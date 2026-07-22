@@ -15,9 +15,10 @@
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode, resolveSemrushImsToken } from '../utils.js';
-import { createSerenityTransport, SerenityTransportError } from './rest-transport.js';
+import { createSerenityTransport } from './rest-transport.js';
+import { isSemrushTransportError } from './errors.js';
 import { resolveWorkspaceId } from './workspace-resolver.js';
-import { deleteAllProjects, releaseFullAllocation } from './workspace-lifecycle.js';
+import { deleteAllProjects, releaseFullAllocation, ensureSubworkspace } from './workspace-lifecycle.js';
 import { handleCreateMarketSubworkspace } from './handlers/markets-subworkspace.js';
 import { isSerenityDeferPublishEnabled } from './defer-publish-active.js';
 
@@ -231,7 +232,7 @@ export async function provisionBrandSubworkspace(context, {
     // A bare upstream 405 is Semrush's disguised quota rejection (a prompt write
     // or publish that exceeds the child's metered quota — workspace doc §5).
     // Surface it as a clear "Quota exceeded" instead of the cryptic 405/nginx body.
-    if (e instanceof SerenityTransportError && e.status === 405) {
+    if (isSemrushTransportError(e) && e.status === 405) {
       throw new ErrorWithStatusCode('Quota exceeded', 409);
     }
     throw e;
@@ -263,6 +264,99 @@ export async function provisionBrandSubworkspace(context, {
     geoTargetId: resultBody.geoTargetId != null ? Number(resultBody.geoTargetId) : null,
     languageCode: String(resultBody.languageCode || resolvedLanguageCode),
   };
+}
+
+/**
+ * Sub-workspace-only provisioning for a brand created in Semrush mode WITHOUT an
+ * initial market (LLMO-6405). Market-scoped inputs moved out of brand creation, so
+ * a serenity-active brand is created with just its Semrush sub-workspace (the
+ * active-brand anchor) and NO project; its markets are added afterwards from the
+ * Markets tab. Mirrors {@link provisionBrandSubworkspace}'s serenity-first contract
+ * (sub-workspace created BEFORE the brand row via a lightweight stub whose `save` is
+ * a no-op; the caller persists the returned id onto the new row). On failure the
+ * just-created sub-workspace's allocation is released back to the parent pool
+ * (the workspace itself is never deleted — production never deletes a sub-workspace).
+ *
+ * @param {object} context - request context (env, dataAccess, pathInfo headers).
+ * @param {object} params
+ * @param {string} params.spaceCatId - SpaceCat organization UUID.
+ * @param {string} params.brandId - pre-generated brand UUID (sub-workspace title key).
+ * @param {string} params.brandName - brand display name (sub-workspace title).
+ * @param {object} [log]
+ * @returns {Promise<{ semrushSubWorkspaceId: string }>} the new sub-workspace id.
+ * @throws {ErrorWithStatusCode} on workspace create failure (the caller then skips
+ *   the brand write).
+ */
+export async function provisionBrandSubworkspaceBare(context, {
+  spaceCatId, brandId, brandName,
+}, log = console) {
+  if (!hasText(brandName)) {
+    throw new ErrorWithStatusCode('brandName is required for Semrush provisioning', 400);
+  }
+  if (!hasText(brandId)) {
+    throw new ErrorWithStatusCode('brandId is required for Semrush provisioning', 400);
+  }
+
+  const parentWorkspaceId = await resolveWorkspaceId(context, spaceCatId);
+  if (!parentWorkspaceId || !hasText(parentWorkspaceId)) {
+    throw new ErrorWithStatusCode('Organization has no Semrush workspace configured', 400);
+  }
+
+  const imsToken = await resolveSemrushImsToken(context, log, 'brand-provisioning');
+  const transport = createSerenityTransport({ env: context.env, imsToken });
+
+  /** @type {string|null} */
+  let capturedWorkspaceId = null;
+  const brandStub = {
+    getId: () => brandId,
+    getName: () => brandName,
+    getSemrushSubWorkspaceId: () => undefined,
+    setSemrushSubWorkspaceId: (id) => { capturedWorkspaceId = id; },
+    save: async () => {},
+  };
+
+  try {
+    // marketCount = 1: the bare sub-workspace is carved for a single future project
+    // (the first market the user adds). ensureSubworkspace returns the new id.
+    const subWorkspaceId = await ensureSubworkspace(
+      transport,
+      brandStub,
+      parentWorkspaceId,
+      1,
+      log,
+      {},
+      null,
+      {},
+    );
+    const resolved = hasText(subWorkspaceId) ? subWorkspaceId : capturedWorkspaceId;
+    if (!resolved || !hasText(resolved)) {
+      throw new ErrorWithStatusCode('Semrush provisioning returned no sub-workspace id', 502);
+    }
+    return { semrushSubWorkspaceId: resolved };
+  } catch (e) {
+    // Release the just-created (empty) sub-workspace's allocation on failure — the
+    // brand row is never written, so nothing references it. Best-effort; never masks
+    // the original error. deleteAllProjects tolerates an empty workspace.
+    // Narrow via a const (hasText is not a type guard, and a closure-mutated `let`
+    // is not narrowed by control flow — see this dir's CLAUDE.md).
+    const wsId = capturedWorkspaceId;
+    if (wsId && hasText(wsId)) {
+      try {
+        await deleteAllProjects(transport, wsId);
+        await releaseFullAllocation(transport, wsId, parentWorkspaceId, log);
+        log?.info?.(
+          'serenity: emptied sub-workspace after failed bare brand provisioning — allocation lowered to floor',
+          { semrushWorkspaceId: wsId },
+        );
+      } catch (releaseErr) {
+        log?.error?.('serenity: failed to release sub-workspace allocation after failed bare provisioning', {
+          semrushWorkspaceId: wsId,
+          error: releaseErr?.message,
+        });
+      }
+    }
+    throw e;
+  }
 }
 
 /**

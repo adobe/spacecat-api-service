@@ -24,8 +24,20 @@ const GROUP_ID = 'grp_18385';
 const LLMO_API_KEY = 'llmo-api-key-xyz';
 const CALLER_EMAIL = 'onboarder@adobe.com';
 
-// A minimal but valid PAPI rule tree the client returns from getRuleTree.
-const RULE_TREE = { rules: { name: 'default', children: [{ name: 'Existing' }], variables: [] } };
+// A minimal but valid PAPI rule tree the client returns from getRuleTree. The default rule has a
+// CUSTOM origin (passes the onboarding scope gate) and its own Caching behavior (so the OAE rule is
+// built WITHOUT adding a Caching behavior of its own — the common/tokowaka case).
+const RULE_TREE = {
+  rules: {
+    name: 'default',
+    behaviors: [
+      { name: 'origin', options: { verificationMode: 'CUSTOM' } },
+      { name: 'caching', options: { behavior: 'CACHE_CONTROL_AND_EXPIRES' } },
+    ],
+    children: [{ name: 'Existing' }],
+    variables: [],
+  },
+};
 
 describe('LlmoAkamaiController', () => {
   let sandbox;
@@ -227,17 +239,21 @@ describe('LlmoAkamaiController', () => {
       expect(res.status).to.equal(200);
       expect(body.latestVersion).to.equal(7);
       expect(body.currentChildRules).to.deep.equal(['Existing']);
-      expect(body.mergedChildRules[0]).to.equal('Optimize at Edge');
-      // plan dry-runs the exact patch it would deploy, without creating a version.
+      // The OAE wrapper is appended LAST so its origin + cacheId win (Akamai is last-match-wins).
+      expect(body.mergedChildRules).to.deep.equal(['Existing', 'Optimize at Edge']);
+      expect(body.mergedChildRules[body.mergedChildRules.length - 1]).to.equal('Optimize at Edge');
+      // plan dry-runs the exact full-tree PUT it would deploy, without creating a version.
       expect(mockAkamaiClient.createVersion).to.not.have.been.called;
-      expect(mockAkamaiClient.patchRuleTree).to.have.been.calledOnce;
-      expect(mockAkamaiClient.patchRuleTree.firstCall.args[6]).to.deep.equal({ dryRun: true });
+      expect(mockAkamaiClient.updateRuleTree).to.have.been.calledOnce;
+      expect(mockAkamaiClient.updateRuleTree.firstCall.args[6]).to.deep.equal({ dryRun: true });
       expect(body.validated).to.equal(true);
       expect(body.errors).to.deep.equal([]);
     });
 
-    it('surfaces dry-run validation errors and warnings from the patch deploy would apply', async () => {
-      mockAkamaiClient.patchRuleTree.resolves({ errors: [{ detail: 'bad' }], warnings: [{ detail: 'w' }] });
+    it('surfaces dry-run validation errors and warnings the PUT deploy would apply', async () => {
+      mockAkamaiClient.updateRuleTree.resolves({
+        errors: [{ detail: 'bad' }], warnings: [{ detail: 'w' }],
+      });
       const res = await controller.plan(withData(propertyRef));
       const body = await res.json();
       expect(res.status).to.equal(200);
@@ -247,7 +263,7 @@ describe('LlmoAkamaiController', () => {
     });
 
     it('degrades to validated:false (200) when the dry-run itself cannot run', async () => {
-      mockAkamaiClient.patchRuleTree.rejects(new Error('PAPI PATCH /x -> 409: conflict'));
+      mockAkamaiClient.updateRuleTree.rejects(new Error('PAPI PUT /x -> 403: already-activated'));
       const res = await controller.plan(withData(propertyRef));
       const body = await res.json();
       expect(res.status).to.equal(200);
@@ -281,23 +297,22 @@ describe('LlmoAkamaiController', () => {
   });
 
   describe('deploy', () => {
-    it('creates a new version, applies the rules via a JSON patch, and returns it', async () => {
+    it('creates a new version, applies the rules via a full-tree PUT, and returns it', async () => {
       const res = await controller.deploy(withData(propertyRef));
       const body = await res.json();
       expect(res.status).to.equal(200);
       expect(body.baseVersion).to.equal(7);
       expect(body.newVersion).to.equal(8);
-      // The patch is built against and applied to the NEW version, guarded by its etag; the old
-      // full-tree PUT is no longer used.
-      expect(mockAkamaiClient.getRuleTree).to.have.been.calledWith(PROPERTY_ID, 8);
-      expect(mockAkamaiClient.patchRuleTree).to.have.been.calledOnce;
-      const [, version, , , ops, etag] = mockAkamaiClient.patchRuleTree.firstCall.args;
+      // The tree is read from the BASE version (for the scope gate + merge), then the merged tree
+      // is PUT into the NEW version, pinning the base version's ruleFormat.
+      expect(mockAkamaiClient.getRuleTree).to.have.been.calledWith(PROPERTY_ID, 7);
+      expect(mockAkamaiClient.updateRuleTree).to.have.been.calledOnce;
+      const [, version, , , merged, ruleFormat] = mockAkamaiClient.updateRuleTree.firstCall.args;
       expect(version).to.equal(8);
-      // v8's etag (from the fresh getRuleTree(8)), not the latest-version (v7) etag.
-      expect(etag).to.equal('etag-8');
-      const addParent = ops.find((o) => o.op === 'add' && o.value?.name === 'Optimize at Edge');
-      expect(addParent).to.exist;
-      expect(mockAkamaiClient.updateRuleTree).to.not.have.been.called;
+      expect(ruleFormat).to.equal('v2024-01-01');
+      const parent = merged.rules.children.find((c) => c.name === 'Optimize at Edge');
+      expect(parent).to.exist;
+      expect(mockAkamaiClient.patchRuleTree).to.not.have.been.called;
     });
 
     it('blocks deploy when the property does not serve the site domain', async () => {
@@ -310,7 +325,7 @@ describe('LlmoAkamaiController', () => {
     });
 
     it('returns 422 when PAPI rejects the rule tree', async () => {
-      mockAkamaiClient.patchRuleTree.resolves({ errors: [{ title: 'bad' }], warnings: [] });
+      mockAkamaiClient.updateRuleTree.resolves({ errors: [{ title: 'bad' }], warnings: [] });
       const res = await controller.deploy(withData(propertyRef));
       const body = await res.json();
       expect(res.status).to.equal(422);
@@ -323,12 +338,91 @@ describe('LlmoAkamaiController', () => {
       expect(res.status).to.equal(403);
     });
 
-    it('reports the created newVersion when patch throws after createVersion', async () => {
-      mockAkamaiClient.patchRuleTree.rejects(new Error('PAPI PATCH /x -> 500: boom'));
+    it('reports the created newVersion when the PUT throws after createVersion', async () => {
+      mockAkamaiClient.updateRuleTree.rejects(new Error('PAPI PUT /x -> 500: boom'));
       const res = await controller.deploy(withData(propertyRef));
       const body = await res.json();
       expect(res.status).to.equal(502);
       expect(body.newVersion).to.equal(8);
+    });
+
+    it('accepts an explicit baseVersion and copies from it', async () => {
+      const res = await controller.deploy(withData({ ...propertyRef, baseVersion: 5 }));
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.baseVersion).to.equal(5);
+      expect(mockAkamaiClient.getRuleTree).to.have.been.calledWith(PROPERTY_ID, 5);
+      expect(mockAkamaiClient.createVersion).to.have.been.calledWith(PROPERTY_ID, 5);
+      // Default (latest) is not consulted when baseVersion is given.
+      expect(mockAkamaiClient.getLatestVersion).to.not.have.been.called;
+    });
+
+    it('rejects a non-integer baseVersion', async () => {
+      const res = await controller.deploy(withData({ ...propertyRef, baseVersion: '1e3' }));
+      expect(res.status).to.equal(400);
+      expect(mockAkamaiClient.createVersion).to.not.have.been.called;
+    });
+
+    it('rejects baseVersion 0 (PAPI versions start at 1)', async () => {
+      const res = await controller.deploy(withData({ ...propertyRef, baseVersion: 0 }));
+      expect(res.status).to.equal(400);
+      expect(mockAkamaiClient.getRuleTree).to.not.have.been.called;
+      expect(mockAkamaiClient.createVersion).to.not.have.been.called;
+    });
+  });
+
+  describe('CUSTOM scope gate + caching decision', () => {
+    // Default rule origin is PLATFORM_SETTINGS -> onboarding is not supported.
+    const platformTree = {
+      rules: {
+        name: 'default',
+        behaviors: [{ name: 'origin', options: { verificationMode: 'PLATFORM_SETTINGS' } }],
+        children: [],
+        variables: [],
+      },
+    };
+
+    it('deploy rejects (400) a property whose default origin is not CUSTOM', async () => {
+      mockAkamaiClient.getRuleTree.resolves({ ruleTree: platformTree, ruleFormat: 'latest' });
+      const res = await controller.deploy(withData(propertyRef));
+      expect(res.status).to.equal(400);
+      // Gate runs before any mutation.
+      expect(mockAkamaiClient.createVersion).to.not.have.been.called;
+      expect(mockAkamaiClient.updateRuleTree).to.not.have.been.called;
+    });
+
+    it('plan rejects (400) a property whose default origin is not CUSTOM', async () => {
+      mockAkamaiClient.getRuleTree.resolves({ ruleTree: platformTree, ruleFormat: 'latest' });
+      const res = await controller.plan(withData(propertyRef));
+      expect(res.status).to.equal(400);
+    });
+
+    it('adds a Caching behavior to the OAE rule ONLY when the default rule has none', async () => {
+      // Default tree here (RULE_TREE) HAS caching -> OAE routing rule must NOT add its own.
+      await controller.deploy(withData(propertyRef));
+      const withCaching = mockAkamaiClient.updateRuleTree.firstCall.args[4];
+      const routingA = withCaching.rules.children
+        .find((c) => c.name === 'Optimize at Edge').children
+        .find((c) => c.name === 'Optimize at Edge Routing');
+      expect(routingA.behaviors.some((b) => b.name === 'caching')).to.equal(false);
+
+      // A default rule WITHOUT caching -> OAE routing rule adds one so cacheId validates.
+      mockAkamaiClient.updateRuleTree.resetHistory();
+      const noCacheTree = {
+        rules: {
+          name: 'default',
+          behaviors: [{ name: 'origin', options: { verificationMode: 'CUSTOM' } }],
+          children: [],
+          variables: [],
+        },
+      };
+      mockAkamaiClient.getRuleTree.resolves({ ruleTree: noCacheTree, ruleFormat: 'latest' });
+      await controller.deploy(withData(propertyRef));
+      const noCache = mockAkamaiClient.updateRuleTree.firstCall.args[4];
+      const routingB = noCache.rules.children
+        .find((c) => c.name === 'Optimize at Edge').children
+        .find((c) => c.name === 'Optimize at Edge Routing');
+      expect(routingB.behaviors.some((b) => b.name === 'caching')).to.equal(true);
     });
   });
 
@@ -343,6 +437,14 @@ describe('LlmoAkamaiController', () => {
       // notifyEmails is derived server-side from the caller's trial_email.
       expect(mockAkamaiClient.activate)
         .to.have.been.calledWith(PROPERTY_ID, 7, CONTRACT_ID, GROUP_ID, 'STAGING');
+    });
+
+    it('passes an activation note attributing the caller', async () => {
+      await controller.activate(withData(propertyRef));
+      const note = mockAkamaiClient.activate.firstCall.args[5];
+      expect(note).to.be.a('string');
+      expect(note).to.contain('Optimize at Edge');
+      expect(note).to.contain('via Adobe LLM Optimizer');
     });
 
     it('activates a specific version when provided', async () => {
@@ -408,6 +510,89 @@ describe('LlmoAkamaiController', () => {
       expect(capturedClientConfig.host).to.equal('akab-xxx.luna.akamaiapis.net');
       expect(capturedClientConfig.clientToken).to.equal('ctok');
       expect(capturedClientConfig.accessToken).to.equal('atok');
+    });
+
+    it('recovers to 200 when the POST errors (timeout/422) but Akamai queued the activation', async () => {
+      mockAkamaiClient.activate.rejects(
+        new Error('PAPI POST /papi/v1/properties/prp_1253269/activations request failed: '
+          + 'Request timeout after 10000ms'),
+      );
+      mockAkamaiClient.latestActivation.resolves({
+        activationId: 'atv_777', status: 'PENDING', propertyVersion: 7, submitDate: new Date().toISOString(),
+      });
+      const res = await controller.activate(withData(propertyRef));
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.activationId).to.equal('atv_777');
+      expect(body.recovered).to.equal(true);
+      expect(mockAkamaiClient.latestActivation)
+        .to.have.been.calledWith(PROPERTY_ID, CONTRACT_ID, GROUP_ID, 'STAGING');
+    });
+
+    it('recovers an already-active version regardless of age (422 already-activated)', async () => {
+      // Re-activating an already-ACTIVE version returns 422 already-activated; the version is live
+      // on the network (the goal), so we report success even though it was submitted long ago.
+      mockAkamaiClient.activate.rejects(
+        new Error('PAPI POST /papi/v1/properties/prp_1253269/activations -> 422: already-activated'),
+      );
+      mockAkamaiClient.latestActivation.resolves({
+        activationId: 'atv_20135944',
+        status: 'ACTIVE',
+        propertyVersion: 7,
+        submitDate: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      });
+      const res = await controller.activate(withData(propertyRef));
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.recovered).to.equal(true);
+      expect(body.activationId).to.equal('atv_20135944');
+    });
+
+    it('recovers with a null activationId when Akamai has not yet assigned one (placeholder)', async () => {
+      mockAkamaiClient.activate.rejects(
+        new Error('PAPI POST /papi/v1/properties/prp_1253269/activations request failed: '
+          + 'Request timeout after 10000ms'),
+      );
+      // A just-queued activation appears in the list as "atv_null" before the id is assigned.
+      mockAkamaiClient.latestActivation.resolves({
+        activationId: 'atv_null', status: 'PENDING', propertyVersion: 7, submitDate: new Date().toISOString(),
+      });
+      const res = await controller.activate(withData(propertyRef));
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.recovered).to.equal(true);
+      // Placeholder id is not pollable — return null so the UI polls by network instead.
+      expect(body.activationId).to.equal(null);
+    });
+
+    it('surfaces the error when the POST fails and no matching activation is in flight', async () => {
+      mockAkamaiClient.activate.rejects(
+        new Error('PAPI POST /papi/v1/properties/prp_1253269/activations -> 500: boom'),
+      );
+      mockAkamaiClient.latestActivation.resolves(undefined);
+      const res = await controller.activate(withData(propertyRef));
+      expect(res.status).to.equal(502);
+    });
+
+    it('does not recover when the in-flight activation is for a different version', async () => {
+      mockAkamaiClient.activate.rejects(
+        new Error('PAPI POST /papi/v1/properties/prp_1253269/activations -> 422: already-activated'),
+      );
+      mockAkamaiClient.latestActivation.resolves({
+        activationId: 'atv_x', status: 'PENDING', propertyVersion: 999,
+      });
+      const res = await controller.activate(withData(propertyRef));
+      expect(res.status).to.equal(502);
+    });
+
+    it('surfaces the original error when the recovery lookup itself fails', async () => {
+      mockAkamaiClient.activate.rejects(
+        new Error('PAPI POST /papi/v1/properties/prp_1253269/activations request failed: '
+          + 'Request timeout after 10000ms'),
+      );
+      mockAkamaiClient.latestActivation.rejects(new Error('listActivations failed'));
+      const res = await controller.activate(withData(propertyRef));
+      expect(res.status).to.equal(502);
     });
   });
 
@@ -617,15 +802,21 @@ describe('LlmoAkamaiController', () => {
     });
 
     it('plan tolerates a rule tree whose root has no children', async () => {
-      mockAkamaiClient.getRuleTree.resolves({ ruleTree: { rules: { name: 'default' } }, ruleFormat: 'latest' });
+      const bareTree = {
+        rules: {
+          name: 'default',
+          behaviors: [{ name: 'origin', options: { verificationMode: 'CUSTOM' } }],
+        },
+      };
+      mockAkamaiClient.getRuleTree.resolves({ ruleTree: bareTree, ruleFormat: 'latest' });
       const res = await controller.plan(withData(propertyRef));
       const body = await res.json();
       expect(res.status).to.equal(200);
       expect(body.currentChildRules).to.deep.equal([]);
     });
 
-    it('deploy treats an empty patchRuleTree response as success', async () => {
-      mockAkamaiClient.patchRuleTree.resolves(undefined);
+    it('deploy treats an empty updateRuleTree response as success', async () => {
+      mockAkamaiClient.updateRuleTree.resolves(undefined);
       const res = await controller.deploy(withData(propertyRef));
       expect(res.status).to.equal(200);
     });

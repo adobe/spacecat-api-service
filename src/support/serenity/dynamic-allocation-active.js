@@ -17,6 +17,19 @@ import {
 } from './resource-manager.js';
 import { withResourceLock } from './resource-lock.js';
 import { isMeteredQuota } from './errors.js';
+import { recordQuotaRetryOutcome } from './allocation-metrics.js';
+
+/** Default poll-retry shape for {@link createHeadroomGuard}'s `retryOnQuota` (LLMO-6190 follow-up:
+ * live-verified ~9s Semrush gateway write-enforcement lag after a JIT top-up — see the doc comment
+ * on `retryOnQuota` below). Sized with margin over the observed lag; a caller may override via
+ * `opts.retryOnQuota` (tests inject a fake `sleep` + a tiny `backoffMs`/`totalBudgetMs`). */
+const DEFAULT_RETRY_ON_QUOTA = {
+  maxAttempts: 3,
+  backoffMs: 3000,
+  totalBudgetMs: 9000,
+  sleep: (ms) => new Promise((resolve) => { setTimeout(resolve, ms); }),
+  now: () => Date.now(),
+};
 
 /**
  * The GLOBAL kill-switch for dynamic (just-in-time) Semrush AI resource allocation
@@ -48,9 +61,12 @@ export function isDynamicAllocationEnabled(env) {
  * @property {(need?: import('./resource-manager.js').Dims,
  *   opts?: { includeDrafted?: boolean }) => Promise<{ toppedUp: boolean }>} ensure
  *   the choke point every subworkspace metered-write path calls before its metered op.
- * @property {(fn: () => Promise<any>) => Promise<any>} retryOnQuota wraps a metered
- *   publish/write call with ONE bounded recovery cycle for the disguised metered-quota 405
- *   (LLMO-6190 item 4 — see {@link import('./errors.js').isMeteredQuota}).
+ * @property {(fn: () => Promise<any>, opts?: { callSite?: string }) => Promise<any>} retryOnQuota
+ *   wraps a metered publish/write call with a bounded poll-retry cycle for the disguised
+ *   metered-quota 405 (LLMO-6190 item 4 / follow-up — see
+ *   {@link import('./errors.js').isMeteredQuota}). `opts.callSite` is a short, closed-vocabulary
+ *   label (e.g. `'publishProject'`, `'createOnePrompt'`) used ONLY for the recovery-outcome metric
+ *   dimension — never derived from user input, to keep metric cardinality bounded.
  */
 
 /**
@@ -81,11 +97,15 @@ export function isDynamicAllocationEnabled(env) {
  *   {@link DEFAULT_BRAND_AI_CEILING} — a placeholder; pass an explicit value to override once a
  *   real per-brand number exists).
  * @param {import('./resource-manager.js').Blocks} [opts.blocks] - grace blocks (optional).
+ * @param {Partial<typeof DEFAULT_RETRY_ON_QUOTA>} [opts.retryOnQuota] - poll-retry shape override
+ *   for `retryOnQuota` (tests inject a fake `sleep` + tiny `backoffMs`/`totalBudgetMs`; production
+ *   uses {@link DEFAULT_RETRY_ON_QUOTA} unmodified).
  * @param {any} [log]
  * @returns {HeadroomGuard}
  */
 export function createHeadroomGuard(transport, {
   enabled, subWorkspaceId, parentWorkspaceId, ceiling = DEFAULT_BRAND_AI_CEILING, blocks,
+  retryOnQuota: retryOnQuotaOpts = {},
 }, log) {
   if (!enabled) {
     // Disabled path: a genuine no-op, byte-for-byte the pre-PR behavior. retryOnQuota is likewise a
@@ -109,29 +129,91 @@ export function createHeadroomGuard(transport, {
       subWorkspaceId: childId, parentWorkspaceId: parentId, need, ceiling, blocks, includeDrafted,
     }, log),
   );
+  const {
+    maxAttempts, backoffMs, totalBudgetMs, sleep, now,
+  } = { ...DEFAULT_RETRY_ON_QUOTA, ...retryOnQuotaOpts };
+  // The shared per-request deadline: computed ONCE, here, at guard-construction time — NOT per
+  // `retryOnQuota` call. One guard is built per inbound request (see the subworkspace handlers),
+  // so every call site that shares this guard instance (e.g. createProject → createPromptsByIds →
+  // publishProject, all in one `generateTopics` create-market request) shares the SAME budget,
+  // instead of each independently re-granting itself a fresh ~9s allowance. Round-2 SRE review: a
+  // per-call cap would let 4 sequential wrap sites in one request compound to ~36s, blowing the
+  // request's own ~15s hot-path budget.
+  const requestDeadline = now() + totalBudgetMs;
   return {
     enabled: true,
     ensure,
-    // Bounded recovery for the disguised metered-quota 405 (serenity-docs#22 / LLMO-6190 item 4): a
-    // publish/write can still 405 as a metered-quota rejection even after a pre-publish `ensure`
-    // (e.g. the read that sized the top-up was itself stale, or `includeDrafted` under-counted an
-    // upstream-side draft). On THAT specific signal (`isMeteredQuota`), re-read the child's real
-    // headroom and top up to cover it (`ensure({}, {includeDrafted:true})` — same shape as the
-    // create-market/create-prompts sizing, reusing the SAME per-child lock as `ensure`), then retry
-    // `fn` EXACTLY once. Any other error — or a second failure after the retry, of any kind —
-    // propagates untouched: this is a single bounded cycle, never a loop.
-    retryOnQuota: async (fn) => {
+    // Bounded poll-retry recovery for the disguised metered-quota 405 (serenity-docs#22 / LLMO-6190
+    // follow-up): live-verified, the Semrush gateway's write-enforcement checkpoint can lag a JIT
+    // top-up's transfer by ~9s — the transfer succeeds and a resource read already shows the new
+    // total, but a write landing inside that window still 405s. Because the total is ALREADY
+    // correct by then, re-checking headroom on every attempt would be a no-op read that only adds
+    // per-child lock contention (round-2 SRE review) — so `ensure()` is called exactly ONCE, up
+    // front, and the actual fix is the WAIT between retries, not a repeated top-up.
+    //
+    // Bounded by whichever comes first: `maxAttempts`, or the shared `requestDeadline` above — the
+    // deadline is checked BEFORE every attempt (including the first poll attempt, not only between
+    // retries), so a slow `ensure()` call (e.g. queued behind other same-child recoveries on
+    // `withResourceLock`'s own safety valve) can't silently blow past the shared budget before the
+    // budget is ever consulted. A non-metered error (or a second/subsequent metered error once
+    // bounded) propagates untouched — this never masks a genuinely non-retryable failure, it only
+    // spans the known settle lag.
+    retryOnQuota: async (fn, { callSite = 'unknown' } = {}) => {
       try {
         return await fn();
       } catch (e) {
         if (!isMeteredQuota(e)) {
           throw e;
         }
-        log?.warn?.('SERENITY_ALLOC metered-405 on publish — one bounded top-up+retry', {
-          subWorkspaceId: childId,
+        if (callSite === 'unknown') {
+          // A caller forgot to pass `{ callSite }` — every wrap site in this codebase does, so this
+          // is a code-review miss, not a runtime condition. Surfaced loudly (not just an 'unknown'
+          // metric value) so it gets fixed rather than quietly widening QuotaRetryOutcome's
+          // CallSite dimension with an open-vocabulary value.
+          log?.warn?.('SERENITY_ALLOC retryOnQuota called without a callSite label', {
+            subWorkspaceId: childId,
+          });
+        }
+        log?.warn?.('SERENITY_ALLOC metered-405 — bounded top-up + poll-retry', {
+          subWorkspaceId: childId, callSite,
         });
         await ensure({}, { includeDrafted: true });
-        return fn();
+        let attempt = 0;
+        let lastError = e;
+        for (;;) {
+          // Checked BEFORE every attempt, including the first — an already-blown deadline (e.g.
+          // `ensure()` itself ate the whole budget queued behind another same-child recovery) must
+          // not spend a further `fn()` call on top of it. See the header comment above for why.
+          if (now() >= requestDeadline) {
+            recordQuotaRetryOutcome('exhausted', { attempt, callSite });
+            throw lastError;
+          }
+          attempt += 1;
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            const result = await fn();
+            recordQuotaRetryOutcome('recovered', { attempt, callSite });
+            return result;
+          } catch (e2) {
+            if (!isMeteredQuota(e2)) {
+              // A non-quota error mid-recovery still ENDS this cycle — `abandoned` is distinct
+              // from `exhausted` (still a metered 405 after every attempt) so a dashboard summing
+              // recovered+exhausted+abandoned as "total cycles" doesn't undercount.
+              recordQuotaRetryOutcome('abandoned', { attempt, callSite });
+              throw e2;
+            }
+            lastError = e2;
+            // Bail here too, BEFORE sleeping, if the sleep would itself run past the deadline —
+            // an unconditional sleep could otherwise overshoot the budget by up to a full
+            // `backoffMs` doing nothing useful.
+            if (attempt >= maxAttempts || now() + backoffMs >= requestDeadline) {
+              recordQuotaRetryOutcome('exhausted', { attempt, callSite });
+              throw e2;
+            }
+            // eslint-disable-next-line no-await-in-loop
+            await sleep(backoffMs);
+          }
+        }
       }
     },
   };
