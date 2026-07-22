@@ -562,6 +562,39 @@ describe('Suggestions Controller', () => {
     expect(suggestions[0]).to.have.property('opportunityId', OPPORTUNITY_ID);
   });
 
+  it('projects suggestions to the requested fields when ?fields= is passed', async () => {
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      ...context,
+      data: { ...context.data, fields: 'type,status' },
+    });
+    expect(response.status).to.equal(200);
+    const suggestions = await response.json();
+    expect(suggestions).to.be.an('array').with.lengthOf(1);
+    expect(suggestions[0]).to.have.property('id');
+    expect(suggestions[0]).to.have.property('type');
+    expect(suggestions[0]).to.have.property('status');
+    // heavy fields are dropped when not requested
+    expect(suggestions[0]).to.not.have.property('data');
+  });
+
+  it('returns 400 when ?fields= matches no known suggestion field', async () => {
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      ...context,
+      data: { ...context.data, fields: 'nope' },
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid fields: nope');
+  });
+
   it('returns all suggestions when grant filtering throws an error', async () => {
     mockSuggestionGrant.splitSuggestionsByGrantStatus.rejects(new Error('db failure'));
     const ControllerWithSummitPlg = await esmock('../../src/controllers/suggestions.js', {
@@ -969,6 +1002,46 @@ describe('Suggestions Controller', () => {
     expect(response.status).to.equal(400);
     const error = await response.json();
     expect(error).to.have.property('message', 'Invalid locale format');
+  });
+
+  it('returns 400 when ?fields= matches no known field on getAllForOpportunityPaged', async () => {
+    const response = await suggestionsController.getAllForOpportunityPaged({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, limit: '10' },
+      ...context,
+      data: { ...context.data, fields: 'nope' },
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid fields: nope');
+  });
+
+  it('returns 400 when ?fields= matches no known field on getByStatus', async () => {
+    const response = await suggestionsController.getByStatus({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, status: 'NEW' },
+      ...context,
+      data: { ...context.data, fields: 'nope' },
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid fields: nope');
+  });
+
+  it('returns 400 when ?fields= matches no known field on getByStatusPaged', async () => {
+    // getByStatusPaged reads the paginated { data, cursor } shape
+    mockSuggestionDataAccess.Suggestion.allByOpportunityIdAndStatus.resolves({
+      data: [mockSuggestionEntity(suggs[0])],
+      cursor: null,
+    });
+    const response = await suggestionsController.getByStatusPaged({
+      params: {
+        siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, status: 'NEW', limit: '10',
+      },
+      ...context,
+      data: { ...context.data, fields: 'nope' },
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid fields: nope');
   });
 
   it('returns 400 for malformed locale on getByID', async () => {
@@ -12917,6 +12990,8 @@ describe('Suggestions Controller', () => {
             fromContext: () => ({
               hasAccess: sandbox.stub().resolves(true),
               isLLMOAdministrator: sandbox.stub().returns(true),
+              hasLlmoCapabilityForSite: sandbox.stub().resolves(true),
+              llmoForbiddenMessage: (msg) => msg,
               isOwnerOfSite: sandbox.stub().resolves(true),
             }),
           },

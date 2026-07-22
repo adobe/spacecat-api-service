@@ -111,6 +111,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} proxyController - URL proxy controller for client-side previews.
  * @param {Object} taskManagementController - Task-management (Jira ticket creation) controller.
  * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
+ * @param {Object} auditPolicyController - Audit policy + audit scope controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -179,6 +180,7 @@ export default function getRouteHandlers(
   proxyController,
   taskManagementController,
   redirectsController,
+  auditPolicyController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -253,11 +255,20 @@ export default function getRouteHandlers(
     // eslint-disable-next-line max-len
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': elementsController.listCitedDomains,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview': elementsController.listSentimentOverview,
+    // Data Insights per-topic table (grouped from the prompts-by-topic element).
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics': elementsController.listTopics,
+    // Data Insights per-prompt drill-down: :topicId is the URL-encoded topic NAME.
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics/:topicId/prompts': elementsController.listTopicPrompts,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls': elementsController.listOwnedUrls,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/domain-urls': elementsController.listDomainUrls,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/market-tracking-trends': elementsController.getMarketTrackingTrends,
     // eslint-disable-next-line max-len
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/stats': elementsController.getStats,
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/stats': elementsController.getUrlInspectorStats,
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/prompts/count': elementsController.getUrlInspectorPromptsCount,
     // Brand-independent Semrush language catalog (add-brand wizard language picker).
     'GET /v2/orgs/:spaceCatId/serenity/languages': serenityController.listOrgLanguages,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': serenityController.activate,
@@ -331,6 +342,17 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/agentic-page-types': agenticPageTypesController.create,
     'PATCH /sites/:siteId/agentic-page-types/:name': agenticPageTypesController.update,
     'DELETE /sites/:siteId/agentic-page-types/:name': agenticPageTypesController.remove,
+
+    // Audit Policy contract (SITES-47306). Static segments precede dynamic :auditType match.
+    'GET /sites/:siteId/audit-policy': auditPolicyController.getPolicy,
+    'POST /sites/:siteId/audit-policy/exclusions': auditPolicyController.addExclusions,
+    'POST /sites/:siteId/audit-policy/exclusions/delete': auditPolicyController.removeExclusions,
+    'POST /sites/:siteId/audit-policy/inclusions': auditPolicyController.addInclusions,
+    'POST /sites/:siteId/audit-policy/inclusions/delete': auditPolicyController.removeInclusions,
+    'GET /sites/:siteId/audit-policy/revisions': auditPolicyController.listRevisions,
+    'GET /sites/:siteId/audit-scope/pages': auditPolicyController.getScopePages,
+    'GET /sites/:siteId/audit-scope/summary': auditPolicyController.getScopeSummary,
+    'GET /sites/:siteId/audit-scope/sections': auditPolicyController.getScopeSections,
 
     'PATCH /sites/:siteId/:auditType': auditsController.patchAuditForSite,
     'GET /sites/:siteId/latest-audit/:auditType': auditsController.getLatestForSite,

@@ -306,6 +306,13 @@ function RedirectsController(ctx) {
       }
       if (inmMatched) {
         emitMetric({ name: 'AsoOverlayConditionalGet304' }, emitOpts);
+        // Happy-path visibility. The 4xx branches above emit log.info; the 200/304
+        // happy paths historically emitted only the EMF metric envelope, so the
+        // Splunk on-call board (which filters level=error) never surfaced cache-hit
+        // traffic. Structured record here keeps parity with the 4xx branches and
+        // lets on-call searches see the full request outcome distribution without
+        // needing to leave Splunk to read CloudWatch metrics.
+        log.info('[aso-overlay] served 304 not-modified', { service: canonicalService });
         emitFinal(OUTCOME.NOT_MODIFIED_304);
         // 304 MUST NOT include a message body (RFC 7230 §3.3.3); MUST carry any
         // Cache-Control / ETag we would have sent on a 200 (RFC 7232 §4.1).
@@ -328,6 +335,16 @@ function RedirectsController(ctx) {
       if (etag) {
         emitMetric({ name: 'AsoOverlayEtagPresent' }, emitOpts);
       }
+      // Companion to the 304 log line above — see comment there for the on-call
+      // rationale. `bytes` uses body.length (UTF-8 char count from
+      // transformToString), which is what Splunk field-extracts for a plain body
+      // response; if we ever switch to a binary/gzip'd body, revisit to log the
+      // pre-encoding count instead.
+      log.info('[aso-overlay] served 200 with body', {
+        service: canonicalService,
+        bytes: body.length,
+        etagPresent: Boolean(etag),
+      });
       emitFinal(OUTCOME.OK_200);
       return createResponse(body, 200, {
         'content-type': 'text/plain; charset=utf-8',

@@ -16,10 +16,10 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import crypto from 'node:crypto';
 
 import { ErrorWithStatusCode } from '../../utils.js';
-import { ERROR_CODES, isUpstreamGone } from '../errors.js';
-import { SerenityTransportError } from '../rest-transport.js';
+import { ERROR_CODES, isUpstreamGone, isSemrushTransportError } from '../errors.js';
 import { normalizeLanguageCode, normalizeGeoTargetId } from '../validation.js';
 import { resolveLocation } from '../locations.js';
+import { resolveSiteDomain } from '../site-linkage.js';
 
 const LANGUAGE_CACHE_TTL_MS = 60 * 60 * 1000;
 export const MAX_MODEL_IDS = 50;
@@ -135,6 +135,9 @@ export async function handleListMarkets(transport, dataAccess, brandId, semrushW
       languageCode: row.getLanguageCode(),
       createdAt: row.getCreatedAt(),
       updatedAt: row.getUpdatedAt(),
+      // The market's SpaceCat Site identity (LLMO-6405 Phase 2). Nullable — a
+      // market predating the site-linkage backfill, or one never linked, has none.
+      siteId: row.getSiteId?.() ?? null,
     })),
   };
 }
@@ -189,6 +192,8 @@ export async function handleGetMarket(dataAccess, brandId, geoTargetId, language
     semrushProjectId: row.getSemrushProjectId(),
     createdAt: row.getCreatedAt(),
     updatedAt: row.getUpdatedAt(),
+    // The market's SpaceCat Site identity (LLMO-6405 Phase 2). Nullable.
+    siteId: row.getSiteId?.() ?? null,
   };
 }
 
@@ -208,8 +213,11 @@ function validateCreateBody(body) {
   if (normalizeLanguageCode(body?.languageCode) === null) {
     errors.push('languageCode must match ^[a-z]{2,3}(-[a-z]{2,4})?$');
   }
-  if (!hasText(body?.brandDomain)) {
-    errors.push('brandDomain is required');
+  // brandDomain OR siteId (LLMO-6405 Phase 2): a caller may supply the market's
+  // SpaceCat Site UUID instead of a raw domain — the controller derives the
+  // domain from it (resolveSiteDomain). One of the two is required.
+  if (!hasText(body?.brandDomain) && !hasText(body?.siteId)) {
+    errors.push('brandDomain or siteId is required');
   }
   if (!Array.isArray(body?.brandNames) || body.brandNames.length === 0
       || !body.brandNames.every(hasText)) {
@@ -327,12 +335,30 @@ export async function handleCreateMarket(
 
   const name = hasText(body?.name) ? String(body.name) : defaultMarketName(body.brandDisplayName);
 
+  // brandDomain OR siteId (LLMO-6405 Phase 2): when the caller supplied a Site
+  // UUID instead of a raw domain, derive the Semrush project domain from it. The
+  // flat handler holds full `dataAccess` (incl. Site), so it self-derives — the
+  // subworkspace handler cannot (narrowed dataAccess) and relies on the controller.
+  // A supplied-but-unresolvable siteId is a hard 400 (never silently proceeds).
+  const brandDomain = hasText(body.brandDomain)
+    ? body.brandDomain
+    : await resolveSiteDomain(dataAccess, body.siteId, log);
+  if (!hasText(brandDomain)) {
+    return {
+      status: 400,
+      body: {
+        error: 'invalidRequest',
+        message: 'brandDomain or a resolvable siteId is required',
+      },
+    };
+  }
+
   const upstreamBody = {
     name,
     type: 'ai',
     brand_name_display: body.brandNames[0],
     brand_names: body.brandNames,
-    domain: body.brandDomain,
+    domain: brandDomain,
     country_code: body.market.toLowerCase(),
     location_id: location.geoTargetId,
     location_name: location.locationName,
@@ -482,11 +508,16 @@ export async function handleDeleteMarket(
     languageCode,
   );
   if (!row) {
-    // Idempotent: missing slice is treated as success.
-    return { status: 204 };
+    // Idempotent: missing slice is treated as success. No site to clean up.
+    return { status: 204, deletedSiteId: null };
   }
 
   const semrushProjectId = row.getSemrushProjectId();
+  // Capture the deleted market's linked Site (LLMO-6405 R12) BEFORE the row is
+  // removed, so the controller can reference-count and unlink an orphaned
+  // brand_sites row afterwards. Flat mode does not link sites today, so this is
+  // typically null; surfaced anyway for a uniform delete contract.
+  const deletedSiteId = row.getSiteId?.() ?? null;
   try {
     await transport.deleteProject(semrushWorkspaceId, semrushProjectId);
   } catch (e) {
@@ -531,7 +562,7 @@ export async function handleDeleteMarket(
     );
   }
 
-  return { status: 204 };
+  return { status: 204, deletedSiteId };
 }
 
 // 60s TTL bounds cross-Lambda-container staleness (multiple warm containers
@@ -890,7 +921,7 @@ export async function listGlobalModelCatalog(transport) {
       page += 1;
     }
   } catch (e) {
-    if (e instanceof SerenityTransportError && (e.status === 404 || e.status === 405)) {
+    if (isSemrushTransportError(e) && (e.status === 404 || e.status === 405)) {
       rawItems = [];
     } else {
       throw e;
@@ -929,7 +960,7 @@ export async function listLanguageCatalog(transport) {
     const resp = await transport.listLanguages();
     rawItems = Array.isArray(resp?.items) ? resp.items : [];
   } catch (e) {
-    if (e instanceof SerenityTransportError && (e.status === 404 || e.status === 405)) {
+    if (isSemrushTransportError(e) && (e.status === 404 || e.status === 405)) {
       rawItems = [];
     } else {
       throw e;
@@ -1052,6 +1083,11 @@ export async function handleListModels(
  * it false when the caller batches its own publish afterwards (brand-create
  * stages models + prompts and publishes once, best-effort) — otherwise this
  * inner publish runs on an unpublishable (e.g. unit-less) project and throws.
+ *
+ * `wrapPublish` (default identity — a plain call, byte-for-byte the pre-existing behavior) wraps
+ * the inner `publishProject` call. The subworkspace update-models caller passes
+ * `headroom.retryOnQuota` (LLMO-6190 item 4) so a disguised metered-405 gets ONE bounded
+ * top-up+retry; flat-mode callers omit this param, so flat mode is untouched.
  */
 export async function syncModelsForProject(
   transport,
@@ -1060,7 +1096,7 @@ export async function syncModelsForProject(
   modelIds,
   logCtx,
   log,
-  { publish = true } = {},
+  { publish = true, wrapPublish = (fn) => fn() } = {},
 ) {
   const ctx = logCtx || {};
   // Fetch current assignments: catalog-id → assignment-id mapping
@@ -1132,7 +1168,7 @@ export async function syncModelsForProject(
   // Only reached when something actually changed (the no-op path returned above).
   // Skipped when the caller batches its own publish (brand-create, see jsdoc).
   if (publish) {
-    await transport.publishProject(semrushWorkspaceId, projectId);
+    await wrapPublish(() => transport.publishProject(semrushWorkspaceId, projectId));
   }
 
   // Return the refreshed model list

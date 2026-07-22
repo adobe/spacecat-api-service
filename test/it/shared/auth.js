@@ -125,6 +125,30 @@ export async function createBrandManagerToken() {
   });
 }
 
+/**
+ * Org-wide FACS manager (hybrid-model §8.3). Member of ORG_1, NOT an internal
+ * admin, carrying `<product>/can_manage_users` in the JWT `facs_permissions`
+ * for both LLMO and ASO — so `callerHasFacsManageUsers` resolves org-wide
+ * authority on any resource. This is the persona that authors/edits/revokes
+ * state-layer bindings in the write tests: internal admins are blocked from
+ * those mutations (`blockInternalAdminWrite`), so the `admin` persona can only
+ * be used for reads.
+ */
+export async function createFacsManagerToken() {
+  return signToken({
+    sub: 'test-facs-manager@example.com',
+    email: 'test-facs-manager@example.com',
+    is_admin: false,
+    is_llmo_administrator: false,
+    facs_permissions: ['llmo/can_manage_users', 'aso/can_manage_users'],
+    tenants: [{
+      id: IMS_ORG_IDENT,
+      subServices: [],
+      entitlement: {},
+    }],
+  });
+}
+
 export async function createTrialUserToken() {
   return signToken({
     sub: 'test-trial@example.com',
@@ -283,7 +307,7 @@ export async function createAllTokens() {
   const [
     admin, user, trialUser, llmoAdmin,
     delegatedUser, delegatedUserTruncated, delegatedUserNoSource,
-    readOnlyAdmin, brandManager,
+    readOnlyAdmin, brandManager, facsManager,
     s2sConsumerReadOnly, s2sConsumerReadAll, s2sConsumerUnknown,
   ] = await Promise.all([
     createAdminToken(),
@@ -295,6 +319,7 @@ export async function createAllTokens() {
     createDelegatedUserNoSourceToken(),
     createReadOnlyAdminToken(),
     createBrandManagerToken(),
+    createFacsManagerToken(),
     createS2SConsumerReadOnlyToken(),
     createS2SConsumerReadAllToken(),
     createS2SConsumerUnknownToken(),
@@ -309,6 +334,7 @@ export async function createAllTokens() {
     delegatedUserNoSource,
     readOnlyAdmin,
     brandManager,
+    facsManager,
     s2sConsumerReadOnly,
     s2sConsumerReadAll,
     s2sConsumerUnknown,

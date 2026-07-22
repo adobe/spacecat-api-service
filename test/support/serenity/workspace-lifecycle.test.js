@@ -19,7 +19,8 @@ import {
   ensureSubworkspace,
   decommissionBrandWorkspace,
   resourceAllocation,
-  RELEASE_ALLOCATION,
+  deleteAllProjects,
+  releaseFullAllocation,
   CREATE_ALLOCATION,
 } from '../../../src/support/serenity/workspace-lifecycle.js';
 import { SerenityTransportError } from '../../../src/support/serenity/rest-transport.js';
@@ -46,6 +47,7 @@ function makeTransport(overrides = {}) {
     transferWorkspaceResources: sinon.stub().resolves(null),
     listProjects: sinon.stub().resolves({ items: [] }),
     deleteProject: sinon.stub().resolves(null),
+    deleteWorkspace: sinon.stub().resolves(null),
     ...overrides,
   };
 }
@@ -448,8 +450,12 @@ describe('workspace-lifecycle', () => {
       expect(brand.save).to.not.have.been.called;
     });
 
-    it('releases our new workspace and adopts the winner when a concurrent activation won', async () => {
+    it('empties + lowers the orphaned workspace allocation to a non-zero floor', async () => {
       // reloadPointer reports a DIFFERENT id was persisted while we created ours.
+      // The orphan's projects are emptied (defensively — it is provably already
+      // empty) and its allocation is lowered to a non-zero floor, returning the
+      // surplus to the parent pool (LLMO-6189) — the workspace itself is never
+      // deleted (production never deletes a sub-workspace).
       const transport = makeTransport();
       const brand = makeBrand();
       const reloadPointer = sinon.stub().resolves('winner-ws');
@@ -465,9 +471,12 @@ describe('workspace-lifecycle', () => {
       );
 
       expect(result).to.equal('winner-ws');
-      // Our orphan's allocation is released back to the parent pool.
-      expect(transport.transferWorkspaceResources)
-        .to.have.been.calledOnceWithExactly(SUB_WS, RELEASE_ALLOCATION);
+      expect(transport.listProjects).to.have.been.calledWith(SUB_WS);
+      expect(transport.transferWorkspaceResources).to.have.been.calledOnceWithExactly(
+        SUB_WS,
+        { ai: { projects: 1, prompts: 1 } },
+      );
+      expect(transport.deleteWorkspace).to.not.have.been.called;
       // The winner's pointer is NOT clobbered.
       expect(brand.setSemrushSubWorkspaceId).to.not.have.been.called;
       expect(brand.save).to.not.have.been.called;
@@ -528,7 +537,7 @@ describe('workspace-lifecycle', () => {
 
     it('tolerates a failed release when adopting a concurrent winner', async () => {
       const transport = makeTransport({
-        transferWorkspaceResources: sinon.stub().rejects(new Error('release boom')),
+        listProjects: sinon.stub().rejects(new Error('release boom')),
       });
       const brand = makeBrand();
       const reloadPointer = sinon.stub().resolves('winner-ws');
@@ -549,20 +558,29 @@ describe('workspace-lifecycle', () => {
   });
 
   describe('decommissionBrandWorkspace', () => {
-    it('deletes every listed project then releases the allocation', async () => {
+    it('deletes every listed project, then lowers the allocation to a non-zero floor', async () => {
       const transport = makeTransport({
         listProjects: sinon.stub().resolves({ items: [{ id: 'p1' }, { id: 'p2' }] }),
       });
+      const localLog = { info: sinon.spy(), error: sinon.spy(), warn: sinon.spy() };
 
-      await decommissionBrandWorkspace(transport, SUB_WS, log);
+      await decommissionBrandWorkspace(transport, SUB_WS, localLog);
 
       expect(transport.deleteProject).to.have.been.calledWith(SUB_WS, 'p1');
       expect(transport.deleteProject).to.have.been.calledWith(SUB_WS, 'p2');
-      expect(transport.transferWorkspaceResources)
-        .to.have.been.calledOnceWithExactly(SUB_WS, RELEASE_ALLOCATION);
+      // LLMO-6189: never a to-zero transfer (proven no-op) and never a workspace delete
+      // (production never deletes a sub-workspace) — always a non-zero floor transfer.
+      expect(transport.transferWorkspaceResources).to.have.been.calledOnceWithExactly(
+        SUB_WS,
+        { ai: { projects: 1, prompts: 1 } },
+      );
+      expect(transport.deleteWorkspace).to.not.have.been.called;
+      const infoLine = localLog.info.getCalls().find((c) => /emptied projects, allocation lowered/.test(c.args[0]));
+      expect(infoLine, 'expected a lowered-to-floor info summary').to.exist;
+      expect(infoLine.args[1]).to.include({ released: true, reason: 'lowered-to-floor', deletedProjects: 2 });
     });
 
-    it('treats an upstream 404 on delete as success (convergent)', async () => {
+    it('treats an upstream 404 on project delete as success (convergent)', async () => {
       const transport = makeTransport({
         listProjects: sinon.stub().resolves({ items: [{ id: 'gone' }] }),
         deleteProject: sinon.stub().rejects(new SerenityTransportError(404, 'not found')),
@@ -570,7 +588,7 @@ describe('workspace-lifecycle', () => {
 
       await decommissionBrandWorkspace(transport, SUB_WS, log);
 
-      expect(transport.transferWorkspaceResources).to.have.been.calledOnce;
+      expect(transport.deleteProject).to.have.been.calledOnce;
     });
 
     it('propagates a non-404 delete failure', async () => {
@@ -582,6 +600,7 @@ describe('workspace-lifecycle', () => {
       await expect(decommissionBrandWorkspace(transport, SUB_WS, log))
         .to.be.rejectedWith(SerenityTransportError);
       expect(transport.transferWorkspaceResources).to.not.have.been.called;
+      expect(transport.deleteWorkspace).to.not.have.been.called;
     });
 
     it('skips listing items without an id', async () => {
@@ -601,6 +620,7 @@ describe('workspace-lifecycle', () => {
 
       expect(transport.listProjects).to.not.have.been.called;
       expect(transport.transferWorkspaceResources).to.not.have.been.called;
+      expect(transport.deleteWorkspace).to.not.have.been.called;
     });
 
     it('refuses to decommission the org parent workspace (self-defending)', async () => {
@@ -612,6 +632,7 @@ describe('workspace-lifecycle', () => {
         .to.be.rejectedWith(/must not be the organization parent workspace/);
       expect(transport.deleteProject).to.not.have.been.called;
       expect(transport.transferWorkspaceResources).to.not.have.been.called;
+      expect(transport.deleteWorkspace).to.not.have.been.called;
     });
 
     it('refuses to decommission a workspace with active linked sub-workspaces (guard enabled)', async () => {
@@ -657,7 +678,11 @@ describe('workspace-lifecycle', () => {
       );
 
       expect(transport.deleteProject).to.have.been.calledOnceWithExactly(SUB_WS, 'p1');
-      expect(transport.transferWorkspaceResources).to.have.been.calledOnce;
+      expect(transport.transferWorkspaceResources).to.have.been.calledOnceWithExactly(
+        SUB_WS,
+        { ai: { projects: 1, prompts: 1 } },
+      );
+      expect(transport.deleteWorkspace).to.not.have.been.called;
     });
 
     it('SKIPS the linked-sub-workspace guard by default (flag off, family not queried)', async () => {
@@ -673,7 +698,11 @@ describe('workspace-lifecycle', () => {
 
       expect(transport.listWorkspaceFamily).to.not.have.been.called;
       expect(transport.deleteProject).to.have.been.calledOnceWithExactly(SUB_WS, 'p1');
-      expect(transport.transferWorkspaceResources).to.have.been.calledOnce;
+      expect(transport.transferWorkspaceResources).to.have.been.calledOnceWithExactly(
+        SUB_WS,
+        { ai: { projects: 1, prompts: 1 } },
+      );
+      expect(transport.deleteWorkspace).to.not.have.been.called;
     });
   });
   describe('defensive branch coverage', () => {
@@ -752,12 +781,15 @@ describe('workspace-lifecycle', () => {
         );
 
         expect(transport.deleteProject).to.have.been.calledOnceWithExactly(SUB_WS, 'p1');
-        expect(transport.transferWorkspaceResources).to.have.been.calledOnce;
+        expect(transport.transferWorkspaceResources).to.have.been.calledOnceWithExactly(
+          SUB_WS,
+          { ai: { projects: 1, prompts: 1 } },
+        );
       });
     });
 
     describe('decommissionBrandWorkspace - listProjects resolves non-array', () => {
-      it('treats {} listing as no projects and releases allocation without deleting', async () => {
+      it('treats {} listing as no projects, still lowers the allocation to a non-zero floor', async () => {
         // Line 390: Array.isArray false branch -> projects = [] -> no deletes.
         const transport = makeTransport({
           listProjects: sinon.stub().resolves({}),
@@ -766,8 +798,11 @@ describe('workspace-lifecycle', () => {
         await decommissionBrandWorkspace(transport, SUB_WS, log);
 
         expect(transport.deleteProject).to.not.have.been.called;
-        expect(transport.transferWorkspaceResources)
-          .to.have.been.calledOnceWithExactly(SUB_WS, RELEASE_ALLOCATION);
+        expect(transport.transferWorkspaceResources).to.have.been.calledOnceWithExactly(
+          SUB_WS,
+          { ai: { projects: 1, prompts: 1 } },
+        );
+        expect(transport.deleteWorkspace).to.not.have.been.called;
       });
     });
     describe('poll timing defaults (intervalMs and sleep fallbacks)', () => {
@@ -789,6 +824,134 @@ describe('workspace-lifecycle', () => {
 
         expect(result).to.equal(SUB_WS);
       });
+    });
+  });
+
+  describe('deleteAllProjects (LLMO-6189)', () => {
+    it('deletes every listed project and returns the count', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [{ id: 'p1' }, { id: 'p2' }] }),
+      });
+
+      const count = await deleteAllProjects(transport, SUB_WS);
+
+      expect(count).to.equal(2);
+      expect(transport.deleteProject).to.have.been.calledWith(SUB_WS, 'p1');
+      expect(transport.deleteProject).to.have.been.calledWith(SUB_WS, 'p2');
+    });
+
+    it('treats an upstream 404 as success (convergent) and still counts the item', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [{ id: 'gone' }] }),
+        deleteProject: sinon.stub().rejects(new SerenityTransportError(404, 'not found')),
+      });
+
+      const count = await deleteAllProjects(transport, SUB_WS);
+
+      expect(count).to.equal(1);
+    });
+
+    it('propagates a non-404 delete failure', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [{ id: 'p1' }] }),
+        deleteProject: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
+      });
+
+      await expect(deleteAllProjects(transport, SUB_WS)).to.be.rejectedWith(SerenityTransportError);
+    });
+
+    it('skips items without an id and treats a non-array listing as empty', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [{ id: '' }, {}, { id: 'p1' }] }),
+      });
+
+      const count = await deleteAllProjects(transport, SUB_WS);
+
+      expect(count).to.equal(3);
+      expect(transport.deleteProject).to.have.been.calledOnceWithExactly(SUB_WS, 'p1');
+
+      const transport2 = makeTransport({ listProjects: sinon.stub().resolves({}) });
+      const count2 = await deleteAllProjects(transport2, SUB_WS);
+      expect(count2).to.equal(0);
+      expect(transport2.deleteProject).to.not.have.been.called;
+    });
+  });
+
+  describe('releaseFullAllocation (LLMO-6189)', () => {
+    it('is a no-op for a blank workspace id', async () => {
+      const transport = makeTransport();
+
+      const result = await releaseFullAllocation(transport, '', PARENT_WS, log);
+
+      expect(result).to.deep.equal({ released: false, reason: 'no-workspace' });
+      expect(transport.deleteWorkspace).to.not.have.been.called;
+    });
+
+    it('refuses to act on the org parent workspace', async () => {
+      const transport = makeTransport();
+
+      await expect(
+        releaseFullAllocation(transport, PARENT_WS, PARENT_WS, log),
+      ).to.be.rejectedWith(/must not be the organization parent workspace/);
+      expect(transport.transferWorkspaceResources).to.not.have.been.called;
+      expect(transport.deleteWorkspace).to.not.have.been.called;
+    });
+
+    it('lowers the allocation to the default non-zero floor and reports a genuine reclaim', async () => {
+      const transport = makeTransport();
+      const localLog = { info: sinon.spy(), error: sinon.spy(), warn: sinon.spy() };
+
+      const result = await releaseFullAllocation(transport, SUB_WS, PARENT_WS, localLog);
+
+      expect(result).to.deep.equal({ released: true, reason: 'lowered-to-floor' });
+      expect(transport.transferWorkspaceResources).to.have.been.calledOnceWithExactly(
+        SUB_WS,
+        { ai: { projects: 1, prompts: 1 } },
+      );
+      expect(transport.deleteWorkspace).to.not.have.been.called;
+      expect(localLog.info).to.have.been.calledOnce;
+    });
+
+    it('accepts a caller-supplied floor override', async () => {
+      const transport = makeTransport();
+
+      const result = await releaseFullAllocation(
+        transport,
+        SUB_WS,
+        PARENT_WS,
+        log,
+        { floor: { projects: 2, prompts: 100 } },
+      );
+
+      expect(result).to.deep.equal({ released: true, reason: 'lowered-to-floor' });
+      expect(transport.transferWorkspaceResources).to.have.been.calledOnceWithExactly(
+        SUB_WS,
+        { ai: { projects: 2, prompts: 100 } },
+      );
+    });
+
+    it('propagates a transfer failure', async () => {
+      const transport = makeTransport({
+        transferWorkspaceResources: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
+      });
+
+      await expect(
+        releaseFullAllocation(transport, SUB_WS, PARENT_WS, log),
+      ).to.be.rejectedWith(SerenityTransportError);
+    });
+
+    it('rejects a caller-supplied floor with a zero dimension (MysticatBot review, PR #2812)', async () => {
+      // A zero-dimension floor is exactly the payload this whole fix exists to eliminate — a
+      // transfer to zero is a proven silent no-op. Must throw before ever calling the transport.
+      const transport = makeTransport();
+      const zeroProjectsFloor = { floor: { projects: 0, prompts: 100 } };
+      const zeroPromptsFloor = { floor: { projects: 1, prompts: 0 } };
+
+      await expect(releaseFullAllocation(transport, SUB_WS, PARENT_WS, log, zeroProjectsFloor))
+        .to.be.rejectedWith(/floor must have both dimensions > 0/);
+      await expect(releaseFullAllocation(transport, SUB_WS, PARENT_WS, log, zeroPromptsFloor))
+        .to.be.rejectedWith(/floor must have both dimensions > 0/);
+      expect(transport.transferWorkspaceResources).to.not.have.been.called;
     });
   });
 });

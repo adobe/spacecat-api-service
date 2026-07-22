@@ -27,10 +27,14 @@ import sinonChai from 'sinon-chai';
 import {
   handleCreateMarketSubworkspace,
   handleUpdateModelsSubworkspace,
+  handleDeleteMarketSubworkspace,
 } from '../../../src/support/serenity/handlers/markets-subworkspace.js';
 import { handleCreatePromptsSubworkspace } from '../../../src/support/serenity/handlers/prompts-subworkspace.js';
 import { clearTagCache } from '../../../src/support/serenity/handlers/markets.js';
 import { clearResourceLocks } from '../../../src/support/serenity/resource-lock.js';
+import { PROJECT_BLOCK, PROMPT_BLOCK } from '../../../src/support/serenity/resource-manager.js';
+import { SerenityTransportError } from '../../../src/support/serenity/rest-transport.js';
+import { ERROR_CODES } from '../../../src/support/serenity/errors.js';
 import { makeProvisioningTransportStubs } from './fixtures/tag-tree.js';
 
 use(chaiAsPromised);
@@ -379,5 +383,371 @@ describe('dynamic-allocation — enforcement choke point', () => {
       expect(t.getWorkspaceResources, `${name} must front its metered op through the headroom guard`)
         .to.have.been.calledWith(WS);
     });
+  });
+});
+
+// LLMO-6190 item 3 — release-on-delete. Child at (used=1, total=5) projects / (used=50,
+// total=1000) prompts so a release actually has surplus to hand back (target = max(floor,
+// roundUpToBlock(used)), BELOW the current total on both dims — a real, observable release).
+describe('dynamic-allocation fronting — delete-market release', () => {
+  const RELEASABLE_CHILD = resources(dimObj(1, 0, 5), dimObj(50, 0, 1000));
+
+  function makeDeleteTransport(overrides = {}) {
+    const getWorkspaceResources = sinon.stub().resolves(RELEASABLE_CHILD);
+    return {
+      listProjects: sinon.stub().resolves({ items: [proj()] }),
+      deleteProject: sinon.stub().resolves(null),
+      transferWorkspaceResources: sinon.stub().resolves(null),
+      getWorkspaceStatus: sinon.stub().resolves({ status: 'created' }),
+      getWorkspaceResources,
+      ...overrides,
+    };
+  }
+
+  afterEach(() => {
+    sinon.restore();
+    clearResourceLocks();
+  });
+
+  it('OFF: releaseAiSurplus is never invoked — zero release-path transport calls', async () => {
+    const t = makeDeleteTransport();
+    const res = await handleDeleteMarketSubworkspace(t, WS, 2840, 'en', log, {
+      dynamicAllocation: false,
+    });
+    // deletedSiteId is null here: these tests omit `dataAccess`, so the handler
+    // never reads a mapping row (LLMO-6405 R12 delete-cleanup contract).
+    expect(res).to.deep.equal({ status: 204, deletedSiteId: null });
+    expect(t.getWorkspaceResources).to.not.have.been.called;
+    expect(t.transferWorkspaceResources).to.not.have.been.called;
+  });
+
+  it('ON + valid ids: releases with failFast (one transfer, no settle poll) at the pinned floor', async () => {
+    const t = makeDeleteTransport();
+    const res = await handleDeleteMarketSubworkspace(t, WS, 2840, 'en', log, {
+      dynamicAllocation: true,
+    });
+    // deletedSiteId is null here: these tests omit `dataAccess`, so the handler
+    // never reads a mapping row (LLMO-6405 R12 delete-cleanup contract).
+    expect(res).to.deep.equal({ status: 204, deletedSiteId: null });
+    expect(t.getWorkspaceResources).to.have.been.calledWith(WS);
+    // failFast: ONE transfer, no settle-poll status check.
+    expect(t.transferWorkspaceResources).to.have.been.calledOnce;
+    expect(t.getWorkspaceStatus).to.not.have.been.called;
+    // The pinned floor (PROJECT_BLOCK / PROMPT_BLOCK) is what releaseAiSurplus lowers the surplus
+    // to — assert the LITERAL transfer payload, not just "it was called".
+    expect(t.transferWorkspaceResources).to.have.been.calledWith(WS, {
+      ai: { projects: PROJECT_BLOCK, prompts: PROMPT_BLOCK },
+    });
+  });
+
+  it('ON + upstream deleteProject 404s (already gone): release still fires (project is confirmed gone either way)', async () => {
+    const t = makeDeleteTransport({
+      deleteProject: sinon.stub().rejects(new SerenityTransportError(404, 'gone', null)),
+    });
+    const res = await handleDeleteMarketSubworkspace(t, WS, 2840, 'en', log, {
+      dynamicAllocation: true,
+    });
+    // deletedSiteId is null here: these tests omit `dataAccess`, so the handler
+    // never reads a mapping row (LLMO-6405 R12 delete-cleanup contract).
+    expect(res).to.deep.equal({ status: 204, deletedSiteId: null });
+    expect(t.transferWorkspaceResources).to.have.been.calledOnce;
+  });
+
+  it('ON + project never resolved (no market for this slice): NO release — nothing was deleted', async () => {
+    const t = makeDeleteTransport({ listProjects: sinon.stub().resolves({ items: [] }) });
+    const res = await handleDeleteMarketSubworkspace(t, WS, 2840, 'en', log, {
+      dynamicAllocation: true,
+    });
+    // deletedSiteId is null here: these tests omit `dataAccess`, so the handler
+    // never reads a mapping row (LLMO-6405 R12 delete-cleanup contract).
+    expect(res).to.deep.equal({ status: 204, deletedSiteId: null });
+    expect(t.getWorkspaceResources).to.not.have.been.called;
+    expect(t.transferWorkspaceResources).to.not.have.been.called;
+  });
+
+  it('ON + release hits an EXPECTED (best-effort) failure: DELETE still resolves 204 (releaseAiSurplus swallows it internally)', async () => {
+    const t = makeDeleteTransport({
+      transferWorkspaceResources: sinon.stub().rejects(new SerenityTransportError(503, 'busy', null)),
+    });
+    const res = await handleDeleteMarketSubworkspace(t, WS, 2840, 'en', log, {
+      dynamicAllocation: true,
+    });
+    // deletedSiteId is null here: these tests omit `dataAccess`, so the handler
+    // never reads a mapping row (LLMO-6405 R12 delete-cleanup contract).
+    expect(res).to.deep.equal({ status: 204, deletedSiteId: null });
+  });
+
+  it('ON + release hits a genuinely UNEXPECTED error: propagates, matching the model-update seam\'s identical (uncaught) release call — deliberately not special-cased here', async () => {
+    // releaseAiSurplus itself re-throws non-transport/non-ErrorWithStatusCode failures (so real
+    // bugs surface in monitoring rather than a silent warn) — see resource-manager.js. The
+    // model-removal seam (handleUpdateModelsSubworkspace) awaits releaseAiSurplus with no
+    // try/catch either, so this handler intentionally matches that same shape rather than adding
+    // asymmetric protection here.
+    const boom = new TypeError('unexpected bug');
+    const t = makeDeleteTransport({
+      transferWorkspaceResources: sinon.stub().rejects(boom),
+    });
+    await expect(
+      handleDeleteMarketSubworkspace(t, WS, 2840, 'en', log, { dynamicAllocation: true }),
+    ).to.be.rejectedWith(TypeError, 'unexpected bug');
+  });
+});
+
+// LLMO-6190 item 4 — retryOnQuota wiring at the three metered-publish call sites. Each fixture
+// makes publishProject 405 ONCE (a disguised metered-quota rejection) then succeed, proving the
+// bounded recovery cycle (re-read + top-up + retry) runs end-to-end through the real handler, not
+// just the guard in isolation (covered separately in dynamic-allocation-active.test.js).
+describe('dynamic-allocation fronting — retryOnQuota wiring', () => {
+  afterEach(() => {
+    sinon.restore();
+    clearTagCache();
+    clearResourceLocks();
+  });
+
+  // isMeteredQuota keys on body SHAPE (live-verified, LLMO-6190): a bare string/HTML body is the
+  // disguised quota rejection; a JSON object is a genuine app-level error. Mirror the real pinned
+  // fixture here, not a JSON guess.
+  const quota405 = () => new SerenityTransportError(405, 'publish failed: 405', '<html>405 Not Allowed</html>');
+
+  function publishFailsOnceThenSucceeds() {
+    const publishProject = sinon.stub();
+    publishProject.onFirstCall().rejects(quota405());
+    publishProject.onSecondCall().resolves(null);
+    return publishProject;
+  }
+
+  it('create-market (require mode): one 405 then a bounded top-up+retry succeeds', async () => {
+    const t = makeTransport({
+      listProjects: sinon.stub().resolves({ items: [] }),
+      publishProject: publishFailsOnceThenSucceeds(),
+    });
+    const res = await handleCreateMarketSubworkspace(
+      t,
+      makeBrand(),
+      PARENT,
+      createBody,
+      log,
+      null,
+      null,
+      { dynamicAllocation: true, parentWorkspaceId: MASTER, publishMode: 'require' },
+    );
+    expect(res.status).to.equal(201);
+    expect(res.body.published).to.equal(true);
+    expect(t.publishProject).to.have.been.calledTwice;
+  });
+
+  it('create-prompts: one 405 on a project publish then a bounded top-up+retry succeeds (per-project, not thrown)', async () => {
+    const t = makeTransport({
+      listProjects: sinon.stub().resolves({ items: [proj()] }),
+      publishProject: publishFailsOnceThenSucceeds(),
+    });
+    const result = await handleCreatePromptsSubworkspace(
+      t,
+      WS,
+      {
+        prompts: [{
+          text: 'q', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'],
+        }],
+      },
+      log,
+      undefined,
+      { dynamicAllocation: true, parentWorkspaceId: MASTER },
+    );
+    // The retry succeeded, so the create is NOT recorded as a publish failure.
+    expect(result.failed).to.deep.equal([]);
+    expect(t.publishProject).to.have.been.calledTwice;
+  });
+
+  it('update-models: a net-add sync publish 405s once then a bounded top-up+retry succeeds', async () => {
+    const listAiModels = sinon.stub().resolves({ items: [{ id: 'a1', model: { id: 'm1', key: 'k1' } }] });
+    const listPromptsByTags = sinon.stub().resolves({ items: [{ id: 'q1' }, { id: 'q2' }] });
+    const t = makeTransport({
+      listProjects: sinon.stub().resolves({ items: [proj()] }),
+      listAiModels,
+      listPromptsByTags,
+      publishProject: publishFailsOnceThenSucceeds(),
+    });
+    await handleUpdateModelsSubworkspace(
+      t,
+      WS,
+      { geoTargetId: 2840, languageCode: 'en', modelIds: ['m1', 'm2'] },
+      log,
+      { dynamicAllocation: true, parentWorkspaceId: MASTER },
+    );
+    expect(t.publishProject).to.have.been.calledTwice;
+  });
+
+  // serenity-docs#72 §2/§4.1 — case 1 (brand carve exhausted, allocator OFF, production today):
+  // the raw 405 is classified into the stable `quotaExceeded` 409 token rather than propagating
+  // unclassified (which mapError's generic branch would otherwise flatten into a 502).
+  it('create-market (require mode), flag OFF: a 405 is NOT retried, and is classified as quotaExceeded', async () => {
+    const t = makeTransport({
+      listProjects: sinon.stub().resolves({ items: [] }),
+      publishProject: sinon.stub().rejects(quota405()),
+    });
+    const opts = { dynamicAllocation: false, parentWorkspaceId: MASTER, publishMode: 'require' };
+    const p = handleCreateMarketSubworkspace(
+      t,
+      makeBrand(),
+      PARENT,
+      createBody,
+      log,
+      null,
+      null,
+      opts,
+    );
+    const err = await p.then(() => null, (e) => e);
+    expect(err).to.not.equal(null);
+    expect(err).to.not.be.instanceOf(SerenityTransportError);
+    expect(err.status).to.equal(409);
+    expect(err.code).to.equal(ERROR_CODES.QUOTA_EXCEEDED);
+    expect(t.publishProject).to.have.been.calledOnce;
+  });
+
+  // LLMO-6190 follow-up (live-verified ~9s Semrush gateway write-enforcement lag): the three
+  // metered WRITE call sites below (createProject, createPromptsByIds, createOnePrompt) are now
+  // also fronted by `headroom.retryOnQuota`, not just publish. These tests prove the wrapping is
+  // wired at each site — the poll-retry's own timing/backoff/deadline mechanics are unit-tested
+  // with injectable fake timers in dynamic-allocation-active.test.js; every case here resolves on
+  // the FIRST poll attempt (no real sleep triggered) so the suite stays fast.
+
+  it('create-market: createProject 405s once then a bounded top-up+retry succeeds', async () => {
+    const createProject = sinon.stub();
+    createProject.onFirstCall().rejects(quota405());
+    createProject.onSecondCall().resolves({ id: 'p-us-en' });
+    const t = makeTransport({
+      listProjects: sinon.stub().resolves({ items: [] }),
+      createProject,
+    });
+    const res = await handleCreateMarketSubworkspace(
+      t,
+      makeBrand(),
+      PARENT,
+      createBody,
+      log,
+      null,
+      null,
+      { dynamicAllocation: true, parentWorkspaceId: MASTER, publishMode: 'require' },
+    );
+    expect(res.status).to.equal(201);
+    expect(t.createProject).to.have.been.calledTwice;
+  });
+
+  it('create-market with generateTopics: createPromptsByIds 405s once then a bounded top-up+retry succeeds', async () => {
+    const createPromptsByIds = sinon.stub();
+    createPromptsByIds.onFirstCall().rejects(quota405());
+    createPromptsByIds.onSecondCall().resolves({ items: [{ id: 'prompt-1' }] });
+    const t = makeTransport({
+      listProjects: sinon.stub().resolves({ items: [] }),
+      createPromptsByIds,
+      getBrandTopics: sinon.stub().resolves({
+        items: [{ topic: 't1', volume: 10, prompts: ['what is Acme?'] }],
+      }),
+    });
+    const res = await handleCreateMarketSubworkspace(
+      t,
+      makeBrand(),
+      PARENT,
+      createBody,
+      log,
+      null,
+      null,
+      {
+        dynamicAllocation: true,
+        parentWorkspaceId: MASTER,
+        publishMode: 'require',
+        generateTopics: true,
+      },
+    );
+    expect(res.status).to.equal(201);
+    expect(t.createPromptsByIds).to.have.been.calledTwice;
+  });
+
+  it('create-prompts, concurrent batch: each item independently recovers from its own 405 — per-item-keyed stub, not a flat call-index', async () => {
+    // Per-item Map keyed on the prompt text (round-2 QA review): a flat `.onCall()`/shared counter
+    // is nondeterministic under real concurrency (item B's first call can land as the 2nd call
+    // overall and skip its own retry path). Keying on identity guarantees EVERY item's first
+    // attempt 405s once and its second succeeds, regardless of interleaving.
+    const attemptsByText = new Map();
+    const createPromptsByIds = sinon.stub().callsFake(async (wsId, projectId, texts) => {
+      const key = texts[0];
+      const attempt = (attemptsByText.get(key) ?? 0) + 1;
+      attemptsByText.set(key, attempt);
+      if (attempt === 1) {
+        throw quota405();
+      }
+      return { items: [{ id: `prompt-${key}` }] };
+    });
+    const t = makeTransport({
+      listProjects: sinon.stub().resolves({ items: [proj()] }),
+      createPromptsByIds,
+    });
+    const result = await handleCreatePromptsSubworkspace(
+      t,
+      WS,
+      {
+        prompts: [
+          {
+            text: 'q1', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'],
+          },
+          {
+            text: 'q2', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'],
+          },
+          {
+            text: 'q3', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'],
+          },
+        ],
+      },
+      log,
+      undefined,
+      { dynamicAllocation: true, parentWorkspaceId: MASTER },
+    );
+    expect(result.failed).to.deep.equal([]);
+    expect(result.created).to.have.lengthOf(3);
+    expect([...attemptsByText.values()]).to.deep.equal([2, 2, 2]);
+  });
+
+  it('create-prompts, mixed outcome in a concurrent batch: one item recovers, a sibling gets a genuinely non-retryable error, neither leaks into the other', async () => {
+    const nonRetryable = new SerenityTransportError(500, 'boom', { message: 'internal error' });
+    // Deterministic per-key state — 'recovers' 405s once then succeeds, 'fails-hard' always throws
+    // a non-quota error that must never be retried.
+    let recoversAttempt = 0;
+    const stub = sinon.stub().callsFake(async (wsId, projectId, texts) => {
+      const [text] = texts;
+      if (text === 'recovers') {
+        recoversAttempt += 1;
+        if (recoversAttempt === 1) {
+          throw quota405();
+        }
+        return { items: [{ id: 'prompt-recovers' }] };
+      }
+      throw nonRetryable;
+    });
+    const t = makeTransport({
+      listProjects: sinon.stub().resolves({ items: [proj()] }),
+      createPromptsByIds: stub,
+    });
+    const result = await handleCreatePromptsSubworkspace(
+      t,
+      WS,
+      {
+        prompts: [
+          {
+            text: 'recovers', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'],
+          },
+          {
+            text: 'fails-hard', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'],
+          },
+        ],
+      },
+      log,
+      undefined,
+      { dynamicAllocation: true, parentWorkspaceId: MASTER },
+    );
+    expect(result.created).to.have.lengthOf(1);
+    expect(result.created[0].text).to.equal('recovers');
+    expect(result.failed).to.have.lengthOf(1);
+    expect(result.failed[0].text).to.equal('fails-hard');
+    expect(result.failed[0].status).to.equal(500);
   });
 });

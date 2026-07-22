@@ -309,10 +309,15 @@ const routeRequiredCapabilities = {
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview': 'brand:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics': 'brand:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics/:topicId/prompts': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/domain-urls': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/market-tracking-trends': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/stats': 'brand:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/stats': 'brand:read',
+  // eslint-disable-next-line max-len
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/prompts/count': 'brand:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': 'organization:write',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate': 'organization:write',
   'GET /v2/orgs/:spaceCatId/sites/:siteId/brand': 'organization:read',
@@ -471,6 +476,17 @@ const routeRequiredCapabilities = {
   'POST /sites/:siteId/agentic-page-types': 'site:write',
   'PATCH /sites/:siteId/agentic-page-types/:name': 'site:write',
   'DELETE /sites/:siteId/agentic-page-types/:name': 'site:write',
+
+  // Audit Policy contract (SITES-47306)
+  'GET /sites/:siteId/audit-policy': 'site:read',
+  'POST /sites/:siteId/audit-policy/exclusions': 'site:write',
+  'POST /sites/:siteId/audit-policy/exclusions/delete': 'site:write',
+  'POST /sites/:siteId/audit-policy/inclusions': 'site:write',
+  'POST /sites/:siteId/audit-policy/inclusions/delete': 'site:write',
+  'GET /sites/:siteId/audit-policy/revisions': 'site:read',
+  'GET /sites/:siteId/audit-scope/pages': 'site:read',
+  'GET /sites/:siteId/audit-scope/summary': 'site:read',
+  'GET /sites/:siteId/audit-scope/sections': 'site:read',
 
   'PATCH /sites/:siteId/:auditType': 'audit:write',
   'GET /sites/:siteId/latest-audit/:auditType': 'audit:read',

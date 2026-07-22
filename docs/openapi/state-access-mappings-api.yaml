@@ -59,11 +59,17 @@ state-access-mappings:
   post:
     tags:
       - state-access-mappings
-    summary: Create a state-layer access mapping
+    summary: Create (upsert) a state-layer access mapping
     description: |
       Inserts one `facs_access_mappings` binding row. Capability is
       validated against the product's capability catalog. For `subjectType:
       org`, `subjectId` must equal the caller's canonical org id.
+
+      **Upsert semantics:** when an active binding already exists for the same
+      subject + resource, its `grantedCapabilities` are **overwritten** with the
+      request's set (the given capabilities *replace* the stored ones — this is
+      not a merge) and the endpoint returns `200` with the updated mapping. A
+      brand-new binding returns `201`.
 
       `grantedCapabilities` must be non-empty (a `400` is returned otherwise — to
       remove all access, use `DELETE` on the created row). The product's
@@ -83,6 +89,14 @@ state-access-mappings:
           schema:
             $ref: './schemas.yaml#/StateAccessMappingCreateRequest'
     responses:
+      '200':
+        description: >-
+          An active mapping already existed for this subject and resource; its
+          granted capabilities were overwritten with the request's set (upsert).
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/StateAccessMapping'
       '201':
         description: Mapping created.
         content:
@@ -96,7 +110,9 @@ state-access-mappings:
       '403':
         $ref: './responses.yaml#/403'
       '409':
-        description: Active mapping already exists for this subject and resource.
+        description: >-
+          Rare race: an active mapping existed at insert time but was revoked
+          before its capabilities could be overwritten. Safe to retry.
         content:
           application/json:
             schema:
