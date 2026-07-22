@@ -242,20 +242,6 @@ export async function handleCreatePromptsSubworkspace(
     invalidateTagCacheForProject(workspaceId, pid);
   }
 
-  // PROMPT metering seam: the just-created prompts are drafted synchronously across the affected
-  // projects of THIS child; size headroom from `used + drafted` (includeDrafted, staleness-immune)
-  // before the publish. One workspace-level top-up covers all affected projects (the allocation is
-  // per sub-workspace, not per project). No-op when the flag is OFF; skipped when nothing was
-  // created so the OFF path and the empty path issue zero headroom reads.
-  if (affectedProjectIds.length > 0) {
-    const headroom = createHeadroomGuard(
-      transport,
-      { enabled: dynamicAllocation, subWorkspaceId: workspaceId, parentWorkspaceId },
-      log,
-    );
-    await headroom.ensure({}, { includeDrafted: true });
-  }
-
   if (deferPublish) {
     log?.info?.('serenity create-prompts (subworkspace): deferPublish set — prompts written as draft, publish skipped', {
       workspaceId, created: created.length, skipped: skipped.length, failed: failed.length,

@@ -224,7 +224,7 @@ function validateCreateBody(body) {
 async function generateAndAttachPrompts(transport, workspaceId, projectId, {
   domain, country, topicCap = 0, brandNames = [], provisioned, env,
   writeDeadline = computeWriteDeadline(),
-}, log) {
+}, log, headroom) {
   const raw = await transport.getBrandTopics(workspaceId, { domain, country });
   let topics = [];
   if (Array.isArray(raw)) {
@@ -312,6 +312,13 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
       });
     }
   }
+
+  // PROMPT metering seam (Rainer, live-verified LLMO-6190): front headroom sized
+  // on the real generated prompt count (`texts.size`) BEFORE the metered
+  // `createPromptsByIds` writes below — the disguised-quota 405 fires there, not
+  // at publish. No-op when the flag is OFF; NOT optional-chained, a caller that
+  // forgets to thread the guard must fail loud.
+  await headroom.ensure({ prompts: texts.size }, { includeDrafted: true });
 
   for (const { items, tagIds } of byTagSet.values()) {
     // eslint-disable-next-line no-await-in-loop
