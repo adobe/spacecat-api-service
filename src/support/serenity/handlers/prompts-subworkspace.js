@@ -251,7 +251,16 @@ export async function handleCreatePromptsSubworkspace(
     };
   }
 
-  const publishErrors = await publishAffected(transport, workspaceId, affectedProjectIds, log);
+  // Route each project's publish through the headroom guard's retryOnQuota (LLMO-6190 item 4):
+  // a disguised metered-405 gets ONE bounded top-up+retry per project before being recorded as a
+  // failure. No-op passthrough when the flag is OFF (the guard's retryOnQuota is a plain call).
+  const publishErrors = await publishAffected(
+    transport,
+    workspaceId,
+    affectedProjectIds,
+    log,
+    (fn) => headroom.retryOnQuota(fn),
+  );
   // publishAffected returns { projectId, message } records whose message is
   // ALREADY redacted (redactUpstreamMessage) — pubErr is a record, not a raw error.
   for (const pubErr of publishErrors) {

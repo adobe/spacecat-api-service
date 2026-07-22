@@ -546,6 +546,8 @@ describe('dynamic-allocation fronting — retryOnQuota wiring', () => {
       },
       log,
       undefined,
+      undefined,
+      undefined,
       { dynamicAllocation: true, parentWorkspaceId: MASTER },
     );
     // The retry succeeded, so the create is NOT recorded as a publish failure.
