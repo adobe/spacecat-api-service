@@ -11,13 +11,53 @@
  */
 
 import { expect } from 'chai';
-import { emitMetric, resolveEnvironment } from '../../src/support/metrics-emf.js';
+import sinon from 'sinon';
+import {
+  emitMetric,
+  resolveEnvironment,
+  resetEnvFallbackWarnedForTest,
+} from '../../src/support/metrics-emf.js';
 
 describe('metrics-emf', () => {
   it('resolveEnvironment prefers AWS_ENV, then ENV, then dev', () => {
     expect(resolveEnvironment({ AWS_ENV: 'prod' })).to.equal('prod');
     expect(resolveEnvironment({ ENV: 'stage' })).to.equal('stage');
     expect(resolveEnvironment({})).to.equal('dev');
+  });
+
+  describe('resolveEnvironment: default-fallback warn-once', () => {
+    beforeEach(() => resetEnvFallbackWarnedForTest());
+    afterEach(() => resetEnvFallbackWarnedForTest());
+
+    it('does NOT warn when AWS_ENV is set', () => {
+      const log = { warn: sinon.spy() };
+      expect(resolveEnvironment({ AWS_ENV: 'prod' }, { log })).to.equal('prod');
+      expect(log.warn.called).to.be.false;
+    });
+
+    it('does NOT warn when ENV is set (AWS_ENV missing)', () => {
+      const log = { warn: sinon.spy() };
+      expect(resolveEnvironment({ ENV: 'stage' }, { log })).to.equal('stage');
+      expect(log.warn.called).to.be.false;
+    });
+
+    it('warns exactly once per Lambda instance when defaulting to dev', () => {
+      const log = { warn: sinon.spy() };
+      // First call: log.warn fires.
+      expect(resolveEnvironment({}, { log })).to.equal('dev');
+      expect(log.warn.callCount).to.equal(1);
+      expect(log.warn.firstCall.args[0]).to.include('AWS_ENV nor ENV');
+      // Second call same instance: still 'dev', but no additional warn — the
+      // guard prevents flooding on every request when the manifest is broken.
+      expect(resolveEnvironment({}, { log })).to.equal('dev');
+      expect(log.warn.callCount).to.equal(1);
+    });
+
+    it('is a no-op when no log is passed (backwards compat with old callers)', () => {
+      // Legacy callers pass no options; the function must still return 'dev'
+      // without throwing, and must not require the log param.
+      expect(resolveEnvironment({})).to.equal('dev');
+    });
   });
 
   it('emits a well-formed EMF envelope to the injected sink', () => {

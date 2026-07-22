@@ -83,7 +83,7 @@ function WebhooksController(context) {
         return await fn(ctx);
       } catch (e) {
         log.error('GitHub webhook handler error', e);
-        emitMetric({ name: 'WebhookHandlerError', dimensions: { Reason: 'uncaught_exception' } }, { environment: resolveEnvironment(env) });
+        emitMetric({ name: 'WebhookHandlerError', dimensions: { Reason: 'uncaught_exception' } }, { environment: resolveEnvironment(env, { log }) });
         return internalServerError('Internal error');
       }
     };
@@ -98,7 +98,7 @@ function WebhooksController(context) {
     const deliveryId = ctx.pathInfo?.headers?.['x-github-delivery'];
     const { data } = ctx;
 
-    const environment = resolveEnvironment(env);
+    const environment = resolveEnvironment(env, { log });
     const startedAt = Date.now();
     let outcome = 'unknown';
 
