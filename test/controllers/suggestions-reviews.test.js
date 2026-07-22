@@ -527,6 +527,10 @@ describe('Suggestions Controller - backoffice reviews', () => {
       context.data.rejectionCategory = 'product_bug';
       const response = await controller.createAsoReview(context);
       expect(response.status).to.equal(400);
+      // observability: rejection is logged with source + reason
+      expect(context.log.warn).to.have.been.calledWithMatch(
+        /feedback_capture\.rejected source=aso_ui .*reason=invalid_rejection_category/,
+      );
     });
 
     it('rejects a body-supplied source that mismatches aso_ui with 400 (FR-10)', async () => {
@@ -534,6 +538,17 @@ describe('Suggestions Controller - backoffice reviews', () => {
       context.data.source = 'backoffice';
       const response = await controller.createAsoReview(context);
       expect(response.status).to.equal(400);
+      // FR-10 abuse case must be observable server-side (source stays aso_ui).
+      expect(context.log.warn).to.have.been.calledWithMatch(
+        /feedback_capture\.rejected source=aso_ui .*reason=source_mismatch/,
+      );
+    });
+
+    it('does not emit a rejection warn on a successful 201', async () => {
+      const context = makeContext(okInsert());
+      const response = await controller.createAsoReview(context);
+      expect(response.status).to.equal(201);
+      expect(context.log.warn).to.not.have.been.called;
     });
   });
 });
