@@ -123,6 +123,7 @@ describe('Sites Controller', () => {
     'createSite',
     'getAll',
     'getAllByDeliveryType',
+    'getAllByEnrollmentAndTier',
     'getAllWithLatestAudit',
     'getLatestSiteMetrics',
     'getAllAsCSV',
@@ -196,6 +197,7 @@ describe('Sites Controller', () => {
       Site: {
         all: sandbox.stub().resolves(sites),
         allByDeliveryType: sandbox.stub().resolves(sites),
+        allByEnrollmentAndTier: sandbox.stub().resolves(sites),
         allWithLatestAudit: sandbox.stub().resolves(sites),
         allByOrganizationId: sandbox.stub().resolves(sites),
         create: sandbox.stub().resolves(sites[0]),
@@ -1829,6 +1831,86 @@ describe('Sites Controller', () => {
 
     expect(result.status).to.equal(400);
     expect(error).to.have.property('message', 'Delivery type required');
+  });
+
+  it('gets all sites by enrollment tier', async () => {
+    mockDataAccess.Site.allByEnrollmentAndTier.resolves(sites);
+
+    const result = await sitesController.getAllByEnrollmentAndTier({
+      params: { tier: 'PAID' },
+    });
+    const body = await result.json();
+
+    expect(mockDataAccess.Site.allByEnrollmentAndTier)
+      .to.have.been.calledOnceWithExactly('PAID', undefined);
+    expect(body.sites).to.be.an('array').with.lengthOf(2);
+    expect(body.sites[0]).to.have.property('id', SITE_IDS[0]);
+  });
+
+  it('returns an empty list when no sites match the tier', async () => {
+    mockDataAccess.Site.allByEnrollmentAndTier.resolves([]);
+
+    const result = await sitesController.getAllByEnrollmentAndTier({
+      params: { tier: 'PAID' },
+    });
+    const body = await result.json();
+
+    expect(body.sites).to.be.an('array').with.lengthOf(0);
+  });
+
+  it('forwards productCode to allByEnrollmentAndTier when supplied', async () => {
+    mockDataAccess.Site.allByEnrollmentAndTier.resolves(sites);
+
+    await sitesController.getAllByEnrollmentAndTier({
+      params: { tier: 'FREE_TRIAL' },
+      data: { productCode: 'LLMO' },
+    });
+
+    expect(mockDataAccess.Site.allByEnrollmentAndTier)
+      .to.have.been.calledOnceWithExactly('FREE_TRIAL', 'LLMO');
+  });
+
+  it('returns 403 for non-admin users on getAllByEnrollmentAndTier', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+
+    const result = await sitesController.getAllByEnrollmentAndTier({
+      params: { tier: 'PAID' },
+    });
+    const error = await result.json();
+
+    expect(mockDataAccess.Site.allByEnrollmentAndTier).to.have.not.been.called;
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only admins can view all sites');
+  });
+
+  it('returns bad request when tier is missing on getAllByEnrollmentAndTier', async () => {
+    const result = await sitesController.getAllByEnrollmentAndTier({ params: {} });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'Tier required');
+  });
+
+  it('returns bad request when tier is not customer-visible on getAllByEnrollmentAndTier', async () => {
+    const result = await sitesController.getAllByEnrollmentAndTier({
+      params: { tier: 'PRE_ONBOARD' },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error.message).to.match(/^Tier must be one of:/);
+  });
+
+  it('returns bad request when productCode is invalid on getAllByEnrollmentAndTier', async () => {
+    const result = await sitesController.getAllByEnrollmentAndTier({
+      params: { tier: 'PAID' },
+      data: { productCode: 'NOT_A_PRODUCT' },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error.message).to.match(/^productCode must be one of:/);
+    expect(mockDataAccess.Site.allByEnrollmentAndTier).to.have.not.been.called;
   });
 
   it('returns bad request if audit type is not provided', async () => {

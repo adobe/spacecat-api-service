@@ -773,6 +773,15 @@ SiteList:
   type: array
   items:
     $ref: './schemas.yaml#/Site'
+SiteEnrollmentList:
+  type: object
+  required:
+    - sites
+  properties:
+    sites:
+      type: array
+      items:
+        $ref: './schemas.yaml#/Site'
 SiteListItem:
   type: object
   description: |

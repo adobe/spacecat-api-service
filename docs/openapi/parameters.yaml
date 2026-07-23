@@ -33,6 +33,24 @@ deliveryType:
   required: true
   schema:
     $ref: './schemas.yaml#/DeliveryType'
+tier:
+  name: tier
+  description: Entitlement tier to filter by
+  in: path
+  required: true
+  schema:
+    type: string
+    enum:
+      - PAID
+      - FREE_TRIAL
+      - PLG
+productCodeQuery:
+  name: productCode
+  description: Optional product code to further filter the result (e.g. LLMO)
+  in: query
+  required: false
+  schema:
+    type: string
 base64BaseUrl:
   name: base64BaseUrl
   description: Base64-encoded base URL
