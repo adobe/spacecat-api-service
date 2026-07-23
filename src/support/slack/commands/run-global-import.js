@@ -11,17 +11,35 @@
  */
 
 import BaseCommand from './base.js';
-import { postErrorMessage } from '../../../utils/slack/base.js';
+import {
+  extractURLFromSlackInput,
+  postErrorMessage,
+  postSiteNotFoundMessage,
+} from '../../../utils/slack/base.js';
 import { triggerGlobalImportRun } from '../../utils.js';
 
 /* c8 ignore start */
 /* eslint-disable no-useless-escape */
 const PHRASES = ['run global import'];
+const FORCE_FLAG = '--force';
 
 const GLOBAL_IMPORTS = [
   'stale-suggestions-cleanup',
   'optimize-at-edge-enabled-marking',
 ];
+
+/**
+ * Splits the `--force` flag out of the raw args, wherever it appears, leaving the remaining
+ * positional args (importType, site) in order.
+ *
+ * @param {string[]} args - Raw args as provided to the command.
+ * @returns {{ positionalArgs: string[], force: boolean }}
+ */
+function splitForceFlag(args) {
+  const positionalArgs = args.filter((a) => a !== FORCE_FLAG);
+  const force = args.includes(FORCE_FLAG);
+  return { positionalArgs, force };
+}
 
 /**
  * Run Global Import command.
@@ -33,15 +51,21 @@ const GLOBAL_IMPORTS = [
  */
 function runGlobalImportCommand(context) {
   const { log, dataAccess } = context;
-  const { Configuration } = dataAccess;
+  const { Configuration, Site } = dataAccess;
 
   const baseCommand = BaseCommand({
     id: 'run-global-import',
     name: 'Run Global Import',
     description: 'Run a global import job that operates across all data. '
-      + 'These imports do not require a specific site URL.',
+      + 'These imports do not require a specific site URL, but an optional site (URL or ID) '
+      + 'scopes the run to just that one site, and --force skips that handler\'s normal '
+      + 'gating check for it, for handlers that support both.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {importType}\n\nAvailable types: \`${GLOBAL_IMPORTS.join('\`, \`')}\``,
+    usageText: `${PHRASES[0]} {importType} [site-url-or-id] [--force]\n\nAvailable types: \`${GLOBAL_IMPORTS.join('\`, \`')}\`\n`
+      + 'Optional site (URL or ID): scope the run to a single site instead of all data '
+      + '(currently only `optimize-at-edge-enabled-marking` uses it).\n'
+      + '`--force`: requires a site — skips prerender content validation, enabling the site '
+      + 'on the edge request-id check alone. Never touches an already-enabled site.',
   });
 
   /**
@@ -55,7 +79,8 @@ function runGlobalImportCommand(context) {
     const config = await Configuration.findLatest();
 
     try {
-      const [importType] = args;
+      const { positionalArgs, force } = splitForceFlag(args);
+      const [importType, siteInput] = positionalArgs;
 
       if (!importType || importType === '') {
         await say(baseCommand.usage());
@@ -81,14 +106,41 @@ function runGlobalImportCommand(context) {
         return;
       }
 
+      // Optional site scope — accepts either a site URL or a raw site ID.
+      let site;
+      if (siteInput) {
+        const baseURL = extractURLFromSlackInput(siteInput);
+        site = baseURL
+          ? await Site.findByBaseURL(baseURL)
+          : await Site.findById(siteInput);
+
+        if (!site) {
+          await postSiteNotFoundMessage(say, siteInput);
+          return;
+        }
+      }
+
+      if (force && !site) {
+        await say(':warning: `--force` requires a site (URL or ID) to scope to — it has no effect on a bulk run.');
+        return;
+      }
+
       await triggerGlobalImportRun(
         config,
         importType,
         slackContext,
         context,
+        { siteId: site?.getId(), force, forcedBy: slackContext.user },
       );
 
-      await say(`:adobe-run: Triggered global import: *${importType}*`);
+      let message = `:adobe-run: Triggered global import: *${importType}*`;
+      if (site) {
+        message += ` for site *${site.getBaseURL()}* (\`${site.getId()}\`)`;
+      }
+      if (force) {
+        message += ' — *force*: skipping prerender content validation.';
+      }
+      await say(message);
     } catch (error) {
       log.error(`Error running global import: ${error.message}`);
       await postErrorMessage(say, error);

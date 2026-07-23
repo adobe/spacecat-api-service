@@ -35,6 +35,8 @@ import {
   sendAutofixMessage,
   isViewAsTrialRequest,
   getImsUserTokenStrict,
+  sendGlobalImportRunMessage,
+  triggerGlobalImportRun,
 } from '../../src/support/utils.js';
 
 use(chaiAsPromised);
@@ -1720,6 +1722,118 @@ describe('utils', () => {
       const token = await resolveSemrushImsToken(context, { error: sinon.stub() }, 'label');
 
       expect(token).to.equal('ims-token');
+    });
+  });
+
+  describe('sendGlobalImportRunMessage', () => {
+    it('sends a message without a siteId when none is provided', async () => {
+      const sqs = { sendMessage: sinon.stub().resolves() };
+      const slackContext = { channelId: 'C1', threadTs: '123' };
+
+      await sendGlobalImportRunMessage(sqs, 'queue-url', 'stale-suggestions-cleanup', slackContext);
+
+      expect(sqs.sendMessage).to.have.been.calledWith('queue-url', {
+        type: 'stale-suggestions-cleanup',
+        slackContext,
+      });
+    });
+
+    it('includes the siteId in the message when provided', async () => {
+      const sqs = { sendMessage: sinon.stub().resolves() };
+      const slackContext = { channelId: 'C1', threadTs: '123' };
+
+      await sendGlobalImportRunMessage(
+        sqs,
+        'queue-url',
+        'optimize-at-edge-enabled-marking',
+        slackContext,
+        { siteId: 'site-1' },
+      );
+
+      expect(sqs.sendMessage).to.have.been.calledWith('queue-url', {
+        type: 'optimize-at-edge-enabled-marking',
+        slackContext,
+        siteId: 'site-1',
+      });
+    });
+
+    it('includes force and forcedBy in the message when provided', async () => {
+      const sqs = { sendMessage: sinon.stub().resolves() };
+      const slackContext = { channelId: 'C1', threadTs: '123' };
+
+      await sendGlobalImportRunMessage(
+        sqs,
+        'queue-url',
+        'optimize-at-edge-enabled-marking',
+        slackContext,
+        { siteId: 'site-1', force: true, forcedBy: 'jdoe' },
+      );
+
+      expect(sqs.sendMessage).to.have.been.calledWith('queue-url', {
+        type: 'optimize-at-edge-enabled-marking',
+        slackContext,
+        siteId: 'site-1',
+        force: true,
+        forcedBy: 'jdoe',
+      });
+    });
+
+    it('omits force and forcedBy when falsy/absent', async () => {
+      const sqs = { sendMessage: sinon.stub().resolves() };
+      const slackContext = { channelId: 'C1', threadTs: '123' };
+
+      await sendGlobalImportRunMessage(
+        sqs,
+        'queue-url',
+        'optimize-at-edge-enabled-marking',
+        slackContext,
+        { siteId: 'site-1', force: false },
+      );
+
+      expect(sqs.sendMessage).to.have.been.calledWith('queue-url', {
+        type: 'optimize-at-edge-enabled-marking',
+        slackContext,
+        siteId: 'site-1',
+      });
+    });
+  });
+
+  describe('triggerGlobalImportRun', () => {
+    it('passes siteId/force/forcedBy through to sendGlobalImportRunMessage when provided', async () => {
+      const sqs = { sendMessage: sinon.stub().resolves() };
+      const config = { getQueues: () => ({ imports: 'queue-url' }) };
+      const slackContext = { channelId: 'C1', threadTs: '123' };
+      const lambdaContext = { sqs };
+
+      await triggerGlobalImportRun(
+        config,
+        'optimize-at-edge-enabled-marking',
+        slackContext,
+        lambdaContext,
+        { siteId: 'site-1', force: true, forcedBy: 'jdoe' },
+      );
+
+      expect(sqs.sendMessage).to.have.been.calledWith('queue-url', {
+        type: 'optimize-at-edge-enabled-marking',
+        slackContext: { channelId: 'C1', threadTs: '123' },
+        siteId: 'site-1',
+        force: true,
+        forcedBy: 'jdoe',
+      });
+    });
+
+    it('omits siteId/force/forcedBy when no options are provided', async () => {
+      const sqs = { sendMessage: sinon.stub().resolves() };
+      const config = { getQueues: () => ({ imports: 'queue-url' }) };
+      const slackContext = { channelId: 'C1', threadTs: '123' };
+      const lambdaContext = { sqs };
+
+      await triggerGlobalImportRun(config, 'stale-suggestions-cleanup', slackContext, lambdaContext);
+
+      expect(sqs.sendMessage).to.have.been.calledWith('queue-url', {
+        type: 'stale-suggestions-cleanup',
+        slackContext: { channelId: 'C1', threadTs: '123' },
+      });
     });
   });
 });

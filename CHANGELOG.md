@@ -1,3 +1,17 @@
+# [1.684.0](https://github.com/adobe/spacecat-api-service/compare/v1.683.0...v1.684.0) (2026-07-23)
+
+
+### Features
+
+* update onboarding flow to align with audit-worker config-free execution  ([#2541](https://github.com/adobe/spacecat-api-service/issues/2541)) ([b46aa32](https://github.com/adobe/spacecat-api-service/commit/b46aa32b6a804048da4709456ceea96af212bbda))
+
+# [1.683.0](https://github.com/adobe/spacecat-api-service/compare/v1.682.0...v1.683.0) (2026-07-22)
+
+
+### Features
+
+* **run-global-import:** scope a global import to a single site, with an optional --force ([#2860](https://github.com/adobe/spacecat-api-service/issues/2860)) ([0390aa5](https://github.com/adobe/spacecat-api-service/commit/0390aa5b8a3519a4a2f4ef21ad1e97590ee5bf0c)), closes [#813](https://github.com/adobe/spacecat-api-service/issues/813)
+
 # [1.682.0](https://github.com/adobe/spacecat-api-service/compare/v1.681.0...v1.682.0) (2026-07-22)
 
 
