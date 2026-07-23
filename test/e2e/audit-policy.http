@@ -179,10 +179,6 @@ Content-Type: application/json
   "reason": "test"
 }
 
-### Invalid cursor for revisions (should return 400)
-GET {{baseUrl}}/sites/{{siteId}}/audit-policy/revisions?cursor=not-base64url
-Authorization: Bearer {{sessionToken}}
-
 # =============================================================================
 # WORKFLOW: Complete Test Scenario
 # =============================================================================

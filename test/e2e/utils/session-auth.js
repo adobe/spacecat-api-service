@@ -43,7 +43,12 @@ async function login() {
  */
 export function getSessionToken() {
   if (!cachedSessionTokenPromise) {
-    cachedSessionTokenPromise = login();
+    // Clear the cache on rejection (e.g. a transient network error) so the
+    // next call retries login instead of replaying the same failure forever.
+    cachedSessionTokenPromise = login().catch((err) => {
+      cachedSessionTokenPromise = null;
+      throw err;
+    });
   }
   return cachedSessionTokenPromise;
 }

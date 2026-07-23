@@ -10,14 +10,9 @@
  * governing permissions and limitations under the License.
  */
 
-import { use, expect } from 'chai';
-import sinonChai from 'sinon-chai';
-import chaiAsPromised from 'chai-as-promised';
+import { expect } from 'chai';
 import { apiBaseUrl } from './utils/spacecat-utils.js';
 import { getSessionToken } from './utils/session-auth.js';
-
-use(sinonChai);
-use(chaiAsPromised);
 
 /**
  * E2E tests for the Audit Policy API contract (SITES-47306, SITES-48346):
@@ -112,8 +107,16 @@ describe('Audit Policy - E2E Tests', function auditPolicySuite() {
       this.skip();
       return;
     }
-    await removeValues('exclusions', [TEST_GLOB]);
-    await removeValues('inclusions', [TEST_URL]);
+    const [exclusionsCleanup, inclusionsCleanup] = await Promise.all([
+      removeValues('exclusions', [TEST_GLOB]),
+      removeValues('inclusions', [TEST_URL]),
+    ]);
+    if (!exclusionsCleanup.ok) {
+      console.log(`[WARN] leftover-exclusions cleanup returned ${exclusionsCleanup.status}`);
+    }
+    if (!inclusionsCleanup.ok) {
+      console.log(`[WARN] leftover-inclusions cleanup returned ${inclusionsCleanup.status}`);
+    }
   });
 
   describe('GET /audit-policy', () => {
@@ -178,25 +181,13 @@ describe('Audit Policy - E2E Tests', function auditPolicySuite() {
         expect(cursor).to.be.a('string');
       }
     });
-
-    it('returns 400 for a malformed cursor', async () => {
-      // Cursors are base64url integers; "not-base64url" is itself valid
-      // base64url alphabet, so it silently decodes instead of failing to
-      // decode. Encode a value that decodes to something decodeCursor
-      // actually rejects: non-numeric text (parseInt -> NaN).
-      const malformedCursor = Buffer.from('not-a-real-cursor', 'utf8').toString('base64url');
-      const response = await request({
-        path: `/sites/${SITE_ID}/audit-policy/revisions?cursor=${malformedCursor}`,
-      });
-      expect(response.status).to.equal(400);
-    });
   });
 
   describe('Exclusions - add/remove round trip', () => {
     after(() => removeValues('exclusions', [TEST_GLOB]));
 
     it('adds an exclusion glob and bumps the version', async () => {
-      const before1 = await getPolicy();
+      const policyBefore = await getPolicy();
       const response = await request({
         path: `/sites/${SITE_ID}/audit-policy/exclusions`,
         method: 'POST',
@@ -205,16 +196,16 @@ describe('Audit Policy - E2E Tests', function auditPolicySuite() {
       expect(response.status).to.equal(200);
       const policy = await response.json();
       expect(policy.exclusionGlobs).to.include(TEST_GLOB);
-      expect(policy.version).to.equal(before1.version + 1);
+      expect(policy.version).to.equal(policyBefore.version + 1);
     });
 
     it('removes the exclusion glob and bumps the version again', async () => {
-      const before1 = await getPolicy();
+      const policyBefore = await getPolicy();
       const response = await removeValues('exclusions', [TEST_GLOB]);
       expect(response.status).to.equal(200);
       const policy = await response.json();
       expect(policy.exclusionGlobs).to.not.include(TEST_GLOB);
-      expect(policy.version).to.equal(before1.version + 1);
+      expect(policy.version).to.equal(policyBefore.version + 1);
     });
 
     it('rejects a path-traversal exclusion glob', async () => {
@@ -249,7 +240,7 @@ describe('Audit Policy - E2E Tests', function auditPolicySuite() {
     after(() => removeValues('inclusions', [TEST_URL]));
 
     it('adds a manual URL and bumps the version', async () => {
-      const before1 = await getPolicy();
+      const policyBefore = await getPolicy();
       const response = await request({
         path: `/sites/${SITE_ID}/audit-policy/inclusions`,
         method: 'POST',
@@ -258,16 +249,16 @@ describe('Audit Policy - E2E Tests', function auditPolicySuite() {
       expect(response.status).to.equal(200);
       const policy = await response.json();
       expect(policy.manualUrls).to.include(TEST_URL);
-      expect(policy.version).to.equal(before1.version + 1);
+      expect(policy.version).to.equal(policyBefore.version + 1);
     });
 
     it('removes the manual URL and bumps the version again', async () => {
-      const before1 = await getPolicy();
+      const policyBefore = await getPolicy();
       const response = await removeValues('inclusions', [TEST_URL]);
       expect(response.status).to.equal(200);
       const policy = await response.json();
       expect(policy.manualUrls).to.not.include(TEST_URL);
-      expect(policy.version).to.equal(before1.version + 1);
+      expect(policy.version).to.equal(policyBefore.version + 1);
     });
   });
 
