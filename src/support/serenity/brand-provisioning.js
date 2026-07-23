@@ -21,6 +21,7 @@ import { resolveWorkspaceId } from './workspace-resolver.js';
 import { deleteAllProjects, releaseFullAllocation, ensureSubworkspace } from './workspace-lifecycle.js';
 import { handleCreateMarketSubworkspace } from './handlers/markets-subworkspace.js';
 import { computeWriteDeadline } from './intent-classification.js';
+import { isDynamicAllocationEnabled, resolveBrandAiCeiling } from './dynamic-allocation-active.js';
 
 // Brand-create generation policy (tunable). Keep the top N generated topics by
 // search volume; brand-topics returns up to 10 topics x up to 100 prompts each,
@@ -137,6 +138,15 @@ export async function provisionBrandSubworkspace(context, {
   const imsToken = await resolveSemrushImsToken(context, log, 'brand-provisioning');
   const transport = createSerenityTransport({ env: context.env, imsToken });
 
+  // Dynamic-allocation kill-switch + per-brand ceiling (LLMO-6190): brand creation is onboarding,
+  // and §3/§4a of the design require an onboarded-while-ON brand to get a MINIMAL sub-workspace
+  // (JIT top-up on the first metered op), not the flat pre-calculated carve. This was previously
+  // missing here — the flag/ceiling were threaded into every other subworkspace write path
+  // (activate, create-market, create-prompts, update-models) but not brand creation, so a new
+  // brand always got the flat carve even with the flag ON.
+  const dynamicAllocation = isDynamicAllocationEnabled(context.env);
+  const ceiling = resolveBrandAiCeiling(context.env, log);
+
   /** @type {string|null} */
   let capturedWorkspaceId = null;
   const brandStub = {
@@ -221,6 +231,8 @@ export async function provisionBrandSubworkspace(context, {
         publishMode: (Array.isArray(modelIds) && modelIds.length > 0) || generateTopics
           ? 'require'
           : 'best-effort',
+        dynamicAllocation,
+        ceiling,
       },
     );
   } catch (e) {
@@ -301,6 +313,10 @@ export async function provisionBrandSubworkspaceBare(context, {
   const imsToken = await resolveSemrushImsToken(context, log, 'brand-provisioning');
   const transport = createSerenityTransport({ env: context.env, imsToken });
 
+  // Dynamic-allocation kill-switch (LLMO-6190) — see the identical note in
+  // provisionBrandSubworkspace above: onboarding must not silently opt out of JIT allocation.
+  const dynamicAllocation = isDynamicAllocationEnabled(context.env);
+
   /** @type {string|null} */
   let capturedWorkspaceId = null;
   const brandStub = {
@@ -322,7 +338,7 @@ export async function provisionBrandSubworkspaceBare(context, {
       log,
       {},
       null,
-      {},
+      { dynamicAllocation },
     );
     const resolved = hasText(subWorkspaceId) ? subWorkspaceId : capturedWorkspaceId;
     if (!resolved || !hasText(resolved)) {

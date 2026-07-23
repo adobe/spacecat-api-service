@@ -64,7 +64,7 @@ import {
 } from '../support/serenity/handlers/tags.js';
 import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
 import { isSerenityActiveForOrg } from '../support/serenity/serenity-active.js';
-import { isDynamicAllocationEnabled } from '../support/serenity/dynamic-allocation-active.js';
+import { isDynamicAllocationEnabled, resolveBrandAiCeiling } from '../support/serenity/dynamic-allocation-active.js';
 import { MAX_TOPICS_ON_CREATE } from '../support/serenity/brand-provisioning.js';
 import { marketForGeoTargetId } from '../support/serenity/locations.js';
 import { brandNeedles, classifyBrandedTag } from '../support/serenity/branded-classifier.js';
@@ -448,6 +448,12 @@ function SerenityController(context, log, env) {
   // handlers front through a no-op guard (byte-for-byte pre-PR behavior).
   const dynamicAllocationEnabled = (ctx) => isDynamicAllocationEnabled(ctx?.env || env);
 
+  // Global per-brand AI ceiling (LLMO-6190 flag-flip gate) — a runaway backstop, the SAME value
+  // for every brand, resolved from Vault off the same per-request env as the kill-switch above.
+  // `undefined` when unset → the guard keeps its non-binding default (byte-for-byte today). Passed
+  // as a plain object alongside `dynamicAllocation` at each guard-building handler call site.
+  const brandAiCeiling = (ctx) => resolveBrandAiCeiling(ctx?.env || env, log);
+
   /** Loads the Brand model instance (for subworkspace-mode write/lifecycle flows). */
   async function loadBrand(ctx, brandUuid) {
     const Brand = ctx?.dataAccess?.Brand;
@@ -537,6 +543,7 @@ function SerenityController(context, log, env) {
           {
             dynamicAllocation: dynamicAllocationEnabled(ctx),
             parentWorkspaceId: auth.parentWorkspaceId ?? '',
+            ceiling: brandAiCeiling(ctx),
           },
         )
         : await handleCreatePrompts(
@@ -772,6 +779,7 @@ function SerenityController(context, log, env) {
             // Dynamic-allocation kill-switch. The JIT top-up units pool is the org parent passed
             // positionally above (auth.parentWorkspaceId) — not duplicated in this options bag.
             dynamicAllocation: dynamicAllocationEnabled(ctx),
+            ceiling: brandAiCeiling(ctx),
           },
         );
         // Mirror this market as a SpaceCat Site (+ brand_sites link), once its
@@ -1117,6 +1125,7 @@ function SerenityController(context, log, env) {
           {
             dynamicAllocation: dynamicAllocationEnabled(ctx),
             parentWorkspaceId: auth.parentWorkspaceId ?? '',
+            ceiling: brandAiCeiling(ctx),
           },
         )
         : await handleUpdateModels(
@@ -1402,6 +1411,7 @@ function SerenityController(context, log, env) {
               dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
               // JIT units pool = the org parent passed positionally above; not duplicated here.
               dynamicAllocation: dynamicAllocationEnabled(ctx),
+              ceiling: brandAiCeiling(ctx),
             },
           );
         } catch (e) {
