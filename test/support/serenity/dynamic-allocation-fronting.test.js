@@ -184,6 +184,8 @@ describe('dynamic-allocation fronting — create-prompts', () => {
       },
       log,
       undefined, // classifyPromptType (tag-dimension path — not under test here)
+      undefined, // env
+      undefined, // writeDeadline
       { dynamicAllocation: true, parentWorkspaceId: MASTER },
     );
     expect(t.getWorkspaceResources).to.have.been.calledWith(WS);
@@ -202,6 +204,8 @@ describe('dynamic-allocation fronting — create-prompts', () => {
       },
       log,
       undefined, // classifyPromptType
+      undefined, // env
+      undefined, // writeDeadline
       { dynamicAllocation: false, parentWorkspaceId: MASTER },
     );
     expect(t.getWorkspaceResources).to.not.have.been.called;
@@ -357,6 +361,8 @@ describe('dynamic-allocation — enforcement choke point', () => {
         },
         log,
         undefined, // classifyPromptType
+        undefined, // env
+        undefined, // writeDeadline
         { dynamicAllocation: true, parentWorkspaceId: MASTER },
       ),
     },
@@ -551,6 +557,8 @@ describe('dynamic-allocation fronting — retryOnQuota wiring', () => {
       },
       log,
       undefined,
+      undefined,
+      undefined,
       { dynamicAllocation: true, parentWorkspaceId: MASTER },
     );
     // The retry succeeded, so the create is NOT recorded as a publish failure.
@@ -699,7 +707,9 @@ describe('dynamic-allocation fronting — retryOnQuota wiring', () => {
         ],
       },
       log,
-      undefined,
+      undefined, // classifyPromptType
+      undefined, // env
+      undefined, // writeDeadline
       { dynamicAllocation: true, parentWorkspaceId: MASTER },
     );
     expect(result.failed).to.deep.equal([]);
@@ -741,7 +751,9 @@ describe('dynamic-allocation fronting — retryOnQuota wiring', () => {
         ],
       },
       log,
-      undefined,
+      undefined, // classifyPromptType
+      undefined, // env
+      undefined, // writeDeadline
       { dynamicAllocation: true, parentWorkspaceId: MASTER },
     );
     expect(result.created).to.have.lengthOf(1);

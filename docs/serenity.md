@@ -8,11 +8,12 @@ api-service exposes nine endpoints that front the Adobe-hosted Semrush AIO API a
 
 ## Environment configuration
 
-The proxy is configured via a single env var that is **required at runtime** — Lambda fails at first request if it is unset.
+`SEMRUSH_PROJECTS_BASE_URL` is **required at runtime** — Lambda fails at first request if it is unset. The server-side intent classifier (serenity-docs#32) adds one optional override.
 
 | Variable | Required | Source | Purpose |
 |---|---|---|---|
 | `SEMRUSH_PROJECTS_BASE_URL` | yes (no source default) | Vault `dx_mysticat/<env>/api-service`; locally `.env` | Upstream host for the Semrush AIO REST API. Must be `https://…`. Trailing slashes are stripped. Per-environment value so the production target can differ from the hackathon host without a code change. |
+| `PROMPT_INTENT_CLASSIFICATION_DEPLOYMENT_NAME` | no (falls back to `AZURE_OPEN_AI_API_DEPLOYMENT_NAME`) | Vault `dx_mysticat/<env>/api-service`; locally `.env` | Classifier-scoped Azure OpenAI deployment (model) name for server-side prompt-intent classification (serenity-docs#32). Takes precedence over the shared `AZURE_OPEN_AI_API_DEPLOYMENT_NAME` other Azure consumers use (e.g. `org-detector`), so intent classification can target a different model without affecting them. Unset ⇒ shared deployment; behavior unchanged until explicitly configured. |
 
 ### Vault writes (dev / stage / prod)
 

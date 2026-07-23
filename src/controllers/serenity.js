@@ -68,6 +68,7 @@ import { isDynamicAllocationEnabled } from '../support/serenity/dynamic-allocati
 import { MAX_TOPICS_ON_CREATE } from '../support/serenity/brand-provisioning.js';
 import { marketForGeoTargetId } from '../support/serenity/locations.js';
 import { brandNeedles, classifyBrandedTag } from '../support/serenity/branded-classifier.js';
+import { computeWriteDeadline } from '../support/serenity/intent-classification.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { resolveBrandUuid } from '../support/prompts-storage.js';
 import {
@@ -521,6 +522,9 @@ function SerenityController(context, log, env) {
       }
       const transport = buildTransport(ctx, imsToken);
       const classifyPromptType = await buildPromptTypeClassifier(ctx, auth.brandUuid);
+      // serenity-docs#32: one shared write-budget deadline for classify + create
+      // + publish, computed once at request entry.
+      const writeDeadline = computeWriteDeadline();
       const result = auth.mode === 'subworkspace'
         ? await handleCreatePromptsSubworkspace(
           transport,
@@ -528,6 +532,8 @@ function SerenityController(context, log, env) {
           ctx.data || {},
           log,
           classifyPromptType,
+          ctx.env,
+          writeDeadline,
           {
             dynamicAllocation: dynamicAllocationEnabled(ctx),
             parentWorkspaceId: auth.parentWorkspaceId ?? '',
@@ -541,6 +547,8 @@ function SerenityController(context, log, env) {
           ctx.data || {},
           log,
           classifyPromptType,
+          ctx.env,
+          writeDeadline,
         );
       return createResponse(result, 200);
     } catch (e) {
@@ -561,6 +569,7 @@ function SerenityController(context, log, env) {
       }
       const transport = buildTransport(ctx, imsToken);
       const classifyPromptType = await buildPromptTypeClassifier(ctx, auth.brandUuid);
+      const writeDeadline = computeWriteDeadline();
       const result = auth.mode === 'subworkspace'
         ? await handleUpdatePromptSubworkspace(
           transport,
@@ -569,6 +578,8 @@ function SerenityController(context, log, env) {
           ctx.data || {},
           log,
           classifyPromptType,
+          ctx.env,
+          writeDeadline,
         )
         : await handleUpdatePrompt(
           transport,
@@ -579,6 +590,8 @@ function SerenityController(context, log, env) {
           ctx.data || {},
           log,
           classifyPromptType,
+          ctx.env,
+          writeDeadline,
         );
       return createResponse(result.body, result.status);
     } catch (e) {
@@ -680,6 +693,10 @@ function SerenityController(context, log, env) {
 
   const createMarket = async (ctx) => {
     try {
+      // Shared write-budget deadline, computed once at request entry so intent
+      // classification during topic/prompt generation budgets against the true
+      // request start (serenity-docs#32).
+      const writeDeadline = computeWriteDeadline();
       const imsToken = await resolveSemrushImsToken(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
@@ -743,6 +760,8 @@ function SerenityController(context, log, env) {
             brandAliases,
             brandUrlSources,
             competitors,
+            env: ctx.env,
+            writeDeadline,
             // auth.brandUuid is an already-persisted brand row here (loadBrand
             // above), so the mapping-row upsert's FK to brands is satisfied —
             // see mapping-rows.js upsertMappingRow doc.
@@ -1124,6 +1143,11 @@ function SerenityController(context, log, env) {
    */
   const activate = async (ctx) => {
     try {
+      // Shared write-budget deadline, computed once at request entry so intent
+      // classification during per-market topic/prompt generation budgets against
+      // the true request start rather than per-market function entry
+      // (serenity-docs#32).
+      const writeDeadline = computeWriteDeadline();
       const imsToken = await resolveSemrushImsToken(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
@@ -1369,6 +1393,8 @@ function SerenityController(context, log, env) {
               brandAliases,
               brandUrlSources,
               competitors,
+              env: ctx.env,
+              writeDeadline,
               // `brand` was loaded via loadBrand above — an already-persisted
               // row, so the mapping-row upsert's FK to brands is satisfied.
               // Narrowed to the one model the mapping-row helpers touch — see

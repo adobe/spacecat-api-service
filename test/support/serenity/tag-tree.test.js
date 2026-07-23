@@ -22,6 +22,7 @@ import {
   provisionDimensionTree,
   ensureClosedValue,
   resolveTypeValueInjection,
+  resolveIntentValueInjection,
   resolveClosedValueInjection,
   findTagsInTree,
   assertParentWithinDimension,
@@ -568,6 +569,61 @@ describe('serenity tag-tree', () => {
         createProjectTags: sinon.stub(),
       };
       await expect(resolveTypeValueInjection(transport, WS, PROJECT, 'branded', fakeLog()))
+        .to.be.rejectedWith(/listProjectTags 502/);
+      expect(transport.createProjectTags).to.not.have.been.called;
+    });
+  });
+
+  // Twin of the `resolveTypeValueInjection` block above for the `intent` closed
+  // dimension (serenity-docs#32). Both are thin wrappers over
+  // `resolveClosedValueInjection`; this pins the intent-specific return key
+  // (`intentTagIds`) and the fail-closed contract independently of the type twin.
+  describe('resolveIntentValueInjection', () => {
+    it('returns the wanted value id plus EVERY id under the intent root', async () => {
+      const transport = {
+        listProjectTags: makeListProjectTagsStub(),
+        createProjectTags: sinon.stub(),
+      };
+      const res = await resolveIntentValueInjection(transport, WS, PROJECT, 'Task', fakeLog());
+      expect(res.computedId).to.equal(TAG_IDS.intentTask);
+      // The strip set is every intent id — the caller may not set the value itself.
+      expect(res.intentTagIds).to.have.members([
+        TAG_IDS.intentInformational,
+        TAG_IDS.intentTask,
+        TAG_IDS.intentCommercial,
+        TAG_IDS.intentTransactional,
+        TAG_IDS.intentNavigational,
+      ]);
+      expect(transport.createProjectTags).to.not.have.been.called;
+    });
+
+    it('creates the value on demand when a project predating the taxonomy lacks it', async () => {
+      const { listProjectTags, createProjectTags } = makeProvisioningTransportStubs();
+      const transport = { listProjectTags, createProjectTags };
+      const res = await resolveIntentValueInjection(transport, WS, PROJECT, 'Task', fakeLog());
+      expect(res.computedId).to.equal('created:created::intent:Task');
+      expect(res.intentTagIds).to.deep.equal(['created:created::intent:Task']);
+    });
+
+    it('502s rather than skip injection when the intent root cannot be resolved', async () => {
+      // A prompt written without the server-computed `intent` tag stays
+      // unclassified forever: the client may not set that dimension itself.
+      const transport = {
+        listProjectTags: makeListProjectTagsStub({ '': [] }),
+        createProjectTags: sinon.stub().resolves([]),
+      };
+      const err = await resolveIntentValueInjection(transport, WS, PROJECT, 'Task', fakeLog())
+        .then(() => null, (e) => e);
+      expect(err).to.be.an('error');
+      expect(err.status).to.equal(502);
+    });
+
+    it('propagates a transport failure while reading the tag tree', async () => {
+      const transport = {
+        listProjectTags: sinon.stub().rejects(new Error('listProjectTags 502')),
+        createProjectTags: sinon.stub(),
+      };
+      await expect(resolveIntentValueInjection(transport, WS, PROJECT, 'Task', fakeLog()))
         .to.be.rejectedWith(/listProjectTags 502/);
       expect(transport.createProjectTags).to.not.have.been.called;
     });

@@ -1422,13 +1422,19 @@ describe('SerenityController', () => {
       // so topic generation defaults off (today's behavior is unchanged). brandUuid
       // is already a persisted row (loadBrand), so dataAccess is threaded through
       // for the mapping-row upsert (mapping-rows.js).
-      expect(handlers.handleCreateMarketSubworkspace.firstCall.args[7])
+      // writeDeadline is a request-scoped epoch-ms deadline (dynamic) — asserted
+      // as a number, then dropped before the deep-equal.
+      const { writeDeadline, ...marketOptions } = handlers.handleCreateMarketSubworkspace
+        .firstCall.args[7];
+      expect(writeDeadline).to.be.a('number');
+      expect(marketOptions)
         .to.deep.equal({
           generateTopics: false,
           topicCap: 0,
           brandAliases: ['Acme Inc', 'ACME'],
           brandUrlSources: { urls: [], socialAccounts: [], earnedContent: [] },
           competitors: [],
+          env: {},
           dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
           // Dynamic-allocation kill-switch defaults OFF (env unset) — the guard is a no-op.
           dynamicAllocation: false,
@@ -2122,12 +2128,20 @@ describe('SerenityController', () => {
         brandAliases: ['Acme Inc'],
         brandUrlSources: { urls: [], socialAccounts: [], earnedContent: [] },
         competitors: [],
+        env: {},
         dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
         dynamicAllocation: false,
       };
       const { firstCall, secondCall } = handlers.handleCreateMarketSubworkspace;
-      expect(firstCall.args[7]).to.deep.equal(expectedOpts);
-      expect(secondCall.args[7]).to.deep.equal(expectedOpts);
+      // writeDeadline is computed ONCE at activate entry, so every market in the
+      // batch receives the SAME dynamic epoch-ms deadline — assert that, then
+      // drop it before comparing the rest of the options bag.
+      const { writeDeadline: dl1, ...opts1 } = firstCall.args[7];
+      const { writeDeadline: dl2, ...opts2 } = secondCall.args[7];
+      expect(dl1).to.be.a('number');
+      expect(dl2).to.equal(dl1);
+      expect(opts1).to.deep.equal(expectedOpts);
+      expect(opts2).to.deep.equal(expectedOpts);
       // Org parent (JIT units pool) threaded positionally (arg index 2), not in the options bag.
       expect(firstCall.args[2]).to.equal(WORKSPACE);
       expect(secondCall.args[2]).to.equal(WORKSPACE);

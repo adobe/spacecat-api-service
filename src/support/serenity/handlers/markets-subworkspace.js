@@ -41,9 +41,10 @@ import { withResourceLock } from '../resource-lock.js';
 import {
   modelChangeUnits, releaseAiSurplus, PROJECT_BLOCK, PROMPT_BLOCK,
 } from '../resource-manager.js';
-import { DIMENSION, STANDARD_PROMPT_TAG_VALUES } from '../prompt-tags.js';
+import { DIMENSION, STANDARD_PROMPT_TAG_VALUES, INTENT_VALUE } from '../prompt-tags.js';
 import { provisionDimensionTree } from '../tag-tree.js';
 import { classifyBrandedTag, needlesFromNames } from '../branded-classifier.js';
+import { classifyPromptIntents, AI_GEN_CLASSIFY_MAX, computeWriteDeadline } from '../intent-classification.js';
 import { collectBrandUrlEntries, attachBrandUrlsToProject, primaryDomainSet } from '../brand-urls.js';
 import { resolveProjects } from '../resolve-projects.js';
 import { buildReservedDomains, syncCompetitorBenchmarksForProject } from '../competitor-benchmarks.js';
@@ -271,9 +272,11 @@ function validateCreateBody(body) {
  * Generates topics + prompts for (domain, country) via the AI-SEO service
  * (transport.getBrandTopics) and attaches them to the project. Keeps the top
  * `topicCap` topics by search volume (0 = keep all) and tags every prompt with
- * the standard closed-dimension values ({@link STANDARD_PROMPT_TAG_VALUES}) plus
- * a branded / non-branded `type` value derived from `brandNames` (brand name +
- * aliases). Returns the topic/prompt counts. A generation that yields nothing is
+ * the standard closed-dimension values ({@link STANDARD_PROMPT_TAG_VALUES}, minus
+ * its seeded `intent` default), plus a branded / non-branded `type` value derived
+ * from `brandNames` (brand name + aliases) and a per-prompt server-classified
+ * `intent` value (serenity-docs#32, replacing the seeded `Informational`
+ * default). Returns the topic/prompt counts. A generation that yields nothing is
  * a clean no-op (no upstream write).
  *
  * The generated topic name is NOT attached. Under the dimension-root model a
@@ -283,9 +286,9 @@ function validateCreateBody(body) {
  * arrive uncategorized and are categorized later (adobe/serenity-docs#44).
  *
  * Writes are id-based: `createPromptsByIds` takes ONE shared `tag_ids` array per
- * call, so the texts are partitioned by their resolved tag-id set — which, with
- * topics gone, is exactly two groups (branded and non-branded). Identical text
- * collapses to one entry per group.
+ * call, so the texts are partitioned by their resolved tag-id set — the (type,
+ * intent) pair, since topics are gone and everything else is constant. Identical
+ * text collapses to one entry per group.
  *
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {string} workspaceId - sub-workspace the project lives in.
@@ -300,6 +303,9 @@ function validateCreateBody(body) {
  * @param {{ values: Map<string, Map<string, string>> }} options.provisioned - the
  *   already-provisioned dimension tree. The caller provisions it unconditionally,
  *   so re-resolving it here would read the whole taxonomy a second time per request.
+ * @param {object} [options.env] - environment (Azure OpenAI creds), for intent
+ *   classification (serenity-docs#32).
+ * @param {number} [options.writeDeadline] - shared request-write deadline.
  * @param {object} log - logger.
  * @param {{ ensure: Function, retryOnQuota: Function }} headroom - the caller's headroom guard
  *   (createHeadroomGuard) —
@@ -310,7 +316,8 @@ function validateCreateBody(body) {
  *   write loop, sized on the real prompt count now that it's known (`texts.size`), not an estimate.
  */
 async function generateAndAttachPrompts(transport, workspaceId, projectId, {
-  domain, country, topicCap = 0, brandNames = [], provisioned,
+  domain, country, topicCap = 0, brandNames = [], provisioned, env,
+  writeDeadline = computeWriteDeadline(),
 }, log, headroom) {
   const raw = await transport.getBrandTopics(workspaceId, { domain, country });
   let topics = [];
@@ -350,37 +357,84 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
   // Resolve every tag id we are about to attach. `createPromptsByIds` is ATOMIC on
   // an unresolvable id (live 500s and creates nothing), so ids are never guessed.
   // `provisionDimensionTree` resolved every closed value or threw a 502, so the
-  // standard values and the whole `type` vocabulary are present here by construction.
+  // standard values and the whole `type`/`intent` vocabularies are present here by
+  // construction.
   const { values } = provisioned;
-  const standardIds = STANDARD_PROMPT_TAG_VALUES.map(
-    ({ dimension, name }) => /** @type {string} */ (values.get(dimension)?.get(name)),
-  );
+  // The standard closed-dimension ids EXCEPT `intent`: intent is classified per
+  // prompt below (serenity-docs#32) and replaces the seeded `Informational`
+  // default, so it must not be double-attached from the standard set.
+  const standardIdsNonIntent = STANDARD_PROMPT_TAG_VALUES
+    .filter(({ dimension }) => dimension !== DIMENSION.INTENT)
+    .map(({ dimension, name }) => /** @type {string} */ (values.get(dimension)?.get(name)));
   const typeValues = /** @type {Map<string, string>} */ (values.get(DIMENSION.TYPE));
+  const intentValues = /** @type {Map<string, string>} */ (values.get(DIMENSION.INTENT));
 
-  /** @type {Map<string, string[]>} bare type value → prompt texts */
-  const byTypeValue = new Map();
-  for (const text of texts) {
-    const value = classifyBrandedTag(text, needles);
-    const bucket = byTypeValue.get(value);
+  // Batch-classify intent ONCE for every generated text (capped at
+  // AI_GEN_CLASSIFY_MAX under the shared request deadline); anything unclassified
+  // falls back to the seeded `Informational` default. Every resolved value is in
+  // the `intent` vocabulary provisioned above, so its id is a Map lookup — no
+  // extra upstream call.
+  const allTexts = [...texts];
+  // The cap is a designed budget bound, not an error: texts beyond it are not
+  // classified and take the seeded `Informational` default (see the partition
+  // below). Emit one line when it binds so a silently-defaulted tail is
+  // observable rather than invisible (serenity-docs#32 observability).
+  if (allTexts.length > AI_GEN_CLASSIFY_MAX) {
+    log?.info?.('generateAndAttachPrompts: AI-gen classify cap hit — tail defaults to Informational', {
+      workspaceId,
+      projectId,
+      total: allTexts.length,
+      classified: AI_GEN_CLASSIFY_MAX,
+      defaultedByCap: allTexts.length - AI_GEN_CLASSIFY_MAX,
+    });
+  }
+  const intentByText = await classifyPromptIntents(
+    allTexts.slice(0, AI_GEN_CLASSIFY_MAX),
+    {
+      env, log, deadline: writeDeadline, writePath: 'ai-gen', workspaceId,
+    },
+  );
+
+  // `createPromptsByIds` takes ONE shared `tag_ids` array per call, so partition
+  // the texts by their resolved (type, intent) id pair — the only two dimensions
+  // that vary per prompt.
+  /** @type {Map<string, { items: string[], tagIds: string[] }>} */
+  const byTagSet = new Map();
+  for (const text of allTexts) {
+    const typeValue = classifyBrandedTag(text, needles);
+    const intentValue = intentByText.get(text) ?? INTENT_VALUE.INFORMATIONAL;
+    const key = `${typeValue} ${intentValue}`;
+    const bucket = byTagSet.get(key);
     if (bucket) {
-      bucket.push(text);
+      bucket.items.push(text);
     } else {
-      byTypeValue.set(value, [text]);
+      // `branded` / `non-branded` are the classifier's only outputs and every
+      // classified/defaulted intent is a fixed vocabulary value — both are in the
+      // tree provisioned above.
+      const typeId = /** @type {string} */ (typeValues.get(typeValue));
+      const intentId = /** @type {string} */ (intentValues.get(intentValue));
+      byTagSet.set(key, {
+        items: [text],
+        tagIds: [...standardIdsNonIntent, intentId, typeId],
+      });
     }
   }
 
+  // PROMPT metering seam (Rainer, live-verified LLMO-6190): front headroom sized
+  // on the real generated prompt count (`texts.size`) BEFORE the metered
+  // `createPromptsByIds` writes below — the disguised-quota 405 fires there, not
+  // at publish. No-op when the flag is OFF; NOT optional-chained, a caller that
+  // forgets to thread the guard must fail loud.
   await headroom.ensure({ prompts: texts.size }, { includeDrafted: true });
 
-  for (const [value, items] of byTypeValue) {
-    // `branded` / `non-branded` are the classifier's only outputs and both are in
-    // the `type` vocabulary provisioned above.
-    const typeId = /** @type {string} */ (typeValues.get(value));
+  for (const { items, tagIds } of byTagSet.values()) {
     // LLMO-6190 follow-up: the metered write can still 405 as a disguised metered-quota rejection
     // despite the `ensure` above (live-verified ~9s gateway write-enforcement lag after a JIT
     // top-up) — route through `headroom.retryOnQuota` (no-op passthrough when the flag is OFF).
+    // `tagIds` is precomputed per (type, intent) bucket above (standard + intent + type).
     // eslint-disable-next-line no-await-in-loop
     await headroom.retryOnQuota(
-      () => transport.createPromptsByIds(workspaceId, projectId, items, [...standardIds, typeId]),
+      () => transport.createPromptsByIds(workspaceId, projectId, items, tagIds),
       { callSite: 'createPromptsByIds' },
     );
   }
@@ -449,6 +503,10 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  *   `ensureSubworkspace` is skipped. When false, byte-for-byte the pre-this-PR behavior.
  *   (The units pool for JIT sizing is the positional `parentWorkspaceId` arg — the same id given
  *   to `ensureSubworkspace` — so it is not duplicated in this options bag.)
+ * @param {object} [options.env] - environment (Azure OpenAI creds), threaded into
+ *   intent classification when `generateTopics` is set (serenity-docs#32).
+ * @param {number} [options.writeDeadline] - shared request-write deadline; defaults
+ *   to a fresh {@link computeWriteDeadline} for direct/test callers.
  */
 export async function handleCreateMarketSubworkspace(
   transport,
@@ -468,6 +526,8 @@ export async function handleCreateMarketSubworkspace(
     publishMode = 'require',
     dataAccess = null,
     dynamicAllocation = false,
+    env = null,
+    writeDeadline = computeWriteDeadline(),
   } = {},
 ) {
   const errors = validateCreateBody(body);
@@ -597,6 +657,8 @@ export async function handleCreateMarketSubworkspace(
           ...(Array.isArray(body.brandNames) ? body.brandNames : []),
           ...aliasNames,
         ],
+        env,
+        writeDeadline,
       },
       log,
       headroom,
