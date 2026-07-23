@@ -138,6 +138,76 @@ describe('serenity quota-alerts', () => {
     });
   });
 
+  describe('alertRollbackFailure', () => {
+    it('is a no-op (no Slack call) when the kill-switch is OFF', async () => {
+      await alerts.alertRollbackFailure(
+        {
+          orgId: 'org-1', brandId: 'brand-1', workspaceId: 'ws-1', projectId: 'proj-1', semrushPromptIds: ['p1'],
+        },
+        {},
+      );
+      expect(postSlackMessage).to.not.have.been.called;
+    });
+
+    it('posts a distinct rollback-failure message when enabled and configured', async () => {
+      await alerts.alertRollbackFailure(
+        {
+          orgId: 'org-1',
+          brandId: 'brand-1',
+          workspaceId: 'ws-1',
+          projectId: 'proj-1',
+          semrushPromptIds: ['p1', 'p2'],
+          rollbackError: 'upstream 500',
+        },
+        ENABLED_ENV,
+      );
+      expect(postSlackMessage).to.have.been.calledOnceWith('C123', sinon.match.string, 'xoxb-test');
+      const [, message] = postSlackMessage.firstCall.args;
+      expect(message).to.match(/rollback FAILED/i);
+      expect(message).to.contain('proj-1');
+      expect(message).to.contain('p1, p2');
+      expect(message).to.contain('upstream 500');
+    });
+
+    it('dedupes repeated rollback-failure alerts for the same org+brand within the window', async () => {
+      const payload = {
+        orgId: 'org-1', brandId: 'brand-1', workspaceId: 'ws-1', projectId: 'proj-1', semrushPromptIds: ['p1'],
+      };
+      await alerts.alertRollbackFailure(payload, ENABLED_ENV);
+      await alerts.alertRollbackFailure(payload, ENABLED_ENV);
+      expect(postSlackMessage).to.have.been.calledOnce;
+    });
+
+    it('does not collapse into (or get suppressed by) an ordinary quota-rejection alert window', async () => {
+      await alerts.alertQuotaRejection(
+        {
+          orgId: 'org-1', brandId: 'brand-1', caseType: 'brandCarveExhausted', dimension: 'prompts',
+        },
+        ENABLED_ENV,
+      );
+      await alerts.alertRollbackFailure(
+        {
+          orgId: 'org-1', brandId: 'brand-1', workspaceId: 'ws-1', projectId: 'proj-1', semrushPromptIds: ['p1'],
+        },
+        ENABLED_ENV,
+      );
+      expect(postSlackMessage.callCount).to.equal(2);
+    });
+
+    it('is fire-and-forget: a Slack post failure is swallowed, never thrown', async () => {
+      postSlackMessage.rejects(new Error('slack down'));
+      const log = { warn: sinon.stub() };
+      await alerts.alertRollbackFailure(
+        {
+          orgId: 'org-1', brandId: 'brand-1', workspaceId: 'ws-1', projectId: 'proj-1', semrushPromptIds: ['p1'],
+        },
+        ENABLED_ENV,
+        log,
+      );
+      expect(log.warn).to.have.been.called;
+    });
+  });
+
   describe('alertPoolFreeThreshold', () => {
     it('is a no-op when the kill-switch is OFF', async () => {
       await alerts.alertPoolFreeThreshold(

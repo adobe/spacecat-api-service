@@ -44,7 +44,7 @@ import {
   recordHeadroomCheck, recordTopUpLatency, recordPoolFreeRatio, recordRejection,
   recordNotReadyRetry, recordReleaseOutcome,
 } from './allocation-metrics.js';
-import { alertPoolFreeThreshold } from './quota-alerts.js';
+import { alertPoolFreeThreshold, alertQuotaRejection } from './quota-alerts.js';
 
 /** @typedef {{ used: number, drafted: number, total: number }} AiDim */
 /** @typedef {{ projects: AiDim, prompts: AiDim }} AiTotals */
@@ -55,6 +55,14 @@ import { alertPoolFreeThreshold } from './quota-alerts.js';
  * @property {number} attempts
  * @property {number} intervalMs
  * @property {(ms: number) => Promise<void>} sleep
+ */
+/**
+ * serenity-docs#72 §5 alert payload context, threaded down from the request (opt-in — most
+ * callers still omit it; see quota-alerts.js).
+ * @typedef {object} AlertContext
+ * @property {string | null | undefined} [orgId]
+ * @property {string | null | undefined} [brandId]
+ * @property {object} env
  */
 
 /** Grace-sized top-up blocks: projects one-at-a-time (checked at publish), prompts in bulk. */
@@ -228,9 +236,11 @@ function workspaceBusy() {
  * @param {{ projects: number, prompts: number }} totals
  * @param {PollOpts} poll
  * @param {any} [log]
+ * @param {AlertContext | null} [alertContext] - when supplied (and `alertContext.env`'s kill-switch
+ *   is on), fires the §5 hard-exhaustion Slack alert on a terminal pool-exhausted 422.
  * @returns {Promise<void>}
  */
-async function transferAndSettle(transport, workspaceId, totals, poll, log) {
+async function transferAndSettle(transport, workspaceId, totals, poll, log, alertContext = null) {
   const startedAt = Date.now();
   try {
     for (let attempt = 0; attempt <= NOT_READY_RETRIES; attempt += 1) {
@@ -244,6 +254,17 @@ async function transferAndSettle(transport, workspaceId, totals, poll, log) {
         if (isPoolExhausted(e)) {
           log?.warn?.('SERENITY_ALLOC org pool exhausted on transfer', { workspaceId });
           recordRejection('orgPoolExhausted'); // dashboard-only — expected under normal pool load
+          if (alertContext) {
+            // serenity-docs#72 §5: hard-exhaustion alert (case 2) — distinct from the advisory
+            // pool-free early-warning above, which fires BEFORE the pool is actually exhausted.
+            // eslint-disable-next-line no-await-in-loop
+            await alertQuotaRejection({
+              orgId: alertContext.orgId,
+              brandId: alertContext.brandId,
+              workspaceId,
+              caseType: 'orgPoolExhausted',
+            }, alertContext.env, log);
+          }
           throw orgPoolExhausted();
         }
         if (!isWorkspaceNotReady(e)) {
@@ -283,9 +304,11 @@ async function transferAndSettle(transport, workspaceId, totals, poll, log) {
  * @param {string} workspaceId
  * @param {{ projects: number, prompts: number }} totals
  * @param {any} [log]
+ * @param {AlertContext | null} [alertContext] - when supplied (and `alertContext.env`'s kill-switch
+ *   is on), fires the §5 hard-exhaustion Slack alert on a terminal pool-exhausted 422.
  * @returns {Promise<void>}
  */
-async function transferOnce(transport, workspaceId, totals, log) {
+async function transferOnce(transport, workspaceId, totals, log, alertContext = null) {
   const startedAt = Date.now();
   try {
     await transport.transferWorkspaceResources(workspaceId, { ai: totals });
@@ -293,6 +316,14 @@ async function transferOnce(transport, workspaceId, totals, log) {
     if (isPoolExhausted(e)) {
       log?.warn?.('SERENITY_ALLOC org pool exhausted on transfer', { workspaceId });
       recordRejection('orgPoolExhausted'); // dashboard-only — expected under normal pool load
+      if (alertContext) {
+        await alertQuotaRejection({
+          orgId: alertContext.orgId,
+          brandId: alertContext.brandId,
+          workspaceId,
+          caseType: 'orgPoolExhausted',
+        }, alertContext.env, log);
+      }
       throw orgPoolExhausted();
     }
     if (isWorkspaceNotReady(e)) {
@@ -327,18 +358,20 @@ async function transferOnce(transport, workspaceId, totals, log) {
  *   (stale-low). Sizing from `used + drafted` is staleness-immune, so a just-drafted batch has the
  *   quota it needs the instant it publishes (plan §21). Prompts only — a project has
  *   no draft-then-publish metering seam.
- * @param {object} [opts.env] request env — when supplied, feeds the org-pool early-warning Slack
- *   alert (serenity-docs#72 §5) off this function's own advisory pool-free read; omitted by most
- *   callers today (the alert is opt-in via `SERENITY_QUOTA_ALERTS_ENABLED`, and threading `env`
- *   this deep is not yet done everywhere — see quota-alerts.js).
- * @param {string} [opts.orgId] IMS org id, for the alert payload only.
+ * @param {object | null} [opts.env] request env — when supplied, feeds the org-pool early-warning
+ *   Slack alert (serenity-docs#72 §5) off this function's own advisory pool-free read; omitted by
+ *   most callers today (the alert is opt-in via `SERENITY_QUOTA_ALERTS_ENABLED`, and threading
+ *   `env` this deep is not yet done everywhere — see quota-alerts.js).
+ * @param {string | null} [opts.orgId] IMS org id, for the alert payload only.
+ * @param {string | null} [opts.brandId] brand id, for the alert payload only (also gates the hard-
+ *   exhaustion §5 alert on `brandAiLimit`/`orgPoolExhausted` alongside `env`).
  * @param {any} [log]
  * @returns {Promise<{ toppedUp: boolean, newTotal: { projects: number, prompts: number } }>}
  */
 export async function ensureAiHeadroom(transport, {
   subWorkspaceId, parentWorkspaceId, need,
   ceiling = {}, blocks = DEFAULT_BLOCKS, includeDrafted = false,
-  env, orgId,
+  env, orgId, brandId,
 }, log) {
   // Fail LOUD on a missing sub-/parent-workspace id: an empty id is a fronting/wiring bug (the
   // caller failed to thread auth.workspaceId / auth.parentWorkspaceId), and silently reading `''`
@@ -361,6 +394,12 @@ export async function ensureAiHeadroom(transport, {
           subWorkspaceId, dim, target, cap,
         });
         recordRejection('brandAiLimit'); // dashboard-only — expected under normal pool load
+        if (env) {
+          // eslint-disable-next-line no-await-in-loop
+          await alertQuotaRejection({
+            orgId, brandId, workspaceId: subWorkspaceId, caseType: 'brandAiLimit', dimension: dim,
+          }, env, log);
+        }
         throw brandAiLimit();
       }
       newTotal[dim] = target;
@@ -404,7 +443,8 @@ export async function ensureAiHeadroom(transport, {
   // FAIL-FAST: one transfer attempt, no settle poll (serenity-docs#22). A still-settling child
   // returns a retryable 503 immediately rather than blocking the request on a poll.
   log?.info?.('SERENITY_ALLOC top-up', { subWorkspaceId, newTotal });
-  await transferOnce(transport, subWorkspaceId, newTotal, log);
+  const alertContext = env ? { orgId, brandId, env } : null;
+  await transferOnce(transport, subWorkspaceId, newTotal, log, alertContext);
   return { toppedUp: true, newTotal };
 }
 
