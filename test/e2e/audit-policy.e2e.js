@@ -13,7 +13,7 @@
 import { use, expect } from 'chai';
 import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
-import { apiBaseUrl, expectValidISODate } from './utils/spacecat-utils.js';
+import { apiBaseUrl } from './utils/spacecat-utils.js';
 import { getSessionToken } from './utils/session-auth.js';
 
 use(sinonChai);
@@ -43,10 +43,21 @@ use(chaiAsPromised);
  * of failing.
  */
 const SITE_ID = '019ef3bd-5e67-7ea1-a4b7-f939f14fdc4e'; // https://main--scope-creep--iuliag.aem.live
-const UNKNOWN_SITE_ID = '00000000-0000-0000-0000-000000000000';
+// The nil UUID fails isValidUUID (version nibble '0' is not 1-8), so it 400s
+// before ever reaching the "site not found" check. Use a well-formed one instead.
+const UNKNOWN_SITE_ID = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
 const TEST_GLOB = '/__e2e-audit-policy-test__/*';
 const TEST_URL = 'https://main--scope-creep--iuliag.aem.live/__e2e-audit-policy-test__/manual-page';
 const REASON = 'audit-policy e2e test run';
+
+// audit_policy_revision timestamps come back as raw Postgres timestamptz text
+// (offset + microseconds, e.g. "2026-07-23T14:03:38.083934+00:00"), not the
+// app-level Z-suffixed ISO8601 the shared expectValidISODate() expects -
+// so just confirm it parses, rather than pinning an exact format.
+function expectParsableTimestamp(value) {
+  expect(value).to.be.a('string');
+  expect(new Date(value).toString()).to.not.equal('Invalid Date', `Expected a valid timestamp, got: ${value}`);
+}
 
 async function request({
   path, method = 'GET', body = null, skipAuth = false,
@@ -151,7 +162,7 @@ describe('Audit Policy - E2E Tests', function auditPolicySuite() {
       items.forEach((revision) => {
         expect(revision).to.not.have.property('siteId');
         expect(revision).to.have.property('effectiveAt');
-        expectValidISODate(revision.effectiveAt);
+        expectParsableTimestamp(revision.effectiveAt);
       });
       if (cursor !== undefined) {
         expect(cursor).to.be.a('string');
@@ -159,8 +170,13 @@ describe('Audit Policy - E2E Tests', function auditPolicySuite() {
     });
 
     it('returns 400 for a malformed cursor', async () => {
+      // Cursors are base64url integers; "not-base64url" is itself valid
+      // base64url alphabet, so it silently decodes instead of failing to
+      // decode. Encode a value that decodes to something decodeCursor
+      // actually rejects: non-numeric text (parseInt -> NaN).
+      const malformedCursor = Buffer.from('not-a-real-cursor', 'utf8').toString('base64url');
       const response = await request({
-        path: `/sites/${SITE_ID}/audit-policy/revisions?cursor=not-base64url`,
+        path: `/sites/${SITE_ID}/audit-policy/revisions?cursor=${malformedCursor}`,
       });
       expect(response.status).to.equal(400);
     });
