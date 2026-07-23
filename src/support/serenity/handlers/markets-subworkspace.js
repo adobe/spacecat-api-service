@@ -503,6 +503,9 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  *   `ensureSubworkspace` is skipped. When false, byte-for-byte the pre-this-PR behavior.
  *   (The units pool for JIT sizing is the positional `parentWorkspaceId` arg — the same id given
  *   to `ensureSubworkspace` — so it is not duplicated in this options bag.)
+ * @param {Partial<import('../resource-manager.js').Blocks>} [options.ceiling] - per-brand AI
+ *   ceiling (LLMO-6190 flag-flip gate), resolved from Vault by the controller and passed through to
+ *   `createHeadroomGuard`. Omitted → non-binding default. No-op when `dynamicAllocation` is false.
  * @param {object} [options.env] - environment (Azure OpenAI creds), threaded into
  *   intent classification when `generateTopics` is set (serenity-docs#32).
  * @param {number} [options.writeDeadline] - shared request-write deadline; defaults
@@ -526,6 +529,7 @@ export async function handleCreateMarketSubworkspace(
     publishMode = 'require',
     dataAccess = null,
     dynamicAllocation = false,
+    ceiling = undefined,
     env = null,
     writeDeadline = computeWriteDeadline(),
   } = {},
@@ -568,7 +572,9 @@ export async function handleCreateMarketSubworkspace(
   // it; OFF (or a missing parent) yields a no-op guard so the flag-OFF path issues zero reads.
   const headroom = createHeadroomGuard(
     transport,
-    { enabled: dynamicAllocation, subWorkspaceId: workspaceId, parentWorkspaceId },
+    {
+      enabled: dynamicAllocation, subWorkspaceId: workspaceId, parentWorkspaceId, ceiling,
+    },
     log,
   );
 
@@ -1090,13 +1096,16 @@ export async function handleListModelsSubworkspace(transport, workspaceId, query
  *   ADD, and release the freed units after it on a net REMOVAL. Lives at this mode-guarded caller,
  *   NOT inside the shared `syncModelsForProject`, so flat mode is untouched (byte-for-byte).
  * @param {string} [options.parentWorkspaceId=''] - org parent/master workspace id (units pool).
+ * @param {Partial<import('../resource-manager.js').Blocks>} [options.ceiling] - per-brand AI
+ *   ceiling (LLMO-6190 flag-flip gate), resolved from Vault by the controller and passed to
+ *   `createHeadroomGuard`. Omitted → non-binding default. No-op when `dynamicAllocation` is false.
  */
 export async function handleUpdateModelsSubworkspace(
   transport,
   workspaceId,
   body,
   log,
-  { dynamicAllocation = false, parentWorkspaceId = '' } = {},
+  { dynamicAllocation = false, parentWorkspaceId = '', ceiling = undefined } = {},
 ) {
   const geoTargetId = normalizeGeoTargetId(Number(body?.geoTargetId));
   const languageCode = normalizeLanguageCode(body?.languageCode);
@@ -1128,7 +1137,9 @@ export async function handleUpdateModelsSubworkspace(
   // that are handed back after it. No-op when OFF (guarded on `enabled` → zero extra reads).
   const headroom = createHeadroomGuard(
     transport,
-    { enabled: dynamicAllocation, subWorkspaceId: workspaceId, parentWorkspaceId },
+    {
+      enabled: dynamicAllocation, subWorkspaceId: workspaceId, parentWorkspaceId, ceiling,
+    },
     log,
   );
   let netDelta = 0;

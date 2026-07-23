@@ -56,6 +56,63 @@ export function isDynamicAllocationEnabled(env) {
 }
 
 /**
+ * Env/Vault keys for the global per-brand AI ceiling (LLMO-6190 flag-flip gate, §8). One flat
+ * scalar per dimension at `dx_mysticat/<env>/api-service`, each independently optional. The
+ * ceiling here is a RUNAWAY BACKSTOP — "the largest plausible legitimate single-brand demand", the
+ * SAME value for every brand — NOT a per-org pool fraction (a fraction false-fails a legitimate
+ * heavy-but-feasible split; the transfer's own `orgPoolExhausted` 422 stays the demand-aware
+ * contention gate) and NOT per-customer config (that data model is deliberately deferred — see
+ * serenity-docs brand-semrush-dynamic-resource-allocation.md §7). The number itself is a product
+ * decision set in Vault; this module only reads whatever is present.
+ * @type {{ projects: string, prompts: string }}
+ */
+export const BRAND_AI_CEILING_ENV_FLAGS = Object.freeze({
+  projects: 'SERENITY_BRAND_AI_CEILING_PROJECTS',
+  prompts: 'SERENITY_BRAND_AI_CEILING_PROMPTS',
+});
+
+/**
+ * Resolves the per-brand AI ceiling from the request env. FAIL-SAFE, mirroring the kill-switch's
+ * "anything non-canonical → safe default" philosophy: a missing key leaves that dimension
+ * unenforced, and a present-but-unparseable / non-positive value (a Vault typo like `5o00`, `-1`,
+ * `0`, `abc`) is logged loudly and likewise left unenforced — a misconfiguration can never break a
+ * customer write, it only fails to bind (the warning + a bind-check during the flip catch that).
+ * Only a clean positive integer binds. `parseInt` is deliberately NOT used (it would silently
+ * accept `5o00` as `5`, a dangerously low cap); the value must be all digits.
+ *
+ * Returns `undefined` when NEITHER dimension resolves, so {@link createHeadroomGuard} keeps its
+ * byte-for-byte non-binding `DEFAULT_BRAND_AI_CEILING` default; otherwise a partial
+ * `{ projects?, prompts? }` carrying only the cleanly-parsed dimensions (an unset/invalid
+ * dimension stays unenforced — `ensureAiHeadroom` only gates a dimension whose cap is a number).
+ * @param {object} [env] - the request env (`context.env`).
+ * @param {any} [log]
+ * @returns {{ projects?: number, prompts?: number } | undefined}
+ */
+export function resolveBrandAiCeiling(env, log) {
+  /** @type {{ projects?: number, prompts?: number }} */
+  const ceiling = {};
+  for (const dim of /** @type {Array<'projects'|'prompts'>} */ (['projects', 'prompts'])) {
+    const flag = BRAND_AI_CEILING_ENV_FLAGS[dim];
+    const raw = env?.[flag];
+    if (raw === undefined || raw === null || String(raw).trim() === '') {
+      // Unset — leave this dimension unenforced (silent; this is the normal pre-rollout state).
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+    const text = String(raw).trim();
+    const parsed = /^\d+$/.test(text) ? Number(text) : NaN;
+    if (Number.isInteger(parsed) && parsed > 0) {
+      ceiling[dim] = parsed;
+    } else {
+      log?.warn?.('SERENITY_ALLOC ignoring malformed brand-AI-ceiling env value — dimension left unenforced', {
+        dim, flag, raw: text,
+      });
+    }
+  }
+  return (ceiling.projects === undefined && ceiling.prompts === undefined) ? undefined : ceiling;
+}
+
+/**
  * @typedef {object} HeadroomGuard
  * @property {boolean} enabled whether JIT top-up is active for this request.
  * @property {(need?: import('./resource-manager.js').Dims,
@@ -93,9 +150,10 @@ export function isDynamicAllocationEnabled(env) {
  * @param {boolean} opts.enabled - the global kill-switch value for this request.
  * @param {string} [opts.subWorkspaceId] - the sub-workspace being written to (`auth.workspaceId`).
  * @param {string} [opts.parentWorkspaceId] - the org parent workspace (`auth.parentWorkspaceId`).
- * @param {import('./resource-manager.js').Blocks} [opts.ceiling] - per-brand ceiling (default
- *   {@link DEFAULT_BRAND_AI_CEILING} — a placeholder; pass an explicit value to override once a
- *   real per-brand number exists).
+ * @param {Partial<import('./resource-manager.js').Blocks>} [opts.ceiling] - per-brand ceiling,
+ *   resolved from Vault via {@link resolveBrandAiCeiling} and threaded by the controller. Partial:
+ *   a dimension may be omitted, leaving it unenforced. When omitted entirely, defaults to the
+ *   non-binding {@link DEFAULT_BRAND_AI_CEILING} placeholder (byte-for-byte today's behavior).
  * @param {import('./resource-manager.js').Blocks} [opts.blocks] - grace blocks (optional).
  * @param {Partial<typeof DEFAULT_RETRY_ON_QUOTA>} [opts.retryOnQuota] - poll-retry shape override
  *   for `retryOnQuota` (tests inject a fake `sleep` + tiny `backoffMs`/`totalBudgetMs`; production
