@@ -1661,8 +1661,111 @@ export function aggregateSentimentByWeek(rows) {
 }
 
 /**
+ * Aggregates execution rows into per-calendar-day sentiment percentages.
+ * Mirrors aggregateSentimentByWeek but buckets by execution_date instead of ISO week.
+ * Dedup key, first-seen semantics, and percentage math are identical.
+ *
+ * @param {Array<{execution_date: string, sentiment: string|null, prompt: string|null,
+ *   region_code: string|null, topics: string|null}>} rows
+ * @returns {Array<Object>} dailyTrends sorted by date ascending
+ * @internal Exported for testing
+ */
+export function aggregateSentimentByDay(rows) {
+  const dayMap = new Map();
+
+  rows.forEach((row) => {
+    const date = row.execution_date;
+    if (!dayMap.has(date)) {
+      const { week, weekNumber, year } = toISOWeek(date);
+      dayMap.set(date, {
+        date,
+        week,
+        weekNumber,
+        year,
+        positive: 0,
+        neutral: 0,
+        negative: 0,
+        totalPrompts: 0,
+        promptsWithSentiment: 0,
+        seenKeys: new Set(),
+      });
+    }
+    const entry = dayMap.get(date);
+
+    const key = buildPromptKey(row);
+    if (entry.seenKeys.has(key)) {
+      return;
+    }
+    entry.seenKeys.add(key);
+
+    entry.totalPrompts += 1;
+
+    const sentiment = (row.sentiment || '').toLowerCase().trim();
+    if (sentiment === 'positive') {
+      entry.positive += 1;
+      entry.promptsWithSentiment += 1;
+    } else if (sentiment === 'neutral') {
+      entry.neutral += 1;
+      entry.promptsWithSentiment += 1;
+    } else if (sentiment === 'negative') {
+      entry.negative += 1;
+      entry.promptsWithSentiment += 1;
+    }
+  });
+
+  return [...dayMap.values()]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((entry) => {
+      const total = entry.promptsWithSentiment;
+      const positivePct = total > 0 ? Math.round((entry.positive / total) * 100) : 0;
+      const negativePct = total > 0 ? Math.round((entry.negative / total) * 100) : 0;
+      const neutralPct = total > 0 ? 100 - positivePct - negativePct : 0;
+
+      return {
+        date: entry.date,
+        week: entry.week,
+        weekNumber: entry.weekNumber,
+        year: entry.year,
+        sentiment: [
+          { name: 'Positive', value: positivePct, color: SENTIMENT_COLORS.positive },
+          { name: 'Neutral', value: neutralPct, color: SENTIMENT_COLORS.neutral },
+          { name: 'Negative', value: negativePct, color: SENTIMENT_COLORS.negative },
+        ],
+        totalPrompts: entry.totalPrompts,
+        promptsWithSentiment: entry.promptsWithSentiment,
+        mentions: 0,
+        citations: 0,
+        visibilityScore: 0,
+        competitors: [],
+      };
+    });
+}
+
+const SENTIMENT_DAILY_MAX_DAYS = 90;
+
+function mapRpcRowToSentimentTrend(row) {
+  return {
+    week: row.week_str,
+    weekNumber: row.week_number,
+    year: row.year,
+    sentiment: [
+      { name: 'Positive', value: row.positive_pct, color: SENTIMENT_COLORS.positive },
+      { name: 'Neutral', value: row.neutral_pct, color: SENTIMENT_COLORS.neutral },
+      { name: 'Negative', value: row.negative_pct, color: SENTIMENT_COLORS.negative },
+    ],
+    totalPrompts: row.total_prompts,
+    promptsWithSentiment: row.prompts_with_sentiment,
+    mentions: 0,
+    citations: 0,
+    visibilityScore: 0,
+    competitors: [],
+  };
+}
+
+/**
  * Creates the getSentimentOverview handler.
- * Returns per-week sentiment counts (positive, neutral, negative) and prompt metrics.
+ * Returns per-week or per-day sentiment counts and prompt metrics.
+ * Pass granularity=day for daily buckets (max 90-day range); default is weekly.
  * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
  */
 export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
@@ -1677,12 +1780,27 @@ export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
       const organizationId = spaceCatId;
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
 
+      const granularity = ((ctx.data?.granularity) || 'week').toLowerCase();
+      if (granularity !== 'week' && granularity !== 'day') {
+        return badRequest("granularity must be 'week' or 'day'");
+      }
+
       if (brandPresenceRpcRejectsMultiCategoryOrRegion(params)) {
         return badRequest(MULTI_CATEGORY_REGION_RPC_UNSUPPORTED);
       }
 
       const startDate = params.startDate || defaults.startDate;
       const endDate = params.endDate || defaults.endDate;
+
+      if (granularity === 'day') {
+        const days = Math.round(
+          (new Date(`${endDate}T00:00:00Z`) - new Date(`${startDate}T00:00:00Z`)) / MS_PER_DAY,
+        ) + 1;
+        if (days > SENTIMENT_DAILY_MAX_DAYS) {
+          return badRequest('Date range too large for daily granularity (max 90 days)');
+        }
+      }
+
       const model = resolveModelFromRequest(params.model);
 
       if (shouldApplyFilter(params.siteId)) {
@@ -1708,6 +1826,7 @@ export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
         p_region_code: params.regionCodesList?.[0] ?? null,
         p_origin: shouldApplyFilter(params.origin) ? params.origin : null,
         p_topic_ids: params.topicIds?.length > 0 ? params.topicIds : null,
+        p_granularity: granularity,
       });
 
       if (error) {
@@ -1715,23 +1834,16 @@ export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
         return badRequest(error.message);
       }
 
-      const weeklyTrends = (data || []).map((row) => ({
-        week: row.week_str,
-        weekNumber: row.week_number,
-        year: row.year,
-        sentiment: [
-          { name: 'Positive', value: row.positive_pct, color: SENTIMENT_COLORS.positive },
-          { name: 'Neutral', value: row.neutral_pct, color: SENTIMENT_COLORS.neutral },
-          { name: 'Negative', value: row.negative_pct, color: SENTIMENT_COLORS.negative },
-        ],
-        totalPrompts: row.total_prompts,
-        promptsWithSentiment: row.prompts_with_sentiment,
-        mentions: 0,
-        citations: 0,
-        visibilityScore: 0,
-        competitors: [],
-      }));
-      return cachedOk({ weeklyTrends });
+      if (granularity === 'day') {
+        const dailyTrends = (data || []).map((row) => ({
+          date: row.date_str,
+          ...mapRpcRowToSentimentTrend(row),
+        }));
+        return cachedOk({ granularity: 'day', dailyTrends, weeklyTrends: [] });
+      }
+
+      const weeklyTrends = (data || []).map(mapRpcRowToSentimentTrend);
+      return cachedOk({ granularity: 'week', weeklyTrends, dailyTrends: [] });
     },
   );
 }
