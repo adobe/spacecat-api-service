@@ -306,6 +306,13 @@ const applyTopOrganicPagesFilter = async (metricsData, limit, options) => {
   return result;
 };
 
+// pageTypes[].pattern is later spliced, unescaped, into an Athena SQL string literal
+// (REGEXP_LIKE(column, '<pattern>')) by @adobe/spacecat-shared-athena-client. Trino/Presto
+// string literals have no backslash-escape mode, so a bare single quote is the only
+// character that can terminate the literal early and inject SQL - reject it outright
+// rather than trying to escape/re-quote a value we don't control the eventual sink for.
+const SQL_UNSAFE_PATTERN_CHAR = /'/;
+
 /**
  * Validates that pageTypes array contains valid regex patterns
  * @param {Array} pageTypes - Array of page type objects with name and pattern
@@ -323,6 +330,13 @@ const validatePageTypes = (pageTypes) => {
 
     if (!hasText(pageType.pattern)) {
       return { isValid: false, error: `pageTypes[${index}] must have a pattern` };
+    }
+
+    if (SQL_UNSAFE_PATTERN_CHAR.test(pageType.pattern)) {
+      return {
+        isValid: false,
+        error: `pageTypes[${index}] pattern must not contain a single quote character`,
+      };
     }
 
     try {

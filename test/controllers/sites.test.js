@@ -5272,6 +5272,22 @@ describe('Sites Controller', () => {
       expect(error.message).to.include('pageTypes[0] has invalid regex pattern:');
     });
 
+    it('returns bad request when pageType pattern contains a single quote', async () => {
+      const invalidPageTypes = [
+        { name: 'Schema probe', pattern: "x' || CAST(CAST(current_schema AS INTEGER) AS VARCHAR) || 'x" },
+      ];
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { pageTypes: invalidPageTypes },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'pageTypes[0] pattern must not contain a single quote character');
+    });
+
     it('does not update site when pageTypes are the same', async () => {
       const site = sites[0];
       const existingPageTypes = [
