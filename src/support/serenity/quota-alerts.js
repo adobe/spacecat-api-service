@@ -53,10 +53,21 @@ function isEnabled(env) {
   return env?.SERENITY_QUOTA_ALERTS_ENABLED === 'true';
 }
 
+/**
+ * @param {object} p
+ * @param {string | null} [p.orgId]
+ * @param {string | null} [p.brandId]
+ * @param {string} [p.workspaceId]
+ * @param {string} p.caseType
+ * @param {string} [p.dimension]
+ */
 function dedupeKey({
-  orgId, brandId, caseType, dimension,
+  orgId, brandId, workspaceId, caseType, dimension,
 }) {
-  return `${orgId || 'unknown'}:${brandId || 'unknown'}:${caseType}:${dimension || 'unknown'}`;
+  // workspaceId is included so call sites that cannot thread org/brand context down this deep
+  // (some prompt/model handlers) still dedupe PER TENANT rather than collapsing every org/brand
+  // hitting the same case+dimension into one bucket when orgId/brandId are both absent.
+  return `${orgId || 'unknown'}:${brandId || workspaceId || 'unknown'}:${caseType}:${dimension || 'unknown'}`;
 }
 
 /**
@@ -141,6 +152,66 @@ export async function alertQuotaRejection(payload, env, log) {
 }
 
 /**
+ * Alerts that a §4.1 atomicity rollback itself failed — "a rollback that itself fails is
+ * alerted as an engineering defect (residual draft prompts, §5), never silently logged." This
+ * is a DISTINCT signal from a routine quota rejection: it means a prompt this request staged is
+ * now STRANDED as a live, unpublished draft upstream (the exact state the rollback exists to
+ * prevent), not that a customer hit their limit. Fire-and-forget, same as {@link
+ * alertQuotaRejection}; gated on the same kill-switch/channel config since there is no separate
+ * incident-alerting destination in this codebase.
+ *
+ * @param {object} p
+ * @param {string | null} [p.orgId]
+ * @param {string | null} [p.brandId]
+ * @param {string} p.workspaceId
+ * @param {string} p.projectId
+ * @param {string[]} p.semrushPromptIds the ids that could not be deleted — still live upstream.
+ * @param {string} [p.rollbackError] the delete call's own failure message (already redacted by
+ *   the caller — never pass a raw upstream error here).
+ * @param {object} env
+ * @param {object} [log]
+ * @returns {Promise<void>}
+ */
+export async function alertRollbackFailure({
+  orgId, brandId, workspaceId, projectId, semrushPromptIds, rollbackError,
+}, env, log) {
+  if (!isEnabled(env)) {
+    return;
+  }
+  // Distinct dedup key (own caseType) so this never collapses into, or gets suppressed by, an
+  // ordinary quota-rejection alert's window for the same org/brand.
+  const key = dedupeKey({
+    orgId, brandId, workspaceId, caseType: 'rollbackFailed', dimension: 'prompts',
+  });
+  const now = Date.now();
+  const entry = seen.get(key);
+  if (entry && now - entry.firstAt < DEDUP_WINDOW_MS) {
+    entry.count += 1;
+    return;
+  }
+  seen.set(key, { count: 1, firstAt: now });
+
+  const channelId = env?.SERENITY_QUOTA_ALERTS_SLACK_CHANNEL_ID;
+  const token = env?.SLACK_BOT_TOKEN;
+  if (!channelId || !token) {
+    log?.warn?.('SERENITY_QUOTA_ALERT: channel/token not configured — skipping rollback-failure post', { key });
+    return;
+  }
+  try {
+    const message = [
+      ':rotating_light: *Serenity quota-rollback FAILED — stranded draft prompts* :bug:',
+      `• Org: \`${orgId || 'unknown'}\`  Brand: \`${brandId || 'unknown'}\`  Workspace: \`${workspaceId}\``,
+      `• Project: \`${projectId}\`  Prompt ids (still live, unpublished): \`${semrushPromptIds.join(', ')}\``,
+      `• Rollback error: \`${rollbackError || 'n/a'}\``,
+      `• ${new Date().toISOString()}`,
+    ].join('\n');
+    await postSlackMessage(channelId, message, token);
+  } catch (e) {
+    log?.warn?.('SERENITY_QUOTA_ALERT: failed to post rollback-failure alert', { key, error: e?.message });
+  }
+}
+
+/**
  * Early-warning alert (§5, in addition to the hard-exhaustion alert above): fires when the org
  * pool's free capacity drops below a configurable fraction — "so the account team can be engaged
  * *before* the customer hits the wall." Consumes the SAME advisory pool-free read
@@ -148,7 +219,7 @@ export async function alertQuotaRejection(payload, env, log) {
  * see resource-manager.js.
  *
  * @param {object} p
- * @param {string} [p.orgId]
+ * @param {string | null | undefined} [p.orgId]
  * @param {string} p.parentWorkspaceId
  * @param {'projects'|'prompts'} p.dimension
  * @param {number} p.free

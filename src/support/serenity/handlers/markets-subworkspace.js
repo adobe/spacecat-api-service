@@ -579,7 +579,13 @@ export async function handleCreateMarketSubworkspace(
   const headroom = createHeadroomGuard(
     transport,
     {
-      enabled: dynamicAllocation, subWorkspaceId: workspaceId, parentWorkspaceId, ceiling, env, orgId,
+      enabled: dynamicAllocation,
+      subWorkspaceId: workspaceId,
+      parentWorkspaceId,
+      ceiling,
+      env,
+      orgId,
+      brandId: brand.getId(),
     },
     log,
   );
@@ -1128,13 +1134,23 @@ export async function handleListModelsSubworkspace(transport, workspaceId, query
  * @param {Partial<import('../resource-manager.js').Blocks>} [options.ceiling] - per-brand AI
  *   ceiling (LLMO-6190 flag-flip gate), resolved from Vault by the controller and passed to
  *   `createHeadroomGuard`. Omitted → non-binding default. No-op when `dynamicAllocation` is false.
+ * @param {string | null} [options.orgId] - serenity-docs#72 §5 alert payload only.
+ * @param {string | null} [options.brandId] - serenity-docs#72 §5 alert payload only.
+ * @param {object | null} [options.env] - serenity-docs#72 §5 alert kill-switch/config only.
  */
 export async function handleUpdateModelsSubworkspace(
   transport,
   workspaceId,
   body,
   log,
-  { dynamicAllocation = false, parentWorkspaceId = '', ceiling = undefined } = {},
+  {
+    dynamicAllocation = false,
+    parentWorkspaceId = '',
+    ceiling = undefined,
+    orgId = null,
+    brandId = null,
+    env = null,
+  } = {},
 ) {
   const geoTargetId = normalizeGeoTargetId(Number(body?.geoTargetId));
   const languageCode = normalizeLanguageCode(body?.languageCode);
@@ -1167,7 +1183,13 @@ export async function handleUpdateModelsSubworkspace(
   const headroom = createHeadroomGuard(
     transport,
     {
-      enabled: dynamicAllocation, subWorkspaceId: workspaceId, parentWorkspaceId, ceiling,
+      enabled: dynamicAllocation,
+      subWorkspaceId: workspaceId,
+      parentWorkspaceId,
+      ceiling,
+      env,
+      orgId,
+      brandId,
     },
     log,
   );
@@ -1204,7 +1226,11 @@ export async function handleUpdateModelsSubworkspace(
     // LLMO-6190 follow-up: bounded poll-retry if the sync's publish 405s as a disguised
     // metered-quota rejection despite the sizing above (e.g. the pre-publish read was stale). No-op
     // when OFF.
-    { wrapPublish: (fn) => headroom.retryOnQuota(fn, { callSite: 'syncModelsPublish' }) },
+    // serenity-docs#72 §5: feeds the shared syncModelsForProject publish-catch's alert.
+    {
+      wrapPublish: (fn) => headroom.retryOnQuota(fn, { callSite: 'syncModelsPublish' }),
+      alertContext: { orgId, brandId, env },
+    },
   );
 
   // Net model REMOVAL freed published-prompt units. Release them AFTER the sync's publish — by then

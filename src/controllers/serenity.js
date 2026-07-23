@@ -534,7 +534,7 @@ function SerenityController(context, log, env) {
       const result = auth.mode === 'subworkspace'
         ? await handleCreatePromptsSubworkspace(
           transport,
-          auth.workspaceId,
+          /** @type {string} */ (auth.workspaceId),
           ctx.data || {},
           log,
           classifyPromptType,
@@ -544,18 +544,23 @@ function SerenityController(context, log, env) {
             dynamicAllocation: dynamicAllocationEnabled(ctx),
             parentWorkspaceId: auth.parentWorkspaceId ?? '',
             ceiling: brandAiCeiling(ctx),
+            // serenity-docs#72 §5: feeds the quota-rejection Slack alert (opt-in via
+            // SERENITY_QUOTA_ALERTS_ENABLED) — never required, a no-op when unset.
+            orgId: ctx?.params?.spaceCatId,
+            brandId: auth.brandUuid,
           },
         )
         : await handleCreatePrompts(
           transport,
           ctx.dataAccess,
           auth.brandUuid,
-          auth.workspaceId,
+          /** @type {string} */ (auth.workspaceId),
           ctx.data || {},
           log,
           classifyPromptType,
           ctx.env,
           writeDeadline,
+          { orgId: ctx?.params?.spaceCatId },
         );
       return createResponse(result, 200);
     } catch (e) {
@@ -617,17 +622,19 @@ function SerenityController(context, log, env) {
       const result = auth.mode === 'subworkspace'
         ? await handleBulkDeletePromptsSubworkspace(
           transport,
-          auth.workspaceId,
+          /** @type {string} */ (auth.workspaceId),
           ctx.data || {},
           log,
+          { orgId: ctx?.params?.spaceCatId, brandId: auth.brandUuid, env: ctx.env || env },
         )
         : await handleBulkDeletePrompts(
           transport,
           ctx.dataAccess,
           auth.brandUuid,
-          auth.workspaceId,
+          /** @type {string} */ (auth.workspaceId),
           ctx.data || {},
           log,
+          { orgId: ctx?.params?.spaceCatId, env: ctx.env || env },
         );
       return createResponse(result, 200);
     } catch (e) {
@@ -1129,15 +1136,19 @@ function SerenityController(context, log, env) {
             dynamicAllocation: dynamicAllocationEnabled(ctx),
             parentWorkspaceId: auth.parentWorkspaceId ?? '',
             ceiling: brandAiCeiling(ctx),
+            env: ctx.env || env,
+            orgId: ctx?.params?.spaceCatId,
+            brandId: auth.brandUuid,
           },
         )
         : await handleUpdateModels(
           transport,
           ctx.dataAccess,
           auth.brandUuid,
-          auth.workspaceId,
+          /** @type {string} */ (auth.workspaceId),
           ctx.data || {},
           log,
+          { orgId: ctx?.params?.spaceCatId, env: ctx.env || env },
         );
       return createResponse(result, 200);
     } catch (e) {
