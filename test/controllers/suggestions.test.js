@@ -159,6 +159,7 @@ describe('Suggestions Controller', () => {
     'autofixSuggestions',
     'createSuggestions',
     'createBackofficeReview',
+    'createAsoReview',
     'getAllForOpportunity',
     'getAllForOpportunityPaged',
     'deploySuggestionToEdge',

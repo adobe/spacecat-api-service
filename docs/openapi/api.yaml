@@ -333,6 +333,8 @@ paths:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestion-fixes'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/{suggestionId}/backoffice-reviews:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestion-backoffice-reviews'
+  /sites/{siteId}/opportunities/{opportunityId}/suggestions/{suggestionId}/aso-reviews:
+    $ref: './site-opportunities.yaml#/site-opportunity-suggestion-aso-reviews'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/status:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions-status'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/auto-fix:

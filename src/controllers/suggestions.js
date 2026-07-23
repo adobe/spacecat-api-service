@@ -2889,32 +2889,46 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   /**
-   * Capture an ESE review verdict from the Backoffice (SITES-43974 / SITES-39001).
+   * Shared core for capturing a human review verdict on a suggestion (SITES-43974
+   * / SITES-39002). Used by both the Backoffice (ESE) and the ASO UI (customer)
+   * review endpoints — the caller supplies the `source` (bound by the route,
+   * never trusted from the body — FR-10) and the rejection categories allowed for
+   * that source.
    *
-   * POST /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/backoffice-reviews
-   *
-   * `source` is bound to 'backoffice' by the route (never trusted from the body —
-   * FR-10). `event_id` is a mandatory client-supplied idempotency key (FR-09):
-   * a duplicate collapses to a no-op (HTTP 200 with the existing row). Customer-
-   * derived fields are secret-scrubbed and the markdown is sanitised before
-   * insert. The raw patches are NOT echoed in the response.
+   * `event_id` is a mandatory client-supplied idempotency key (FR-09): a duplicate
+   * collapses to a no-op (HTTP 200 with the existing row). Customer-derived fields
+   * are secret-scrubbed and the markdown is sanitised before insert. The raw
+   * patches are NOT echoed in the response.
    *
    * @param {Object} context - request context.
+   * @param {Object} opts
+   * @param {string} opts.source - one of REVIEW_SOURCES; stamped on the row.
+   * @param {string[]} opts.allowedRejectionCategories - categories accepted for this source.
    * @returns {Promise<Response>}
    */
-  const createBackofficeReview = async (context) => {
+  const captureReview = async (context, { source, allowedRejectionCategories }) => {
     const siteId = context.params?.siteId;
     const opptyId = context.params?.opportunityId;
     const suggestionId = context.params?.suggestionId;
 
+    // Emit a single structured warn on every non-2xx exit so a customer-facing
+    // (aso_ui) rejection is observable server-side — the ASO UI has no client-side
+    // error reporting, so these logs are the only signal. Splunk can slice by
+    // `source` (aso_ui vs backoffice) and `reason`. Mirrors the scrub_hit_total
+    // format; shared by both routes via captureReview.
+    const rejected = (reason, response) => {
+      context.log?.warn?.(`feedback_capture.rejected source=${source} suggestion=${suggestionId} reason=${reason}`);
+      return response;
+    };
+
     if (!isValidUUID(siteId)) {
-      return badRequest('Site ID required');
+      return rejected('invalid_site_id', badRequest('Site ID required'));
     }
     if (!isValidUUID(opptyId)) {
-      return badRequest('Opportunity ID required');
+      return rejected('invalid_opportunity_id', badRequest('Opportunity ID required'));
     }
     if (!isValidUUID(suggestionId)) {
-      return badRequest('Suggestion ID required');
+      return rejected('invalid_suggestion_id', badRequest('Suggestion ID required'));
     }
 
     const body = isNonEmptyObject(context.data) ? context.data : {};
@@ -2925,28 +2939,28 @@ function SuggestionsController(ctx, sqs, env) {
 
     // FR-09: event_id is MANDATORY and client-supplied (no server fallback).
     if (!hasText(eventId) || !isValidUUID(eventId)) {
-      return badRequest('event_id is required and must be a UUID');
+      return rejected('invalid_event_id', badRequest('event_id is required and must be a UUID'));
     }
     // FR-10: a client must not self-assert a higher-trust source.
-    if (hasText(body.source) && body.source !== REVIEW_SOURCES.BACKOFFICE) {
-      return badRequest('source is derived from the route and must not be set in the body');
+    if (hasText(body.source) && body.source !== source) {
+      return rejected('source_mismatch', badRequest('source is derived from the route and must not be set in the body'));
     }
     if (verdict !== REVIEW_VERDICTS.UP && verdict !== REVIEW_VERDICTS.DOWN) {
-      return badRequest('verdict must be "up" or "down"');
+      return rejected('invalid_verdict', badRequest('verdict must be "up" or "down"'));
     }
     if (rejectionCategory != null
-      && !Object.values(REJECTION_CATEGORIES).includes(rejectionCategory)) {
-      return badRequest('invalid rejection_category');
+      && !allowedRejectionCategories.includes(rejectionCategory)) {
+      return rejected('invalid_rejection_category', badRequest('invalid rejection_category'));
     }
     if (stateTransition != null && !FEEDBACK_STATE_TRANSITIONS.includes(stateTransition)) {
-      return badRequest('invalid state_transition');
+      return rejected('invalid_state_transition', badRequest('invalid state_transition'));
     }
     if (detailMarkdown != null) {
       if (typeof detailMarkdown !== 'string') {
-        return badRequest('detail_markdown must be a string');
+        return rejected('invalid_detail_markdown', badRequest('detail_markdown must be a string'));
       }
       if (Buffer.byteLength(detailMarkdown, 'utf8') > 8192) {
-        return createResponse({ message: 'detail_markdown exceeds the 8 KB limit' }, 413);
+        return rejected('detail_markdown_too_large', createResponse({ message: 'detail_markdown exceeds the 8 KB limit' }, 413));
       }
     }
     // guidance_markdown is the AI-generated issue context (title + description).
@@ -2954,40 +2968,40 @@ function SuggestionsController(ctx, sqs, env) {
     // implementation guidance run long.
     if (guidanceMarkdown != null) {
       if (typeof guidanceMarkdown !== 'string') {
-        return badRequest('guidance_markdown must be a string');
+        return rejected('invalid_guidance_markdown', badRequest('guidance_markdown must be a string'));
       }
       if (Buffer.byteLength(guidanceMarkdown, 'utf8') > 65536) {
-        return createResponse({ message: 'guidance_markdown exceeds the 64 KB limit' }, 413);
+        return rejected('guidance_markdown_too_large', createResponse({ message: 'guidance_markdown exceeds the 64 KB limit' }, 413));
       }
     }
     // feedback_subject_id is an opaque grouping id (e.g. a CWV issue id) — a short
     // string, not free text. Bounded to guard against abuse.
     if (feedbackSubjectId != null) {
       if (typeof feedbackSubjectId !== 'string' || feedbackSubjectId.length > 200) {
-        return badRequest('feedback_subject_id must be a string of at most 200 characters');
+        return rejected('invalid_feedback_subject_id', badRequest('feedback_subject_id must be a string of at most 200 characters'));
       }
     }
 
     const site = await Site.findById(siteId);
     if (!site) {
-      return notFound('Site not found');
+      return rejected('site_not_found', notFound('Site not found'));
     }
     if (!await accessControlUtil.hasAccess(site)) {
-      return forbidden('User does not belong to the organization');
+      return rejected('forbidden', forbidden('User does not belong to the organization'));
     }
 
     const suggestion = await Suggestion.findById(suggestionId);
     if (!suggestion || suggestion.getOpportunityId() !== opptyId) {
-      return notFound('Suggestion not found');
+      return rejected('suggestion_not_found', notFound('Suggestion not found'));
     }
     const opportunity = await suggestion.getOpportunity();
     if (!opportunity || opportunity.getSiteId() !== siteId) {
-      return notFound('Suggestion not found');
+      return rejected('suggestion_not_found', notFound('Suggestion not found'));
     }
 
     const postgrestClient = context.dataAccess?.services?.postgrestClient;
     if (!postgrestClient?.from) {
-      return createResponse({ message: 'Feedback store unavailable' }, 503);
+      return rejected('store_unavailable', createResponse({ message: 'Feedback store unavailable' }, 503));
     }
 
     // reviewer_id is server-derived from the authenticated principal — never the body.
@@ -3023,7 +3037,7 @@ function SuggestionsController(ctx, sqs, env) {
       site_id: siteId,
       suggestion_id: suggestionId,
       opportunity_type: opportunity.getType?.() ?? null,
-      source: REVIEW_SOURCES.BACKOFFICE,
+      source,
       signal,
       reviewer_id: reviewerId,
       detail_markdown: cleanMarkdown ?? null,
@@ -3061,8 +3075,37 @@ function SuggestionsController(ctx, sqs, env) {
     return createResponse(toReviewView(data), 201);
   };
 
+  /**
+   * Capture an ESE review from the Backoffice.
+   * POST /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/backoffice-reviews
+   * Binds source='backoffice'; all rejection categories are allowed.
+   * @param {Object} context - request context.
+   * @returns {Promise<Response>}
+   */
+  const createBackofficeReview = (context) => captureReview(context, {
+    source: REVIEW_SOURCES.BACKOFFICE,
+    allowedRejectionCategories: Object.values(REJECTION_CATEGORIES),
+  });
+
+  /**
+   * Capture a customer review from the ASO UI (SITES-39002).
+   * POST /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/aso-reviews
+   * Binds source='aso_ui'; only 'bad_recommendation' and 'other' are accepted as
+   * rejection categories (no 'product_bug' from customers).
+   * @param {Object} context - request context.
+   * @returns {Promise<Response>}
+   */
+  const createAsoReview = (context) => captureReview(context, {
+    source: REVIEW_SOURCES.ASO_UI,
+    allowedRejectionCategories: [
+      REJECTION_CATEGORIES.BAD_RECOMMENDATION,
+      REJECTION_CATEGORIES.OTHER,
+    ],
+  });
+
   return {
     createBackofficeReview,
+    createAsoReview,
     autofixSuggestions,
     createSuggestions,
     deploySuggestionToEdge,

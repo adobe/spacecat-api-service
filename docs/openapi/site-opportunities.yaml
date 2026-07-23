@@ -1330,7 +1330,99 @@ site-opportunity-suggestion-backoffice-reviews:
       '404':
         $ref: './responses.yaml#/404'
       '413':
-        description: detail_markdown exceeds the 8 KB limit
+        description: detail_markdown exceeds the 8 KB limit, or guidance_markdown exceeds the 64 KB limit
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+site-opportunity-suggestion-aso-reviews:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+    - $ref: './parameters.yaml#/suggestionId'
+  post:
+    operationId: createAsoReview
+    summary: |
+      Capture a customer review verdict for a CWV suggestion (ASO UI feedback loop)
+    description: |
+      Records a single customer-review feedback event for the suggestion as part of
+      the Learning Agent feedback loop (SITES-39002). `source` is bound to `aso_ui`
+      by this route and must not be supplied in the body. `eventId` is a mandatory
+      client-supplied idempotency key (UUID v4) — a duplicate POST with the same
+      `eventId` collapses to a no-op and returns 200 with the existing review.
+      Customer-derived fields are secret-scrubbed and markdown is sanitised
+      server-side before storage; raw patches are not echoed in the response.
+      Feedback is pure signal — it does not change the suggestion's status.
+    tags:
+      - opportunity-suggestions
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - eventId
+              - verdict
+            properties:
+              eventId:
+                type: string
+                format: uuid
+                description: Client-supplied idempotency key (UUID v4), retained across retries.
+              verdict:
+                type: string
+                enum: [up, down]
+                description: The customer's verdict (translated server-side to a positive/negative signal).
+              detailMarkdown:
+                type: string
+                maxLength: 8192
+                description: Optional customer feedback (markdown). Required on reject by the UI; sanitised + 8 KB cap server-side.
+              guidanceMarkdown:
+                type: string
+                maxLength: 65536
+                description: >-
+                  AI-generated issue context (title + description) for the reviewed issue.
+                  Gives the Learning Agent "what the issue was" alongside the generated
+                  patch (previousFix) and the review. Sanitised + 64 KB cap server-side.
+              feedbackSubjectId:
+                type: string
+                maxLength: 200
+                description: >-
+                  Optional SpaceCat-internal id of the sub-item this review is about
+                  within the suggestion (a CWV issue id). Not exported to S3.
+              rejectionCategory:
+                type: string
+                enum: [bad_recommendation, other]
+                description: Optional category on a reject. `product_bug` is not accepted from the ASO UI.
+              previousFix:
+                type: object
+                description: Generated patch snapshot at review time (secret-scrubbed server-side).
+    responses:
+      '201':
+        description: Review recorded
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SuggestionReview'
+      '200':
+        description: Idempotent no-op — a review with this eventId already exists
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SuggestionReview'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '413':
+        description: detail_markdown exceeds the 8 KB limit, or guidance_markdown exceeds the 64 KB limit
       '500':
         $ref: './responses.yaml#/500'
       '503':
