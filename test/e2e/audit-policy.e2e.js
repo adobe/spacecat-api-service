@@ -30,15 +30,17 @@ use(chaiAsPromised);
  *     a session token via POST /auth/login (x-api-key is deprecated).
  *
  * Uses a fixed dev test site rather than auto-discovery, since audit policy
- * mutations need a site with ASO/LLMO write entitlement.
+ * mutations need a site with ASO/LLMO write entitlement. Dev-only and
+ * local/manual-only by design: SITE_ID below doesn't exist on prod, so this
+ * suite always skips when ENVIRONMENT=prod (which is what the scheduled
+ * .github/workflows/e2e-tests.yaml cron runs against) - it isn't wired into
+ * that workflow and isn't meant to be run there.
  *
  * Running locally:
  *   mysticat login                                  # once, if not already
  *   export IMS_ACCESS_TOKEN=$(mysticat auth token --ims -e dev)
  *   npx mocha --timeout 30s test/e2e/audit-policy.e2e.js
  *
- * `-e dev` matches this suite's default target (the CI/dev API); set
- * ENVIRONMENT=prod (and get a prod-scoped token instead) to run against prod.
  * Without IMS_ACCESS_TOKEN set, the suite logs a warning and skips instead
  * of failing.
  */
@@ -96,6 +98,14 @@ describe('Audit Policy - E2E Tests', function auditPolicySuite() {
   this.timeout(30000);
 
   before(async function beforeAll() {
+    // SITE_ID above only exists on dev - never run this against prod, even if a
+    // future IMS_ACCESS_TOKEN secret gets wired into the scheduled e2e workflow
+    // for other suites (that workflow's matrix is prod-only today).
+    if (process.env.ENVIRONMENT === 'prod') {
+      console.log('[WARN] audit-policy e2e suite targets a dev-only test site - skipping in prod');
+      this.skip();
+      return;
+    }
     const sessionToken = await getSessionToken();
     if (!sessionToken) {
       console.log('[WARN] IMS_ACCESS_TOKEN not set - skipping audit-policy e2e suite');

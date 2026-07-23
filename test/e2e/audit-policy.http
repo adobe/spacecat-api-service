@@ -2,14 +2,22 @@
 # ====================================================
 # This file contains HTTP requests for testing the Audit Policy API endpoints.
 #
-# Prerequisites:
-# 1. Install "REST Client" extension in Cursor/VS Code
-# 2. Obtain an IMS user access token, then run the LOGIN request below to
-#    exchange it for a session token. x-api-key is deprecated starting
-#    August 2026 - all requests here authenticate with
-#    `Authorization: Bearer <sessionToken>` instead.
-#    https://opensource.adobe.com/spacecat-api-service/#tag/auth/operation/login
-# 3. Click "Send Request" above any request to execute
+# Running requests:
+# - IntelliJ IDEA / PyCharm: this .http format is understood natively by the
+#   built-in HTTP Client - no plugin needed. Open the file and click the
+#   green run arrow in the gutter next to any request.
+# - Claude Code (CLI or desktop app): ask it to run a specific request from
+#   this file (e.g. "run the 'Get current policy' request from
+#   audit-policy.http") - it will translate the request + variables into curl.
+#
+# Auth: x-api-key is deprecated for this API starting August 2026. Get a
+# ready-to-use session token via the mysticat CLI (no manual login-endpoint
+# call needed):
+#   mysticat login              # once, if not already logged in
+#   mysticat auth token -e dev  # prints a session token - paste it below
+# Paste the output into @sessionToken and skip straight to the POLICY
+# section. (The optional LOGIN section further down calls POST /auth/login
+# directly - only needed if you want to exercise that endpoint itself.)
 #
 # Environment: Update these variables for your environment
 # - dev: https://spacecat-services--api-service.aem-dev.hlx.page
@@ -17,14 +25,22 @@
 # - prod: https://spacecat-services--api-service.aem.hlx.page
 
 @baseUrl = https://spacecat-services--api-service.aem-dev.hlx.page
-@imsAccessToken = YOUR_IMS_ACCESS_TOKEN_HERE
+
+# mysticat auth token -e dev
+@sessionToken = YOUR_SESSION_TOKEN_HERE
 
 # Dev test site: https://main--scope-creep--iuliag.aem.live
 @siteId = 019ef3bd-5e67-7ea1-a4b7-f939f14fdc4e
 
 # =============================================================================
-# LOGIN - Exchange an IMS access token for a session token
+# LOGIN (optional) - exercises POST /auth/login directly
 # =============================================================================
+# Only needed if you want to test the login endpoint itself rather than get
+# a session token the quick way above. Get the IMS access token via
+# `mysticat auth token --ims -e dev`, then copy "sessionToken" from the
+# response below into @sessionToken above.
+
+@imsAccessToken = YOUR_IMS_ACCESS_TOKEN_HERE
 
 ### Login
 POST {{baseUrl}}/auth/login
@@ -33,9 +49,6 @@ Content-Type: application/json
 {
   "accessToken": "{{imsAccessToken}}"
 }
-
-# Note: copy the "sessionToken" from the response above into the variable below
-@sessionToken = YOUR_SESSION_TOKEN_HERE
 
 # =============================================================================
 # POLICY - Read
