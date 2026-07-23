@@ -31,7 +31,6 @@ import { hasText } from '@adobe/spacecat-shared-utils';
  *   excluded from the returned competitor list).
  * @returns {{ competitors: Array<{ name: string, mentions: number, citations: number }> }}
  */
-/* c8 ignore start -- competitor-summary POC endpoint; unit tests intentionally deferred */
 export function transformCompetitorSummary(mentionsRaw, citationsRaw, brandName) {
   const wantedBrand = String(brandName ?? '').trim().toLowerCase();
   const totalsByName = new Map();
@@ -68,4 +67,3 @@ export function transformCompetitorSummary(mentionsRaw, citationsRaw, brandName)
     competitors: [...totalsByName.values()].sort((a, b) => b.mentions - a.mentions),
   };
 }
-/* c8 ignore stop */

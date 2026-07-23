@@ -1530,6 +1530,10 @@ export default function ElementsController(context, log, env) {
         projectIds = brandSemrushProjects
           .map((p) => p.semrushProjectId)
           .filter(hasText);
+        // A brand with zero Semrush projects has no competitor data — return empty
+        // rather than falling through to an unscoped query, which (mirrors
+        // getMarketTrackingTrends) would return the entire workspace, including
+        // other brands' data on the org-parent-workspace fallback.
         if (projectIds.length === 0) {
           return cachedOk({ competitors: [] });
         }

@@ -362,6 +362,20 @@ const FIXTURES = {
       }],
     },
   },
+  // Also served by ElementsController — the lightweight aggregate-totals
+  // counterpart to Market Tracking Trends.
+  listSerenityCompetitorSummary: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'getCompetitorSummary',
+    serviceMethod: 'getCompetitorSummary',
+    handlerResult: {
+      competitors: [
+        { name: 'Rival One', mentions: 900, citations: 5000 },
+        { name: 'Rival Two', mentions: 150, citations: 300 },
+      ],
+    },
+  },
   listSerenityBrandPresenceSentimentOverview: {
     expectedStatus: 200,
     usesElementsController: true,
