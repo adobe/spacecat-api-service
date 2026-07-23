@@ -483,6 +483,45 @@ describe('dynamic-allocation fronting — delete-market release', () => {
     });
   });
 
+  it('ON + two concurrent deletes on the SAME child: releases are serialized through withResourceLock '
+    + '(LLMO-6191 item 3), matching handleUpdateModelsSubworkspace — no interleaved read/write', async () => {
+    // Without the lock, both releases' getWorkspaceResources reads would fire before either
+    // transferWorkspaceResources write (the read-then-absolute-set race the lock closes). Hold the
+    // first call's write open with a deferred promise so a second, concurrent call to the SAME
+    // workspace can only start its own read/write pair once the first has fully settled.
+    let resolveFirstTransfer;
+    const firstTransferGate = new Promise((resolve) => {
+      resolveFirstTransfer = resolve;
+    });
+    const callOrder = [];
+    const getWorkspaceResources = sinon.stub().callsFake(async () => {
+      callOrder.push('read');
+      return RELEASABLE_CHILD;
+    });
+    const transferWorkspaceResources = sinon.stub().callsFake(async () => {
+      callOrder.push('write-start');
+      if (callOrder.filter((e) => e === 'write-start').length === 1) {
+        await firstTransferGate;
+      }
+      callOrder.push('write-end');
+      return null;
+    });
+    const t = makeDeleteTransport({ getWorkspaceResources, transferWorkspaceResources });
+
+    const p1 = handleDeleteMarketSubworkspace(t, WS, 2840, 'en', log, { dynamicAllocation: true });
+    // Let the first call's release reach its (gated) write before starting the second.
+    await new Promise((resolve) => {
+      setTimeout(() => resolve(), 0);
+    });
+    const p2 = handleDeleteMarketSubworkspace(t, WS, 2840, 'en', log, { dynamicAllocation: true });
+    // The second call's read must NOT have fired yet — it is queued behind the first call's whole
+    // critical section (read + write), not just its read.
+    expect(callOrder).to.deep.equal(['read', 'write-start']);
+    resolveFirstTransfer();
+    await Promise.all([p1, p2]);
+    expect(callOrder).to.deep.equal(['read', 'write-start', 'write-end', 'read', 'write-start', 'write-end']);
+  });
+
   it('ON + upstream deleteProject 404s (already gone): release still fires (project is confirmed gone either way)', async () => {
     const t = makeDeleteTransport({
       deleteProject: sinon.stub().rejects(new SerenityTransportError(404, 'gone', null)),
