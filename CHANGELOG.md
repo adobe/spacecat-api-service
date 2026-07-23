@@ -1,3 +1,10 @@
+# [1.687.0](https://github.com/adobe/spacecat-api-service/compare/v1.686.1...v1.687.0) (2026-07-23)
+
+
+### Features
+
+* **serenity:** add Semrush-backed competitor-summary endpoint for Overview ([#2890](https://github.com/adobe/spacecat-api-service/issues/2890)) ([6012ea0](https://github.com/adobe/spacecat-api-service/commit/6012ea0f601bad4b10dc9baf7f25355c3b36c5b4))
+
 ## [1.686.1](https://github.com/adobe/spacecat-api-service/compare/v1.686.0...v1.686.1) (2026-07-23)
 
 
