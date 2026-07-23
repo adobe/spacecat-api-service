@@ -31,6 +31,16 @@ use(chaiAsPromised);
  *
  * Uses a fixed dev test site rather than auto-discovery, since audit policy
  * mutations need a site with ASO/LLMO write entitlement.
+ *
+ * Running locally:
+ *   mysticat login                                  # once, if not already
+ *   export IMS_ACCESS_TOKEN=$(mysticat auth token --ims -e dev)
+ *   npx mocha --timeout 30s test/e2e/audit-policy.e2e.js
+ *
+ * `-e dev` matches this suite's default target (the CI/dev API); set
+ * ENVIRONMENT=prod (and get a prod-scoped token instead) to run against prod.
+ * Without IMS_ACCESS_TOKEN set, the suite logs a warning and skips instead
+ * of failing.
  */
 const SITE_ID = '019ef3bd-5e67-7ea1-a4b7-f939f14fdc4e'; // https://main--scope-creep--iuliag.aem.live
 const UNKNOWN_SITE_ID = '00000000-0000-0000-0000-000000000000';
