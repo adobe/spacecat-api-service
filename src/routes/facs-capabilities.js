@@ -237,6 +237,7 @@ const routeFacsCapabilities = {
     'GET /ephemeral-run/batch/:batchId/status', // admin/internal
 
     // System configuration (Configuration model — admin-only)
+    'GET /configurations/versions', // admin
     'GET /configurations/:version', // admin
     'GET /configurations/latest', // admin
     'PATCH /configurations/latest', // admin
