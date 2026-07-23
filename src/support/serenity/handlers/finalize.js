@@ -81,8 +81,8 @@ const sliceKey = (geoTargetId, languageCode) => `${Number(geoTargetId)}::${Strin
  *   as the create/prompt endpoints).
  * @param {object} [options] - Publish-confirm tuning (AC3).
  * @param {number} [options.confirmAttempts=1] - Max getProjectStatus reads per
- *   project after publish (bounded to the Lambda budget; the unbounded ≤900s
- *   reconcile loop is the DRS/worker's job, not this Lambda's).
+ *   project after publish, hard-capped at 3 regardless of caller input (the
+ *   unbounded ≤900s reconcile loop is the DRS/worker's job, not this Lambda's).
  * @param {number} [options.confirmIntervalMs=0] - Delay between confirm reads.
  * @param {number} [options.deadlineMs] - Epoch-ms wall-time deadline (e.g. from
  *   the Lambda's getRemainingTimeInMillis). When the remaining budget drops below
@@ -277,6 +277,12 @@ export async function finalizeSerenityProjects(
     confirmAttempts = 1, confirmIntervalMs = 0, deadlineMs,
   } = options;
   const canConfirm = typeof transport.getProjectStatus === 'function';
+  // Bound the per-project confirm poll regardless of caller input — even a large
+  // confirmAttempts can't make one project's poll run away (the worker reconcile
+  // resolves anything still pending after the cap). Complements the deadlineMs
+  // guard below (which bounds the loop ACROSS projects).
+  const MAX_CONFIRM_ATTEMPTS = 3;
+  const safeAttempts = Math.min(Math.max(1, confirmAttempts), MAX_CONFIRM_ATTEMPTS);
   // Wall-time guard: publish is sequential (publish + bounded confirm per
   // project), so a large brand could exceed the Lambda budget. When the caller
   // supplies `deadlineMs` (epoch ms, e.g. from getRemainingTimeInMillis), stop
@@ -334,7 +340,7 @@ export async function finalizeSerenityProjects(
 
     // eslint-disable-next-line no-await-in-loop
     const confirm = await pollProjectPublished(transport, semrushWorkspaceId, projectId, {
-      attempts: confirmAttempts,
+      attempts: safeAttempts,
       intervalMs: confirmIntervalMs,
       log,
     });

@@ -263,4 +263,26 @@ describe('finalizeSerenityProjects (publish-after-populate)', () => {
     expect(out.publishPending).to.have.lengthOf(2);
     expect(out.publishPending.every((p) => p.reason === 'deadline')).to.be.true;
   });
+
+  it('caps the per-project confirm poll at 3 reads regardless of confirmAttempts', async () => {
+    // never reports live → the poll would run for the full attempt budget.
+    transport.getProjectStatus.resolves({ publish_status: 'publishing' });
+    const body = {
+      prompts: [{ text: 'q', geoTargetId: 2840, languageCode: 'en' }],
+      models: [{ geoTargetId: 2840, languageCode: 'en', modelIds: ['m1'] }],
+    };
+    const out = await finalizeSerenityProjects(
+      transport,
+      dataAccess,
+      BRAND,
+      WS,
+      body,
+      noopLog,
+      undefined,
+      { confirmAttempts: 10, confirmIntervalMs: 0 },
+    );
+    // one publishable project; poll hard-capped at 3 reads (not 10).
+    expect(transport.getProjectStatus.callCount).to.equal(3);
+    expect(out.publishPending).to.deep.equal([{ projectId: 'proj-1', status: 'publishing' }]);
+  });
 });
