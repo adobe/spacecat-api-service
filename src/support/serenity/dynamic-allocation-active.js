@@ -56,6 +56,63 @@ export function isDynamicAllocationEnabled(env) {
 }
 
 /**
+ * Env/Vault keys for the global per-brand AI ceiling (LLMO-6190 flag-flip gate, §8). One flat
+ * scalar per dimension at `dx_mysticat/<env>/api-service`, each independently optional. The
+ * ceiling here is a RUNAWAY BACKSTOP — "the largest plausible legitimate single-brand demand", the
+ * SAME value for every brand — NOT a per-org pool fraction (a fraction false-fails a legitimate
+ * heavy-but-feasible split; the transfer's own `orgPoolExhausted` 422 stays the demand-aware
+ * contention gate) and NOT per-customer config (that data model is deliberately deferred — see
+ * serenity-docs brand-semrush-dynamic-resource-allocation.md §7). The number itself is a product
+ * decision set in Vault; this module only reads whatever is present.
+ * @type {{ projects: string, prompts: string }}
+ */
+export const BRAND_AI_CEILING_ENV_FLAGS = Object.freeze({
+  projects: 'SERENITY_BRAND_AI_CEILING_PROJECTS',
+  prompts: 'SERENITY_BRAND_AI_CEILING_PROMPTS',
+});
+
+/**
+ * Resolves the per-brand AI ceiling from the request env. FAIL-SAFE, mirroring the kill-switch's
+ * "anything non-canonical → safe default" philosophy: a missing key leaves that dimension
+ * unenforced, and a present-but-unparseable / non-positive value (a Vault typo like `5o00`, `-1`,
+ * `0`, `abc`) is logged loudly and likewise left unenforced — a misconfiguration can never break a
+ * customer write, it only fails to bind (the warning + a bind-check during the flip catch that).
+ * Only a clean positive integer binds. `parseInt` is deliberately NOT used (it would silently
+ * accept `5o00` as `5`, a dangerously low cap); the value must be all digits.
+ *
+ * Returns `undefined` when NEITHER dimension resolves, so {@link createHeadroomGuard} keeps its
+ * byte-for-byte non-binding `DEFAULT_BRAND_AI_CEILING` default; otherwise a partial
+ * `{ projects?, prompts? }` carrying only the cleanly-parsed dimensions (an unset/invalid
+ * dimension stays unenforced — `ensureAiHeadroom` only gates a dimension whose cap is a number).
+ * @param {object} [env] - the request env (`context.env`).
+ * @param {any} [log]
+ * @returns {{ projects?: number, prompts?: number } | undefined}
+ */
+export function resolveBrandAiCeiling(env, log) {
+  /** @type {{ projects?: number, prompts?: number }} */
+  const ceiling = {};
+  for (const dim of /** @type {Array<'projects'|'prompts'>} */ (['projects', 'prompts'])) {
+    const flag = BRAND_AI_CEILING_ENV_FLAGS[dim];
+    const raw = env?.[flag];
+    if (raw === undefined || raw === null || String(raw).trim() === '') {
+      // Unset — leave this dimension unenforced (silent; this is the normal pre-rollout state).
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+    const text = String(raw).trim();
+    const parsed = /^\d+$/.test(text) ? Number(text) : NaN;
+    if (Number.isInteger(parsed) && parsed > 0) {
+      ceiling[dim] = parsed;
+    } else {
+      log?.warn?.('SERENITY_ALLOC ignoring malformed brand-AI-ceiling env value — dimension left unenforced', {
+        dim, flag, raw: text,
+      });
+    }
+  }
+  return (ceiling.projects === undefined && ceiling.prompts === undefined) ? undefined : ceiling;
+}
+
+/**
  * @typedef {object} HeadroomGuard
  * @property {boolean} enabled whether JIT top-up is active for this request.
  * @property {(need?: import('./resource-manager.js').Dims,
@@ -93,9 +150,10 @@ export function isDynamicAllocationEnabled(env) {
  * @param {boolean} opts.enabled - the global kill-switch value for this request.
  * @param {string} [opts.subWorkspaceId] - the sub-workspace being written to (`auth.workspaceId`).
  * @param {string} [opts.parentWorkspaceId] - the org parent workspace (`auth.parentWorkspaceId`).
- * @param {import('./resource-manager.js').Blocks} [opts.ceiling] - per-brand ceiling (default
- *   {@link DEFAULT_BRAND_AI_CEILING} — a placeholder; pass an explicit value to override once a
- *   real per-brand number exists).
+ * @param {Partial<import('./resource-manager.js').Blocks>} [opts.ceiling] - per-brand ceiling,
+ *   resolved from Vault via {@link resolveBrandAiCeiling} and threaded by the controller. Partial:
+ *   a dimension may be omitted, leaving it unenforced. When omitted entirely, defaults to the
+ *   non-binding {@link DEFAULT_BRAND_AI_CEILING} placeholder (byte-for-byte today's behavior).
  * @param {import('./resource-manager.js').Blocks} [opts.blocks] - grace blocks (optional).
  * @param {Partial<typeof DEFAULT_RETRY_ON_QUOTA>} [opts.retryOnQuota] - poll-retry shape override
  *   for `retryOnQuota` (tests inject a fake `sleep` + tiny `backoffMs`/`totalBudgetMs`; production
@@ -151,9 +209,13 @@ export function createHeadroomGuard(transport, {
     // per-child lock contention (round-2 SRE review) — so `ensure()` is called exactly ONCE, up
     // front, and the actual fix is the WAIT between retries, not a repeated top-up.
     //
-    // Bounded by whichever comes first: `maxAttempts`, or the shared `requestDeadline` above. A
-    // non-metered error (or a second/subsequent metered error once bounded) propagates untouched —
-    // this never masks a genuinely non-retryable failure, it only spans the known settle lag.
+    // Bounded by whichever comes first: `maxAttempts`, or the shared `requestDeadline` above — the
+    // deadline is checked BEFORE every attempt (including the first poll attempt, not only between
+    // retries), so a slow `ensure()` call (e.g. queued behind other same-child recoveries on
+    // `withResourceLock`'s own safety valve) can't silently blow past the shared budget before the
+    // budget is ever consulted. A non-metered error (or a second/subsequent metered error once
+    // bounded) propagates untouched — this never masks a genuinely non-retryable failure, it only
+    // spans the known settle lag.
     retryOnQuota: async (fn, { callSite = 'unknown' } = {}) => {
       try {
         return await fn();
@@ -174,8 +236,17 @@ export function createHeadroomGuard(transport, {
           subWorkspaceId: childId, callSite,
         });
         await ensure({}, { includeDrafted: true });
-        let attempt = 1;
+        let attempt = 0;
+        let lastError = e;
         for (;;) {
+          // Checked BEFORE every attempt, including the first — an already-blown deadline (e.g.
+          // `ensure()` itself ate the whole budget queued behind another same-child recovery) must
+          // not spend a further `fn()` call on top of it. See the header comment above for why.
+          if (now() >= requestDeadline) {
+            recordQuotaRetryOutcome('exhausted', { attempt, callSite });
+            throw lastError;
+          }
+          attempt += 1;
           try {
             // eslint-disable-next-line no-await-in-loop
             const result = await fn();
@@ -183,21 +254,22 @@ export function createHeadroomGuard(transport, {
             return result;
           } catch (e2) {
             if (!isMeteredQuota(e2)) {
-              // A non-quota error mid-recovery still ENDS this cycle (Alicia Adriani review):
-              // record it as `abandoned` so a dashboard built on `recovered + exhausted +
-              // abandoned` as "total recovery cycles" doesn't silently undercount cycles cut
-              // short by an unrelated failure — distinct from `exhausted` (which specifically
-              // means "still a metered 405 after every attempt").
+              // A non-quota error mid-recovery still ENDS this cycle — `abandoned` is distinct
+              // from `exhausted` (still a metered 405 after every attempt) so a dashboard summing
+              // recovered+exhausted+abandoned as "total cycles" doesn't undercount.
               recordQuotaRetryOutcome('abandoned', { attempt, callSite });
               throw e2;
             }
-            if (attempt >= maxAttempts || now() >= requestDeadline) {
+            lastError = e2;
+            // Bail here too, BEFORE sleeping, if the sleep would itself run past the deadline —
+            // an unconditional sleep could otherwise overshoot the budget by up to a full
+            // `backoffMs` doing nothing useful.
+            if (attempt >= maxAttempts || now() + backoffMs >= requestDeadline) {
               recordQuotaRetryOutcome('exhausted', { attempt, callSite });
               throw e2;
             }
             // eslint-disable-next-line no-await-in-loop
             await sleep(backoffMs);
-            attempt += 1;
           }
         }
       }

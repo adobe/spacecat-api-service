@@ -142,11 +142,12 @@ export async function listFacsAccessMappings(postgrestClient, filters = {}) {
 }
 
 /**
- * Builds the set of `resource_id`s the caller may **view** for a product +
- * resource type — the union of org-scoped and user-scoped active bindings whose
- * `granted_capabilities` include `<product>/can_view`. Used by ReBAC-filtered
- * collection endpoints (list-sites, list-brands) to narrow results to the
- * resources a resource-scoped caller can see.
+ * Builds the set of `resource_id`s on which the caller holds a specific
+ * `<product>/<capability>` for a product + resource type — the union of
+ * org-scoped and user-scoped active bindings whose `granted_capabilities`
+ * include `capability`. Resource-aware controllers authorize a write by
+ * intersecting the returned set with the resources a request touches;
+ * {@link listViewableResourceIds} is this with `can_view`.
  *
  * Org-scoped grants always apply; the user-scoped read runs only when a
  * `subjectId` is known (a missing subjectId must NOT widen the query — without
@@ -158,13 +159,13 @@ export async function listFacsAccessMappings(postgrestClient, filters = {}) {
  * @param {string} args.imsOrgId      - REQUIRED. Canonical caller org id.
  * @param {string} args.product       - REQUIRED. Uppercase product code.
  * @param {string} args.resourceType  - REQUIRED. e.g. 'site' | 'brand'.
+ * @param {string} args.capability    - REQUIRED. Fully-qualified `<product>/<cap>`.
  * @param {string} [args.subjectId]   - Caller's canonical user id (JWT sub).
- * @returns {Promise<Set<string>>} resource_ids the caller may view.
+ * @returns {Promise<Set<string>>} resource_ids on which the caller holds `capability`.
  */
-export async function listViewableResourceIds(postgrestClient, {
-  imsOrgId, product, resourceType, subjectId,
+export async function listResourceIdsWithCapability(postgrestClient, {
+  imsOrgId, product, resourceType, subjectId, capability,
 }) {
-  const viewCapability = `${product.toLowerCase()}/can_view`;
   const subjectScopes = [{ subjectType: 'org', subjectId: imsOrgId }];
   if (subjectId) {
     subjectScopes.push({ subjectType: 'user', subjectId });
@@ -183,12 +184,35 @@ export async function listViewableResourceIds(postgrestClient, {
   const ids = new Set();
   for (const rows of pages) {
     for (const row of rows) {
-      if ((row.granted_capabilities ?? []).includes(viewCapability)) {
+      if ((row.granted_capabilities ?? []).includes(capability)) {
         ids.add(row.resource_id);
       }
     }
   }
   return ids;
+}
+
+/**
+ * Builds the set of `resource_id`s the caller may **view** for a product +
+ * resource type — {@link listResourceIdsWithCapability} specialised to
+ * `<product>/can_view`. Used by ReBAC-filtered collection endpoints
+ * (list-sites, list-brands) to narrow results to the resources a
+ * resource-scoped caller can see.
+ *
+ * @param {object} postgrestClient
+ * @param {object} args
+ * @param {string} args.imsOrgId      - REQUIRED. Canonical caller org id.
+ * @param {string} args.product       - REQUIRED. Uppercase product code.
+ * @param {string} args.resourceType  - REQUIRED. e.g. 'site' | 'brand'.
+ * @param {string} [args.subjectId]   - Caller's canonical user id (JWT sub).
+ * @returns {Promise<Set<string>>} resource_ids the caller may view.
+ */
+export async function listViewableResourceIds(postgrestClient, {
+  imsOrgId, product, resourceType, subjectId,
+}) {
+  return listResourceIdsWithCapability(postgrestClient, {
+    imsOrgId, product, resourceType, subjectId, capability: `${product.toLowerCase()}/can_view`,
+  });
 }
 
 /**

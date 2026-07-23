@@ -17,7 +17,9 @@ import esmock from 'esmock';
 import {
   isDynamicAllocationEnabled,
   createHeadroomGuard,
+  resolveBrandAiCeiling,
   DYNAMIC_ALLOCATION_ENV_FLAG,
+  BRAND_AI_CEILING_ENV_FLAGS,
 } from '../../../src/support/serenity/dynamic-allocation-active.js';
 import { clearResourceLocks } from '../../../src/support/serenity/resource-lock.js';
 import { SerenityTransportError } from '../../../src/support/serenity/rest-transport.js';
@@ -57,6 +59,52 @@ describe('dynamic-allocation-active — isDynamicAllocationEnabled', () => {
     expect(isDynamicAllocationEnabled({ [DYNAMIC_ALLOCATION_ENV_FLAG]: '1' })).to.equal(false);
     expect(isDynamicAllocationEnabled({ [DYNAMIC_ALLOCATION_ENV_FLAG]: true })).to.equal(false);
     expect(isDynamicAllocationEnabled(undefined)).to.equal(false);
+  });
+});
+
+describe('dynamic-allocation-active — resolveBrandAiCeiling', () => {
+  const PROJECTS = BRAND_AI_CEILING_ENV_FLAGS.projects;
+  const PROMPTS = BRAND_AI_CEILING_ENV_FLAGS.prompts;
+
+  it('returns undefined when neither dimension is set (keeps the guard non-binding default)', () => {
+    expect(resolveBrandAiCeiling(undefined)).to.equal(undefined);
+    expect(resolveBrandAiCeiling({})).to.equal(undefined);
+    expect(resolveBrandAiCeiling({ UNRELATED: '5' })).to.equal(undefined);
+  });
+
+  it('parses a clean positive integer per dimension', () => {
+    expect(resolveBrandAiCeiling({ [PROMPTS]: '5000' })).to.deep.equal({ prompts: 5000 });
+    expect(resolveBrandAiCeiling({ [PROJECTS]: '8' })).to.deep.equal({ projects: 8 });
+    expect(resolveBrandAiCeiling({ [PROJECTS]: '8', [PROMPTS]: '5000' }))
+      .to.deep.equal({ projects: 8, prompts: 5000 });
+  });
+
+  it('leaves a partial ceiling when only one dimension is set (the other stays unenforced)', () => {
+    const c = resolveBrandAiCeiling({ [PROMPTS]: '5000' });
+    expect(c).to.deep.equal({ prompts: 5000 });
+    expect(c).to.not.have.property('projects');
+  });
+
+  it('FAIL-SAFE: a malformed / non-positive value warns and leaves that dimension unenforced (never throws)', () => {
+    const warn = sinon.stub();
+    const spyLog = { info: () => {}, error: () => {}, warn };
+    // parseInt would wrongly accept '5o00' as 5 — the digit-only guard rejects it instead.
+    for (const bad of ['abc', '5o00', '-1', '0', '5.5', '1e3', '  ']) {
+      warn.resetHistory();
+      const c = resolveBrandAiCeiling({ [PROMPTS]: bad }, spyLog);
+      expect(c, `bad value ${JSON.stringify(bad)} must not bind`).to.equal(undefined);
+      // Whitespace-only is "unset" (silent); the rest are malformed (warned).
+      if (bad.trim() !== '') {
+        expect(warn, `bad value ${JSON.stringify(bad)} should warn`).to.have.been.calledOnce;
+      }
+    }
+  });
+
+  it('binds the good dimension and warns on the bad one when mixed', () => {
+    const warn = sinon.stub();
+    const c = resolveBrandAiCeiling({ [PROJECTS]: 'oops', [PROMPTS]: '5000' }, { warn });
+    expect(c).to.deep.equal({ prompts: 5000 });
+    expect(warn).to.have.been.calledOnce;
   });
 });
 
@@ -162,6 +210,72 @@ describe('dynamic-allocation-active — createHeadroomGuard', () => {
     const r = await guard.ensure({ prompts: 5000 });
     expect(r.toppedUp).to.equal(true);
     expect(t.transferWorkspaceResources).to.have.been.calledOnce;
+  });
+
+  it('an explicit BINDING ceiling: a top-up past the cap throws brandAiLimit (409), no transfer', async () => {
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    const guard = createHeadroomGuard(
+      t,
+      {
+        enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: MASTER, ceiling: { prompts: 100 },
+      },
+      log,
+    );
+    let caught;
+    try {
+      await guard.ensure({ prompts: 500 }); // target rounds to 500 > cap 100
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught?.code).to.equal('brandAiLimit');
+    expect(caught?.status).to.equal(409);
+    expect(t.transferWorkspaceResources).to.not.have.been.called;
+  });
+
+  it('an explicit ceiling that COVERS the need: tops up normally (does NOT 409)', async () => {
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    const guard = createHeadroomGuard(
+      t,
+      {
+        enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: MASTER, ceiling: { prompts: 1000 },
+      },
+      log,
+    );
+    const r = await guard.ensure({ prompts: 500 }); // target 500 <= cap 1000
+    expect(r.toppedUp).to.equal(true);
+    expect(t.transferWorkspaceResources).to.have.been.calledOnce;
+  });
+
+  it('a PARTIAL ceiling binds only its dimension — the unset dimension stays unenforced', async () => {
+    // ceiling only caps prompts; projects has no cap, so a large project top-up is not gated.
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    const guard = createHeadroomGuard(
+      t,
+      {
+        enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: MASTER, ceiling: { prompts: 100 },
+      },
+      log,
+    );
+    // projects dimension: no cap present → tops up without a brandAiLimit throw.
+    const rProjects = await guard.ensure({ projects: 5 });
+    expect(rProjects.toppedUp).to.equal(true);
+    // prompts dimension on the same guard: still bound by the cap → throws past it.
+    let caught;
+    try {
+      await guard.ensure({ prompts: 500 });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught?.code).to.equal('brandAiLimit');
   });
 });
 
@@ -351,10 +465,14 @@ describe('dynamic-allocation-active — createHeadroomGuard.retryOnQuota', () =>
     expect(fn).to.have.callCount(2);
   });
 
-  it('ON, the shared deadline (not the attempt cap) stops retrying: exhausts after the deadline passes even with attempts still available', async () => {
-    // maxAttempts is generous, but `now()` is stubbed to jump straight past totalBudgetMs after the
-    // first poll attempt — the deadline, not the attempt count, must be what ends the loop (round-2
-    // SRE review: this is the seam that bounds a stacked-call-site request, not per-call attempts).
+  it('ON, the deadline takes priority OVER the attempt cap: exhausts after one poll attempt even though maxAttempts allows many more', async () => {
+    // maxAttempts is generous, but `now()` is stubbed to jump past totalBudgetMs right after the
+    // FIRST poll attempt's own deadline check — the deadline, not the attempt count, must be what
+    // ends the loop (round-2 SRE review: this is the seam that bounds a stacked-call-site request,
+    // not per-call attempts). The deadline is checked BEFORE every attempt (self-review finding):
+    // 1st `now()` call = guard construction; 2nd = the deadline check before poll attempt 1 (still
+    // within budget, so attempt 1 runs and fails); 3rd = the deadline check before poll attempt 2
+    // (now past budget, so it never runs).
     const t = makeTransport({
       child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
       master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
@@ -362,9 +480,7 @@ describe('dynamic-allocation-active — createHeadroomGuard.retryOnQuota', () =>
     let callCount = 0;
     const now = () => {
       callCount += 1;
-      // 1st call: guard construction (t0). 2nd+ calls: inside the loop's deadline check — jump
-      // straight past the budget so the very first deadline check already fails.
-      return callCount <= 1 ? 0 : 1_000_000;
+      return callCount <= 2 ? 0 : 1_000_000;
     };
     const guard = createHeadroomGuard(
       t,
@@ -389,6 +505,56 @@ describe('dynamic-allocation-active — createHeadroomGuard.retryOnQuota', () =>
     expect(caught).to.equal(lastError);
     // initial call + exactly ONE poll attempt before the deadline cuts it off
     expect(fn).to.have.callCount(2);
+  });
+
+  it('ON, the deadline is checked BEFORE the very first poll attempt, not only between retries: a budget already blown by ensure() skips the attempt entirely', async () => {
+    // Checking the deadline only inside the catch (i.e. only after a poll attempt already failed)
+    // meant the first attempt always ran regardless of how long `ensure()` itself took. Simulate
+    // `ensure()` alone having consumed the whole budget (e.g. queued behind other same-child
+    // recoveries) — `now()` is already past the deadline by the time the loop's first check runs,
+    // so `fn()` must NOT be called again at all, the ORIGINAL triggering error (not a fabricated
+    // new one) propagates, and the metric records the `attempt: 0` case this closes (MysticatBot
+    // review).
+    const recordQuotaRetryOutcome = sinon.stub();
+    const { createHeadroomGuard: mockedCreateHeadroomGuard } = await esmock(
+      '../../../src/support/serenity/dynamic-allocation-active.js',
+      { '../../../src/support/serenity/allocation-metrics.js': { recordQuotaRetryOutcome } },
+    );
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    let nowCallCount = 0;
+    const now = () => {
+      nowCallCount += 1;
+      // 1st call: guard construction (t0=0, so requestDeadline=9000). Every call after that
+      // (i.e. the loop's pre-attempt check) reports as already far past the budget.
+      return nowCallCount <= 1 ? 0 : 1_000_000;
+    };
+    const guard = mockedCreateHeadroomGuard(
+      t,
+      {
+        enabled: true,
+        subWorkspaceId: CHILD,
+        parentWorkspaceId: MASTER,
+        retryOnQuota: fastRetry({ maxAttempts: 10, totalBudgetMs: 9000, now }),
+      },
+      log,
+    );
+    const initialError = quota405();
+    const fn = sinon.stub().rejects(initialError);
+    let caught;
+    try {
+      await guard.retryOnQuota(fn);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).to.equal(initialError);
+    expect(fn).to.have.been.calledOnce; // only the initial call — no poll attempt was ever made
+    expect(recordQuotaRetryOutcome).to.have.been.calledOnceWith(
+      'exhausted',
+      { attempt: 0, callSite: 'unknown' },
+    );
   });
 
   it('ON, the deadline is SHARED across two sequential retryOnQuota calls on the SAME guard, not recomputed per call (MysticatBot review)', async () => {
@@ -429,22 +595,20 @@ describe('dynamic-allocation-active — createHeadroomGuard.retryOnQuota', () =>
     // guard's budget, even though `maxAttempts: 10` would otherwise allow many more poll attempts.
     clock = 150;
 
-    // Call site B: if the deadline were shared (correct), it's already past — B exhausts on its
-    // very first poll attempt despite `maxAttempts: 10`. If a regression recomputed the deadline
-    // fresh inside this call (bug), B would get a full new 100ms budget from clock=150 and NOT
-    // exhaust here.
-    const lastError = quota405();
-    const fnB = sinon.stub();
-    fnB.onFirstCall().rejects(quota405());
-    fnB.onSecondCall().rejects(lastError);
+    // Call site B: if the deadline were shared (correct), it's already past — the deadline check
+    // before B's first poll attempt fails immediately, so B never even gets a poll attempt, only
+    // its initial call. If a regression recomputed the deadline fresh inside this call (bug), B
+    // would get a full new 100ms budget from clock=150 and NOT exhaust here.
+    const initialErrorB = quota405();
+    const fnB = sinon.stub().rejects(initialErrorB);
     let caught;
     try {
       await guard.retryOnQuota(fnB, { callSite: 'B' });
     } catch (e) {
       caught = e;
     }
-    expect(caught).to.equal(lastError);
-    expect(fnB).to.have.callCount(2);
+    expect(caught).to.equal(initialErrorB);
+    expect(fnB).to.have.been.calledOnce;
   });
 
   it('ON, the recovery ensure() itself throws (e.g. org pool exhausted): that error propagates and fn is NOT retried', async () => {
@@ -621,6 +785,64 @@ describe('dynamic-allocation-active — retryOnQuota emits QuotaRetryOutcome (My
     expect(caught).to.equal(notMetered);
     expect(recordQuotaRetryOutcome).to.have.been.calledOnceWith(
       'abandoned',
+      { attempt: 1, callSite: 'publishProject' },
+    );
+  });
+
+  it('ON, a sleep that WOULD overshoot the deadline is skipped entirely: bails at the current attempt instead of sleeping uselessly (Alicia Adriani review)', async () => {
+    // Sequence of now() calls: 1st = construction (t0=0, budget=1000 => deadline=1000). 2nd = the
+    // pre-attempt check before poll attempt 1 (still within budget). 3rd = the pre-sleep check
+    // after poll attempt 1 fails: now()=950, backoffMs=3000 => 950+3000=3950 >= 1000 — sleeping
+    // would badly overshoot the deadline, so the fix must bail HERE, without ever calling sleep,
+    // rather than sleeping the full 3000ms only to bail at the next loop-top check anyway.
+    const recordQuotaRetryOutcome = sinon.stub();
+    const { createHeadroomGuard: mockedCreateHeadroomGuard } = await esmock(
+      '../../../src/support/serenity/dynamic-allocation-active.js',
+      { '../../../src/support/serenity/allocation-metrics.js': { recordQuotaRetryOutcome } },
+    );
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    let nowCallCount = 0;
+    const now = () => {
+      nowCallCount += 1;
+      if (nowCallCount === 1) {
+        return 0; // construction
+      }
+      if (nowCallCount === 2) {
+        return 100; // pre-attempt check before poll attempt 1
+      }
+      return 950; // pre-sleep check after poll attempt 1 fails
+    };
+    const sleep = sinon.stub().resolves();
+    const guard = mockedCreateHeadroomGuard(
+      t,
+      {
+        enabled: true,
+        subWorkspaceId: CHILD,
+        parentWorkspaceId: MASTER,
+        retryOnQuota: {
+          maxAttempts: 5, backoffMs: 3000, totalBudgetMs: 1000, now, sleep,
+        },
+      },
+      log,
+    );
+    const lastError = quota405();
+    const fn = sinon.stub();
+    fn.onCall(0).rejects(quota405());
+    fn.onCall(1).rejects(lastError);
+    let caught;
+    try {
+      await guard.retryOnQuota(fn, { callSite: 'publishProject' });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).to.equal(lastError);
+    expect(fn).to.have.callCount(2); // initial call + exactly one poll attempt
+    expect(sleep).to.not.have.been.called;
+    expect(recordQuotaRetryOutcome).to.have.been.calledOnceWith(
+      'exhausted',
       { attempt: 1, callSite: 'publishProject' },
     );
   });

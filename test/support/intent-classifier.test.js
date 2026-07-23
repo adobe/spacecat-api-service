@@ -21,6 +21,8 @@ import yaml from 'js-yaml';
 import {
   classifyIntents,
   contentToString,
+  DRS_CATEGORY_SPEC,
+  SYSTEM_PROMPT,
 } from '../../src/support/intent-classifier.js';
 import { INTENT_VALUES } from '../../src/support/intent.js';
 
@@ -66,6 +68,13 @@ describe('intent-classifier', () => {
   afterEach(() => sinon.restore());
 
   describe('createIntentClassifier', () => {
+    // Byte-for-byte parity guard for the native/DRS path: the 6-bucket refactor
+    // reuses SYSTEM_PROMPT as-is for DRS_CATEGORY_SPEC.systemPrompt, so the
+    // native prompt must be strictly the same string, not a copy that can drift.
+    it('reuses SYSTEM_PROMPT verbatim as the DRS category spec system prompt', () => {
+      expect(DRS_CATEGORY_SPEC.systemPrompt).to.equal(SYSTEM_PROMPT);
+    });
+
     it('returns null when Azure OpenAI is not configured', async () => {
       const { mod, ctorSpy } = await loadWithModel(() => ({ content: '{}' }));
       const classify = mod.createIntentClassifier({ env: {}, log });

@@ -621,6 +621,18 @@ describe('getRouteHandlers', () => {
     getRedirects: sinon.stub(),
   };
 
+  const mockAuditPolicyController = {
+    getPolicy: sinon.stub(),
+    addExclusions: sinon.stub(),
+    removeExclusions: sinon.stub(),
+    addInclusions: sinon.stub(),
+    removeInclusions: sinon.stub(),
+    listRevisions: sinon.stub(),
+    getScopePages: sinon.stub(),
+    getScopeSummary: sinon.stub(),
+    getScopeSections: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -688,6 +700,7 @@ describe('getRouteHandlers', () => {
       mockProxyController,
       mockTaskManagementController,
       mockRedirectsController,
+      mockAuditPolicyController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -918,10 +931,14 @@ describe('getRouteHandlers', () => {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics/:topicId/prompts',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/domain-urls',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/market-tracking-trends',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/stats',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/stats',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/prompts/count',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate',
       'GET /v2/orgs/:spaceCatId/sites/:siteId/brand',
@@ -1309,6 +1326,15 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/agentic-page-types',
       'PATCH /sites/:siteId/agentic-page-types/:name',
       'DELETE /sites/:siteId/agentic-page-types/:name',
+      'GET /sites/:siteId/audit-policy',
+      'POST /sites/:siteId/audit-policy/exclusions',
+      'POST /sites/:siteId/audit-policy/exclusions/delete',
+      'POST /sites/:siteId/audit-policy/inclusions',
+      'POST /sites/:siteId/audit-policy/inclusions/delete',
+      'GET /sites/:siteId/audit-policy/revisions',
+      'GET /sites/:siteId/audit-scope/pages',
+      'GET /sites/:siteId/audit-scope/summary',
+      'GET /sites/:siteId/audit-scope/sections',
       'GET /organizations/:organizationId/task-management/connections',
       'GET /organizations/:organizationId/task-management/connections/:connectionId',
       'GET /organizations/:organizationId/task-management/tickets',

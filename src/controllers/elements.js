@@ -395,10 +395,87 @@ export default function ElementsController(context, log, env) {
   }
 
   /**
+   * Shared scaffolding for the two URL Inspector KPI endpoints
+   * (`getUrlInspectorStats`, `getUrlInspectorPromptsCount`): org/brand auth,
+   * the optional `siteId` -> brand ownership cross-check, and region ->
+   * project(s) resolution (including the empty-scope 404 guard). Both
+   * endpoints need the exact same security-relevant checks (siteId
+   * ownership, cross-brand project scoping) — keeping them in one place
+   * means a fix to one can't silently miss the other (PR #2861 review: the
+   * `/prompts/count` copy had already drifted to skip test coverage the
+   * `/stats` copy had).
+   *
+   * @param {object} ctx - Request context.
+   * @returns {Promise<{error: Response}|{workspaceId: string, brand: object,
+   *   brandId: string, query: object, service: object, projects: object[],
+   *   projectIds: string[]}>} `projects` carries `{ region, projectId }`
+   *   entries (only populated resolving region/aggregate view); `projectIds`
+   *   is always the flat, `hasText`-filtered list of Semrush project ids.
+   */
+  async function resolveUrlInspectorScope(ctx) {
+    const auth = await authorizeOrg(ctx);
+    if (auth.error) {
+      return { error: auth.error };
+    }
+    const { spaceCatId, brandId } = ctx?.params ?? {};
+    const { workspaceId, brand } = auth;
+    const query = extractQuery(ctx);
+
+    const siteId = query.siteId || query.site_id;
+    if (hasText(siteId)) {
+      const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
+      const resolved = await getBrandBySite(spaceCatId, siteId, postgrestClient, log);
+      if (!resolved || resolved.id !== brand.id) {
+        return { error: badRequest('siteId does not belong to the specified brand') };
+      }
+    }
+
+    const service = await buildService(ctx);
+    const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+    const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
+
+    // Scope per project (region): a specific region → that one project; otherwise
+    // all the brand's markets — mirrors listOwnedUrls/listDomainUrls.
+    let projects;
+    let projectIds;
+    const { region } = query;
+    if (hasText(region) && region.toLowerCase() !== 'all') {
+      const projectId = await service.resolveRegionProjectId(workspaceId, {
+        brandId, region, brandSemrushProjects,
+      });
+      if (!hasText(projectId)) {
+        return { error: notFound(`No Semrush market found for region: ${region}`) };
+      }
+      projects = [{ region, projectId }];
+      projectIds = [projectId];
+    } else {
+      projects = await service.getOwnedUrlProjects(workspaceId, { brandSemrushProjects });
+      // Derived from the SAME resolved `projects` array (not re-filtered from
+      // brandSemrushProjects) — a project can exist in the DB rows but not
+      // resolve via the Markets element (or vice versa), and using two
+      // different sources here would scope the two KPI endpoints to
+      // different project sets.
+      projectIds = projects.map((p) => p.projectId).filter(hasText);
+      // An empty list here must not silently fall through to an unscoped
+      // (workspace-wide) Semrush query (mirrors getStats's Decision 4.1) —
+      // if this brand has no sub-workspace of its own yet, `workspaceId`
+      // resolves to the org's shared parent, so an unscoped call would
+      // return every brand/project in that parent, not just this one.
+      if (projectIds.length === 0) {
+        return { error: notFound(`No Semrush projects configured for brand: ${brandId}`) };
+      }
+    }
+
+    return {
+      workspaceId, brand, brandId, query, service, projects, projectIds,
+    };
+  }
+
+  /**
    * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence
    *     /url-inspector/filter-dimensions
    * Returns filter dimensions for the URL Inspector dashboard
-   * (brands, regions, topics, categories, page_intents, origins), scoped to
+   * (brands, regions, topics, categories, page_intents, origins, content_types), scoped to
    * that single brand.
    */
   const listUrlInspectorFilterDimensions = async (ctx) => {
@@ -658,6 +735,169 @@ export default function ElementsController(context, log, env) {
 
       const result = await service.getSentimentOverview(workspaceId, params);
       return cachedOk(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+  /* c8 ignore stop */
+
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics
+   * Data Insights per-topic table. Backed by the rich PROMPTS_BY_TOPIC element
+   * (78864493) fetched across ALL topics, grouped by topic and aggregated
+   * server-side (promptCount, brandMentions/citations, avg visibility/position/sentiment).
+   *
+   * Brand-scoped via the brand's Semrush **sub-workspace** (like {@link listTopicPrompts}).
+   * Region (optional) resolves to a `CBF_project`; absent → all of the brand's markets.
+   * Returns the full topic list (`{ topics, totalCount }`); the table paginates client-side.
+   *
+   * Query params (all optional): `model`/`platform` (default search-gpt), `region`,
+   * `startDate`/`endDate` (YYYY-MM-DD).
+   */
+  /* c8 ignore start -- LLMO-6418 POC endpoint; unit tests intentionally deferred */
+  const listTopics = async (ctx) => {
+    try {
+      const auth = await authorizeBrandSubWorkspace(ctx, log);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { brandId } = ctx?.params ?? {};
+      const { workspaceId } = auth;
+      const query = extractQuery(ctx);
+
+      // Date range is optional; when present it must be a valid, ordered YYYY-MM-DD pair.
+      const startDate = query.startDate || query.start_date;
+      const endDate = query.endDate || query.end_date;
+      if (hasText(startDate) || hasText(endDate)) {
+        if (!isYmdDate(startDate) || !isYmdDate(endDate)) {
+          return badRequest('startDate and endDate must be valid YYYY-MM-DD dates');
+        }
+        if (startDate > endDate) {
+          return badRequest('startDate must not be after endDate');
+        }
+      }
+
+      const service = await buildService(ctx);
+
+      // Region scoping: resolve the UI region code to its Semrush project id (Markets
+      // element) and pass it as CBF_project. region=all/absent → all markets.
+      let projectId;
+      const { region } = query;
+      if (hasText(region) && region.toLowerCase() !== 'all') {
+        const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+        const brandSemrushProjects = await fetchBrandSemrushProjects(
+          BrandSemrushProject,
+          [{ id: brandId }],
+        );
+        projectId = await service.resolveRegionProjectId(workspaceId, {
+          brandId, region, brandSemrushProjects,
+        });
+        if (!hasText(projectId)) {
+          return notFound(`No Semrush market found for region: ${region}`);
+        }
+      }
+
+      const topics = await service.getTopics(workspaceId, {
+        model: query.model || query.platform,
+        startDate: hasText(startDate) ? startDate : undefined,
+        endDate: hasText(endDate) ? endDate : undefined,
+        projectId,
+      });
+
+      return cachedOk({ topics, totalCount: topics.length });
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+  /* c8 ignore stop */
+
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics/:topicId/prompts
+   * Data Insights per-prompt drill-down for a single topic. Backed by the rich
+   * PROMPTS_BY_TOPIC element (78864493), scoped by `CBF_topic` = the topic NAME
+   * (`:topicId` is the URL-encoded topic name, not a UUID — Semrush topics have no id).
+   *
+   * Brand-scoped via the brand's Semrush **sub-workspace** (like {@link listPrompts} —
+   * projects/prompts live only there). Region (optional) resolves to a `CBF_project`
+   * via the Markets element; absent → all of the brand's markets. Pagination is
+   * client-side (Semrush has no server-side paging); `totalCount` is the full count.
+   *
+   * Query params (all optional): `model`/`platform` (default search-gpt), `region`,
+   * `startDate`/`endDate` (YYYY-MM-DD), `page` (0-based), `pageSize` (1..1000, default 50).
+   */
+  /* c8 ignore start -- LLMO-6418 POC endpoint; unit tests intentionally deferred */
+  const listTopicPrompts = async (ctx) => {
+    try {
+      const auth = await authorizeBrandSubWorkspace(ctx, log);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { brandId, topicId } = ctx?.params ?? {};
+      const { workspaceId } = auth;
+
+      // :topicId is the URL-encoded topic NAME. enrichPathInfo already decodes path
+      // params, but decode defensively in case a caller double-encodes.
+      let topic = topicId;
+      try {
+        topic = decodeURIComponent(topicId);
+      } catch { /* keep raw when not a valid encoding */ }
+      if (!hasText(topic)) {
+        return badRequest('topicId (topic name) is required');
+      }
+
+      const query = extractQuery(ctx);
+
+      // Date range is optional here (unlike the aggregate endpoints); when present it
+      // must be a valid, ordered YYYY-MM-DD pair — never forward a malformed date.
+      const startDate = query.startDate || query.start_date;
+      const endDate = query.endDate || query.end_date;
+      if (hasText(startDate) || hasText(endDate)) {
+        if (!isYmdDate(startDate) || !isYmdDate(endDate)) {
+          return badRequest('startDate and endDate must be valid YYYY-MM-DD dates');
+        }
+        if (startDate > endDate) {
+          return badRequest('startDate must not be after endDate');
+        }
+      }
+
+      const service = await buildService(ctx);
+
+      // Region scoping: resolve the UI region code to its Semrush project id (via the
+      // Markets element) and pass it as CBF_project. region=all/absent → all markets.
+      let projectId;
+      const { region } = query;
+      if (hasText(region) && region.toLowerCase() !== 'all') {
+        const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+        const brandSemrushProjects = await fetchBrandSemrushProjects(
+          BrandSemrushProject,
+          [{ id: brandId }],
+        );
+        projectId = await service.resolveRegionProjectId(workspaceId, {
+          brandId, region, brandSemrushProjects,
+        });
+        if (!hasText(projectId)) {
+          return notFound(`No Semrush market found for region: ${region}`);
+        }
+      }
+
+      const allPrompts = await service.getTopicPrompts(workspaceId, {
+        topic,
+        model: query.model || query.platform,
+        startDate: hasText(startDate) ? startDate : undefined,
+        endDate: hasText(endDate) ? endDate : undefined,
+        projectId,
+      });
+
+      // Client-side pagination (mirrors listOwnedUrls); totalCount is the full count.
+      const page = Math.max(0, Number.parseInt(query.page, 10) || 0);
+      const pageSize = Math.min(Math.max(1, Number.parseInt(query.pageSize, 10) || 50), 1000);
+      const totalCount = allPrompts.length;
+      const offset = page * pageSize;
+      const prompts = allPrompts.slice(offset, offset + pageSize);
+
+      return cachedOk({
+        topicId: topic, prompts, totalCount, page, pageSize,
+      });
     } catch (e) {
       return mapError(e, log);
     }
@@ -1087,15 +1327,153 @@ export default function ElementsController(context, log, env) {
     }
   };
 
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence
+   *     /url-inspector/stats
+   * 3 of the 4 URL Inspector stats KPI cards (totalPromptsCited, uniqueUrls,
+   * totalCitations) plus a per-week sparkline breakdown, matching the response
+   * shape of the Aurora/Postgres reference endpoint
+   * (docs/llmo-brandalf-apis/url-inspector-stats-api.md) minus its
+   * `totalPrompts` field. The 4th card (`totalPrompts`) is served by
+   * {@link getUrlInspectorPromptsCount} on its own endpoint — split out
+   * because this endpoint's per-project Stats-per-URL fan-out (up to 8 weeks x
+   * N projects) is what was timing out, while `totalPrompts` is a single,
+   * unscoped Semrush call that always completes fast; bundling it here just
+   * made it wait on the slow cards. Known approximation gap:
+   * `totalPromptsCited` sums a per-URL count (Semrush exposes no distinct
+   * prompts-cited element, so a prompt citing multiple owned URLs is
+   * overcounted).
+   */
+  const getUrlInspectorStats = async (ctx) => {
+    try {
+      const scope = await resolveUrlInspectorScope(ctx);
+      if (scope.error) {
+        return scope.error;
+      }
+      const {
+        workspaceId, query, service, projects,
+      } = scope;
+
+      // Date range is optional (defaults to a 28-day trailing window) — matches
+      // every other *stats* endpoint (getStats, both Aurora stats endpoints),
+      // not the required-date convention of the table endpoints
+      // (listCitedDomains/listOwnedUrls/listDomainUrls) this file's other
+      // url-inspector routes use.
+      let startDate = query.startDate || query.start_date;
+      let endDate = query.endDate || query.end_date;
+      if (hasText(startDate) && !isYmdDate(startDate)) {
+        return badRequest('startDate must be a valid YYYY-MM-DD date');
+      }
+      if (hasText(endDate) && !isYmdDate(endDate)) {
+        return badRequest('endDate must be a valid YYYY-MM-DD date');
+      }
+      if (hasText(startDate) && hasText(endDate) && startDate > endDate) {
+        return badRequest('startDate must not be after endDate');
+      }
+      // Default each side independently — a caller supplying only one of the
+      // two (e.g. startDate with no endDate) must not have their explicit
+      // value silently discarded by overwriting both with the default range.
+      if (!hasText(startDate) || !hasText(endDate)) {
+        const defaultRange = defaultStatsDateRange();
+        if (!hasText(startDate)) {
+          startDate = defaultRange.startDate;
+        }
+        if (!hasText(endDate)) {
+          endDate = defaultRange.endDate;
+        }
+      }
+      // Bound the span at 56 days (8 weeks) — matches getStats (brand-presence).
+      // `weeklyTrends` may cover a NARROWER window than this on a multi-project
+      // aggregate view (its per-week cap adapts to project count so the
+      // service's fan-out fits one gateway-safe round-trip — see
+      // getUrlInspectorStats in elements-service.js); `stats` always covers the
+      // full requested range regardless.
+      const MAX_RANGE_DAYS = 56;
+      const spanDays = (Date.parse(`${endDate}T00:00:00Z`)
+        - Date.parse(`${startDate}T00:00:00Z`)) / 86400000;
+      if (spanDays > MAX_RANGE_DAYS) {
+        return badRequest(`Date range must not exceed ${MAX_RANGE_DAYS} days`);
+      }
+
+      const result = await service.getUrlInspectorStats(workspaceId, {
+        projects,
+        model: query.model,
+        platform: query.platform,
+        startDate,
+        endDate,
+        category: query.categoryId || query.category,
+      });
+
+      return cachedOk(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence
+   *     /url-inspector/prompts/count
+   * The 4th URL Inspector stats KPI card (`totalPrompts`), split out of
+   * `/url-inspector/stats` (see that handler's docstring for why) — a single
+   * Semrush PROMPTS element call, scoped to the brand's project(s) the same
+   * way `getUrlInspectorStats` scopes Stats-per-URL. No date range: the
+   * PROMPTS element has no date filter, so there is nothing to default/cap and
+   * no weekly breakdown to return.
+   *
+   * **Known, PERMANENT limitation: no weekly trend for `totalPrompts`.** The
+   * Aurora/Postgres reference endpoint
+   * (`docs/llmo-brandalf-apis/url-inspector-stats-api.md`) returns
+   * `totalPrompts` WITH a per-week trend, via `rpc_url_inspector_total_prompts`
+   * — a time-windowed count of distinct active prompts that ran each week.
+   * The Semrush PROMPTS element has no equivalent: it is a static, currently-
+   * configured-prompt roster (filterable by model/tag/project, but not by
+   * date), not an execution log, so there is no upstream data to bucket by
+   * week. This is not a gap to close later with more work — it's a ceiling of
+   * the Semrush data model. (An earlier version tried to route around this by
+   * repeating the all-time total in every `weeklyTrends` entry; that was
+   * flagged in review as misleading — a caller would read
+   * `weeklyTrends[i].totalPrompts` as "prompts that week" — so it was split
+   * into this dedicated, trend-less endpoint instead of fabricating a
+   * per-week series.) The consuming UI (project-elmo-ui#2479) renders this
+   * KPI card as a static number with no sparkline, unlike its 3 siblings.
+   */
+  const getUrlInspectorPromptsCount = async (ctx) => {
+    try {
+      const scope = await resolveUrlInspectorScope(ctx);
+      if (scope.error) {
+        return scope.error;
+      }
+      const {
+        workspaceId, query, service, projectIds,
+      } = scope;
+
+      const category = query.categoryId || query.category;
+      const { count: totalPrompts } = await service.getPrompts(workspaceId, {
+        model: query.model,
+        platform: query.platform,
+        tags: category ? [`category__${category}`] : [],
+        projectIds,
+      });
+
+      return cachedOk({ totalPrompts });
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
   return {
     listUrlInspectorFilterDimensions,
     listWeeks,
     listPrompts,
     listCitedDomains,
     listSentimentOverview,
+    listTopics,
+    listTopicPrompts,
     listOwnedUrls,
     listDomainUrls,
     getMarketTrackingTrends,
     getStats,
+    getUrlInspectorStats,
+    getUrlInspectorPromptsCount,
   };
 }

@@ -1,3 +1,121 @@
+## [1.686.1](https://github.com/adobe/spacecat-api-service/compare/v1.686.0...v1.686.1) (2026-07-23)
+
+
+### Bug Fixes
+
+* **serenity:** thread dynamic-allocation flag + ceiling into brand onboarding (LLMO-6190) ([#2893](https://github.com/adobe/spacecat-api-service/issues/2893)) ([a64248b](https://github.com/adobe/spacecat-api-service/commit/a64248b714a6df7c37fb9c6e4a63c779c38421cd))
+
+# [1.686.0](https://github.com/adobe/spacecat-api-service/compare/v1.685.0...v1.686.0) (2026-07-23)
+
+
+### Features
+
+* **serenity:** make the per-brand AI ceiling bindable + tunable via Vault (LLMO-6190 gate) ([#2891](https://github.com/adobe/spacecat-api-service/issues/2891)) ([1dce3b7](https://github.com/adobe/spacecat-api-service/commit/1dce3b7a658dcbbee05433c502751d7bca80c617))
+
+# [1.685.0](https://github.com/adobe/spacecat-api-service/compare/v1.684.0...v1.685.0) (2026-07-23)
+
+
+### Features
+
+* **serenity:** server-compute intent:<Value> on every prompt write path ([#2785](https://github.com/adobe/spacecat-api-service/issues/2785)) ([f405425](https://github.com/adobe/spacecat-api-service/commit/f4054254cb40b0adf725f416b1b4618ff4b09e41)), closes [#2772](https://github.com/adobe/spacecat-api-service/issues/2772) [serenity-docs#31](https://github.com/serenity-docs/issues/31) [serenity-docs#31](https://github.com/serenity-docs/issues/31)
+
+# [1.684.0](https://github.com/adobe/spacecat-api-service/compare/v1.683.0...v1.684.0) (2026-07-23)
+
+
+### Features
+
+* update onboarding flow to align with audit-worker config-free execution  ([#2541](https://github.com/adobe/spacecat-api-service/issues/2541)) ([b46aa32](https://github.com/adobe/spacecat-api-service/commit/b46aa32b6a804048da4709456ceea96af212bbda))
+
+# [1.683.0](https://github.com/adobe/spacecat-api-service/compare/v1.682.0...v1.683.0) (2026-07-22)
+
+
+### Features
+
+* **run-global-import:** scope a global import to a single site, with an optional --force ([#2860](https://github.com/adobe/spacecat-api-service/issues/2860)) ([0390aa5](https://github.com/adobe/spacecat-api-service/commit/0390aa5b8a3519a4a2f4ef21ad1e97590ee5bf0c)), closes [#813](https://github.com/adobe/spacecat-api-service/issues/813)
+
+# [1.682.0](https://github.com/adobe/spacecat-api-service/compare/v1.681.0...v1.682.0) (2026-07-22)
+
+
+### Features
+
+* **audit-policy:** spacecat-api-service contract — policy CRUD + 501 scope stubs (SITES-47306) ([#2723](https://github.com/adobe/spacecat-api-service/issues/2723)) ([16370c1](https://github.com/adobe/spacecat-api-service/commit/16370c111f04c7f68ceb3a186a6f6fcad2298e36)), closes [#204](https://github.com/adobe/spacecat-api-service/issues/204) [Hi#level](https://github.com/Hi/issues/level) [#184](https://github.com/adobe/spacecat-api-service/issues/184) [#204](https://github.com/adobe/spacecat-api-service/issues/204) [#755](https://github.com/adobe/spacecat-api-service/issues/755)
+
+# [1.681.0](https://github.com/adobe/spacecat-api-service/compare/v1.680.1...v1.681.0) (2026-07-22)
+
+
+### Features
+
+* add Semrush-backed URL Inspector stats endpoint ([#2861](https://github.com/adobe/spacecat-api-service/issues/2861)) ([8448f7f](https://github.com/adobe/spacecat-api-service/commit/8448f7f1f4e2271ba8036bb76313cf57118abb5e)), closes [adobe/project-elmo-ui#2479](https://github.com/adobe/project-elmo-ui/issues/2479)
+
+## [1.680.1](https://github.com/adobe/spacecat-api-service/compare/v1.680.0...v1.680.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* **serenity:** check retryOnQuota's shared deadline before every attempt ([#2882](https://github.com/adobe/spacecat-api-service/issues/2882)) ([8fa5a7d](https://github.com/adobe/spacecat-api-service/commit/8fa5a7d8777b98748e75e52f37e648b2a3536cf5)), closes [#2874](https://github.com/adobe/spacecat-api-service/issues/2874)
+
+# [1.680.0](https://github.com/adobe/spacecat-api-service/compare/v1.679.1...v1.680.0) (2026-07-22)
+
+
+### Bug Fixes
+
+* **llmo:** 404 brand-claims when the S3 object is missing ([#2887](https://github.com/adobe/spacecat-api-service/issues/2887)) ([9004c4b](https://github.com/adobe/spacecat-api-service/commit/9004c4b7119fcf6c807ad1cbd56efbde1eb50bff))
+
+
+### Features
+
+* bind Semrush markets to SpaceCat Site entities (LLMO-6405) ([#2888](https://github.com/adobe/spacecat-api-service/issues/2888)) ([f4f891d](https://github.com/adobe/spacecat-api-service/commit/f4f891de904661bfa261330fda2f874d089bff09))
+* Serenity Data Insights topics + prompts endpoints | LLMO-6418 ([#2885](https://github.com/adobe/spacecat-api-service/issues/2885)) ([720e9f0](https://github.com/adobe/spacecat-api-service/commit/720e9f06046b08af426e4b62cea9f2a48587f660))
+
+## [1.679.1](https://github.com/adobe/spacecat-api-service/compare/v1.679.0...v1.679.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* **ci:** bump mysticat-ci pin from [@v2](https://github.com/v2) to [@v3](https://github.com/v3) ([#2865](https://github.com/adobe/spacecat-api-service/issues/2865)) ([59c47dc](https://github.com/adobe/spacecat-api-service/commit/59c47dc77cd16092bb8e1b61ff015a7819ab431b)), closes [mysticat-ci#22](https://github.com/mysticat-ci/issues/22) [mysticat-ci#22](https://github.com/mysticat-ci/issues/22) [mysticat-ci#22](https://github.com/mysticat-ci/issues/22)
+
+# [1.679.0](https://github.com/adobe/spacecat-api-service/compare/v1.678.0...v1.679.0) (2026-07-22)
+
+
+### Features
+
+* **llmo:** FACS-hybrid site authorization (hasLlmoCapabilityForSite) ([#2836](https://github.com/adobe/spacecat-api-service/issues/2836)) ([860fca5](https://github.com/adobe/spacecat-api-service/commit/860fca55d67b3b1f05ed1644db07aba72a7756a3))
+
+# [1.678.0](https://github.com/adobe/spacecat-api-service/compare/v1.677.1...v1.678.0) (2026-07-22)
+
+
+### Features
+
+* add content types in SR URL Inspector Filters response ([#2884](https://github.com/adobe/spacecat-api-service/issues/2884)) ([c89f08e](https://github.com/adobe/spacecat-api-service/commit/c89f08e74d885a9eccd21cbe6577bc5ce5320465))
+
+## [1.677.1](https://github.com/adobe/spacecat-api-service/compare/v1.677.0...v1.677.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* **llmo:** dedupe brand-presence citation counts by execution_id ([#2881](https://github.com/adobe/spacecat-api-service/issues/2881)) ([49a727f](https://github.com/adobe/spacecat-api-service/commit/49a727f618325ac669489d7ede930d8dca9ef73b))
+
+# [1.677.0](https://github.com/adobe/spacecat-api-service/compare/v1.676.0...v1.677.0) (2026-07-22)
+
+
+### Features
+
+* **serenity:** org-flag brand-create mode, sub-workspace-only pending activation, site_id anchoring (LLMO-6405) ([#2878](https://github.com/adobe/spacecat-api-service/issues/2878)) ([a9d7a4a](https://github.com/adobe/spacecat-api-service/commit/a9d7a4a829094e21759f328be8c60c6cd440175e))
+
+# [1.676.0](https://github.com/adobe/spacecat-api-service/compare/v1.675.0...v1.676.0) (2026-07-22)
+
+
+### Features
+
+* added move site slack command ([#2795](https://github.com/adobe/spacecat-api-service/issues/2795)) ([3757f01](https://github.com/adobe/spacecat-api-service/commit/3757f019896b3810df023876300a191367a675da))
+
+# [1.675.0](https://github.com/adobe/spacecat-api-service/compare/v1.674.0...v1.675.0) (2026-07-22)
+
+
+### Features
+
+* emit log.info on 200/304 branches for happy-path visibility (SITES-48140) ([#2880](https://github.com/adobe/spacecat-api-service/issues/2880)) ([271a362](https://github.com/adobe/spacecat-api-service/commit/271a36237ed5dbc88bc900bd1bf604f880946b3c)), closes [#675](https://github.com/adobe/spacecat-api-service/issues/675)
+
 # [1.674.0](https://github.com/adobe/spacecat-api-service/compare/v1.673.3...v1.674.0) (2026-07-21)
 
 

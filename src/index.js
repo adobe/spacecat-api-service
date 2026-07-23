@@ -114,6 +114,7 @@ import AiVisibilityController from './controllers/ai-visibility.js';
 import StateAccessMappingsController from './controllers/state-access-mappings.js';
 import AgenticCategoriesController from './controllers/agentic-categories.js';
 import AgenticPageTypesController from './controllers/agentic-page-types.js';
+import AuditPolicyController from './controllers/audit-policy.js';
 import SerenityController from './controllers/serenity.js';
 import ElementsController from './controllers/elements.js';
 import ProxyController from './controllers/proxy.js';
@@ -294,6 +295,7 @@ async function run(request, context) {
     const stateAccessMappingsController = StateAccessMappingsController(context);
     const agenticCategoriesController = AgenticCategoriesController();
     const agenticPageTypesController = AgenticPageTypesController();
+    const auditPolicyController = AuditPolicyController();
     const serenityController = SerenityController(context, log, context.env);
     const elementsController = ElementsController(context, log, context.env);
     const proxyController = ProxyController();
@@ -365,6 +367,7 @@ async function run(request, context) {
       proxyController,
       taskManagementController,
       redirectsController,
+      auditPolicyController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
