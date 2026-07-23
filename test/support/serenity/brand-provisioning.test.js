@@ -271,6 +271,22 @@ describe('provisionBrandSubworkspace', () => {
     expect(options.publishMode).to.equal('best-effort');
   });
 
+  it('leaves the initial market a DRAFT (publishMode "skip") when SERENITY_DEFER_PUBLISH is on (LLMO-5492)', async () => {
+    const { provisionBrandSubworkspace } = await loadModule({
+      resolveWorkspaceId, handleCreateMarketSubworkspace,
+    });
+    const context = buildContext();
+    context.env.SERENITY_DEFER_PUBLISH = 'true';
+    // modelIds + generateTopics would normally force publishMode 'require'; the
+    // defer-publish flag overrides it so the create path leaves a draft for finalize.
+    await provisionBrandSubworkspace(context, {
+      ...baseParams, modelIds: ['m1'], generateTopics: true,
+    });
+    const { args } = handleCreateMarketSubworkspace.firstCall;
+    const [, , , , , , , options] = args;
+    expect(options.publishMode).to.equal('skip');
+  });
+
   it('forwards brandAliases to the handler for branded prompt classification', async () => {
     const { provisionBrandSubworkspace } = await loadModule({
       resolveWorkspaceId, handleCreateMarketSubworkspace,

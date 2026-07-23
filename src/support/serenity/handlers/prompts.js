@@ -637,12 +637,18 @@ export async function mapLimit(items, limit, mapper) {
  * POST /serenity/prompts — bulk create.
  * Each input must carry `(geoTargetId, languageCode, text, tagIds)`. Inputs
  * are grouped by slice; the matching BrandSemrushProject row resolves the
- * upstream project; publish runs once per affected project at the end —
- * unless `body.deferPublish` is true (serenity-docs#32 CSV-chunking), in
- * which case the create is a draft-only write and the caller is responsible
- * for triggering a publish itself (e.g. a normal, non-deferred call on the
- * last chunk of an import, which publishes every project touched across the
- * whole import since a single CSV import always targets one project).
+ * upstream project; publish runs once per affected project at the end.
+ *
+ * Two independent switches suppress that end-of-call publish:
+ *   - `body.deferPublish` (serenity-docs#32 CSV-chunking): a draft-only write;
+ *     the caller triggers publish itself (e.g. a normal, non-deferred call on the
+ *     last chunk of an import, which publishes every project touched across the
+ *     whole import since a single CSV import always targets one project).
+ *   - the `publish` option (default true — the standalone-endpoint contract):
+ *     set it false when the caller batches its own publish afterwards
+ *     (LLMO-5492 publish-after-populate: finalize pushes prompts + models and
+ *     publishes each project once) — an intermediate publish would either go
+ *     live half-populated or, on a model-less draft, throw.
  */
 export async function handleCreatePrompts(
   transport,
@@ -654,6 +660,7 @@ export async function handleCreatePrompts(
   classifyPromptType,
   env,
   writeDeadline,
+  { publish = true } = {},
 ) {
   const inputs = Array.isArray(body?.prompts) ? body.prompts : [];
   if (inputs.length === 0) {
@@ -783,6 +790,8 @@ export async function handleCreatePrompts(
     invalidateTagCacheForProject(semrushWorkspaceId, pid);
   }
 
+  // body.deferPublish (CSV-chunking) — draft-only write, publish deferred to a
+  // later non-deferred call; return early flagged not-published.
   if (deferPublish) {
     log?.info?.('serenity create-prompts: deferPublish set — prompts written as draft, publish skipped', {
       brandId, created: created.length, skipped: skipped.length, failed: failed.length,
@@ -792,20 +801,24 @@ export async function handleCreatePrompts(
     };
   }
 
-  const publishErrors = await publishAffected(
-    transport,
-    semrushWorkspaceId,
-    affectedProjectIds,
-    log,
-  );
-  // publishAffected returns already-redacted { projectId, message } records;
-  // pubErr is a record, not a raw error, so pubErr.message is safe to surface.
-  for (const pubErr of publishErrors) {
-    failed.push({
-      text: '',
-      status: 502,
-      message: `publish: ${pubErr.message}`,
-    });
+  // publish:false — the caller (finalize) batches a single publish after models
+  // are also set, so skip the per-create publish here.
+  if (publish) {
+    const publishErrors = await publishAffected(
+      transport,
+      semrushWorkspaceId,
+      affectedProjectIds,
+      log,
+    );
+    // publishAffected returns already-redacted { projectId, message } records;
+    // pubErr is a record, not a raw error, so pubErr.message is safe to surface.
+    for (const pubErr of publishErrors) {
+      failed.push({
+        text: '',
+        status: 502,
+        message: `publish: ${pubErr.message}`,
+      });
+    }
   }
 
   return {

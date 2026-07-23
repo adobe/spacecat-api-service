@@ -1442,6 +1442,37 @@ describe('handlers/markets.js — handleUpdateModels', () => {
     expect(result.items[0].id).to.equal('cat-gpt');
   });
 
+  // LLMO-5492 — deferred publish: with { publish: false } the model-set diff is
+  // still applied upstream, but publishProject is NOT called, so finalize can
+  // batch a single populate-then-publish across prompts + models.
+  it('applies the model diff but does NOT publish when { publish: false }', async () => {
+    const project = makeProject({ semrushProjectId: 'proj-1', geoTargetId: 2840, languageCode: 'en' });
+    const da = makeDataAccess([]);
+    da.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = makeTransport({ currentItems: [] });
+    transport.listAiModels.onSecondCall().resolves({
+      items: [{
+        id: 'assign-1',
+        model: {
+          id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null,
+        },
+      }],
+    });
+
+    await handleUpdateModels(
+      transport,
+      da,
+      BRAND,
+      WORKSPACE,
+      { geoTargetId: 2840, languageCode: 'en', modelIds: ['cat-gpt'] },
+      fakeLog(),
+      { publish: false },
+    );
+
+    expect(transport.addAiModel).to.have.been.calledOnceWith(WORKSPACE, 'proj-1', 'cat-gpt');
+    expect(transport.publishProject).to.not.have.been.called;
+  });
+
   it('removes models absent from the desired set', async () => {
     const project = makeProject({ semrushProjectId: 'proj-1', geoTargetId: 2840, languageCode: 'en' });
     const da = makeDataAccess([]);

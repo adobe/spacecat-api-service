@@ -590,6 +590,35 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     expect(transport.publishProject).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en');
   });
 
+  // LLMO-5492 — deferred publish: with { publish: false } the prompt is still
+  // created upstream but the project is NOT published, so the finalize step can
+  // batch a single populate-then-publish. Positional args after body/log:
+  // classifyPromptType (7th), env (8th), writeDeadline (9th, both undefined
+  // here), then the options object as the 10th.
+  it('creates the prompt but does NOT publish when { publish: false }', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      createPromptsByIds: sinon.stub().resolves({
+        page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'hello' }], existing_count: 0,
+      }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: 'hello', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-cat-1'],
+      }],
+    }, fakeLog(), undefined, undefined, undefined, { publish: false });
+
+    expect(result.created).to.have.lengthOf(1);
+    expect(transport.createPromptsByIds).to.have.been.calledOnce;
+    expect(transport.publishProject).to.not.have.been.called;
+  });
+
   // A name cannot identify a nested tag: the name-keyed upstream write is
   // root-only, so an unknown name would mint a phantom ROOT tag rather than
   // attach the category the caller meant. A `tags` key is therefore rejected

@@ -1200,6 +1200,12 @@ export async function syncModelsForProject(
  * internally for the DELETE batch and are never exposed to callers.
  *
  * Returns the final model list in the same shape as `handleListModels`.
+ *
+ * `publish` (default true — the standalone-endpoint contract) commits the
+ * model-set change to the live project. Set it false when the caller batches
+ * its own publish afterwards (LLMO-5492 publish-after-populate: finalize sets
+ * models with publish deferred, then publishes each project once) — the inner
+ * publish is forwarded to {@link syncModelsForProject}.
  */
 export async function handleUpdateModels(
   transport,
@@ -1208,6 +1214,7 @@ export async function handleUpdateModels(
   semrushWorkspaceId,
   body,
   log,
+  { publish = true } = {},
 ) {
   const geoTargetId = normalizeGeoTargetId(Number(body?.geoTargetId));
   const languageCode = normalizeLanguageCode(body?.languageCode);
@@ -1246,5 +1253,6 @@ export async function handleUpdateModels(
     modelIds,
     { brandId, geoTargetId, languageCode },
     log,
+    { publish },
   );
 }
