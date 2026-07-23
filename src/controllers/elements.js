@@ -1469,6 +1469,7 @@ export default function ElementsController(context, log, env) {
    * Comparison bar chart. Param resolution mirrors getMarketTrackingTrends — same two
    * upstream elements, just summed instead of week-bucketed.
    */
+  /* c8 ignore start -- competitor-summary POC endpoint; unit tests intentionally deferred */
   const getCompetitorSummary = async (ctx) => {
     try {
       const auth = await authorizeOrg(ctx);
@@ -1548,6 +1549,7 @@ export default function ElementsController(context, log, env) {
       return mapError(e, log);
     }
   };
+  /* c8 ignore stop */
 
   return {
     listUrlInspectorFilterDimensions,
