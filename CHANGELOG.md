@@ -1,3 +1,10 @@
+# [1.688.0](https://github.com/adobe/spacecat-api-service/compare/v1.687.0...v1.688.0) (2026-07-23)
+
+
+### Features
+
+* **configuration:** add GET /configurations/versions endpoint ([#2892](https://github.com/adobe/spacecat-api-service/issues/2892)) ([62cdb32](https://github.com/adobe/spacecat-api-service/commit/62cdb321502f02d68075ebd20230aa8112cbfa3b)), closes [adobe/spacecat-shared#1839](https://github.com/adobe/spacecat-shared/issues/1839)
+
 # [1.687.0](https://github.com/adobe/spacecat-api-service/compare/v1.686.1...v1.687.0) (2026-07-23)
 
 
