@@ -48,6 +48,7 @@ import {
   buildMarketMentionsTrendPayload,
   buildMarketCitationsTrendPayload,
   transformMarketTrackingTrends,
+  transformCompetitorSummary,
   buildStatsTotalExecutionsPayload,
   transformStatsTotalExecutionsResponse,
   buildStatsMentionsPayload,
@@ -534,6 +535,51 @@ export function createElementsService(transport, log) {
         ),
       ]);
       return { weeklyTrends: transformMarketTrackingTrends(mentions, citations, brandName) };
+    },
+    /* c8 ignore stop */
+
+    /**
+     * Fetches aggregate per-competitor mentions/citations totals (no weekly breakdown)
+     * for the Overview Competitor Comparison bar chart
+     * (`GET .../brand-presence/competitor-summary`) — the lightweight counterpart to
+     * {@link getMarketTrackingTrends}, reusing the exact same two elements (TRENDS_MV +
+     * MARKET_CITATIONS_TREND) but summed into one row per competitor instead of a
+     * weekly series.
+     *
+     * `projectId` (a single selected region) takes precedence over `projectIds` (the
+     * aggregate "all regions" view). Both are OR-ed into one call per element.
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params
+     * @param {string} [params.model] / [params.platform] - AI model filter.
+     * @param {string} params.startDate / params.endDate - YYYY-MM-DD.
+     * @param {string} [params.projectId] - Single Semrush project UUID (one region).
+     * @param {string[]} [params.projectIds] - All the brand's project UUIDs (aggregate).
+     * @param {string} params.brandName - Tracked brand display name (excluded from the result).
+     * @returns {Promise<{competitors: Array<{name: string, mentions: number, citations: number}>}>}
+     */
+    /* c8 ignore start -- competitor-summary POC endpoint; unit tests intentionally deferred */
+    async getCompetitorSummary(workspaceId, {
+      model, platform, startDate, endDate, projectId, projectIds, brandName,
+    }) {
+      const resolvedProjectIds = projectId ? [projectId] : (projectIds ?? []);
+      const [mentions, citations] = await Promise.all([
+        transport.fetchElement(
+          workspaceId,
+          ELEMENT_IDS.TRENDS_MV,
+          buildMarketMentionsTrendPayload({
+            model, platform, startDate, endDate, projectIds: resolvedProjectIds,
+          }),
+        ),
+        transport.fetchElement(
+          workspaceId,
+          ELEMENT_IDS.MARKET_CITATIONS_TREND,
+          buildMarketCitationsTrendPayload({
+            model, platform, startDate, endDate, projectIds: resolvedProjectIds,
+          }),
+        ),
+      ]);
+      return transformCompetitorSummary(mentions, citations, brandName);
     },
     /* c8 ignore stop */
 

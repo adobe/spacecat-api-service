@@ -180,6 +180,8 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-url-inspector-filter-dimensions'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/market-tracking-trends:
     $ref: './serenity-api.yaml#/v2-serenity-market-tracking-trends'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/competitor-summary:
+    $ref: './serenity-api.yaml#/v2-serenity-competitor-summary'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/sentiment-overview:
     $ref: './serenity-api.yaml#/v2-serenity-brand-presence-sentiment-overview'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/topics:
