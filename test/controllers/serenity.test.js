@@ -1438,6 +1438,9 @@ describe('SerenityController', () => {
           dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
           // Dynamic-allocation kill-switch defaults OFF (env unset) — the guard is a no-op.
           dynamicAllocation: false,
+          // Per-brand AI ceiling (LLMO-6190 gate): undefined when no ceiling env is set — the
+          // guard keeps its non-binding default.
+          ceiling: undefined,
         });
       // The org parent (JIT units pool) is threaded POSITIONALLY (arg index 2), not in the
       // options bag — the same id given to ensureSubworkspace.
@@ -1614,6 +1617,39 @@ describe('SerenityController', () => {
       expect(response.status).to.equal(200);
       expect(handlers.handleCreatePromptsSubworkspace).to.have.been.calledOnce;
       expect(handlers.handleCreatePrompts).to.not.have.been.called;
+    });
+
+    it('createPrompts threads the per-brand AI ceiling (LLMO-6190 gate) from env into the subworkspace handler options', async () => {
+      handlers.handleCreatePromptsSubworkspace.resolves({ created: [], skipped: [], failed: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      await controller.createPrompts(fakeContext({
+        data: { prompts: [] },
+        env: { SERENITY_BRAND_AI_CEILING_PROMPTS: '5000' },
+      }));
+      // options bag is the 8th positional arg (transport, workspaceId, data, log,
+      // classifyPromptType, env, writeDeadline, options).
+      const opts = handlers.handleCreatePromptsSubworkspace.firstCall.args[7];
+      expect(opts.ceiling).to.deep.equal({ prompts: 5000 });
+    });
+
+    it('createPrompts leaves ceiling undefined when no ceiling env is set (byte-for-byte non-binding default)', async () => {
+      handlers.handleCreatePromptsSubworkspace.resolves({ created: [], skipped: [], failed: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      await controller.createPrompts(fakeContext({ data: { prompts: [] } }));
+      const opts = handlers.handleCreatePromptsSubworkspace.firstCall.args[7];
+      expect(opts.ceiling).to.equal(undefined);
+    });
+
+    it('createPrompts FAIL-SAFE: a malformed ceiling env leaves ceiling undefined (never throws)', async () => {
+      handlers.handleCreatePromptsSubworkspace.resolves({ created: [], skipped: [], failed: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createPrompts(fakeContext({
+        data: { prompts: [] },
+        env: { SERENITY_BRAND_AI_CEILING_PROMPTS: 'not-a-number' },
+      }));
+      expect(response.status).to.equal(200);
+      const opts = handlers.handleCreatePromptsSubworkspace.firstCall.args[7];
+      expect(opts.ceiling).to.equal(undefined);
     });
 
     it('updatePrompt routes to the subworkspace handler in subworkspace mode', async () => {
@@ -2131,6 +2167,8 @@ describe('SerenityController', () => {
         env: {},
         dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
         dynamicAllocation: false,
+        // Per-brand AI ceiling (LLMO-6190 gate): undefined when no ceiling env is set.
+        ceiling: undefined,
       };
       const { firstCall, secondCall } = handlers.handleCreateMarketSubworkspace;
       // writeDeadline is computed ONCE at activate entry, so every market in the

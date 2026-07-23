@@ -40,6 +40,8 @@ import { redactUpstreamMessage } from '../rest-transport.js';
 import { createHeadroomGuard } from '../dynamic-allocation-active.js';
 import { classifyPromptIntents } from '../intent-classification.js';
 
+/** @typedef {import('../resource-manager.js').Blocks} Blocks */
+
 /**
  * Subworkspace-mode prompt handlers (serenity dual-mode, subworkspace path). Behaviourally
  * identical to the flat-mode prompt handlers EXCEPT for how a `(geoTargetId,
@@ -132,7 +134,11 @@ export async function handleCreatePromptsSubworkspace(
   classifyPromptType,
   env,
   writeDeadline,
-  { dynamicAllocation = false, parentWorkspaceId = '' } = {},
+  {
+    dynamicAllocation = false,
+    parentWorkspaceId = '',
+    ceiling = /** @type {Partial<Blocks> | undefined} */ (undefined),
+  } = {},
 ) {
   const inputs = Array.isArray(body?.prompts) ? body.prompts : [];
   if (inputs.length === 0) {
@@ -184,7 +190,9 @@ export async function handleCreatePromptsSubworkspace(
   // under). No-op when the flag is OFF.
   const headroom = createHeadroomGuard(
     transport,
-    { enabled: dynamicAllocation, subWorkspaceId: workspaceId, parentWorkspaceId },
+    {
+      enabled: dynamicAllocation, subWorkspaceId: workspaceId, parentWorkspaceId, ceiling,
+    },
     log,
   );
   await headroom.ensure({ prompts: inputs.length }, { includeDrafted: true });
