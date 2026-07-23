@@ -1,3 +1,10 @@
+## [1.688.1](https://github.com/adobe/spacecat-api-service/compare/v1.688.0...v1.688.1) (2026-07-23)
+
+
+### Bug Fixes
+
+* **serenity:** wrap delete-market releaseAiSurplus in withResourceLock ([#2897](https://github.com/adobe/spacecat-api-service/issues/2897)) ([969b351](https://github.com/adobe/spacecat-api-service/commit/969b3519de24e18f4b74a0a1883fc59e26a76e59))
+
 # [1.688.0](https://github.com/adobe/spacecat-api-service/compare/v1.687.0...v1.688.0) (2026-07-23)
 
 
