@@ -240,11 +240,21 @@ configuration-versions:
           application/json:
             schema:
               type: object
+              required:
+                - versions
+                - isTruncated
+                - nextKeyMarker
+                - nextVersionIdMarker
               properties:
                 versions:
                   type: array
                   items:
                     type: object
+                    required:
+                      - versionId
+                      - lastModified
+                      - isLatest
+                      - size
                     properties:
                       versionId:
                         type: string

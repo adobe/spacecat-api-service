@@ -378,16 +378,15 @@ describe('Configurations Controller', () => {
       expect(mockDataAccess.Configuration.listVersions).to.not.have.been.called;
     });
 
-    it('defaults to detail=true and no limit/markers when no query params', async () => {
+    it('defaults to limit=25 and detail=true, omitting absent markers, when no query params', async () => {
       await configurationsController.listVersions(reqCtx());
 
-      expect(mockDataAccess.Configuration.listVersions).to.have.been.calledWithMatch({
-        detail: true,
-        keyMarker: undefined,
-        versionIdMarker: undefined,
-      });
+      expect(mockDataAccess.Configuration.listVersions)
+        .to.have.been.calledWithMatch({ limit: 25, detail: true });
+      // Absent markers must be omitted entirely, not passed as explicit undefined.
       const arg = mockDataAccess.Configuration.listVersions.firstCall.args[0];
-      expect(arg).to.not.have.property('limit');
+      expect(arg).to.not.have.property('keyMarker');
+      expect(arg).to.not.have.property('versionIdMarker');
     });
 
     it('passes limit, markers and detail=false from the query string', async () => {
@@ -414,17 +413,38 @@ describe('Configurations Controller', () => {
       expect(mockDataAccess.Configuration.listVersions).to.have.been.calledWithMatch({ limit: 1 });
     });
 
-    it('ignores a non-numeric limit (falls back to collection default)', async () => {
+    it('falls back to the documented default (25) on a non-numeric limit', async () => {
       await configurationsController.listVersions(reqCtx('?limit=abc'));
-      const arg = mockDataAccess.Configuration.listVersions.firstCall.args[0];
-      expect(arg).to.not.have.property('limit');
+      expect(mockDataAccess.Configuration.listVersions).to.have.been.calledWithMatch({ limit: 25 });
+    });
+
+    it('rejects an over-long pagination marker with 400', async () => {
+      const huge = 'x'.repeat(1025);
+      const result = await configurationsController.listVersions(reqCtx(`?keyMarker=${huge}`));
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error.message).to.match(/exceeds maximum length/);
+      expect(mockDataAccess.Configuration.listVersions).to.not.have.been.called;
     });
 
     it('falls back to defaults when context.request is missing', async () => {
       const result = await configurationsController.listVersions({});
       expect(result.status).to.equal(200);
       expect(mockDataAccess.Configuration.listVersions)
-        .to.have.been.calledWithMatch({ detail: true });
+        .to.have.been.calledWithMatch({ limit: 25, detail: true });
+    });
+
+    it('falls back to defaults when context.request.url is malformed', async () => {
+      const result = await configurationsController.listVersions({ request: { url: 'not-a-valid-url' } });
+      expect(result.status).to.equal(200);
+      expect(mockDataAccess.Configuration.listVersions)
+        .to.have.been.calledWithMatch({ limit: 25, detail: true });
+    });
+
+    it('propagates a data-access failure (surfaced as 500 by the wrapper)', async () => {
+      mockDataAccess.Configuration.listVersions.rejects(new Error('S3 down'));
+      await expect(configurationsController.listVersions(reqCtx())).to.be.rejectedWith('S3 down');
     });
   });
 

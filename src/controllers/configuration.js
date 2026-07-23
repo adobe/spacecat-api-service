@@ -182,20 +182,31 @@ function ConfigurationController(ctx) {
 
     const rawLimit = searchParams.get('limit');
     const parsedLimit = Number.parseInt(rawLimit, 10);
-    // Clamp to [1, 100]; fall back to the collection default when unparseable.
+    // Default 25 (matches the OpenAPI contract), clamped to [1, 100].
     const limit = Number.isInteger(parsedLimit)
       ? Math.min(Math.max(parsedLimit, 1), 100)
-      : undefined;
+      : 25;
 
     const keyMarker = searchParams.get('keyMarker') || undefined;
     const versionIdMarker = searchParams.get('versionIdMarker') || undefined;
+
+    // Defense-in-depth: reject absurdly long pagination markers (endpoint is
+    // admin-gated, but the markers are opaque pass-throughs to S3).
+    const MAX_MARKER_LENGTH = 1024;
+    if ((keyMarker && keyMarker.length > MAX_MARKER_LENGTH)
+      || (versionIdMarker && versionIdMarker.length > MAX_MARKER_LENGTH)) {
+      return badRequest('keyMarker/versionIdMarker exceeds maximum length');
+    }
+
     // Enrichment (updatedBy/updatedAt) is on by default; opt out with detail=false.
     const detail = searchParams.get('detail') !== 'false';
 
+    // Conditional spread so we never hand an explicit `undefined` marker key to
+    // the data-access layer (keeps parity with a possible `'key' in opts` check).
     const page = await Configuration.listVersions({
-      ...(limit !== undefined ? { limit } : {}),
-      keyMarker,
-      versionIdMarker,
+      limit,
+      ...(keyMarker !== undefined ? { keyMarker } : {}),
+      ...(versionIdMarker !== undefined ? { versionIdMarker } : {}),
       detail,
     });
 
