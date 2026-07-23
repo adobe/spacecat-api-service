@@ -329,6 +329,7 @@ function TrafficController(context, log, env) {
 
     const parsedTemporalCondition = parseTemporalCondition(decodedTemporalCondition);
     if (!parsedTemporalCondition) {
+      log.info(`Rejected request with invalid temporalCondition | siteId: ${siteId} | reason: failed strict parse/shape validation | requestId: ${requestId}`);
       return badRequest('Invalid temporal condition');
     }
 
