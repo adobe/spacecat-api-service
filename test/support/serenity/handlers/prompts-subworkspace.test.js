@@ -22,6 +22,7 @@ import {
   handleBulkDeletePromptsSubworkspace,
 } from '../../../../src/support/serenity/handlers/prompts-subworkspace.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
+import { ErrorWithStatusCode } from '../../../../src/support/utils.js';
 import { TAG_IDS, makeListProjectTagsStub } from '../fixtures/tag-tree.js';
 
 use(chaiAsPromised);
@@ -155,9 +156,34 @@ describe('prompts-subworkspace handlers', () => {
       expect(result.created).to.have.length(1);
       expect(result.created[0]).to.include({ semrushPromptId: 'new-prompt', geoTargetId: 2840 });
       // A create is a user-authenticated write: the derived `origin` (`human`) is
-      // stamped alongside the caller's tags (origin-dimension.md §3).
-      expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'p-us-en', ['p'], ['tag-1', TAG_IDS.originHuman]);
+      // stamped (origin-dimension.md §3) and intent defaults to Informational (Azure
+      // unconfigured, serenity-docs#32), alongside the caller's tag.
+      expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'p-us-en', ['p'], ['tag-1', TAG_IDS.originHuman, TAG_IDS.intentInformational]);
       expect(transport.publishProject).to.have.been.calledOnceWith(WS, 'p-us-en');
+      expect(result.published).to.equal(true);
+    });
+
+    it('skips the trailing publish and reports published:false when deferPublish is true', async () => {
+      const transport = makeTransport();
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        deferPublish: true,
+        prompts: [{
+          text: 'p', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
+        }],
+      }, log);
+      expect(result.published).to.equal(false);
+      expect(result.created).to.have.length(1);
+      expect(transport.publishProject).to.not.have.been.called;
+    });
+
+    it('400s when deferPublish is present but not a boolean', async () => {
+      const transport = makeTransport();
+      await expect(handleCreatePromptsSubworkspace(transport, WS, {
+        deferPublish: 'yes',
+        prompts: [{
+          text: 'p', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
+        }],
+      }, log)).to.be.rejectedWith(ErrorWithStatusCode, /deferPublish must be a boolean/);
     });
 
     it('dynamic-allocation ON: fronts headroom sized on the batch BEFORE the write, not just before publish (LLMO-6190, live-verified)', async () => {
@@ -179,7 +205,9 @@ describe('prompts-subworkspace handlers', () => {
         prompts: [{
           text: 'p', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
         }],
-      }, log, undefined, { dynamicAllocation: true, parentWorkspaceId: 'parent-ws' });
+      }, log, undefined, undefined, undefined, {
+        dynamicAllocation: true, parentWorkspaceId: 'parent-ws',
+      });
       expect(result.created).to.have.length(1);
       expect(transport.getWorkspaceResources).to.have.been.calledOnceWith(WS);
       expect(transport.getWorkspaceResources)
@@ -213,12 +241,16 @@ describe('prompts-subworkspace handlers', () => {
       }, log, classifyByBrandMention);
       expect(result.created[0].tagIds).to.deep.equal([
         TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.originHuman,
+        TAG_IDS.intentInformational,
       ]);
       expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(
         WS,
         'p-us-en',
         ['is Acme good?'],
-        [TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.originHuman],
+        [
+          TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.originHuman,
+          TAG_IDS.intentInformational,
+        ],
       );
     });
 
@@ -316,7 +348,7 @@ describe('prompts-subworkspace handlers', () => {
       expect(transport.updatePromptTagsByIds).to.have.been.calledOnceWithExactly(
         WS,
         'p-us-en',
-        [{ id: 'old-id', references: ['tag-1'], replace: true }],
+        [{ id: 'old-id', references: ['tag-1', TAG_IDS.intentInformational], replace: true }],
       );
       expect(transport.deletePromptsByIds).to.not.have.been.called;
       expect(transport.createPromptsByIds).to.not.have.been.called;
@@ -375,13 +407,14 @@ describe('prompts-subworkspace handlers', () => {
         text: 'new', tagIds: ['tag-cat-1', '', undefined], geoTargetId: 2840, languageCode: 'en',
       }, log);
       expect(result.status).to.equal(200);
+      // The id is preserved — the edit is in place, never a re-create.
       expect(result.body.semrushPromptId).to.equal('old-id');
-      expect(result.body.tagIds).to.deep.equal(['tag-cat-1']);
+      expect(result.body.tagIds).to.deep.equal(['tag-cat-1', TAG_IDS.intentInformational]);
       expect(transport.renamePrompt).to.have.been.calledOnceWithExactly(WS, 'p-us-en', 'old-id', 'new');
       expect(transport.updatePromptTagsByIds).to.have.been.calledOnceWithExactly(
         WS,
         'p-us-en',
-        [{ id: 'old-id', references: ['tag-cat-1'], replace: true }],
+        [{ id: 'old-id', references: ['tag-cat-1', TAG_IDS.intentInformational], replace: true }],
       );
     });
 
@@ -412,14 +445,18 @@ describe('prompts-subworkspace handlers', () => {
       }, log, classifyByBrandMention);
       expect(result.status).to.equal(200);
       expect(result.body.tagIds).to.deep.equal([
-        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded,
+        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.intentInformational,
       ]);
       expect(transport.updatePromptTagsByIds).to.have.been.calledOnceWithExactly(
         WS,
         'p-us-en',
         [{
           id: 'old-id',
-          references: [TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded],
+          references: [
+            TAG_IDS.categoryRunningShoes,
+            TAG_IDS.typeBranded,
+            TAG_IDS.intentInformational,
+          ],
           replace: true,
         }],
       );
@@ -742,6 +779,6 @@ describe('prompts-subworkspace — defensive branch coverage', () => {
       languageCode: 'en',
     }, log);
     expect(result.status).to.equal(200);
-    expect(result.body.tagIds).to.deep.equal(['keep']);
+    expect(result.body.tagIds).to.deep.equal(['keep', TAG_IDS.intentInformational]);
   });
 });

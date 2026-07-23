@@ -80,6 +80,10 @@ const sliceKey = (geoTargetId, languageCode) => `${Number(geoTargetId)}::${Strin
  *   into handleCreatePrompts (the caller builds it from the brand's aliases, same
  *   as the create/prompt endpoints).
  * @param {object} [options] - Publish-confirm tuning (AC3).
+ * @param {object} [options.env] - Env passed to the prompt-push intent
+ *   classifier (handleCreatePrompts); omitted → intents default to Informational.
+ * @param {number} [options.writeDeadline] - Epoch-ms deadline for that intent
+ *   classification; omitted → unbounded within the classifier's own budget.
  * @param {number} [options.confirmAttempts=1] - Max getProjectStatus reads per
  *   project after publish, hard-capped at 3 regardless of caller input (the
  *   unbounded ≤900s reconcile loop is the DRS/worker's job, not this Lambda's).
@@ -124,6 +128,12 @@ export async function finalizeSerenityProjects(
       { prompts: promptInputs },
       log,
       classifyPromptType,
+      // env/writeDeadline drive LLM intent classification; optional here — a
+      // trigger may thread them via options, else intents default to
+      // Informational (the documented NULL fallback). publish:false so the
+      // single authoritative publish happens in step 3.
+      options.env,
+      options.writeDeadline,
       { publish: false },
     );
   }

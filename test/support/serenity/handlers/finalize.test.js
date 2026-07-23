@@ -106,7 +106,11 @@ describe('finalizeSerenityProjects (publish-after-populate)', () => {
     expect(handleCreatePrompts).to.have.been.calledOnce;
     const pArgs = handleCreatePrompts.firstCall.args;
     expect(pArgs[6]).to.equal(classify);
-    expect(pArgs[7]).to.deep.equal({ publish: false });
+    // env (7) + writeDeadline (8) are threaded from options (undefined here),
+    // then the { publish: false } option at index 9.
+    expect(pArgs[7]).to.equal(undefined);
+    expect(pArgs[8]).to.equal(undefined);
+    expect(pArgs[9]).to.deep.equal({ publish: false });
     // models set with publish deferred
     expect(handleUpdateModels.firstCall.args[6]).to.deep.equal({ publish: false });
     // single publish + confirm

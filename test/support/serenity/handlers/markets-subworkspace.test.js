@@ -1687,6 +1687,90 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['plain text'], [...STANDARD_IDS, TAG_IDS.typeNonBranded]);
   });
 
+  // serenity-docs#32: a classified prompt gets its real intent id; a text absent
+  // from the classification map (e.g. beyond AI_GEN_CLASSIFY_MAX) falls back to
+  // the Informational default. Prompts are partitioned by their (type, intent)
+  // id pair, one upstream call per distinct pair.
+  it('generateAndAttachPrompts: applies the classified intent per prompt and defaults an unclassified one', async () => {
+    const SOURCE_AI_ID = TAG_IDS.originAi;
+    const handler = await esmock(
+      '../../../../src/support/serenity/handlers/markets-subworkspace.js',
+      {
+        '../../../../src/support/serenity/intent-classification.js': {
+          // 'buy now' classified Transactional; 'about it' omitted → default.
+          classifyPromptIntents: async () => new Map([['buy now', 'Transactional']]),
+          AI_GEN_CLASSIFY_MAX: 16,
+          computeWriteDeadline: () => Date.now() + 12000,
+        },
+      },
+    );
+    const transport = makeTransport({
+      getBrandTopics: sinon.stub().resolves([
+        { topic: 'T', volume: 10, prompts: ['buy now', 'about it'] },
+      ]),
+    });
+    const res = await handler.handleCreateMarketSubworkspace(
+      transport,
+      makeBrand(),
+      PARENT,
+      { ...createBody, brandNames: ['Trail'] },
+      log,
+      null,
+      null,
+      { generateTopics: true, publishMode: 'skip' },
+    );
+    expect(res.status).to.equal(201);
+    // Both are non-branded ('Trail' not mentioned); intent differs, so two calls.
+    expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['buy now'], [SOURCE_AI_ID, TAG_IDS.intentTransactional, TAG_IDS.typeNonBranded]);
+    expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['about it'], [SOURCE_AI_ID, TAG_IDS.intentInformational, TAG_IDS.typeNonBranded]);
+  });
+
+  // Boundary: at exactly AI_GEN_CLASSIFY_MAX + 1 texts, only the first MAX are
+  // sent to the classifier; the overflow text is never classified and takes the
+  // Informational default, and the cap-hit is logged (serenity-docs#32).
+  it('generateAndAttachPrompts: classifies only up to AI_GEN_CLASSIFY_MAX and logs the defaulted overflow', async () => {
+    const capLog = { info: sinon.spy(), error: sinon.spy(), warn: sinon.spy() };
+    const classifySpy = sinon.stub().resolves(new Map([['p1', 'Transactional'], ['p2', 'Transactional']]));
+    const handler = await esmock(
+      '../../../../src/support/serenity/handlers/markets-subworkspace.js',
+      {
+        '../../../../src/support/serenity/intent-classification.js': {
+          classifyPromptIntents: classifySpy,
+          // Shrink the cap to 2 so a 3-text batch exercises the boundary.
+          AI_GEN_CLASSIFY_MAX: 2,
+          computeWriteDeadline: () => Date.now() + 12000,
+        },
+      },
+    );
+    const transport = makeTransport({
+      getBrandTopics: sinon.stub().resolves([
+        { topic: 'T', volume: 10, prompts: ['p1', 'p2', 'p3'] },
+      ]),
+    });
+    const res = await handler.handleCreateMarketSubworkspace(
+      transport,
+      makeBrand(),
+      PARENT,
+      { ...createBody, brandNames: ['Trail'] },
+      capLog,
+      null,
+      null,
+      { generateTopics: true, publishMode: 'skip' },
+    );
+    expect(res.status).to.equal(201);
+    // Only the first 2 texts were handed to the classifier — the slice bound.
+    expect(classifySpy).to.have.been.calledOnce;
+    expect(classifySpy.firstCall.args[0]).to.deep.equal(['p1', 'p2']);
+    // p1/p2 classified Transactional; p3 (beyond the cap) defaults Informational.
+    expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['p1', 'p2'], [...STANDARD_IDS.slice(0, 1), TAG_IDS.intentTransactional, TAG_IDS.typeNonBranded]);
+    expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['p3'], [...STANDARD_IDS.slice(0, 1), TAG_IDS.intentInformational, TAG_IDS.typeNonBranded]);
+    // The cap-hit is observable, not silent.
+    expect(capLog.info).to.have.been.calledWithMatch(
+      'generateAndAttachPrompts: AI-gen classify cap hit — tail defaults to Informational',
+      sinon.match({ total: 3, classified: 2, defaultedByCap: 1 }),
+    );
+  });
+
   // The two guards below both fire when the tag tree, freshly provisioned, still
   // does not contain a name we asked for. That is not hypothetical: upstream tag
   // writes land in the project's DRAFT layer while a default read serves the LIVE

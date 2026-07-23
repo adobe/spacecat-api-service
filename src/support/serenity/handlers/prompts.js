@@ -19,8 +19,9 @@ import { redactUpstreamMessage } from '../rest-transport.js';
 import { ERROR_CODES, isUpstreamGone } from '../errors.js';
 import { normalizeGeoTargetId, normalizeLanguageCode, isValidTagIdFormat } from '../validation.js';
 import { invalidateTagCacheForProject } from './markets.js';
-import { resolveTypeValueInjection, resolveClosedValueInjection } from '../tag-tree.js';
-import { DIMENSION, ORIGIN_VALUE } from '../prompt-tags.js';
+import { resolveTypeValueInjection, resolveIntentValueInjection, resolveClosedValueInjection } from '../tag-tree.js';
+import { DIMENSION, ORIGIN_VALUE, INTENT_VALUE } from '../prompt-tags.js';
+import { classifyPromptIntents } from '../intent-classification.js';
 
 // TWIN FILE: the slice→project orchestration here is paralleled by the
 // subworkspace-mode handlers in prompts-subworkspace.js. The duplication is
@@ -48,6 +49,24 @@ export const BULK_CREATE_CONCURRENCY = 8;
 // handler would faithfully build per-project Maps + upstream payloads for all
 // of them. Defense-in-depth, not a correctness gate.
 export const BULK_PROMPTS_MAX_ITEMS = 500;
+
+/**
+ * Validates the optional `deferPublish` body flag (serenity-docs#32 CSV-chunking).
+ * Present-but-non-boolean is a hard 400 (so a caller typo like `"yes"`/`1` is
+ * rejected at the write boundary rather than silently treated as "publish");
+ * absent, `false`, or `true` are all accepted. Returns the resolved boolean
+ * (absent → false).
+ *
+ * @param {object} body - request body.
+ * @returns {boolean} whether the caller asked to skip the trailing publish.
+ */
+export function validateDeferPublish(body) {
+  const deferPublish = body?.deferPublish;
+  if (deferPublish !== undefined && typeof deferPublish !== 'boolean') {
+    throw new ErrorWithStatusCode('deferPublish must be a boolean', 400);
+  }
+  return deferPublish === true;
+}
 
 /**
  * Builds the prompt's tag list from the upstream item: one entry per tag,
@@ -481,6 +500,59 @@ export function makePromptTagInjector(
 }
 
 /**
+ * Applies a pre-computed, per-request `intent` classification map to a prompt
+ * write (serenity-docs#32) — the structural analog of {@link makePromptTagInjector}
+ * for the `intent` closed dimension. Unlike `type`, the "compute the value" step
+ * is a `Map` lookup, not a per-item classify call: intent is batch-classified
+ * ONCE per request (see `classifyPromptIntents` in `../intent-classification.js`)
+ * because it is an LLM call, not a cheap pure function. A text missing from
+ * `intentByText` (e.g. beyond the AI-gen classify cap) falls back to
+ * `INTENT_VALUE.INFORMATIONAL`, the seeded standard value.
+ *
+ * Given the map, it returns `injectComputedIntent(projectId, input)` which:
+ *   - STRIPS every caller-supplied tag id under the `intent` root (the client may
+ *     never set the value), and
+ *   - APPENDS the pre-resolved upstream id of the server-computed value. The
+ *     atomic `createPromptsByIds` 500s on an unresolved id, so it is resolved
+ *     BEFORE the write.
+ *
+ * Id-based resolution ({@link resolveIntentValueInjection}, two tag-tree reads
+ * per distinct `intent` value per project) is memoized for the request, mirroring
+ * {@link makePromptTagInjector}'s memoization. `resolveIntentValueInjection` resolves
+ * or throws, so the computed tag is always attached and never silently dropped.
+ *
+ * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {string} semrushWorkspaceId
+ * @param {Map<string, string>} intentByText - text -> bare `intent` value.
+ * @param {object} [log]
+ * @returns {(projectId: string, input: { text: string, geoTargetId: number,
+ *   tagIds: string[] }) =>
+ *   Promise<{ text: string, geoTargetId: number, tagIds: string[] }>}
+ */
+export function makeIntentInjector(transport, semrushWorkspaceId, intentByText, log) {
+  /** @type {Map<string, Promise<{ computedId: string, intentTagIds: string[] }>>} */
+  const cache = new Map();
+  return async function injectComputedIntent(projectId, input) {
+    const intentValue = intentByText.get(input.text) ?? INTENT_VALUE.INFORMATIONAL;
+    const key = `${projectId} ${intentValue}`;
+    let pending = cache.get(key);
+    if (!pending) {
+      pending = resolveIntentValueInjection(
+        transport,
+        semrushWorkspaceId,
+        projectId,
+        intentValue,
+        log,
+      );
+      cache.set(key, pending);
+    }
+    const { computedId, intentTagIds } = await pending;
+    const stripped = input.tagIds.filter((id) => !intentTagIds.includes(id));
+    return { ...input, tagIds: [...stripped, computedId] };
+  };
+}
+
+/**
  * Validates + normalizes a PATCH prompt body's `text` + `tagIds`, shared by
  * {@link handleUpdatePrompt} and its subworkspace twin. Tags are addressed by
  * upstream id only, mirroring {@link normalizePromptInput} — a name cannot
@@ -517,7 +589,18 @@ export function parseUpdatePromptBody(body) {
       },
     };
   }
-  const text = String(body.text);
+  // Mirror the create contract (`normalizePromptInput`): empty or whitespace-only
+  // text is rejected here rather than passed on to `renamePrompt`, where it would
+  // be classified and written as a blank prompt. `|| ''` also coerces a falsy
+  // non-string (`null`, `0`, `false`) to empty, matching create exactly.
+  const text = String(body.text || '').trim();
+  if (!text) {
+    return {
+      ok: false,
+      status: 400,
+      body: { error: 'invalidRequest', message: 'text must be a non-empty string' },
+    };
+  }
   const tagIds = sanitizeTagIds(body.tagIds);
   if (tagIds.length === 0) {
     return {
@@ -552,15 +635,20 @@ export async function mapLimit(items, limit, mapper) {
 
 /**
  * POST /serenity/prompts — bulk create.
- * Each input must carry `(geoTargetId, languageCode, text, tags?)`. Inputs
+ * Each input must carry `(geoTargetId, languageCode, text, tagIds)`. Inputs
  * are grouped by slice; the matching BrandSemrushProject row resolves the
  * upstream project; publish runs once per affected project at the end.
  *
- * `publish` (default true — the standalone-endpoint contract) commits the new
- * prompts to the live project. Set it false when the caller batches its own
- * publish afterwards (LLMO-5492 publish-after-populate: finalize pushes prompts
- * + models and publishes each project once) — an intermediate publish would
- * either go live half-populated or, on a model-less draft, throw.
+ * Two independent switches suppress that end-of-call publish:
+ *   - `body.deferPublish` (serenity-docs#32 CSV-chunking): a draft-only write;
+ *     the caller triggers publish itself (e.g. a normal, non-deferred call on the
+ *     last chunk of an import, which publishes every project touched across the
+ *     whole import since a single CSV import always targets one project).
+ *   - the `publish` option (default true — the standalone-endpoint contract):
+ *     set it false when the caller batches its own publish afterwards
+ *     (LLMO-5492 publish-after-populate: finalize pushes prompts + models and
+ *     publishes each project once) — an intermediate publish would either go
+ *     live half-populated or, on a model-less draft, throw.
  */
 export async function handleCreatePrompts(
   transport,
@@ -570,6 +658,8 @@ export async function handleCreatePrompts(
   body,
   log,
   classifyPromptType,
+  env,
+  writeDeadline,
   { publish = true } = {},
 ) {
   const inputs = Array.isArray(body?.prompts) ? body.prompts : [];
@@ -582,6 +672,7 @@ export async function handleCreatePrompts(
       400,
     );
   }
+  const deferPublish = validateDeferPublish(body);
 
   const projects = await dataAccess.BrandSemrushProject.allByBrandId(brandId);
   const projectsBySlice = new Map();
@@ -600,6 +691,25 @@ export async function handleCreatePrompts(
     log,
     { originValue: ORIGIN_VALUE.HUMAN },
   );
+  // Unified layer (serenity-docs#32): batch-classify every distinct text ONCE
+  // under the shared request deadline, then thread the resolved map into each
+  // per-item injection below (a per-item LLM call would be far too slow).
+  // Classify the TRIMMED text: `makeIntentInjector` looks up the map by
+  // `input.text`, which `normalizePromptInput` has already trimmed, so the
+  // classify key must be trimmed to match — otherwise a whitespace-padded prompt
+  // (common in CSV import) misses the map and silently defaults to Informational
+  // despite a real classification.
+  const intentByText = await classifyPromptIntents(
+    inputs.map((raw) => String(raw?.text || '').trim()),
+    {
+      env,
+      log,
+      deadline: writeDeadline,
+      writePath: deferPublish ? 'csv' : 'create',
+      workspaceId: semrushWorkspaceId,
+    },
+  );
+  const injectComputedIntent = makeIntentInjector(transport, semrushWorkspaceId, intentByText, log);
 
   const results = await mapLimit(inputs, BULK_CREATE_CONCURRENCY, async (raw) => {
     const { value: input, reason } = normalizePromptInput(raw);
@@ -622,9 +732,12 @@ export async function handleCreatePrompts(
     }
     const projectId = project.getSemrushProjectId();
     try {
-      // Unified layer: strip any caller-supplied type/origin + inject the
-      // computed type and the derived origin (`human`).
-      const typed = await injectComputedTags(projectId, input);
+      // Unified layer: strip caller-supplied type/origin/intent, then inject the
+      // computed type + derived origin (origin-dimension.md §3) and the
+      // classified intent (serenity-docs#32). The two injectors act on disjoint
+      // dimensions, so chaining composes cleanly.
+      let typed = await injectComputedTags(projectId, input);
+      typed = await injectComputedIntent(projectId, typed);
       const semrushPromptId = await createOnePrompt(
         transport,
         semrushWorkspaceId,
@@ -677,6 +790,17 @@ export async function handleCreatePrompts(
     invalidateTagCacheForProject(semrushWorkspaceId, pid);
   }
 
+  // body.deferPublish (CSV-chunking) — draft-only write, publish deferred to a
+  // later non-deferred call; return early flagged not-published.
+  if (deferPublish) {
+    log?.info?.('serenity create-prompts: deferPublish set — prompts written as draft, publish skipped', {
+      brandId, created: created.length, skipped: skipped.length, failed: failed.length,
+    });
+    return {
+      created, skipped, failed, published: false,
+    };
+  }
+
   // publish:false — the caller (finalize) batches a single publish after models
   // are also set, so skip the per-create publish here.
   if (publish) {
@@ -697,7 +821,9 @@ export async function handleCreatePrompts(
     }
   }
 
-  return { created, skipped, failed };
+  return {
+    created, skipped, failed, published: true,
+  };
 }
 
 /**
@@ -747,6 +873,8 @@ export async function handleUpdatePrompt(
   body,
   log,
   classifyPromptType,
+  env,
+  writeDeadline,
 ) {
   // `semrushPromptId` is validated as non-empty at the controller boundary
   // (serenity.js:259) before this handler is invoked over HTTP, so no
@@ -784,22 +912,39 @@ export async function handleUpdatePrompt(
   }
   const projectId = project.getSemrushProjectId();
 
-  // Recompute the type tag from the NEW text BEFORE any upstream write: the
-  // unified layer (tree read / on-demand tag create) resolves the computed
-  // value's id first, so a classification failure aborts cleanly with the
-  // prompt completely untouched. NO `originValue` is passed: `origin` is a fact
-  // about the row's creation, never re-derived on edit (origin-dimension.md §3
-  // item 3). The prompt's stored origin id, echoed back by the caller, rides
-  // through the replace-mode tag write untouched.
+  // Recompute the type AND intent tags from the NEW text BEFORE the rename: the
+  // unified layer (tree read / on-demand tag create / LLM classify) must run
+  // before any upstream write, so a classification failure aborts cleanly with
+  // the old prompt still present (serenity-docs#31, #32). NO `originValue` is
+  // passed: `origin` is a fact about the row's creation, never re-derived on
+  // edit (origin-dimension.md §3 item 3) — the prompt's stored origin id, echoed
+  // back by the caller, rides through the replace-mode tag write untouched.
+  //
+  // This runs UNCONDITIONALLY, even when the PATCH does not change the text. The
+  // upstream provider has no GET-by-id and the handler is not sent the old text
+  // (the body is the full next state — see the docblock above), so it cannot
+  // know whether the text actually changed. `renamePrompt`'s `is_updated: false`
+  // reports a no-op only AFTER the rename, too late to gate a classify that has
+  // to run first for failure-safety. Skipping the reclassification would require
+  // the client to send the old text — a contract change deliberately out of
+  // scope here (keep the edit path a single straight line).
   const injectComputedTags = makePromptTagInjector(
     transport,
     semrushWorkspaceId,
     classifyPromptType,
     log,
   );
-  const typed = await injectComputedTags(projectId, {
+  const intentByText = await classifyPromptIntents(
+    [nextText],
+    {
+      env, log, deadline: writeDeadline, writePath: 'edit', workspaceId: semrushWorkspaceId,
+    },
+  );
+  const injectComputedIntent = makeIntentInjector(transport, semrushWorkspaceId, intentByText, log);
+  let typed = await injectComputedTags(projectId, {
     text: nextText, geoTargetId, tagIds: nextTagIds,
   });
+  typed = await injectComputedIntent(projectId, typed);
 
   try {
     await transport.renamePrompt(semrushWorkspaceId, projectId, semrushPromptId, nextText);

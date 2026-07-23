@@ -1,3 +1,10 @@
+# [1.685.0](https://github.com/adobe/spacecat-api-service/compare/v1.684.0...v1.685.0) (2026-07-23)
+
+
+### Features
+
+* **serenity:** server-compute intent:<Value> on every prompt write path ([#2785](https://github.com/adobe/spacecat-api-service/issues/2785)) ([f405425](https://github.com/adobe/spacecat-api-service/commit/f4054254cb40b0adf725f416b1b4618ff4b09e41)), closes [#2772](https://github.com/adobe/spacecat-api-service/issues/2772) [serenity-docs#31](https://github.com/serenity-docs/issues/31) [serenity-docs#31](https://github.com/serenity-docs/issues/31)
+
 # [1.684.0](https://github.com/adobe/spacecat-api-service/compare/v1.683.0...v1.684.0) (2026-07-23)
 
 

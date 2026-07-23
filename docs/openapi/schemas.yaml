@@ -11123,10 +11123,20 @@ SerenityCreatePromptsRequest:
       minItems: 1
       maxItems: 500
       items: { $ref: '#/SerenityPromptInput' }
+    deferPublish:
+      type: boolean
+      default: false
+      description: >
+        When true, the created prompts are written to the upstream draft layer
+        but the project is NOT published as part of this request (the response
+        carries `published: false`). Used for chunked CSV imports, where the
+        client posts several chunks and issues a single publish after the last
+        one (serenity-docs#32). Omitted/false publishes once at the end of the
+        call as usual.
 
 SerenityCreatePromptsResponse:
   type: object
-  required: [created, skipped, failed]
+  required: [created, skipped, failed, published]
   properties:
     created:
       type: array
@@ -11150,6 +11160,13 @@ SerenityCreatePromptsResponse:
           languageCode: { type: string }
           status: { type: integer }
           message: { type: string }
+    published:
+      type: boolean
+      description: >
+        Whether the project was published as part of this request. Always true
+        unless the request set `deferPublish: true`, in which case the prompts
+        were written as drafts and the caller must publish separately
+        (serenity-docs#32).
 
 SerenityUpdatePromptRequest:
   type: object
