@@ -94,6 +94,8 @@ paths:
     $ref: './auth-api.yaml#/login'
   /configurations/latest:
     $ref: './configuration-api.yaml#/latest-configuration'
+  /configurations/versions:
+    $ref: './configuration-api.yaml#/configuration-versions'
   /configurations/latest/queues:
     $ref: './configuration-api.yaml#/configuration-queues'
   /configurations/latest/jobs/{jobType}:

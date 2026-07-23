@@ -159,6 +159,49 @@ function ConfigurationController(ctx) {
     }
   };
 
+  /**
+   * Lists configuration versions (S3 object-version history), newest first.
+   * Removes the need for direct S3/AWS access to discover the VersionIds used by
+   * `GET /configurations/:version`, `POST /configurations/:version/restore`, and
+   * offline exports.
+   * @param {UniversalContext} context - Context of the request.
+   * @return {Promise<Response>} Paginated list of configuration versions.
+   */
+  const listVersions = async (context) => {
+    const denied = await authorizeConfigRead(context, 'GET /configurations/versions');
+    if (denied) {
+      return denied;
+    }
+
+    let searchParams;
+    try {
+      searchParams = new URL(context.request.url).searchParams;
+    } catch {
+      searchParams = new URLSearchParams();
+    }
+
+    const rawLimit = searchParams.get('limit');
+    const parsedLimit = Number.parseInt(rawLimit, 10);
+    // Clamp to [1, 100]; fall back to the collection default when unparseable.
+    const limit = Number.isInteger(parsedLimit)
+      ? Math.min(Math.max(parsedLimit, 1), 100)
+      : undefined;
+
+    const keyMarker = searchParams.get('keyMarker') || undefined;
+    const versionIdMarker = searchParams.get('versionIdMarker') || undefined;
+    // Enrichment (updatedBy/updatedAt) is on by default; opt out with detail=false.
+    const detail = searchParams.get('detail') !== 'false';
+
+    const page = await Configuration.listVersions({
+      ...(limit !== undefined ? { limit } : {}),
+      keyMarker,
+      versionIdMarker,
+      detail,
+    });
+
+    return ok(ConfigurationDto.versionsToJSON(page));
+  };
+
   const registerAudit = async (context) => {
     const denied = await authorizeConfigWrite(context, 'POST /configurations/audits', 'Only admins can register audits');
     if (denied) {
@@ -509,6 +552,7 @@ function ConfigurationController(ctx) {
   return {
     getByVersion,
     getLatest,
+    listVersions,
     registerAudit,
     unregisterAudit,
     updateQueues,

@@ -238,6 +238,7 @@ const routeRequiredCapabilities = {
 
   // Configuration
   'GET /configurations/latest': CAP_CONFIGURATION_READ,
+  'GET /configurations/versions': CAP_CONFIGURATION_READ,
   'PATCH /configurations/latest': CAP_CONFIGURATION_WRITE,
   'POST /configurations/:version/restore': CAP_CONFIGURATION_WRITE,
   'GET /configurations/:version': CAP_CONFIGURATION_READ,

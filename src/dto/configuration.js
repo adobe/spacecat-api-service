@@ -27,4 +27,25 @@ export const ConfigurationDto = {
     queues: configuration.getQueues(),
     ...(configuration.getSlackRoles() ? { slackRoles: configuration.getSlackRoles() } : {}),
   }),
+
+  /**
+   * Converts a page of configuration versions (from
+   * `ConfigurationCollection.listVersions`) into the API response shape.
+   * @param {{versions: object[], isTruncated: boolean,
+   *   nextKeyMarker: (string|null), nextVersionIdMarker: (string|null)}} page
+   * @returns {object} The version-list response.
+   */
+  versionsToJSON: (page) => ({
+    versions: (page.versions || []).map((version) => ({
+      versionId: version.versionId,
+      lastModified: version.lastModified,
+      isLatest: version.isLatest,
+      size: version.size,
+      ...(version.updatedBy !== undefined ? { updatedBy: version.updatedBy } : {}),
+      ...(version.updatedAt !== undefined ? { updatedAt: version.updatedAt } : {}),
+    })),
+    isTruncated: Boolean(page.isTruncated),
+    nextKeyMarker: page.nextKeyMarker ?? null,
+    nextVersionIdMarker: page.nextVersionIdMarker ?? null,
+  }),
 };

@@ -238,6 +238,7 @@ const routeFacsCapabilities = {
 
     // System configuration (Configuration model — admin-only)
     'GET /configurations/:version', // admin
+    'GET /configurations/versions', // admin
     'GET /configurations/latest', // admin
     'PATCH /configurations/latest', // admin
     'PATCH /configurations/latest/handlers/:handlerType', // admin

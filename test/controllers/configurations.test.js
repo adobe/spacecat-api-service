@@ -110,6 +110,7 @@ describe('Configurations Controller', () => {
   const configurationFunctions = [
     'getLatest',
     'getByVersion',
+    'listVersions',
     'registerAudit',
     'unregisterAudit',
     'updateQueues',
@@ -129,6 +130,29 @@ describe('Configurations Controller', () => {
       Configuration: {
         findLatest: sandbox.stub().resolves(configurations[1]),
         findByVersion: sandbox.stub().resolves(configurations[0]),
+        listVersions: sandbox.stub().resolves({
+          versions: [
+            {
+              versionId: 'v2',
+              lastModified: '2026-07-23T10:00:00.000Z',
+              isLatest: true,
+              size: 3000,
+              updatedBy: 'admin@adobe.com',
+              updatedAt: '2026-07-23T10:00:00.000Z',
+            },
+            {
+              versionId: 'v1',
+              lastModified: '2026-07-22T09:00:00.000Z',
+              isLatest: false,
+              size: 2900,
+              updatedBy: null,
+              updatedAt: null,
+            },
+          ],
+          isTruncated: false,
+          nextKeyMarker: null,
+          nextVersionIdMarker: null,
+        }),
       },
     };
 
@@ -317,6 +341,91 @@ describe('Configurations Controller', () => {
 
     expect(result.status).to.equal(403);
     expect(error).to.have.property('message', 'Only admins can view configurations');
+  });
+
+  describe('listVersions', () => {
+    const reqCtx = (query = '') => ({
+      request: { url: `https://spacecat.experiencecloud.live/api/v1/configurations/versions${query}` },
+    });
+
+    it('lists configuration versions for an admin', async () => {
+      const result = await configurationsController.listVersions(reqCtx());
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(mockDataAccess.Configuration.listVersions).to.have.been.calledOnce;
+      expect(body.versions).to.have.length(2);
+      expect(body.versions[0]).to.deep.equal({
+        versionId: 'v2',
+        lastModified: '2026-07-23T10:00:00.000Z',
+        isLatest: true,
+        size: 3000,
+        updatedBy: 'admin@adobe.com',
+        updatedAt: '2026-07-23T10:00:00.000Z',
+      });
+      expect(body).to.include({ isTruncated: false });
+      expect(body.nextKeyMarker).to.be.null;
+      expect(body.nextVersionIdMarker).to.be.null;
+    });
+
+    it('returns forbidden for non-admin users', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false });
+      const result = await configurationsController.listVersions(reqCtx());
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Only admins can view configurations');
+      expect(mockDataAccess.Configuration.listVersions).to.not.have.been.called;
+    });
+
+    it('defaults to detail=true and no limit/markers when no query params', async () => {
+      await configurationsController.listVersions(reqCtx());
+
+      expect(mockDataAccess.Configuration.listVersions).to.have.been.calledWithMatch({
+        detail: true,
+        keyMarker: undefined,
+        versionIdMarker: undefined,
+      });
+      const arg = mockDataAccess.Configuration.listVersions.firstCall.args[0];
+      expect(arg).to.not.have.property('limit');
+    });
+
+    it('passes limit, markers and detail=false from the query string', async () => {
+      await configurationsController.listVersions(
+        reqCtx('?limit=10&keyMarker=km&versionIdMarker=vm&detail=false'),
+      );
+
+      expect(mockDataAccess.Configuration.listVersions).to.have.been.calledWithMatch({
+        limit: 10,
+        keyMarker: 'km',
+        versionIdMarker: 'vm',
+        detail: false,
+      });
+    });
+
+    it('clamps limit above 100 down to 100', async () => {
+      await configurationsController.listVersions(reqCtx('?limit=5000'));
+      expect(mockDataAccess.Configuration.listVersions)
+        .to.have.been.calledWithMatch({ limit: 100 });
+    });
+
+    it('clamps limit below 1 up to 1', async () => {
+      await configurationsController.listVersions(reqCtx('?limit=0'));
+      expect(mockDataAccess.Configuration.listVersions).to.have.been.calledWithMatch({ limit: 1 });
+    });
+
+    it('ignores a non-numeric limit (falls back to collection default)', async () => {
+      await configurationsController.listVersions(reqCtx('?limit=abc'));
+      const arg = mockDataAccess.Configuration.listVersions.firstCall.args[0];
+      expect(arg).to.not.have.property('limit');
+    });
+
+    it('falls back to defaults when context.request is missing', async () => {
+      const result = await configurationsController.listVersions({});
+      expect(result.status).to.equal(200);
+      expect(mockDataAccess.Configuration.listVersions)
+        .to.have.been.calledWithMatch({ detail: true });
+    });
   });
 
   describe('configuration read - S2S configuration:read capability', () => {

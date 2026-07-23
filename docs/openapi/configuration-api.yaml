@@ -186,6 +186,119 @@ latest-configuration:
         description: Configuration not found.
       '500':
         $ref: './responses.yaml#/500'
+configuration-versions:
+  get:
+    tags:
+      - configuration
+    summary: List configuration versions (version history)
+    description: |
+      Lists the version history of the global configuration, newest first. Each
+      version corresponds to an S3 object version. Use the returned `versionId`
+      values with `GET /configurations/{version}` or
+      `POST /configurations/{version}/restore`. This removes the need for direct
+      S3/AWS access to discover VersionIds.
+
+      When `detail` is true (default) each version is enriched with
+      `updatedBy`/`updatedAt` read from the object's S3 user-metadata; versions
+      written before that metadata was introduced return `null` for those fields.
+    operationId: listConfigurationVersions
+    security:
+      - admin_key: [ ]
+    parameters:
+      - name: limit
+        in: query
+        required: false
+        description: Maximum number of versions to return (1–100).
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 25
+      - name: keyMarker
+        in: query
+        required: false
+        description: S3 KeyMarker for pagination (from a previous response's nextKeyMarker).
+        schema:
+          type: string
+      - name: versionIdMarker
+        in: query
+        required: false
+        description: S3 VersionIdMarker for pagination (from a previous response's nextVersionIdMarker).
+        schema:
+          type: string
+      - name: detail
+        in: query
+        required: false
+        description: When false, skips updatedBy/updatedAt enrichment for a faster listing.
+        schema:
+          type: boolean
+          default: true
+    responses:
+      '200':
+        description: A page of configuration versions, newest first.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                versions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      versionId:
+                        type: string
+                        example: "EqZSCYxbPdKJ0Xso9QkbS0h0ZfDbhXWe"
+                      lastModified:
+                        type: string
+                        format: date-time
+                        example: "2026-07-23T10:00:00.000Z"
+                      isLatest:
+                        type: boolean
+                        example: true
+                      size:
+                        type: integer
+                        example: 3120487
+                      updatedBy:
+                        type: [string, 'null']
+                        example: "admin@adobe.com"
+                      updatedAt:
+                        type: [string, 'null']
+                        format: date-time
+                        example: "2026-07-23T10:00:00.000Z"
+                isTruncated:
+                  type: boolean
+                  example: false
+                nextKeyMarker:
+                  type: [string, 'null']
+                nextVersionIdMarker:
+                  type: [string, 'null']
+            examples:
+              versions-list:
+                summary: A page of versions
+                value:
+                  versions:
+                    - versionId: "EqZSCYxbPdKJ0Xso9QkbS0h0ZfDbhXWe"
+                      lastModified: "2026-07-23T10:00:00.000Z"
+                      isLatest: true
+                      size: 3120487
+                      updatedBy: "admin@adobe.com"
+                      updatedAt: "2026-07-23T10:00:00.000Z"
+                    - versionId: "SzrMxECGfivkXWmCK2zlmzHrc0BVoSdR"
+                      lastModified: "2026-07-22T09:00:00.000Z"
+                      isLatest: false
+                      size: 3118002
+                      updatedBy: null
+                      updatedAt: null
+                  isTruncated: false
+                  nextKeyMarker: null
+                  nextVersionIdMarker: null
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '500':
+        $ref: './responses.yaml#/500'
 configuration:
   get:
     tags:
