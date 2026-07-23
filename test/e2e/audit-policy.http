@@ -1,0 +1,185 @@
+# Audit Policy API Testing (SITES-47306, SITES-48346)
+# ====================================================
+# This file contains HTTP requests for testing the Audit Policy API endpoints.
+#
+# Prerequisites:
+# 1. Install "REST Client" extension in Cursor/VS Code
+# 2. Obtain an IMS user access token, then run the LOGIN request below to
+#    exchange it for a session token. x-api-key is deprecated starting
+#    August 2026 - all requests here authenticate with
+#    `Authorization: Bearer <sessionToken>` instead.
+#    https://opensource.adobe.com/spacecat-api-service/#tag/auth/operation/login
+# 3. Click "Send Request" above any request to execute
+#
+# Environment: Update these variables for your environment
+# - dev: https://spacecat-services--api-service.aem-dev.hlx.page
+# - stage: https://spacecat-services--api-service.aem-stage.hlx.page
+# - prod: https://spacecat-services--api-service.aem.hlx.page
+
+@baseUrl = https://spacecat-services--api-service.aem-dev.hlx.page
+@imsAccessToken = YOUR_IMS_ACCESS_TOKEN_HERE
+
+# Dev test site: https://main--scope-creep--iuliag.aem.live
+@siteId = 019ef3bd-5e67-7ea1-a4b7-f939f14fdc4e
+
+# =============================================================================
+# LOGIN - Exchange an IMS access token for a session token
+# =============================================================================
+
+### Login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "accessToken": "{{imsAccessToken}}"
+}
+
+# Note: copy the "sessionToken" from the response above into the variable below
+@sessionToken = YOUR_SESSION_TOKEN_HERE
+
+# =============================================================================
+# POLICY - Read
+# =============================================================================
+
+### Get current policy (synthesizes version:0 defaults when none exists yet)
+GET {{baseUrl}}/sites/{{siteId}}/audit-policy
+Authorization: Bearer {{sessionToken}}
+
+### List policy revisions, newest first
+GET {{baseUrl}}/sites/{{siteId}}/audit-policy/revisions
+Authorization: Bearer {{sessionToken}}
+
+### List policy revisions with a smaller page size
+GET {{baseUrl}}/sites/{{siteId}}/audit-policy/revisions?limit=5
+Authorization: Bearer {{sessionToken}}
+
+### List the next page (replace with a "cursor" value from the previous response)
+GET {{baseUrl}}/sites/{{siteId}}/audit-policy/revisions?limit=5&cursor=YOUR_CURSOR_HERE
+Authorization: Bearer {{sessionToken}}
+
+# =============================================================================
+# EXCLUSIONS - Add & Remove
+# =============================================================================
+
+### Add exclusion globs
+POST {{baseUrl}}/sites/{{siteId}}/audit-policy/exclusions
+Authorization: Bearer {{sessionToken}}
+Content-Type: application/json
+
+{
+  "values": ["/drafts/*", "/__e2e-audit-policy-test__/*"],
+  "reason": "Excluding draft pages from audit scope",
+  "note": "Requested by content team"
+}
+
+### Remove exclusion globs
+POST {{baseUrl}}/sites/{{siteId}}/audit-policy/exclusions/delete
+Authorization: Bearer {{sessionToken}}
+Content-Type: application/json
+
+{
+  "values": ["/__e2e-audit-policy-test__/*"],
+  "reason": "Cleaning up test data"
+}
+
+# =============================================================================
+# INCLUSIONS (manual URLs) - Add & Remove
+# =============================================================================
+
+### Add manual URLs
+POST {{baseUrl}}/sites/{{siteId}}/audit-policy/inclusions
+Authorization: Bearer {{sessionToken}}
+Content-Type: application/json
+
+{
+  "values": ["https://main--scope-creep--iuliag.aem.live/__e2e-audit-policy-test__/manual-page"],
+  "reason": "Force-including a page excluded by sitemap heuristics"
+}
+
+### Remove manual URLs
+POST {{baseUrl}}/sites/{{siteId}}/audit-policy/inclusions/delete
+Authorization: Bearer {{sessionToken}}
+Content-Type: application/json
+
+{
+  "values": ["https://main--scope-creep--iuliag.aem.live/__e2e-audit-policy-test__/manual-page"],
+  "reason": "Cleaning up test data"
+}
+
+# =============================================================================
+# AUDIT SCOPE - view stubs (501 until B4/B7 land)
+# =============================================================================
+
+### Get scoped pages (not implemented yet)
+GET {{baseUrl}}/sites/{{siteId}}/audit-scope/pages
+Authorization: Bearer {{sessionToken}}
+
+### Get scope summary (not implemented yet)
+GET {{baseUrl}}/sites/{{siteId}}/audit-scope/summary
+Authorization: Bearer {{sessionToken}}
+
+### Get scope sections (not implemented yet)
+GET {{baseUrl}}/sites/{{siteId}}/audit-scope/sections
+Authorization: Bearer {{sessionToken}}
+
+# =============================================================================
+# ERROR CASES (for testing error handling)
+# =============================================================================
+
+### Missing auth (should return 401)
+GET {{baseUrl}}/sites/{{siteId}}/audit-policy
+
+### Non-UUID site id (should return 400)
+GET {{baseUrl}}/sites/not-a-uuid/audit-policy
+Authorization: Bearer {{sessionToken}}
+
+### Unknown site id (should return 404)
+GET {{baseUrl}}/sites/00000000-0000-0000-0000-000000000000/audit-policy
+Authorization: Bearer {{sessionToken}}
+
+### Add exclusions missing reason (should return 400)
+POST {{baseUrl}}/sites/{{siteId}}/audit-policy/exclusions
+Authorization: Bearer {{sessionToken}}
+Content-Type: application/json
+
+{
+  "values": ["/no-reason/*"]
+}
+
+### Add exclusions with an empty values array (should return 400)
+POST {{baseUrl}}/sites/{{siteId}}/audit-policy/exclusions
+Authorization: Bearer {{sessionToken}}
+Content-Type: application/json
+
+{
+  "values": [],
+  "reason": "test"
+}
+
+### Add an exclusion glob with a path-traversal sequence (should return 400)
+POST {{baseUrl}}/sites/{{siteId}}/audit-policy/exclusions
+Authorization: Bearer {{sessionToken}}
+Content-Type: application/json
+
+{
+  "values": ["../../etc/passwd"],
+  "reason": "test"
+}
+
+### Invalid cursor for revisions (should return 400)
+GET {{baseUrl}}/sites/{{siteId}}/audit-policy/revisions?cursor=not-base64url
+Authorization: Bearer {{sessionToken}}
+
+# =============================================================================
+# WORKFLOW: Complete Test Scenario
+# =============================================================================
+# Run these in order to test a complete workflow:
+#
+# 1. Login (exchange IMS access token for a session token)
+# 2. Get current policy (note the baseline version)
+# 3. Add exclusion globs (verify version bumped by 1)
+# 4. Add manual URLs (verify version bumped by 1 again)
+# 5. Get current policy again (verify both arrays reflect the additions)
+# 6. List revisions (verify newest-first ordering, includes the two writes above)
+# 7. Remove the exclusion globs and manual URLs added above (cleanup)
+# 8. Get current policy once more (verify arrays are back to baseline)
