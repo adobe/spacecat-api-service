@@ -514,7 +514,7 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  *   omitted, alerting is a no-op.
  * @param {number} [options.writeDeadline] - shared request-write deadline; defaults
  *   to a fresh {@link computeWriteDeadline} for direct/test callers.
- * @param {string} [options.orgId] - IMS org id, for the Slack alert payload only.
+ * @param {string | null} [options.orgId] - IMS org id, for the Slack alert payload only.
  */
 export async function handleCreateMarketSubworkspace(
   transport,
