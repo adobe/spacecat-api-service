@@ -61,6 +61,18 @@ describe('llmo-akamai-utils', () => {
       cfg.match.userAgents.push('EvilBot');
       expect(EDGE_OPTIMIZE_DEFAULTS.userAgents).to.not.include('EvilBot');
     });
+
+    it('adds the x-edgeoptimize-fetcher-key header when a fetcherKey is provided (trimmed)', () => {
+      const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY, fetcherKey: '  secret-123 \n' });
+      expect(cfg.incomingRequestHeaders['x-edgeoptimize-fetcher-key']).to.equal('secret-123');
+    });
+
+    it('omits the fetcher-key header when fetcherKey is absent or blank', () => {
+      const none = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
+      expect(none.incomingRequestHeaders).to.not.have.property('x-edgeoptimize-fetcher-key');
+      const blank = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY, fetcherKey: '   ' });
+      expect(blank.incomingRequestHeaders).to.not.have.property('x-edgeoptimize-fetcher-key');
+    });
   });
 
   describe('buildRoutingRule', () => {

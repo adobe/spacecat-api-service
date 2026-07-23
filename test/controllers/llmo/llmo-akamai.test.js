@@ -250,6 +250,31 @@ describe('LlmoAkamaiController', () => {
       expect(body.errors).to.deep.equal([]);
     });
 
+    it('sets the x-edgeoptimize-fetcher-key header in the preview when a fetcherKey is supplied', async () => {
+      const res = await controller.plan(withData({ ...propertyRef, fetcherKey: 'fk-plan-abc' }));
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      const serialized = JSON.stringify(body.merged);
+      expect(serialized).to.contain('x-edgeoptimize-fetcher-key');
+      expect(serialized).to.contain('fk-plan-abc');
+    });
+
+    it('rejects a fetcherKey with control characters', async () => {
+      const res = await controller.plan(withData({ ...propertyRef, fetcherKey: 'line\nbreak' }));
+      expect(res.status).to.equal(400);
+      expect(mockAkamaiClient.updateRuleTree).to.not.have.been.called;
+    });
+
+    it('rejects a blank (whitespace-only) fetcherKey', async () => {
+      const res = await controller.plan(withData({ ...propertyRef, fetcherKey: '   ' }));
+      expect(res.status).to.equal(400);
+    });
+
+    it('rejects a fetcherKey longer than 256 characters', async () => {
+      const res = await controller.plan(withData({ ...propertyRef, fetcherKey: 'x'.repeat(257) }));
+      expect(res.status).to.equal(400);
+    });
+
     it('surfaces dry-run validation errors and warnings the PUT deploy would apply', async () => {
       mockAkamaiClient.updateRuleTree.resolves({
         errors: [{ detail: 'bad' }], warnings: [{ detail: 'w' }],
@@ -359,6 +384,31 @@ describe('LlmoAkamaiController', () => {
 
     it('rejects a non-integer baseVersion', async () => {
       const res = await controller.deploy(withData({ ...propertyRef, baseVersion: '1e3' }));
+      expect(res.status).to.equal(400);
+      expect(mockAkamaiClient.createVersion).to.not.have.been.called;
+    });
+
+    it('sets the x-edgeoptimize-fetcher-key header when a fetcherKey is supplied', async () => {
+      const res = await controller.deploy(withData({ ...propertyRef, fetcherKey: 'fk-secret-abc' }));
+      expect(res.status).to.equal(200);
+      const [, , , , merged] = mockAkamaiClient.updateRuleTree.firstCall.args;
+      const headers = [];
+      const collect = (rule) => {
+        (rule.behaviors || []).forEach((b) => {
+          if (b.name === 'modifyIncomingRequestHeader') {
+            headers.push(b.options);
+          }
+        });
+        (rule.children || []).forEach(collect);
+      };
+      collect(merged.rules.children.find((c) => c.name === 'Optimize at Edge'));
+      const fetcher = headers.find((o) => o.customHeaderName === 'x-edgeoptimize-fetcher-key');
+      expect(fetcher).to.exist;
+      expect(fetcher.headerValue).to.equal('fk-secret-abc');
+    });
+
+    it('rejects a fetcherKey longer than 256 characters', async () => {
+      const res = await controller.deploy(withData({ ...propertyRef, fetcherKey: 'x'.repeat(257) }));
       expect(res.status).to.equal(400);
       expect(mockAkamaiClient.createVersion).to.not.have.been.called;
     });
