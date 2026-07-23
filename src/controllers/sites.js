@@ -409,6 +409,12 @@ function SitesController(ctx, log, env) {
     if (productCodeError) {
       return badRequest(productCodeError);
     }
+    if (isArray(context.data?.pageTypes)) {
+      const validation = validatePageTypes(context.data.pageTypes);
+      if (!validation.isValid) {
+        return badRequest(validation.error);
+      }
+    }
     let site;
     let status;
     try {
