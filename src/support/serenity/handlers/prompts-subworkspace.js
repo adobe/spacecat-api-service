@@ -132,10 +132,10 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
  * @param {any} body
  * @param {any} log
  * @param {any} classifyPromptType
- * @param {object | null} [env] - environment (Azure OpenAI creds), threaded into intent
+ * @param {object | null} env - environment (Azure OpenAI creds), threaded into intent
  *   classification; ALSO used directly to fire the quota-rejection Slack alert (serenity-docs#72
  *   §5). Optional — omitted, alerting is a no-op.
- * @param {number} [writeDeadline] - shared request-write deadline for intent classification.
+ * @param {number} writeDeadline - shared request-write deadline for intent classification.
  * @param {object} [options]
  * @param {boolean} [options.dynamicAllocation]
  * @param {string} [options.parentWorkspaceId]
@@ -316,7 +316,7 @@ export async function handleCreatePromptsSubworkspace(
       workspaceId, created: created.length, skipped: skipped.length, failed: failed.length,
     });
     return {
-      // eslint-disable-next-line no-unused-vars -- destructuring-omit to strip the bookkeeping field
+      // eslint-disable-next-line no-unused-vars -- omit the bookkeeping field
       created: created.map(({ rollbackProjectId, ...rest }) => rest),
       skipped,
       failed,
