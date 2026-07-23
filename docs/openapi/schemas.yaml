@@ -11967,6 +11967,27 @@ SerenityMarketTrackingTrends:
                 name: { type: string }
                 mentions: { type: integer }
                 citations: { type: integer }
+SerenityCompetitorSummary:
+  type: object
+  description: |
+    Aggregate per-competitor mentions/citations totals (no weekly breakdown) for
+    the Overview Competitor Comparison bar chart — the lightweight counterpart
+    to `SerenityMarketTrackingTrends`. Sourced from the same two Semrush
+    elements (Trends Mentions/Visibility + Market Tracking citations), summed
+    across the requested date range instead of bucketed by week. The tracked
+    brand itself is excluded; only competitors (Semrush benchmarks) are returned.
+  required: [competitors]
+  properties:
+    competitors:
+      type: array
+      description: One entry per tracked competitor, sorted by mentions desc.
+      items:
+        type: object
+        required: [name, mentions, citations]
+        properties:
+          name: { type: string }
+          mentions: { type: integer }
+          citations: { type: integer }
 SerenityBrandPresenceStatsValues:
   type: object
   description: The four aggregated Brand Presence KPI values, shared by the top-level `stats` and each `trends[].data.stats` entry.
