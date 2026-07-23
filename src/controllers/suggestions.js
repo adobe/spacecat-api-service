@@ -183,6 +183,48 @@ async function postPlgSuggestionSkipAlert(site, opportunity, suggestion, context
   }
 }
 
+// TTL for presigned impact-measurement raw-data URLs (7 days).
+const INSIGHTS_PRESIGN_TTL_SECONDS = 60 * 60 * 24 * 7;
+
+/**
+ * Replace each analysis's `rawDataUrl` (an `s3://bucket/key` URI) in place with a presigned HTTPS URL
+ * so the UI can download the per-analysis detail blobs. Same field name — the `s3://` value is simply
+ * swapped for the presigned URL. Best-effort per analysis — on a presign failure the original
+ * `rawDataUrl` is left as-is. Analyses without a `rawDataUrl` are untouched.
+ *
+ * @param {object} insights - ExperimentInsights object.
+ * @param {object} s3Ctx - context.s3 ({ s3Client, getSignedUrl, GetObjectCommand }).
+ * @param {object} log - logger.
+ * @returns {Promise<object>} a new insights object with presigned rawDataUrls.
+ */
+async function presignInsightsRawData(insights, s3Ctx, log) {
+  const analyses = insights?.analyses;
+  if (!Array.isArray(analyses)) {
+    return insights;
+  }
+  const { s3Client, getSignedUrl, GetObjectCommand } = s3Ctx;
+  const presignedAnalyses = await Promise.all(analyses.map(async (analysis) => {
+    const match = /^s3:\/\/([^/]+)\/(.+)$/.exec(analysis?.rawDataUrl || '');
+    if (!match) {
+      return analysis;
+    }
+    const [, bucket, key] = match;
+    try {
+      // Replace the s3:// rawDataUrl in place with a presigned HTTPS URL the browser can fetch.
+      const rawDataUrl = await getSignedUrl(
+        s3Client,
+        new GetObjectCommand({ Bucket: bucket, Key: key }),
+        { expiresIn: INSIGHTS_PRESIGN_TTL_SECONDS },
+      );
+      return { ...analysis, rawDataUrl };
+    } catch (e) {
+      log.info(`[geo-experiment] Could not presign rawDataUrl ${analysis.rawDataUrl}: ${e.message}`);
+      return analysis;
+    }
+  }));
+  return { ...insights, analyses: presignedAnalyses };
+}
+
 /**
  * Suggestions controller.
  * @param {object} ctx - Context of the request.
@@ -2447,6 +2489,8 @@ function SuggestionsController(ctx, sqs, env) {
           );
           const body = await response.Body.transformToString();
           insights = JSON.parse(body);
+          // Presign each analysis's rawDataUrl so the UI can download the S3 detail blobs directly.
+          insights = await presignInsightsRawData(insights, context.s3, context.log);
         } catch (s3Error) {
           // Insights may not exist yet (e.g. impact measurement not yet complete)
           context.log.info(`[geo-experiment] Could not fetch insights for ${geoExperimentId}: ${s3Error.message}`);
