@@ -1,3 +1,10 @@
+# [1.686.0](https://github.com/adobe/spacecat-api-service/compare/v1.685.0...v1.686.0) (2026-07-23)
+
+
+### Features
+
+* **serenity:** make the per-brand AI ceiling bindable + tunable via Vault (LLMO-6190 gate) ([#2891](https://github.com/adobe/spacecat-api-service/issues/2891)) ([1dce3b7](https://github.com/adobe/spacecat-api-service/commit/1dce3b7a658dcbbee05433c502751d7bca80c617))
+
 # [1.685.0](https://github.com/adobe/spacecat-api-service/compare/v1.684.0...v1.685.0) (2026-07-23)
 
 
