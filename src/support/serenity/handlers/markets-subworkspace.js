@@ -856,9 +856,11 @@ export async function handleCreateMarketSubworkspace(
  * (our own `deleteProject` succeeded, or it 404'd because the upstream was already gone) leaves the
  * project truly absent, so both are treated identically: release fires after the try/catch, not
  * just on the success leg. Same shape as the model-removal seam
- * (`handleUpdateModelsSubworkspace`): inline, fail-fast (`releaseAiSurplus({ failFast: true })`),
- * best-effort (its own internal try/catch swallows expected transport/pool failures — a release
- * hiccup must never fail an otherwise-successful DELETE), post-delete. No-op when the flag is OFF.
+ * (`handleUpdateModelsSubworkspace`): per-child `withResourceLock`-wrapped (LLMO-6191 item 3,
+ * closing the same same-container absolute-set race the sibling call site closes), fail-fast
+ * (`releaseAiSurplus({ failFast: true })`), best-effort (its own internal try/catch swallows
+ * expected transport/pool failures — a release hiccup must never fail an otherwise-successful
+ * DELETE), post-delete. No-op when the flag is OFF.
  *
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {string|null} workspaceId - sub-workspace id the market's project lives in.
@@ -907,11 +909,21 @@ export async function handleDeleteMarketSubworkspace(
     // `resolveProject` above already resolved a project against `workspaceId`, so it is a real,
     // non-blank id here; releaseAiSurplus's own requireWorkspaceId re-asserts this at runtime —
     // narrow the (JSDoc-optional) `string|null` param for tsc, which cannot infer that.
-    await releaseAiSurplus(transport, {
-      subWorkspaceId: /** @type {string} */ (workspaceId),
-      floor: { projects: PROJECT_BLOCK, prompts: PROMPT_BLOCK },
-      failFast: true,
-    }, log);
+    //
+    // Wrapped in `withResourceLock` (LLMO-6191 item 3), mirroring `handleUpdateModelsSubworkspace`:
+    // `releaseAiSurplus` does the same read-then-absolute-set as `ensureAiHeadroom`, so an
+    // in-flight `ensure`/release for this SAME child in this same warm container must not race
+    // this one — both go through the one per-child lock. This closes the same-container half of
+    // the absolute-set race; the cross-container half is the deferred distributed lock (see
+    // docs/decisions/007-cross-container-resource-lock.md).
+    await withResourceLock(
+      /** @type {string} */ (workspaceId),
+      () => releaseAiSurplus(transport, {
+        subWorkspaceId: /** @type {string} */ (workspaceId),
+        floor: { projects: PROJECT_BLOCK, prompts: PROMPT_BLOCK },
+        failFast: true,
+      }, log),
+    );
   }
   return { status: 204, deletedSiteId };
 }
