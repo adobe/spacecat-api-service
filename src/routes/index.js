@@ -75,6 +75,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} llmoController - The LLMO controller.
  * @param {Object} llmoCloudflareController - The LLMO Cloudflare onboarding controller.
  * @param {Object} llmoCloudFrontController - The LLMO CloudFront onboarding controller.
+ * @param {Object} llmoAkamaiController - The LLMO Akamai onboarding controller.
  * @param {Object} llmoMysticatController - The LLMO Mysticat controller (brand presence APIs).
  * @param {Object} userActivityController - The user activity controller.
  * @param {Object} siteEnrollmentController - The site enrollment controller.
@@ -108,7 +109,9 @@ function isStaticRoute(routePattern) {
  * @param {Object} serenityController - Serenity API controller (prompts + markets).
  * @param {Object} elementsController - Elements API controller (Semrush Elements wrappers).
  * @param {Object} proxyController - URL proxy controller for client-side previews.
+ * @param {Object} taskManagementController - Task-management (Jira ticket creation) controller.
  * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
+ * @param {Object} auditPolicyController - Audit policy + audit scope controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -140,6 +143,7 @@ export default function getRouteHandlers(
   llmoController,
   llmoCloudflareController,
   llmoCloudFrontController,
+  llmoAkamaiController,
   llmoMysticatController,
   llmoOpportunitiesController,
   userActivityController,
@@ -174,7 +178,9 @@ export default function getRouteHandlers(
   serenityController,
   elementsController,
   proxyController,
+  taskManagementController,
   redirectsController,
+  auditPolicyController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -183,6 +189,9 @@ export default function getRouteHandlers(
     'GET /config/:service/redirects.txt': redirectsController.getRedirects,
     'GET /audits/latest/:auditType': auditsController.getAllLatest,
     'GET /configurations/latest': configurationController.getLatest,
+    // Static route — matched before the dynamic `GET /configurations/:version`
+    // (see src/utils/route-utils.js), so "versions" is never treated as a VersionId.
+    'GET /configurations/versions': configurationController.listVersions,
     'PATCH /configurations/latest': configurationController.updateConfiguration,
     'POST /configurations/:version/restore': configurationController.restoreVersion,
     'GET /configurations/:version': configurationController.getByVersion,
@@ -191,6 +200,8 @@ export default function getRouteHandlers(
     'PUT /configurations/latest/queues': configurationController.updateQueues,
     'PATCH /configurations/latest/jobs/:jobType': configurationController.updateJob,
     'PATCH /configurations/latest/handlers/:handlerType': configurationController.updateHandler,
+    /* TEMPORARY: This route is for cleanup task and will be removed once cleanup is done */
+    'PUT /configurations/latest/handlers/:handlerType/replace-enabled-disabled': configurationController.replaceHandlerEnabledDisabled,
     'PATCH /configurations/sites/audits': sitesAuditsToggleController.execute,
     'POST /event/fulfillment': fulfillmentController.processFulfillmentEvents,
     'POST /event/fulfillment/:eventType': fulfillmentController.processFulfillmentEvents,
@@ -239,11 +250,31 @@ export default function getRouteHandlers(
     // Brand-independent global model catalog (add-brand wizard, before a brand exists).
     'GET /v2/orgs/:spaceCatId/serenity/models': serenityController.listOrgModels,
     // Serenity: Semrush Elements APIs Wrappers wiki https://wiki.corp.adobe.com/spaces/AEMSites/pages/3928196548/Project+Serenity+LLMO+x+Semrush+API+for+Brand+Presence+Data
-    'GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/filter-dimensions': elementsController.listUrlInspectorFilterDimensions,
-    'GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/weeks': elementsController.listWeeks,
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/filter-dimensions': elementsController.listUrlInspectorFilterDimensions,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks': elementsController.listWeeks,
     // Brand-scoped: prompts/projects live in the brand's sub-workspace, not the org workspace.
     // eslint-disable-next-line max-len
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': elementsController.listPrompts,
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': elementsController.listCitedDomains,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview': elementsController.listSentimentOverview,
+    // Data Insights per-topic table (grouped from the prompts-by-topic element).
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics': elementsController.listTopics,
+    // Data Insights per-prompt drill-down: :topicId is the URL-encoded topic NAME.
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics/:topicId/prompts': elementsController.listTopicPrompts,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls': elementsController.listOwnedUrls,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/domain-urls': elementsController.listDomainUrls,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/market-tracking-trends': elementsController.getMarketTrackingTrends,
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/stats': elementsController.getStats,
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/stats': elementsController.getUrlInspectorStats,
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/prompts/count': elementsController.getUrlInspectorPromptsCount,
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/competitor-summary': elementsController.getCompetitorSummary,
     // Brand-independent Semrush language catalog (add-brand wizard language picker).
     'GET /v2/orgs/:spaceCatId/serenity/languages': serenityController.listOrgLanguages,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': serenityController.activate,
@@ -260,6 +291,14 @@ export default function getRouteHandlers(
     'GET /organizations/:organizationId/projects': organizationsController.getProjectsByOrganizationId,
     'GET /organizations/:organizationId/projects/:projectId/sites': organizationsController.getSitesByProjectIdAndOrganizationId,
     'GET /organizations/:organizationId/by-project-name/:projectName/sites': organizationsController.getSitesByProjectNameAndOrganizationId,
+    'GET /organizations/:organizationId/task-management/connections': taskManagementController.listConnections,
+    'GET /organizations/:organizationId/task-management/connections/:connectionId': taskManagementController.getConnection,
+    'GET /organizations/:organizationId/task-management/tickets': taskManagementController.listTickets,
+    'GET /organizations/:organizationId/suggestions/:suggestionId/ticket': taskManagementController.getTicketBySuggestion,
+    'GET /organizations/:organizationId/opportunities/:opportunityId/tickets': taskManagementController.listTicketsByOpportunity,
+    'POST /organizations/:organizationId/task-management/:provider/tickets': taskManagementController.createTicket,
+    'GET /organizations/:organizationId/task-management/connections/:connectionId/projects': taskManagementController.listProjects,
+    'GET /organizations/:organizationId/task-management/connections/:connectionId/issue-types': taskManagementController.listIssueTypes,
     'GET /projects': projectsController.getAll,
     'POST /projects': projectsController.createProject,
     'GET /projects/:projectId': projectsController.getByID,
@@ -309,6 +348,17 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/agentic-page-types': agenticPageTypesController.create,
     'PATCH /sites/:siteId/agentic-page-types/:name': agenticPageTypesController.update,
     'DELETE /sites/:siteId/agentic-page-types/:name': agenticPageTypesController.remove,
+
+    // Audit Policy contract (SITES-47306). Static segments precede dynamic :auditType match.
+    'GET /sites/:siteId/audit-policy': auditPolicyController.getPolicy,
+    'POST /sites/:siteId/audit-policy/exclusions': auditPolicyController.addExclusions,
+    'POST /sites/:siteId/audit-policy/exclusions/delete': auditPolicyController.removeExclusions,
+    'POST /sites/:siteId/audit-policy/inclusions': auditPolicyController.addInclusions,
+    'POST /sites/:siteId/audit-policy/inclusions/delete': auditPolicyController.removeInclusions,
+    'GET /sites/:siteId/audit-policy/revisions': auditPolicyController.listRevisions,
+    'GET /sites/:siteId/audit-scope/pages': auditPolicyController.getScopePages,
+    'GET /sites/:siteId/audit-scope/summary': auditPolicyController.getScopeSummary,
+    'GET /sites/:siteId/audit-scope/sections': auditPolicyController.getScopeSections,
 
     'PATCH /sites/:siteId/:auditType': auditsController.patchAuditForSite,
     'GET /sites/:siteId/latest-audit/:auditType': auditsController.getLatestForSite,
@@ -474,6 +524,7 @@ export default function getRouteHandlers(
     'GET /tools/scrape/jobs/by-url/:url': scrapeJobController.getScrapeUrlByProcessingType,
 
     // Fixes
+    'GET /sites/:siteId/fixes': (c) => fixesController.getAllForSite(c),
     'GET /sites/:siteId/opportunities/:opportunityId/fixes': (c) => fixesController.getAllForOpportunity(c),
     'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': (c) => fixesController.getByStatus(c),
     'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.getByID(c),
@@ -550,6 +601,14 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones': llmoCloudflareController.listZones,
     'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy': llmoCloudflareController.deployWorker,
     'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes': llmoCloudflareController.addRoute,
+
+    // LLMO Akamai Onboarding Routes
+    'GET /sites/:siteId/llmo/cdn-onboard/akamai/config': llmoAkamaiController.getConfig,
+    'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties': llmoAkamaiController.listProperties,
+    'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan': llmoAkamaiController.plan,
+    'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy': llmoAkamaiController.deploy,
+    'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate': llmoAkamaiController.activate,
+    'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status': llmoAkamaiController.activationStatus,
 
     'GET /llmo/agentic-traffic/global': llmoMysticatController.getAgenticTrafficGlobal,
     'POST /llmo/agentic-traffic/global': llmoMysticatController.postAgenticTrafficGlobal,

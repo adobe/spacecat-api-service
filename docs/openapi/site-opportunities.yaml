@@ -8,6 +8,8 @@ site-opportunities:
       Retrieve a list of all opportunities for a specific site
     tags:
       - opportunities
+    parameters:
+      - $ref: './parameters.yaml#/fields'
     responses:
       '200':
         description: A list of opportunities
@@ -79,6 +81,8 @@ site-opportunities-by-status:
       Retrieve opportunities for a specific site filtered by status
     tags:
       - opportunities
+    parameters:
+      - $ref: './parameters.yaml#/fields'
     responses:
       '200':
         description: A list of opportunities filtered by status
@@ -222,6 +226,8 @@ site-opportunity-suggestions:
       **Note:** For paginated results, use the `/paged` endpoints. Status filtering is only available on this non-paginated endpoint or the dedicated `/by-status` endpoints.
     tags:
       - opportunity-suggestions
+    parameters:
+      - $ref: './parameters.yaml#/fields'
     responses:
       '200':
         description: A list of suggestions
@@ -291,6 +297,8 @@ site-opportunity-suggestions-by-status:
       Returns suggestions filtered by status with optional field projection using the view parameter.
     tags:
       - opportunity-suggestions
+    parameters:
+      - $ref: './parameters.yaml#/fields'
     responses:
       '200':
         description: A list of suggestions filtered by status
@@ -330,6 +338,8 @@ site-opportunity-suggestions-paged:
       Note: For status filtering, use the non-paginated endpoint or the by-status endpoints.
     tags:
       - opportunity-suggestions
+    parameters:
+      - $ref: './parameters.yaml#/fields'
     responses:
       '200':
         description: A paginated list of suggestions
@@ -370,6 +380,8 @@ site-opportunity-suggestions-paged-with-cursor:
       Note: For status filtering, use the non-paginated endpoint or the by-status endpoints.
     tags:
       - opportunity-suggestions
+    parameters:
+      - $ref: './parameters.yaml#/fields'
     responses:
       '200':
         description: A paginated list of suggestions
@@ -413,6 +425,8 @@ site-opportunity-suggestions-by-status-paged:
       Supports field projection using the view parameter to reduce response size.
     tags:
       - opportunity-suggestions
+    parameters:
+      - $ref: './parameters.yaml#/fields'
     responses:
       '200':
         description: A paginated list of suggestions filtered by status
@@ -457,6 +471,8 @@ site-opportunity-suggestions-by-status-paged-with-cursor:
       Supports field projection using the view parameter to reduce response size.
     tags:
       - opportunity-suggestions
+    parameters:
+      - $ref: './parameters.yaml#/fields'
     responses:
       '200':
         description: A paginated list of suggestions filtered by status
@@ -1264,6 +1280,21 @@ site-opportunity-suggestion-backoffice-reviews:
                 type: string
                 maxLength: 8192
                 description: Optional ESE rationale (markdown). Required on reject by the UI; sanitised + 8 KB cap server-side.
+              guidanceMarkdown:
+                type: string
+                maxLength: 65536
+                description: >-
+                  AI-generated issue context (title + description) for the reviewed issue.
+                  Gives the Learning Agent "what the issue was" alongside the generated
+                  patch (previousFix) and the review. Sanitised + 64 KB cap server-side.
+              feedbackSubjectId:
+                type: string
+                maxLength: 200
+                description: >-
+                  Optional SpaceCat-internal id of the sub-item this review is about
+                  within the suggestion (e.g. a CWV issue id), so the Backoffice can group
+                  per-issue "previous feedback" when issues share one suggestionId.
+                  Independent of the Fix-entity issue id. Not exported to S3.
               rejectionCategory:
                 type: string
                 enum: [product_bug, bad_recommendation, other]
@@ -1404,6 +1435,63 @@ site-opportunity-suggestion-fixes:
               $ref: './schemas.yaml#/FixListResponse'
       '401':
         $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+site-fixes:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/locale'
+    - name: status
+      description: Optional fix status to filter by (e.g. `PENDING`, `FAILED`).
+      in: query
+      required: false
+      schema:
+        type: string
+    - name: limit
+      description: |
+        Maximum number of fixes to return. The aggregation spans every opportunity
+        belonging to the site, so the result set is capped to bound response size
+        and downstream user-name enrichment cost.
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 200
+        example: 200
+  get:
+    operationId: getSiteFixes
+    summary: |
+      Retrieve all fixes for a site, across every opportunity
+    description: |
+      Aggregates fixes across every opportunity belonging to the site, avoiding the need to
+      enumerate opportunities and fetch fixes per-opportunity. Optionally filtered by status.
+      Capped by `limit` (default 200, max 1000).
+    tags:
+      - opportunity-fixes
+    responses:
+      '200':
+        description: A list of fixes
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/FixList'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
       '404':
         $ref: './responses.yaml#/404'
       '429':

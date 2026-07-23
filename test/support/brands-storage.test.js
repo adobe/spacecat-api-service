@@ -18,10 +18,13 @@ import chaiAsPromised from 'chai-as-promised';
 import {
   listBrands,
   getBrandById,
+  getBrandIdentity,
+  getBrandBaseSiteId,
   getBrandAliases,
   getBrandUrlSources,
   getBrandCompetitors,
   getBrandBySite,
+  listBrandIdsForSite,
   isSemrushMarketMirrorSite,
   upsertBrand,
   updateBrand,
@@ -469,6 +472,83 @@ describe('brands-storage', () => {
     });
   });
 
+  describe('getBrandIdentity', () => {
+    it('returns null when postgrestClient is missing', async () => {
+      expect(await getBrandIdentity(ORG_ID, BRAND_ID, null)).to.be.null;
+    });
+
+    it('returns null when brandId is empty', async () => {
+      expect(await getBrandIdentity(ORG_ID, '', { from: () => {} })).to.be.null;
+    });
+
+    it('returns the { id, name } identity unchanged, without mapping through the full brand DTO', async () => {
+      const query = createChainableQuery({ data: { id: BRAND_ID, name: 'TestBrand' }, error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await getBrandIdentity(ORG_ID, BRAND_ID, postgrestClient);
+
+      expect(result).to.deep.equal({ id: BRAND_ID, name: 'TestBrand' });
+    });
+
+    it('returns null when the brand does not exist in the org', async () => {
+      const query = createChainableQuery({ data: null, error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await getBrandIdentity(ORG_ID, BRAND_ID, postgrestClient);
+      expect(result).to.be.null;
+    });
+
+    it('throws on database error', async () => {
+      const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      await expect(getBrandIdentity(ORG_ID, BRAND_ID, postgrestClient))
+        .to.be.rejectedWith('Failed to get brand identity');
+    });
+  });
+
+  describe('getBrandBaseSiteId', () => {
+    // Can't-scope-the-query cases THROW (not return null) so a best-effort caller's
+    // catch fails safe and skips primary-site-dependent cleanup, rather than
+    // proceeding with a null primary that would disable the guard (LLMO-6405 review).
+    it('throws when postgrestClient is missing', async () => {
+      await expect(getBrandBaseSiteId(ORG_ID, BRAND_ID, null))
+        .to.be.rejectedWith('organizationId, brandId, and a postgrest client are all required');
+    });
+
+    it('throws when brandId is empty', async () => {
+      await expect(getBrandBaseSiteId(ORG_ID, '', { from: () => {} }))
+        .to.be.rejectedWith('organizationId, brandId, and a postgrest client are all required');
+    });
+
+    it('throws when organizationId is missing (fail-safe: unresolved, not "no primary")', async () => {
+      await expect(getBrandBaseSiteId('', BRAND_ID, { from: () => {} }))
+        .to.be.rejectedWith('organizationId, brandId, and a postgrest client are all required');
+    });
+
+    it('returns the brand primary site_id', async () => {
+      const query = createChainableQuery({ data: { site_id: 'primary-site-1' }, error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      expect(await getBrandBaseSiteId(ORG_ID, BRAND_ID, postgrestClient)).to.equal('primary-site-1');
+    });
+
+    it('returns null when the brand has no primary site (or is not found)', async () => {
+      const noRow = createChainableQuery({ data: null, error: null });
+      expect(await getBrandBaseSiteId(ORG_ID, BRAND_ID, { from: sinon.stub().returns(noRow) }))
+        .to.be.null;
+      const nullSite = createChainableQuery({ data: { site_id: null }, error: null });
+      expect(await getBrandBaseSiteId(ORG_ID, BRAND_ID, { from: sinon.stub().returns(nullSite) }))
+        .to.be.null;
+    });
+
+    it('throws on database error', async () => {
+      const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      await expect(getBrandBaseSiteId(ORG_ID, BRAND_ID, postgrestClient))
+        .to.be.rejectedWith('Failed to get brand primary site');
+    });
+  });
+
   describe('getBrandAliases', () => {
     it('returns [] when postgrestClient is missing', async () => {
       expect(await getBrandAliases(BRAND_ID, null)).to.deep.equal([]);
@@ -625,6 +705,43 @@ describe('brands-storage', () => {
       const postgrestClient = { from: sinon.stub().returns(query) };
       await expect(getBrandCompetitors(BRAND_ID, postgrestClient))
         .to.be.rejectedWith('Failed to get brand competitors');
+    });
+  });
+
+  describe('listBrandIdsForSite', () => {
+    const SITE_ID = '44444444-4444-4444-8444-444444444444';
+
+    it('returns empty set when postgrestClient / org / site are missing', async () => {
+      expect(await listBrandIdsForSite(ORG_ID, SITE_ID, null)).to.deep.equal(new Set());
+      expect(await listBrandIdsForSite(ORG_ID, SITE_ID, {})).to.deep.equal(new Set());
+      expect(await listBrandIdsForSite('', SITE_ID, { from: () => {} })).to.deep.equal(new Set());
+      expect(await listBrandIdsForSite(ORG_ID, '', { from: () => {} })).to.deep.equal(new Set());
+    });
+
+    it('unions the primary brand (brands.site_id) and linked brands (brand_sites)', async () => {
+      const from = sinon.stub();
+      from.withArgs('brands').returns(createChainableQuery({ data: [{ id: 'brand-A' }], error: null }));
+      from.withArgs('brand_sites').returns(createChainableQuery({
+        data: [{ brand_id: 'brand-A' }, { brand_id: 'brand-B' }], error: null,
+      }));
+      const result = await listBrandIdsForSite(ORG_ID, SITE_ID, { from });
+      expect(result).to.deep.equal(new Set(['brand-A', 'brand-B']));
+    });
+
+    it('throws when the brands query errors', async () => {
+      const from = sinon.stub();
+      from.withArgs('brands').returns(createChainableQuery({ data: null, error: { message: 'boom' } }));
+      from.withArgs('brand_sites').returns(createChainableQuery({ data: [], error: null }));
+      await expect(listBrandIdsForSite(ORG_ID, SITE_ID, { from }))
+        .to.be.rejectedWith(/Failed to resolve brands for site: boom/);
+    });
+
+    it('throws when the brand_sites query errors', async () => {
+      const from = sinon.stub();
+      from.withArgs('brands').returns(createChainableQuery({ data: [], error: null }));
+      from.withArgs('brand_sites').returns(createChainableQuery({ data: null, error: { message: 'nope' } }));
+      await expect(listBrandIdsForSite(ORG_ID, SITE_ID, { from }))
+        .to.be.rejectedWith(/Failed to resolve brand-site links for site: nope/);
     });
   });
 
@@ -1025,7 +1142,7 @@ describe('brands-storage', () => {
       expect(brandsUpsert.row).to.not.have.property('semrush_sub_workspace_id');
     });
 
-    it('keeps the brand active without a site_id when a semrush_sub_workspace_id anchors it', async () => {
+    it('keeps the brand active with a null site_id when only a semrush_sub_workspace_id anchors it (no baseSiteId)', async () => {
       const client = createCapturingClient({
         brands: [
           { data: null, error: null },
@@ -1044,10 +1161,12 @@ describe('brands-storage', () => {
       const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
       expect(brandsUpsert.row.status).to.equal('active');
       expect(brandsUpsert.row.semrush_sub_workspace_id).to.equal('ws-1');
-      expect(brandsUpsert.row).to.not.have.property('site_id');
+      // A fresh create always writes an explicit site_id — null when no baseSiteId
+      // is supplied. The sub-workspace is what keeps it active (LLMO-6405).
+      expect(brandsUpsert.row.site_id).to.equal(null);
     });
 
-    it('ignores baseSiteId on a semrush-anchored create (never sets site_id, avoids 409)', async () => {
+    it('writes site_id from baseSiteId on a semrush-anchored create (anchored by BOTH — LLMO-6405)', async () => {
       const client = createCapturingClient({
         brands: [
           { data: null, error: null }, // no existing brand
@@ -1058,15 +1177,17 @@ describe('brands-storage', () => {
 
       await upsertBrand({
         organizationId: ORG_ID,
-        // baseSiteId would coincidentally match an onboarded site already owned by
-        // another brand; a semrush-anchored brand must NOT claim it as site_id.
-        brand: { name: 'Test', status: 'active', baseSiteId: 'collides-with-other-brand' },
+        // LLMO-6405: a Semrush brand now also carries its primary site — the UI's
+        // primary-URL step sends baseSiteId, so site_id is populated on every path.
+        brand: { name: 'Test', status: 'active', baseSiteId: 'primary-site-id' },
         postgrestClient: client,
         semrushSubWorkspaceId: 'ws-1',
       });
 
       const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
-      expect(brandsUpsert.row).to.not.have.property('site_id');
+      // The old anchoredBySemrush skip is removed — site_id IS written from
+      // baseSiteId even when a sub-workspace anchors the brand.
+      expect(brandsUpsert.row.site_id).to.equal('primary-site-id');
       expect(brandsUpsert.row.semrush_sub_workspace_id).to.equal('ws-1');
       expect(brandsUpsert.row.status).to.equal('active');
     });

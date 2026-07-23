@@ -186,12 +186,14 @@ export function contentToString(content) {
 
 /**
  * Extracts a JSON object from a model response that may include code fences or
- * surrounding prose, then returns its normalized `intent` (or null).
+ * surrounding prose, then returns the parsed object (or null on any parse
+ * failure). Shared by every category spec — none of this extraction logic is
+ * taxonomy-specific.
  *
  * @param {string} content - Raw model output
- * @returns {string|null}
+ * @returns {object|null}
  */
-function parseIntent(content) {
+function parseModelJson(content) {
   if (!hasText(content)) {
     return null;
   }
@@ -208,20 +210,58 @@ function parseIntent(content) {
     [raw] = brace;
   }
   try {
-    const parsed = JSON.parse(raw);
-    // normalizeIntent lowercases, applies the legacy remap, and validates
-    // against the 6 canonical buckets (else null) — single source of truth.
-    return normalizeIntent(parsed?.intent);
+    return JSON.parse(raw);
   } catch {
     return null;
   }
 }
 
 /**
- * Creates an intent classifier bound to the Azure OpenAI credentials in `env`.
+ * The native/DRS 6-bucket category spec — the classifier's default
+ * configuration, reproducing today's behavior byte-for-byte (it reuses the
+ * existing {@link SYSTEM_PROMPT} export as-is, so there is nothing new to keep
+ * in sync). `parseResult` discards `confidence`, matching the pre-existing
+ * `parseIntent` behavior.
+ *
+ * @typedef {object} CategorySpec
+ * @property {string} systemPrompt - the system prompt for this taxonomy.
+ * @property {(parsed: object) => (string|null)} parseResult - validates +
+ *   normalizes the parsed JSON body into a canonical value, or null.
+ * @property {number} [invokeTimeoutMs] - per-call timeout override; falls back
+ *   to {@link resolveInvokeTimeoutMs} (env-driven) when omitted.
+ */
+
+/** @type {CategorySpec} */
+export const DRS_CATEGORY_SPEC = Object.freeze({
+  systemPrompt: SYSTEM_PROMPT,
+  // normalizeIntent lowercases, applies the legacy remap, and validates
+  // against the 6 canonical buckets (else null) — single source of truth.
+  parseResult: (parsed) => normalizeIntent(parsed?.intent),
+});
+
+/**
+ * Resolves the Azure OpenAI deployment (model) name from env, allowing a
+ * classifier-scoped override (`PROMPT_INTENT_CLASSIFICATION_DEPLOYMENT_NAME`)
+ * to take precedence over the shared per-env deployment used by other Azure
+ * OpenAI consumers (e.g. `org-detector`). Falls back to the shared deployment
+ * when the override is unset, so existing behavior is unchanged until the
+ * override is explicitly configured.
+ *
+ * @param {object} env - Environment variables
+ * @returns {string|undefined}
+ */
+function resolveDeploymentName(env = {}) {
+  return env.PROMPT_INTENT_CLASSIFICATION_DEPLOYMENT_NAME
+    || env.AZURE_OPEN_AI_API_DEPLOYMENT_NAME;
+}
+
+/**
+ * Creates an intent classifier bound to the Azure OpenAI credentials in `env`,
+ * for the given taxonomy (`categorySpec`). Defaults to {@link DRS_CATEGORY_SPEC}
+ * so existing single-arg callers are unaffected.
  *
  * Returns a function `classify(text) => Promise<string|null>` that is always
- * best-effort: it resolves to a canonical bucket on success, or `null` on any
+ * best-effort: it resolves to a canonical value on success, or `null` on any
  * failure or when text/credentials are missing. It NEVER rejects.
  *
  * Classification runs whenever Azure OpenAI is configured. When the Azure
@@ -231,17 +271,19 @@ function parseIntent(content) {
  * @param {object} context - Helix universal context
  * @param {object} context.env - Environment variables (Azure OpenAI creds)
  * @param {object} [context.log] - Logger
+ * @param {CategorySpec} [categorySpec] - the taxonomy to classify into;
+ *   defaults to the native 6-bucket DRS taxonomy.
  * @returns {((text: string) => Promise<string|null>)|null}
  */
-export function createIntentClassifier(context = {}) {
+export function createIntentClassifier(context = {}, categorySpec = DRS_CATEGORY_SPEC) {
   const { env = {}, log = console } = context;
 
   const {
     AZURE_OPEN_AI_API_KEY: azureOpenAIApiKey,
     AZURE_OPEN_AI_API_INSTANCE_NAME: azureOpenAIApiInstanceName,
-    AZURE_OPEN_AI_API_DEPLOYMENT_NAME: azureOpenAIApiDeploymentName,
     AZURE_OPEN_AI_API_VERSION: azureOpenAIApiVersion,
   } = env;
+  const azureOpenAIApiDeploymentName = resolveDeploymentName(env);
 
   if (!hasText(azureOpenAIApiKey)
     || !hasText(azureOpenAIApiInstanceName)
@@ -266,7 +308,8 @@ export function createIntentClassifier(context = {}) {
     return null;
   }
 
-  const invokeTimeoutMs = resolveInvokeTimeoutMs(env);
+  const invokeTimeoutMs = categorySpec.invokeTimeoutMs ?? resolveInvokeTimeoutMs(env);
+  const { systemPrompt, parseResult } = categorySpec;
 
   return async function classify(text) {
     // Mirror DRS: skip empty / whitespace-only text (no LLM call, intent null).
@@ -279,14 +322,15 @@ export function createIntentClassifier(context = {}) {
       // On timeout this rejects and falls through to the non-fatal catch below.
       const response = await withTimeout(
         model.invoke([
-          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'system', content: systemPrompt },
           { role: 'user', content: trimmed.slice(0, MAX_PROMPT_CHARS) },
         ]),
         invokeTimeoutMs,
       );
       // content may be a string OR an array of content parts; coerce either way.
       const content = contentToString(response?.content);
-      return parseIntent(content);
+      const parsed = parseModelJson(content);
+      return parsed ? parseResult(parsed) : null;
     } catch (e) {
       log.warn(`Intent classification failed for prompt; persisting null: ${e.message}`);
       return null;

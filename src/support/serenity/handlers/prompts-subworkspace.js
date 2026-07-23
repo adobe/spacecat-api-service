@@ -22,7 +22,9 @@ import {
   buildPromptDto,
   normalizePromptInput,
   createOnePrompt,
-  makeTypeInjector,
+  makePromptTagInjector,
+  makeIntentInjector,
+  validateDeferPublish,
   parseUpdatePromptBody,
   mapLimit,
   publishAffected,
@@ -32,8 +34,13 @@ import {
   BULK_CREATE_CONCURRENCY,
   BULK_PROMPTS_MAX_ITEMS,
 } from './prompts.js';
+import { ORIGIN_VALUE } from '../prompt-tags.js';
 import { resolveProject, buildSliceProjectMap, sliceKey } from '../subworkspace-projects.js';
 import { redactUpstreamMessage } from '../rest-transport.js';
+import { createHeadroomGuard } from '../dynamic-allocation-active.js';
+import { classifyPromptIntents } from '../intent-classification.js';
+
+/** @typedef {import('../resource-manager.js').Blocks} Blocks */
 
 /**
  * Subworkspace-mode prompt handlers (serenity dual-mode, subworkspace path). Behaviourally
@@ -89,6 +96,8 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
     throw err;
   }
 
+  // Each prompt's tags already carry their own parentage (see buildTagsOf), so
+  // one upstream call answers the whole page — no tag-tree walk to join against.
   const resp = await transport.listPromptsByTags(workspaceId, project.id, {
     tag_ids: tagIds,
     page,
@@ -123,6 +132,13 @@ export async function handleCreatePromptsSubworkspace(
   body,
   log,
   classifyPromptType,
+  env,
+  writeDeadline,
+  {
+    dynamicAllocation = false,
+    parentWorkspaceId = '',
+    ceiling = /** @type {Partial<Blocks> | undefined} */ (undefined),
+  } = {},
 ) {
   const inputs = Array.isArray(body?.prompts) ? body.prompts : [];
   if (inputs.length === 0) {
@@ -134,17 +150,60 @@ export async function handleCreatePromptsSubworkspace(
       400,
     );
   }
+  const deferPublish = validateDeferPublish(body);
 
   const projectsBySlice = await buildSliceProjectMap(transport, workspaceId, log);
-  const injectComputedType = makeTypeInjector(transport, workspaceId, classifyPromptType, log);
+  // CREATE: user-authenticated write → derived `origin` is `human` (see the
+  // flat-mode twin handleCreatePrompts and origin-dimension.md §3).
+  const injectComputedTags = makePromptTagInjector(
+    transport,
+    workspaceId,
+    classifyPromptType,
+    log,
+    { originValue: ORIGIN_VALUE.HUMAN },
+  );
+  // Unified layer (serenity-docs#32): batch-classify every distinct text ONCE
+  // under the shared request deadline, then thread the resolved map into each
+  // per-item injection below.
+  // Classify the TRIMMED text: `makeIntentInjector` looks up the map by
+  // `input.text`, which `normalizePromptInput` has already trimmed, so the
+  // classify key must be trimmed to match — otherwise a whitespace-padded prompt
+  // (common in CSV import) misses the map and silently defaults to Informational
+  // despite a real classification.
+  const intentByText = await classifyPromptIntents(
+    inputs.map((raw) => String(raw?.text || '').trim()),
+    {
+      env,
+      log,
+      deadline: writeDeadline,
+      writePath: deferPublish ? 'csv' : 'create',
+      workspaceId,
+    },
+  );
+  const injectComputedIntent = makeIntentInjector(transport, workspaceId, intentByText, log);
+
+  // PROMPT metering seam (Rainer, live-verified LLMO-6190): the metered write is
+  // `createPromptsByIds` (inside `createOnePrompt` below), NOT publish — a disguised-quota 405
+  // fires there, before any publish, if `used + drafted + batch > total`. Front headroom BEFORE
+  // this loop, sized on the whole incoming batch (`inputs.length` — a safe upper bound; some
+  // inputs may still skip on validation/missing-project, so this can over-provision slightly, never
+  // under). No-op when the flag is OFF.
+  const headroom = createHeadroomGuard(
+    transport,
+    {
+      enabled: dynamicAllocation, subWorkspaceId: workspaceId, parentWorkspaceId, ceiling,
+    },
+    log,
+  );
+  await headroom.ensure({ prompts: inputs.length }, { includeDrafted: true });
 
   const results = await mapLimit(inputs, BULK_CREATE_CONCURRENCY, async (raw) => {
-    const input = normalizePromptInput(raw);
+    const { value: input, reason } = normalizePromptInput(raw);
     if (!input) {
       return {
         skipped: {
           text: String(raw?.text || ''),
-          reason: 'text, languageCode, and geoTargetId are required',
+          reason: /** @type {string} */ (reason),
         },
       };
     }
@@ -159,17 +218,27 @@ export async function handleCreatePromptsSubworkspace(
     }
     const projectId = String(project.id);
     try {
-      // Unified layer: strip any caller-supplied type + inject the computed one.
-      const typed = await injectComputedType(projectId, input);
-      const semrushPromptId = await createOnePrompt(transport, workspaceId, projectId, typed);
+      // Unified layer: strip caller-supplied type/origin/intent, then inject the
+      // computed type + derived origin (origin-dimension.md §3) and the classified
+      // intent (serenity-docs#32). The injectors act on disjoint dimensions.
+      let typed = await injectComputedTags(projectId, input);
+      typed = await injectComputedIntent(projectId, typed);
+      // LLMO-6190 follow-up: the metered write itself can still 405 as a disguised metered-quota
+      // rejection despite the pre-loop sizing above (the live-verified ~9s gateway
+      // write-enforcement lag after a JIT top-up) — route it through `headroom.retryOnQuota` (a
+      // no-op passthrough when the flag is OFF) so each item recovers independently; `mapLimit`'s
+      // own per-item try/catch below still isolates a surviving failure to this one item.
+      const semrushPromptId = await headroom.retryOnQuota(
+        () => createOnePrompt(transport, workspaceId, projectId, typed),
+        { callSite: 'createOnePrompt' },
+      );
       return {
         created: {
           semrushPromptId,
           geoTargetId: typed.geoTargetId,
           languageCode: input.languageCode,
           text: typed.text,
-          tags: typed.tags,
-          ...(typed.tagIds !== undefined ? { tagIds: typed.tagIds } : {}),
+          tagIds: typed.tagIds,
         },
         affectedProjectId: projectId,
       };
@@ -205,20 +274,44 @@ export async function handleCreatePromptsSubworkspace(
     invalidateTagCacheForProject(workspaceId, pid);
   }
 
-  const publishErrors = await publishAffected(transport, workspaceId, affectedProjectIds, log);
+  if (deferPublish) {
+    log?.info?.('serenity create-prompts (subworkspace): deferPublish set — prompts written as draft, publish skipped', {
+      workspaceId, created: created.length, skipped: skipped.length, failed: failed.length,
+    });
+    return {
+      created, skipped, failed, published: false,
+    };
+  }
+
+  // Route each project's publish through the headroom guard's retryOnQuota (LLMO-6190 item 4):
+  // a disguised metered-405 gets ONE bounded top-up+retry per project before being recorded as a
+  // failure. No-op passthrough when the flag is OFF (the guard's retryOnQuota is a plain call).
+  const publishErrors = await publishAffected(
+    transport,
+    workspaceId,
+    affectedProjectIds,
+    log,
+    (fn) => headroom.retryOnQuota(fn, { callSite: 'publishAffected' }),
+  );
   // publishAffected returns { projectId, message } records whose message is
   // ALREADY redacted (redactUpstreamMessage) — pubErr is a record, not a raw error.
   for (const pubErr of publishErrors) {
     failed.push({ text: '', status: 502, message: `publish: ${pubErr.message}` });
   }
 
-  return { created, skipped, failed };
+  return {
+    created, skipped, failed, published: true,
+  };
 }
 
 /**
- * PATCH /serenity/prompts/:semrushPromptId (subworkspace) — replace. Resolves the
- * slice's project from the live listing, then runs the shared DELETE-then-CREATE
- * (we never CREATE after a failed DELETE — that produced duplicate prompts).
+ * PATCH /serenity/prompts/:semrushPromptId (subworkspace) — in-place edit.
+ * Resolves the slice's project from the live listing, then edits the prompt IN
+ * PLACE exactly like the flat-mode twin (see handleUpdatePrompt's contract):
+ * `rename` first (the one op that can refuse — upstream 404 → promptNotFound,
+ * 409 text collision → thrown for the controller's `conflict` mapping), then
+ * the replace-mode batch tag write. The prompt id is preserved end to end and
+ * echoed unchanged in the response; nothing is deleted on this path.
  */
 export async function handleUpdatePromptSubworkspace(
   transport,
@@ -227,12 +320,14 @@ export async function handleUpdatePromptSubworkspace(
   body,
   log,
   classifyPromptType,
+  env,
+  writeDeadline,
 ) {
   const parsedBody = parseUpdatePromptBody(body);
   if (!parsedBody.ok) {
     return { status: parsedBody.status, body: parsedBody.body };
   }
-  const { text: nextText, tags: nextTags, tagIds: nextTagIds } = parsedBody;
+  const { text: nextText, tagIds: nextTagIds } = parsedBody;
   const geoTargetId = normalizeGeoTargetId(Number(body.geoTargetId));
   const languageCode = normalizeLanguageCode(body.languageCode);
   if (geoTargetId === null || languageCode === null) {
@@ -257,15 +352,27 @@ export async function handleUpdatePromptSubworkspace(
   }
   const projectId = String(project.id);
 
-  // Recompute the type tag from the NEW text BEFORE the delete (see the flat-mode
-  // twin): the unified layer must not run between delete and create.
-  const injectComputedType = makeTypeInjector(transport, workspaceId, classifyPromptType, log);
-  const typed = await injectComputedType(projectId, {
-    text: nextText, geoTargetId, tags: nextTags, tagIds: nextTagIds,
+  // Recompute the type AND intent tags from the NEW text BEFORE any upstream write
+  // (see the flat-mode twin handleUpdatePrompt): the unified layer must run before
+  // the rename so a classification failure aborts cleanly with the prompt untouched
+  // (serenity-docs#31, #32). No `originValue`: origin is never re-derived on edit
+  // (origin-dimension.md §3 item 3); the stored origin the caller echoes rides
+  // through the replace-mode tag write untouched.
+  const injectComputedTags = makePromptTagInjector(transport, workspaceId, classifyPromptType, log);
+  const intentByText = await classifyPromptIntents(
+    [nextText],
+    {
+      env, log, deadline: writeDeadline, writePath: 'edit', workspaceId,
+    },
+  );
+  const injectComputedIntent = makeIntentInjector(transport, workspaceId, intentByText, log);
+  let typed = await injectComputedTags(projectId, {
+    text: nextText, geoTargetId, tagIds: nextTagIds,
   });
+  typed = await injectComputedIntent(projectId, typed);
 
   try {
-    await transport.deletePromptsByIds(workspaceId, projectId, [semrushPromptId]);
+    await transport.renamePrompt(workspaceId, projectId, semrushPromptId, nextText);
   } catch (e) {
     if (isUpstreamGone(e)) {
       return {
@@ -276,27 +383,26 @@ export async function handleUpdatePromptSubworkspace(
         },
       };
     }
-    log?.error?.('handleUpdatePromptSubworkspace: deletePromptsByIds failed; aborting before create to avoid duplicate', {
-      projectId,
-      semrushPromptId,
-      error: e.message,
-    });
+    // A 409 (the new text collides with a sibling prompt's) and every other
+    // upstream error propagate to the controller's mapError; nothing has
+    // mutated upstream — the tag write below has not run.
     throw e;
   }
 
-  let newSemrushPromptId;
+  // Full replace with the injector's output: the caller's tagIds minus any
+  // caller-supplied type value, plus the server-computed one. An unknown
+  // prompt id would be skipped silently (204) — the rename above has already
+  // established existence.
   try {
-    newSemrushPromptId = await createOnePrompt(transport, workspaceId, projectId, typed);
+    await transport.updatePromptTagsByIds(workspaceId, projectId, [
+      { id: semrushPromptId, references: typed.tagIds, replace: true },
+    ]);
   } catch (e) {
-    // The DELETE above already succeeded, so the old prompt is gone upstream —
-    // a failure here (e.g. an unresolvable tagId 500ing the atomic id-based
-    // create) is a genuine data-loss event, not a retryable no-op. Log it
-    // distinctly from the pre-delete failure above so on-call can tell "nothing
-    // happened" apart from "the prompt is gone and must be recreated manually".
-    log?.error?.('handleUpdatePromptSubworkspace: createOnePrompt failed AFTER a successful delete; the prompt is now lost upstream and must be recreated manually', {
-      projectId,
-      semrushPromptId,
-      error: e.message,
+    // The rename above already landed: the prompt's text has moved while its
+    // tags are stale. Record the partial mutation before propagating, so the
+    // generic upstream error the caller sees is attributable on-call.
+    log?.warn?.('updatePromptTagsByIds failed after a successful rename — text updated, tags stale', {
+      semrushPromptId, projectId, error: e.message,
     });
     throw e;
   }
@@ -308,12 +414,11 @@ export async function handleUpdatePromptSubworkspace(
   return {
     status: 200,
     body: {
-      semrushPromptId: newSemrushPromptId,
+      semrushPromptId,
       geoTargetId,
       languageCode,
-      text: typed.text,
-      tags: typed.tags,
-      ...(typed.tagIds !== undefined ? { tagIds: typed.tagIds } : {}),
+      text: nextText,
+      tagIds: typed.tagIds,
     },
   };
 }

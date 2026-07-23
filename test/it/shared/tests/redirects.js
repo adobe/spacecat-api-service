@@ -166,6 +166,20 @@ export default function redirectsTests(getBaseUrl) {
       expect(await res.text()).to.equal(OVERLAY_BODY);
     });
 
+    // AEM CS preview pods send AEM_SERVICE=cm-pN-eN-prev; both the auth handler
+    // and the controller must accept the suffix and resolve to the canonical
+    // overlay. Runs the same fixture end-to-end via `-prev` to prove no leg of
+    // the chain 401/400s the preview traffic before the strip happens.
+    it('valid key + -prev suffix → 200 (resolves to canonical overlay)', async () => {
+      const res = await get(
+        `/config/${ENTITLED_SERVICE}-prev/redirects.txt`,
+        { 'x-aso-api-key': API_KEY },
+      );
+      expect(res.status).to.equal(200);
+      expect(res.headers.get('content-type')).to.include('text/plain');
+      expect(await res.text()).to.equal(OVERLAY_BODY);
+    });
+
     it('missing X-ASO-API-Key → 401', async () => {
       const res = await get(`/config/${ENTITLED_SERVICE}/redirects.txt`, {});
       expect(res.status).to.equal(401);

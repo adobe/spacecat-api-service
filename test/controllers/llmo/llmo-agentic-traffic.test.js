@@ -2328,3 +2328,158 @@ describe('llmo-agentic-traffic', () => {
     });
   });
 });
+
+describe('llmo-agentic-traffic — rotation (demo sites)', () => {
+  // Configured demo site (agentic + referral) — demoStrategy. See ROTATION_CONFIG.
+  const ROTATION_SITE_ID = '66b55446-4cc3-46f1-9cd4-9eb57601b3f1';
+  const CANNED_START = '2026-06-08'; // canned block = Jun 8–Jul 5 2026 (w24–27)
+  const CANNED_END = '2026-07-05';
+  // Freeze now=2026-07-06 (Monday) → phase 0, P0 = anchor ⇒ window = block [Jun 8, Jul 5].
+  const FULL = { startDate: '2026-06-08', endDate: '2026-07-05' };
+  // A rich row carrying every field the various handlers map.
+  const ROW = {
+    total_hits: 10,
+    success_rate: 0.5,
+    avg_ttfb_ms: 100,
+    avg_citability_score: 0.4,
+    period_start: '2026-06-10', // for kpis-trend relabel
+
+    region: 'US',
+    category_name: 'Coffee',
+    page_type: 'article',
+    http_status: 200,
+    agent_type: 'Chatbots',
+    unique_agents: 2,
+    unique_agent_names: ['GPTBot'],
+    host: 'frescopa.coffee',
+    url_path: '/coffee',
+    total_count: 1,
+    top_agent: 'GPTBot',
+    response_codes: [200],
+    hits_trend: [{ week_start: '2026-06-10', value: 3 }],
+  };
+
+  let clock;
+  beforeEach(() => {
+    clock = sinon.useFakeTimers({ now: Date.UTC(2026, 6, 6), toFake: ['Date'] });
+  });
+  afterEach(() => clock.restore());
+
+  const assertCannedDates = (client) => {
+    expect(client.rpc).to.have.been.called;
+    client.rpc.getCalls().forEach((call) => {
+      expect(call.args[1].p_start_date >= CANNED_START).to.equal(true);
+      expect(call.args[1].p_end_date <= CANNED_END).to.equal(true);
+    });
+  };
+
+  it('weeks: synthesises the rolling window without querying frozen min/max', async () => {
+    const client = createMockClient();
+    const ctx = makeContext({ client, params: { siteId: ROTATION_SITE_ID }, data: FULL });
+    const res = await createAgenticTrafficWeeksHandler(stubbedValidateAccess)(ctx);
+    expect(res.status).to.equal(200);
+    expect((await res.json()).weeks).to.have.length(4);
+    expect(client.from).to.not.have.been.called; // no min/max query on rotation path
+  });
+
+  // Each rotated endpoint rewrites the inbound range into the frozen canned block.
+  const ROTATED = [
+    ['kpis', createAgenticTrafficKpisHandler, 'rpc_agentic_traffic_kpis'],
+    ['kpis-trend', createAgenticTrafficKpisTrendHandler, 'rpc_agentic_traffic_kpis_trend'],
+    ['by-region', createAgenticTrafficByRegionHandler, 'rpc_agentic_traffic_by_region'],
+    ['by-category', createAgenticTrafficByCategoryHandler, 'rpc_agentic_traffic_by_category'],
+    ['by-page-type', createAgenticTrafficByPageTypeHandler, 'rpc_agentic_traffic_by_page_type'],
+    ['by-status', createAgenticTrafficByStatusHandler, 'rpc_agentic_traffic_by_status'],
+    ['by-user-agent', createAgenticTrafficByUserAgentHandler, 'rpc_agentic_traffic_by_user_agent'],
+    ['by-url', createAgenticTrafficByUrlHandler, 'rpc_agentic_traffic_by_url'],
+    ['filter-dimensions', createAgenticTrafficFilterDimensionsHandler, 'rpc_agentic_traffic_distinct_filters'],
+    ['movers', createAgenticTrafficMoversHandler, 'rpc_agentic_traffic_movers'],
+  ];
+  ROTATED.forEach(([name, factory, rpc]) => {
+    it(`${name}: rewrites the inbound range into the canned block`, async () => {
+      const client = createMockClient({ [rpc]: { data: [ROW], error: null } });
+      const ctx = makeContext({ client, params: { siteId: ROTATION_SITE_ID }, data: FULL });
+      const res = await factory(stubbedValidateAccess)(ctx);
+      expect(res.status).to.equal(200);
+      assertCannedDates(client);
+    });
+  });
+
+  it('hits-by-urls (POST): rotates the canned block for the requested URLs', async () => {
+    const client = createMockClient({ rpc_agentic_hits_for_urls: { data: [ROW], error: null } });
+    const ctx = makeContext({
+      client,
+      params: { siteId: ROTATION_SITE_ID },
+      data: { ...FULL, urls: [{ host: 'frescopa.coffee', urlPath: '/coffee' }] },
+    });
+    const res = await createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess)(ctx);
+    expect(res.status).to.equal(200);
+    assertCannedDates(client);
+  });
+
+  it('kpis-trend: relabels canned trend dates into the current window', async () => {
+    const client = createMockClient({
+      rpc_agentic_traffic_kpis_trend: {
+        data: [{ period_start: '2026-06-10', total_hits: 7, success_rate: 0.5 }],
+        error: null,
+      },
+    });
+    const ctx = makeContext({ client, params: { siteId: ROTATION_SITE_ID }, data: FULL });
+    const res = await createAgenticTrafficKpisTrendHandler(stubbedValidateAccess)(ctx);
+    const body = await res.json();
+    // phase 0 (P0 = anchor) ⇒ identity: canned 2026-06-10 stays 2026-06-10.
+    expect(body[0].periodStart).to.equal('2026-06-10');
+  });
+
+  it('by-region: combines 2 canned segments on a wrap-spanning sub-range', async () => {
+    // now=2026-07-13 (phase 1) ⇒ P0=Jun 15, window Jun 15–Jul 12. The last two slots
+    // (j2,j3 = Jun 29–Jul 12) map to frozen weeks {3,0} → 2 non-contiguous segments.
+    clock.restore();
+    clock = sinon.useFakeTimers({ now: Date.UTC(2026, 6, 13), toFake: ['Date'] });
+    const client = createMockClient({
+      rpc_agentic_traffic_by_region: { data: [{ region: 'US', total_hits: 10 }], error: null },
+    });
+    const ctx = makeContext({
+      client,
+      params: { siteId: ROTATION_SITE_ID },
+      data: { startDate: '2026-06-29', endDate: '2026-07-12' },
+    });
+    const res = await createAgenticTrafficByRegionHandler(stubbedValidateAccess)(ctx);
+    expect(client.rpc).to.have.been.calledTwice; // 2 canned segments
+    const body = await res.json();
+    expect(body[0]).to.deep.equal({ region: 'US', totalHits: 20 }); // 10 + 10 summed
+  });
+
+  it('returns empty without an RPC call when the range is before the window', async () => {
+    const client = createMockClient({ rpc_agentic_traffic_kpis: { data: [ROW], error: null } });
+    const ctx = makeContext({
+      client,
+      params: { siteId: ROTATION_SITE_ID },
+      data: { startDate: '2026-01-01', endDate: '2026-01-07' },
+    });
+    const res = await createAgenticTrafficKpisHandler(stubbedValidateAccess)(ctx);
+    expect(res.status).to.equal(200);
+    expect((await res.json()).totalHits).to.equal(0);
+    expect(client.rpc).to.not.have.been.called; // clamped to empty → no round-trip
+  });
+
+  it('surfaces an RPC error from the rotated path as 500', async () => {
+    const client = createMockClient({
+      rpc_agentic_traffic_kpis: { data: null, error: { message: 'boom' } },
+    });
+    const ctx = makeContext({ client, params: { siteId: ROTATION_SITE_ID }, data: FULL });
+    const res = await createAgenticTrafficKpisHandler(stubbedValidateAccess)(ctx);
+    expect(res.status).to.equal(500);
+  });
+
+  it('non-rotation site: passes the requested range through unchanged', async () => {
+    const client = createMockClient({
+      rpc_agentic_traffic_kpis: { data: [{ total_hits: 1 }], error: null },
+    });
+    const ctx = makeContext({ client }); // default SITE_ID (not a demo site)
+    await createAgenticTrafficKpisHandler(stubbedValidateAccess)(ctx);
+    expect(client.rpc).to.have.been.calledOnce;
+    expect(client.rpc.firstCall.args[1].p_start_date).to.equal('2026-01-01');
+    expect(client.rpc.firstCall.args[1].p_end_date).to.equal('2026-01-28');
+  });
+});

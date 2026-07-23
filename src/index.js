@@ -38,6 +38,7 @@ import {
 } from '@adobe/spacecat-shared-slack-client';
 import { hasText, isValidUUID, logWrapper } from '@adobe/spacecat-shared-utils';
 import { traceIdResponseWrapper } from './support/trace-id-response-wrapper.js';
+import { ensureFetchResponseWrapper } from './support/ensure-fetch-response-wrapper.js';
 
 import dataAccess from './support/data-access.js';
 import sqs from './support/sqs.js';
@@ -45,6 +46,7 @@ import getRouteHandlers from './routes/index.js';
 import matchPath, { sanitizePath } from './utils/route-utils.js';
 
 import AuditsController from './controllers/audits.js';
+import TaskManagementController from './controllers/task-management.js';
 import OrganizationsController from './controllers/organizations.js';
 import ProjectsController from './controllers/project.js';
 import SitesController from './controllers/sites.js';
@@ -80,6 +82,7 @@ import ReportsController from './controllers/reports.js';
 import LlmoController from './controllers/llmo/llmo.js';
 import LlmoCloudflareController from './controllers/llmo/llmo-cloudflare.js';
 import LlmoCloudFrontController from './controllers/llmo/llmo-cloudfront.js';
+import LlmoAkamaiController from './controllers/llmo/llmo-akamai.js';
 import LlmoMysticatController from './controllers/llmo/llmo-mysticat-controller.js';
 import LlmoOpportunitiesController from './controllers/llmo/opportunities/llmo-opportunities-controller.js';
 import FanoutReportController from './controllers/llmo/fanout-report.js';
@@ -111,6 +114,7 @@ import AiVisibilityController from './controllers/ai-visibility.js';
 import StateAccessMappingsController from './controllers/state-access-mappings.js';
 import AgenticCategoriesController from './controllers/agentic-categories.js';
 import AgenticPageTypesController from './controllers/agentic-page-types.js';
+import AuditPolicyController from './controllers/audit-policy.js';
 import SerenityController from './controllers/serenity.js';
 import ElementsController from './controllers/elements.js';
 import ProxyController from './controllers/proxy.js';
@@ -260,6 +264,7 @@ async function run(request, context) {
     const llmoController = LlmoController(context);
     const llmoCloudflareController = LlmoCloudflareController(context);
     const llmoCloudFrontController = LlmoCloudFrontController(context);
+    const llmoAkamaiController = LlmoAkamaiController(context);
     const llmoMysticatController = LlmoMysticatController(context);
     const llmoOpportunitiesController = LlmoOpportunitiesController(context);
     const fanoutReportController = FanoutReportController(context);
@@ -290,9 +295,11 @@ async function run(request, context) {
     const stateAccessMappingsController = StateAccessMappingsController(context);
     const agenticCategoriesController = AgenticCategoriesController();
     const agenticPageTypesController = AgenticPageTypesController();
+    const auditPolicyController = AuditPolicyController();
     const serenityController = SerenityController(context, log, context.env);
     const elementsController = ElementsController(context, log, context.env);
     const proxyController = ProxyController();
+    const taskManagementController = TaskManagementController(context);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -323,6 +330,7 @@ async function run(request, context) {
       llmoController,
       llmoCloudflareController,
       llmoCloudFrontController,
+      llmoAkamaiController,
       llmoMysticatController,
       llmoOpportunitiesController,
       userActivitiesController,
@@ -357,7 +365,9 @@ async function run(request, context) {
       serenityController,
       elementsController,
       proxyController,
+      taskManagementController,
       redirectsController,
+      auditPolicyController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
@@ -392,6 +402,9 @@ async function run(request, context) {
       }
       if (params.preflightId && !isValidUUID(params.preflightId)) {
         return badRequest('Preflight Id is invalid. Please provide a valid UUID.');
+      }
+      if (params.connectionId && !isValidUUIDAnyVersion(params.connectionId)) {
+        return badRequest('Connection Id is invalid. Please provide a valid UUID.');
       }
       context.params = params;
       context.request = request;
@@ -489,4 +502,11 @@ export const main = wrappedMain
   .with(elevatedSlackClientWrapper, { slackTarget: WORKSPACE_EXTERNAL })
   .with(vaultSecrets)
   .with(compressResponse)
-  .with(helixStatus);
+  .with(helixStatus)
+  // OUTERMOST wrapper (runs LAST on the response path, just before helix-universal's
+  // AWS Lambda adapter serializes the response). Guarantees the response reaching
+  // `aws-adapter.js:254` — `splitHeaders(response.headers.raw(), ...)` — is an
+  // `@adobe/fetch` Response whose Headers has `.raw()`, not a native Web-Fetch-API
+  // Response whose Headers doesn't. See the wrapper's module-level docstring for
+  // the full backstory (SITES-48140 EMF-instrumentation bundling interaction).
+  .with(ensureFetchResponseWrapper);

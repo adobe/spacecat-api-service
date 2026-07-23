@@ -49,6 +49,22 @@ describe('matchPath', () => {
     expect(matchPath('GET', '/about', routeDefinitions)).to.deep.equal({ handler: 'aboutHandler', params: {} });
   });
 
+  it('prefers a static route over a colliding dynamic one (versions vs :version)', () => {
+    const defs = {
+      staticRoutes: { 'GET /configurations/versions': 'listVersionsHandler' },
+      dynamicRoutes: {
+        'GET /configurations/:version': { handler: 'getByVersionHandler', paramNames: ['version'] },
+      },
+    };
+    // The literal "versions" segment must resolve to the static handler, not be
+    // captured as a VersionId by the dynamic route.
+    expect(matchPath('GET', '/configurations/versions', defs))
+      .to.deep.equal({ handler: 'listVersionsHandler', params: {} });
+    // A real VersionId still falls through to the dynamic route.
+    expect(matchPath('GET', '/configurations/abc123', defs))
+      .to.deep.equal({ handler: 'getByVersionHandler', params: { version: 'abc123' } });
+  });
+
   it('matches dynamic routes correctly', () => {
     expect(matchPath('GET', '/users/123', routeDefinitions)).to.deep.equal({ handler: 'userHandler', params: { userId: '123' } });
     expect(matchPath('GET', '/products/456/details', routeDefinitions)).to.deep.equal({ handler: 'productDetailsHandler', params: { productId: '456' } });

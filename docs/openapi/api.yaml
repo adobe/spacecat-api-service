@@ -94,6 +94,8 @@ paths:
     $ref: './auth-api.yaml#/login'
   /configurations/latest:
     $ref: './configuration-api.yaml#/latest-configuration'
+  /configurations/versions:
+    $ref: './configuration-api.yaml#/configuration-versions'
   /configurations/latest/queues:
     $ref: './configuration-api.yaml#/configuration-queues'
   /configurations/latest/jobs/{jobType}:
@@ -174,6 +176,24 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-activate'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/deactivate:
     $ref: './serenity-api.yaml#/v2-serenity-deactivate'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/filter-dimensions:
+    $ref: './serenity-api.yaml#/v2-serenity-url-inspector-filter-dimensions'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/market-tracking-trends:
+    $ref: './serenity-api.yaml#/v2-serenity-market-tracking-trends'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/competitor-summary:
+    $ref: './serenity-api.yaml#/v2-serenity-competitor-summary'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/sentiment-overview:
+    $ref: './serenity-api.yaml#/v2-serenity-brand-presence-sentiment-overview'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/topics:
+    $ref: './serenity-api.yaml#/v2-serenity-brand-presence-topics'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/topics/{topicId}/prompts:
+    $ref: './serenity-api.yaml#/v2-serenity-brand-presence-topic-prompts'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/stats:
+    $ref: './serenity-api.yaml#/v2-serenity-brand-presence-stats'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/stats:
+    $ref: './serenity-api.yaml#/v2-serenity-url-inspector-stats'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/prompts/count:
+    $ref: './serenity-api.yaml#/v2-serenity-url-inspector-prompts-count'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/{organizationId}/entitlements:
@@ -193,6 +213,22 @@ paths:
     $ref: './organization-api.yaml#/organization-by-ims-org-id'
   /organizations/by-ims-org-id/{imsOrgId}/slack-config:
     $ref: './organization-api.yaml#/organization-slack-config-by-ims-org-id'
+  /organizations/{organizationId}/task-management/connections:
+    $ref: './task-management-api.yaml#/task-management-connections'
+  /organizations/{organizationId}/task-management/connections/{connectionId}:
+    $ref: './task-management-api.yaml#/task-management-connection-by-id'
+  /organizations/{organizationId}/task-management/connections/{connectionId}/projects:
+    $ref: './task-management-api.yaml#/task-management-connection-projects'
+  /organizations/{organizationId}/task-management/connections/{connectionId}/issue-types:
+    $ref: './task-management-api.yaml#/task-management-connection-issue-types'
+  /organizations/{organizationId}/task-management/tickets:
+    $ref: './task-management-api.yaml#/task-management-tickets'
+  /organizations/{organizationId}/task-management/{provider}/tickets:
+    $ref: './task-management-api.yaml#/task-management-create-ticket'
+  /organizations/{organizationId}/suggestions/{suggestionId}/ticket:
+    $ref: './task-management-api.yaml#/ticket-by-suggestion'
+  /organizations/{organizationId}/opportunities/{opportunityId}/tickets:
+    $ref: './task-management-api.yaml#/tickets-by-opportunity'
   /organizations/{organizationId}/projects:
     $ref: './organizations-api.yaml#/organization-projects'
   /organizations/{organizationId}/projects/{projectId}/sites:
@@ -343,6 +379,24 @@ paths:
     $ref: './agentic-rules-api.yaml#/agentic-page-types-list'
   /sites/{siteId}/agentic-page-types/{name}:
     $ref: './agentic-rules-api.yaml#/agentic-page-types-one'
+  /sites/{siteId}/audit-policy:
+    $ref: './audit-policy-api.yaml#/audit-policy'
+  /sites/{siteId}/audit-policy/exclusions:
+    $ref: './audit-policy-api.yaml#/audit-policy-exclusions'
+  /sites/{siteId}/audit-policy/exclusions/delete:
+    $ref: './audit-policy-api.yaml#/audit-policy-exclusions-delete'
+  /sites/{siteId}/audit-policy/inclusions:
+    $ref: './audit-policy-api.yaml#/audit-policy-inclusions'
+  /sites/{siteId}/audit-policy/inclusions/delete:
+    $ref: './audit-policy-api.yaml#/audit-policy-inclusions-delete'
+  /sites/{siteId}/audit-policy/revisions:
+    $ref: './audit-policy-api.yaml#/audit-policy-revisions'
+  /sites/{siteId}/audit-scope/pages:
+    $ref: './audit-policy-api.yaml#/audit-scope-pages'
+  /sites/{siteId}/audit-scope/summary:
+    $ref: './audit-policy-api.yaml#/audit-scope-summary'
+  /sites/{siteId}/audit-scope/sections:
+    $ref: './audit-policy-api.yaml#/audit-scope-sections'
   /sites/{siteId}/traffic/paid:
     $ref: './site-paid.yaml#/site-traffic-paid-top-pages'
   /sites/{siteId}/traffic/paid/url-page-type:
@@ -479,6 +533,8 @@ paths:
     $ref: './site-metrics-api.yaml#/page-metrics-by-source'
   /sites/{siteId}/experiments:
     $ref: './experiments-api.yaml#/experiments'
+  /sites/{siteId}/fixes:
+    $ref: './site-opportunities.yaml#/site-fixes'
   /sites/{siteId}/opportunities/{opportunityId}/fixes:
     $ref: './site-opportunities.yaml#/site-opportunity-fixes'
   /sites/{siteId}/opportunities/{opportunityId}/fixes/by-status/{status}:
@@ -688,6 +744,18 @@ paths:
     $ref: './llmo-api.yaml#/site-llmo-cloudflare-deploy'
   /sites/{siteId}/llmo/cdn-onboard/cloudflare/routes:
     $ref: './llmo-api.yaml#/site-llmo-cloudflare-routes'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/config:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-config'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/properties:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-properties'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/plan:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-plan'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/deploy:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-deploy'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/activate:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-activate'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/activation-status:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-activation-status'
   /sites/{siteId}/llmo/strategy:
     $ref: './llmo-api.yaml#/llmo-strategy'
   /sites/{siteId}/reports:

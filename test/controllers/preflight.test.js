@@ -21,7 +21,12 @@ import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import esmock from 'esmock';
 
 import * as utils from '../../src/support/utils.js';
-import PreflightController, { countIssuesForAudit } from '../../src/controllers/preflight.js';
+import PreflightController, {
+  collectSiteKnownHostnames,
+  countIssuesForAudit,
+  PREFLIGHT_PROCESS_AUDW,
+  PREFLIGHT_PROCESS_MYST,
+} from '../../src/controllers/preflight.js';
 
 // Make fetch available globally
 global.fetch = fetch;
@@ -81,6 +86,14 @@ describe('Preflight Controller', () => {
     getId: () => 'test-site-123',
     getOrganizationId: () => 'org-123',
     getAuthoringType: () => SiteModel.AUTHORING_TYPES.SP,
+    // SITES-48309: the createPreflight hostname-membership check (ADR-002)
+    // reads these getters. Default the site's baseURL to match the
+    // canonical test URL (main--example-site.aem.page) so the majority of
+    // tests that submit that URL still resolve to a "URL belongs to this
+    // site" pass. Per-test AEM CS / EDS site fixtures override as needed.
+    getBaseURL: () => 'https://main--example-site.aem.page',
+    getDeliveryConfig: () => ({}),
+    getHlxConfig: () => ({}),
   };
 
   const preflightId = 'aabbccdd-1234-5678-abcd-111122223333';
@@ -134,7 +147,13 @@ describe('Preflight Controller', () => {
       findLatest: sandbox.stub().resolves(mockConfiguration),
     },
     Organization: {
-      findById: sandbox.stub().resolves({ getId: () => 'org-123' }),
+      findById: sandbox.stub().resolves({
+        getId: () => 'org-123',
+        // SITES-48037: createPreflight threads imsOrgId to mysticat and rejects
+        // when it's missing/empty (500). Default the stub to a valid value; per-test
+        // overrides in the "missing imsOrgId" cases stub it to '' / null.
+        getImsOrgId: () => 'TEST123456@AdobeOrg',
+      }),
     },
     Preflight: {
       create: sandbox.stub().resolves(mockPreflight),
@@ -1135,8 +1154,16 @@ describe('Preflight Controller', () => {
 
       mockDataAccess.AsyncJob.create = sandbox.stub().resolves(mockJob);
       mockDataAccess.Site.findById = sandbox.stub().resolves(mockSite);
-      mockDataAccess.Site.findByPreviewURL = sandbox.stub().resolves(mockSite);
+      // SITES-48309: createPreflight no longer calls findByPreviewURL; hostname
+      // validation is now an in-memory check via collectSiteKnownHostnames.
       mockDataAccess.Preflight.create = sandbox.stub().resolves(mockPreflight);
+      // SITES-48037: createPreflight resolves imsOrgId via Organization.findById.
+      // Re-stub per test to keep the fail-closed cases (null org / null imsOrgId)
+      // from leaking into subsequent tests via a shared sandbox.
+      mockDataAccess.Organization.findById = sandbox.stub().resolves({
+        getId: () => 'org-123',
+        getImsOrgId: () => 'TEST123456@AdobeOrg',
+      });
       hasAccessStub = sandbox.stub().resolves(true);
 
       // SITES-43236 / SITES-46699: createPreflight constructs a custom-env
@@ -1425,11 +1452,14 @@ describe('Preflight Controller', () => {
       expect(result.errorCode).to.equal('PREFLIGHT_ACCESS_DENIED');
     });
 
-    it('returns 400 when url does not belong to site', async () => {
-      mockDataAccess.Site.findByPreviewURL.resolves(null);
+    it('returns 400 when url hostname is not in the site\'s known-hosts set (SITES-48309)', async () => {
+      // Post-SITES-48309: URL→site validation is a hostname-membership check
+      // against site.getBaseURL() / site.getDeliveryConfig().authorURL / EDS
+      // hostnames derived from hlxConfig.rso — no DB lookup, no findByPreviewURL.
+      // A URL whose hostname isn't in that set → 400 PREFLIGHT_INVALID_REQUEST.
       const response = await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
-        data: { url: 'https://main--example-site.aem.page/test.html' },
+        data: { url: 'https://different-site.example.com/test.html' },
       });
       expect(response.status).to.equal(400);
       const result = await response.json();
@@ -1437,26 +1467,57 @@ describe('Preflight Controller', () => {
       expect(result.message).to.equal('URL does not belong to this site');
     });
 
-    it('returns 400 when url belongs to a different site', async () => {
-      mockDataAccess.Site.findByPreviewURL.resolves({ getId: () => 'different-site-id' });
+    it('accepts author-tier AEM CS URL when site\'s deliveryConfig.authorURL matches (SITES-48309)', async () => {
+      // ADR-002 §"POST /sites/:siteId/preflights" — hostname-membership set
+      // includes deliveryConfig.authorURL so both publish-tier (baseURL) and
+      // author-tier URLs for the same AEM CS site are accepted.
+      const aemCsSite = {
+        getId: () => 'test-site-123',
+        getOrganizationId: () => 'org-123',
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.SP,
+        getBaseURL: () => 'https://publish-p12345-e67890-cmstg.adobeaemcloud.com',
+        getDeliveryConfig: () => ({ authorURL: 'https://author-p12345-e67890-cmstg.adobeaemcloud.com' }),
+        getHlxConfig: () => ({}),
+      };
+      mockDataAccess.Site.findById.resolves(aemCsSite);
       const response = await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
-        data: { url: 'https://main--example-site.aem.page/test.html' },
+        data: { url: 'https://author-p12345-e67890-cmstg.adobeaemcloud.com/us/en.html' },
       });
-      expect(response.status).to.equal(400);
+      // Downstream mysticat / promise-token machinery isn't stubbed for this
+      // fixture, so the request will still fail somewhere later — but the
+      // hostname check specifically must NOT be the failure point.
+      expect(response.status).to.not.equal(400);
       const result = await response.json();
-      expect(result.errorCode).to.equal('PREFLIGHT_INVALID_REQUEST');
+      expect(result.errorCode).to.not.equal('PREFLIGHT_INVALID_REQUEST');
     });
 
-    it('returns 500 when Site.findByPreviewURL throws', async () => {
-      mockDataAccess.Site.findByPreviewURL.rejects(new Error('DB error'));
+    it('accepts publish-tier AEM CS URL when site\'s baseURL is the publish host (SITES-48309)', async () => {
+      // The immediate scenario that motivated SITES-48309 — a real onboarded
+      // AEM CS site with baseURL on the publish tier. Under the legacy
+      // findByPreviewURL check this returned a generic 500 (Unsupported preview
+      // URL) because the regex only matched `author-p<N>-e<M>`.
+      const aemCsSite = {
+        getId: () => 'test-site-123',
+        getOrganizationId: () => 'org-123',
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.SP,
+        getBaseURL: () => 'https://publish-p152454-e364278-cmstg.adobeaemcloud.com',
+        getDeliveryConfig: () => ({}),
+        getHlxConfig: () => ({}),
+      };
+      mockDataAccess.Site.findById.resolves(aemCsSite);
       const response = await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
-        data: { url: 'https://main--example-site.aem.page/test.html' },
+        data: { url: 'https://publish-p152454-e364278-cmstg.adobeaemcloud.com/us/en.html' },
       });
-      expect(response.status).to.equal(500);
+      // Same as above — downstream isn't stubbed, so we can't assert 202
+      // without more setup. What matters is neither the hostname check (400)
+      // nor the "Unsupported preview URL" regression (500) fires.
+      expect(response.status).to.not.equal(400);
+      expect(response.status).to.not.equal(500);
       const result = await response.json();
-      expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
+      expect(result.errorCode).to.not.equal('PREFLIGHT_INVALID_REQUEST');
+      expect(result.errorCode).to.not.equal('PREFLIGHT_INTERNAL_ERROR');
     });
 
     it('does not consult Configuration / TierClient (eligibility deferred to Mysticat per SITES-46202)', async () => {
@@ -1615,6 +1676,80 @@ describe('Preflight Controller', () => {
       expect(preflightBody.preflightId).to.be.a('string');
     });
 
+    // -- SITES-48037: ims_org_id threading & fail-closed contract --
+
+    it('threads ims_org_id into the mysticat analyze body (SITES-48037)', async () => {
+      // Mysticat requires this in the payload to bypass DRS's cross-org S2S
+      // auto-resolution (SITES-47943 RCA). Spacecat is the source of truth
+      // and threads the value verbatim from Organization.getImsOrgId().
+      await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      const [, calledOptions] = fetchStub.secondCall.args;
+      const body = JSON.parse(calledOptions.body);
+      expect(body.ims_org_id).to.equal('TEST123456@AdobeOrg');
+      expect(mockDataAccess.Organization.findById).to.have.been.calledWith('org-123');
+    });
+
+    it('returns 400 when the Organization has no imsOrgId (SITES-48037 fail-closed)', async () => {
+      // Empty imsOrgId is a config gap — the site is registered but its parent
+      // org wasn't fully onboarded. 400 (not 500) because this isn't a
+      // retryable server error; the caller's admin needs to populate the org's
+      // imsOrgId before this site can preflight.
+      mockDataAccess.Organization.findById.resolves({
+        getId: () => 'org-123',
+        getImsOrgId: () => '',
+      });
+      const response = await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_INVALID_REQUEST');
+      expect(result.message).to.equal('Site organization is missing imsOrgId');
+      // Fail-closed happens after hasAccess but BEFORE the HEAD probe (which
+      // is fetch call 1) and the mysticat call (fetch call 2). Assert fetch
+      // was never invoked — cleaner than `secondCall.to.be.null` and order-
+      // independent of any future HEAD-probe placement changes.
+      expect(fetchStub).to.not.have.been.called;
+    });
+
+    it('returns 500 when Organization.findById throws (SITES-48037)', async () => {
+      mockDataAccess.Organization.findById.rejects(new Error('db down'));
+      const response = await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
+      expect(result.message).to.equal('Failed to resolve site organization');
+    });
+
+    it('returns 500 when Organization.findById returns null — dangling FK (SITES-48037)', async () => {
+      // Distinct from the empty-imsOrgId case: null org = data-integrity issue
+      // at the FK level (site.organization_id points to a row that doesn't
+      // exist — needs cleanup). Empty imsOrgId = config gap at the field
+      // level (needs org onboarding). Different remediation paths → different
+      // error messages, and 500 (not 400) because it's genuinely broken data
+      // in our tables that no client action can fix.
+      mockDataAccess.Organization.findById.resolves(null);
+      const response = await preflightController.createPreflight({
+        params: { siteId: 'test-site-123' },
+        data: { url: 'https://main--example-site.aem.page/test.html' },
+        attributes: { authInfo: mockAuthInfo },
+      });
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
+      expect(result.message).to.equal('Site organization not found');
+    });
+
     it('does not include x-page-auth header when HEAD returns 200 (no page-auth needed)', async () => {
       await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
@@ -1675,7 +1810,6 @@ describe('Preflight Controller', () => {
         getDeliveryType: () => 'aem_cs',
       };
       mockDataAccess.Site.findById.resolves(aemCsSite);
-      mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
 
       const pageAuthStub = sandbox.stub().resolves('customer-site-token');
       const controller = await esmock('../../src/controllers/preflight.js', {
@@ -1829,9 +1963,12 @@ describe('Preflight Controller', () => {
         getOrganizationId: () => 'org-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS_CW,
         getDeliveryType: () => 'aem_edge',
+        // SITES-48309: hostname-membership stubs (see mockSite header).
+        getBaseURL: () => 'https://main--example-site.aem.page',
+        getDeliveryConfig: () => ({}),
+        getHlxConfig: () => ({}),
       };
       mockDataAccess.Site.findById.resolves(cwSite);
-      mockDataAccess.Site.findByPreviewURL.resolves(cwSite);
 
       const mockRetrievePageAuth = sandbox.stub().resolves('page-access-token');
       const ControllerWithIms = await esmock('../../src/controllers/preflight.js', {
@@ -1882,9 +2019,13 @@ describe('Preflight Controller', () => {
         getId: () => 'test-site-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
         getDeliveryType: () => 'aem_cs',
+        getOrganizationId: () => 'org-123',
+        // SITES-48309: hostname-membership stubs (see mockSite header).
+        getBaseURL: () => 'https://main--example-site.aem.page',
+        getDeliveryConfig: () => ({}),
+        getHlxConfig: () => ({}),
       };
       mockDataAccess.Site.findById.resolves(csSite);
-      mockDataAccess.Site.findByPreviewURL.resolves(csSite);
       const ControllerWithStubbed = await esmock('../../src/controllers/preflight.js', {
         '../../src/support/access-control-util.js': {
           default: { fromContext: () => ({ hasAccess: hasAccessStub }) },
@@ -1925,9 +2066,15 @@ describe('Preflight Controller', () => {
         getId: () => 'test-site-123',
         getAuthoringType: () => { throw new Error('authoring type lookup failed'); },
         getDeliveryType: () => 'aem_cs',
+        getOrganizationId: () => 'org-123',
+        // SITES-48309: hostname-membership stubs — need to be present so the
+        // hostname check runs before resolvePromiseToken (which is where the
+        // authoring-type throw fires and this test exercises).
+        getBaseURL: () => 'https://main--example-site.aem.page',
+        getDeliveryConfig: () => ({}),
+        getHlxConfig: () => ({}),
       };
       mockDataAccess.Site.findById.resolves(brokenSite);
-      mockDataAccess.Site.findByPreviewURL.resolves(brokenSite);
       const ControllerWithStubbed = await esmock('../../src/controllers/preflight.js', {
         '../../src/support/access-control-util.js': {
           default: { fromContext: () => ({ hasAccess: hasAccessStub }) },
@@ -1966,9 +2113,13 @@ describe('Preflight Controller', () => {
         getId: () => 'test-site-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
         getDeliveryType: () => 'aem_cs',
+        getOrganizationId: () => 'org-123',
+        // SITES-48309: hostname-membership stubs (see mockSite header).
+        getBaseURL: () => 'https://main--example-site.aem.page',
+        getDeliveryConfig: () => ({}),
+        getHlxConfig: () => ({}),
       };
       mockDataAccess.Site.findById.resolves(csSite);
-      mockDataAccess.Site.findByPreviewURL.resolves(csSite);
       const mockRetrievePageAuth = sandbox.stub().rejects(new Error('IMS down'));
       const ControllerWithIms = await esmock('../../src/controllers/preflight.js', {
         '@adobe/spacecat-shared-ims-client': {
@@ -2031,9 +2182,13 @@ describe('Preflight Controller', () => {
         getId: () => 'test-site-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.SP,
         getDeliveryType: () => 'aem_edge',
+        getOrganizationId: () => 'org-123',
+        // SITES-48309: hostname-membership stubs (see mockSite header).
+        getBaseURL: () => 'https://main--example-site.aem.page',
+        getDeliveryConfig: () => ({}),
+        getHlxConfig: () => ({}),
       };
       mockDataAccess.Site.findById.resolves(spSite);
-      mockDataAccess.Site.findByPreviewURL.resolves(spSite);
 
       const mockRetrievePageAuth = sandbox.stub().resolves('sp-page-token');
       const ControllerWithIms = await esmock('../../src/controllers/preflight.js', {
@@ -2079,9 +2234,13 @@ describe('Preflight Controller', () => {
         getId: () => 'test-site-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
         getDeliveryType: () => 'aem_cs',
+        getOrganizationId: () => 'org-123',
+        // SITES-48309: hostname-membership stubs (see mockSite header).
+        getBaseURL: () => 'https://main--example-site.aem.page',
+        getDeliveryConfig: () => ({}),
+        getHlxConfig: () => ({}),
       };
       mockDataAccess.Site.findById.resolves(csSite);
-      mockDataAccess.Site.findByPreviewURL.resolves(csSite);
 
       const mockRetrievePageAuth = sandbox.stub().resolves('cs-token');
       const ControllerWithIms = await esmock('../../src/controllers/preflight.js', {
@@ -2276,7 +2435,9 @@ describe('Preflight Controller', () => {
 
       const infoCall = loggerStub.info.getCalls()
         .find((c) => typeof c.args[0] === 'string'
-          && c.args[0].includes(`[Preflight] Run complete. jobId=${jobId}`)
+          && c.args[0].includes('[Preflight] Run complete.')
+          && c.args[0].includes(`process=${PREFLIGHT_PROCESS_AUDW}`)
+          && c.args[0].includes(`jobId=${jobId}`)
           && c.args[0].includes('status=COMPLETED'));
       expect(infoCall, 'expected a [Preflight] jobId info log').to.not.be.undefined;
       const logged = JSON.parse(infoCall.args[0].split('results=')[1]);
@@ -2326,7 +2487,9 @@ describe('Preflight Controller', () => {
 
       const infoCall = loggerStub.info.getCalls()
         .find((c) => typeof c.args[0] === 'string'
-          && c.args[0].includes(`[Preflight] Run complete. jobId=${jobId}`)
+          && c.args[0].includes('[Preflight] Run complete.')
+          && c.args[0].includes(`process=${PREFLIGHT_PROCESS_AUDW}`)
+          && c.args[0].includes(`jobId=${jobId}`)
           && c.args[0].includes('status=COMPLETED'));
       expect(infoCall, 'expected a [Preflight] jobId info log').to.not.be.undefined;
       const logged = JSON.parse(infoCall.args[0].split('results=')[1]);
@@ -2362,8 +2525,114 @@ describe('Preflight Controller', () => {
       expect(response.status).to.equal(200);
 
       const infoCall = loggerStub.info.getCalls()
-        .find((c) => typeof c.args[0] === 'string' && c.args[0].includes(`[Preflight] Run complete. jobId=${jobId}`));
+        .find((c) => typeof c.args[0] === 'string' && c.args[0].includes('[Preflight] Run complete.'));
       expect(infoCall, 'expected no [Preflight] jobId info log while IN_PROGRESS').to.be.undefined;
+    });
+
+    it('warns with code + message (not the full error object) when the job is FAILED', async () => {
+      loggerStub.warn.resetHistory();
+      const failedError = { code: 'MYSTICAT_ERROR', message: 'Upstream analyze service failed', details: { secret: 'tok' } };
+      const failedJob = {
+        ...mockJob,
+        getStatus: () => 'FAILED',
+        getError: () => failedError,
+      };
+      mockDataAccess.AsyncJob.findById.resolves(failedJob);
+
+      const context = { params: { jobId } };
+      const response = await preflightController.getPreflightJobStatusAndResult(context);
+      expect(response.status).to.equal(200);
+
+      const warnCall = loggerStub.warn.getCalls()
+        .find((c) => typeof c.args[0] === 'string'
+          && c.args[0].includes('[Preflight] Run failed.')
+          && c.args[0].includes(`process=${PREFLIGHT_PROCESS_AUDW}`)
+          && c.args[0].includes(`jobId=${jobId}`)
+          && c.args[0].includes('status=FAILED'));
+      expect(warnCall, 'expected a [Preflight] Run failed warn log').to.not.be.undefined;
+      expect(warnCall.args[0]).to.include('errorCode=MYSTICAT_ERROR');
+      expect(warnCall.args[0]).to.include('errorMessage=Upstream analyze service failed');
+      // details must NOT be logged (never log secrets / freeform worker content)
+      expect(warnCall.args[0]).to.not.include('details');
+      expect(warnCall.args[0]).to.not.include('tok');
+    });
+
+    it('warns with errorCode=none when the job is FAILED without a structured error', async () => {
+      loggerStub.warn.resetHistory();
+      const failedJob = {
+        ...mockJob,
+        getStatus: () => 'FAILED',
+        getError: () => null,
+      };
+      mockDataAccess.AsyncJob.findById.resolves(failedJob);
+
+      const context = { params: { jobId } };
+      const response = await preflightController.getPreflightJobStatusAndResult(context);
+      expect(response.status).to.equal(200);
+
+      const warnCall = loggerStub.warn.getCalls()
+        .find((c) => typeof c.args[0] === 'string'
+          && c.args[0].includes('[Preflight] Run failed.')
+          && c.args[0].includes(`process=${PREFLIGHT_PROCESS_AUDW}`)
+          && c.args[0].includes(`jobId=${jobId}`)
+          && c.args[0].includes('status=FAILED'));
+      expect(warnCall, 'expected a [Preflight] Run failed warn log').to.not.be.undefined;
+      expect(warnCall.args[0]).to.include('errorCode=none');
+      expect(warnCall.args[0]).to.include('errorMessage=none');
+    });
+
+    it('logs FAILED at warn level, not error', async () => {
+      loggerStub.warn.resetHistory();
+      loggerStub.error.resetHistory();
+      const failedJob = {
+        ...mockJob,
+        getStatus: () => 'FAILED',
+        getError: () => ({ code: 'MYSTICAT_ERROR', message: 'boom' }),
+      };
+      mockDataAccess.AsyncJob.findById.resolves(failedJob);
+
+      await preflightController.getPreflightJobStatusAndResult({ params: { jobId } });
+
+      const errorRunFailed = loggerStub.error.getCalls()
+        .find((c) => typeof c.args[0] === 'string' && c.args[0].includes('[Preflight] Run failed.'));
+      expect(errorRunFailed, 'FAILED must not be logged at error level').to.be.undefined;
+    });
+
+    it('re-logs the terminal outcome on every poll (stateless — one warn per poll)', async () => {
+      loggerStub.warn.resetHistory();
+      const failedJob = {
+        ...mockJob,
+        getStatus: () => 'FAILED',
+        getError: () => ({ code: 'MYSTICAT_ERROR', message: 'boom' }),
+      };
+      mockDataAccess.AsyncJob.findById.resolves(failedJob);
+
+      const context = { params: { jobId } };
+      await preflightController.getPreflightJobStatusAndResult(context);
+      await preflightController.getPreflightJobStatusAndResult(context);
+      await preflightController.getPreflightJobStatusAndResult(context);
+
+      const runFailedWarns = loggerStub.warn.getCalls()
+        .filter((c) => typeof c.args[0] === 'string' && c.args[0].includes('[Preflight] Run failed.'));
+      expect(runFailedWarns).to.have.lengthOf(3);
+    });
+
+    it('does not log a failure for a COMPLETED job', async () => {
+      loggerStub.warn.resetHistory();
+      const completedJob = {
+        ...mockJob,
+        getStatus: () => 'COMPLETED',
+        getResult: () => [],
+      };
+      mockDataAccess.AsyncJob.findById.resolves(completedJob);
+
+      const context = { params: { jobId } };
+      const response = await preflightController.getPreflightJobStatusAndResult(context);
+      expect(response.status).to.equal(200);
+
+      const warnCall = loggerStub.warn.getCalls()
+        .find((c) => typeof c.args[0] === 'string' && c.args[0].includes('[Preflight] Run failed.'));
+      expect(warnCall, 'expected no [Preflight] Run failed warn log for a COMPLETED job').to.be.undefined;
     });
 
     it('returns 400 Bad Request for invalid job ID', async () => {
@@ -2716,6 +2985,85 @@ describe('Preflight Controller', () => {
       const result = await response.json();
       expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
     });
+
+    it('logs a run-complete summary tagged with the myst process', async () => {
+      loggerStub.info.resetHistory();
+      const completedJob = {
+        ...mockJob,
+        getStatus: () => 'COMPLETED',
+        getResult: () => [
+          {
+            pageUrl: 'https://main--example-site.aem.page/test.html',
+            step: 'suggest',
+            audits: [{ name: 'metatags', type: 'seo', opportunities: [{ issue: 'Title too short' }] }],
+          },
+        ],
+      };
+      mockPreflight.getAsyncJob = sandbox.stub().resolves(completedJob);
+
+      const response = await preflightController.getPreflightById({
+        params: { siteId: 'test-site-123', preflightId },
+      });
+      expect(response.status).to.equal(200);
+
+      const infoCall = loggerStub.info.getCalls()
+        .find((c) => typeof c.args[0] === 'string'
+          && c.args[0].includes('[Preflight] Run complete.')
+          && c.args[0].includes(`process=${PREFLIGHT_PROCESS_MYST}`)
+          && c.args[0].includes(`jobId=${jobId}`)
+          && c.args[0].includes('status=COMPLETED'));
+      expect(infoCall, 'expected a myst-process [Preflight] Run complete info log').to.not.be.undefined;
+    });
+
+    it('warns (not errors) with code + message tagged with the myst process when FAILED', async () => {
+      loggerStub.warn.resetHistory();
+      loggerStub.error.resetHistory();
+      const failedError = { code: 'MYSTICAT_ERROR', message: 'Upstream analyze service failed', details: { secret: 'tok' } };
+      const failedJob = {
+        ...mockJob,
+        getStatus: () => 'FAILED',
+        getError: () => failedError,
+      };
+      mockPreflight.getAsyncJob = sandbox.stub().resolves(failedJob);
+
+      const response = await preflightController.getPreflightById({
+        params: { siteId: 'test-site-123', preflightId },
+      });
+      expect(response.status).to.equal(200);
+
+      const warnCall = loggerStub.warn.getCalls()
+        .find((c) => typeof c.args[0] === 'string'
+          && c.args[0].includes('[Preflight] Run failed.')
+          && c.args[0].includes(`process=${PREFLIGHT_PROCESS_MYST}`)
+          && c.args[0].includes(`jobId=${jobId}`)
+          && c.args[0].includes('status=FAILED'));
+      expect(warnCall, 'expected a myst-process [Preflight] Run failed warn log').to.not.be.undefined;
+      expect(warnCall.args[0]).to.include('errorCode=MYSTICAT_ERROR');
+      expect(warnCall.args[0]).to.include('errorMessage=Upstream analyze service failed');
+      expect(warnCall.args[0]).to.not.include('tok');
+      const errorRunFailed = loggerStub.error.getCalls()
+        .find((c) => typeof c.args[0] === 'string' && c.args[0].includes('[Preflight] Run failed.'));
+      expect(errorRunFailed, 'FAILED must not be logged at error level').to.be.undefined;
+    });
+
+    it('does not emit an outcome log when no AsyncJob is linked yet (null job)', async () => {
+      loggerStub.info.resetHistory();
+      loggerStub.warn.resetHistory();
+      loggerStub.error.resetHistory();
+      mockPreflight.getAsyncJob = sandbox.stub().resolves(null);
+
+      const response = await preflightController.getPreflightById({
+        params: { siteId: 'test-site-123', preflightId },
+      });
+      expect(response.status).to.equal(200);
+
+      const outcomeLog = [
+        ...loggerStub.info.getCalls(),
+        ...loggerStub.warn.getCalls(),
+        ...loggerStub.error.getCalls(),
+      ].find((c) => typeof c.args[0] === 'string' && c.args[0].includes('[Preflight] Run'));
+      expect(outcomeLog, 'expected no outcome log when AsyncJob is null').to.be.undefined;
+    });
   });
 });
 
@@ -2768,5 +3116,118 @@ describe('countIssuesForAudit', () => {
       ],
     };
     expect(countIssuesForAudit(audit)).to.equal(45);
+  });
+});
+
+describe('collectSiteKnownHostnames (SITES-48309)', () => {
+  const makeSite = ({ baseURL, deliveryConfig, hlxConfig } = {}) => ({
+    getBaseURL: () => baseURL,
+    getDeliveryConfig: () => deliveryConfig || {},
+    getHlxConfig: () => hlxConfig || {},
+  });
+
+  it('collects the baseURL hostname (lowercased) as the primary known host', () => {
+    const hosts = collectSiteKnownHostnames(makeSite({
+      baseURL: 'https://Publish-P12345-E67890-cmstg.adobeaemcloud.com',
+    }));
+    expect([...hosts]).to.deep.equal(['publish-p12345-e67890-cmstg.adobeaemcloud.com']);
+  });
+
+  it('adds deliveryConfig.authorURL host in addition to baseURL (AEM CS two-tier)', () => {
+    const hosts = collectSiteKnownHostnames(makeSite({
+      baseURL: 'https://publish-p12345-e67890-cmstg.adobeaemcloud.com',
+      deliveryConfig: { authorURL: 'https://author-p12345-e67890-cmstg.adobeaemcloud.com' },
+    }));
+    expect(hosts.has('publish-p12345-e67890-cmstg.adobeaemcloud.com')).to.be.true;
+    expect(hosts.has('author-p12345-e67890-cmstg.adobeaemcloud.com')).to.be.true;
+    expect(hosts.size).to.equal(2);
+  });
+
+  it('derives EDS hostnames from hlxConfig.rso — 8 hostnames (2 patterns × 4 suffixes)', () => {
+    const hosts = collectSiteKnownHostnames(makeSite({
+      baseURL: 'https://wknd.site',
+      hlxConfig: { rso: { owner: 'adobe', site: 'wknd', ref: 'main' } },
+    }));
+    // baseURL host + 8 derived EDS hosts = 9 total.
+    expect(hosts.size).to.equal(9);
+    expect(hosts.has('wknd.site')).to.be.true;
+    // 3-part <ref>--<site>--<owner> on all four suffixes.
+    for (const sfx of ['aem.page', 'aem.live', 'hlx.page', 'hlx.live']) {
+      expect(hosts.has(`main--wknd--adobe.${sfx}`)).to.be.true;
+      // 2-part <site>--<owner> on all four suffixes.
+      expect(hosts.has(`wknd--adobe.${sfx}`)).to.be.true;
+    }
+  });
+
+  it('defaults ref to "main" when rso omits it', () => {
+    const hosts = collectSiteKnownHostnames(makeSite({
+      baseURL: 'https://wknd.site',
+      hlxConfig: { rso: { owner: 'adobe', site: 'wknd' } },
+    }));
+    expect(hosts.has('main--wknd--adobe.aem.page')).to.be.true;
+    expect(hosts.has('main--wknd--adobe.aem.live')).to.be.true;
+  });
+
+  it('honors a non-main ref when rso specifies one', () => {
+    const hosts = collectSiteKnownHostnames(makeSite({
+      baseURL: 'https://wknd.site',
+      hlxConfig: { rso: { owner: 'adobe', site: 'wknd', ref: 'feature-x' } },
+    }));
+    expect(hosts.has('feature-x--wknd--adobe.aem.page')).to.be.true;
+    expect(hosts.has('main--wknd--adobe.aem.page')).to.be.false;
+  });
+
+  it('adds NO EDS hostnames when rso is missing owner', () => {
+    const hosts = collectSiteKnownHostnames(makeSite({
+      baseURL: 'https://wknd.site',
+      hlxConfig: { rso: { site: 'wknd', ref: 'main' } },
+    }));
+    expect([...hosts]).to.deep.equal(['wknd.site']);
+  });
+
+  it('adds NO EDS hostnames when rso is missing site', () => {
+    const hosts = collectSiteKnownHostnames(makeSite({
+      baseURL: 'https://wknd.site',
+      hlxConfig: { rso: { owner: 'adobe', ref: 'main' } },
+    }));
+    expect([...hosts]).to.deep.equal(['wknd.site']);
+  });
+
+  it('lowercases rso components (case-insensitive matching)', () => {
+    const hosts = collectSiteKnownHostnames(makeSite({
+      baseURL: 'https://wknd.site',
+      hlxConfig: { rso: { owner: 'Adobe', site: 'WKND', ref: 'Main' } },
+    }));
+    expect(hosts.has('main--wknd--adobe.aem.page')).to.be.true;
+    expect(hosts.has('Main--WKND--Adobe.aem.page')).to.be.false;
+  });
+
+  it('returns an empty set when the site has no usable hostname sources', () => {
+    // No baseURL, no authorURL, no hlxConfig.rso — degenerate but shouldn\'t throw.
+    const hosts = collectSiteKnownHostnames(makeSite({
+      baseURL: null,
+    }));
+    expect(hosts.size).to.equal(0);
+  });
+
+  it('ignores malformed URLs on baseURL / authorURL without throwing', () => {
+    const hosts = collectSiteKnownHostnames(makeSite({
+      baseURL: 'not a url',
+      deliveryConfig: { authorURL: 'also not a url' },
+    }));
+    expect(hosts.size).to.equal(0);
+  });
+
+  it('handles a fully-populated site — baseURL + authorURL + rso all present', () => {
+    const hosts = collectSiteKnownHostnames(makeSite({
+      baseURL: 'https://publish-p12345-e67890-cmstg.adobeaemcloud.com',
+      deliveryConfig: { authorURL: 'https://author-p12345-e67890-cmstg.adobeaemcloud.com' },
+      hlxConfig: { rso: { owner: 'adobe', site: 'demo', ref: 'main' } },
+    }));
+    // 2 explicit + 8 derived = 10 hostnames total.
+    expect(hosts.size).to.equal(10);
+    expect(hosts.has('publish-p12345-e67890-cmstg.adobeaemcloud.com')).to.be.true;
+    expect(hosts.has('author-p12345-e67890-cmstg.adobeaemcloud.com')).to.be.true;
+    expect(hosts.has('main--demo--adobe.aem.page')).to.be.true;
   });
 });

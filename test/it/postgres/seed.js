@@ -42,6 +42,9 @@ import { projectionAudits } from './seed-data/projection-audits.js';
 import { featureFlags } from './seed-data/feature-flags.js';
 import { prompts } from './seed-data/prompts.js';
 import { brandPresenceExecutions } from './seed-data/brand-presence-executions.js';
+import { taskManagementConnections } from './seed-data/task-management-connections.js';
+import { tickets } from './seed-data/tickets.js';
+import { ticketSuggestions } from './seed-data/ticket-suggestions.js';
 
 const POSTGREST_PORT = process.env.IT_POSTGREST_PORT || '3300';
 const POSTGREST_URL = `http://localhost:${POSTGREST_PORT}`;
@@ -109,6 +112,50 @@ function clearData() {
   );
 }
 
+const REFERRAL_SOURCE_TABLES = {
+  optel: 'referral_traffic_optel',
+  cdn: 'referral_traffic_cdn',
+  adobe_analytics: 'referral_traffic_adobe_analytics',
+  ga4: 'referral_traffic_ga4',
+  cja: 'referral_traffic_cja',
+};
+
+/**
+ * Seeds referral-traffic source *presence* for the has-data IT.
+ *
+ * Clears all five `referral_traffic_*` tables, then inserts one minimal row per
+ * requested source so `GET /sites/:siteId/referral-traffic/has-data` reports
+ * exactly those sources (in the backend's resolution-priority order).
+ *
+ * Rows go into an on-demand far-future (2099) partition: the has-data lower
+ * bound accepts them, and a 2099 range can't collide with the image's real
+ * monthly partitions. Runs as the `postgres` superuser via psql to bypass
+ * PostgREST role grants + partition routing.
+ *
+ * Keep siteId/source inputs trusted constants only (canonical seed UUIDs and
+ * the whitelisted source-to-table map), never request-derived values.
+ *
+ * @param {string} siteId  Site the rows belong to (a canonical seed UUID).
+ * @param {Array<'optel'|'cdn'|'adobe_analytics'|'ga4'|'cja'>} sources Sources to
+ *   mark present; pass [] to clear all five (test cleanup).
+ */
+export function seedReferralPresence(siteId, sources = []) {
+  const statements = [
+    ...Object.values(REFERRAL_SOURCE_TABLES).map((t) => `DELETE FROM ${t};`),
+    ...sources.flatMap((source) => {
+      const table = REFERRAL_SOURCE_TABLES[source];
+      return [
+        `CREATE TABLE IF NOT EXISTS ${table}_itseed PARTITION OF ${table} FOR VALUES FROM ('2099-01-01') TO ('2099-02-01');`,
+        `INSERT INTO ${table} (site_id, traffic_date, url_path, pageviews) VALUES ('${siteId}', '2099-01-15', '/it-seed', 1);`,
+      ];
+    }),
+  ];
+  execSync(
+    `docker exec ${POSTGRES_CONTAINER} psql -U postgres -d ${POSTGRES_DB} -v ON_ERROR_STOP=1 -c "${statements.join(' ')}"`,
+    { stdio: 'pipe', timeout: 10_000 },
+  );
+}
+
 /**
  * Seeds all tables, parallelizing inserts within each FK dependency level.
  *
@@ -137,6 +184,7 @@ async function seed() {
     // feature_flags grants INSERT to postgrest_writer only (SELECT to anon), so
     // seed it with the writer JWT — same as the append-only audit tables.
     insertRows('feature_flags', featureFlags, { asWriter: true }),
+    insertRows('task_management_connections', taskManagementConnections),
   ]);
 
   // Level 1b: depend on projects
@@ -165,10 +213,14 @@ async function seed() {
     insertRows('audit_urls', auditUrls),
     insertRows('sentiment_guidelines', sentimentGuidelines),
     insertRows('brand_sites', brandSites),
+    insertRows('tickets', tickets),
   ]);
 
-  // Level 4: depend on fix_entities + suggestions
-  await insertRows('fix_entity_suggestions', fixEntitySuggestions);
+  // Level 4: depend on fix_entities + suggestions + tickets
+  await Promise.all([
+    insertRows('fix_entity_suggestions', fixEntitySuggestions),
+    insertRows('ticket_suggestions', ticketSuggestions),
+  ]);
 }
 
 /**

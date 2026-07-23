@@ -110,11 +110,13 @@ describe('Configurations Controller', () => {
   const configurationFunctions = [
     'getLatest',
     'getByVersion',
+    'listVersions',
     'registerAudit',
     'unregisterAudit',
     'updateQueues',
     'updateJob',
     'updateHandler',
+    'replaceHandlerEnabledDisabled',
     'updateConfiguration',
     'restoreVersion',
   ];
@@ -128,6 +130,29 @@ describe('Configurations Controller', () => {
       Configuration: {
         findLatest: sandbox.stub().resolves(configurations[1]),
         findByVersion: sandbox.stub().resolves(configurations[0]),
+        listVersions: sandbox.stub().resolves({
+          versions: [
+            {
+              versionId: 'v2',
+              lastModified: '2026-07-23T10:00:00.000Z',
+              isLatest: true,
+              size: 3000,
+              updatedBy: 'admin@adobe.com',
+              updatedAt: '2026-07-23T10:00:00.000Z',
+            },
+            {
+              versionId: 'v1',
+              lastModified: '2026-07-22T09:00:00.000Z',
+              isLatest: false,
+              size: 2900,
+              updatedBy: null,
+              updatedAt: null,
+            },
+          ],
+          isTruncated: false,
+          nextKeyMarker: null,
+          nextVersionIdMarker: null,
+        }),
       },
     };
 
@@ -316,6 +341,111 @@ describe('Configurations Controller', () => {
 
     expect(result.status).to.equal(403);
     expect(error).to.have.property('message', 'Only admins can view configurations');
+  });
+
+  describe('listVersions', () => {
+    const reqCtx = (query = '') => ({
+      request: { url: `https://spacecat.experiencecloud.live/api/v1/configurations/versions${query}` },
+    });
+
+    it('lists configuration versions for an admin', async () => {
+      const result = await configurationsController.listVersions(reqCtx());
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(mockDataAccess.Configuration.listVersions).to.have.been.calledOnce;
+      expect(body.versions).to.have.length(2);
+      expect(body.versions[0]).to.deep.equal({
+        versionId: 'v2',
+        lastModified: '2026-07-23T10:00:00.000Z',
+        isLatest: true,
+        size: 3000,
+        updatedBy: 'admin@adobe.com',
+        updatedAt: '2026-07-23T10:00:00.000Z',
+      });
+      expect(body).to.include({ isTruncated: false });
+      expect(body.nextKeyMarker).to.be.null;
+      expect(body.nextVersionIdMarker).to.be.null;
+    });
+
+    it('returns forbidden for non-admin users', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false });
+      const result = await configurationsController.listVersions(reqCtx());
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Only admins can view configurations');
+      expect(mockDataAccess.Configuration.listVersions).to.not.have.been.called;
+    });
+
+    it('defaults to limit=25 and detail=true, omitting absent markers, when no query params', async () => {
+      await configurationsController.listVersions(reqCtx());
+
+      expect(mockDataAccess.Configuration.listVersions)
+        .to.have.been.calledWithMatch({ limit: 25, detail: true });
+      // Absent markers must be omitted entirely, not passed as explicit undefined.
+      const arg = mockDataAccess.Configuration.listVersions.firstCall.args[0];
+      expect(arg).to.not.have.property('keyMarker');
+      expect(arg).to.not.have.property('versionIdMarker');
+    });
+
+    it('passes limit, markers and detail=false from the query string', async () => {
+      await configurationsController.listVersions(
+        reqCtx('?limit=10&keyMarker=km&versionIdMarker=vm&detail=false'),
+      );
+
+      expect(mockDataAccess.Configuration.listVersions).to.have.been.calledWithMatch({
+        limit: 10,
+        keyMarker: 'km',
+        versionIdMarker: 'vm',
+        detail: false,
+      });
+    });
+
+    it('clamps limit above 100 down to 100', async () => {
+      await configurationsController.listVersions(reqCtx('?limit=5000'));
+      expect(mockDataAccess.Configuration.listVersions)
+        .to.have.been.calledWithMatch({ limit: 100 });
+    });
+
+    it('clamps limit below 1 up to 1', async () => {
+      await configurationsController.listVersions(reqCtx('?limit=0'));
+      expect(mockDataAccess.Configuration.listVersions).to.have.been.calledWithMatch({ limit: 1 });
+    });
+
+    it('falls back to the documented default (25) on a non-numeric limit', async () => {
+      await configurationsController.listVersions(reqCtx('?limit=abc'));
+      expect(mockDataAccess.Configuration.listVersions).to.have.been.calledWithMatch({ limit: 25 });
+    });
+
+    it('rejects an over-long pagination marker with 400', async () => {
+      const huge = 'x'.repeat(1025);
+      const result = await configurationsController.listVersions(reqCtx(`?keyMarker=${huge}`));
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error.message).to.match(/exceeds maximum length/);
+      expect(mockDataAccess.Configuration.listVersions).to.not.have.been.called;
+    });
+
+    it('falls back to defaults when context.request is missing', async () => {
+      const result = await configurationsController.listVersions({});
+      expect(result.status).to.equal(200);
+      expect(mockDataAccess.Configuration.listVersions)
+        .to.have.been.calledWithMatch({ limit: 25, detail: true });
+    });
+
+    it('falls back to defaults when context.request.url is malformed', async () => {
+      const result = await configurationsController.listVersions({ request: { url: 'not-a-valid-url' } });
+      expect(result.status).to.equal(200);
+      expect(mockDataAccess.Configuration.listVersions)
+        .to.have.been.calledWithMatch({ limit: 25, detail: true });
+    });
+
+    it('propagates a data-access failure (surfaced as 500 by the wrapper)', async () => {
+      mockDataAccess.Configuration.listVersions.rejects(new Error('S3 down'));
+      await expect(configurationsController.listVersions(reqCtx())).to.be.rejectedWith('S3 down');
+    });
   });
 
   describe('configuration read - S2S configuration:read capability', () => {
@@ -1112,6 +1242,238 @@ describe('Configurations Controller', () => {
 
       expect(result.status).to.equal(400);
       expect(error).to.have.property('message', 'Handler "unknown" not found');
+    });
+  });
+
+  describe('replaceHandlerEnabledDisabled', () => {
+    it('replaces enabled lists successfully', async () => {
+      const replaceHandlerEnabledDisabled = sandbox.stub();
+      mockDataAccess.Configuration.findLatest.resolves({
+        ...configurations[1],
+        replaceHandlerEnabledDisabled,
+      });
+
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: { handlerType: 'cwv' },
+        data: { enabled: { sites: ['site1'], orgs: ['org1'] } },
+        attributes: context.attributes,
+      });
+      const configuration = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(replaceHandlerEnabledDisabled).to.have.been.calledOnceWith('cwv', {
+        enabled: { sites: ['site1'], orgs: ['org1'] },
+      });
+      expect(configuration).to.be.an('object');
+    });
+
+    it('replaces disabled lists successfully', async () => {
+      const replaceHandlerEnabledDisabled = sandbox.stub();
+      mockDataAccess.Configuration.findLatest.resolves({
+        ...configurations[1],
+        replaceHandlerEnabledDisabled,
+      });
+
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: { handlerType: 'cwv' },
+        data: { disabled: { sites: ['site1'], orgs: ['org1'] } },
+        attributes: context.attributes,
+      });
+
+      expect(result.status).to.equal(200);
+      expect(replaceHandlerEnabledDisabled).to.have.been.calledOnceWith('cwv', {
+        disabled: { sites: ['site1'], orgs: ['org1'] },
+      });
+    });
+
+    it('replaces both enabled and disabled lists successfully', async () => {
+      const replaceHandlerEnabledDisabled = sandbox.stub();
+      mockDataAccess.Configuration.findLatest.resolves({
+        ...configurations[1],
+        replaceHandlerEnabledDisabled,
+      });
+
+      const data = {
+        enabled: { sites: ['s1'], orgs: ['o1'] },
+        disabled: { sites: ['s2'], orgs: ['o2'] },
+      };
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: { handlerType: 'cwv' },
+        data,
+        attributes: context.attributes,
+      });
+
+      expect(result.status).to.equal(200);
+      expect(replaceHandlerEnabledDisabled).to.have.been.calledOnceWith('cwv', data);
+    });
+
+    it('accepts empty arrays as valid replacement values', async () => {
+      const replaceHandlerEnabledDisabled = sandbox.stub();
+      mockDataAccess.Configuration.findLatest.resolves({
+        ...configurations[1],
+        replaceHandlerEnabledDisabled,
+      });
+
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: { handlerType: 'cwv' },
+        data: { enabled: { sites: [], orgs: [] } },
+        attributes: context.attributes,
+      });
+
+      expect(result.status).to.equal(200);
+      expect(replaceHandlerEnabledDisabled).to.have.been.calledOnceWith('cwv', {
+        enabled: { sites: [], orgs: [] },
+      });
+    });
+
+    it('returns 403 if user is not an admin', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false });
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: { handlerType: 'cwv' },
+        data: { enabled: { sites: ['s1'] } },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Only admins can update handler configuration');
+    });
+
+    it('returns 400 if handlerType is not provided', async () => {
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: {},
+        data: { enabled: { sites: ['s1'] } },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'Handler type is required');
+    });
+
+    it('returns 400 if request body is empty', async () => {
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: { handlerType: 'cwv' },
+        data: {},
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'Request body is required and cannot be empty');
+    });
+
+    it('returns 400 when neither enabled nor disabled is provided', async () => {
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: { handlerType: 'cwv' },
+        data: { foo: 'bar' },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property(
+        'message',
+        'At least one of enabled or disabled must be provided',
+      );
+    });
+
+    it('returns 400 when enabled is provided without sites or orgs', async () => {
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: { handlerType: 'cwv' },
+        data: { enabled: {} },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property(
+        'message',
+        'At least one of enabled.sites or enabled.orgs must be provided',
+      );
+    });
+
+    it('returns 400 when enabled.sites is not an array', async () => {
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: { handlerType: 'cwv' },
+        data: { enabled: { sites: 'not-an-array' } },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'enabled.sites must be an array');
+    });
+
+    it('returns 400 when enabled.orgs is not an array', async () => {
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: { handlerType: 'cwv' },
+        data: { enabled: { orgs: 'not-an-array' } },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'enabled.orgs must be an array');
+    });
+
+    it('returns 400 when disabled is provided without sites or orgs', async () => {
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: { handlerType: 'cwv' },
+        data: { disabled: {} },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property(
+        'message',
+        'At least one of disabled.sites or disabled.orgs must be provided',
+      );
+    });
+
+    it('returns 400 when disabled.sites is not an array', async () => {
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: { handlerType: 'cwv' },
+        data: { disabled: { sites: 'not-an-array' } },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'disabled.sites must be an array');
+    });
+
+    it('returns 400 when disabled.orgs is not an array', async () => {
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: { handlerType: 'cwv' },
+        data: { disabled: { orgs: 'not-an-array' } },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'disabled.orgs must be an array');
+    });
+
+    it('returns 404 if configuration not found', async () => {
+      mockDataAccess.Configuration.findLatest.resolves(null);
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: { handlerType: 'cwv' },
+        data: { enabled: { sites: ['s1'] } },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(404);
+      expect(error).to.have.property('message', 'Configuration not found');
+    });
+
+    it('returns 400 if replaceHandlerEnabledDisabled throws an error', async () => {
+      const replaceHandlerEnabledDisabled = sandbox.stub()
+        .throws(new Error('Handler "unknown" not found in configuration'));
+      mockDataAccess.Configuration.findLatest.resolves({
+        ...configurations[1],
+        replaceHandlerEnabledDisabled,
+      });
+
+      const result = await configurationsController.replaceHandlerEnabledDisabled({
+        params: { handlerType: 'unknown' },
+        data: { enabled: { sites: ['s1'] } },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'Handler "unknown" not found in configuration');
     });
   });
 

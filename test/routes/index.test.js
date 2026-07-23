@@ -26,12 +26,16 @@ describe('getRouteHandlers', () => {
     getAll: sinon.stub(),
     getByVersion: sinon.stub(),
     getLatest: sinon.stub(),
+    listVersions: sinon.stub(),
     updateConfiguration: sinon.stub(),
     registerAudit: sinon.stub(),
     unregisterAudit: sinon.stub(),
     updateQueues: sinon.stub(),
     updateJob: sinon.stub(),
     updateHandler: sinon.stub(),
+    // TEMPORARY: Mock for temporary cleanup API - will be removed once cleanup is done
+    // This is added here to prevent route tests from failing, not for unit testing the endpoint
+    replaceHandlerEnabledDisabled: sinon.stub(),
     restoreVersion: sinon.stub(),
   };
 
@@ -249,6 +253,7 @@ describe('getRouteHandlers', () => {
   };
 
   const mockFixesController = {
+    getAllForSite: () => null,
     getAllForOpportunity: () => null,
     getByStatus: () => null,
     getByID: () => null,
@@ -366,6 +371,15 @@ describe('getRouteHandlers', () => {
     deploy: () => null,
     plan: () => null,
     getPermissions: () => null,
+  };
+
+  const mockLlmoAkamaiController = {
+    getConfig: () => null,
+    listProperties: () => null,
+    plan: () => null,
+    deploy: () => null,
+    activate: () => null,
+    activationStatus: () => null,
   };
 
   const mockSandboxAuditController = {
@@ -592,8 +606,31 @@ describe('getRouteHandlers', () => {
     getPreview: sinon.stub(),
   };
 
+  const mockTaskManagementController = {
+    listConnections: sinon.stub(),
+    getConnection: sinon.stub(),
+    listTickets: sinon.stub(),
+    getTicketBySuggestion: sinon.stub(),
+    listTicketsByOpportunity: sinon.stub(),
+    createTicket: sinon.stub(),
+    listProjects: sinon.stub(),
+    listIssueTypes: sinon.stub(),
+  };
+
   const mockRedirectsController = {
     getRedirects: sinon.stub(),
+  };
+
+  const mockAuditPolicyController = {
+    getPolicy: sinon.stub(),
+    addExclusions: sinon.stub(),
+    removeExclusions: sinon.stub(),
+    addInclusions: sinon.stub(),
+    removeInclusions: sinon.stub(),
+    listRevisions: sinon.stub(),
+    getScopePages: sinon.stub(),
+    getScopeSummary: sinon.stub(),
+    getScopeSections: sinon.stub(),
   };
 
   it('segregates static and dynamic routes', () => {
@@ -626,6 +663,7 @@ describe('getRouteHandlers', () => {
       mockLlmoController,
       mockLlmoCloudflareController,
       mockLlmoCloudFrontController,
+      mockLlmoAkamaiController,
       mockLlmoMysticatController,
       mockLlmoOpportunitiesController,
       mockUserActivityController,
@@ -660,11 +698,14 @@ describe('getRouteHandlers', () => {
       mockSerenityController,
       mockElementsController,
       mockProxyController,
+      mockTaskManagementController,
       mockRedirectsController,
+      mockAuditPolicyController,
     );
 
     expect(staticRoutes).to.have.all.keys(
       'GET /configurations/latest',
+      'GET /configurations/versions',
       'PATCH /configurations/latest',
       'POST /configurations/audits',
       'PATCH /configurations/sites/audits',
@@ -754,6 +795,7 @@ describe('getRouteHandlers', () => {
     );
 
     expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);
+    expect(staticRoutes['GET /configurations/versions']).to.equal(mockConfigurationController.listVersions);
     expect(staticRoutes['PATCH /configurations/latest']).to.equal(mockConfigurationController.updateConfiguration);
     expect(staticRoutes['POST /configurations/audits']).to.equal(mockConfigurationController.registerAudit);
     expect(staticRoutes['PATCH /configurations/sites/audits']).to.equal(mockSitesAuditsToggleController.execute);
@@ -837,6 +879,7 @@ describe('getRouteHandlers', () => {
       'DELETE /configurations/audits/:auditType',
       'PATCH /configurations/latest/jobs/:jobType',
       'PATCH /configurations/latest/handlers/:handlerType',
+      'PUT /configurations/latest/handlers/:handlerType/replace-enabled-disabled',
       'POST /event/fulfillment/:eventType',
       'POST /hooks/site-detection/cdn/:hookSecret',
       'POST /hooks/site-detection/rum/:hookSecret',
@@ -886,9 +929,20 @@ describe('getRouteHandlers', () => {
       'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models',
       'GET /v2/orgs/:spaceCatId/serenity/models',
       'GET /v2/orgs/:spaceCatId/serenity/languages',
-      'GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/url-inspector/filter-dimensions',
-      'GET /v2/orgs/:spaceCatId/serenity/all/brand-presence/weeks',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/filter-dimensions',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics/:topicId/prompts',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/domain-urls',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/market-tracking-trends',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/stats',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/stats',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/prompts/count',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/competitor-summary',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate',
       'GET /v2/orgs/:spaceCatId/sites/:siteId/brand',
@@ -1105,6 +1159,7 @@ describe('getRouteHandlers', () => {
       'GET /tools/scrape/jobs/by-base-url/:baseURL/by-processingtype/:processingType',
       'GET /tools/scrape/jobs/by-url/:url/:processingType',
       'GET /tools/scrape/jobs/by-url/:url',
+      'GET /sites/:siteId/fixes',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId',
@@ -1175,6 +1230,12 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/config',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties',
+      'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan',
+      'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy',
+      'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status',
       'GET /sites/:siteId/user-activities',
       'POST /sites/:siteId/user-activities',
       'GET /sites/:siteId/site-enrollments',
@@ -1268,6 +1329,23 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/agentic-page-types',
       'PATCH /sites/:siteId/agentic-page-types/:name',
       'DELETE /sites/:siteId/agentic-page-types/:name',
+      'GET /sites/:siteId/audit-policy',
+      'POST /sites/:siteId/audit-policy/exclusions',
+      'POST /sites/:siteId/audit-policy/exclusions/delete',
+      'POST /sites/:siteId/audit-policy/inclusions',
+      'POST /sites/:siteId/audit-policy/inclusions/delete',
+      'GET /sites/:siteId/audit-policy/revisions',
+      'GET /sites/:siteId/audit-scope/pages',
+      'GET /sites/:siteId/audit-scope/summary',
+      'GET /sites/:siteId/audit-scope/sections',
+      'GET /organizations/:organizationId/task-management/connections',
+      'GET /organizations/:organizationId/task-management/connections/:connectionId',
+      'GET /organizations/:organizationId/task-management/tickets',
+      'GET /organizations/:organizationId/suggestions/:suggestionId/ticket',
+      'GET /organizations/:organizationId/opportunities/:opportunityId/tickets',
+      'POST /organizations/:organizationId/task-management/:provider/tickets',
+      'GET /organizations/:organizationId/task-management/connections/:connectionId/projects',
+      'GET /organizations/:organizationId/task-management/connections/:connectionId/issue-types',
     ];
     expect(Object.keys(dynamicRoutes)).to.have.members(expectedDynamicRouteKeys);
 

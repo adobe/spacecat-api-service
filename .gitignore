@@ -1,6 +1,6 @@
 coverage
 .nyc_output/
-node_modules/
+node_modules
 junit
 dist
 tmp
@@ -21,7 +21,12 @@ admin-idp-p*.json
 # V1 to V2 migration scripts and test data (local only)
 scripts/
 !scripts/backfill-rum-config.mjs
+!scripts/serenity-metered-405-canary.mjs
+!scripts/serenity-rightsizing-sweep.mjs
 docs/index.html
 mcp-server.log
 # Scout MCP local config (per-developer, never commit)
 .scout/
+
+# oh-my-claudecode workspace state (per-developer, never commit)
+.omc/

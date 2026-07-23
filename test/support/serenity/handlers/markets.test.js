@@ -28,7 +28,7 @@ import {
   clearLanguageCache,
   clearTagCache,
   listProjectTagTree,
-  dimensionFromTagName,
+  countPublishedPrompts,
 } from '../../../../src/support/serenity/handlers/markets.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
 import { ErrorWithStatusCode } from '../../../../src/support/utils.js';
@@ -40,7 +40,7 @@ const BRAND = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const WORKSPACE = 'workspace-1';
 
 function makeProject({
-  semrushProjectId, geoTargetId, languageCode, remove,
+  semrushProjectId, geoTargetId, languageCode, remove, siteId = null,
 }) {
   return {
     getSemrushProjectId: () => semrushProjectId,
@@ -48,6 +48,7 @@ function makeProject({
     getLanguageCode: () => languageCode,
     getCreatedAt: () => '2026-05-28T10:00:00Z',
     getUpdatedAt: () => '2026-05-28T10:00:00Z',
+    getSiteId: () => siteId,
     remove: remove || sinon.stub().resolves(),
   };
 }
@@ -58,6 +59,11 @@ function makeDataAccess(projects) {
       allByBrandId: sinon.stub().resolves(projects),
       findBySlice: sinon.stub(),
       create: sinon.stub(),
+    },
+    // Site data-access — used by the siteId → domain derivation on the flat
+    // create path (LLMO-6405 Phase 2). Individual tests configure findById.
+    Site: {
+      findById: sinon.stub(),
     },
   };
 }
@@ -112,6 +118,7 @@ describe('handlers/markets.js — handleListMarkets', () => {
       languageCode: 'en',
       createdAt: '2026-05-28T10:00:00Z',
       updatedAt: '2026-05-28T10:00:00Z',
+      siteId: null,
     });
     expect(result.items[0]).not.to.have.property('semrushProjectId');
     expect(result.items[0]).not.to.have.property('semrushLocationId');
@@ -131,6 +138,20 @@ describe('handlers/markets.js — handleListMarkets', () => {
 
     const result = await handleListMarkets(transport, dataAccess, BRAND, WORKSPACE);
     expect(result.items).to.have.lengthOf(1);
+  });
+
+  it('surfaces each market siteId from the mapping rows (LLMO-6405)', async () => {
+    const rows = [
+      makeProject({
+        semrushProjectId: 'p-us', geoTargetId: 2840, languageCode: 'en', siteId: 'site-us',
+      }),
+      makeProject({
+        semrushProjectId: 'p-de', geoTargetId: 2276, languageCode: 'de', siteId: null,
+      }),
+    ];
+    const dataAccess = makeDataAccess(rows);
+    const result = await handleListMarkets({}, dataAccess, BRAND, WORKSPACE);
+    expect(result.items.map((m) => m.siteId)).to.deep.equal(['site-us', null]);
   });
 });
 
@@ -218,6 +239,72 @@ describe('handlers/markets.js — handleCreateMarket', () => {
       domain: 'adobe.com',
     });
     expect(upstreamBody.brand_names).to.deep.equal(['Adobe']);
+  });
+
+  it('derives brandDomain from a supplied siteId when brandDomain is absent (LLMO-6405)', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    dataAccess.Site.findById.resolves({ getBaseURL: () => 'https://acme.com/path' });
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', siteId: 'site-42', brandNames: ['Adobe'],
+    }, fakeLog());
+
+    expect(result.status).to.equal(201);
+    expect(dataAccess.Site.findById).to.have.been.calledOnceWith('site-42');
+    // The Semrush project domain is the hostname resolved from the site base_url.
+    expect(transport.createProject.firstCall.args[1].domain).to.equal('acme.com');
+  });
+
+  it('prefers an explicit brandDomain over the siteId (does not read the Site)', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', brandDomain: 'adobe.com', siteId: 'site-42', brandNames: ['Adobe'],
+    }, fakeLog());
+
+    expect(result.status).to.equal(201);
+    expect(dataAccess.Site.findById).to.not.have.been.called;
+    expect(transport.createProject.firstCall.args[1].domain).to.equal('adobe.com');
+  });
+
+  it('400s when a supplied siteId does not resolve to a site domain', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.Site.findById.resolves(null); // unknown site
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+    };
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', siteId: 'site-missing', brandNames: ['Adobe'],
+    }, fakeLog());
+
+    expect(result.status).to.equal(400);
+    expect(result.body.error).to.equal('invalidRequest');
+  });
+
+  it('400s (validation) when neither brandDomain nor siteId is supplied', async () => {
+    const dataAccess = makeDataAccess([]);
+    const result = await handleCreateMarket({}, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', brandNames: ['Adobe'],
+    }, fakeLog());
+    expect(result.status).to.equal(400);
+    expect(result.body.error).to.equal('invalidRequest');
+    expect(result.body.message).to.match(/brandDomain or siteId/);
   });
 
   // Branch coverage: validateCreateBody has a "name provided but invalid"
@@ -627,6 +714,23 @@ describe('handlers/markets.js — handleDeleteMarket', () => {
     expect(remove).to.have.been.calledOnce;
   });
 
+  it('returns the deleted market siteId (LLMO-6405 R12) and null for a missing slice', async () => {
+    const row = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en', siteId: 'site-77',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(row);
+    const transport = { deleteProject: sinon.stub().resolves() };
+
+    const linked = await handleDeleteMarket(transport, dataAccess, BRAND, WORKSPACE, 2840, 'en', fakeLog());
+    expect(linked).to.deep.equal({ status: 204, deletedSiteId: 'site-77' });
+
+    // Missing slice → idempotent 204 with no site to clean up.
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    const missing = await handleDeleteMarket(transport, dataAccess, BRAND, WORKSPACE, 2840, 'en', fakeLog());
+    expect(missing).to.deep.equal({ status: 204, deletedSiteId: null });
+  });
+
   it('treats upstream 404 as already-gone success', async () => {
     const remove = sinon.stub().resolves();
     const row = makeProject({
@@ -740,7 +844,19 @@ describe('handlers/markets.js — handleGetMarket', () => {
       semrushProjectId: 'proj-us-en',
       createdAt: '2026-05-28T10:00:00Z',
       updatedAt: '2026-05-28T10:00:00Z',
+      siteId: null,
     });
+  });
+
+  it('surfaces the market siteId when the mapping row is linked (LLMO-6405)', async () => {
+    const row = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en', siteId: 'site-77',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(row);
+
+    const result = await handleGetMarket(dataAccess, BRAND, 2840, 'en');
+    expect(result.siteId).to.equal('site-77');
   });
 });
 
@@ -913,7 +1029,7 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     }, fakeLog());
 
     expect(result.items).to.deep.equal([{
-      id: 'root-1', name: 'category:Footwear', parentId: null, childrenCount: 2, path: null, dimension: 'category',
+      id: 'root-1', name: 'category:Footwear', parentId: null, childrenCount: 2, path: null,
     }]);
     // Tree read, not the prompt-derived path.
     expect(transport.listPromptsByTags).to.not.have.been.called;
@@ -957,8 +1073,6 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
       parentId: 'root-1',
       childrenCount: 0,
       path: [{ id: 'root-1', name: 'category:Footwear' }],
-      // Derived from the root ancestor in path[0] (root-first), not the child's own name.
-      dimension: 'category',
     }]);
     expect(transport.listProjectTags.firstCall.args[2]).to.include({ parentId: 'root-1', draft: true });
   });
@@ -989,80 +1103,6 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
       geoTargetId: 2840, languageCode: 'en', parentId: `root-${String.fromCharCode(7)}`,
     }, fakeLog())).to.be.rejected.then((err) => expect(err.status).to.equal(400));
     expect(transport.listProjectTags).to.not.have.been.called;
-  });
-
-  describe('dimensionFromTagName', () => {
-    it('returns the dimension for a recognized "<dimension>:<value>" name (case-insensitive)', () => {
-      expect(dimensionFromTagName('category:Footwear')).to.equal('category');
-      expect(dimensionFromTagName('tag:Priority')).to.equal('tag');
-      // .toLowerCase() is load-bearing — an upper-cased prefix still resolves.
-      expect(dimensionFromTagName('Category:X')).to.equal('category');
-    });
-
-    it('returns undefined for a bare name, an unrecognized prefix, or a leading colon', () => {
-      expect(dimensionFromTagName('Bare')).to.equal(undefined);
-      expect(dimensionFromTagName('weird:Root')).to.equal(undefined);
-      expect(dimensionFromTagName(':x')).to.equal(undefined);
-    });
-
-    it('returns undefined for a non-string input (defensive)', () => {
-      expect(dimensionFromTagName(undefined)).to.equal(undefined);
-      expect(dimensionFromTagName(null)).to.equal(undefined);
-      expect(dimensionFromTagName(123)).to.equal(undefined);
-    });
-  });
-
-  it('listProjectTagTree derives dimension for a tag: root and omits it for an unrecognized prefix', async () => {
-    const listProjectTags = sinon.stub().resolves({
-      page: 1,
-      total: 2,
-      items: [
-        {
-          id: 'tag-root', name: 'tag:Priority', parent_id: null, children_count: 0,
-        },
-        // Unrecognized prefix → dimension omitted (unknown, don't guess).
-        {
-          id: 'weird', name: 'bogus:Thing', parent_id: null, children_count: 0,
-        },
-      ],
-    });
-    const result = await listProjectTagTree({ listProjectTags }, WORKSPACE, 'proj-1', '', fakeLog());
-    expect(result.items[0]).to.include({ id: 'tag-root', dimension: 'tag' });
-    expect(result.items[1]).to.not.have.property('dimension');
-  });
-
-  it('listProjectTagTree omits dimension for a child with a null path (fallback, no throw)', async () => {
-    const listProjectTags = sinon.stub().resolves({
-      page: 1,
-      total: 1,
-      // A child (parent_id set) but path is null — dimension is undeterminable.
-      items: [{
-        id: 'child-x', name: 'Bare', parent_id: 'root-x', children_count: 0, path: null,
-      }],
-    });
-    const result = await listProjectTagTree({ listProjectTags }, WORKSPACE, 'proj-1', 'root-x', fakeLog());
-    expect(result.items[0]).to.include({ id: 'child-x', parentId: 'root-x' });
-    expect(result.items[0]).to.not.have.property('dimension');
-  });
-
-  it('listProjectTagTree omits dimension for a child with an empty path[] or an unrecognized root prefix', async () => {
-    const listProjectTags = sinon.stub().resolves({
-      page: 1,
-      total: 2,
-      items: [
-        // Empty path array → length 0 → dimension undeterminable.
-        {
-          id: 'child-empty', name: 'A', parent_id: 'root-1', children_count: 0, path: [],
-        },
-        // Root ancestor's name has an unrecognized prefix → dimension undeterminable.
-        {
-          id: 'child-weird', name: 'B', parent_id: 'root-2', children_count: 0, path: [{ id: 'root-2', name: 'weird:Root' }],
-        },
-      ],
-    });
-    const result = await listProjectTagTree({ listProjectTags }, WORKSPACE, 'proj-1', 'root-1', fakeLog());
-    expect(result.items[0]).to.not.have.property('dimension');
-    expect(result.items[1]).to.not.have.property('dimension');
   });
 
   it('listProjectTagTree warns and stops at the page ceiling when the last page is still full', async () => {
@@ -1733,6 +1773,49 @@ describe('handlers/markets.js — handleUpdateModels', () => {
     expect(transport.deleteAiModelsByIds).not.to.have.been.called;
     expect(result.items).to.have.length(1);
     expect(result.items[0].id).to.equal('cat-a');
+  });
+});
+
+describe('countPublishedPrompts', () => {
+  afterEach(() => sinon.restore());
+
+  it('sums prompt counts across pages until a short page ends the walk', async () => {
+    const listPromptsByTags = sinon.stub();
+    listPromptsByTags.onCall(0).resolves({ items: new Array(200).fill({ id: 'q' }) });
+    listPromptsByTags.onCall(1).resolves({ items: new Array(30).fill({ id: 'q' }) });
+    const count = await countPublishedPrompts({ listPromptsByTags }, WORKSPACE, 'p1');
+    expect(count).to.equal(230);
+    expect(listPromptsByTags).to.have.callCount(2);
+  });
+
+  it('stops at the page ceiling on a still-full last page and warns (count is a floor)', async () => {
+    // Every page returns a full 200 → the walk hits the 50-page ceiling and stops, warning that the
+    // count may be under-stated (it is used as a floor for the metering need).
+    const warn = sinon.spy();
+    const listPromptsByTags = sinon.stub().resolves({ items: new Array(200).fill({ id: 'q' }) });
+    const count = await countPublishedPrompts({ listPromptsByTags }, WORKSPACE, 'p1', { warn });
+    expect(count).to.equal(200 * 50);
+    expect(listPromptsByTags).to.have.callCount(50);
+    expect(warn).to.have.been.calledWithMatch('countPublishedPrompts: page ceiling hit');
+  });
+
+  it('returns 0 for an empty project', async () => {
+    const listPromptsByTags = sinon.stub().resolves({ items: [] });
+    expect(await countPublishedPrompts({ listPromptsByTags }, WORKSPACE, 'p1')).to.equal(0);
+  });
+
+  it('an upstream failure MID-WALK returns the counted-so-far instead of rejecting', async () => {
+    // Page 1 succeeds (200 items); page 2 throws. Must NOT propagate — countPublishedPrompts backs
+    // resource-manager's modelChangeUnits sizing, and a rejection here would fail the whole metered
+    // write over what should only under-state the need (the transfer 422 is the real backstop).
+    const warn = sinon.spy();
+    const listPromptsByTags = sinon.stub();
+    listPromptsByTags.onCall(0).resolves({ items: new Array(200).fill({ id: 'q' }) });
+    listPromptsByTags.onCall(1).rejects(new Error('upstream 500'));
+    const count = await countPublishedPrompts({ listPromptsByTags }, WORKSPACE, 'p1', { warn });
+    expect(count).to.equal(200);
+    expect(listPromptsByTags).to.have.callCount(2);
+    expect(warn).to.have.been.calledWithMatch('countPublishedPrompts: upstream failure mid-walk');
   });
 });
 

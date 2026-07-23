@@ -482,3 +482,63 @@ agentTypes:
     multiple:
       value: Chatbots,Research
       summary: URL Inspector PG inclusion list
+akamaiHost:
+  name: x-akamai-host
+  in: header
+  required: true
+  description: >-
+    Akamai EdgeGrid API host for the customer's account, e.g.
+    `akab-xxxxx.luna.akamaiapis.net`. Client-supplied per request; never
+    persisted or logged by the service.
+  schema:
+    type: string
+akamaiClientToken:
+  name: x-akamai-client-token
+  in: header
+  required: true
+  description: Akamai EdgeGrid client token. Client-supplied per request; never persisted or logged.
+  schema:
+    type: string
+akamaiClientSecret:
+  name: x-akamai-client-secret
+  in: header
+  required: true
+  description: Akamai EdgeGrid client secret. Client-supplied per request; never persisted or logged.
+  schema:
+    type: string
+akamaiAccessToken:
+  name: x-akamai-access-token
+  in: header
+  required: true
+  description: Akamai EdgeGrid access token. Client-supplied per request; never persisted or logged.
+  schema:
+    type: string
+akamaiAccountSwitchKey:
+  name: x-akamai-account-switch-key
+  in: header
+  required: false
+  description: >-
+    Optional Akamai account switch key, for partners operating across multiple
+    Akamai accounts. Client-supplied per request; never persisted or logged.
+  schema:
+    type: string
+fields:
+  name: fields
+  in: query
+  required: false
+  description: >-
+    Optional sparse-fieldset selector (JSON:API / Google `fields` convention). A
+    comma-separated list of top-level field names to include in each returned
+    item, e.g. `fields=id,baseURL,name`. When omitted, the full representation is
+    returned (fully backwards compatible). `id` is always included even if not
+    listed. Unknown field names are ignored; if none of the requested names match
+    a returned item, the request returns 400. Use this to reduce response payload
+    size for size-constrained consumers. Max 50 fields, max 1000 characters.
+
+    Note: `fields` is applied against the response shape produced by any `view`
+    parameter, not the full representation. If a requested field is absent from
+    the selected view (e.g. `view=minimal&fields=data` where `data` is excluded
+    from the minimal view), the request returns 400.
+  schema:
+    type: string
+    example: 'id,baseURL,name'

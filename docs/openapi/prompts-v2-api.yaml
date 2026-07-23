@@ -78,6 +78,16 @@ v2-prompts-by-brand:
         type: string
         enum: [ai, human]
       description: Filter by origin (ai or human)
+    - name: source
+      in: query
+      required: false
+      schema:
+        type: string
+      description: >-
+        Filter by prompt source (exact match), e.g. `gsc`, `semrush`,
+        `base_url`, `config`. Free-form string — sources are open-ended and
+        added by upstream producers (e.g. DRS) without API changes, so no enum
+        is enforced.
     - name: sort
       in: query
       required: false
@@ -244,6 +254,11 @@ v2-prompts-by-brand-and-id:
     tags:
       - customer-config
     summary: Update a single prompt
+    description: >-
+      Updates a single prompt. `origin` is NOT patchable — it is fixed by the
+      writer that created the row and is never re-derived on update
+      (origin-dimension.md §3 item 3); an `origin` in the body is ignored,
+      leaving the stored value untouched.
     operationId: updatePromptByBrandAndId
     security:
       - ims_key: [ ]

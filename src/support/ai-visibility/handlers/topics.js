@@ -19,7 +19,7 @@ import { BRANDS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/
 import { SOURCE_DOMAINS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/source/enums_pb.js';
 import {
   num, brandTarget, parseLimitOffset, resolveCountry, resolveCountryForFts,
-  optionalLlmFromQuery, llmToEngine,
+  optionalLlmFromQuery, requiredLlmFromQuery, llmToEngine,
   sourceDomainsByTopicFtsRows,
   LLM_ENUM, FTS_LLMS, TOPIC_INTENT_SLUG,
   settledValueOrElse, resolveTopicIds, buildTextFilterQl,
@@ -430,19 +430,6 @@ export async function handleTopicsResearchStats(sp, clients) {
   return { status: 200, body: attachRelatedTopicsAiVolume(body, metricsVol) };
 }
 
-/**
- * @param {{ sortByKey: string, dirMult: 1 | -1 }} sort
- */
-function topicsResearchComparator(sort) {
-  const { sortByKey, dirMult } = sort;
-  // Tiebreak by topic name ASC to keep ordering deterministic and to preserve the
-  // pre-existing default behaviour on the RELEVANCE_SCORE + DESC path.
-  if (sortByKey === 'VOLUME') {
-    return (a, b) => cmpNum(a.topicVolume, b.topicVolume) * dirMult || cmpStr(a.topic, b.topic);
-  }
-  return (a, b) => cmpNum(a.relevanceScore, b.relevanceScore) * dirMult || cmpStr(a.topic, b.topic);
-}
-
 export async function handleTopicsResearch(sp, clients) {
   const country = resolveCountryForFts(sp);
   const { limit, offset } = parseLimitOffset(sp);
@@ -454,65 +441,37 @@ export async function handleTopicsResearch(sp, clients) {
   if (sort.error) { return sort.error; }
   const order = { by: sort.by, direction: sort.direction };
   const dimensionFilterQl = buildTextFilterQl(sp.get('textFilter'), 'topic');
-  const llm = optionalLlmFromQuery(sp);
-  if (llm) {
-    const pair = await Promise.allSettled([
-      countTopicRowsByTopicsByFtsPaging(country, q, llm, clients, { dimensionFilterQl }),
-      clients.topicClient.topicsByFTS({
-        country, llm, query: q, order, range: { limit, offset }, ...(dimensionFilterQl ? { dimensionFilterQl } : {}),
-      }),
-    ]);
-    const listTotal = settledValueOrElse(pair[0], 0);
-    if (pair[1].status !== 'fulfilled') {
-      throw pair[1].reason;
-    }
-    const raw = pair[1].value;
-    const data = (raw.topics || []).map((t) => ({
-      topic: t.name,
-      topicId: String(t.id),
-      topicVolume: num(t.volume),
-      promptsCount: num(t.promptsCount),
-      relevanceScore: num(t.relevanceScore),
-    }));
-    return {
-      status: 200,
-      body: {
-        data, total: listTotal, offset, limit,
-      },
-    };
-  }
-  const pairAll = await Promise.all([
-    countDistinctTopicIdsAcrossFtsLlms(country, q, clients, { dimensionFilterQl }),
-    Promise.all(FTS_LLMS.map((l) => clients.topicClient.topicsByFTS({
-      country, llm: l, query: q, order, range: { limit, offset }, ...(dimensionFilterQl ? { dimensionFilterQl } : {}),
-    }).catch(() => ({ topics: [] })))),
+  // One path for single-engine and all-models: when the client omits `engine` it resolves
+  // to LLM_ENUM.ALL. topicsByFTS + topicsByFTSTotals at that llm already return the correct
+  // per-topic volume/promptsCount/relevanceScore and a matching total — no per-engine
+  // fan-out or paging. (The old all-models fan-out+dedup kept the first engine's per-topic
+  // values, surfacing a per-engine volume/count (e.g. 999) instead of the ALL-level total,
+  // 199,302 — LLMO-6323. Verified topicsByFTSTotals(llm) == the prior paged count per engine.)
+  const llm = requiredLlmFromQuery(sp);
+  const filter = dimensionFilterQl ? { dimensionFilterQl } : {};
+  const pair = await Promise.allSettled([
+    clients.topicClient.topicsByFTSTotals({
+      country, llm, query: q, ...filter,
+    }),
+    clients.topicClient.topicsByFTS({
+      country, llm, query: q, order, range: { limit, offset }, ...filter,
+    }),
   ]);
-  const topicsTotalDistinct = pairAll[0];
-  const listResults = pairAll[1];
-  const seen = new Map();
-  for (const raw of listResults) {
-    for (const t of (raw.topics || [])) {
-      const id = String(t.id);
-      if (!seen.has(id)) {
-        seen.set(id, {
-          topic: t.name,
-          topicId: id,
-          topicVolume: num(t.volume),
-          promptsCount: num(t.promptsCount),
-          relevanceScore: num(t.relevanceScore),
-        });
-      } else {
-        const prev = seen.get(id);
-        prev.relevanceScore = Math.max(prev.relevanceScore, num(t.relevanceScore));
-      }
-    }
+  if (pair[1].status !== 'fulfilled') {
+    throw pair[1].reason;
   }
-  const merged = Array.from(seen.values()).sort(topicsResearchComparator(sort));
-  const data = merged.slice(0, limit);
+  const total = num(settledValueOrElse(pair[0], { total: 0 }).total);
+  const data = (pair[1].value.topics || []).map((t) => ({
+    topic: t.name,
+    topicId: String(t.id),
+    topicVolume: num(t.volume),
+    promptsCount: num(t.promptsCount),
+    relevanceScore: num(t.relevanceScore),
+  }));
   return {
     status: 200,
     body: {
-      data, total: topicsTotalDistinct, offset, limit,
+      data, total, offset, limit,
     },
   };
 }

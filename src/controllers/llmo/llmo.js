@@ -522,8 +522,8 @@ function LlmoController(ctx) {
         return siteValidation;
       }
 
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can update the LLMO config');
+      if (!await accessControlUtil.hasLlmoCapabilityForSite(siteValidation.site)) {
+        return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can update the LLMO config'));
       }
 
       // Support gzip-compressed request bodies (Content-Type: application/gzip)
@@ -624,8 +624,8 @@ function LlmoController(ctx) {
       return siteValidation;
     }
 
-    if (!accessControlUtil.isLLMOAdministrator()) {
-      return forbidden('Only LLMO administrators can add questions');
+    if (!await accessControlUtil.hasLlmoCapabilityForSite(siteValidation.site)) {
+      return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can add questions'));
     }
     const { site, config } = siteValidation;
 
@@ -673,8 +673,8 @@ function LlmoController(ctx) {
       return siteValidation;
     }
 
-    if (!accessControlUtil.isLLMOAdministrator()) {
-      return forbidden('Only LLMO administrators can remove questions');
+    if (!await accessControlUtil.hasLlmoCapabilityForSite(siteValidation.site)) {
+      return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can remove questions'));
     }
     const { site, config } = siteValidation;
 
@@ -699,8 +699,8 @@ function LlmoController(ctx) {
       return siteValidation;
     }
 
-    if (!accessControlUtil.isLLMOAdministrator()) {
-      return forbidden('Only LLMO administrators can update questions');
+    if (!await accessControlUtil.hasLlmoCapabilityForSite(siteValidation.site)) {
+      return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can update questions'));
     }
     const { site, config } = siteValidation;
 
@@ -739,8 +739,8 @@ function LlmoController(ctx) {
         return siteValidation;
       }
 
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can add customer intent');
+      if (!await accessControlUtil.hasLlmoCapabilityForSite(siteValidation.site)) {
+        return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can add customer intent'));
       }
       const { site, config } = siteValidation;
 
@@ -856,8 +856,8 @@ function LlmoController(ctx) {
       }
       const { site, config } = siteValidation;
 
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can update the CDN logs filter');
+      if (!await accessControlUtil.hasLlmoCapabilityForSite(site)) {
+        return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can update the CDN logs filter'));
       }
 
       if (!isObject(data)) {
@@ -890,8 +890,8 @@ function LlmoController(ctx) {
       }
       const { site, config } = siteValidation;
 
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can update the CDN bucket config');
+      if (!await accessControlUtil.hasLlmoCapabilityForSite(site)) {
+        return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can update the CDN bucket config'));
       }
 
       if (!isObject(data)) {
@@ -940,8 +940,8 @@ function LlmoController(ctx) {
     const { data } = context;
 
     try {
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can onboard');
+      if (!accessControlUtil.hasLlmoAdminCapability()) {
+        return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can onboard'));
       }
 
       // Validate required fields
@@ -1090,8 +1090,16 @@ function LlmoController(ctx) {
     const { spaceCatId } = context.params;
     const { data } = context;
 
-    // Customers never see the internal reason — only a generic failure.
-    const GENERIC_ONBOARD_ERROR = "We couldn't onboard this domain — please contact support.";
+    // Customers never see the internal reason - only a generic failure. The
+    // project-elmo-ui client renders its own localized copy (with a link to the
+    // onboarding guide) instead of this raw text - this string only reaches a
+    // caller that skips the UI (e.g. a direct API/curl consumer), so it stays a
+    // short, plain fallback. Kept ASCII-only (no em dash / curly quotes): it's
+    // copied verbatim into the `x-error` response header by
+    // badRequest()/internalServerError(), and a character outside the
+    // header-safe range (see cleanupHeaderValue) crashes the response with a 500
+    // "Invalid character in header content" instead of the intended 400/500 body.
+    const GENERIC_ONBOARD_ERROR = "We couldn't onboard this domain right now. Please contact support.";
 
     try {
       // --- Resolve org (404 if missing) ---
@@ -1169,7 +1177,7 @@ function LlmoController(ctx) {
       const validation = await validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, context);
       if (!validation.isValid) {
         log.warn(`Site-only onboarding rejected for org ${spaceCatId}, domain ${domain}: ${validation.error}`);
-        return badRequest(GENERIC_ONBOARD_ERROR);
+        return badRequest(cleanupHeaderValue(GENERIC_ONBOARD_ERROR));
       }
 
       // --- Orchestrate (siteOnly: true; no `say` → zero customer Slack) ---
@@ -1205,7 +1213,7 @@ function LlmoController(ctx) {
         `:x: Site-only onboarding failed for org ${spaceCatId}: ${error.message}`,
         context,
       );
-      return internalServerError(GENERIC_ONBOARD_ERROR);
+      return internalServerError(cleanupHeaderValue(GENERIC_ONBOARD_ERROR));
     }
   };
 
@@ -1370,8 +1378,9 @@ function LlmoController(ctx) {
         return siteValidation;
       }
 
-      // Delegate to the rationale handler for the actual processing
-      return await handleLlmoRationale(context);
+      // Delegate to the rationale handler, reusing the already-resolved site
+      // so it doesn't repeat the Site.findById lookup.
+      return await handleLlmoRationale(context, siteValidation.site);
     } catch (error) {
       log.error(`Error getting LLMO rationale for site ${siteId}: ${error.message}`);
       return badRequest(cleanupHeaderValue(error.message));
@@ -1477,8 +1486,8 @@ function LlmoController(ctx) {
         return forbidden('User does not have access to this site');
       }
 
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can update the edge optimize config');
+      if (!await accessControlUtil.hasLlmoCapabilityForSite(site)) {
+        return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can update the edge optimize config'));
       }
 
       if (!await accessControlUtil.isOwnerOfSite(site)) {
@@ -1791,8 +1800,8 @@ function LlmoController(ctx) {
         return forbidden('User does not have access to this site');
       }
 
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can get the edge optimize config');
+      if (!await accessControlUtil.hasLlmoCapabilityForSite(site)) {
+        return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can get the edge optimize config'));
       }
 
       const baseURL = site.getBaseURL();
@@ -2040,8 +2049,8 @@ function LlmoController(ctx) {
         return forbidden('User does not have access to this site');
       }
 
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can add staging domains');
+      if (!await accessControlUtil.hasLlmoCapabilityForSite(site)) {
+        return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can add staging domains'));
       }
 
       if (!areDomainsSameAsBase(stagingDomains, site.getBaseURL())) {
@@ -2124,8 +2133,8 @@ function LlmoController(ctx) {
     const { data } = context;
 
     try {
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can update the query index');
+      if (!accessControlUtil.hasLlmoAdminCapability()) {
+        return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can update the query index'));
       }
 
       if (!data || typeof data !== 'object') {
