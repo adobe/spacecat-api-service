@@ -18,6 +18,7 @@ import { ErrorWithStatusCode } from '../../utils.js';
 import {
   ERROR_CODES, isUpstreamGone, isMeteredQuota, toQuotaExceededError,
 } from '../errors.js';
+import { alertQuotaRejection } from '../quota-alerts.js';
 import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
 import {
   resolveLocation,
@@ -506,10 +507,14 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  * @param {Partial<import('../resource-manager.js').Blocks>} [options.ceiling] - per-brand AI
  *   ceiling (LLMO-6190 flag-flip gate), resolved from Vault by the controller and passed through to
  *   `createHeadroomGuard`. Omitted → non-binding default. No-op when `dynamicAllocation` is false.
- * @param {object} [options.env] - environment (Azure OpenAI creds), threaded into
- *   intent classification when `generateTopics` is set (serenity-docs#32).
+ * @param {object} [options.env] - environment (Azure OpenAI creds), threaded into intent
+ *   classification when `generateTopics` is set (serenity-docs#32); ALSO threaded to
+ *   `createHeadroomGuard` (org-pool early-warning alert) and used directly to fire the
+ *   quota-rejection Slack alert (serenity-docs#72 §5) on a publish quota rejection. Optional —
+ *   omitted, alerting is a no-op.
  * @param {number} [options.writeDeadline] - shared request-write deadline; defaults
  *   to a fresh {@link computeWriteDeadline} for direct/test callers.
+ * @param {string | null} [options.orgId] - IMS org id, for the Slack alert payload only.
  */
 export async function handleCreateMarketSubworkspace(
   transport,
@@ -532,6 +537,7 @@ export async function handleCreateMarketSubworkspace(
     ceiling = undefined,
     env = null,
     writeDeadline = computeWriteDeadline(),
+    orgId = null,
   } = {},
 ) {
   const errors = validateCreateBody(body);
@@ -573,7 +579,13 @@ export async function handleCreateMarketSubworkspace(
   const headroom = createHeadroomGuard(
     transport,
     {
-      enabled: dynamicAllocation, subWorkspaceId: workspaceId, parentWorkspaceId, ceiling,
+      enabled: dynamicAllocation,
+      subWorkspaceId: workspaceId,
+      parentWorkspaceId,
+      ceiling,
+      env,
+      orgId,
+      brandId: brand.getId(),
     },
     log,
   );
@@ -781,6 +793,17 @@ export async function handleCreateMarketSubworkspace(
         log?.warn?.('handleCreateMarketSubworkspace: publish rejected — quota exceeded', {
           workspaceId, projectId,
         });
+        // serenity-docs#72 §5: never throws/never alters the rejection below — but AWAITED so the
+        // Slack POST actually completes before a Lambda response freeze could drop it (fire-and-
+        // forget refers to the response value, not literal no-await).
+        await alertQuotaRejection({
+          orgId,
+          brandId: brand.getId(),
+          workspaceId,
+          market: `${body.market}/${languageCode}`,
+          caseType: 'brandCarveExhausted',
+          dimension: 'prompts',
+        }, env, log);
         throw toQuotaExceededError();
       }
       throw e;
@@ -797,16 +820,28 @@ export async function handleCreateMarketSubworkspace(
         // Swallowed by design (best-effort provisioning must not fail the brand create), but this
         // IS a quota rejection and the event that creates the dark draft market a customer later
         // trips over — serenity-docs#72 §5 requires it to alert even though nothing failed here.
-        // TODO(serenity-docs#72 step 2): fire the Slack alert here once the alerting mechanism
-        // lands; the call below is side-effect-only (its returned error is intentionally
-        // discarded, never thrown — best-effort swallows it) purely to run
-        // `recordRejection('quotaExceeded')` inside it, so the CloudWatch metric this alarm will
-        // key on fires here too, keeping the classifier + alerting signal consistent between
-        // this swallowed path and the `require` path above (MysticatBot review, non-blocking nit).
+        // The call below is side-effect-only (its returned error is intentionally discarded, never
+        // thrown — best-effort swallows it) purely to run `recordRejection('quotaExceeded')`
+        // inside it, so the CloudWatch metric this alarm will key on fires here too, keeping the
+        // classifier + alerting signal consistent between this swallowed path and the `require`
+        // path above (MysticatBot review, non-blocking nit).
         toQuotaExceededError();
         log?.warn?.('handleCreateMarketSubworkspace: publish skipped — quota exceeded, project left as draft', {
           workspaceId, projectId,
         });
+        // serenity-docs#72 §5 bullet 2: "the swallow is still a quota rejection... MUST emit the
+        // same (deduplicated) alert, marked as originating from the best-effort provisioning
+        // path" — the event that creates the dark draft market a customer later trips over.
+        // Awaited for the same Lambda-freeze reason as the require branch above.
+        await alertQuotaRejection({
+          orgId,
+          brandId: brand.getId(),
+          workspaceId,
+          market: `${body.market}/${languageCode}`,
+          caseType: 'brandCarveExhausted',
+          dimension: 'prompts',
+          swallowed: true,
+        }, env, log);
       } else {
         throw e;
       }
@@ -1111,13 +1146,23 @@ export async function handleListModelsSubworkspace(transport, workspaceId, query
  * @param {Partial<import('../resource-manager.js').Blocks>} [options.ceiling] - per-brand AI
  *   ceiling (LLMO-6190 flag-flip gate), resolved from Vault by the controller and passed to
  *   `createHeadroomGuard`. Omitted → non-binding default. No-op when `dynamicAllocation` is false.
+ * @param {string | null} [options.orgId] - serenity-docs#72 §5 alert payload only.
+ * @param {string | null} [options.brandId] - serenity-docs#72 §5 alert payload only.
+ * @param {object | null} [options.env] - serenity-docs#72 §5 alert kill-switch/config only.
  */
 export async function handleUpdateModelsSubworkspace(
   transport,
   workspaceId,
   body,
   log,
-  { dynamicAllocation = false, parentWorkspaceId = '', ceiling = undefined } = {},
+  {
+    dynamicAllocation = false,
+    parentWorkspaceId = '',
+    ceiling = undefined,
+    orgId = null,
+    brandId = null,
+    env = null,
+  } = {},
 ) {
   const geoTargetId = normalizeGeoTargetId(Number(body?.geoTargetId));
   const languageCode = normalizeLanguageCode(body?.languageCode);
@@ -1150,7 +1195,13 @@ export async function handleUpdateModelsSubworkspace(
   const headroom = createHeadroomGuard(
     transport,
     {
-      enabled: dynamicAllocation, subWorkspaceId: workspaceId, parentWorkspaceId, ceiling,
+      enabled: dynamicAllocation,
+      subWorkspaceId: workspaceId,
+      parentWorkspaceId,
+      ceiling,
+      env,
+      orgId,
+      brandId,
     },
     log,
   );
@@ -1187,7 +1238,11 @@ export async function handleUpdateModelsSubworkspace(
     // LLMO-6190 follow-up: bounded poll-retry if the sync's publish 405s as a disguised
     // metered-quota rejection despite the sizing above (e.g. the pre-publish read was stale). No-op
     // when OFF.
-    { wrapPublish: (fn) => headroom.retryOnQuota(fn, { callSite: 'syncModelsPublish' }) },
+    // serenity-docs#72 §5: feeds the shared syncModelsForProject publish-catch's alert.
+    {
+      wrapPublish: (fn) => headroom.retryOnQuota(fn, { callSite: 'syncModelsPublish' }),
+      alertContext: { orgId, brandId, env },
+    },
   );
 
   // Net model REMOVAL freed published-prompt units. Release them AFTER the sync's publish — by then

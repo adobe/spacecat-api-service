@@ -14,6 +14,7 @@ import { expect, use } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
+import esmock from 'esmock';
 import { SerenityTransportError } from '../../../src/support/serenity/rest-transport.js';
 import { ErrorWithStatusCode } from '../../../src/support/utils.js';
 import {
@@ -183,6 +184,89 @@ describe('resource-manager — ensureAiHeadroom', () => {
       subWorkspaceId: CHILD, parentWorkspaceId: MASTER, need: { prompts: 10 }, poll,
     }, log).catch((x) => x);
     expect(e.code).to.equal('orgPoolExhausted');
+  });
+
+  describe('serenity-docs#72 §5: hard-exhaustion Slack alerting (case 2/3)', () => {
+    const ENABLED_ENV = {
+      SERENITY_QUOTA_ALERTS_ENABLED: 'true',
+      SERENITY_QUOTA_ALERTS_SLACK_CHANNEL_ID: 'C123',
+      SLACK_BOT_TOKEN: 'xoxb-test',
+    };
+    let alertQuotaRejection;
+    let alertPoolFreeThreshold;
+    let mocked;
+
+    beforeEach(async () => {
+      // esmock does not transitively override two hops deep (resource-manager → quota-alerts →
+      // slack/base) — mock at the ONE-HOP entry (quota-alerts.js's own exports) instead, same
+      // workaround used for PR #2854's toQuotaExceededError coverage.
+      alertQuotaRejection = sinon.stub().resolves();
+      alertPoolFreeThreshold = sinon.stub().resolves();
+      mocked = await esmock('../../../src/support/serenity/resource-manager.js', {
+        '../../../src/support/serenity/quota-alerts.js': {
+          alertQuotaRejection, alertPoolFreeThreshold,
+        },
+      });
+    });
+
+    it('alerts brandAiLimit when the top-up would exceed the per-brand ceiling and env is threaded', async () => {
+      const t = makeTransport({ child: resources(dim(2, 0, 2), dim(0, 0, 100)) });
+      const e = await mocked.ensureAiHeadroom(t, {
+        subWorkspaceId: CHILD,
+        parentWorkspaceId: MASTER,
+        need: { projects: 3 },
+        ceiling: { projects: 3 },
+        poll,
+        env: ENABLED_ENV,
+        orgId: 'org-1',
+        brandId: 'brand-1',
+      }, log).catch((x) => x);
+      expect(e.code).to.equal('brandAiLimit');
+      expect(alertQuotaRejection).to.have.been.calledOnce;
+      const [payload, env] = alertQuotaRejection.firstCall.args;
+      expect(payload.caseType).to.equal('brandAiLimit');
+      expect(payload.orgId).to.equal('org-1');
+      expect(payload.brandId).to.equal('brand-1');
+      expect(env).to.equal(ENABLED_ENV);
+    });
+
+    it('does NOT alert brandAiLimit when env is not threaded (no-op, backward compatible)', async () => {
+      const t = makeTransport({ child: resources(dim(2, 0, 2), dim(0, 0, 100)) });
+      const e = await mocked.ensureAiHeadroom(t, {
+        subWorkspaceId: CHILD,
+        parentWorkspaceId: MASTER,
+        need: { projects: 3 },
+        ceiling: { projects: 3 },
+        poll,
+      }, log).catch((x) => x);
+      expect(e.code).to.equal('brandAiLimit');
+      expect(alertQuotaRejection).to.not.have.been.called;
+    });
+
+    it('alerts orgPoolExhausted on a terminal 422 "insufficient units" when env is threaded', async () => {
+      const t = makeTransport({
+        child: resources(dim(2, 0, 2), dim(0, 0, 0)),
+        master: resources(dim(0, 0, 100), dim(0, 0, 800)),
+        transfer: sinon.stub().rejects(poolFull()),
+      });
+      const e = await mocked.ensureAiHeadroom(t, {
+        subWorkspaceId: CHILD,
+        parentWorkspaceId: MASTER,
+        need: { prompts: 10 },
+        poll,
+        env: ENABLED_ENV,
+        orgId: 'org-1',
+        brandId: 'brand-1',
+      }, log).catch((x) => x);
+      expect(e.code).to.equal('orgPoolExhausted');
+      // alertPoolFreeThreshold is the distinct EARLY-warning advisory alert (fires before the
+      // transfer even runs); assert on the hard-exhaustion alert specifically.
+      expect(alertQuotaRejection).to.have.been.calledOnce;
+      const [payload] = alertQuotaRejection.firstCall.args;
+      expect(payload.caseType).to.equal('orgPoolExhausted');
+      expect(payload.orgId).to.equal('org-1');
+      expect(payload.brandId).to.equal('brand-1');
+    });
   });
 
   it('FAIL-FAST: a transient "workspace not ready" 422 → immediate 503 workspaceBusy, ONE transfer, NO poll', async () => {

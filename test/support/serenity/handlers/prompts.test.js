@@ -27,6 +27,7 @@ import {
 } from '../../../../src/support/serenity/handlers/prompts.js';
 import { ErrorWithStatusCode } from '../../../../src/support/utils.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
+import { ERROR_CODES } from '../../../../src/support/serenity/errors.js';
 import {
   TAG_IDS,
   dimensionTreeLevels,
@@ -867,6 +868,71 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       message: 'publish: publish boom',
     });
   });
+
+  // serenity-docs#72 §4.1: a residual quota rejection on the publish leg (a disguised-405 that
+  // survived any retry) must surface as the stable 409 quotaExceeded token, never as a generic
+  // embedded `publish: <message>` 502 record. §4.1 atomicity also requires the prompt this
+  // request staged to be rolled back (deleted) — never left as an unpublished draft.
+  it('rolls back the staged prompt and appends a 409 quotaExceeded failure (not a generic 502) when publishProject 405s as a disguised quota rejection', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      createPromptsByIds: sinon.stub().resolves({
+        page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'ok' }],
+      }),
+      publishProject: sinon.stub().rejects(
+        new SerenityTransportError(405, 'publish failed: 405', '<html>405 Not Allowed</html>'),
+      ),
+      deletePromptsByIds: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: 'ok', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'],
+      }],
+    }, fakeLog());
+
+    expect(result.created).to.have.lengthOf(0);
+    expect(result.failed).to.have.lengthOf(1);
+    expect(result.failed[0].status).to.equal(409);
+    expect(result.failed[0].error).to.equal(ERROR_CODES.QUOTA_EXCEEDED);
+    expect(result.failed[0].message).to.not.match(/^publish: /);
+    expect(result.failed[0].text).to.equal('ok');
+    expect(transport.deletePromptsByIds)
+      .to.have.been.calledOnceWith(WORKSPACE, 'proj-us-en', ['new-sem-id']);
+  });
+
+  it('logs (best-effort) but still fails the prompt when the rollback delete itself fails', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    const log = fakeLog();
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      createPromptsByIds: sinon.stub().resolves({
+        page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'ok' }],
+      }),
+      publishProject: sinon.stub().rejects(
+        new SerenityTransportError(405, 'publish failed: 405', '<html>405 Not Allowed</html>'),
+      ),
+      deletePromptsByIds: sinon.stub().rejects(new Error('delete boom')),
+    };
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: 'ok', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'],
+      }],
+    }, log);
+
+    expect(result.created).to.have.lengthOf(0);
+    expect(result.failed).to.have.lengthOf(1);
+    expect(result.failed[0].status).to.equal(409);
+    expect(result.failed[0].error).to.equal(ERROR_CODES.QUOTA_EXCEEDED);
+  });
 });
 
 describe('handlers/prompts.js — handleUpdatePrompt', () => {
@@ -1688,6 +1754,33 @@ describe('handlers/prompts.js — handleBulkDeletePrompts', () => {
       status: 502,
       message: 'publish: publish boom',
     });
+  });
+
+  // serenity-docs#72 §4.1: same 409 quotaExceeded requirement as the create path — a residual
+  // disguised-405 on the post-delete republish must not be a generic embedded 502 record.
+  it('appends a 409 quotaExceeded failed entry when publishProject 405s as a disguised quota rejection', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    const transport = {
+      deletePromptsByIds: sinon.stub().resolves(),
+      publishProject: sinon.stub().rejects(
+        new SerenityTransportError(405, 'publish failed: 405', '<html>405 Not Allowed</html>'),
+      ),
+    };
+
+    const result = await handleBulkDeletePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [
+        { semrushPromptId: 'sem-1', geoTargetId: 2840, languageCode: 'en' },
+      ],
+    }, fakeLog());
+
+    expect(result.deleted).to.equal(1);
+    expect(result.failed).to.have.lengthOf(1);
+    expect(result.failed[0].status).to.equal(409);
+    expect(result.failed[0].error).to.equal(ERROR_CODES.QUOTA_EXCEEDED);
+    expect(result.failed[0].message).to.not.match(/^publish: /);
   });
 
   // Important #9 from review: bulk-delete buckets targets by project; per-bucket
