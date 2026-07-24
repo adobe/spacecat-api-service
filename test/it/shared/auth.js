@@ -130,9 +130,10 @@ export async function createBrandManagerToken() {
  * admin, carrying `<product>/can_manage_users` in the JWT `facs_permissions`
  * for both LLMO and ASO — so `callerHasFacsManageUsers` resolves org-wide
  * authority on any resource. This is the persona that authors/edits/revokes
- * state-layer bindings in the write tests: internal admins are blocked from
- * those mutations (`blockInternalAdminWrite`), so the `admin` persona can only
- * be used for reads.
+ * state-layer bindings in the write tests: an internal admin may CREATE only
+ * for resources in its own org (`requireAdminResourceInOrg`), which the IT
+ * harness can't satisfy without seeding real resources, so a non-admin manager
+ * drives the write flow.
  */
 export async function createFacsManagerToken() {
   return signToken({
