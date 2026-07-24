@@ -167,8 +167,13 @@ export function transformMarketTrackingTrends(mentionsRaw, citationsRaw, brandNa
       const value = Number(line.y__mentions) || 0;
       if (line.legend.trim().toLowerCase() === wantedBrand) {
         bucket[metric] += value;
+        // Assignment, not `+=`: these are 0-1 fraction/rate fields, not counts. Summing
+        // would be semantically wrong if the upstream ever emitted more than one row for
+        // the same brand+week (today's `auto_bucketing:"week"` contract guarantees it
+        // doesn't, but this makes the code correct by construction regardless). Clamp to
+        // [0,1] in case upstream ever sends a slightly out-of-range rate.
         for (const [field, rawKey] of Object.entries(brandFields)) {
-          bucket[field] += Number(line[rawKey]) || 0;
+          bucket[field] = Math.min(1, Math.max(0, Number(line[rawKey]) || 0));
         }
       } else {
         ensureCompetitor(bucket, line.legend)[metric] += value;
