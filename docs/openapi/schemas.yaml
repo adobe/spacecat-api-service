@@ -11927,11 +11927,13 @@ SerenityMarketTrackingTrends:
   type: object
   description: |
     Weekly Market Tracking Trends for the Serenity (Semrush Elements-backed)
-    Brand Presence Competitor Comparison chart. Each entry is one ISO week; the
-    tracked brand's own totals are at the top level and every tracked competitor
-    (a Semrush benchmark) is an entry in `competitors`. Mentions come from the
-    Trends Mentions/Visibility element and citations from the Market Tracking
-    citations element; both are already weekly-bucketed by Semrush.
+    Brand Presence Competitor Comparison chart and the Overview-SR KPI cards
+    (LLMO-6515). Each entry is one ISO week; the tracked brand's own totals are
+    at the top level and every tracked competitor (a Semrush benchmark) is an
+    entry in `competitors`. Mentions/Share of Voice/Brand Visibility come from
+    the Trends Mentions/Visibility element and citations/Source Visibility from
+    the Market Tracking citations element; both are already weekly-bucketed by
+    Semrush.
   required: [weeklyTrends]
   properties:
     weeklyTrends:
@@ -11939,7 +11941,7 @@ SerenityMarketTrackingTrends:
       description: One entry per ISO week, sorted ascending by `week`.
       items:
         type: object
-        required: [week, weekNumber, year, mentions, citations, competitors]
+        required: [week, weekNumber, year, mentions, citations, shareOfVoice, brandVisibility, sourceVisibility, competitors]
         properties:
           week:
             type: string
@@ -11957,6 +11959,18 @@ SerenityMarketTrackingTrends:
           citations:
             type: integer
             description: The tracked brand's own citations in this week.
+          shareOfVoice:
+            type: number
+            format: double
+            description: The tracked brand's Share of Voice this week, a 0–1 fraction (defaults to 0 if not returned upstream).
+          brandVisibility:
+            type: number
+            format: double
+            description: The tracked brand's Brand Visibility this week — fraction of analyzed prompts where the brand appears (prompts_mentioned / total_num_prompts), 0–1 (defaults to 0 if not returned upstream).
+          sourceVisibility:
+            type: number
+            format: double
+            description: The tracked brand's Source Visibility this week — fraction of analyzed prompts where the brand's domain is cited (prompts_with_mentions / total_prompts), 0–1 (defaults to 0 if not returned upstream).
           competitors:
             type: array
             description: Per-competitor mentions + citations for this week, sorted by mentions desc.

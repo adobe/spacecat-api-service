@@ -17,21 +17,28 @@ import { dateToIsoWeek } from '../week-utils.js';
 /**
  * Payload builders + response transformer backing
  * `GET .../brand-presence/market-tracking-trends` — the Competitor Comparison chart
- * on the `brand-presence-sr-ui` dashboard. See
- * docs/elements/market-tracking-trends-plan.md for the full design + the live MFE
- * capture this file is modelled on.
+ * and the Overview-SR KPI cards (LLMO-6515) on the `brand-presence-sr-ui` dashboard.
+ * See docs/elements/market-tracking-trends-plan.md for the full design + the live
+ * MFE capture this file is modelled on.
  *
  * Two `line` elements power it, both returning one weekly series per market
  * participant keyed by `legend` = brand/competitor NAME (competitors arrive natively
  * as tracked Semrush benchmarks; there is NO brand filter — that is what keeps the
  * competitor legends in the response):
- *   - Mentions  → TRENDS_MV (b5281393), project filter col `CBF_project` (singular).
- *   - Citations → MARKET_CITATIONS_TREND (2e5a6f4e), project filter col `CBF_projects`
- *     (plural). ⚠️ Both elements expose the value under the key `y__mentions`; in the
- *     citations element that number is the CITATION count, not mentions.
+ *   - TRENDS_MV (b5281393), project filter col `CBF_project` (singular) — a
+ *     multi-value element carrying `y__mentions` (mention count), `y__sov` (share of
+ *     voice) and `y__visibility` (brand visibility = prompts_mentioned /
+ *     total_num_prompts) per row.
+ *   - MARKET_CITATIONS_TREND (2e5a6f4e), project filter col `CBF_projects` (plural)
+ *     — carries `y__mentions` (⚠️ the CITATION count, not mentions — Semrush reuses
+ *     the generic field name) and `y__visibility` (source visibility =
+ *     prompts_with_mentions / total_prompts).
+ *
+ * `y__sov`/`y__visibility` are only meaningful for the tracked brand's own row (the
+ * legend matching `brandName`); competitor rows only ever surface mentions/citations.
  */
 
-/* c8 ignore start -- market-tracking-trends POC endpoint; unit tests intentionally deferred */
+/* c8 ignore start -- market-tracking-trends payload builders; unit tests intentionally deferred */
 /**
  * Builds the weekly-bucketed payload for a market-tracking trend `line` element.
  * Shape verified against the live MFE: top-level `auto_bucketing: "week"`, plain
@@ -88,19 +95,26 @@ export function buildMarketMentionsTrendPayload(params = {}) {
 export function buildMarketCitationsTrendPayload(params = {}) {
   return buildMarketTrendPayload({ ...params, projectCol: 'CBF_projects' });
 }
+/* c8 ignore stop */
 
 /**
  * Merges the mentions + citations `line` responses into the weekly Competitor
- * Comparison shape. Both elements are already weekly-bucketed (`auto_bucketing:week`),
- * so each `blocks.lines[]` row is `{ legend: name, x: weekStartIso, y__mentions: N }`;
+ * Comparison shape, enriched with the tracked brand's Share of Voice / Brand
+ * Visibility / Source Visibility rate metrics (LLMO-6515). Both elements are already
+ * weekly-bucketed (`auto_bucketing:week`), so each `blocks.lines[]` row is
+ * `{ legend: name, x: weekStartIso, y__mentions: N, y__sov: N, y__visibility: N }`;
  * `y__mentions` is the mention count in the mentions response and the citation count
  * in the citations response. Rows are grouped by week (the `x` date, YYYY-MM-DD); the
  * tracked brand's own line (`legend === brandName`, case-insensitive) becomes the
- * week's top-level `mentions`/`citations`, every other legend becomes a `competitors[]`
- * entry. A metric a legend appears in for only one of the two elements defaults to 0.
+ * week's top-level `mentions`/`citations`/`shareOfVoice`/`brandVisibility`/
+ * `sourceVisibility`, every other legend becomes a `competitors[]` entry carrying only
+ * `mentions`/`citations` (unchanged). A field a legend/element doesn't carry defaults
+ * to 0.
  *
- * @param {object} mentionsRaw - Raw TRENDS_MV response.
- * @param {object} citationsRaw - Raw MARKET_CITATIONS_TREND response.
+ * @param {object} mentionsRaw - Raw TRENDS_MV response (mentions, share of voice,
+ *   brand visibility).
+ * @param {object} citationsRaw - Raw MARKET_CITATIONS_TREND response (citations,
+ *   source visibility).
  * @param {string} brandName - Tracked brand's display name (matches its `legend`).
  * @returns {Array<object>} weeklyTrends sorted ascending by week.
  */
@@ -112,7 +126,13 @@ export function transformMarketTrackingTrends(mentionsRaw, citationsRaw, brandNa
     let bucket = weeks.get(week);
     if (!bucket) {
       bucket = {
-        week, mentions: 0, citations: 0, competitors: new Map(),
+        week,
+        mentions: 0,
+        citations: 0,
+        shareOfVoice: 0,
+        brandVisibility: 0,
+        sourceVisibility: 0,
+        competitors: new Map(),
       };
       weeks.set(week, bucket);
     }
@@ -127,7 +147,9 @@ export function transformMarketTrackingTrends(mentionsRaw, citationsRaw, brandNa
     return comp;
   };
 
-  const accumulate = (raw, metric) => {
+  // `brandFields` maps this element's raw `y__*` keys to the brand-only weekly
+  // fields they populate — competitor rows never get these (only mentions/citations).
+  const accumulate = (raw, metric, brandFields = {}) => {
     for (const line of (raw?.blocks?.lines ?? [])) {
       if (!line || !hasText(line.legend) || typeof line.x !== 'string') {
         // eslint-disable-next-line no-continue
@@ -145,14 +167,17 @@ export function transformMarketTrackingTrends(mentionsRaw, citationsRaw, brandNa
       const value = Number(line.y__mentions) || 0;
       if (line.legend.trim().toLowerCase() === wantedBrand) {
         bucket[metric] += value;
+        for (const [field, rawKey] of Object.entries(brandFields)) {
+          bucket[field] += Number(line[rawKey]) || 0;
+        }
       } else {
         ensureCompetitor(bucket, line.legend)[metric] += value;
       }
     }
   };
 
-  accumulate(mentionsRaw, 'mentions');
-  accumulate(citationsRaw, 'citations');
+  accumulate(mentionsRaw, 'mentions', { shareOfVoice: 'y__sov', brandVisibility: 'y__visibility' });
+  accumulate(citationsRaw, 'citations', { sourceVisibility: 'y__visibility' });
 
   return [...weeks.values()]
     .map((bucket) => {
@@ -163,10 +188,12 @@ export function transformMarketTrackingTrends(mentionsRaw, citationsRaw, brandNa
         year: Number.parseInt(year, 10),
         mentions: bucket.mentions,
         citations: bucket.citations,
+        shareOfVoice: bucket.shareOfVoice,
+        brandVisibility: bucket.brandVisibility,
+        sourceVisibility: bucket.sourceVisibility,
         competitors: [...bucket.competitors.values()]
           .sort((a, b) => b.mentions - a.mentions),
       };
     })
     .sort((a, b) => a.week.localeCompare(b.week));
 }
-/* c8 ignore stop */
