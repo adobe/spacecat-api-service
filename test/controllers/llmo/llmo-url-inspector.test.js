@@ -14,6 +14,7 @@
 import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
+import esmock from 'esmock';
 import {
   createUrlInspectorStatsHandler,
   createUrlInspectorOwnedUrlsHandler,
@@ -23,6 +24,11 @@ import {
   createUrlInspectorUrlPromptsHandler,
   createUrlInspectorFilterDimensionsHandler,
 } from '../../../src/controllers/llmo/llmo-url-inspector.js';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Semrush BP integration tests — uses esmock to inject stubs for
+// resolveWorkspaceId, createSerenityTransport, and queryBpCitationsByUrl.
+// ─────────────────────────────────────────────────────────────────────────────
 
 use(sinonChai);
 
@@ -2063,6 +2069,418 @@ describe('URL Inspector Handlers', () => {
       const response = await handler(context);
 
       expect(response.status).to.equal(400);
+    });
+  });
+});
+
+const WORKSPACE_ID = 'ws-1111-2222-3333';
+
+function createSemrushContext(params = {}, data = {}) {
+  const { client, rpcStub, limitStub } = createRpcMock(
+    {},
+    { data: [], error: null },
+  );
+  const context = {
+    params: { spaceCatId: ORG_ID, brandId: BRAND_ID, ...params },
+    data: { siteId: SITE_ID, ...data },
+    log: { error: sinon.stub(), info: sinon.stub(), warn: sinon.stub() },
+    env: { SEMRUSH_PROJECTS_BASE_URL: 'https://semrush.example.com', SEMRUSH_BP_ELEMENT_ID: 'el-abc' },
+    pathInfo: { headers: { authorization: 'Bearer test-ims-token' } },
+    dataAccess: {
+      Site: { postgrestService: client },
+      Organization: {
+        findById: sinon.stub().resolves({
+          getId: () => ORG_ID,
+          getSemrushWorkspaceId: () => WORKSPACE_ID,
+          getImsOrgId: () => 'ims-org',
+        }),
+      },
+      BrandSemrushProject: {
+        allByBrandId: sinon.stub().resolves([
+          { getSemrushProjectId: () => 'proj-aaa' },
+        ]),
+      },
+    },
+  };
+  return {
+    context, client, rpcStub, limitStub,
+  };
+}
+
+describe('URL Inspector Semrush BP integration', () => {
+  let resolveWorkspaceIdStub;
+  let createSerenityTransportStub;
+  let queryBpCitationsByUrlStub;
+  let Handlers;
+
+  beforeEach(async () => {
+    resolveWorkspaceIdStub = sinon.stub().resolves(WORKSPACE_ID);
+    queryBpCitationsByUrlStub = sinon.stub().resolves({
+      citations: 42,
+      citationsByDay: [{ date: '2026-01-01', count: 42 }],
+      promptsCited: 7,
+      prompts: [{ prompt: 'What is the best product?' }],
+    });
+    const queryBpResultsStub = sinon.stub().resolves({ data: { rows: [] } });
+    const mockTransport = { queryBrandPresenceResults: queryBpResultsStub };
+    createSerenityTransportStub = sinon.stub().returns(mockTransport);
+
+    Handlers = await esmock(
+      '../../../src/controllers/llmo/llmo-url-inspector.js',
+      {
+        '../../../src/support/serenity/workspace-resolver.js': {
+          resolveWorkspaceId: resolveWorkspaceIdStub,
+        },
+        '../../../src/support/serenity/rest-transport.js': {
+          createSerenityTransport: createSerenityTransportStub,
+        },
+        '../../../src/support/serenity/handlers/brand-presence.js': {
+          queryBpCitationsByUrl: queryBpCitationsByUrlStub,
+        },
+      },
+    );
+  });
+
+  afterEach(() => {
+    sinon.restore();
+  });
+
+  describe('createUrlInspectorStatsHandler — Semrush path', () => {
+    it('returns Semrush citation KPIs when workspace is set and brand is scoped', async () => {
+      const { context, rpcStub } = createSemrushContext({ brandId: BRAND_ID });
+      rpcStub.resolves({ data: [{ week: null, value: 0 }], error: null });
+
+      const handler = Handlers.createUrlInspectorStatsHandler(
+        async () => ({ organization: { getId: () => ORG_ID } }),
+      );
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.stats.totalCitations).to.equal(42);
+      expect(body.stats.totalPromptsCited).to.equal(7);
+      expect(queryBpCitationsByUrlStub).to.have.been.calledOnce;
+    });
+
+    it('falls back to Mysticat when workspace is null', async () => {
+      resolveWorkspaceIdStub.resolves(null);
+      const { context, rpcStub } = createSemrushContext({ brandId: BRAND_ID });
+      rpcStub.resolves({ data: [{ week: null, value: 99 }], error: null });
+
+      const handler = Handlers.createUrlInspectorStatsHandler(
+        async () => ({ organization: { getId: () => ORG_ID } }),
+      );
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.stats.totalCitations).to.equal(99);
+      expect(queryBpCitationsByUrlStub).to.not.have.been.called;
+    });
+
+    it('falls back to Mysticat when brandId is all', async () => {
+      const { context, rpcStub } = createSemrushContext({ brandId: 'all' });
+      rpcStub.resolves({ data: [{ week: null, value: 55 }], error: null });
+
+      const handler = Handlers.createUrlInspectorStatsHandler(
+        async () => ({ organization: { getId: () => ORG_ID } }),
+      );
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.stats.totalCitations).to.equal(55);
+      expect(queryBpCitationsByUrlStub).to.not.have.been.called;
+    });
+
+    it('falls back gracefully when Semrush throws', async () => {
+      queryBpCitationsByUrlStub.rejects(new Error('upstream boom'));
+      const { context, rpcStub } = createSemrushContext({ brandId: BRAND_ID });
+      rpcStub.resolves({ data: [{ week: null, value: 10 }], error: null });
+
+      const handler = Handlers.createUrlInspectorStatsHandler(
+        async () => ({ organization: { getId: () => ORG_ID } }),
+      );
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.stats.totalCitations).to.equal(10);
+      expect(context.log.error).to.have.been.calledWithMatch(/Semrush BP error/);
+    });
+
+    it('returns Mysticat stats unchanged when queryBpCitationsByUrl returns null', async () => {
+      queryBpCitationsByUrlStub.resolves(null);
+      const { context, rpcStub } = createSemrushContext({ brandId: BRAND_ID });
+      rpcStub.resolves({ data: [{ week: null, value: 77 }], error: null });
+
+      const handler = Handlers.createUrlInspectorStatsHandler(
+        async () => ({ organization: { getId: () => ORG_ID } }),
+      );
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.stats.totalCitations).to.equal(77);
+    });
+
+    it('re-throws 503 config errors without falling back', async () => {
+      const configError = Object.assign(new Error('missing element id'), { status: 503 });
+      queryBpCitationsByUrlStub.rejects(configError);
+      const { context, rpcStub } = createSemrushContext({ brandId: BRAND_ID });
+      rpcStub.resolves({ data: [{ week: null, value: 10 }], error: null });
+
+      const handler = Handlers.createUrlInspectorStatsHandler(
+        async () => ({ organization: { getId: () => ORG_ID } }),
+      );
+      await expect(handler(context)).to.be.rejectedWith('missing element id');
+    });
+
+    it('passes hostname (not full URL) as domain to queryBpCitationsByUrl', async () => {
+      const { context, rpcStub } = createSemrushContext({ brandId: BRAND_ID }, { siteId: 'https://www.example.com' });
+      rpcStub.resolves({ data: [{ week: null, value: 0 }], error: null });
+
+      const handler = Handlers.createUrlInspectorStatsHandler(
+        async () => ({ organization: { getId: () => ORG_ID } }),
+      );
+      await handler(context);
+
+      const callArgs = queryBpCitationsByUrlStub.firstCall.args[5];
+      expect(callArgs.domain).to.equal('www.example.com');
+      expect(callArgs.urlFragment).to.equal('https://www.example.com');
+    });
+  });
+
+  describe('createUrlInspectorOwnedUrlsHandler — Semrush path', () => {
+    function ownedRow() {
+      return {
+        url: 'https://example.com/page',
+        total_count: 1,
+        citations: 5,
+        prompts_cited: 2,
+        products: [],
+        regions: [],
+        weekly_citations: [],
+        weekly_prompts_cited: [],
+        agentic_hits: 3,
+        agentic_hits_trend: [],
+        referral_hits: 1,
+        referral_hits_trend: [],
+      };
+    }
+
+    it('replaces citations and promptsCited per URL from Semrush when workspace is set', async () => {
+      const { context, rpcStub } = createSemrushContext({ brandId: BRAND_ID });
+      rpcStub.resolves({ data: [ownedRow()], error: null });
+
+      const handler = Handlers.createUrlInspectorOwnedUrlsHandler(
+        async () => ({ organization: { getId: () => ORG_ID } }),
+      );
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.urls[0].citations).to.equal(42);
+      expect(body.urls[0].promptsCited).to.equal(7);
+      expect(body.urls[0].agenticHits).to.equal(3);
+      expect(body.urls[0].referralHits).to.equal(1);
+      expect(queryBpCitationsByUrlStub).to.have.been.calledOnce;
+    });
+
+    it('returns Mysticat citations when workspace is null', async () => {
+      resolveWorkspaceIdStub.resolves(null);
+      const { context, rpcStub } = createSemrushContext({ brandId: BRAND_ID });
+      rpcStub.resolves({ data: [ownedRow()], error: null });
+
+      const handler = Handlers.createUrlInspectorOwnedUrlsHandler(
+        async () => ({ organization: { getId: () => ORG_ID } }),
+      );
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.urls[0].citations).to.equal(5);
+      expect(queryBpCitationsByUrlStub).to.not.have.been.called;
+    });
+
+    it('returns original urlRow unchanged when queryBpCitationsByUrl returns null', async () => {
+      queryBpCitationsByUrlStub.resolves(null);
+      const { context, rpcStub } = createSemrushContext({ brandId: BRAND_ID });
+      rpcStub.resolves({ data: [ownedRow()], error: null });
+
+      const handler = Handlers.createUrlInspectorOwnedUrlsHandler(
+        async () => ({ organization: { getId: () => ORG_ID } }),
+      );
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.urls[0].citations).to.equal(5);
+      expect(queryBpCitationsByUrlStub).to.have.been.calledOnce;
+    });
+
+    it('falls back gracefully on Semrush error', async () => {
+      queryBpCitationsByUrlStub.rejects(new Error('semrush boom'));
+      const { context, rpcStub } = createSemrushContext({ brandId: BRAND_ID });
+      rpcStub.resolves({ data: [ownedRow()], error: null });
+
+      const handler = Handlers.createUrlInspectorOwnedUrlsHandler(
+        async () => ({ organization: { getId: () => ORG_ID } }),
+      );
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.urls[0].citations).to.equal(5);
+      expect(context.log.warn).to.have.been.calledWithMatch(/Semrush BP error/);
+    });
+
+    it('preserves successful rows when one URL Semrush call fails', async () => {
+      queryBpCitationsByUrlStub.onFirstCall().resolves({
+        citations: 99, promptsCited: 3, prompts: [],
+      });
+      queryBpCitationsByUrlStub.onSecondCall().rejects(new Error('partial fail'));
+      const row1 = { ...ownedRow(), url: 'https://example.com/page1', citations: 1 };
+      const row2 = { ...ownedRow(), url: 'https://example.com/page2', citations: 2 };
+      const { context, rpcStub } = createSemrushContext({ brandId: BRAND_ID });
+      rpcStub.resolves({ data: [row1, row2], error: null });
+
+      const handler = Handlers.createUrlInspectorOwnedUrlsHandler(
+        async () => ({ organization: { getId: () => ORG_ID } }),
+      );
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.urls[0].citations).to.equal(99);
+      expect(body.urls[1].citations).to.equal(2);
+    });
+
+    it('re-throws 503 config errors in owned-urls', async () => {
+      const configError = Object.assign(new Error('missing element id'), { status: 503 });
+      queryBpCitationsByUrlStub.rejects(configError);
+      const { context, rpcStub } = createSemrushContext({ brandId: BRAND_ID });
+      rpcStub.resolves({ data: [ownedRow()], error: null });
+
+      const handler = Handlers.createUrlInspectorOwnedUrlsHandler(
+        async () => ({ organization: { getId: () => ORG_ID } }),
+      );
+      await expect(handler(context)).to.be.rejectedWith('missing element id');
+    });
+
+    it('passes hostname (not full URL) as domain in per-URL query', async () => {
+      const { context, rpcStub } = createSemrushContext({ brandId: BRAND_ID });
+      rpcStub.resolves({ data: [ownedRow()], error: null });
+
+      const handler = Handlers.createUrlInspectorOwnedUrlsHandler(
+        async () => ({ organization: { getId: () => ORG_ID } }),
+      );
+      await handler(context);
+
+      const callArgs = queryBpCitationsByUrlStub.firstCall.args[5];
+      expect(callArgs.domain).to.equal('example.com');
+      expect(callArgs.urlFragment).to.equal('https://example.com/page');
+    });
+
+    it('falls back to raw url when URL parse fails in owned-urls', async () => {
+      const badUrlRow = { ...ownedRow(), url: 'not-a-valid-url' };
+      const { context, rpcStub } = createSemrushContext({ brandId: BRAND_ID });
+      rpcStub.resolves({ data: [badUrlRow], error: null });
+
+      const handler = Handlers.createUrlInspectorOwnedUrlsHandler(
+        async () => ({ organization: { getId: () => ORG_ID } }),
+      );
+      await handler(context);
+
+      const callArgs = queryBpCitationsByUrlStub.firstCall.args[5];
+      expect(callArgs.domain).to.equal('not-a-valid-url');
+    });
+  });
+
+  describe('createUrlInspectorUrlPromptsHandler — Semrush path', () => {
+    it('returns prompts from Semrush when workspace is set and brand is scoped', async () => {
+      const { context } = createSemrushContext({ brandId: BRAND_ID });
+
+      const handler = Handlers.createUrlInspectorUrlPromptsHandler(
+        async () => ({ organization: { getId: () => ORG_ID } }),
+      );
+      const ctxWithUrl = { ...context, data: { siteId: SITE_ID, urlId: 'https://example.com/page' } };
+      const response = await handler(ctxWithUrl);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.prompts).to.have.length(1);
+      expect(body.prompts[0].prompt).to.equal('What is the best product?');
+      expect(queryBpCitationsByUrlStub).to.have.been.calledOnce;
+    });
+
+    it('falls back to Mysticat when workspace is null', async () => {
+      resolveWorkspaceIdStub.resolves(null);
+      const { context, rpcStub } = createSemrushContext({ brandId: BRAND_ID });
+      rpcStub.resolves({
+        data: [{
+          prompt: 'mysticat prompt', category: '', region: '', topics: '', citations: 1,
+        }],
+        error: null,
+      });
+
+      const handler = Handlers.createUrlInspectorUrlPromptsHandler(
+        async () => ({ organization: { getId: () => ORG_ID } }),
+      );
+      const ctxWithUrl = { ...context, data: { siteId: SITE_ID, urlId: 'some-uuid' } };
+      const response = await handler(ctxWithUrl);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.prompts[0].prompt).to.equal('mysticat prompt');
+      expect(queryBpCitationsByUrlStub).to.not.have.been.called;
+    });
+
+    it('falls back to Mysticat when Semrush throws', async () => {
+      queryBpCitationsByUrlStub.rejects(new Error('upstream down'));
+      const { context, rpcStub } = createSemrushContext({ brandId: BRAND_ID });
+      rpcStub.resolves({
+        data: [{
+          prompt: 'fallback prompt', category: '', region: '', topics: '', citations: 1,
+        }],
+        error: null,
+      });
+
+      const handler = Handlers.createUrlInspectorUrlPromptsHandler(
+        async () => ({ organization: { getId: () => ORG_ID } }),
+      );
+      const ctxWithUrl = { ...context, data: { siteId: SITE_ID, urlId: 'some-uuid' } };
+      const response = await handler(ctxWithUrl);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.prompts[0].prompt).to.equal('fallback prompt');
+      expect(context.log.error).to.have.been.calledWithMatch(/Semrush BP error/);
+    });
+
+    it('re-throws 503 config errors in url-prompts', async () => {
+      const configError = Object.assign(new Error('missing element id'), { status: 503 });
+      queryBpCitationsByUrlStub.rejects(configError);
+      const { context } = createSemrushContext({ brandId: BRAND_ID });
+
+      const handler = Handlers.createUrlInspectorUrlPromptsHandler(
+        async () => ({ organization: { getId: () => ORG_ID } }),
+      );
+      const ctxWithUrl = { ...context, data: { siteId: SITE_ID, urlId: 'https://example.com/page' } };
+      await expect(handler(ctxWithUrl)).to.be.rejectedWith('missing element id');
+    });
+
+    it('passes hostname as domain for url-prompts when urlId is a URL', async () => {
+      const { context } = createSemrushContext({ brandId: BRAND_ID });
+
+      const handler = Handlers.createUrlInspectorUrlPromptsHandler(
+        async () => ({ organization: { getId: () => ORG_ID } }),
+      );
+      const ctxWithUrl = { ...context, data: { siteId: SITE_ID, urlId: 'https://example.com/page' } };
+      await handler(ctxWithUrl);
+
+      const callArgs = queryBpCitationsByUrlStub.firstCall.args[5];
+      expect(callArgs.domain).to.equal('example.com');
     });
   });
 });

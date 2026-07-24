@@ -1027,5 +1027,43 @@ export function createSerenityTransport({ env, imsToken }) {
         },
       );
     },
+
+    /**
+     * POST /apis/v4-raw/external-api/v1/workspaces/{ws}/products/ai/elements/{elementId}
+     *
+     * Queries the Brand Presence reporting API for citation data. The
+     * `elementId` is a Semrush-side concept that identifies the BP report
+     * element; it is stored in `env.SEMRUSH_BP_ELEMENT_ID` (sourced from
+     * Vault, same as SEMRUSH_PROJECTS_BASE_URL). The `renderData` object
+     * carries all filter parameters (project_id, URL fragment, domain,
+     * date range, etc.) and is forwarded verbatim as `render_data` in the
+     * request body.
+     *
+     * Returns the raw upstream JSON. The caller (brand-presence handler) is
+     * responsible for interpreting the response shape.
+     */
+    async queryBrandPresenceResults(semrushWorkspaceId, elementId, renderData) {
+      const url = `${root}/apis/v4-raw/external-api/v1/workspaces/${encodeURIComponent(semrushWorkspaceId)}/products/ai/elements/${encodeURIComponent(elementId)}`;
+      const token = authToken();
+      const timeoutFetch = createTimeoutFetch(DEFAULT_TIMEOUT_MS);
+      const response = await timeoutFetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({ render_data: renderData }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new SerenityTransportError(
+          response.status,
+          `Semrush POST ${url} failed: ${response.status}`,
+          body,
+        );
+      }
+      return response.json().catch(() => null);
+    },
   };
 }
