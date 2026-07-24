@@ -81,7 +81,14 @@ if (!['insomnia', 'http'].includes(args.format)) {
 }
 const outputPath = args.output ?? DEFAULT_OUTPUT_BY_FORMAT[args.format];
 
-const spec = JSON.parse(readFileSync(args['spec-path'], 'utf-8'));
+let spec;
+try {
+  spec = JSON.parse(readFileSync(args['spec-path'], 'utf-8'));
+} catch (err) {
+  console.error(`Could not read spec at "${args['spec-path']}": ${err.message}`);
+  console.error('Bundle it first: npx @redocly/cli bundle docs/openapi/api.yaml --dereferenced --ext json -o tmp/bundled-api.json');
+  process.exit(1);
+}
 const { paths } = spec;
 
 // ---------------------------------------------------------------------------

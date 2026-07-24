@@ -52,10 +52,10 @@ async function request({
   path, method = 'GET', body = null, skipAuth = false,
 }) {
   const sessionToken = skipAuth ? null : await getSessionToken();
-  const headers = new Headers({
-    'Content-Type': 'application/json',
-    'x-client-type': 'api-e2e-tests',
-  });
+  const headers = new Headers({ 'x-client-type': 'api-e2e-tests' });
+  if (body) {
+    headers.set('Content-Type', 'application/json');
+  }
   if (sessionToken) {
     headers.set('Authorization', `Bearer ${sessionToken}`);
   }
@@ -66,8 +66,12 @@ async function request({
   });
 }
 
-function getPolicy() {
-  return request({ path: `/sites/${SITE_ID}/audit-policy` }).then((r) => r.json());
+async function getPolicy() {
+  const response = await request({ path: `/sites/${SITE_ID}/audit-policy` });
+  if (!response.ok) {
+    throw new Error(`GET /audit-policy failed: ${response.status} ${await response.text()}`);
+  }
+  return response.json();
 }
 
 // Remove is a pure set-difference filter (safe to retry / call on values that
