@@ -25,6 +25,7 @@ import routeFacsCapabilities, { PRODUCTS_CAPABILITIES } from '../routes/facs-cap
 import {
   createFacsAccessMappings,
   getFacsAccessMappingById,
+  getResourceImsOrgId,
   insertFacsAccessMappingAuditEvent,
   listFacsAccessMappings,
   listFacsAccessMappingHistory,
@@ -454,21 +455,42 @@ function StateAccessMappingsController(context) {
   }
 
   /**
-   * Blocks internal admins from **mutating** state-layer bindings — create,
-   * update (PATCH), and delete/revoke (DELETE empties the capability set).
-   * Grants must originate from a real FACS-layer or state-layer
-   * `can_manage_users` holder in the customer org so every mutation carries an
-   * accountable `created_by` / `updated_by` — an internal admin identity is a
-   * platform-operator bypass (see `callerHasFacsManageUsers`), not an org
-   * manager, and must never author or revoke customer ReBAC grants. Reads
-   * (list / history / capabilities / audit) are unaffected.
+   * Constrains an internal admin CREATE to resources that belong to the
+   * caller's own org. An internal admin is a platform-operator bypass
+   * (`callerHasFacsManageUsers` treats `isAdmin()` as org-wide authority), so
+   * without this an admin could author a binding on ANY org's resource — the
+   * mapping row is stamped with the caller's org, but `resourceId` is
+   * caller-supplied and otherwise unchecked. We resolve the resource's owning
+   * org and require it to equal the caller's.
+   *
+   * Non-admin callers return `null` here — their scope is enforced by
+   * `gateManager` (they must hold `can_manage_users`). PATCH / DELETE need no
+   * equivalent: those operate on an existing row fetched scoped to the caller's
+   * `imsOrgId` (the RPC filters on `ims_org_id`), so an admin can only mutate
+   * rows already in their own org.
+   *
+   * Fail-closed: an unknown resource or an unresolvable owning org is denied.
    *
    * @param {object} ctx
-   * @returns {Response|null} `forbidden` when the caller is an internal admin.
+   * @param {object} args
+   * @param {string} args.imsOrgId      Caller's canonical org id.
+   * @param {string} args.resourceType  'site' | 'brand'.
+   * @param {string} args.resourceId
+   * @returns {Promise<Response|null>} `forbidden` when an admin targets a
+   *   resource outside their org; `null` when allowed.
    */
-  function blockInternalAdminWrite(ctx) {
-    if (ctx.attributes?.authInfo?.isAdmin?.()) {
-      return forbidden('Internal admins may not create, update, or delete access mappings');
+  async function requireAdminResourceInOrg(ctx, { imsOrgId, resourceType, resourceId }) {
+    if (!ctx.attributes?.authInfo?.isAdmin?.()) {
+      return null;
+    }
+    const { postgrestClient } = ctx.dataAccess.services;
+    const resourceImsOrgId = normalizeImsOrgId(
+      await getResourceImsOrgId(postgrestClient, { resourceType, resourceId }),
+    );
+    if (!resourceImsOrgId || resourceImsOrgId !== imsOrgId) {
+      return forbidden(
+        'Internal admins may only manage access mappings for resources in their own organization',
+      );
     }
     return null;
   }
@@ -671,10 +693,6 @@ function StateAccessMappingsController(context) {
     if (pre.error) {
       return pre.error;
     }
-    const adminBlock = blockInternalAdminWrite(ctx);
-    if (adminBlock) {
-      return adminBlock;
-    }
     const { product, imsOrgId } = pre;
     const { error: gateErr, authority } = await gateManager(ctx, product, imsOrgId);
     if (gateErr) {
@@ -718,6 +736,11 @@ function StateAccessMappingsController(context) {
       return forbidden(
         `Caller may only manage resources where they hold ${product.toLowerCase()}/can_manage_users`,
       );
+    }
+    // Internal admins may only create bindings for resources in their own org.
+    const adminScope = await requireAdminResourceInOrg(ctx, { imsOrgId, resourceType, resourceId });
+    if (adminScope) {
+      return adminScope;
     }
 
     const capErr = validateGrantedCapabilities(grantedCapabilities, product);
@@ -844,10 +867,6 @@ function StateAccessMappingsController(context) {
     if (pre.error) {
       return pre.error;
     }
-    const adminBlock = blockInternalAdminWrite(ctx);
-    if (adminBlock) {
-      return adminBlock;
-    }
     const { product, imsOrgId } = pre;
     const { error: gateErr, authority } = await gateManager(ctx, product, imsOrgId);
     if (gateErr) {
@@ -947,10 +966,6 @@ function StateAccessMappingsController(context) {
     const pre = preamble(ctx);
     if (pre.error) {
       return pre.error;
-    }
-    const adminBlock = blockInternalAdminWrite(ctx);
-    if (adminBlock) {
-      return adminBlock;
     }
     const { product, imsOrgId } = pre;
     const { error: gateErr, authority } = await gateManager(ctx, product, imsOrgId);
