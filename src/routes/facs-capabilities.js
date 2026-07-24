@@ -237,6 +237,7 @@ const routeFacsCapabilities = {
     'GET /ephemeral-run/batch/:batchId/status', // admin/internal
 
     // System configuration (Configuration model — admin-only)
+    'GET /configurations/versions', // admin
     'GET /configurations/:version', // admin
     'GET /configurations/latest', // admin
     'PATCH /configurations/latest', // admin
@@ -837,6 +838,7 @@ const routeFacsCapabilities = {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/stats': 'llmo/can_view',
       // eslint-disable-next-line max-len
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/prompts/count': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/competitor-summary': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats': 'llmo/can_view',
       // Preflight (site-scoped reads)
       'GET /sites/:siteId/preflights': 'llmo/can_view',

@@ -189,6 +189,9 @@ export default function getRouteHandlers(
     'GET /config/:service/redirects.txt': redirectsController.getRedirects,
     'GET /audits/latest/:auditType': auditsController.getAllLatest,
     'GET /configurations/latest': configurationController.getLatest,
+    // Static route — matched before the dynamic `GET /configurations/:version`
+    // (see src/utils/route-utils.js), so "versions" is never treated as a VersionId.
+    'GET /configurations/versions': configurationController.listVersions,
     'PATCH /configurations/latest': configurationController.updateConfiguration,
     'POST /configurations/:version/restore': configurationController.restoreVersion,
     'GET /configurations/:version': configurationController.getByVersion,
@@ -269,6 +272,8 @@ export default function getRouteHandlers(
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/stats': elementsController.getUrlInspectorStats,
     // eslint-disable-next-line max-len
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/prompts/count': elementsController.getUrlInspectorPromptsCount,
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/competitor-summary': elementsController.getCompetitorSummary,
     // Brand-independent Semrush language catalog (add-brand wizard language picker).
     'GET /v2/orgs/:spaceCatId/serenity/languages': serenityController.listOrgLanguages,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': serenityController.activate,
