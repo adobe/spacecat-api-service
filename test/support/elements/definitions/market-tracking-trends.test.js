@@ -207,5 +207,30 @@ describe('market-tracking-trends definitions', () => {
       const [week] = transformMarketTrackingTrends(mentionsRaw, undefined, undefined);
       expect(week.competitors).to.deep.equal([{ name: 'Acme', mentions: 10, citations: 0 }]);
     });
+
+    it('uses the last row\'s value (not a sum) when the brand appears twice for the same week', () => {
+      const mentionsRaw = {
+        blocks: {
+          lines: [
+            { legend: 'OurBrand', x: '2026-07-05', y__sov: 0.3 },
+            { legend: 'OurBrand', x: '2026-07-05', y__sov: 0.7 },
+          ],
+        },
+      };
+      const [week] = transformMarketTrackingTrends(mentionsRaw, undefined, 'OurBrand');
+      expect(week.shareOfVoice).to.equal(0.7);
+    });
+
+    it('clamps an out-of-range rate field into [0,1]', () => {
+      const mentionsRaw = {
+        blocks: {
+          lines: [{
+            legend: 'OurBrand', x: '2026-07-05', y__sov: 1.4, y__visibility: -0.2,
+          }],
+        },
+      };
+      const [week] = transformMarketTrackingTrends(mentionsRaw, undefined, 'OurBrand');
+      expect(week).to.deep.include({ shareOfVoice: 1, brandVisibility: 0 });
+    });
   });
 });
