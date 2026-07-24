@@ -1234,6 +1234,59 @@ describe('Paid TrafficController', async () => {
       expect(body.message).to.equal('Invalid temporal condition');
     });
 
+    it('rejects SQL injection payload via temporalCondition (HackerOne #3880600 / VULN-37317)', async () => {
+      // Boolean-oracle payload from the report: satisfies the old substring
+      // check (contains "week" and "year") but injects a live SQL expression.
+      mockContext.data.temporalCondition = encodeURIComponent("year = 2026 AND week = 29 AND IF(1 = 1, CAST('n4z8c6q2' AS INTEGER), 1) = 1");
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getImpactByPage();
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.equal('Invalid temporal condition');
+      expect(mockAthenaQuery).to.not.have.been.called;
+    });
+
+    it('rejects closing-parenthesis / OR escape attempt via temporalCondition', async () => {
+      mockContext.data.temporalCondition = encodeURIComponent('(week=1 AND year=2024)) OR (1=1) --');
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getImpactByPage();
+      expect(res.status).to.equal(400);
+      expect(mockAthenaQuery).to.not.have.been.called;
+    });
+
+    it('rejects temporalCondition with an excessive number of OR-joined clauses', async () => {
+      const clauses = Array.from({ length: 9 }, (_, i) => `(week=${(i % 53) + 1} AND year=2024)`);
+      mockContext.data.temporalCondition = encodeURIComponent(clauses.join(' OR '));
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getImpactByPage();
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.equal('Invalid temporal condition');
+      expect(mockAthenaQuery).to.not.have.been.called;
+    });
+
+    it('accepts temporalCondition at the maximum allowed clause count (mixed week/year ordering)', async () => {
+      const weeks = Array.from({ length: 8 }, (_, i) => (i % 53) + 1);
+      // Alternate week-first / year-first clauses so both branches of the
+      // regex's alternation (and both capture-group pairs) are exercised.
+      const clauses = weeks.map((week, i) => (
+        i % 2 === 0 ? `(week=${week} AND year=2024)` : `(year=2024 AND week=${week})`
+      ));
+      mockContext.data.temporalCondition = encodeURIComponent(clauses.join(' OR '));
+      mockAthenaQuery.resolves([]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getImpactByPage();
+      expect(res.status).to.equal(200);
+      expect(mockAthenaQuery).to.have.been.calledOnce;
+
+      // Regardless of the original clauses' ordering, the query must only ever
+      // contain the canonical week-first form rebuilt from validated integers.
+      const expectedSafeCondition = weeks.map((week) => `(week=${week} AND year=2024)`).join(' OR ');
+      const queryArg = mockAthenaQuery.firstCall.args[0];
+      expect(queryArg).to.include(expectedSafeCondition);
+      expect(queryArg).to.not.include('year=2024 AND week');
+    });
+
     it('returns cached result if available for impact endpoints', async () => {
       mockS3.send.callsFake((cmd) => {
         if (cmd.constructor && cmd.constructor.name === 'HeadObjectCommand') {
