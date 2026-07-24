@@ -17,22 +17,13 @@ import { getSessionToken } from './utils/session-auth.js';
 /**
  * E2E tests for the Audit Policy API contract (SITES-47306, SITES-48346).
  *
- * Scoped per the `implement-e2e-tests` skill's triage (.claude/skills/implement-e2e-tests):
- * only the handful of scenarios that can't be proven by test/controllers/audit-policy.test.js
- * (mocked, exhaustive per-field validation and branch coverage) or
- * test/it/shared/tests/audit-policy.js (real Postgres/PostgREST, version arithmetic and the
- * cross-org 403 matrix). That's:
- *   - this route's own auth wiring (401 without a session token, via the real deployed
- *     middleware - not the mocked auth path)
- *   - the audit-scope/* sub-resources are actually wired to their 501 stubs in the deployed
- *     route table (not just correct controller logic)
- *   - one assembled read -> write -> read -> revisions -> write consumer workflow, exercising
- *     live entitlement resolution and the real wrpc_upsert_audit_policy RPC end-to-end through
- *     the deployed Lambda + PostgREST stack. Exclusions only - inclusions share the same
- *     mutateArray code path (proven separately by both lower layers), so re-running the same
- *     round trip for manualUrls here would just be an ice-cream-cone repeat.
- * Per-field 400s, the cross-org 403 matrix, and version-conflict retry logic are deliberately
- * not repeated here.
+ * Scoped to what only this layer can prove: real auth wiring, real route-table wiring for the
+ * audit-scope stubs, and one live read-write-revisions-write workflow through the deployed
+ * Lambda + PostgREST stack. Per-field validation, the cross-org 403 matrix, and
+ * version-conflict retry logic are already covered by test/controllers/audit-policy.test.js
+ * (mocked) and test/it/shared/tests/audit-policy.js (real Postgres) and aren't repeated here.
+ * The workflow only exercises exclusions - inclusions share the same mutateArray code path,
+ * already proven by both of those.
  *
  * Required environment variables:
  *   - IMS_ACCESS_TOKEN: an IMS user access token, exchanged once per run for
