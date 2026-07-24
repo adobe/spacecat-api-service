@@ -101,4 +101,18 @@ export const ELEMENT_IDS = Object.freeze({
   PROMPT_AI_ANSWERS: '45d6251f-15cd-4b33-a7f6-de97925e900e',
   PROMPT_SOURCES: '7db0df5c-6679-4495-8ea8-ef2dfd7e5251',
   PROMPT_VISIBILITY: 'f5230e00-b14f-4a52-bf89-2952ef7fe39b',
+
+  // KPI Headlines (Overview-SR exact-parity cards, LLMO-6515 follow-up). Verified
+  // live against the Brand Presence MFE — each is a per-brand `kpiLineChart`
+  // element carrying a Semrush-computed `mainValue`/`secondaryValue` period
+  // comparison, distinct from the multi-brand weekly series `TRENDS_MV`/
+  // `MARKET_CITATIONS_TREND` already provide (see kpi-headlines.js).
+  KPI_SHARE_OF_VOICE: '69a4befb-268e-42ff-b949-fdb9609c8f52',
+  KPI_BRAND_VISIBILITY: '6db33cf0-f4bc-4ab9-8bd0-f10ac4623562',
+  // Scoped by CBF_brand_urls (the brand's own URL list from BRAND_URLS below),
+  // NOT CBF_ws_brand — source visibility is domain-cited, not brand-name-mentioned.
+  KPI_SOURCE_VISIBILITY: 'a6e7e811-4274-4f69-a2b3-35c5d639124d',
+  // Filter element: the brand's own URL list (main domain + tracked social
+  // profiles), scoped by CBF_brand. Feeds KPI_SOURCE_VISIBILITY's CBF_brand_urls.
+  BRAND_URLS: 'c8bea9ec-dca4-4121-9353-4189c0edd4b5',
 });

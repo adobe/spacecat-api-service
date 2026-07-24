@@ -274,6 +274,12 @@ export default function getRouteHandlers(
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/prompts/count': elementsController.getUrlInspectorPromptsCount,
     // eslint-disable-next-line max-len
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/competitor-summary': elementsController.getCompetitorSummary,
+    // Overview-SR exact-parity KPI headlines (LLMO-6516 follow-up). Source Visibility is
+    // split into its own route — see getSourceVisibilityHeadline's timeout-budget rationale.
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/kpi-headlines': elementsController.getKpiHeadlines,
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/source-visibility-headline': elementsController.getSourceVisibilityHeadline,
     // Brand-independent Semrush language catalog (add-brand wizard language picker).
     'GET /v2/orgs/:spaceCatId/serenity/languages': serenityController.listOrgLanguages,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': serenityController.activate,
