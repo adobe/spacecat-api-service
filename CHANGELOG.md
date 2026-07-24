@@ -1,3 +1,10 @@
+## [1.688.2](https://github.com/adobe/spacecat-api-service/compare/v1.688.1...v1.688.2) (2026-07-24)
+
+
+### Bug Fixes
+
+* validate temporalCondition strictly to close SQL injection in paid traffic endpoints | VULN-37317 ([#2894](https://github.com/adobe/spacecat-api-service/issues/2894)) ([1853786](https://github.com/adobe/spacecat-api-service/commit/185378604f12b46ac93bbcd4216acb6164b08e59)), closes [#3880600](https://github.com/adobe/spacecat-api-service/issues/3880600)
+
 ## [1.688.1](https://github.com/adobe/spacecat-api-service/compare/v1.688.0...v1.688.1) (2026-07-23)
 
 
