@@ -1,3 +1,10 @@
+## [1.688.3](https://github.com/adobe/spacecat-api-service/compare/v1.688.2...v1.688.3) (2026-07-24)
+
+
+### Bug Fixes
+
+* reject single-quote characters in pageTypes pattern to close stored SQL injection | VULN-37318 ([#2895](https://github.com/adobe/spacecat-api-service/issues/2895)) ([1aa75e4](https://github.com/adobe/spacecat-api-service/commit/1aa75e41cae0adbf6e1c436206b750e11808bcdc))
+
 ## [1.688.2](https://github.com/adobe/spacecat-api-service/compare/v1.688.1...v1.688.2) (2026-07-24)
 
 
