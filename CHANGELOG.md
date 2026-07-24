@@ -1,3 +1,10 @@
+# [1.689.0](https://github.com/adobe/spacecat-api-service/compare/v1.688.3...v1.689.0) (2026-07-24)
+
+
+### Features
+
+* **serenity:** expose Share of Voice / Brand & Source Visibility trends | LLMO-6515 ([#2901](https://github.com/adobe/spacecat-api-service/issues/2901)) ([0b98535](https://github.com/adobe/spacecat-api-service/commit/0b98535721c6e2b8417490695ef0e3067f1a0c32))
+
 ## [1.688.3](https://github.com/adobe/spacecat-api-service/compare/v1.688.2...v1.688.3) (2026-07-24)
 
 
