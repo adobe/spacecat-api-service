@@ -103,7 +103,9 @@ project-sites:
       - project
     summary: Retrieve all sites for a project
     description: |
-      This endpoint retrieves all sites belonging to a specific project.
+      This endpoint retrieves all sites belonging to a specific project,
+      filtered to those the organization is entitled to and enrolled in for
+      the product supplied in the `x-product` header.
     operationId: getSitesByProjectId
     parameters:
       - name: projectId
@@ -112,6 +114,12 @@ project-sites:
         required: true
         schema:
           $ref: './schemas.yaml#/Id'
+      - name: x-product
+        in: header
+        description: The product code (e.g. LLMO or ASO) used to filter sites by entitlement and enrollment
+        required: true
+        schema:
+          type: string
     responses:
       '200':
         description: A list of sites for the project
