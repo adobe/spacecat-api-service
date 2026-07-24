@@ -478,18 +478,21 @@ v2-serenity-tags:
     description: |
       Registers a BARE-NAMED prompt tag on the market addressed by the
       `(geoTargetId, languageCode)` slice. Every tag is a descendant of one of
-      the four dimension roots (`category`, `intent`, `source`, `type`); a tag's
-      dimension is that root ancestor, never a prefix on its name. `type` names
-      the dimension the value belongs to, and `name` must not contain `:` nor
-      shadow a dimension root's name.
+      the five dimension roots (`category`, `tag`, `intent`, `source`, `type`);
+      a tag's dimension is that root ancestor, never a prefix on its name.
+      `type` names the dimension the value belongs to, and `name` must not
+      contain `:` nor shadow a dimension root's name.
 
-      `category` is the one OPEN dimension: its values are customer-authored. A
-      duplicate name under the same parent is a hard upstream error, so
-      resolve-before-create is the CALLER's job. Omit `parentId` to hang the new
-      value directly under the `category` root; pass an upstream tag id (from a
-      prior tags list) to nest it under an existing category as a sub-category.
-      The "Categories" view is the `category` root's subtree across a brand's
-      markets.
+      `category` and `tag` are the two OPEN dimensions: their values are
+      customer-authored. `tag` is the open, nestable "plain tags" dimension
+      (serenity-docs#26) — structurally identical to `category` (one level of
+      bare-named children) but a distinct dimension, so the two taxonomies
+      never collide. A duplicate name under the same parent is a hard upstream
+      error, so resolve-before-create is the CALLER's job. Omit `parentId` to
+      hang the new value directly under its dimension root; pass an upstream
+      tag id (from a prior tags list) to nest it under an existing root value
+      as a child. The "Categories" view is the `category` root's subtree across
+      a brand's markets.
 
       `intent` / `source` / `type` are CLOSED dimensions with a fixed value enum:
       `name` must be one of that enum's values, and `parentId` is not accepted
@@ -498,7 +501,7 @@ v2-serenity-tags:
       already carries that value its existing id is returned (200,
       `created: false`) instead of attempting another create.
 
-      The four dimension roots are provisioned on demand, so a project that
+      The five dimension roots are provisioned on demand, so a project that
       predates this taxonomy is brought forward by the first write to it.
     operationId: createSerenityTag
     security:
@@ -514,8 +517,8 @@ v2-serenity-tags:
             properties:
               type:
                 type: string
-                enum: [category, intent, source, type]
-                description: The tag's dimension. `category` is open (customer-authored); `intent`/`source`/`type` are closed (fixed enum).
+                enum: [category, tag, intent, source, type]
+                description: The tag's dimension. `category`/`tag` are open (customer-authored); `intent`/`source`/`type` are closed (fixed enum).
               name:
                 type: string
                 minLength: 1
@@ -523,7 +526,7 @@ v2-serenity-tags:
                 description: |
                   A BARE value — no dimension prefix. Must not contain ':' and
                   must not be one of the reserved dimension root names
-                  (`category`, `intent`, `source`, `type`). For a closed
+                  (`category`, `tag`, `intent`, `source`, `type`). For a closed
                   dimension it must exactly match one of that dimension's fixed
                   enum values.
               geoTargetId:
@@ -540,8 +543,8 @@ v2-serenity-tags:
                   Optional upstream tag id (from a prior tags list) to nest the
                   new OPEN-dimension value under as a sub-category. Omit, or
                   pass explicit JSON `null`, to hang it directly under the
-                  `category` dimension root — never at the root level, which is
-                  reserved for the four dimension roots. Not allowed for a
+                  named dimension's root — never at the root level, which is
+                  reserved for the five dimension roots. Not allowed for a
                   closed dimension.
     responses:
       '200':
@@ -573,7 +576,7 @@ v2-serenity-tags:
                 brandId: { type: string, format: uuid }
                 geoTargetId: { type: integer }
                 languageCode: { type: string }
-                type: { type: string, enum: [category] }
+                type: { type: string, enum: [category, tag] }
                 name: { type: string, description: The bare value. }
                 id:
                   type: string
@@ -632,7 +635,7 @@ v2-serenity-tag-by-id:
       and RE-SENDING it upstream — an upstream PATCH that omits `parent_id`
       silently PROMOTES the tag to a root, stranding it outside its dimension
       while every carrying prompt stays attached. Explicit JSON `null` is
-      rejected with a 400: the root level is reserved for the four dimension
+      rejected with a 400: the root level is reserved for the five dimension
       roots, so a tag can never legally become one.
 
       A re-parent stays inside the tag's own dimension, and the new parent may
@@ -641,7 +644,7 @@ v2-serenity-tag-by-id:
       the tag and its subtree reachable from no root — and so unreachable and
       unrepairable through this API.
 
-      The four dimension roots themselves cannot be renamed or re-parented
+      The five dimension roots themselves cannot be renamed or re-parented
       (400) — doing so would leave their whole subtree without a dimension. A
       closed dimension's value cannot be renamed or re-parented either: its
       vocabulary is fixed.
@@ -664,7 +667,7 @@ v2-serenity-tag-by-id:
                 description: |
                   The tag's new BARE name — no dimension prefix. Must not
                   contain ':' and must not be one of the reserved dimension root
-                  names (`category`, `intent`, `source`, `type`).
+                  names (`category`, `tag`, `intent`, `source`, `type`).
               parentId:
                 type: string
                 description: |
@@ -716,6 +719,73 @@ v2-serenity-tag-by-id:
           `tagId` itself — an id absent from the project's tag tree answers
           `tagNotFound` rather than being forwarded upstream, because without the
           tag's current parent there is no request body that preserves it.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+  delete:
+    tags: [serenity]
+    summary: Delete a tag (tag-dimension only)
+    description: |
+      Deletes a single AIO tag on the market addressed by the
+      `(geoTargetId, languageCode)` query filters. Removes the standalone tag
+      only; prompts that carry it are untouched.
+
+      SCOPE: `tag`-dimension tags ONLY for now. Deleting a `category:` (or any
+      other non-`tag:`) tag returns 400 (`categoryDeleteNotYetSupported`) — a
+      deliberate temporary restriction, because category delete conflicts with
+      DRS's existing idempotent category re-sync/soft-delete system (a separate
+      store with its own delete/resurrection semantics). Deleting a ROOT tag
+      that still has children returns 409 (`tagHasChildren`); delete or
+      re-parent the children first. This children guard is enforced BEFORE any
+      upstream call, so a rejected delete never reaches Semrush.
+    operationId: deleteSerenityTag
+    security:
+      - ims_key: []
+    parameters:
+      - name: geoTargetId
+        in: query
+        required: true
+        description: Google Ads Geo Target ID of the market slice.
+        schema:
+          type: integer
+          minimum: 1
+      - name: languageCode
+        in: query
+        required: true
+        description: BCP-47 primary subtag of the market slice.
+        schema:
+          type: string
+          pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+    responses:
+      '204':
+        description: Tag deleted.
+      '400':
+        description: |
+          Missing/invalid slice filters, or the tag is not a `tag`-dimension tag
+          (`categoryDeleteNotYetSupported` — category delete is out of scope for
+          now).
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '401': { $ref: './responses.yaml#/401' }
+      '404':
+        description: |
+          Organization, brand, or the (geoTargetId, languageCode) market not
+          found; or the tag id could not be located in the project tag tree
+          (`tagNotResolved`).
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '409':
+        description: |
+          The tag is a root that still has children (`tagHasChildren`) — delete
+          or re-parent them first.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '502':
         description: Upstream returned a non-2xx response.
         content:

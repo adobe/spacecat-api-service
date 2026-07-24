@@ -721,9 +721,18 @@ export async function listTagsForProject(transport, semrushWorkspaceId, projectI
  *   requested. Callers that only need to test membership (e.g. resolve-or-
  *   create) pass this to avoid paginating the whole tree; omit it to collect
  *   every item, as every pre-existing caller does.
+ * Each item also carries its `dimension` (`category` / `topic` / `tag` / a
+ * closed dimension) when derivable: a ROOT's dimension comes from its own name
+ * prefix; a CHILD's from walking its `path[]` breadcrumb to the root ancestor
+ * and reading THAT root's prefix (a child's own name is bare). The field is
+ * OMITTED when the dimension can't be determined (malformed/missing prefix, or
+ * a child with a null `path`) — consumers must treat a missing `dimension` as
+ * "unknown, don't guess", never as "bare = subcategory".
+ *
  * @returns {Promise<{ items: Array<{
  *   id: string, name: string, parentId: string | null,
  *   childrenCount: number, path: Array<{ id: string, name: string }> | null,
+ *   dimension?: string,
  * }> }>}
  */
 export async function listProjectTagTree(

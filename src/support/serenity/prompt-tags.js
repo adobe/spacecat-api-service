@@ -44,6 +44,7 @@
  */
 export const DIMENSION = Object.freeze({
   CATEGORY: 'category',
+  TAG: 'tag',
   INTENT: 'intent',
   ORIGIN: 'origin',
   TYPE: 'type',
@@ -59,6 +60,7 @@ export const LEGACY_AUTHORSHIP_ROOT_NAME = 'source';
 /** Root names, in the order they are provisioned on a project. */
 export const DIMENSION_ROOT_NAMES = Object.freeze([
   DIMENSION.CATEGORY,
+  DIMENSION.TAG,
   DIMENSION.INTENT,
   DIMENSION.ORIGIN,
   DIMENSION.TYPE,
@@ -123,10 +125,12 @@ export const CLOSED_DIMENSIONS = Object.freeze([
 
 /**
  * The OPEN dimensions — a caller may create arbitrary descendants at any depth.
- * `category` is the only one: a customer category is a child of the `category`
- * root, and a sub-category is a child of a category.
+ * `category` is the customer-authored category taxonomy; `tag` is the open,
+ * nestable "plain tags" dimension (serenity-docs#26) — customer-authored roots
+ * with one level of bare-named children, structurally identical to `category`
+ * but a distinct dimension so the two taxonomies never collide.
  */
-export const OPEN_DIMENSIONS = Object.freeze([DIMENSION.CATEGORY]);
+export const OPEN_DIMENSIONS = Object.freeze([DIMENSION.CATEGORY, DIMENSION.TAG]);
 
 /** Every dimension a caller may address on the create-tag endpoint. */
 export const ALL_DIMENSIONS = Object.freeze([...OPEN_DIMENSIONS, ...CLOSED_DIMENSIONS]);

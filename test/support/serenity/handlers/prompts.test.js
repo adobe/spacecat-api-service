@@ -2089,7 +2089,7 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
       // freshly-minted `type` root, then `human` beneath the `origin` root — the
       // create path stamps the derived origin as well as the computed type.
       expect(createProjectTags.firstCall.args[2]).to.deep.equal([
-        'category', 'intent', 'origin', 'type',
+        'category', 'tag', 'intent', 'origin', 'type',
       ]);
       expect(createProjectTags.firstCall.args[3]).to.deep.equal({});
       expect(createProjectTags.secondCall.args[2]).to.deep.equal(['branded']);

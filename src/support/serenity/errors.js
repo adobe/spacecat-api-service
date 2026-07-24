@@ -194,6 +194,10 @@ export const ERROR_CODES = Object.freeze({
   // Subworkspace provisioning (serenity dual-mode, subworkspace path).
   AMBIGUOUS_WORKSPACE: 'ambiguousWorkspace',
   LINKED_SUBWORKSPACES: 'linkedSubworkspaces',
+  // Tag delete (DELETE /serenity/tags/:tagId, tag-dimension only for now).
+  TAG_HAS_CHILDREN: 'tagHasChildren',
+  CATEGORY_DELETE_NOT_YET_SUPPORTED: 'categoryDeleteNotYetSupported',
+  TAG_NOT_RESOLVED: 'tagNotResolved',
   // Dynamic AI resource allocation (JIT top-up path).
   ORG_POOL_EXHAUSTED: 'orgPoolExhausted',
   BRAND_AI_LIMIT: 'brandAiLimit',

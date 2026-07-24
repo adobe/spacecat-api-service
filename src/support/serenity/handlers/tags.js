@@ -21,7 +21,7 @@ import {
 } from '../validation.js';
 import { resolveProject } from '../subworkspace-projects.js';
 import {
-  ALL_DIMENSIONS, CLOSED_DIMENSIONS,
+  ALL_DIMENSIONS, CLOSED_DIMENSIONS, DIMENSION,
   isClosedDimension, closedValuesOf, isDimensionRootName,
 } from '../prompt-tags.js';
 import {
@@ -32,6 +32,7 @@ import {
   assertParentWithinDimension,
 } from '../tag-tree.js';
 import { republishBestEffort } from '../brand-urls.js';
+import { listProjectTagTree } from './markets.js';
 
 /**
  * POST /serenity/tags — create a prompt TAG on a single market.
@@ -825,4 +826,148 @@ export async function handleUpdateTagSubworkspace(
       geoTargetId, languageCode, tagId: id, name, parentId: updatedParentId,
     },
   };
+}
+
+/**
+ * Reads the slice (geoTargetId, languageCode) filters off a query-like object,
+ * throwing a 400 when either is missing/malformed. Shared by the flat and
+ * subworkspace delete handlers. Returns the normalized pair.
+ *
+ * @param {object} query - the request query ({ geoTargetId, languageCode }).
+ * @returns {{ geoTargetId: number, languageCode: string }}
+ */
+function requireSliceFilters(query) {
+  const geoTargetId = normalizeGeoTargetId(query?.geoTargetId);
+  const languageCode = normalizeLanguageCode(query?.languageCode);
+  if (geoTargetId === null || languageCode === null) {
+    throw new ErrorWithStatusCode(
+      'geoTargetId (integer) and languageCode (BCP-47 primary subtag) are required',
+      400,
+    );
+  }
+  return { geoTargetId, languageCode };
+}
+
+/**
+ * Shared delete core for both workspace modes. Resolves the target's tree
+ * position + dimension, enforces the two guards, then deletes.
+ *
+ * SCOPE: tag-dimension ONLY for now. Deleting a `category` (or any non-`tag`)
+ * tag is a deliberate 400 (`categoryDeleteNotYetSupported`) — it conflicts with
+ * DRS's existing idempotent category re-sync/soft-delete system (a separate
+ * PostgREST `categories` table with its own delete/resurrection semantics,
+ * unrelated to this Semrush tag tree). A populated ROOT is a 409
+ * (`tagHasChildren`) enforced BEFORE any upstream call, so a rejected delete
+ * never touches Semrush.
+ *
+ * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string} tagId - upstream tag id to delete.
+ * @param {object} [log] - logger.
+ * @returns {Promise<{ status: number }>}
+ */
+async function deleteResolvedTag(transport, semrushWorkspaceId, projectId, tagId, log) {
+  const found = await findTagsInTree(transport, semrushWorkspaceId, projectId, [tagId], log);
+  const target = /** @type {import('../tag-tree.js').TagPosition} */ (found.get(tagId));
+  // Unresolvable target (never stored, already deleted, or beyond the tree-walk
+  // cap): 404, not a dimension error — we genuinely could not locate the tag, so
+  // "category delete not supported" would be factually wrong and unactionable.
+  if (target.kind === 'unknown') {
+    const err = new ErrorWithStatusCode('Tag not found in the project tag tree', 404);
+    err.code = ERROR_CODES.TAG_NOT_RESOLVED;
+    throw err;
+  }
+  if (target.rootName !== DIMENSION.TAG) {
+    const err = new ErrorWithStatusCode(
+      'Only tag-dimension tags can be deleted; category delete is not yet supported',
+      400,
+    );
+    err.code = ERROR_CODES.CATEGORY_DELETE_NOT_YET_SUPPORTED;
+    throw err;
+  }
+  if (target.kind === 'root') {
+    // childrenCount is not part of TagPosition (findTagsInTree reports tree
+    // POSITION, not fan-out) -- re-list the roots level to read it before the
+    // guard, so a populated root delete never reaches Semrush.
+    const roots = await listProjectTagTree(transport, semrushWorkspaceId, projectId, '', log);
+    const rootItem = roots.items.find((t) => t.id === tagId);
+    if (rootItem && rootItem.childrenCount > 0) {
+      const err = new ErrorWithStatusCode(
+        'Cannot delete a tag that still has children; delete or re-parent them first',
+        409,
+      );
+      err.code = ERROR_CODES.TAG_HAS_CHILDREN;
+      throw err;
+    }
+  }
+  await transport.deleteProjectTags(semrushWorkspaceId, projectId, [tagId]);
+  log?.info?.('deleteResolvedTag: deleted tag', { semrushWorkspaceId, projectId, tagId });
+  return { status: 204 };
+}
+
+/**
+ * DELETE /serenity/tags/:tagId (flat mode) — delete a single TAG-dimension tag.
+ * The market's project id comes from the persisted `BrandSemrushProject`
+ * mapping (same resolution as handleCreateTag), keyed by the slice filters on
+ * the query string.
+ *
+ * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {object} dataAccess - data-access layer (BrandSemrushProject).
+ * @param {string} brandId - brand UUID.
+ * @param {string} semrushWorkspaceId - the org's (parent) workspace id.
+ * @param {string} tagId - upstream tag id to delete.
+ * @param {object} query - request query ({ geoTargetId, languageCode }).
+ * @param {object} log - logger.
+ * @returns {Promise<{ status: number }>}
+ */
+export async function handleDeleteTag(
+  transport,
+  dataAccess,
+  brandId,
+  semrushWorkspaceId,
+  tagId,
+  query,
+  log,
+) {
+  const id = requireTagId(tagId);
+  const { geoTargetId, languageCode } = requireSliceFilters(query);
+  const row = await dataAccess.BrandSemrushProject.findBySlice(
+    brandId,
+    geoTargetId,
+    languageCode,
+  );
+  if (!row) {
+    throw marketNotFound();
+  }
+  return deleteResolvedTag(transport, semrushWorkspaceId, row.getSemrushProjectId(), id, log);
+}
+
+/**
+ * DELETE /serenity/tags/:tagId (subworkspace mode) — the market's project is
+ * resolved live from the brand's own subworkspace listing (same resolution as
+ * handleCreateTagSubworkspace). See {@link handleDeleteTag} for the scope
+ * restriction and the children guard this shares.
+ *
+ * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {string} workspaceId - the brand's subworkspace id.
+ * @param {string} tagId - upstream tag id to delete.
+ * @param {object} query - request query ({ geoTargetId, languageCode }).
+ * @param {object} log - logger.
+ * @returns {Promise<{ status: number }>}
+ */
+export async function handleDeleteTagSubworkspace(
+  transport,
+  workspaceId,
+  tagId,
+  query,
+  log,
+) {
+  const id = requireTagId(tagId);
+  const { geoTargetId, languageCode } = requireSliceFilters(query);
+  const project = await resolveProject(transport, workspaceId, geoTargetId, languageCode, log);
+  if (!project) {
+    throw marketNotFound();
+  }
+  return deleteResolvedTag(transport, workspaceId, String(project.id), id, log);
 }

@@ -30,13 +30,13 @@ import {
 
 describe('serenity prompt-tags taxonomy', () => {
   describe('dimension roots', () => {
-    it('has exactly four roots, all bare-named', () => {
-      expect([...DIMENSION_ROOT_NAMES]).to.deep.equal(['category', 'intent', 'origin', 'type']);
+    it('has exactly five roots, all bare-named', () => {
+      expect([...DIMENSION_ROOT_NAMES]).to.deep.equal(['category', 'tag', 'intent', 'origin', 'type']);
       DIMENSION_ROOT_NAMES.forEach((n) => expect(n).to.not.include(':'));
     });
 
-    it('splits the roots into one open and three closed dimensions', () => {
-      expect([...OPEN_DIMENSIONS]).to.deep.equal([DIMENSION.CATEGORY]);
+    it('splits the roots into two open and three closed dimensions', () => {
+      expect([...OPEN_DIMENSIONS]).to.deep.equal([DIMENSION.CATEGORY, DIMENSION.TAG]);
       expect([...CLOSED_DIMENSIONS]).to.deep.equal(['intent', 'origin', 'type']);
       expect([...ALL_DIMENSIONS].sort()).to.deep.equal([...DIMENSION_ROOT_NAMES].sort());
     });
@@ -101,6 +101,24 @@ describe('serenity prompt-tags taxonomy', () => {
 
     it('is frozen', () => {
       expect(Object.isFrozen(STANDARD_PROMPT_TAG_VALUES)).to.equal(true);
+    });
+  });
+
+  describe('OPEN_DIMENSIONS', () => {
+    it('is exactly [category, tag] — the open, customer-authored dimensions', () => {
+      expect([...OPEN_DIMENSIONS]).to.deep.equal([
+        DIMENSION.CATEGORY,
+        DIMENSION.TAG,
+      ]);
+    });
+
+    it('is frozen', () => {
+      expect(Object.isFrozen(OPEN_DIMENSIONS)).to.equal(true);
+    });
+
+    it('is disjoint from CLOSED_DIMENSIONS (no dimension is both open and closed)', () => {
+      const closed = new Set(CLOSED_DIMENSIONS);
+      OPEN_DIMENSIONS.forEach((d) => expect(closed.has(d)).to.equal(false));
     });
   });
 });

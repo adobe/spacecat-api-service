@@ -11516,6 +11516,17 @@ SerenityTag:
   properties:
     id: { type: string }
     name: { type: string }
+    dimension:
+      type: string
+      enum: [category, topic, tag, source, intent, type]
+      description: |
+        The tag's dimension. Populated by the nested TREE read
+        (GET /serenity/tags?parentId=...): a ROOT's dimension is derived from its
+        own `<dimension>:` name prefix; a CHILD's from its root ancestor (a
+        child's own name is bare). OMITTED when the dimension can't be determined
+        (malformed/missing prefix, or a child with a null `path`) — consumers
+        MUST treat a missing `dimension` as "unknown, don't guess", never as
+        "bare = subcategory".
     parentId:
       type: [string, 'null']
       description: |

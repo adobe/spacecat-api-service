@@ -263,7 +263,7 @@ describe('serenity tag-tree', () => {
         createProjectTags: sinon.stub(),
       };
       const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
-      expect([...roots.keys()]).to.deep.equal(['category', 'intent', 'origin', 'type']);
+      expect([...roots.keys()]).to.deep.equal(['category', 'tag', 'intent', 'origin', 'type']);
       expect(transport.createProjectTags).to.not.have.been.called;
     });
 
@@ -273,7 +273,7 @@ describe('serenity tag-tree', () => {
       const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
       expect(createProjectTags).to.have.been.calledOnce;
       expect(createProjectTags.firstCall.args[2])
-        .to.deep.equal(['category', 'intent', 'origin', 'type']);
+        .to.deep.equal(['category', 'tag', 'intent', 'origin', 'type']);
       expect(roots.get('type')).to.equal('created::type');
     });
 
@@ -283,6 +283,7 @@ describe('serenity tag-tree', () => {
       const legacyLevels = {
         '': [
           { id: 'root-category', name: 'category', children_count: 0 },
+          { id: 'root-tag', name: 'tag', children_count: 0 },
           { id: 'root-intent', name: 'intent', children_count: 5 },
           { id: 'root-source', name: 'source', children_count: 2 },
           { id: 'root-type', name: 'type', children_count: 2 },
@@ -310,6 +311,7 @@ describe('serenity tag-tree', () => {
       const levels = {
         '': [
           { id: 'root-category', name: 'category', children_count: 0 },
+          { id: 'root-tag', name: 'tag', children_count: 0 },
           { id: 'root-intent', name: 'intent', children_count: 5 },
           { id: 'root-source', name: 'source', children_count: 1 },
           { id: 'root-type', name: 'type', children_count: 2 },
@@ -335,6 +337,7 @@ describe('serenity tag-tree', () => {
       const bothLevels = {
         '': [
           { id: 'root-category', name: 'category', children_count: 0 },
+          { id: 'root-tag', name: 'tag', children_count: 0 },
           { id: 'root-intent', name: 'intent', children_count: 5 },
           { id: 'root-origin', name: 'origin', children_count: 2 },
           { id: 'root-source', name: 'source', children_count: 2 },
@@ -362,6 +365,7 @@ describe('serenity tag-tree', () => {
       const childlessLevels = {
         '': [
           { id: 'root-category', name: 'category', children_count: 0 },
+          { id: 'root-tag', name: 'tag', children_count: 0 },
           { id: 'root-intent', name: 'intent', children_count: 5 },
           { id: 'root-source', name: 'source', children_count: 0 },
           { id: 'root-type', name: 'type', children_count: 2 },
@@ -415,6 +419,7 @@ describe('serenity tag-tree', () => {
       const listProjectTags = makeListProjectTagsStub({
         '': [
           { id: 'r-cat', name: 'category', children_count: 0 },
+          { id: 'r-tag', name: 'tag', children_count: 0 },
           { id: 'r-int', name: 'intent', children_count: 0 },
           { id: 'r-src', name: 'source', children_count: 0 },
         ],
@@ -440,7 +445,7 @@ describe('serenity tag-tree', () => {
       const listProjectTags = makeListProjectTagsStub();
       const transport = { listProjectTags, createProjectTags: sinon.stub() };
       const { roots, values } = await provisionDimensionTree(transport, WS, PROJECT, fakeLog());
-      expect([...roots.keys()]).to.have.members(['category', 'intent', 'origin', 'type']);
+      expect([...roots.keys()]).to.have.members(['category', 'tag', 'intent', 'origin', 'type']);
       expect(values.get('origin')?.get('ai')).to.equal(TAG_IDS.originAi);
       expect(values.get('type')?.get('branded')).to.equal(TAG_IDS.typeBranded);
       // The open `category` root is provisioned but its children are customer content.

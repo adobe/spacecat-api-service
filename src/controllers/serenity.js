@@ -61,6 +61,8 @@ import {
   handleCreateTagSubworkspace,
   handleUpdateTag,
   handleUpdateTagSubworkspace,
+  handleDeleteTag,
+  handleDeleteTagSubworkspace,
 } from '../support/serenity/handlers/tags.js';
 import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
 import { isSerenityActiveForOrg } from '../support/serenity/serenity-active.js';
@@ -1012,6 +1014,50 @@ function SerenityController(context, log, env) {
     }
   };
 
+  /**
+   * DELETE /serenity/tags/:tagId — delete a single TAG-dimension tag on the
+   * market addressed by the `(geoTargetId, languageCode)` query filters. Deleting
+   * a `category:` (or any non-`tag:`) tag is a deliberate 400 for now; deleting a
+   * populated root is a 409. Dispatches by workspace mode, mirroring deleteMarket.
+   */
+  const deleteTag = async (ctx) => {
+    try {
+      const imsToken = requireImsBearer(ctx);
+      const { tagId } = ctx?.params || {};
+      if (!hasText(tagId)) {
+        throw new ErrorWithStatusCode('Missing tagId', 400);
+      }
+      const auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      // Both delete handlers resolve to { status: 204 } on success (errors throw
+      // → mapError); the response is an empty 204 either way, so await the
+      // upstream delete side effect and discard the result.
+      await (auth.mode === 'subworkspace'
+        ? handleDeleteTagSubworkspace(
+          transport,
+          /** @type {string} */ (auth.workspaceId),
+          tagId,
+          parsedQuery(ctx),
+          log,
+        )
+        : handleDeleteTag(
+          transport,
+          ctx.dataAccess,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (auth.workspaceId),
+          tagId,
+          parsedQuery(ctx),
+          log,
+        ));
+      return noContent();
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
   const listModels = async (ctx) => {
     try {
       const imsToken = await resolveSemrushImsToken(ctx);
@@ -1678,6 +1724,7 @@ function SerenityController(context, log, env) {
     listTags,
     createTag,
     updateTag,
+    deleteTag,
     listModels,
     listOrgModels,
     listOrgLanguages,
