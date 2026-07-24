@@ -154,9 +154,13 @@ function synthExample(schema, depth = 0, seen = new Set()) {
 
 function requestBodyText(op) {
   const rb = op.requestBody;
-  if (!rb) return null;
+  if (!rb) {
+    return null;
+  }
   const jsonContent = rb.content?.['application/json'];
-  if (!jsonContent) return null;
+  if (!jsonContent) {
+    return null;
+  }
 
   let example;
   if ('example' in jsonContent) {
@@ -194,10 +198,16 @@ function opName(method, path, op) {
 
 function opDescription(op) {
   const parts = [];
-  if (op.summary) parts.push(op.summary);
-  if (op.description && op.description !== op.summary) parts.push(op.description);
+  if (op.summary) {
+    parts.push(op.summary);
+  }
+  if (op.description && op.description !== op.summary) {
+    parts.push(op.description);
+  }
   const codes = Object.keys(op.responses ?? {});
-  if (codes.length > 0) parts.push(`Responses: ${codes.sort().join(', ')}.`);
+  if (codes.length > 0) {
+    parts.push(`Responses: ${codes.sort().join(', ')}.`);
+  }
   return parts.join('\n\n');
 }
 
@@ -208,7 +218,9 @@ const METHODS = ['get', 'post', 'put', 'patch', 'delete'];
 const operations = [];
 Object.entries(paths).forEach(([path, methods]) => {
   Object.entries(methods).forEach(([method, op]) => {
-    if (METHODS.includes(method)) operations.push([path, method, op]);
+    if (METHODS.includes(method)) {
+      operations.push([path, method, op]);
+    }
   });
 });
 
@@ -242,7 +254,7 @@ resources.push({
   name: 'SpaceCat API',
   description: [
     'Full request collection generated from the bundled OpenAPI spec '
-      + `(docs/openapi/api.yaml, adobe/spacecat-api-service, main branch) - `
+      + '(docs/openapi/api.yaml, adobe/spacecat-api-service, main branch) - '
       + `${operations.length - (loginOp ? 1 : 0)} operations across ${Object.keys(grouped).length} `
       + 'resource folders.',
     'Run "Login" first (Auth folder) to exchange an Adobe IMS access token for a session token '
@@ -263,7 +275,9 @@ resources.push({
 });
 
 const envData = { baseUrl: '', imsAccessToken: '', sessionToken: '' };
-allParams.forEach((p) => { envData[p] = ''; });
+allParams.forEach((p) => {
+  envData[p] = '';
+});
 const envOrder = ['baseUrl', 'imsAccessToken', 'sessionToken', ...allParams];
 
 resources.push({
@@ -325,8 +339,8 @@ if (loginOp) {
     ],
     authentication: { type: 'none' },
     afterResponseScript: [
-      "const body = insomnia.response.json();",
-      "if (insomnia.response.code === 200 && body && body.sessionToken) {",
+      'const body = insomnia.response.json();',
+      'if (insomnia.response.code === 200 && body && body.sessionToken) {',
       "  insomnia.environment.set('sessionToken', body.sessionToken);",
       "  console.log('sessionToken stored in the active environment.');",
       '} else {',
@@ -373,33 +387,33 @@ Object.keys(grouped).sort().forEach((tag) => {
   folderSort += 1;
 
   let reqSort = 0;
-  [...grouped[tag]].sort(([pathA, methodA], [pathB, methodB]) => {
-    if (pathA !== pathB) return pathA < pathB ? -1 : 1;
-    return methodA < methodB ? -1 : methodA > methodB ? 1 : 0;
-  }).forEach(([path, method, op]) => {
-    const reqId = makeId('req', `${method}_${path}`);
-    const request = {
-      _id: reqId,
-      _type: 'request',
-      parentId: folderId,
-      name: opName(method, path, op),
-      description: opDescription(op),
-      method: method.toUpperCase(),
-      url: `{{ _.baseUrl }}${insomniaUrl(path)}`,
-      parameters: queryParams(op),
-      headers: [],
-      authentication: { type: 'none' },
-      metaSortKey: 1000000000000 + reqSort,
-      isPrivate: false,
-    };
-    const bodyText = requestBodyText(op);
-    if (bodyText !== null) {
-      request.body = { mimeType: 'application/json', text: bodyText };
-      request.headers.push({ name: 'Content-Type', value: 'application/json' });
-    }
-    resources.push(request);
-    reqSort += 1;
-  });
+  const sortKey = ([path, method]) => `${path} ${method}`;
+  [...grouped[tag]]
+    .sort((a, b) => sortKey(a).localeCompare(sortKey(b)))
+    .forEach(([path, method, op]) => {
+      const reqId = makeId('req', `${method}_${path}`);
+      const request = {
+        _id: reqId,
+        _type: 'request',
+        parentId: folderId,
+        name: opName(method, path, op),
+        description: opDescription(op),
+        method: method.toUpperCase(),
+        url: `{{ _.baseUrl }}${insomniaUrl(path)}`,
+        parameters: queryParams(op),
+        headers: [],
+        authentication: { type: 'none' },
+        metaSortKey: 1000000000000 + reqSort,
+        isPrivate: false,
+      };
+      const bodyText = requestBodyText(op);
+      if (bodyText !== null) {
+        request.body = { mimeType: 'application/json', text: bodyText };
+        request.headers.push({ name: 'Content-Type', value: 'application/json' });
+      }
+      resources.push(request);
+      reqSort += 1;
+    });
 });
 
 const exportData = {
@@ -414,4 +428,5 @@ writeFileSync(args.output, `${JSON.stringify(exportData, null, 2)}\n`);
 
 console.log(`Generated ${resources.length} resources -> ${args.output}`);
 console.log(`Folders: ${Object.keys(grouped).length + 2}`);
+// eslint-disable-next-line no-underscore-dangle -- `_type` is Insomnia's own export field name.
 console.log(`Requests: ${resources.filter((r) => r._type === 'request').length}`);
