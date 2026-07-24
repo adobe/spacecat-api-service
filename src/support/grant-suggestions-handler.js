@@ -51,6 +51,30 @@ function defaultSortFn(groupA, groupB) {
 }
 
 /**
+ * Determines the display/grant priority tier for an alt-text suggestion:
+ *   0 - non-decorative image with a generated fix (altText suggested)
+ *   1 - non-decorative image without a fix
+ *   2 - decorative image
+ * Lower tiers are granted/displayed first, implementing the fallback
+ * funnel: non-decorative-with-fix -> non-decorative -> any image
+ * (including decorative). A tier is only reached once higher tiers run
+ * out of suggestions to fill the bucket.
+ */
+function getAltTextTier(suggestion) {
+  const data = typeof suggestion?.getData === 'function'
+    ? suggestion.getData()
+    : suggestion?.data;
+  const recommendations = data?.recommendations ?? [];
+  const isDecorative = recommendations.some((r) => r?.isDecorative === true);
+  if (isDecorative) {
+    return 2;
+  }
+  const hasFix = recommendations.length > 0
+    && recommendations.every((r) => typeof r?.altText === 'string' && r.altText.trim() !== '');
+  return hasFix ? 0 : 1;
+}
+
+/**
  * Per-opportunity grouping and sorting strategies.
  *
  * Each entry is keyed by opportunity type and may define:
@@ -141,6 +165,20 @@ const OPPORTUNITY_STRATEGIES = {
       const idA = typeof a?.getId === 'function' ? a.getId() : (a?.id ?? '');
       const idB = typeof b?.getId === 'function' ? b.getId() : (b?.id ?? '');
       return idA.localeCompare(idB);
+    },
+  },
+  // Alt-text suggestions are displayed/granted via a fallback funnel:
+  // non-decorative images with a generated fix first, then non-decorative
+  // images without a fix, and finally decorative images - only once the
+  // higher tiers don't have enough images left to fill the bucket. Within
+  // a tier, falls back to the default sort (rank ascending, then id).
+  'alt-text': {
+    sortFn: (groupA, groupB) => {
+      const tierDiff = getAltTextTier(groupA.items[0]) - getAltTextTier(groupB.items[0]);
+      if (tierDiff !== 0) {
+        return tierDiff;
+      }
+      return defaultSortFn(groupA, groupB);
     },
   },
 };

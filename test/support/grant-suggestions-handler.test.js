@@ -322,6 +322,78 @@ describe('grant-suggestions-handler', () => {
       const ids = groups.flatMap((g) => g.items.map((s) => s.getId()));
       expect(ids).to.include.members(['id-1', 'id-2']);
     });
+
+    describe('alt-text funnel (non-decorative+fix -> non-decorative -> any image)', () => {
+      const mk = (id, recommendations) => ({
+        getId: () => id,
+        getRank: () => 1,
+        getData: () => ({ recommendations }),
+      });
+
+      it('ranks non-decorative-with-fix above non-decorative-without-fix and decorative', () => {
+        const withFix = mk('with-fix', [{ isDecorative: false, altText: 'a dog' }]);
+        const noFix = mk('no-fix', [{ isDecorative: false, altText: '' }]);
+        const decorative = mk('decorative', [{ isDecorative: true }]);
+        const groups = getTopSuggestions([decorative, noFix, withFix], 'alt-text');
+        expect(groups.map((g) => g.items[0].getId())).to.deep.equal(['with-fix', 'no-fix', 'decorative']);
+      });
+
+      it('fills the bucket from lower tiers only once higher tiers run out', () => {
+        const withFix = mk('with-fix', [{ isDecorative: false, altText: 'a dog' }]);
+        const noFix1 = mk('no-fix-1', [{ isDecorative: false }]);
+        const noFix2 = mk('no-fix-2', [{ isDecorative: false }]);
+        const decorative = mk('decorative', [{ isDecorative: true }]);
+        const groups = getTopSuggestions(
+          [decorative, noFix2, noFix1, withFix],
+          'alt-text',
+        ).slice(0, 3);
+        expect(groups.map((g) => g.items[0].getId())).to.deep.equal(['with-fix', 'no-fix-1', 'no-fix-2']);
+      });
+
+      it('falls back to decorative images when no non-decorative images exist', () => {
+        const decorative1 = mk('decorative-1', [{ isDecorative: true }]);
+        const decorative2 = mk('decorative-2', [{ isDecorative: true }]);
+        const groups = getTopSuggestions([decorative1, decorative2], 'alt-text');
+        expect(groups.map((g) => g.items[0].getId())).to.deep.equal(['decorative-1', 'decorative-2']);
+      });
+
+      it('treats a suggestion as decorative if any of its recommendations is decorative', () => {
+        const mixed = mk('mixed', [{ isDecorative: false, altText: 'x' }, { isDecorative: true }]);
+        const withFix = mk('with-fix', [{ isDecorative: false, altText: 'a dog' }]);
+        const groups = getTopSuggestions([mixed, withFix], 'alt-text');
+        expect(groups.map((g) => g.items[0].getId())).to.deep.equal(['with-fix', 'mixed']);
+      });
+
+      it('requires every recommendation to carry a fix to count as non-decorative-with-fix', () => {
+        const partialFix = mk('partial-fix', [{ isDecorative: false, altText: 'a dog' }, { isDecorative: false, altText: '' }]);
+        const fullFix = mk('full-fix', [{ isDecorative: false, altText: 'a dog' }]);
+        const groups = getTopSuggestions([partialFix, fullFix], 'alt-text');
+        expect(groups.map((g) => g.items[0].getId())).to.deep.equal(['full-fix', 'partial-fix']);
+      });
+
+      it('treats missing or empty recommendations as non-decorative without a fix', () => {
+        const s1 = mk('id-1', []);
+        const s2 = { getId: () => 'id-2', getRank: () => 1, getData: () => ({}) };
+        const groups = getTopSuggestions([s1, s2], 'alt-text');
+        expect(groups).to.have.lengthOf(2);
+      });
+
+      it('works with plain object data (no getData())', () => {
+        const s1 = { id: 'id-1', rank: 1, data: { recommendations: [{ isDecorative: true }] } };
+        const s2 = { id: 'id-2', rank: 1, data: { recommendations: [{ isDecorative: false, altText: 'x' }] } };
+        const groups = getTopSuggestions([s1, s2], 'alt-text');
+        expect(groups.map((g) => g.items[0])).to.deep.equal([s2, s1]);
+      });
+
+      it('breaks ties within a tier by rank ascending then id (default sort)', () => {
+        const s1 = mk('id-b', [{ isDecorative: false }]);
+        const s2 = mk('id-a', [{ isDecorative: false }]);
+        s1.getRank = () => 10;
+        s2.getRank = () => 5;
+        const groups = getTopSuggestions([s1, s2], 'alt-text');
+        expect(groups.map((g) => g.items[0].getId())).to.deep.equal(['id-a', 'id-b']);
+      });
+    });
   });
 
   describe('grantSuggestionsForOpportunity', () => {
