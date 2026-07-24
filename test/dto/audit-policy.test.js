@@ -47,10 +47,32 @@ describe('AuditPolicyDto', () => {
       updatedBy: 'b',
       reason: 'r',
       note: 'n',
-      createdAt: '2026-01-01T00:00:00Z',
-      updatedAt: '2026-01-02T00:00:00Z',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-02T00:00:00.000Z',
     });
     expect(dto).to.not.have.any.keys('site_id', 'strategy_name', 'exclusion_globs');
+  });
+
+  it('toJSON normalizes raw Postgres timestamptz text to Z-suffixed ISO8601', () => {
+    const row = {
+      site_id: SITE_ID,
+      version: 5,
+      budget: 4000,
+      strategy_name: 'tiered',
+      exclusion_globs: [],
+      manual_urls: [],
+      scope_config: {},
+      lifecycle_overrides: {},
+      created_by: 'a',
+      updated_by: 'b',
+      reason: 'r',
+      note: null,
+      created_at: '2026-01-01T00:00:00.123456+00:00',
+      updated_at: '2026-01-02T00:00:00.654321+00:00',
+    };
+    const dto = AuditPolicyDto.toJSON(row);
+    expect(dto.createdAt).to.equal('2026-01-01T00:00:00.123Z');
+    expect(dto.updatedAt).to.equal('2026-01-02T00:00:00.654Z');
   });
 
   it('defaultDocument returns version 0 baseline when no row exists', () => {
@@ -81,7 +103,30 @@ describe('AuditPolicyDto', () => {
     };
     const dto = AuditPolicyRevisionDto.toJSON(row);
     expect(dto).to.include({
-      version: 4, updatedBy: 'b', effectiveAt: '2026-01-01T00:00:00Z', supersededAt: '2026-01-02T00:00:00Z',
+      version: 4,
+      updatedBy: 'b',
+      effectiveAt: '2026-01-01T00:00:00.000Z',
+      supersededAt: '2026-01-02T00:00:00.000Z',
     });
+  });
+
+  it('revision toJSON normalizes raw Postgres timestamptz text to Z-suffixed ISO8601', () => {
+    const row = {
+      version: 4,
+      budget: 4000,
+      strategy_name: 'tiered',
+      exclusion_globs: [],
+      manual_urls: [],
+      scope_config: {},
+      lifecycle_overrides: {},
+      updated_by: 'b',
+      reason: 'r',
+      note: null,
+      effective_at: '2026-01-01T00:00:00.123456+00:00',
+      superseded_at: null,
+    };
+    const dto = AuditPolicyRevisionDto.toJSON(row);
+    expect(dto.effectiveAt).to.equal('2026-01-01T00:00:00.123Z');
+    expect(dto.supersededAt).to.equal(null);
   });
 });
