@@ -11962,14 +11962,20 @@ SerenityMarketTrackingTrends:
           shareOfVoice:
             type: number
             format: double
+            minimum: 0
+            maximum: 1
             description: The tracked brand's Share of Voice this week, a 0–1 fraction (defaults to 0 if not returned upstream).
           brandVisibility:
             type: number
             format: double
+            minimum: 0
+            maximum: 1
             description: The tracked brand's Brand Visibility this week — fraction of analyzed prompts where the brand appears (prompts_mentioned / total_num_prompts), 0–1 (defaults to 0 if not returned upstream).
           sourceVisibility:
             type: number
             format: double
+            minimum: 0
+            maximum: 1
             description: The tracked brand's Source Visibility this week — fraction of analyzed prompts where the brand's domain is cited (prompts_with_mentions / total_prompts), 0–1 (defaults to 0 if not returned upstream).
           competitors:
             type: array
