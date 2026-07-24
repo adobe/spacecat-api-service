@@ -1,3 +1,24 @@
+## [1.688.3](https://github.com/adobe/spacecat-api-service/compare/v1.688.2...v1.688.3) (2026-07-24)
+
+
+### Bug Fixes
+
+* reject single-quote characters in pageTypes pattern to close stored SQL injection | VULN-37318 ([#2895](https://github.com/adobe/spacecat-api-service/issues/2895)) ([1aa75e4](https://github.com/adobe/spacecat-api-service/commit/1aa75e41cae0adbf6e1c436206b750e11808bcdc))
+
+## [1.688.2](https://github.com/adobe/spacecat-api-service/compare/v1.688.1...v1.688.2) (2026-07-24)
+
+
+### Bug Fixes
+
+* validate temporalCondition strictly to close SQL injection in paid traffic endpoints | VULN-37317 ([#2894](https://github.com/adobe/spacecat-api-service/issues/2894)) ([1853786](https://github.com/adobe/spacecat-api-service/commit/185378604f12b46ac93bbcd4216acb6164b08e59)), closes [#3880600](https://github.com/adobe/spacecat-api-service/issues/3880600)
+
+## [1.688.1](https://github.com/adobe/spacecat-api-service/compare/v1.688.0...v1.688.1) (2026-07-23)
+
+
+### Bug Fixes
+
+* **serenity:** wrap delete-market releaseAiSurplus in withResourceLock ([#2897](https://github.com/adobe/spacecat-api-service/issues/2897)) ([969b351](https://github.com/adobe/spacecat-api-service/commit/969b3519de24e18f4b74a0a1883fc59e26a76e59))
+
 # [1.688.0](https://github.com/adobe/spacecat-api-service/compare/v1.687.0...v1.688.0) (2026-07-23)
 
 
