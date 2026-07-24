@@ -26,6 +26,7 @@ describe('getRouteHandlers', () => {
     getAll: sinon.stub(),
     getByVersion: sinon.stub(),
     getLatest: sinon.stub(),
+    listVersions: sinon.stub(),
     updateConfiguration: sinon.stub(),
     registerAudit: sinon.stub(),
     unregisterAudit: sinon.stub(),
@@ -704,6 +705,7 @@ describe('getRouteHandlers', () => {
 
     expect(staticRoutes).to.have.all.keys(
       'GET /configurations/latest',
+      'GET /configurations/versions',
       'PATCH /configurations/latest',
       'POST /configurations/audits',
       'PATCH /configurations/sites/audits',
@@ -793,6 +795,7 @@ describe('getRouteHandlers', () => {
     );
 
     expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);
+    expect(staticRoutes['GET /configurations/versions']).to.equal(mockConfigurationController.listVersions);
     expect(staticRoutes['PATCH /configurations/latest']).to.equal(mockConfigurationController.updateConfiguration);
     expect(staticRoutes['POST /configurations/audits']).to.equal(mockConfigurationController.registerAudit);
     expect(staticRoutes['PATCH /configurations/sites/audits']).to.equal(mockSitesAuditsToggleController.execute);
@@ -938,6 +941,7 @@ describe('getRouteHandlers', () => {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/stats',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/stats',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/prompts/count',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/competitor-summary',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate',
       'GET /v2/orgs/:spaceCatId/sites/:siteId/brand',

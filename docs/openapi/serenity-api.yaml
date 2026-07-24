@@ -1986,3 +1986,121 @@ v2-serenity-market-tracking-trends:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-competitor-summary:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: Aggregate per-competitor totals for the Brand Presence Competitor Comparison chart
+    description: |
+      Returns aggregate mentions/citations totals per competitor over the
+      requested date range — the lightweight counterpart to
+      `listSerenityMarketTrackingTrends`, sourced from the same two Semrush
+      Elements (Trends Mentions/Visibility + Market Tracking citations) but
+      summed instead of bucketed by week. Competitors are the brand's tracked
+      Semrush benchmarks; they are returned automatically (no competitor list
+      input). See `SerenityCompetitorSummary`.
+
+      Date range is optional and defaults to a 28-day trailing window. Both
+      `startDate` and `endDate` must be supplied together or not at all — a
+      half-supplied range falls back to the full default as a unit. The resolved
+      span is capped at 366 days (400 otherwise).
+    operationId: listSerenityCompetitorSummary
+    security:
+      - ims_key: []
+    parameters:
+      - name: startDate
+        in: query
+        required: false
+        description: |
+          Range start (`YYYY-MM-DD`). Alias `start_date`. Defaults to 28 days
+          before today. Must be supplied together with `endDate` (else both are
+          ignored and the default range is used).
+        schema: { type: string, format: date }
+      - name: endDate
+        in: query
+        required: false
+        description: Range end (`YYYY-MM-DD`). Alias `end_date`. Defaults to today.
+        schema: { type: string, format: date }
+      - name: model
+        in: query
+        required: false
+        description: |
+          AI model to scope the totals to. Accepts a Semrush Elements model name
+          directly, or a SpaceCat/UI platform code (translated server-side).
+          Defaults to `search-gpt` when omitted or unrecognized.
+        schema:
+          type: string
+          x-canonical-values:
+            - google-ai-mode
+            - grok-3
+            - google-ai-overview
+            - microsoft-copilot
+            - open-evidence
+            - gemini-2.5-flash
+            - claude-sonnet-4
+            - gpt-5
+            - deepseek
+            - search-gpt
+            - perplexity
+          x-known-aliases:
+            copilot: microsoft-copilot
+            gemini: gemini-2.5-flash
+            openai: gpt-5
+            chatgpt: search-gpt
+      - name: platform
+        in: query
+        required: false
+        description: Legacy alias for `model`; `model` takes precedence when both are given.
+        schema: { type: string }
+      - name: regionCode
+        in: query
+        required: false
+        description: |
+          One region+language code (e.g. `US`), resolved to a single Semrush
+          project. Aliases `region_code`, `region`. `all` or absent aggregates
+          across every project the brand owns.
+        schema: { type: string }
+      - name: siteId
+        in: query
+        required: false
+        description: |
+          Optional cross-check: must resolve to the same brand as `:brandId`
+          (400 otherwise). Alias `site_id`. Does not itself narrow the query.
+        schema: { type: string }
+    responses:
+      '200':
+        description: Competitor summary totals retrieved.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityCompetitorSummary' }
+      '400': { $ref: './responses.yaml#/400' }
+      '403':
+        description: Caller lacks access to the organization.
+      '404':
+        description: Organization not found, brand not found for this organization, the brand has no resolvable Semrush workspace, or the requested region matches no market.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '503':
+        description: PostgREST client not configured for this deployment.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }

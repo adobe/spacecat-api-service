@@ -49,6 +49,7 @@ export {
   buildMarketCitationsTrendPayload,
   transformMarketTrackingTrends,
 } from './market-tracking-trends.js';
+export { transformCompetitorSummary } from './competitor-summary.js';
 export {
   transformStatsSimpleNumericResponse,
   buildStatsTotalExecutionsPayload,

@@ -1461,6 +1461,100 @@ export default function ElementsController(context, log, env) {
     }
   };
 
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/competitor-summary
+   * Elements-backed equivalent of the Postgres-RPC `/competitor-summary` endpoint
+   * (see llmo-brand-presence.js#createCompetitorSummaryHandler): aggregate per-competitor
+   * mentions/citations totals (no weekly breakdown) for the Overview Competitor
+   * Comparison bar chart. Param resolution mirrors getMarketTrackingTrends — same two
+   * upstream elements, just summed instead of week-bucketed.
+   */
+  /* c8 ignore start -- competitor-summary POC endpoint; unit tests intentionally deferred */
+  const getCompetitorSummary = async (ctx) => {
+    try {
+      const auth = await authorizeOrg(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { spaceCatId, brandId } = ctx?.params ?? {};
+      const { workspaceId, brand } = auth;
+      const query = extractQuery(ctx);
+
+      const siteId = query.siteId || query.site_id;
+      if (hasText(siteId)) {
+        const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
+        const resolved = await getBrandBySite(spaceCatId, siteId, postgrestClient, log);
+        if (!resolved || resolved.id !== brand.id) {
+          return badRequest('siteId does not belong to the specified brand');
+        }
+      }
+
+      let startDate = query.startDate || query.start_date;
+      let endDate = query.endDate || query.end_date;
+      if (hasText(startDate) && !isYmdDate(startDate)) {
+        return badRequest('startDate must be a valid YYYY-MM-DD date');
+      }
+      if (hasText(endDate) && !isYmdDate(endDate)) {
+        return badRequest('endDate must be a valid YYYY-MM-DD date');
+      }
+      if (!hasText(startDate) || !hasText(endDate)) {
+        const defaultRange = defaultStatsDateRange();
+        startDate = defaultRange.startDate;
+        endDate = defaultRange.endDate;
+      }
+      if (startDate > endDate) {
+        return badRequest('startDate must not be after endDate');
+      }
+      const MAX_RANGE_DAYS = 366;
+      const spanDays = (Date.parse(`${endDate}T00:00:00Z`)
+        - Date.parse(`${startDate}T00:00:00Z`)) / 86400000;
+      if (spanDays > MAX_RANGE_DAYS) {
+        return badRequest(`Date range must not exceed ${MAX_RANGE_DAYS} days`);
+      }
+
+      const service = await buildService(ctx);
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
+
+      let projectId;
+      let projectIds;
+      const region = query.regionCode || query.region_code || query.region;
+      if (hasText(region) && region.toLowerCase() !== 'all') {
+        projectId = await service.resolveRegionProjectId(workspaceId, {
+          brandId, region, brandSemrushProjects,
+        });
+        if (!hasText(projectId)) {
+          return notFound(`No Semrush market found for region: ${region}`);
+        }
+      } else {
+        projectIds = brandSemrushProjects
+          .map((p) => p.semrushProjectId)
+          .filter(hasText);
+        // A brand with zero Semrush projects has no competitor data — return empty
+        // rather than falling through to an unscoped query, which (mirrors
+        // getMarketTrackingTrends) would return the entire workspace, including
+        // other brands' data on the org-parent-workspace fallback.
+        if (projectIds.length === 0) {
+          return cachedOk({ competitors: [] });
+        }
+      }
+
+      const result = await service.getCompetitorSummary(workspaceId, {
+        model: query.model,
+        platform: query.platform,
+        startDate,
+        endDate,
+        projectId,
+        projectIds,
+        brandName: brand.name,
+      });
+      return cachedOk(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+  /* c8 ignore stop */
+
   return {
     listUrlInspectorFilterDimensions,
     listWeeks,
@@ -1475,5 +1569,6 @@ export default function ElementsController(context, log, env) {
     getStats,
     getUrlInspectorStats,
     getUrlInspectorPromptsCount,
+    getCompetitorSummary,
   };
 }
