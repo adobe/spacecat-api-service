@@ -17,6 +17,7 @@ import {
   PROJECT_1_ID,
   PROJECT_1_NAME,
   PROJECT_2_ID,
+  SITE_1_ID,
   NON_EXISTENT_PROJECT_ID,
 } from '../seed-ids.js';
 
@@ -89,6 +90,69 @@ export default function projectTests(getHttpClient, resetData) {
       it('returns 400 for invalid UUID', async () => {
         const http = getHttpClient();
         const res = await http.user.get('/projects/not-a-uuid');
+        expect(res.status).to.equal(400);
+      });
+    });
+
+    describe('GET /projects/:projectId/sites', () => {
+      before(() => resetData());
+
+      it('user: x-product=LLMO returns the project sites enrolled for the product', async () => {
+        // SITE_1 belongs to PROJECT_1/ORG_1 and is enrolled under ORG_1's
+        // customer-visible LLMO entitlement, so the entitlement filter keeps it.
+        const http = getHttpClient();
+        const res = await http.user.get(
+          `/projects/${PROJECT_1_ID}/sites`,
+          { 'x-product': 'LLMO' },
+        );
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(1);
+        expect(res.body[0].id).to.equal(SITE_1_ID);
+      });
+
+      it('user: x-product=ASO returns empty (no ASO enrollments for the project sites)', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(
+          `/projects/${PROJECT_1_ID}/sites`,
+          { 'x-product': 'ASO' },
+        );
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(0);
+      });
+
+      it('returns 400 without x-product header', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(
+          `/projects/${PROJECT_1_ID}/sites`,
+          { 'x-product': undefined },
+        );
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: returns 403 for denied org project', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(
+          `/projects/${PROJECT_2_ID}/sites`,
+          { 'x-product': 'LLMO' },
+        );
+        expect(res.status).to.equal(403);
+      });
+
+      it('returns 404 for non-existent project', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get(
+          `/projects/${NON_EXISTENT_PROJECT_ID}/sites`,
+          { 'x-product': 'LLMO' },
+        );
+        expect(res.status).to.equal(404);
+      });
+
+      it('returns 400 for invalid UUID', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(
+          '/projects/not-a-uuid/sites',
+          { 'x-product': 'LLMO' },
+        );
         expect(res.status).to.equal(400);
       });
     });
