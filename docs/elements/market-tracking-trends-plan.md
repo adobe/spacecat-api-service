@@ -9,7 +9,9 @@
 
 Powers the **Competitor Comparison** chart (`CitationsMentionsTrendChart`) on the
 `brand-presence-sr-ui` dashboard: a weekly time series of mentions and citations for the
-tracked brand and each of its competitors.
+tracked brand and each of its competitors. Also powers the Overview-SR KPI cards
+(LLMO-6515) — the tracked brand's weekly Share of Voice / Brand Visibility /
+Source Visibility (see §1a below).
 
 > **Verified against the Brand Presence MFE.** The element mapping below was derived by
 > observing the request/response shapes of the Semrush micro-frontend's "Market Tracking"
@@ -55,6 +57,9 @@ trivial future extension via a `granularity` param.
       "year": 2026,
       "mentions": 900,
       "citations": 5000,
+      "shareOfVoice": 0.42,
+      "brandVisibility": 0.61,
+      "sourceVisibility": 0.33,
       "competitors": [
         { "name": "Rival One", "mentions": 150, "citations": 300 },
         { "name": "Rival Two", "mentions": 120, "citations": 250 }
@@ -67,7 +72,10 @@ trivial future extension via a `granularity` param.
 - One entry per ISO week (`week` = the element's week-start `x`, `YYYY-MM-DD`), sorted ascending.
 - `mentions`/`citations` are the **tracked brand's** own totals that week; each competitor's
   totals sit in `competitors[]` (sorted by mentions desc).
-- Visibility is intentionally **not** included (out of scope for this chart).
+- `shareOfVoice`/`brandVisibility`/`sourceVisibility` (LLMO-6515) are the **tracked brand's**
+  own weekly rate metrics (0–1 fractions), sourced from `y__sov`/`y__visibility` on the
+  mentions element and `y__visibility` on the citations element (see §1a). Competitors never
+  carry these fields — only mentions/citations.
 
 ### Error responses
 
@@ -97,9 +105,24 @@ Semrush benchmarks). Each `blocks.lines[]` row is `{ legend, x, y__mentions, …
 > ⚠️ **`y__mentions` means different things per element.** In `TRENDS_MV` it is the mention
 > count; in `MARKET_CITATIONS_TREND` the *same key* carries the **citation** count (Semrush
 > reuses the generic field name). The transform maps `TRENDS_MV.y__mentions → mentions` and
-> `MARKET_CITATIONS_TREND.y__mentions → citations`. (The citations element also returns
-> `y__prompts_with_mentions` and `y__visibility`, which power the MFE's sibling "Responses with
-> Citations" / "Source Visibility" sub-tabs — unused here.)
+> `MARKET_CITATIONS_TREND.y__mentions → citations`.
+
+### 1a. Share of Voice / Brand Visibility / Source Visibility (LLMO-6515)
+
+Both trend elements carry additional per-row fields beyond the mentions/citations count,
+verified against the live element API — no new element, no payload change:
+
+| KPI card | Element | Value field | Meaning |
+|---|---|---|---|
+| Share of Voice | `TRENDS_MV` | `y__sov` | Weighted visibility score (mentions + position + search volume). |
+| Brand Visibility | `TRENDS_MV` | `y__visibility` | `prompts_mentioned / total_num_prompts`. |
+| Source Visibility | `MARKET_CITATIONS_TREND` | `y__visibility` | `prompts_with_mentions / total_prompts`. |
+
+All three are 0–1 fractions, only meaningful for the tracked brand's own `legend` row (the
+competitor legends this endpoint already returns don't carry them). `transformMarketTrackingTrends`
+reads them alongside `y__mentions` on the same brand row and defaults a missing field to 0 —
+same defaulting rule as mentions/citations. The headline KPI number for each card is derived
+**client-side** from this weekly series (end-vs-start); no server-side aggregate is added.
 
 ### Confirmed request payload (both elements)
 
@@ -150,10 +173,10 @@ FACS brand resource.
 
 ## 3. Tests
 
-- `test/support/elements/definitions/market-tracking-trends.test.js` — payload builders
-  (singular vs plural project col, no-projectIds branch, model fallback) + transform
-  (brand/competitor split, week grouping, missing-metric → 0, case-insensitive brand match,
-  malformed-line skipping).
+- `test/support/elements/definitions/market-tracking-trends.test.js` — `transformMarketTrackingTrends`:
+  brand/competitor split, week grouping, missing-metric → 0, case-insensitive brand match, and
+  (LLMO-6515) `shareOfVoice`/`brandVisibility`/`sourceVisibility` present on the brand row only,
+  defaulting to 0 when absent. (Payload builders remain `c8 ignore`d — untested POC code.)
 - `test/support/elements/elements-service.test.js` — `getMarketTrackingTrends` (both element
   calls, merge, `projectId` precedence, error propagation).
 - `test/controllers/elements.test.js` — auth reuse, date defaulting/validation, region
@@ -162,5 +185,7 @@ FACS brand resource.
 
 ## 4. Out of scope
 
-UI wiring; Competitor Summary / Share of Voice / Sentiment endpoints; visibility; day/month
-bucketing.
+UI wiring; Sentiment endpoints; day/month bucketing. Share of Voice / Brand Visibility /
+Source Visibility are now in scope as of LLMO-6515 (§1a) — see the ticket's acceptance
+criteria for what remains out of scope (server-side KPI aggregation, dedicated `simpleNumeric`
+elements for exact MFE parity).
