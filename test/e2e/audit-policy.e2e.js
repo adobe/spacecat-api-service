@@ -11,14 +11,28 @@
  */
 
 import { expect } from 'chai';
-import { apiBaseUrl } from './utils/spacecat-utils.js';
+import { apiBaseUrl, expectValidISODate } from './utils/spacecat-utils.js';
 import { getSessionToken } from './utils/session-auth.js';
 
 /**
- * E2E tests for the Audit Policy API contract (SITES-47306, SITES-48346):
- * policy read, cursor-paginated revision history, exclusion/inclusion
- * add-remove mutation endpoints, and the still-unimplemented audit-scope
- * view stubs.
+ * E2E tests for the Audit Policy API contract (SITES-47306, SITES-48346).
+ *
+ * Scoped per the `implement-e2e-tests` skill's triage (.claude/skills/implement-e2e-tests):
+ * only the handful of scenarios that can't be proven by test/controllers/audit-policy.test.js
+ * (mocked, exhaustive per-field validation and branch coverage) or
+ * test/it/shared/tests/audit-policy.js (real Postgres/PostgREST, version arithmetic and the
+ * cross-org 403 matrix). That's:
+ *   - this route's own auth wiring (401 without a session token, via the real deployed
+ *     middleware - not the mocked auth path)
+ *   - the audit-scope/* sub-resources are actually wired to their 501 stubs in the deployed
+ *     route table (not just correct controller logic)
+ *   - one assembled read -> write -> read -> revisions -> write consumer workflow, exercising
+ *     live entitlement resolution and the real wrpc_upsert_audit_policy RPC end-to-end through
+ *     the deployed Lambda + PostgREST stack. Exclusions only - inclusions share the same
+ *     mutateArray code path (proven separately by both lower layers), so re-running the same
+ *     round trip for manualUrls here would just be an ice-cream-cone repeat.
+ * Per-field 400s, the cross-org 403 matrix, and version-conflict retry logic are deliberately
+ * not repeated here.
  *
  * Required environment variables:
  *   - IMS_ACCESS_TOKEN: an IMS user access token, exchanged once per run for
@@ -40,21 +54,8 @@ import { getSessionToken } from './utils/session-auth.js';
  * of failing.
  */
 const SITE_ID = '019ef3bd-5e67-7ea1-a4b7-f939f14fdc4e'; // https://main--scope-creep--iuliag.aem.live
-// The nil UUID fails isValidUUID (version nibble '0' is not 1-8), so it 400s
-// before ever reaching the "site not found" check. Use a well-formed one instead.
-const UNKNOWN_SITE_ID = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
 const TEST_GLOB = '/__e2e-audit-policy-test__/*';
-const TEST_URL = 'https://main--scope-creep--iuliag.aem.live/__e2e-audit-policy-test__/manual-page';
 const REASON = 'audit-policy e2e test run';
-
-// audit_policy_revision timestamps come back as raw Postgres timestamptz text
-// (offset + microseconds, e.g. "2026-07-23T14:03:38.083934+00:00"), not the
-// app-level Z-suffixed ISO8601 the shared expectValidISODate() expects -
-// so just confirm it parses, rather than pinning an exact format.
-function expectParsableTimestamp(value) {
-  expect(value).to.be.a('string');
-  expect(new Date(value).toString()).to.not.equal('Invalid Date', `Expected a valid timestamp, got: ${value}`);
-}
 
 async function request({
   path, method = 'GET', body = null, skipAuth = false,
@@ -81,9 +82,9 @@ function getPolicy() {
 // Remove is a pure set-difference filter (safe to retry / call on values that
 // were never added), so this doubles as best-effort cleanup for a
 // previously-aborted run and as the after-hook teardown for these tests.
-function removeValues(resource, values) {
+function removeExclusions(values) {
   return request({
-    path: `/sites/${SITE_ID}/audit-policy/${resource}/delete`,
+    path: `/sites/${SITE_ID}/audit-policy/exclusions/delete`,
     method: 'POST',
     body: { values, reason: REASON },
   });
@@ -107,169 +108,71 @@ describe('Audit Policy - E2E Tests', function auditPolicySuite() {
       this.skip();
       return;
     }
-    const [exclusionsCleanup, inclusionsCleanup] = await Promise.all([
-      removeValues('exclusions', [TEST_GLOB]),
-      removeValues('inclusions', [TEST_URL]),
-    ]);
-    if (!exclusionsCleanup.ok) {
-      console.log(`[WARN] leftover-exclusions cleanup returned ${exclusionsCleanup.status}`);
-    }
-    if (!inclusionsCleanup.ok) {
-      console.log(`[WARN] leftover-inclusions cleanup returned ${inclusionsCleanup.status}`);
+    const cleanup = await removeExclusions([TEST_GLOB]);
+    if (!cleanup.ok) {
+      console.log(`[WARN] leftover-exclusions cleanup returned ${cleanup.status}`);
     }
   });
 
-  describe('GET /audit-policy', () => {
-    it('returns a policy document with the expected shape', async () => {
-      const response = await request({ path: `/sites/${SITE_ID}/audit-policy` });
-      expect(response.status).to.equal(200);
-      const policy = await response.json();
-      expect(policy).to.include.all.keys(
-        'siteId',
-        'version',
-        'budget',
-        'strategyName',
-        'exclusionGlobs',
-        'manualUrls',
-        'scopeConfig',
-        'lifecycleOverrides',
-        'createdBy',
-        'updatedBy',
-        'reason',
-        'note',
-        'createdAt',
-        'updatedAt',
-      );
-      expect(policy.siteId).to.equal(SITE_ID);
-      expect(policy.version).to.be.a('number');
-      expect(policy.exclusionGlobs).to.be.an('array');
-      expect(policy.manualUrls).to.be.an('array');
-    });
-
-    it('returns 404 for an unknown site', async () => {
-      const response = await request({ path: `/sites/${UNKNOWN_SITE_ID}/audit-policy` });
-      expect(response.status).to.equal(404);
-    });
-
-    it('returns 400 for a non-UUID site id', async () => {
-      const response = await request({ path: '/sites/not-a-uuid/audit-policy' });
-      expect(response.status).to.equal(400);
-    });
-
+  describe('Auth wiring', () => {
     it('returns 401 without a session token', async () => {
       const response = await request({ path: `/sites/${SITE_ID}/audit-policy`, skipAuth: true });
       expect(response.status).to.equal(401);
     });
   });
 
-  describe('GET /audit-policy/revisions', () => {
-    it('returns a paginated list ordered newest-first', async () => {
-      const response = await request({ path: `/sites/${SITE_ID}/audit-policy/revisions?limit=5` });
-      expect(response.status).to.equal(200);
-      const { items, cursor } = await response.json();
-      expect(items).to.be.an('array');
-
-      for (let i = 1; i < items.length; i += 1) {
-        expect(items[i - 1].version).to.be.greaterThan(items[i].version);
-      }
-      items.forEach((revision) => {
-        expect(revision).to.not.have.property('siteId');
-        expect(revision).to.have.property('effectiveAt');
-        expectParsableTimestamp(revision.effectiveAt);
+  describe('Audit scope endpoints (not yet implemented)', () => {
+    it('returns 501 for pages, summary, and sections', async () => {
+      const subResources = ['pages', 'summary', 'sections'];
+      const responses = await Promise.all(subResources.map(
+        (sub) => request({ path: `/sites/${SITE_ID}/audit-scope/${sub}` }),
+      ));
+      responses.forEach((response, i) => {
+        expect(response.status, `audit-scope/${subResources[i]} should be 501`).to.equal(501);
       });
-      if (cursor !== undefined) {
-        expect(cursor).to.be.a('string');
-      }
     });
   });
 
-  describe('Exclusions - add/remove round trip', () => {
-    after(() => removeValues('exclusions', [TEST_GLOB]));
+  describe('Policy read/write/revision workflow', () => {
+    after(() => removeExclusions([TEST_GLOB]));
 
-    it('adds an exclusion glob and bumps the version', async () => {
+    it('adds an exclusion, reflects it on read and in revision history, then removes it', async () => {
       const policyBefore = await getPolicy();
-      const response = await request({
+      expect(policyBefore.exclusionGlobs).to.not.include(TEST_GLOB);
+
+      const addResponse = await request({
         path: `/sites/${SITE_ID}/audit-policy/exclusions`,
         method: 'POST',
         body: { values: [TEST_GLOB], reason: REASON },
       });
-      expect(response.status).to.equal(200);
-      const policy = await response.json();
-      expect(policy.exclusionGlobs).to.include(TEST_GLOB);
-      expect(policy.version).to.equal(policyBefore.version + 1);
-    });
+      expect(addResponse.status).to.equal(200);
+      const addedPolicy = await addResponse.json();
+      expect(addedPolicy.exclusionGlobs).to.include(TEST_GLOB);
+      expect(addedPolicy.version).to.equal(policyBefore.version + 1);
 
-    it('removes the exclusion glob and bumps the version again', async () => {
-      const policyBefore = await getPolicy();
-      const response = await removeValues('exclusions', [TEST_GLOB]);
-      expect(response.status).to.equal(200);
-      const policy = await response.json();
-      expect(policy.exclusionGlobs).to.not.include(TEST_GLOB);
-      expect(policy.version).to.equal(policyBefore.version + 1);
-    });
+      // The mutation response and a fresh read must agree - proves the write is visible
+      // through the same read path a consumer would poll after making a change.
+      const afterAddPolicy = await getPolicy();
+      expect(afterAddPolicy.exclusionGlobs).to.include(TEST_GLOB);
+      expect(afterAddPolicy.version).to.equal(addedPolicy.version);
 
-    it('rejects a path-traversal exclusion glob', async () => {
-      const response = await request({
-        path: `/sites/${SITE_ID}/audit-policy/exclusions`,
-        method: 'POST',
-        body: { values: ['../../etc/passwd'], reason: REASON },
+      const revisionsResponse = await request({
+        path: `/sites/${SITE_ID}/audit-policy/revisions?limit=1`,
       });
-      expect(response.status).to.equal(400);
-    });
+      expect(revisionsResponse.status).to.equal(200);
+      const { items } = await revisionsResponse.json();
+      expect(items).to.be.an('array').with.length.greaterThan(0);
+      // The revision row for this write can trail the policy row by a beat (observed against
+      // real dev: the policy read above was already at addedPolicy.version, but the newest
+      // revision row can still reflect the prior version) - accept either, but not older.
+      expect(items[0].version).to.be.within(policyBefore.version, addedPolicy.version);
+      expectValidISODate(items[0].effectiveAt);
 
-    it('rejects a request missing reason', async () => {
-      const response = await request({
-        path: `/sites/${SITE_ID}/audit-policy/exclusions`,
-        method: 'POST',
-        body: { values: [TEST_GLOB] },
-      });
-      expect(response.status).to.equal(400);
-    });
-
-    it('rejects an empty values array', async () => {
-      const response = await request({
-        path: `/sites/${SITE_ID}/audit-policy/exclusions`,
-        method: 'POST',
-        body: { values: [], reason: REASON },
-      });
-      expect(response.status).to.equal(400);
-    });
-  });
-
-  describe('Inclusions - add/remove round trip', () => {
-    after(() => removeValues('inclusions', [TEST_URL]));
-
-    it('adds a manual URL and bumps the version', async () => {
-      const policyBefore = await getPolicy();
-      const response = await request({
-        path: `/sites/${SITE_ID}/audit-policy/inclusions`,
-        method: 'POST',
-        body: { values: [TEST_URL], reason: REASON },
-      });
-      expect(response.status).to.equal(200);
-      const policy = await response.json();
-      expect(policy.manualUrls).to.include(TEST_URL);
-      expect(policy.version).to.equal(policyBefore.version + 1);
-    });
-
-    it('removes the manual URL and bumps the version again', async () => {
-      const policyBefore = await getPolicy();
-      const response = await removeValues('inclusions', [TEST_URL]);
-      expect(response.status).to.equal(200);
-      const policy = await response.json();
-      expect(policy.manualUrls).to.not.include(TEST_URL);
-      expect(policy.version).to.equal(policyBefore.version + 1);
-    });
-  });
-
-  describe('Audit scope endpoints (not yet implemented)', () => {
-    ['pages', 'summary', 'sections'].forEach((subResource) => {
-      it(`GET /audit-scope/${subResource} returns 501`, async () => {
-        const response = await request({ path: `/sites/${SITE_ID}/audit-scope/${subResource}` });
-        expect(response.status).to.equal(501);
-        const body = await response.json();
-        expect(body).to.have.property('message');
-      });
+      const removeResponse = await removeExclusions([TEST_GLOB]);
+      expect(removeResponse.status).to.equal(200);
+      const removedPolicy = await removeResponse.json();
+      expect(removedPolicy.exclusionGlobs).to.not.include(TEST_GLOB);
+      expect(removedPolicy.version).to.equal(addedPolicy.version + 1);
     });
   });
 });
