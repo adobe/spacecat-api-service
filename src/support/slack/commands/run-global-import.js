@@ -22,6 +22,7 @@ import { triggerGlobalImportRun } from '../../utils.js';
 /* eslint-disable no-useless-escape */
 const PHRASES = ['run global import'];
 const FORCE_FLAG = '--force';
+const VALIDATE_ONLY_FLAG = '--validate-only';
 
 const GLOBAL_IMPORTS = [
   'stale-suggestions-cleanup',
@@ -29,16 +30,17 @@ const GLOBAL_IMPORTS = [
 ];
 
 /**
- * Splits the `--force` flag out of the raw args, wherever it appears, leaving the remaining
- * positional args (importType, site) in order.
+ * Splits the `--force`/`--validate-only` flags out of the raw args, wherever they appear,
+ * leaving the remaining positional args (importType, site) in order.
  *
  * @param {string[]} args - Raw args as provided to the command.
- * @returns {{ positionalArgs: string[], force: boolean }}
+ * @returns {{ positionalArgs: string[], force: boolean, validateOnly: boolean }}
  */
-function splitForceFlag(args) {
-  const positionalArgs = args.filter((a) => a !== FORCE_FLAG);
+function splitFlags(args) {
+  const positionalArgs = args.filter((a) => a !== FORCE_FLAG && a !== VALIDATE_ONLY_FLAG);
   const force = args.includes(FORCE_FLAG);
-  return { positionalArgs, force };
+  const validateOnly = args.includes(VALIDATE_ONLY_FLAG);
+  return { positionalArgs, force, validateOnly };
 }
 
 /**
@@ -58,14 +60,17 @@ function runGlobalImportCommand(context) {
     name: 'Run Global Import',
     description: 'Run a global import job that operates across all data. '
       + 'These imports do not require a specific site URL, but an optional site (URL or ID) '
-      + 'scopes the run to just that one site, and --force skips that handler\'s normal '
-      + 'gating check for it, for handlers that support both.',
+      + 'scopes the run to just that one site, and --force/--validate-only ask that handler '
+      + 'to skip or run only its normal gating check for it, for handlers that support them.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {importType} [site-url-or-id] [--force]\n\nAvailable types: \`${GLOBAL_IMPORTS.join('\`, \`')}\`\n`
+    usageText: `${PHRASES[0]} {importType} [site-url-or-id] [--force|--validate-only]\n\nAvailable types: \`${GLOBAL_IMPORTS.join('\`, \`')}\`\n`
       + 'Optional site (URL or ID): scope the run to a single site instead of all data '
       + '(currently only `optimize-at-edge-enabled-marking` uses it).\n'
       + '`--force`: requires a site — skips prerender content validation, enabling the site '
-      + 'on the edge request-id check alone. Never touches an already-enabled site.',
+      + 'on the edge request-id check alone. Never touches an already-enabled site.\n'
+      + '`--validate-only`: requires a site — runs only the prerender content check and '
+      + 'records its result, without touching enablement at all. Works even on an '
+      + 'already-enabled site. Cannot be combined with `--force`.',
   });
 
   /**
@@ -79,8 +84,13 @@ function runGlobalImportCommand(context) {
     const config = await Configuration.findLatest();
 
     try {
-      const { positionalArgs, force } = splitForceFlag(args);
+      const { positionalArgs, force, validateOnly } = splitFlags(args);
       const [importType, siteInput] = positionalArgs;
+
+      if (force && validateOnly) {
+        await say(':warning: `--force` and `--validate-only` cannot be used together.');
+        return;
+      }
 
       if (!importType || importType === '') {
         await say(baseCommand.usage());
@@ -120,8 +130,8 @@ function runGlobalImportCommand(context) {
         }
       }
 
-      if (force && !site) {
-        await say(':warning: `--force` requires a site (URL or ID) to scope to — it has no effect on a bulk run.');
+      if ((force || validateOnly) && !site) {
+        await say(':warning: `--force`/`--validate-only` requires a site (URL or ID) to scope to — it has no effect on a bulk run.');
         return;
       }
 
@@ -130,7 +140,9 @@ function runGlobalImportCommand(context) {
         importType,
         slackContext,
         context,
-        { siteId: site?.getId(), force, forcedBy: slackContext.user },
+        {
+          siteId: site?.getId(), force, forcedBy: slackContext.user, validateOnly,
+        },
       );
 
       let message = `:adobe-run: Triggered global import: *${importType}*`;
@@ -139,6 +151,9 @@ function runGlobalImportCommand(context) {
       }
       if (force) {
         message += ' — *force*: skipping prerender content validation.';
+      }
+      if (validateOnly) {
+        message += ' — *validate-only*: running prerender content validation only, not touching enablement.';
       }
       await say(message);
     } catch (error) {
