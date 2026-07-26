@@ -1,3 +1,10 @@
+## [1.690.1](https://github.com/adobe/spacecat-api-service/compare/v1.690.0...v1.690.1) (2026-07-26)
+
+
+### Bug Fixes
+
+* **state-mappings:** scope internal-admin writes to their own org ([#2900](https://github.com/adobe/spacecat-api-service/issues/2900)) ([e8b9b5d](https://github.com/adobe/spacecat-api-service/commit/e8b9b5dd9cdef3ee5c4ea13f3a84ccd8338d4be8)), closes [#2871](https://github.com/adobe/spacecat-api-service/issues/2871) [#2871](https://github.com/adobe/spacecat-api-service/issues/2871)
+
 # [1.690.0](https://github.com/adobe/spacecat-api-service/compare/v1.689.0...v1.690.0) (2026-07-26)
 
 
