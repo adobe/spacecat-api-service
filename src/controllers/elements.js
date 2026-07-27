@@ -1447,11 +1447,13 @@ export default function ElementsController(context, log, env) {
         workspaceId, query, service, projectIds,
       } = scope;
 
+      // category already carries the `category__<label>` prefix from the caller;
+      // sent through as-is, not re-prefixed.
       const category = query.categoryId || query.category;
       const { count: totalPrompts } = await service.getPrompts(workspaceId, {
         model: query.model,
         platform: query.platform,
-        tags: category ? [`category__${category}`] : [],
+        tags: category ? [category] : [],
         projectIds,
       });
 

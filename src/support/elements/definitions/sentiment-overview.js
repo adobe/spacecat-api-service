@@ -57,7 +57,8 @@ function defaultDateRange() {
  *  - `CBF_model` sits inside an `or` block within `advanced`.
  *  - Region scoping → `CBF_project` (Semrush project id) inside an `or` block within
  *    `advanced` (NOT a top-level `project_id`, which this element ignores).
- *  - `category` (when present) → the namespaced tag `category__<label>` on `CBF_tags`.
+ *  - `category` (when present) → sent as-is on `CBF_tags` (callers already include the
+ *    `category__<label>` prefix).
  *  - Cited Domains' `comparison_data_formatting: 'union'` and top-level `project_id` are
  *    intentionally NOT sent — this element ignores both (confirmed via the MFE probe).
  *  - Brand scoping comes from the request targeting the brand's sub-workspace (resolved in
@@ -70,7 +71,8 @@ function defaultDateRange() {
  * @param {string} [params.platform] - Legacy alias for `model`; `model` takes precedence.
  * @param {string} [params.startDate] - ISO date (YYYY-MM-DD). Defaults to 28 days ago.
  * @param {string} [params.endDate] - ISO date (YYYY-MM-DD). Defaults to today.
- * @param {string} [params.category] - Category label, pushed as the tag `category__<label>`.
+ * @param {string} [params.category] - Full `category__<label>` tag value, sent
+ *   as-is (callers already include the `category__` prefix).
  * @param {string} [params.projectId] - Semrush project id for region scoping (as `CBF_project`).
  */
 export function buildSentimentOverviewPayload({
@@ -90,7 +92,7 @@ export function buildSentimentOverviewPayload({
     advancedFilters.push({ op: 'or', filters: [{ op: 'eq', val: projectId, col: 'CBF_project' }] });
   }
   if (category) {
-    advancedFilters.push({ op: 'eq', val: `category__${category}`, col: 'CBF_tags' });
+    advancedFilters.push({ op: 'eq', val: category, col: 'CBF_tags' });
   }
 
   return {
