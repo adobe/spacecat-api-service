@@ -6247,6 +6247,15 @@ site-llmo-akamai-deploy:
                   items:
                     type: object
                     additionalProperties: true
+                fetcherKey:
+                  type: string
+                  description: >-
+                    The fetcher key minted server-side and baked into the deployed rule as the
+                    `x-edgeoptimize-fetcher-key` incoming request header. Show it to the customer so
+                    they can allowlist Optimize-at-Edge (with the `AdobeEdgeOptimize/1.0` user agent)
+                    in their Bot Manager / WAF. A fresh key is minted on every deploy, so
+                    re-deploying rotates it. Returned only here — never persisted server-side.
+                  example: '3b1e...'
       '400':
         $ref: './responses.yaml#/400'
       '401':
