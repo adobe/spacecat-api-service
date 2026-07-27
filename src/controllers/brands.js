@@ -2071,8 +2071,16 @@ function BrandsController(ctx, log, env) {
             competitorsTouched,
             aliasesTouched,
             status: syncError?.status,
+            message: syncError?.message,
+            stack: syncError?.stack,
           });
-          return ok({ ...updated, semrushSyncPending: true });
+          // Preserve any partial rejectedAliases collected before the throw so
+          // the UI can still warn about aliases that were refused by Semrush.
+          return ok({
+            ...updated,
+            semrushSyncPending: true,
+            ...(rejectedAliases.length > 0 && { semrushRejectedAliases: rejectedAliases }),
+          });
         }
       }
 

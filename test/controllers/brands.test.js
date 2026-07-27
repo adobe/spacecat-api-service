@@ -6770,6 +6770,55 @@ describe('Brands Controller', () => {
       );
     });
 
+    it('LLMO-6545: includes both semrushSyncPending and semrushRejectedAliases when alias sync collected rejections before a later sync throws', async () => {
+      // URL sync succeeds, alias sync collects rejected aliases into rejectedAliases[],
+      // then competitor sync throws. The catch must preserve the partial alias rejections
+      // so the UI can still warn the operator which aliases were refused by Semrush.
+      const rejected = [{ name: 'alias-a' }, { name: 'alias-b' }];
+      const updated = {
+        id: BRAND_UUID,
+        semrushSubWorkspaceId: 'ws-9',
+        urls: [],
+        socialAccounts: [],
+        earnedContent: [],
+        competitors: [{ url: 'https://rival.com', regions: ['us'] }],
+        brandAliases: [{ name: 'alias-a' }, { name: 'alias-c' }],
+      };
+      const updateBrandStub = sinon.stub().resolves(updated);
+      // URL sync succeeds; alias sync resolves with rejected aliases; competitor sync throws.
+      const aliasSyncStub = sinon.stub().resolves({ rejected });
+      const competitorSyncStub = sinon.stub().rejects(
+        Object.assign(new Error('Semrush 503'), { status: 503 }),
+      );
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandAliasesAcrossMarkets: aliasSyncStub,
+        syncCompetitorBenchmarksAcrossMarkets: competitorSyncStub,
+        createSerenityTransport: sinon.stub().returns({
+          name: 't',
+          listProjects: sinon.stub().resolves({ items: [] }),
+        }),
+        getBrandCompetitors: sinon.stub().resolves([]),
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: {
+          competitors: [{ url: 'https://rival.com', regions: ['us'] }],
+          brandAliases: [{ name: 'alias-a' }, { name: 'alias-c' }],
+        },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.include({ semrushSyncPending: true });
+      expect(body.semrushRejectedAliases).to.deep.equal(rejected);
+    });
+
     it('returns 409 when demoting an active brand to pending (LLMO-5587)', async () => {
       // beforeEach mock resolves a persisted brand with status 'active'; a generic
       // PATCH carrying status:'pending' must be rejected (and emit BrandDemotionBlocked).
