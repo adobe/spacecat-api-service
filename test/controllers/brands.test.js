@@ -6722,6 +6722,43 @@ describe('Brands Controller', () => {
       expect(ciSyncStub).to.not.have.been.called;
     });
 
+    it('LLMO-6545: returns 200 with semrushSyncPending:true when Semrush re-sync fails after DB commit', async () => {
+      // DB write succeeds; Semrush sync throws. Before LLMO-6545 this re-threw
+      // the error (500). After the fix it soft-fails: returns 200 with the
+      // committed row + semrushSyncPending flag, and logs for later recovery.
+      const updated = {
+        id: BRAND_UUID,
+        semrushSubWorkspaceId: 'ws-9',
+        urls: [{ value: 'https://acme.com' }],
+        socialAccounts: [],
+        earnedContent: [],
+      };
+      const updateBrandStub = sinon.stub().resolves(updated);
+      const syncError = Object.assign(new Error('Semrush unavailable'), { status: 503 });
+      const syncStub = sinon.stub().rejects(syncError);
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandUrlsAcrossMarkets: syncStub,
+        createSerenityTransport: sinon.stub().returns({ name: 't', listProjects: sinon.stub().resolves({ items: [] }) }),
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { urls: [{ value: 'https://acme.com' }] },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(response.body).to.deep.include({ semrushSyncPending: true });
+      expect(updateBrandStub).to.have.been.calledOnce;
+      expect(loggerStub.error).to.have.been.calledWithMatch(
+        'serenity: brand-edit Semrush re-sync failed after row commit',
+      );
+    });
+
     it('returns 409 when demoting an active brand to pending (LLMO-5587)', async () => {
       // beforeEach mock resolves a persisted brand with status 'active'; a generic
       // PATCH carrying status:'pending' must be rejected (and emit BrandDemotionBlocked).

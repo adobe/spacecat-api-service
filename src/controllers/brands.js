@@ -2061,10 +2061,9 @@ function BrandsController(ctx, log, env) {
             rejectedAliases.push(...(aliasResult?.rejected ?? []));
           }
         } catch (syncError) {
-          // The brand row is already committed; re-sync hard-fails (the brand
-          // must not silently drift out of sync with Semrush). Log the upstream
-          // context (workspace + which sync) so the DB/Semrush divergence is
-          // diagnosable, then rethrow to the handler's catch.
+          // LLMO-6545: Accept drift — DB is already committed so hard-failing returns
+          // a 500 while the edit actually succeeded. Log all context so the divergence
+          // is diagnosable via Splunk and recoverable via --reconcile migration later.
           log.error('serenity: brand-edit Semrush re-sync failed after row commit', {
             brandId,
             semrushSubWorkspaceId: updated.semrushSubWorkspaceId,
@@ -2073,7 +2072,7 @@ function BrandsController(ctx, log, env) {
             aliasesTouched,
             status: syncError?.status,
           });
-          throw syncError;
+          return ok({ ...updated, semrushSyncPending: true });
         }
       }
 
