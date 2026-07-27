@@ -184,6 +184,8 @@ describe('dynamic-allocation fronting — create-prompts', () => {
       },
       log,
       undefined, // classifyPromptType (tag-dimension path — not under test here)
+      undefined, // env
+      undefined, // writeDeadline
       { dynamicAllocation: true, parentWorkspaceId: MASTER },
     );
     expect(t.getWorkspaceResources).to.have.been.calledWith(WS);
@@ -202,9 +204,48 @@ describe('dynamic-allocation fronting — create-prompts', () => {
       },
       log,
       undefined, // classifyPromptType
+      undefined, // env
+      undefined, // writeDeadline
       { dynamicAllocation: false, parentWorkspaceId: MASTER },
     );
     expect(t.getWorkspaceResources).to.not.have.been.called;
+  });
+
+  it('ON + a binding ceiling (LLMO-6190 gate): a top-up past the cap throws brandAiLimit (409) before any write/transfer', async () => {
+    // Child seeded at zero prompts, so the pre-loop `ensure` must top up; the top-up rounds to a
+    // whole PROMPT_BLOCK (→100) which exceeds the low cap (50) → brandAiLimit, thrown out of the
+    // handler before any metered write or transfer fires.
+    const getWorkspaceResources = sinon.stub();
+    getWorkspaceResources.withArgs(WS).resolves(resources(dimObj(0, 0, 50), dimObj(0, 0, 0)));
+    getWorkspaceResources.withArgs(MASTER).resolves(AMPLE_MASTER);
+    const t = makeTransport({
+      listProjects: sinon.stub().resolves({ items: [proj()] }),
+      getWorkspaceResources,
+    });
+    let caught;
+    try {
+      await handleCreatePromptsSubworkspace(
+        t,
+        WS,
+        {
+          prompts: [{
+            text: 'q', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'],
+          }],
+        },
+        log,
+        undefined, // classifyPromptType
+        undefined, // env
+        undefined, // writeDeadline
+        { dynamicAllocation: true, parentWorkspaceId: MASTER, ceiling: { prompts: 50 } },
+      );
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught?.code).to.equal('brandAiLimit');
+    expect(caught?.status).to.equal(409);
+    // The child read fed the ceiling check, but the cap fired BEFORE the pool read/transfer.
+    expect(t.getWorkspaceResources).to.have.been.calledWith(WS);
+    expect(t.transferWorkspaceResources).to.not.have.been.called;
   });
 });
 
@@ -357,6 +398,8 @@ describe('dynamic-allocation — enforcement choke point', () => {
         },
         log,
         undefined, // classifyPromptType
+        undefined, // env
+        undefined, // writeDeadline
         { dynamicAllocation: true, parentWorkspaceId: MASTER },
       ),
     },
@@ -414,7 +457,9 @@ describe('dynamic-allocation fronting — delete-market release', () => {
     const res = await handleDeleteMarketSubworkspace(t, WS, 2840, 'en', log, {
       dynamicAllocation: false,
     });
-    expect(res).to.deep.equal({ status: 204 });
+    // deletedSiteId is null here: these tests omit `dataAccess`, so the handler
+    // never reads a mapping row (LLMO-6405 R12 delete-cleanup contract).
+    expect(res).to.deep.equal({ status: 204, deletedSiteId: null });
     expect(t.getWorkspaceResources).to.not.have.been.called;
     expect(t.transferWorkspaceResources).to.not.have.been.called;
   });
@@ -424,7 +469,9 @@ describe('dynamic-allocation fronting — delete-market release', () => {
     const res = await handleDeleteMarketSubworkspace(t, WS, 2840, 'en', log, {
       dynamicAllocation: true,
     });
-    expect(res).to.deep.equal({ status: 204 });
+    // deletedSiteId is null here: these tests omit `dataAccess`, so the handler
+    // never reads a mapping row (LLMO-6405 R12 delete-cleanup contract).
+    expect(res).to.deep.equal({ status: 204, deletedSiteId: null });
     expect(t.getWorkspaceResources).to.have.been.calledWith(WS);
     // failFast: ONE transfer, no settle-poll status check.
     expect(t.transferWorkspaceResources).to.have.been.calledOnce;
@@ -436,6 +483,45 @@ describe('dynamic-allocation fronting — delete-market release', () => {
     });
   });
 
+  it('ON + two concurrent deletes on the SAME child: releases are serialized through withResourceLock '
+    + '(LLMO-6191 item 3), matching handleUpdateModelsSubworkspace — no interleaved read/write', async () => {
+    // Without the lock, both releases' getWorkspaceResources reads would fire before either
+    // transferWorkspaceResources write (the read-then-absolute-set race the lock closes). Hold the
+    // first call's write open with a deferred promise so a second, concurrent call to the SAME
+    // workspace can only start its own read/write pair once the first has fully settled.
+    let resolveFirstTransfer;
+    const firstTransferGate = new Promise((resolve) => {
+      resolveFirstTransfer = resolve;
+    });
+    const callOrder = [];
+    const getWorkspaceResources = sinon.stub().callsFake(async () => {
+      callOrder.push('read');
+      return RELEASABLE_CHILD;
+    });
+    const transferWorkspaceResources = sinon.stub().callsFake(async () => {
+      callOrder.push('write-start');
+      if (callOrder.filter((e) => e === 'write-start').length === 1) {
+        await firstTransferGate;
+      }
+      callOrder.push('write-end');
+      return null;
+    });
+    const t = makeDeleteTransport({ getWorkspaceResources, transferWorkspaceResources });
+
+    const p1 = handleDeleteMarketSubworkspace(t, WS, 2840, 'en', log, { dynamicAllocation: true });
+    // Let the first call's release reach its (gated) write before starting the second.
+    await new Promise((resolve) => {
+      setTimeout(() => resolve(), 0);
+    });
+    const p2 = handleDeleteMarketSubworkspace(t, WS, 2840, 'en', log, { dynamicAllocation: true });
+    // The second call's read must NOT have fired yet — it is queued behind the first call's whole
+    // critical section (read + write), not just its read.
+    expect(callOrder).to.deep.equal(['read', 'write-start']);
+    resolveFirstTransfer();
+    await Promise.all([p1, p2]);
+    expect(callOrder).to.deep.equal(['read', 'write-start', 'write-end', 'read', 'write-start', 'write-end']);
+  });
+
   it('ON + upstream deleteProject 404s (already gone): release still fires (project is confirmed gone either way)', async () => {
     const t = makeDeleteTransport({
       deleteProject: sinon.stub().rejects(new SerenityTransportError(404, 'gone', null)),
@@ -443,7 +529,9 @@ describe('dynamic-allocation fronting — delete-market release', () => {
     const res = await handleDeleteMarketSubworkspace(t, WS, 2840, 'en', log, {
       dynamicAllocation: true,
     });
-    expect(res).to.deep.equal({ status: 204 });
+    // deletedSiteId is null here: these tests omit `dataAccess`, so the handler
+    // never reads a mapping row (LLMO-6405 R12 delete-cleanup contract).
+    expect(res).to.deep.equal({ status: 204, deletedSiteId: null });
     expect(t.transferWorkspaceResources).to.have.been.calledOnce;
   });
 
@@ -452,7 +540,9 @@ describe('dynamic-allocation fronting — delete-market release', () => {
     const res = await handleDeleteMarketSubworkspace(t, WS, 2840, 'en', log, {
       dynamicAllocation: true,
     });
-    expect(res).to.deep.equal({ status: 204 });
+    // deletedSiteId is null here: these tests omit `dataAccess`, so the handler
+    // never reads a mapping row (LLMO-6405 R12 delete-cleanup contract).
+    expect(res).to.deep.equal({ status: 204, deletedSiteId: null });
     expect(t.getWorkspaceResources).to.not.have.been.called;
     expect(t.transferWorkspaceResources).to.not.have.been.called;
   });
@@ -464,7 +554,9 @@ describe('dynamic-allocation fronting — delete-market release', () => {
     const res = await handleDeleteMarketSubworkspace(t, WS, 2840, 'en', log, {
       dynamicAllocation: true,
     });
-    expect(res).to.deep.equal({ status: 204 });
+    // deletedSiteId is null here: these tests omit `dataAccess`, so the handler
+    // never reads a mapping row (LLMO-6405 R12 delete-cleanup contract).
+    expect(res).to.deep.equal({ status: 204, deletedSiteId: null });
   });
 
   it('ON + release hits a genuinely UNEXPECTED error: propagates, matching the model-update seam\'s identical (uncaught) release call — deliberately not special-cased here', async () => {
@@ -540,6 +632,8 @@ describe('dynamic-allocation fronting — retryOnQuota wiring', () => {
         }],
       },
       log,
+      undefined,
+      undefined,
       undefined,
       { dynamicAllocation: true, parentWorkspaceId: MASTER },
     );
@@ -689,7 +783,9 @@ describe('dynamic-allocation fronting — retryOnQuota wiring', () => {
         ],
       },
       log,
-      undefined,
+      undefined, // classifyPromptType
+      undefined, // env
+      undefined, // writeDeadline
       { dynamicAllocation: true, parentWorkspaceId: MASTER },
     );
     expect(result.failed).to.deep.equal([]);
@@ -731,7 +827,9 @@ describe('dynamic-allocation fronting — retryOnQuota wiring', () => {
         ],
       },
       log,
-      undefined,
+      undefined, // classifyPromptType
+      undefined, // env
+      undefined, // writeDeadline
       { dynamicAllocation: true, parentWorkspaceId: MASTER },
     );
     expect(result.created).to.have.lengthOf(1);

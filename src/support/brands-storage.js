@@ -631,6 +631,42 @@ export async function getBrandIdentity(organizationId, brandId, postgrestClient)
 }
 
 /**
+ * Reads a brand's PRIMARY site id (`brands.site_id`) — the site that anchors the
+ * brand shell itself (as opposed to a market-mirror site linked via
+ * `brand_sites`). Used by the serenity market-delete cleanup (LLMO-6405 R12) to
+ * ensure the brand's primary site link is never removed when its last market is
+ * deleted. Lightweight single-column read; returns null when the brand has no
+ * primary site (a serenity shell before activation) or is not found.
+ *
+ * @param {string} organizationId - SpaceCat organization UUID.
+ * @param {string} brandId - Brand UUID.
+ * @param {object} postgrestClient - PostgREST client.
+ * @returns {Promise<string|null>} the brand's primary site id, or null.
+ */
+export async function getBrandBaseSiteId(organizationId, brandId, postgrestClient) {
+  // Can't scope the query without all three → THROW (not return null) so a
+  // best-effort caller's catch treats it as "primary unresolved" and skips
+  // primary-site-dependent cleanup. Returning null here would be ambiguous with a
+  // successfully-resolved "brand has no primary site" and would silently disable
+  // the primary-site guard in the delete-orphan-unlink path (LLMO-6405 review).
+  if (!postgrestClient?.from || !hasText(brandId) || !hasText(organizationId)) {
+    throw new Error('getBrandBaseSiteId: organizationId, brandId, and a postgrest client are all required');
+  }
+
+  const { data, error } = await postgrestClient
+    .from('brands')
+    .select('site_id')
+    .eq('organization_id', organizationId)
+    .eq('id', brandId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to get brand primary site: ${error.message}`);
+  }
+  return data?.site_id ?? null;
+}
+
+/**
  * Reads a brand's aliases (the `brand_aliases` rows) — the extra names the brand
  * is known by, beyond its display name — each with its `regions`. Returned as
  * `{ name, regions }[]` (empty when the brand has none), the shape the Semrush
@@ -832,6 +868,53 @@ export async function isSemrushMarketMirrorSite(organizationId, siteId, postgres
   }
 
   return Array.isArray(data) && data.length > 0;
+}
+
+/**
+ * Lightweight lookup of every brand id linked to a site within an org — the
+ * union of the brand whose OWN primary site this is (`brands.site_id`) and any
+ * brand that lists it via `brand_sites`. Used by resource-aware authorization
+ * (e.g. `AccessControlUtil.hasLlmoCapabilityForSite`) to map a `:siteId` route
+ * to the LLMO ReBAC `brand` resource(s), then check state-layer grants on them.
+ *
+ * Selects ids only (no child-table joins) — cheaper than `getBrandBySite`, and
+ * returns all linked brands rather than the single primary one.
+ *
+ * @param {string} organizationId - SpaceCat organization UUID
+ * @param {string} siteId - Site UUID
+ * @param {object} postgrestClient - PostgREST client
+ * @returns {Promise<Set<string>>} brand ids linked to the site (empty when none)
+ */
+export async function listBrandIdsForSite(organizationId, siteId, postgrestClient) {
+  if (!postgrestClient?.from || !hasText(organizationId) || !hasText(siteId)) {
+    return new Set();
+  }
+
+  const [ownRes, linkedRes] = await Promise.all([
+    postgrestClient
+      .from('brands')
+      .select('id')
+      .eq('organization_id', organizationId)
+      .eq('status', 'active')
+      .eq('site_id', siteId),
+    postgrestClient
+      .from('brand_sites')
+      .select('brand_id')
+      .eq('organization_id', organizationId)
+      .eq('site_id', siteId),
+  ]);
+
+  if (ownRes.error) {
+    throw new Error(`Failed to resolve brands for site: ${ownRes.error.message}`);
+  }
+  if (linkedRes.error) {
+    throw new Error(`Failed to resolve brand-site links for site: ${linkedRes.error.message}`);
+  }
+
+  const ids = new Set();
+  (ownRes.data || []).forEach((row) => hasText(row.id) && ids.add(row.id));
+  (linkedRes.data || []).forEach((row) => hasText(row.brand_id) && ids.add(row.brand_id));
+  return ids;
 }
 
 /**

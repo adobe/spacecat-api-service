@@ -653,3 +653,38 @@ export async function resolveTypeValueInjection(
   );
   return { computedId, typeTagIds: valueTagIds };
 }
+
+/**
+ * Resolves the id-based injection of a server-computed `intent` value into a
+ * prompt write (serenity-docs#32). The exact structural analog of
+ * {@link resolveTypeValueInjection} for the `intent` closed dimension: returns
+ * the wanted value's id plus EVERY id under the `intent` root, so the caller can
+ * strip any caller-supplied `intent` tag id (the client must never set the value
+ * itself — it is server-classified).
+ *
+ * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string} wantValue - the computed bare `intent` value (e.g. `Task`).
+ * @param {object} [log] - logger.
+ * @returns {Promise<{ computedId: string, intentTagIds: string[] }>} `computedId`
+ *   is always resolved — {@link ensureChildren} throws rather than leave a hole,
+ *   so a prompt can never be written with the server-computed `intent` tag missing.
+ */
+export async function resolveIntentValueInjection(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  wantValue,
+  log,
+) {
+  const { computedId, valueTagIds } = await resolveClosedValueInjection(
+    transport,
+    semrushWorkspaceId,
+    projectId,
+    DIMENSION.INTENT,
+    wantValue,
+    log,
+  );
+  return { computedId, intentTagIds: valueTagIds };
+}
