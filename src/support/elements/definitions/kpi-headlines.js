@@ -166,9 +166,11 @@ export function buildSourceVisibilityPayload({
 
 /**
  * Extracts `{ value, comparisonValue }` from a `kpiLineChart` element response:
- * `blocks.mainValue[0].mainValue` (current period) and
- * `blocks.secondaryValue[0].secondaryValue` (comparison period — both `current`/
- * `previous` entries were verified identical live, so either index is equivalent).
+ * `blocks.mainValue[0].mainValue` (current period) and the `secondaryValue`
+ * entry whose `period` is `"previous"` (comparison period). Both `current`/
+ * `previous` entries were verified identical live, but matched by `period`
+ * rather than positionally — a positional `[0]` read would silently return the
+ * wrong figure if the two ever diverge or the array is ever reordered upstream.
  * Defaults to 0 when a field is missing.
  *
  * @param {object} raw - Raw response from the Elements API.
@@ -176,7 +178,9 @@ export function buildSourceVisibilityPayload({
  */
 export function transformKpiHeadlineResponse(raw) {
   const value = raw?.blocks?.mainValue?.[0]?.mainValue;
-  const comparisonValue = raw?.blocks?.secondaryValue?.[0]?.secondaryValue;
+  const secondaryValues = raw?.blocks?.secondaryValue ?? [];
+  const previous = secondaryValues.find((s) => s?.period === 'previous');
+  const comparisonValue = previous?.secondaryValue;
   return {
     value: typeof value === 'number' ? value : 0,
     comparisonValue: typeof comparisonValue === 'number' ? comparisonValue : 0,

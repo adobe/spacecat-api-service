@@ -178,6 +178,21 @@ describe('kpi-headlines definitions', () => {
       });
     });
 
+    it('matches secondaryValue by period, not array position', () => {
+      // "previous" listed FIRST — a positional [0] read would return the
+      // "current" figure instead; matching by `period` must still pick 0.3927.
+      const raw = {
+        blocks: {
+          mainValue: [{ mainValue: 0.3628 }],
+          secondaryValue: [
+            { period: 'previous', secondaryValue: 0.3927 },
+            { period: 'current', secondaryValue: 0.3628 },
+          ],
+        },
+      };
+      expect(transformKpiHeadlineResponse(raw).comparisonValue).to.equal(0.3927);
+    });
+
     it('defaults to 0 when mainValue/secondaryValue are missing', () => {
       const zeroed = { value: 0, comparisonValue: 0 };
       expect(transformKpiHeadlineResponse({ blocks: {} })).to.deep.equal(zeroed);
@@ -188,7 +203,7 @@ describe('kpi-headlines definitions', () => {
       const raw = {
         blocks: {
           mainValue: [{ mainValue: 'not-a-number' }],
-          secondaryValue: [{ secondaryValue: null }],
+          secondaryValue: [{ period: 'previous', secondaryValue: null }],
         },
       };
       expect(transformKpiHeadlineResponse(raw)).to.deep.equal({ value: 0, comparisonValue: 0 });
