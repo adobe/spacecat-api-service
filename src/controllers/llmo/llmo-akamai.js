@@ -49,6 +49,11 @@ const NETWORKS = ['STAGING', 'PRODUCTION'];
 // new value to their allowlist. The value never leaves the rule tree except in the deploy response.
 const generateFetcherKey = () => randomBytes(32).toString('hex');
 
+// A non-secret constant used ONLY in the read-only plan preview: it makes the merged tree carry the
+// same x-edgeoptimize-fetcher-key header deploy adds (so the dry-run validates the exact change),
+// and is redacted from the returned tree. Not random — the real key is minted at deploy.
+const PLAN_FETCHER_KEY_PLACEHOLDER = 'preview-only-not-a-secret';
+
 // Akamai activation statuses that mean the submit actually succeeded (in flight or already live).
 // Used to recover from an activate POST that errored client-side — the PAPI activation call
 // regularly exceeds the client request timeout on large rule trees (Akamai re-validates the whole
@@ -396,8 +401,8 @@ function LlmoAkamaiController(ctx) {
     const addCaching = !defaultRuleHasCaching(ruleTree);
     // originHostname routes AI-bot traffic to the env-appropriate Edge Optimize worker
     // (dev/stage/live.edgeoptimize.net) via EDGE_OPTIMIZE_EDGE_DOMAIN; falls back to prod default.
-    // fetcherKey (optional, customer-owned) adds the x-edgeoptimize-fetcher-key header for Bot
-    // Manager allowlisting.
+    // fetcherKey (server-minted) adds the x-edgeoptimize-fetcher-key header for Bot Manager
+    // allowlisting.
     return {
       cfg: buildRuleConfig({
         hostname: host, apiKey, addCaching, originHostname: edgeDomain, fetcherKey,
@@ -492,9 +497,9 @@ function LlmoAkamaiController(ctx) {
     if (insertIndexError) {
       return insertIndexError;
     }
-    // Mint a throwaway key so the preview reflects (and validates) the header deploy will add. Its
-    // value is redacted from the returned tree; the real deployed key is minted in deploy.
-    const fetcherKey = generateFetcherKey();
+    // Attach the placeholder so the preview reflects (and validates) the header deploy will add;
+    // redactSecrets strips it from the returned tree. The real key is minted only in deploy.
+    const fetcherKey = PLAN_FETCHER_KEY_PLACEHOLDER;
 
     try {
       const version = await client.getLatestVersion(propertyId, contractId, groupId);

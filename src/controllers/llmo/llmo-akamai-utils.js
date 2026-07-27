@@ -634,7 +634,8 @@ export function buildRuleConfig({
     incomingRequestHeaders: {
       ...d.incomingRequestHeaders,
       'x-edgeoptimize-api-key': apiKey,
-      // Only add the fetcher-key header when the customer supplied a value (Bot Manager allowlist).
+      // Add the server-minted fetcher-key header (Bot Manager allowlist). The controller always
+      // supplies one now; the guard stays defensive against a missing/blank value.
       ...(trimmedFetcherKey ? { 'x-edgeoptimize-fetcher-key': trimmedFetcherKey } : {}),
     },
     outgoingRequestHeaders: { ...d.outgoingRequestHeaders },
