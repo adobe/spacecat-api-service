@@ -265,6 +265,11 @@ function mapDbBrandToV2(row) {
     brandContext: row.brand_context ?? null,
     mentionSentimentGuidance: row.mention_sentiment_guidance ?? null,
     vertical: row.vertical || null,
+    // Internal ops gate (LLMO-5741): opt-in flag the mystique Brand Claims
+    // consumer reads back to decide whether a BP-sheet-ready event becomes a
+    // claims run. Default false so brands stay off the automated path until an
+    // operator flips it (via the `brand-claims` Slack command).
+    brandClaimsEnabled: row.brand_claims_enabled ?? false,
     region: row.regions || [],
     urls,
     socialAccounts: (row.brand_social_accounts || []).map((s) => ({
@@ -831,6 +836,51 @@ export async function getBrandBySite(organizationId, siteId, postgrestClient, lo
     );
   }
   return mapDbBrandToV2(data[0]);
+}
+
+/**
+ * Sets the brand-scoped `brand_claims_enabled` scheduling gate (LLMO-5741),
+ * keyed on the brand UUID (the PK), so operators can enable/disable Brand Claims
+ * for a brand directly. Returns the updated `{ id, name }` or null when no brand
+ * matches the id.
+ *
+ * @param {Object} params
+ * @param {string} params.brandId - Brand UUID.
+ * @param {boolean} params.enabled - Target flag value.
+ * @param {Object} params.postgrestClient - PostgREST client.
+ * @param {string} [params.updatedBy] - Audit actor.
+ * @returns {Promise<{id: string, name: string}|null>}
+ */
+export async function setBrandClaimsEnabled({
+  brandId,
+  enabled,
+  postgrestClient,
+  updatedBy = 'system',
+}) {
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
+  if (typeof enabled !== 'boolean') {
+    throw new Error('enabled must be a boolean');
+  }
+  if (!hasText(brandId)) {
+    return null;
+  }
+
+  const { data, error } = await postgrestClient
+    .from('brands')
+    .update({ brand_claims_enabled: enabled, updated_by: updatedBy })
+    .eq('id', brandId)
+    // Do not flip the flag on a soft-deleted brand (matches the .neq guard used
+    // across brands-storage); a deleted brand returns no row -> null.
+    .neq('status', 'deleted')
+    .select('id, name')
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to update brand claims flag: ${error.message}`);
+  }
+  return data || null;
 }
 
 /**

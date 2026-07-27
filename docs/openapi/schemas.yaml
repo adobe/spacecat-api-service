@@ -7704,6 +7704,15 @@ V2Brand:
         - string
         - 'null'
       description: Industry vertical
+    brandClaimsEnabled:
+      type: boolean
+      default: false
+      readOnly: true
+      description: >-
+        Read-only internal ops gate (LLMO-5741). When true, the Brand Claims
+        scheduler turns a brand-presence sheet-ready event into a claims run for
+        this brand. Brand-scoped and opt-in (default false); set by operators via
+        the `brand-claims` Slack command, not customer-writable.
     region:
       type: array
       items:
@@ -7772,6 +7781,7 @@ V2Brand:
     brandContext: "Example Brand is a B2B analytics platform."
     mentionSentimentGuidance: "Treat factual pricing mentions as neutral unless the response recommends against the brand."
     vertical: 'technology'
+    brandClaimsEnabled: false
     region: ['US', 'DE']
     urls:
       - value: 'https://www.example.com'
