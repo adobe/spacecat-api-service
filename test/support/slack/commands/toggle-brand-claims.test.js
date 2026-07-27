@@ -89,6 +89,14 @@ describe('BrandClaimsCommand', () => {
       expect(setBrandClaimsEnabledStub).to.not.have.been.called;
     });
 
+    it('rejects a brand ID that is not a valid UUID', async () => {
+      const command = BrandClaimsCommand(context);
+      await command.execute('enable-brand-claims not-a-uuid', slackContext);
+
+      expect(slackContext.say.calledWithMatch(/not a valid brand ID/)).to.be.true;
+      expect(setBrandClaimsEnabledStub).to.not.have.been.called;
+    });
+
     it('errors when the postgrest client is unavailable', async () => {
       context.dataAccess.services.postgrestClient = { from: undefined };
 

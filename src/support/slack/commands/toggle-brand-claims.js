@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import { isValidUUID } from '@adobe/spacecat-shared-utils';
 import BaseCommand from './base.js';
 import { setBrandClaimsEnabled } from '../../brands-storage.js';
 import { postErrorMessage } from '../../../utils/slack/base.js';
@@ -51,17 +52,23 @@ function BrandClaimsCommand(context) {
         return;
       }
 
+      if (!isValidUUID(brandId)) {
+        await say(`:warning: '${brandId}' is not a valid brand ID (expected a UUID). ${baseCommand.usage()}`);
+        return;
+      }
+
       const postgrestClient = dataAccess?.services?.postgrestClient;
       if (!postgrestClient?.from) {
         await say(':x: Brand storage is not available in this environment.');
         return;
       }
 
+      const actor = user ? `slack:${user}` : 'slack';
       const brand = await setBrandClaimsEnabled({
         brandId,
         enabled,
         postgrestClient,
-        updatedBy: user ? `slack:${user}` : 'slack',
+        updatedBy: actor,
       });
 
       if (!brand) {
@@ -69,6 +76,7 @@ function BrandClaimsCommand(context) {
         return;
       }
 
+      log.info(`brand-claims: ${enabled ? 'enabled' : 'disabled'} for brand ${brand.id} ("${brand.name}") by ${actor}`);
       await say(`:white_check_mark: Brand claims *${enabled ? 'enabled' : 'disabled'}* for brand "${brand.name}" (${brand.id}).`);
     } catch (error) {
       log.error(error);
