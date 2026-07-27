@@ -1,3 +1,10 @@
+# [1.691.0](https://github.com/adobe/spacecat-api-service/compare/v1.690.3...v1.691.0) (2026-07-27)
+
+
+### Features
+
+* **akamai-oae:** mint the fetcher key server-side (mandatory) for Bot Manager allowlisting ([#2886](https://github.com/adobe/spacecat-api-service/issues/2886)) ([fb5f3d8](https://github.com/adobe/spacecat-api-service/commit/fb5f3d88b5e67c353f7353e185bdee049fa534c2)), closes [project-elmo-ui#2407](https://github.com/project-elmo-ui/issues/2407)
+
 ## [1.690.3](https://github.com/adobe/spacecat-api-service/compare/v1.690.2...v1.690.3) (2026-07-27)
 
 
