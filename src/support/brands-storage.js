@@ -839,6 +839,45 @@ export async function getBrandBySite(organizationId, siteId, postgrestClient, lo
 }
 
 /**
+ * Sets the brand-scoped `brand_claims_enabled` scheduling gate (LLMO-5741),
+ * keyed on the brand UUID (the PK), so operators can enable/disable Brand Claims
+ * for a brand directly. Returns the updated `{ id, name }` or null when no brand
+ * matches the id.
+ *
+ * @param {Object} params
+ * @param {string} params.brandId - Brand UUID.
+ * @param {boolean} params.enabled - Target flag value.
+ * @param {Object} params.postgrestClient - PostgREST client.
+ * @param {string} [params.updatedBy] - Audit actor.
+ * @returns {Promise<{id: string, name: string}|null>}
+ */
+export async function setBrandClaimsEnabled({
+  brandId,
+  enabled,
+  postgrestClient,
+  updatedBy = 'system',
+}) {
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
+  if (!hasText(brandId)) {
+    return null;
+  }
+
+  const { data, error } = await postgrestClient
+    .from('brands')
+    .update({ brand_claims_enabled: enabled, updated_by: updatedBy })
+    .eq('id', brandId)
+    .select('id, name')
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to update brand claims flag: ${error.message}`);
+  }
+  return data || null;
+}
+
+/**
  * True when the site is a Semrush market mirror — i.e. it is linked to a brand
  * via a `brand_sites` row tagged `type='serenity'`. These rows are written ONLY
  * for Semrush-managed brands (see `ensureMarketSite`), so a hit means the site's
@@ -1171,9 +1210,6 @@ export async function updateBrand({
   }
   if (updates.vertical !== undefined) {
     patch.vertical = updates.vertical;
-  }
-  if (updates.brandClaimsEnabled !== undefined) {
-    patch.brand_claims_enabled = updates.brandClaimsEnabled;
   }
 
   // Fetch the persisted row once when baseSiteId or status is changing — it feeds

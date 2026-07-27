@@ -31,6 +31,7 @@ import {
   deleteBrand,
   setBrandStatus,
   listRegions,
+  setBrandClaimsEnabled,
 } from '../../src/support/brands-storage.js';
 
 use(sinonChai);
@@ -2552,6 +2553,52 @@ describe('brands-storage', () => {
     });
   });
 
+  describe('setBrandClaimsEnabled', () => {
+    it('throws when postgrestClient is missing', async () => {
+      await expect(setBrandClaimsEnabled({
+        brandId: BRAND_ID, enabled: true, postgrestClient: null,
+      })).to.be.rejectedWith('PostgREST client is required');
+    });
+
+    it('returns null when brandId is empty', async () => {
+      expect(await setBrandClaimsEnabled({
+        brandId: '', enabled: true, postgrestClient: { from: () => {} },
+      })).to.be.null;
+    });
+
+    it('writes brand_claims_enabled and returns the updated brand', async () => {
+      const client = createCapturingClient({
+        brands: [{ data: { id: BRAND_ID, name: 'Acme' }, error: null }],
+      });
+
+      const result = await setBrandClaimsEnabled({
+        brandId: BRAND_ID, enabled: true, postgrestClient: client, updatedBy: 'slack:U1',
+      });
+
+      const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
+      expect(brandsUpdate.row.brand_claims_enabled).to.equal(true);
+      expect(brandsUpdate.row.updated_by).to.equal('slack:U1');
+      expect(result).to.deep.equal({ id: BRAND_ID, name: 'Acme' });
+    });
+
+    it('returns null when no brand matches the id', async () => {
+      const client = createTableMockClient({ brands: { data: null, error: null } });
+
+      const result = await setBrandClaimsEnabled({
+        brandId: BRAND_ID, enabled: false, postgrestClient: client,
+      });
+      expect(result).to.be.null;
+    });
+
+    it('throws on database error', async () => {
+      const client = createTableMockClient({ brands: { data: null, error: { message: 'boom' } } });
+
+      await expect(setBrandClaimsEnabled({
+        brandId: BRAND_ID, enabled: true, postgrestClient: client,
+      })).to.be.rejectedWith('Failed to update brand claims flag: boom');
+    });
+  });
+
   describe('updateBrand', () => {
     it('throws when postgrestClient is missing', async () => {
       await expect(updateBrand({
@@ -2857,26 +2904,6 @@ describe('brands-storage', () => {
       expect(brandsUpdate.row.mention_sentiment_guidance).to.equal('Keep this guidance');
       expect(result.brandContext).to.equal(null);
       expect(result.mentionSentimentGuidance).to.equal('Keep this guidance');
-    });
-
-    it('emits a brand_claims_enabled patch when brandClaimsEnabled is set', async () => {
-      const client = createCapturingClient({
-        brands: [
-          { data: { id: BRAND_ID }, error: null },
-          { data: makeBrandRow({ brand_claims_enabled: true }), error: null },
-        ],
-      });
-
-      const result = await updateBrand({
-        organizationId: ORG_ID,
-        brandId: BRAND_ID,
-        updates: { brandClaimsEnabled: true },
-        postgrestClient: client,
-      });
-
-      const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
-      expect(brandsUpdate.row.brand_claims_enabled).to.equal(true);
-      expect(result.brandClaimsEnabled).to.equal(true);
     });
 
     it('omits brand guidance columns in update patch when fields are omitted', async () => {

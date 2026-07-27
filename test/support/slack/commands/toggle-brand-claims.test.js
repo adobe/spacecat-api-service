@@ -17,176 +17,112 @@ import esmock from 'esmock';
 
 use(sinonChai);
 
-describe('ToggleBrandClaimsCommand', () => {
+describe('BrandClaimsCommand', () => {
   let context;
   let slackContext;
-  let dataAccessStub;
-  let postgrestClientStub;
-  let getBrandBySiteStub;
-  let updateBrandStub;
-  let ToggleBrandClaimsCommand;
+  let setBrandClaimsEnabledStub;
+  let BrandClaimsCommand;
 
-  const SITE_ID = 'b2c3d4e5-6789-01ab-cdef-2345678901ab';
-  const BRAND = { id: 'a1b2c3d4-5678-90ab-cdef-1234567890ab', name: 'Acme', baseUrl: 'https://acme.com' };
+  const BRAND_ID = 'a1b2c3d4-5678-90ab-cdef-1234567890ab';
+  const BRAND = { id: BRAND_ID, name: 'Acme' };
 
   before(async () => {
-    getBrandBySiteStub = sinon.stub();
-    updateBrandStub = sinon.stub();
-
-    ToggleBrandClaimsCommand = await esmock(
+    setBrandClaimsEnabledStub = sinon.stub();
+    BrandClaimsCommand = await esmock(
       '../../../../src/support/slack/commands/toggle-brand-claims.js',
       {
         '../../../../src/support/brands-storage.js': {
-          getBrandBySite: getBrandBySiteStub,
-          updateBrand: updateBrandStub,
+          setBrandClaimsEnabled: setBrandClaimsEnabledStub,
         },
       },
     );
   });
 
   beforeEach(() => {
-    getBrandBySiteStub.reset();
-    updateBrandStub.reset();
-
-    postgrestClientStub = { from: sinon.stub() };
-    const mockSite = {
-      getId: sinon.stub().returns(SITE_ID),
-      getOrganizationId: sinon.stub().returns('org-1'),
-      getBaseURL: sinon.stub().returns('https://acme.com'),
+    setBrandClaimsEnabledStub.reset();
+    context = {
+      dataAccess: { services: { postgrestClient: { from: sinon.stub() } } },
+      log: console,
     };
-    dataAccessStub = {
-      Site: {
-        findByBaseURL: sinon.stub().resolves(mockSite),
-        findById: sinon.stub().resolves(mockSite),
-      },
-      services: { postgrestClient: postgrestClientStub },
-    };
-    context = { dataAccess: dataAccessStub, log: console };
     slackContext = { say: sinon.spy(), user: 'U123' };
   });
 
   describe('Initialization', () => {
-    it('initializes with base command properties', () => {
-      const command = ToggleBrandClaimsCommand(context);
-      expect(command.id).to.equal('toggle-brand-claims');
-      expect(command.name).to.equal('Toggle Brand Claims');
-      expect(command.phrases).to.deep.equal(['brand-claims']);
+    it('registers both keyword phrases', () => {
+      const command = BrandClaimsCommand(context);
+      expect(command.id).to.equal('brand-claims');
+      expect(command.name).to.equal('Brand Claims');
+      expect(command.phrases).to.deep.equal(['enable-brand-claims', 'disable-brand-claims']);
     });
   });
 
-  describe('Handle Execution', () => {
-    it('enables brand claims for the site\'s brand', async () => {
-      getBrandBySiteStub.resolves(BRAND);
-      updateBrandStub.resolves({ id: BRAND.id });
+  describe('Execute', () => {
+    it('enables brand claims when the enable keyword is used', async () => {
+      setBrandClaimsEnabledStub.resolves(BRAND);
 
-      const command = ToggleBrandClaimsCommand(context);
-      await command.handleExecution(['acme.com', 'on'], slackContext);
+      const command = BrandClaimsCommand(context);
+      await command.execute(`enable-brand-claims ${BRAND_ID}`, slackContext);
 
-      expect(getBrandBySiteStub).to.have.been.calledWith('org-1', SITE_ID, postgrestClientStub);
-      expect(updateBrandStub).to.have.been.calledOnce;
-      const updateArgs = updateBrandStub.firstCall.args[0];
-      expect(updateArgs.brandId).to.equal(BRAND.id);
-      expect(updateArgs.updates).to.deep.equal({ brandClaimsEnabled: true });
-      expect(updateArgs.updatedBy).to.equal('slack:U123');
+      const args = setBrandClaimsEnabledStub.firstCall.args[0];
+      expect(args.brandId).to.equal(BRAND_ID);
+      expect(args.enabled).to.equal(true);
+      expect(args.updatedBy).to.equal('slack:U123');
       expect(slackContext.say.calledWithMatch(/Brand claims \*enabled\* for brand "Acme"/)).to.be.true;
     });
 
-    it('disables brand claims for the site\'s brand', async () => {
-      getBrandBySiteStub.resolves(BRAND);
-      updateBrandStub.resolves({ id: BRAND.id });
+    it('disables brand claims when the disable keyword is used', async () => {
+      setBrandClaimsEnabledStub.resolves(BRAND);
 
-      const command = ToggleBrandClaimsCommand(context);
-      await command.handleExecution(['acme.com', 'off'], slackContext);
+      const command = BrandClaimsCommand(context);
+      await command.execute(`disable-brand-claims ${BRAND_ID}`, slackContext);
 
-      const updateArgs = updateBrandStub.firstCall.args[0];
-      expect(updateArgs.updates).to.deep.equal({ brandClaimsEnabled: false });
+      const args = setBrandClaimsEnabledStub.firstCall.args[0];
+      expect(args.enabled).to.equal(false);
       expect(slackContext.say.calledWithMatch(/Brand claims \*disabled\* for brand "Acme"/)).to.be.true;
     });
 
-    it('resolves the site by ID when the input is not a URL', async () => {
-      getBrandBySiteStub.resolves(BRAND);
-      updateBrandStub.resolves({ id: BRAND.id });
+    it('warns when no brand ID is provided', async () => {
+      const command = BrandClaimsCommand(context);
+      await command.execute('enable-brand-claims', slackContext);
 
-      const command = ToggleBrandClaimsCommand(context);
-      await command.handleExecution([SITE_ID, 'on'], slackContext);
-
-      expect(dataAccessStub.Site.findById).to.have.been.calledWith(SITE_ID);
-      expect(dataAccessStub.Site.findByBaseURL).to.not.have.been.called;
-      expect(updateBrandStub).to.have.been.calledOnce;
-    });
-
-    it('warns when no site input is provided', async () => {
-      const command = ToggleBrandClaimsCommand(context);
-      await command.handleExecution([], slackContext);
-
-      expect(slackContext.say.calledWithMatch(/Please provide a valid site base URL or site ID/)).to.be.true;
-      expect(getBrandBySiteStub).to.not.have.been.called;
-    });
-
-    it('warns when the on/off argument is missing or invalid', async () => {
-      const command = ToggleBrandClaimsCommand(context);
-      await command.handleExecution(['acme.com', 'maybe'], slackContext);
-
-      expect(slackContext.say.calledWithMatch(/Please specify `on` or `off`/)).to.be.true;
-      expect(getBrandBySiteStub).to.not.have.been.called;
-    });
-
-    it('informs the user when no site is found', async () => {
-      dataAccessStub.Site.findByBaseURL.resolves(null);
-
-      const command = ToggleBrandClaimsCommand(context);
-      await command.handleExecution(['unknownsite.com', 'on'], slackContext);
-
-      expect(slackContext.say.calledWithMatch(/No site found with base URL/)).to.be.true;
-      expect(getBrandBySiteStub).to.not.have.been.called;
+      expect(slackContext.say.calledWithMatch(/Please provide a brand ID/)).to.be.true;
+      expect(setBrandClaimsEnabledStub).to.not.have.been.called;
     });
 
     it('errors when the postgrest client is unavailable', async () => {
-      dataAccessStub.services.postgrestClient = { from: undefined };
+      context.dataAccess.services.postgrestClient = { from: undefined };
 
-      const command = ToggleBrandClaimsCommand(context);
-      await command.handleExecution(['acme.com', 'on'], slackContext);
+      const command = BrandClaimsCommand(context);
+      await command.execute(`enable-brand-claims ${BRAND_ID}`, slackContext);
 
       expect(slackContext.say.calledWithMatch(/Brand storage is not available/)).to.be.true;
-      expect(getBrandBySiteStub).to.not.have.been.called;
+      expect(setBrandClaimsEnabledStub).to.not.have.been.called;
     });
 
-    it('warns when the site maps to no active brand', async () => {
-      getBrandBySiteStub.resolves(null);
+    it('warns when no brand matches the ID', async () => {
+      setBrandClaimsEnabledStub.resolves(null);
 
-      const command = ToggleBrandClaimsCommand(context);
-      await command.handleExecution(['acme.com', 'on'], slackContext);
+      const command = BrandClaimsCommand(context);
+      await command.execute(`enable-brand-claims ${BRAND_ID}`, slackContext);
 
-      expect(slackContext.say.calledWithMatch(/No active brand is mapped/)).to.be.true;
-      expect(updateBrandStub).to.not.have.been.called;
-    });
-
-    it('reports when the brand update affects no row', async () => {
-      getBrandBySiteStub.resolves(BRAND);
-      updateBrandStub.resolves(null);
-
-      const command = ToggleBrandClaimsCommand(context);
-      await command.handleExecution(['acme.com', 'on'], slackContext);
-
-      expect(slackContext.say.calledWithMatch(/Could not update brand "Acme"/)).to.be.true;
+      expect(slackContext.say.calledWithMatch(/No brand found with ID/)).to.be.true;
     });
 
     it('falls back to a generic updatedBy when no Slack user is present', async () => {
-      getBrandBySiteStub.resolves(BRAND);
-      updateBrandStub.resolves({ id: BRAND.id });
+      setBrandClaimsEnabledStub.resolves(BRAND);
       slackContext.user = undefined;
 
-      const command = ToggleBrandClaimsCommand(context);
-      await command.handleExecution(['acme.com', 'on'], slackContext);
+      const command = BrandClaimsCommand(context);
+      await command.execute(`disable-brand-claims ${BRAND_ID}`, slackContext);
 
-      expect(updateBrandStub.firstCall.args[0].updatedBy).to.equal('slack');
+      expect(setBrandClaimsEnabledStub.firstCall.args[0].updatedBy).to.equal('slack');
     });
 
     it('handles errors during execution', async () => {
-      dataAccessStub.Site.findByBaseURL.rejects(new Error('Test Error'));
+      setBrandClaimsEnabledStub.rejects(new Error('Test Error'));
 
-      const command = ToggleBrandClaimsCommand(context);
-      await command.handleExecution(['acme.com', 'on'], slackContext);
+      const command = BrandClaimsCommand(context);
+      await command.execute(`enable-brand-claims ${BRAND_ID}`, slackContext);
 
       expect(slackContext.say.calledWithMatch(/Something went wrong: Test Error/)).to.be.true;
     });

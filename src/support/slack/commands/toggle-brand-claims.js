@@ -11,76 +11,43 @@
  */
 
 import BaseCommand from './base.js';
-import { getBrandBySite, updateBrand } from '../../brands-storage.js';
+import { setBrandClaimsEnabled } from '../../brands-storage.js';
+import { postErrorMessage } from '../../../utils/slack/base.js';
 
-import {
-  extractURLFromSlackInput,
-  postErrorMessage,
-  postSiteNotFoundMessage,
-} from '../../../utils/slack/base.js';
-
-const PHRASES = ['brand-claims'];
-
-const ON_VALUES = new Set(['on', 'enable', 'enabled', 'true', 'yes']);
-const OFF_VALUES = new Set(['off', 'disable', 'disabled', 'false', 'no']);
+const ENABLE_PHRASE = 'enable-brand-claims';
+const DISABLE_PHRASE = 'disable-brand-claims';
 
 /**
- * Factory function to create the ToggleBrandClaimsCommand object.
- *
- * Enables/disables the Brand Claims scheduling gate for a site's brand. The flag
- * lives on the brand row (`brands.brand_claims_enabled`), so the command resolves
- * the brand for the given site — the same resolution the mystique consumer uses —
- * and flips that brand's row. Enablement is therefore brand-wide (LLMO-5741).
+ * One command, two explicit keywords: `enable-brand-claims {brandId}` and
+ * `disable-brand-claims {brandId}`. Flips the brand-scoped `brand_claims_enabled`
+ * scheduling gate the mystique Brand Claims consumer reads back (LLMO-5741). The
+ * verb is derived from which keyword was used — no on/off argument to get wrong.
  *
  * @param {Object} context - The context object.
- * @returns {Object} The ToggleBrandClaimsCommand object.
+ * @returns {Object} The command object.
  */
-function ToggleBrandClaimsCommand(context) {
+function BrandClaimsCommand(context) {
   const baseCommand = BaseCommand({
-    id: 'toggle-brand-claims',
-    name: 'Toggle Brand Claims',
-    description: 'Enables or disables the Brand Claims scheduling gate for a site\'s brand '
-      + '(brand-scoped; the automated run targets the brand\'s primary domain).',
-    phrases: PHRASES,
-    usageText: `${PHRASES[0]} {site} {on|off}`,
+    id: 'brand-claims',
+    name: 'Brand Claims',
+    description: 'Enables or disables Brand Claims scheduling for a brand (by brand ID).',
+    phrases: [ENABLE_PHRASE, DISABLE_PHRASE],
+    usageText: `${ENABLE_PHRASE} {brandId} | ${DISABLE_PHRASE} {brandId}`,
   });
 
   const { dataAccess, log } = context;
-  const { Site } = dataAccess;
 
-  /**
-   * Validates input, resolves the site's brand, and flips brandClaimsEnabled.
-   *
-   * @param {string[]} args - The arguments ([siteBaseURLOrId, onOff]).
-   * @param {Object} slackContext - The Slack context object.
-   * @param {Function} slackContext.say - The Slack say function.
-   * @returns {Promise} A promise that resolves when the operation is complete.
-   */
-  const handleExecution = async (args, slackContext) => {
+  const execute = async (message, slackContext) => {
     const { say, user } = slackContext;
 
     try {
-      const [siteInput, onOffArg] = args;
+      const trimmed = message.trim();
+      const enabled = trimmed.startsWith(ENABLE_PHRASE);
+      const phrase = enabled ? ENABLE_PHRASE : DISABLE_PHRASE;
+      const brandId = trimmed.slice(phrase.length).trim().split(/\s+/)[0];
 
-      if (!siteInput) {
-        await say(':warning: Please provide a valid site base URL or site ID.');
-        return;
-      }
-
-      const flagArg = (onOffArg || '').trim().toLowerCase();
-      if (!ON_VALUES.has(flagArg) && !OFF_VALUES.has(flagArg)) {
-        await say(`:warning: Please specify \`on\` or \`off\`. ${baseCommand.usage()}`);
-        return;
-      }
-      const brandClaimsEnabled = ON_VALUES.has(flagArg);
-
-      const baseURL = extractURLFromSlackInput(siteInput);
-      const site = baseURL
-        ? await Site.findByBaseURL(baseURL)
-        : await Site.findById(siteInput);
-
-      if (!site) {
-        await postSiteNotFoundMessage(say, siteInput);
+      if (!brandId) {
+        await say(`:warning: Please provide a brand ID. ${baseCommand.usage()}`);
         return;
       }
 
@@ -90,32 +57,19 @@ function ToggleBrandClaimsCommand(context) {
         return;
       }
 
-      const organizationId = site.getOrganizationId();
-      const brand = await getBrandBySite(organizationId, site.getId(), postgrestClient, log);
-
-      if (!brand) {
-        await say(`:warning: No active brand is mapped to '${site.getBaseURL()}' as its primary site. `
-          + 'Brand claims are brand-scoped, so there is nothing to toggle for this site.');
-        return;
-      }
-
-      const updated = await updateBrand({
-        organizationId,
-        brandId: brand.id,
-        updates: { brandClaimsEnabled },
+      const brand = await setBrandClaimsEnabled({
+        brandId,
+        enabled,
         postgrestClient,
         updatedBy: user ? `slack:${user}` : 'slack',
       });
 
-      if (!updated) {
-        await say(`:x: Could not update brand "${brand.name}" (${brand.id}) — it may have been deleted.`);
+      if (!brand) {
+        await say(`:warning: No brand found with ID '${brandId}'.`);
         return;
       }
 
-      const verb = brandClaimsEnabled ? 'enabled' : 'disabled';
-      await say(`:white_check_mark: Brand claims *${verb}* for brand "${brand.name}" (primary: ${brand.baseUrl || site.getBaseURL()}).\n\n`
-        + '_This flag is brand-scoped — it applies to every site that maps to this brand, '
-        + 'and the automated run targets the brand\'s primary domain._');
+      await say(`:white_check_mark: Brand claims *${enabled ? 'enabled' : 'disabled'}* for brand "${brand.name}" (${brand.id}).`);
     } catch (error) {
       log.error(error);
       await postErrorMessage(say, error);
@@ -126,8 +80,8 @@ function ToggleBrandClaimsCommand(context) {
 
   return {
     ...baseCommand,
-    handleExecution,
+    execute,
   };
 }
 
-export default ToggleBrandClaimsCommand;
+export default BrandClaimsCommand;
