@@ -23,7 +23,7 @@ import {
   ensureServerOwnedValue,
   resolveTypeValueInjection,
   resolveIntentValueInjection,
-  resolveClosedValueInjection,
+  resolveServerOwnedValueInjection,
   findTagsInTree,
   assertParentWithinDimension,
 } from '../../../src/support/serenity/tag-tree.js';
@@ -354,6 +354,10 @@ describe('serenity tag-tree', () => {
       const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
       // The `origin` key resolves to the real `origin` root, not the legacy `source`.
       expect(roots.get('origin')).to.equal('root-origin');
+      // With `origin` already present, the sibling `source` root is resolved as the
+      // producing-system root (source-dimension.md) — the five-root split-brain path,
+      // distinct from the authorship `origin` above and never conflated with it.
+      expect(roots.get('source')).to.equal('root-source');
       // Nothing was created and the orphan `source` was not touched.
       expect(transport.createProjectTags).to.not.have.been.called;
       // Performance contract: finding `origin` short-circuits before any legacy
@@ -451,6 +455,9 @@ describe('serenity tag-tree', () => {
       expect(values.get('type')?.get('branded')).to.equal(TAG_IDS.typeBranded);
       // The open `category` root is provisioned but its children are customer content.
       expect(values.has('category')).to.equal(false);
+      // The open producing-system `source` dimension is likewise never pre-provisioned
+      // — its values appear on first use, like categories.
+      expect(values.has('source')).to.equal(false);
       expect(transport.createProjectTags).to.not.have.been.called;
     });
   });
@@ -504,13 +511,13 @@ describe('serenity tag-tree', () => {
   // not here — this resolver only returns the strip SET (`valueTagIds`), scoped to
   // the dimension root. So these tests pin that the returned set is root-scoped;
   // the strip behaviour itself is covered by the injector tests in prompts.test.js.
-  describe('resolveClosedValueInjection', () => {
+  describe('resolveServerOwnedValueInjection', () => {
     it('resolves an `origin` value id plus EVERY id under the origin root (strip set)', async () => {
       const transport = {
         listProjectTags: makeListProjectTagsStub(),
         createProjectTags: sinon.stub(),
       };
-      const res = await resolveClosedValueInjection(transport, WS, PROJECT, DIMENSION.ORIGIN, 'human', fakeLog());
+      const res = await resolveServerOwnedValueInjection(transport, WS, PROJECT, DIMENSION.ORIGIN, 'human', fakeLog());
       expect(res.computedId).to.equal(TAG_IDS.originHuman);
       // Strip set is every id under the ORIGIN root — the two closed values only.
       expect(res.valueTagIds).to.have.members([TAG_IDS.originAi, TAG_IDS.originHuman]);
@@ -529,7 +536,7 @@ describe('serenity tag-tree', () => {
         listProjectTags: makeListProjectTagsStub(),
         createProjectTags: sinon.stub(),
       };
-      const res = await resolveClosedValueInjection(transport, WS, PROJECT, DIMENSION.ORIGIN, 'ai', fakeLog());
+      const res = await resolveServerOwnedValueInjection(transport, WS, PROJECT, DIMENSION.ORIGIN, 'ai', fakeLog());
       expect(res.computedId).to.equal(TAG_IDS.originAi);
       expect(res.valueTagIds).to.have.members([TAG_IDS.originAi, TAG_IDS.originHuman]);
       expect(transport.createProjectTags).to.not.have.been.called;
@@ -578,13 +585,13 @@ describe('serenity tag-tree', () => {
       expect(createProjectTags).to.not.have.been.called;
     });
 
-    it('resolveClosedValueInjection(source) — the injector path — throws and creates nothing', async () => {
+    it('resolveServerOwnedValueInjection(source) — the injector path — throws and creates nothing', async () => {
       const createProjectTags = sinon.stub();
       const transport = {
         listProjectTags: makeListProjectTagsStub(midRenameLevels()),
         createProjectTags,
       };
-      const err = await resolveClosedValueInjection(transport, WS, PROJECT, 'source', 'config', fakeLog())
+      const err = await resolveServerOwnedValueInjection(transport, WS, PROJECT, 'source', 'config', fakeLog())
         .then(() => null, (e) => e);
       expect(err).to.be.an('error');
       expect(err.status).to.equal(502);
@@ -640,7 +647,7 @@ describe('serenity tag-tree', () => {
 
   // Twin of the `resolveTypeValueInjection` block above for the `intent` closed
   // dimension (serenity-docs#32). Both are thin wrappers over
-  // `resolveClosedValueInjection`; this pins the intent-specific return key
+  // `resolveServerOwnedValueInjection`; this pins the intent-specific return key
   // (`intentTagIds`) and the fail-closed contract independently of the type twin.
   describe('resolveIntentValueInjection', () => {
     it('returns the wanted value id plus EVERY id under the intent root', async () => {
