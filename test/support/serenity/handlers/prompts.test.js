@@ -681,6 +681,26 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       expect(result.created[0].tagIds).to.not.include(TAG_IDS.sourceSemrush);
     });
 
+    it('denied caller: body opts in but allowAssertSource:false keeps source closed (config)', async () => {
+      const project = makeProject({ semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en' });
+      const transport = makeCreateTransport();
+
+      const dataAccess = makeDataAccess([project]);
+      // The body sets both assertSource AND a real per-item source, but the trusted
+      // controller did NOT grant it (allowAssertSource:false). The handler must ignore
+      // the source and stay `config` — so a caller reaching handleCreatePrompts with a
+      // bare body cannot open the producer surface (the capability gate is not bypassable).
+      const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+        assertSource: true,
+        prompts: [{
+          text: 'hello', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-cat-1'], source: 'semrush',
+        }],
+      }, fakeLog(), undefined, undefined, undefined, { allowAssertSource: false });
+
+      expect(result.created[0].tagIds).to.include(TAG_IDS.sourceConfig);
+      expect(result.created[0].tagIds).to.not.include(TAG_IDS.sourceSemrush);
+    });
+
     it('assertSource with an item that carries NO source falls back to the config default', async () => {
       const project = makeProject({ semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en' });
       const transport = makeCreateTransport();
