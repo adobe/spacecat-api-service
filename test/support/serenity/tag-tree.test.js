@@ -301,13 +301,20 @@ describe('serenity tag-tree', () => {
           return Promise.resolve(names.map((n) => ({ id: `made-${n}`, name: n })));
         }),
       };
-      const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
+      const log = fakeLog();
+      const roots = await ensureDimensionRoots(transport, WS, PROJECT, log);
       // `origin` is minted fresh — never resolved to the physical `source` root.
       expect(created).to.deep.equal(['origin']);
       expect(roots.get('origin')).to.equal('made-origin');
-      // Strict resolution costs a single root-level read: no child-level probe of the
-      // legacy `source` root (the removed guard's read is gone).
-      expect(transport.listProjectTags).to.have.callCount(1);
+      // The other three roots resolve to their existing ids — nothing else is created.
+      expect(roots.get('category')).to.equal('root-category');
+      expect(roots.get('intent')).to.equal('root-intent');
+      expect(roots.get('type')).to.equal('root-type');
+      // Minting `origin` beside a still-present legacy `source` root trips the
+      // reshape-missed guardrail: it re-reads the root level once (hence two reads) and
+      // warns — surfacing the stale project without re-introducing any tolerance.
+      expect(transport.listProjectTags).to.have.callCount(2);
+      expect(log.warn).to.have.been.calledWithMatch(/reshape may have missed/);
     });
   });
 

@@ -211,6 +211,14 @@ export async function ensureChildren(
 }
 
 /**
+ * The pre-rename authorship root name. The rename is complete and this module no
+ * longer RESOLVES it (WP-O6 removed the tolerant fallback); it is retained only for
+ * the observability guardrail in {@link ensureDimensionRoots}, which warns when a
+ * project still carries it — a signal the data reshape has not reached that project.
+ */
+const LEGACY_SOURCE_ROOT_NAME = 'source';
+
+/**
  * Resolves the four dimension roots, creating any that a project is missing.
  * Older projects predate this taxonomy entirely, so this is the seam that brings
  * them forward on first touch.
@@ -234,7 +242,7 @@ export async function ensureChildren(
  * @returns {Promise<Map<string, string>>} root name → tag id, in root order.
  */
 export async function ensureDimensionRoots(transport, semrushWorkspaceId, projectId, log) {
-  const { byName } = await ensureChildren(
+  const { byName, createdNames } = await ensureChildren(
     transport,
     semrushWorkspaceId,
     projectId,
@@ -242,6 +250,22 @@ export async function ensureDimensionRoots(transport, semrushWorkspaceId, projec
     DIMENSION_ROOT_NAMES,
     log,
   );
+
+  // Observability guardrail (no tolerance, no behavior change): freshly minting `origin`
+  // while a legacy `source` root still sits at this level means the data reshape may have
+  // missed this project (see the deploy-ordering note above) — surface it rather than
+  // orphan the `source` values silently. The re-read is on the rare origin-create path
+  // only, never the common all-roots-exist path, so steady state costs nothing.
+  if (createdNames.includes(DIMENSION.ORIGIN)) {
+    const level = await indexLevelByName(transport, semrushWorkspaceId, projectId, '', log);
+    if (level.has(LEGACY_SOURCE_ROOT_NAME)) {
+      log?.warn?.(
+        'ensureDimensionRoots: minted a fresh `origin` root while a legacy `source` root is '
+        + 'still present — the data reshape may have missed this project',
+        { semrushWorkspaceId, projectId },
+      );
+    }
+  }
 
   // Return the roots in canonical order.
   const roots = new Map();
