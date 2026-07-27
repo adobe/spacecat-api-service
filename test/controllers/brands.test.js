@@ -6770,10 +6770,11 @@ describe('Brands Controller', () => {
       );
     });
 
-    it('LLMO-6545: includes both semrushSyncPending and semrushRejectedAliases when alias sync collected rejections before a later sync throws', async () => {
-      // URL sync succeeds, alias sync collects rejected aliases into rejectedAliases[],
-      // then competitor sync throws. The catch must preserve the partial alias rejections
-      // so the UI can still warn the operator which aliases were refused by Semrush.
+    it('LLMO-6545: includes both semrushSyncPending and semrushRejectedAliases when competitor sync collected rejections before alias sync throws', async () => {
+      // Execution order: competitors → aliases. Competitor sync resolves with
+      // rejected entries (pushed into rejectedAliases[]); alias sync then throws.
+      // The catch must preserve the partial rejections so the UI can still warn
+      // the operator which aliases were refused by Semrush.
       const rejected = [{ name: 'alias-a' }, { name: 'alias-b' }];
       const updated = {
         id: BRAND_UUID,
@@ -6785,15 +6786,15 @@ describe('Brands Controller', () => {
         brandAliases: [{ name: 'alias-a' }, { name: 'alias-c' }],
       };
       const updateBrandStub = sinon.stub().resolves(updated);
-      // URL sync succeeds; alias sync resolves with rejected aliases; competitor sync throws.
-      const aliasSyncStub = sinon.stub().resolves({ rejected });
-      const competitorSyncStub = sinon.stub().rejects(
+      // Competitor sync succeeds with rejections; alias sync throws.
+      const competitorSyncStub = sinon.stub().resolves({ rejected });
+      const aliasSyncStub = sinon.stub().rejects(
         Object.assign(new Error('Semrush 503'), { status: 503 }),
       );
       const controller = await buildUpdateController({
         updateBrand: updateBrandStub,
-        syncBrandAliasesAcrossMarkets: aliasSyncStub,
         syncCompetitorBenchmarksAcrossMarkets: competitorSyncStub,
+        syncBrandAliasesAcrossMarkets: aliasSyncStub,
         createSerenityTransport: sinon.stub().returns({
           name: 't',
           listProjects: sinon.stub().resolves({ items: [] }),
