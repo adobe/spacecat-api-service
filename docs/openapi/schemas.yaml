@@ -12026,11 +12026,15 @@ SerenityKpiHeadline:
       maximum: 1
       description: The metric's value for the current (requested) period, a 0-1 fraction.
     comparisonValue:
-      type: number
+      type: [number, 'null']
       format: double
       minimum: 0
       maximum: 1
-      description: The metric's value for the immediately preceding period of equal length, a 0-1 fraction.
+      description: |
+        The metric's value for the immediately preceding period of equal length, a 0-1
+        fraction. `null` when Semrush has no data for that period (e.g. it predates data
+        collection) — distinct from a real 0%; consumers should render this as "no
+        comparison available" rather than computing a delta against 0.
 SerenityKpiHeadlines:
   type: object
   description: |

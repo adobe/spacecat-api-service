@@ -866,8 +866,8 @@ export function createElementsService(transport, log) {
      * @param {string} [params.projectId] - Single Semrush project UUID (one region).
      * @param {string[]} [params.projectIds] - All the brand's project UUIDs (aggregate).
      * @returns {Promise<{
-     *   shareOfVoice: {value: number, comparisonValue: number},
-     *   brandVisibility: {value: number, comparisonValue: number},
+     *   shareOfVoice: {value: number, comparisonValue: number | null},
+     *   brandVisibility: {value: number, comparisonValue: number | null},
      * }>}
      */
     async getKpiHeadlines(workspaceId, {
@@ -910,9 +910,11 @@ export function createElementsService(transport, log) {
      *
      * A brand with no registered URLs has nothing to scope
      * `KPI_SOURCE_VISIBILITY` by (an empty `CBF_brand_urls` OR-filter is
-     * unscoped/undefined behavior upstream) — returns a zeroed result rather
-     * than issuing that call, mirroring the empty-projects guards elsewhere in
-     * this service.
+     * unscoped/undefined behavior upstream) — returns `{ value: 0, comparisonValue: null }`
+     * rather than issuing that call (no real measurement exists either period,
+     * so `comparisonValue` stays `null` — same "no data" convention as
+     * {@link transformKpiHeadlineResponse}), mirroring the empty-projects
+     * guards elsewhere in this service.
      *
      * @param {string} workspaceId - Semrush workspace UUID.
      * @param {object} params
@@ -921,7 +923,7 @@ export function createElementsService(transport, log) {
      * @param {string} params.startDate / params.endDate - Required YYYY-MM-DD (main period).
      * @param {string} [params.projectId] - Single Semrush project UUID (one region).
      * @param {string[]} [params.projectIds] - All the brand's project UUIDs (aggregate).
-     * @returns {Promise<{value: number, comparisonValue: number}>}
+     * @returns {Promise<{value: number, comparisonValue: number | null}>}
      */
     async getSourceVisibilityHeadline(workspaceId, {
       brandName, model, platform, startDate, endDate, projectId, projectIds,
@@ -939,7 +941,7 @@ export function createElementsService(transport, log) {
       );
       const brandUrls = transformBrandUrlsResponse(brandUrlsRaw);
       if (brandUrls.length === 0) {
-        return { value: 0, comparisonValue: 0 };
+        return { value: 0, comparisonValue: null };
       }
       const raw = await transport.fetchElement(
         workspaceId,

@@ -1626,8 +1626,8 @@ export default function ElementsController(context, log, env) {
           .filter(hasText);
         if (projectIds.length === 0) {
           return cachedOk({
-            shareOfVoice: { value: 0, comparisonValue: 0 },
-            brandVisibility: { value: 0, comparisonValue: 0 },
+            shareOfVoice: { value: 0, comparisonValue: null },
+            brandVisibility: { value: 0, comparisonValue: null },
           });
         }
       }
@@ -1718,7 +1718,7 @@ export default function ElementsController(context, log, env) {
           .map((p) => p.semrushProjectId)
           .filter(hasText);
         if (projectIds.length === 0) {
-          return cachedOk({ value: 0, comparisonValue: 0 });
+          return cachedOk({ value: 0, comparisonValue: null });
         }
       }
 

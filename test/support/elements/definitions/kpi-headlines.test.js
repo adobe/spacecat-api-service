@@ -193,20 +193,45 @@ describe('kpi-headlines definitions', () => {
       expect(transformKpiHeadlineResponse(raw).comparisonValue).to.equal(0.3927);
     });
 
-    it('defaults to 0 when mainValue/secondaryValue are missing', () => {
-      const zeroed = { value: 0, comparisonValue: 0 };
-      expect(transformKpiHeadlineResponse({ blocks: {} })).to.deep.equal(zeroed);
-      expect(transformKpiHeadlineResponse(undefined)).to.deep.equal(zeroed);
+    it('defaults value to 0 and comparisonValue to null when mainValue/secondaryValue are missing', () => {
+      const defaults = { value: 0, comparisonValue: null };
+      expect(transformKpiHeadlineResponse({ blocks: {} })).to.deep.equal(defaults);
+      expect(transformKpiHeadlineResponse(undefined)).to.deep.equal(defaults);
     });
 
-    it('defaults to 0 for a non-numeric mainValue/secondaryValue', () => {
+    it('defaults value to 0 and comparisonValue to null for a non-numeric mainValue/secondaryValue', () => {
       const raw = {
         blocks: {
           mainValue: [{ mainValue: 'not-a-number' }],
-          secondaryValue: [{ period: 'previous', secondaryValue: null }],
+          secondaryValue: [{ period: 'previous', secondaryValue: 'not-a-number' }],
         },
       };
-      expect(transformKpiHeadlineResponse(raw)).to.deep.equal({ value: 0, comparisonValue: 0 });
+      expect(transformKpiHeadlineResponse(raw)).to.deep.equal({ value: 0, comparisonValue: null });
+    });
+
+    it('returns comparisonValue: null (not 0) when Semrush has no data for the comparison period', () => {
+      const raw = {
+        blocks: {
+          mainValue: [{ mainValue: 0.3726 }],
+          secondaryValue: [
+            { period: 'current', secondaryValue: null },
+            { period: 'previous', secondaryValue: null },
+          ],
+        },
+      };
+      expect(transformKpiHeadlineResponse(raw))
+        .to.deep.equal({ value: 0.3726, comparisonValue: null });
+    });
+
+    it('returns comparisonValue: null when secondaryValue has no "previous" entry (find() miss)', () => {
+      const raw = {
+        blocks: {
+          mainValue: [{ mainValue: 0.3726 }],
+          secondaryValue: [{ period: 'current', secondaryValue: 0.3927 }],
+        },
+      };
+      expect(transformKpiHeadlineResponse(raw))
+        .to.deep.equal({ value: 0.3726, comparisonValue: null });
     });
   });
 });
