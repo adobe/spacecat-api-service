@@ -75,6 +75,26 @@ describe('AuditPolicyDto', () => {
     expect(dto.updatedAt).to.equal('2026-01-02T00:00:00.654Z');
   });
 
+  it('toJSON throws on an unparseable timestamp instead of passing it through (fail loud on a corrupted row, not a silent passthrough)', () => {
+    const row = {
+      site_id: SITE_ID,
+      version: 5,
+      budget: 4000,
+      strategy_name: 'tiered',
+      exclusion_globs: [],
+      manual_urls: [],
+      scope_config: {},
+      lifecycle_overrides: {},
+      created_by: 'a',
+      updated_by: 'b',
+      reason: 'r',
+      note: null,
+      created_at: 'not-a-date',
+      updated_at: '2026-01-02T00:00:00Z',
+    };
+    expect(() => AuditPolicyDto.toJSON(row)).to.throw(RangeError);
+  });
+
   it('defaultDocument returns version 0 baseline when no row exists', () => {
     const dto = AuditPolicyDto.defaultDocument(SITE_ID);
     expect(dto).to.include({

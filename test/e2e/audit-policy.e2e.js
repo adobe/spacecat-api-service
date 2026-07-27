@@ -159,8 +159,15 @@ describe('Audit Policy - E2E Tests', function auditPolicySuite() {
       expect(items).to.be.an('array').with.length.greaterThan(0);
       // The revision row for this write can trail the policy row by a beat (observed against
       // real dev: the policy read above was already at addedPolicy.version, but the newest
-      // revision row can still reflect the prior version) - accept either, but not older.
+      // revision row can still reflect the prior version) - accept either, but not older. A
+      // version number alone is weak proof (any plausible value passes), so also check the
+      // row's own content agrees with whichever version it actually reports.
       expect(items[0].version).to.be.within(policyBefore.version, addedPolicy.version);
+      if (items[0].version === addedPolicy.version) {
+        expect(items[0].exclusionGlobs).to.include(TEST_GLOB);
+      } else {
+        expect(items[0].exclusionGlobs).to.not.include(TEST_GLOB);
+      }
       expectValidISODate(items[0].effectiveAt);
 
       const removeResponse = await removeExclusions([TEST_GLOB]);

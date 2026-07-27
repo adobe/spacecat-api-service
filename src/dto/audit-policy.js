@@ -15,6 +15,9 @@ const DEFAULTS = { budget: 5000, strategyName: 'tiered' };
 // Postgres returns timestamptz columns as raw text (microsecond precision, numeric offset,
 // e.g. "2026-01-01T00:00:00.123456+00:00") - normalize to the Z-suffixed, millisecond-precision
 // ISO8601 every other resource in this API returns (via the shared ORM's Date.toISOString()).
+// Deliberately throws (RangeError) rather than passing an unparseable value through: a real
+// timestamptz column is never non-date text, so a throw here means the row itself is
+// corrupted - surface that loudly instead of silently returning garbage to a client.
 const toISO = (value) => (value == null ? value : new Date(value).toISOString());
 
 export const AuditPolicyDto = {

@@ -19,12 +19,15 @@
 # section. (The optional LOGIN section further down calls POST /auth/login
 # directly - only needed if you want to exercise that endpoint itself.)
 #
-# Environment: Update these variables for your environment
-# - dev: https://spacecat-services--api-service.aem-dev.hlx.page
-# - stage: https://spacecat-services--api-service.aem-stage.hlx.page
-# - prod: https://spacecat-services--api-service.aem.hlx.page
+# Environment: Update this variable for your environment. Use the same
+# Fastly-fronted gateway domain the e2e suite and Insomnia generator use
+# (not the raw Helix *.hlx.page deployment domain, which bypasses Fastly's
+# routing/CORS/HSTS/auth-gateway VCL - see this repo's CLAUDE.md "Fastly"
+# section) so behavior matches what those other tools actually exercise.
+# - dev:  https://spacecat.experiencecloud.live/api/ci
+# - prod: https://spacecat.experiencecloud.live/api/v1
 
-@baseUrl = https://spacecat-services--api-service.aem-dev.hlx.page
+@baseUrl = https://spacecat.experiencecloud.live/api/ci
 
 # mysticat auth token -e dev
 @sessionToken = YOUR_SESSION_TOKEN_HERE
