@@ -1,3 +1,10 @@
+## [1.692.1](https://github.com/adobe/spacecat-api-service/compare/v1.692.0...v1.692.1) (2026-07-27)
+
+
+### Bug Fixes
+
+* bypass auto_fix subService gate for non-ASO products (LLMO-6553) ([#2906](https://github.com/adobe/spacecat-api-service/issues/2906)) ([5048003](https://github.com/adobe/spacecat-api-service/commit/5048003ea3f893e3907188ab5cf1cb8b5409443f))
+
 # [1.692.0](https://github.com/adobe/spacecat-api-service/compare/v1.691.0...v1.692.0) (2026-07-27)
 
 
