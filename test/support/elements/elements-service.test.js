@@ -666,7 +666,10 @@ describe('createElementsService', () => {
   });
 
   const kpiLineChartResponse = (mainValue, secondaryValue) => ({
-    blocks: { mainValue: [{ mainValue }], secondaryValue: [{ secondaryValue }] },
+    blocks: {
+      mainValue: [{ mainValue }],
+      secondaryValue: [{ period: 'previous', secondaryValue }],
+    },
   });
 
   describe('getKpiHeadlines', () => {
@@ -705,6 +708,14 @@ describe('createElementsService', () => {
       const projectFilter = payload.filters.advanced.filters
         .find((f) => f.filters?.some((inner) => inner.col === 'CBF_project'));
       expect(projectFilter.filters).to.deep.equal([{ op: 'eq', val: 'proj-single', col: 'CBF_project' }]);
+    });
+
+    it('propagates a rejected upstream call rather than swallowing it', async () => {
+      const upstreamError = new Error('Elements API POST failed: 502');
+      transport.fetchElement.rejects(upstreamError);
+      await expect(service.getKpiHeadlines('ws-1', {
+        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24',
+      })).to.be.rejectedWith(upstreamError);
     });
   });
 
@@ -770,6 +781,27 @@ describe('createElementsService', () => {
       });
       expect(result).to.deep.equal({ value: 0, comparisonValue: 0 });
       expect(transport.fetchElement).to.have.been.calledOnce;
+    });
+
+    it('propagates a rejected brand-URL-list lookup (first hop) rather than swallowing it', async () => {
+      const upstreamError = new Error('Elements API POST failed: 504');
+      transport.fetchElement.rejects(upstreamError);
+      await expect(service.getSourceVisibilityHeadline('ws-1', {
+        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24',
+      })).to.be.rejectedWith(upstreamError);
+    });
+
+    it('propagates a rejected KPI element call (second hop) after the URL list succeeds', async () => {
+      const upstreamError = new Error('Elements API POST failed: 502');
+      transport.fetchElement.callsFake(async (workspaceId, elementId) => {
+        if (elementId === ELEMENT_IDS.BRAND_URLS) {
+          return { blocks: { value: [{ value: 'lovesac.com' }] } };
+        }
+        throw upstreamError;
+      });
+      await expect(service.getSourceVisibilityHeadline('ws-1', {
+        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24',
+      })).to.be.rejectedWith(upstreamError);
     });
   });
 });
