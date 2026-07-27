@@ -1945,11 +1945,23 @@ function BrandsController(ctx, log, env) {
         if (hasText(brandState?.semrushSubWorkspaceId)) {
           // Semrush brand: market/project domains come from the project listing.
           // List once and stash for the post-commit re-sync (see prefetchedProjects).
-          const imsToken = await resolveSemrushImsToken(context, log, 'brands');
-          const transport = createSerenityTransport({ env: context.env, imsToken });
-          prefetchedProjects = await resolveProjects(transport, brandState.semrushSubWorkspaceId);
+          // Best-effort: if the listing fails (e.g. user not provisioned in Semrush),
+          // degrade to brand-URL-only reserved set and log — the self-reference guard
+          // is a data-quality nicety and must not block the competitor write entirely.
+          try {
+            const imsToken = await resolveSemrushImsToken(context, log, 'brands');
+            const transport = createSerenityTransport({ env: context.env, imsToken });
+            prefetchedProjects = await resolveProjects(transport, brandState.semrushSubWorkspaceId);
+          } catch (guardError) {
+            log.warn('serenity: competitor-guard project listing failed; degrading to brand-URL-only reserved set', {
+              brandId,
+              semrushSubWorkspaceId: brandState.semrushSubWorkspaceId,
+              status: guardError?.status,
+              message: guardError?.message,
+            });
+          }
           reservedDomains = buildReservedDomains(
-            prefetchedProjects.map((p) => p?.domain),
+            (prefetchedProjects ?? []).map((p) => p?.domain),
             brandOwnUrls,
           );
         } else {
@@ -1979,17 +1991,16 @@ function BrandsController(ctx, log, env) {
         return notFound(`Brand not found: ${brandId}`);
       }
 
-      // Brand-level Semrush re-sync: when an edit changes URL sources or
-      // competitors and the brand is in sub-workspace mode, propagate the change
-      // onto every market/project (region-filtered per market). Skipped for
-      // flat-mode brands and unrelated edits. Hard-fail so the brand never drifts
-      // out of sync silently. One transport for both syncs.
+      // Brand-level Semrush re-sync: when an edit changes URL sources, competitors
+      // or aliases and the brand is in sub-workspace mode, propagate the change onto
+      // every market/project (region-filtered per market). Skipped for flat-mode
+      // brands and unrelated edits. One transport shared across all three syncs.
       //
-      // NOTE (intentional asymmetry vs create): the SAME URL/competitor
-      // propagation is BEST-EFFORT on the create path (handleCreateMarket-
-      // Subworkspace swallows a benchmark hiccup so it cannot strand a
-      // half-provisioned brand) but HARD-FAIL here on edit — an already-live
-      // brand must not silently diverge from Semrush after a row commit.
+      // Best-effort, matching the create path: the brand row is already committed
+      // when this block runs, so a re-sync failure must not surface as a 5xx on an
+      // edit that did persist. The response carries semrushSyncPending:true so the
+      // divergence is visible to the caller, and the error log below carries the
+      // context needed to enumerate and recover drifted brands.
       const urlsTouched = updates.urls !== undefined
         || updates.socialAccounts !== undefined
         || updates.earnedContent !== undefined;
@@ -2063,8 +2074,12 @@ function BrandsController(ctx, log, env) {
         } catch (syncError) {
           // LLMO-6545: Accept drift — DB is already committed so hard-failing returns
           // a 500 while the edit actually succeeded. Log all context so the divergence
-          // is diagnosable via Splunk and recoverable via --reconcile migration later.
-          log.error('serenity: brand-edit Semrush re-sync failed after row commit', {
+          // is diagnosable and recoverable via --reconcile migration later.
+          // 401/403 = permanent (user not provisioned in Semrush — needs manual action).
+          // Other status / no status = transient (network, timeout, upstream hiccup).
+          const isPermanent = syncError?.status === 401 || syncError?.status === 403;
+          const logFn = isPermanent ? log.warn : log.error;
+          logFn('serenity: brand-edit Semrush re-sync failed after row commit', {
             brandId,
             semrushSubWorkspaceId: updated.semrushSubWorkspaceId,
             urlsTouched,
@@ -2073,6 +2088,7 @@ function BrandsController(ctx, log, env) {
             status: syncError?.status,
             message: syncError?.message,
             stack: syncError?.stack,
+            permanent: isPermanent,
           });
           // Preserve any partial rejectedAliases collected before the throw so
           // the UI can still warn about aliases that were refused by Semrush.

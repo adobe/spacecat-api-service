@@ -6734,9 +6734,9 @@ describe('Brands Controller', () => {
     });
 
     it('LLMO-6545: returns 200 with semrushSyncPending:true when Semrush re-sync fails after DB commit', async () => {
-      // DB write succeeds; Semrush sync throws. Before LLMO-6545 this re-threw
-      // the error (500). After the fix it soft-fails: returns 200 with the
-      // committed row + semrushSyncPending flag, and logs for later recovery.
+      // Invariant: DB row is committed before the re-sync block runs. A sync
+      // failure must not surface as a 5xx on an edit that persisted. The response
+      // carries semrushSyncPending:true and the error is logged for recovery.
       const updated = {
         id: BRAND_UUID,
         semrushSubWorkspaceId: 'ws-9',
@@ -7282,6 +7282,62 @@ describe('Brands Controller', () => {
         // No rejected aliases accumulated (aliasResult?.rejected ?? [] → []), so
         // the response omits the semrushRejectedAliases key entirely.
         expect(body.semrushRejectedAliases).to.equal(undefined);
+      });
+
+      it('degrades to brand-URL-only reserved set when the pre-write project listing fails (LLMO-6545)', async () => {
+        // createErrorResponse is still reachable on the pre-write guard path and
+        // must redact internal gateway URLs. This test also verifies that a
+        // SerenityTransportError on the pre-write listing degrades gracefully
+        // (writes proceed, self-ref guard uses brand URLs only) rather than
+        // hard-failing before the DB write.
+        const leakUrl = 'https://gw.internal/enterprise/workspaces/ws-7/projects';
+        const updated = {
+          id: BRAND_UUID,
+          semrushSubWorkspaceId: 'ws-7',
+          competitors: [{ name: 'Rival', url: 'https://rival.com' }],
+          urls: [],
+          socialAccounts: [],
+          earnedContent: [],
+        };
+        const updateBrandStub = sinon.stub().resolves(updated);
+        const getBrandByIdStub = sinon.stub().resolves({
+          id: BRAND_UUID,
+          baseUrl: 'https://acme.com',
+          urls: [],
+          semrushSubWorkspaceId: 'ws-7',
+        });
+        // Pre-write listing fails with a gateway error — must not block the write.
+        const listProjectsStub = sinon.stub().rejects(
+          new SerenityTransportError(502, `GET ${leakUrl} failed: 502`, {}),
+        );
+        const controller = await buildUpdateController({
+          updateBrand: updateBrandStub,
+          getBrandById: getBrandByIdStub,
+          createSerenityTransport: sinon.stub().returns({
+            name: 't', listProjects: listProjectsStub,
+          }),
+        });
+
+        const response = await controller.updateBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: { competitors: [{ name: 'Rival', url: 'https://rival.com' }] },
+          dataAccess: mockDataAccess,
+          pathInfo: { headers: { authorization: 'Bearer tok' } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        // Write must succeed despite the listing failure.
+        expect(response.status).to.equal(200);
+        expect(updateBrandStub).to.have.been.calledOnce;
+        // Guard degraded — warn logged.
+        expect(loggerStub.warn).to.have.been.calledWithMatch(
+          'serenity: competitor-guard project listing failed',
+        );
+        // Internal gateway URL must not leak to the client via body or headers.
+        const body = await response.json();
+        expect(JSON.stringify(body)).to.not.contain('gw.internal');
+        expect(response.headers.get('x-error') || '').to.not.contain('gw.internal');
       });
     });
   });

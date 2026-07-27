@@ -171,9 +171,11 @@ v2-brand-for-org:
     responses:
       '200':
         description: |
-          Brand updated successfully. For a sub-workspace brand whose edit changed
-          aliases/competitors, the body may include `semrushRejectedAliases` listing
-          per-market aliases Semrush refused during the re-sync.
+          Brand updated successfully. For a sub-workspace brand the body may include:
+          - `semrushSyncPending: true` when the row persisted but the Semrush re-sync
+            failed (Semrush unavailable or user not provisioned).
+          - `semrushRejectedAliases` listing per-market aliases Semrush refused during
+            an otherwise successful re-sync.
         content:
           application/json:
             schema:

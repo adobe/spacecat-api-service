@@ -7796,14 +7796,23 @@ V2Brand:
 
 V2BrandUpdateResponse:
   description: >-
-    A brand (as returned by GET) plus, when the edit re-synced aliases/competitors
-    to a sub-workspace brand's Semrush markets and Semrush refused some aliases,
-    the `semrushRejectedAliases` set. The field is omitted when nothing was
-    rejected (or the brand is flat-mode).
+    A brand (as returned by GET) plus optional fields when a sub-workspace brand's
+    Semrush re-sync produced notable results. `semrushSyncPending` is set when the
+    row was committed but the re-sync could not be completed (Semrush unavailable or
+    user not provisioned) — the edit persisted and will be reconciled later.
+    `semrushRejectedAliases` is set when Semrush refused some aliases during an
+    otherwise successful re-sync.
   allOf:
     - $ref: '#/V2Brand'
     - type: object
       properties:
+        semrushSyncPending:
+          type: boolean
+          description: >-
+            Present and `true` when the brand row was committed but the Semrush
+            re-sync failed (transient upstream error or user not provisioned in
+            Semrush). The edit is persisted; Semrush will be reconciled via
+            `--reconcile` migration once the underlying issue is resolved.
         semrushRejectedAliases:
           type: array
           description: >-
