@@ -75,12 +75,15 @@ function expectMappingDto(m) {
  * validation and the active-duplicate → upsert (overwrite) semantics.
  *
  * Persona split: **writes** (POST / PATCH / DELETE) use `facsManager` — a
- * non-admin, org-wide FACS `can_manage_users` holder — because internal admins
- * are blocked from mutating state-layer bindings (`blockInternalAdminWrite`).
- * **Reads** use `admin` (still permitted, and keeps admin-read coverage). Both
- * personas share the same org, so rows written by one are visible to the other.
- * The controller logic and the real `facs_access_mappings` table are what's
- * under test here, not the capability gate (covered by the facsWrapper suite).
+ * non-admin, org-wide FACS `can_manage_users` holder. Internal admins may
+ * CREATE only for resources that belong to their own org (`requireAdminResourceInOrg`),
+ * which these tests can't exercise without seeding real brand/site rows; a
+ * non-admin manager has no such resource-existence dependency, so it drives the
+ * write flow. **Reads** use `admin` (still permitted, and keeps admin-read
+ * coverage). Both personas share the same org, so rows written by one are
+ * visible to the other. The controller logic and the real `facs_access_mappings`
+ * table are what's under test here, not the capability gate (covered by the
+ * facsWrapper suite).
  *
  * @param {() => object} getHttpClient - Getter returning the initialized HTTP client
  * @param {() => Promise<void>} resetData - Truncates all data and re-seeds baseline
