@@ -1640,6 +1640,7 @@ export default function ElementsController(context, log, env) {
         projectId,
         projectIds,
         brandName: brand.name,
+        category: query.categoryId || query.category,
       });
       return cachedOk(result);
     } catch (e) {
@@ -1730,6 +1731,7 @@ export default function ElementsController(context, log, env) {
         projectId,
         projectIds,
         brandName: brand.name,
+        category: query.categoryId || query.category,
       });
       return cachedOk(result);
     } catch (e) {

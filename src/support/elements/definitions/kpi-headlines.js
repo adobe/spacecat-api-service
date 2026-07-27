@@ -62,9 +62,10 @@ export function derivePreviousPeriod(startDate, endDate) {
  * @param {string} [params.model] / [params.platform] - AI model filter.
  * @param {string} params.startDate / params.endDate - YYYY-MM-DD (main period).
  * @param {string[]} [params.projectIds] - Semrush project UUIDs to OR together.
+ * @param {string} [params.category] - Category label, pushed as the tag `category__<label>`.
  */
 export function buildKpiHeadlinePayload({
-  brandName, model, platform, startDate, endDate, projectIds = [],
+  brandName, model, platform, startDate, endDate, projectIds = [], category,
 }) {
   const resolvedModel = resolveElementModel(model || platform);
   const { comparisonStartDate, comparisonEndDate } = derivePreviousPeriod(startDate, endDate);
@@ -74,6 +75,9 @@ export function buildKpiHeadlinePayload({
   ];
   if (Array.isArray(projectIds) && projectIds.length > 0) {
     filters.push(orFilter('CBF_project', projectIds));
+  }
+  if (category) {
+    filters.push({ op: 'eq', val: `category__${category}`, col: 'CBF_tags' });
   }
   return {
     comparison_data_formatting: 'union',
@@ -133,9 +137,10 @@ export function transformBrandUrlsResponse(raw) {
  * @param {string} [params.model] / [params.platform] - AI model filter.
  * @param {string} params.startDate / params.endDate - YYYY-MM-DD (main period).
  * @param {string[]} [params.projectIds] - Semrush project UUIDs to OR together.
+ * @param {string} [params.category] - Category label, pushed as the tag `category__<label>`.
  */
 export function buildSourceVisibilityPayload({
-  brandUrls, model, platform, startDate, endDate, projectIds = [],
+  brandUrls, model, platform, startDate, endDate, projectIds = [], category,
 }) {
   const resolvedModel = resolveElementModel(model || platform);
   const { comparisonStartDate, comparisonEndDate } = derivePreviousPeriod(startDate, endDate);
@@ -148,6 +153,9 @@ export function buildSourceVisibilityPayload({
   ];
   if (Array.isArray(projectIds) && projectIds.length > 0) {
     filters.push(orFilter('CBF_project', projectIds));
+  }
+  if (category) {
+    filters.push({ op: 'eq', val: `category__${category}`, col: 'CBF_tags' });
   }
   return {
     comparison_data_formatting: 'union',

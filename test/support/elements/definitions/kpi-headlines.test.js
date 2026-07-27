@@ -80,6 +80,22 @@ describe('kpi-headlines definitions', () => {
       });
       expect(payload.filters.advanced.filters).to.have.lengthOf(2);
     });
+
+    it('pushes a category__<label> tag filter on CBF_tags when category is given', () => {
+      const payload = buildKpiHeadlinePayload({
+        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24', category: 'Firefly',
+      });
+      expect(payload.filters.advanced.filters).to.deep.include({
+        op: 'eq', val: 'category__Firefly', col: 'CBF_tags',
+      });
+    });
+
+    it('omits the category filter when category is not given', () => {
+      const payload = buildKpiHeadlinePayload({
+        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24',
+      });
+      expect(payload.filters.advanced.filters.some((f) => f.col === 'CBF_tags')).to.equal(false);
+    });
   });
 
   describe('buildBrandUrlsPayload', () => {
@@ -156,6 +172,22 @@ describe('kpi-headlines definitions', () => {
         brandUrls: [], startDate: '2026-06-25', endDate: '2026-07-24',
       });
       expect(payload.filters.advanced.filters[0]).to.deep.equal({ op: 'or', filters: [] });
+    });
+
+    it('pushes a category__<label> tag filter on CBF_tags when category is given', () => {
+      const payload = buildSourceVisibilityPayload({
+        brandUrls: ['lovesac.com'], startDate: '2026-06-25', endDate: '2026-07-24', category: 'Firefly',
+      });
+      expect(payload.filters.advanced.filters).to.deep.include({
+        op: 'eq', val: 'category__Firefly', col: 'CBF_tags',
+      });
+    });
+
+    it('omits the category filter when category is not given', () => {
+      const payload = buildSourceVisibilityPayload({
+        brandUrls: ['lovesac.com'], startDate: '2026-06-25', endDate: '2026-07-24',
+      });
+      expect(payload.filters.advanced.filters.some((f) => f.col === 'CBF_tags')).to.equal(false);
     });
   });
 

@@ -2088,6 +2088,16 @@ v2-serenity-kpi-headlines:
           Optional cross-check: must resolve to the same brand as `:brandId`
           (400 otherwise). Alias `site_id`. Does not itself narrow the query.
         schema: { type: string }
+      - name: categoryId
+        in: query
+        required: false
+        description: Category label, mapped to a Semrush tag (`category__<label>`).
+        schema: { type: string }
+      - name: category
+        in: query
+        required: false
+        description: Alias for `categoryId`.
+        schema: { type: string }
     responses:
       '200':
         description: KPI headlines retrieved.
@@ -2208,6 +2218,16 @@ v2-serenity-source-visibility-headline:
         description: |
           Optional cross-check: must resolve to the same brand as `:brandId`
           (400 otherwise). Alias `site_id`. Does not itself narrow the query.
+        schema: { type: string }
+      - name: categoryId
+        in: query
+        required: false
+        description: Category label, mapped to a Semrush tag (`category__<label>`).
+        schema: { type: string }
+      - name: category
+        in: query
+        required: false
+        description: Alias for `categoryId`.
         schema: { type: string }
     responses:
       '200':
