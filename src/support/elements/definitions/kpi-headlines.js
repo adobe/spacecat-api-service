@@ -185,9 +185,6 @@ export function transformKpiHeadlineResponse(raw) {
   const comparisonValue = previous?.secondaryValue;
   return {
     value: typeof value === 'number' ? value : 0,
-    // null (not 0) when Semrush has no data for the comparison period (e.g. a comparison
-    // window predating data collection) — a real 0% and "no data" must stay distinguishable
-    // so consumers can show "N/A" instead of computing a fake delta against a 0 baseline.
     comparisonValue: typeof comparisonValue === 'number' ? comparisonValue : null,
   };
 }
