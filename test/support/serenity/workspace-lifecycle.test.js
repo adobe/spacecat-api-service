@@ -154,6 +154,34 @@ describe('workspace-lifecycle', () => {
       expect(brand.save).to.have.been.calledOnce;
     });
 
+    it('createReadiness "skip": creates and persists WITHOUT the settle poll (LLMO-6569 bare path)', async () => {
+      const transport = makeTransport();
+      // A not-ready workspace would make the legacy poll spin (and time out); 'skip' must not probe
+      // getWorkspaceStatus at all — it persists the pointer immediately and lets it settle async.
+      transport.getWorkspaceStatus.resolves({ status: 'not ready' });
+      const brand = makeBrand();
+
+      const result = await ensureSubworkspace(
+        transport,
+        brand,
+        PARENT_WS,
+        1,
+        log,
+        NOOP_TIMING,
+        null,
+        { createReadiness: 'skip' },
+      );
+
+      expect(result).to.equal(SUB_WS);
+      expect(transport.createSubworkspace)
+        .to.have.been.calledOnceWithExactly(PARENT_WS, EXPECTED_TITLE, CREATE_ALLOCATION);
+      // The whole point of the fix: no settle poll on the create path.
+      expect(transport.getWorkspaceStatus).to.not.have.been.called;
+      // Pointer still persisted immediately, closing the orphan window.
+      expect(brand.setSemrushSubWorkspaceId).to.have.been.calledOnceWithExactly(SUB_WS);
+      expect(brand.save).to.have.been.calledOnce;
+    });
+
     it('adopts a unique created family match after a create timeout (504 recovery preserved)', async () => {
       // True 504-recovery: at proactive-check time nothing is adoptable yet, the
       // create then times out (504) although it actually succeeded upstream, and

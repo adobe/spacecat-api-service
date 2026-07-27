@@ -548,8 +548,11 @@ describe('provisionBrandSubworkspaceBare', () => {
     // Success → no allocation release.
     expect(deleteAllProjects).to.not.have.been.called;
     expect(releaseFullAllocation).to.not.have.been.called;
-    // Kill-switch defaults OFF (env unset) — byte-for-byte the pre-fix flat carve.
-    expect(ensureSubworkspace.firstCall.args[7]).to.deep.equal({ dynamicAllocation: false });
+    // Kill-switch defaults OFF (env unset). createReadiness 'skip' (LLMO-6569): the bare path
+    // creates no project/prompts, so it skips the up-to-30s settle poll and persists the pointer
+    // immediately (closing the orphan window that left brands unlinked on a Fastly edge timeout).
+    expect(ensureSubworkspace.firstCall.args[7])
+      .to.deep.equal({ dynamicAllocation: false, createReadiness: 'skip' });
   });
 
   it('threads the dynamic-allocation flag from env into ensureSubworkspace (LLMO-6190 — onboarding was previously silently excluded)', async () => {
@@ -557,7 +560,8 @@ describe('provisionBrandSubworkspaceBare', () => {
     const ctx = buildContext();
     ctx.env.SERENITY_DYNAMIC_ALLOCATION = 'true';
     await provisionBrandSubworkspaceBare(ctx, bareParams);
-    expect(ensureSubworkspace.firstCall.args[7]).to.deep.equal({ dynamicAllocation: true });
+    expect(ensureSubworkspace.firstCall.args[7])
+      .to.deep.equal({ dynamicAllocation: true, createReadiness: 'skip' });
   });
 
   it('falls back to the captured workspace id when ensureSubworkspace returns nothing', async () => {

@@ -347,6 +347,12 @@ export async function provisionBrandSubworkspaceBare(context, {
   try {
     // marketCount = 1: the bare sub-workspace is carved for a single future project
     // (the first market the user adds). ensureSubworkspace returns the new id.
+    // createReadiness: 'skip' (LLMO-6569) — this path creates NO project/prompts, so nothing
+    // downstream needs a settled workspace. Skipping the up-to-30s settle poll persists the brand's
+    // sub-workspace pointer immediately (closing the orphan window that left brands unlinked when
+    // the poll blew the ~15s Fastly edge budget) and lets the workspace settle asynchronously; the
+    // first market-add later settles it via the existing-sub-workspace branch before creating a
+    // project. This is Rainer's point #1 ("we don't create markets in that").
     const subWorkspaceId = await ensureSubworkspace(
       transport,
       brandStub,
@@ -355,7 +361,7 @@ export async function provisionBrandSubworkspaceBare(context, {
       log,
       {},
       null,
-      { dynamicAllocation },
+      { dynamicAllocation, createReadiness: 'skip' },
     );
     const resolved = hasText(subWorkspaceId) ? subWorkspaceId : capturedWorkspaceId;
     if (!resolved || !hasText(resolved)) {
