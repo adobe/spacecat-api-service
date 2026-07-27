@@ -222,5 +222,16 @@ describe('kpi-headlines definitions', () => {
       expect(transformKpiHeadlineResponse(raw))
         .to.deep.equal({ value: 0.3726, comparisonValue: null });
     });
+
+    it('returns comparisonValue: null when secondaryValue has no "previous" entry (find() miss)', () => {
+      const raw = {
+        blocks: {
+          mainValue: [{ mainValue: 0.3726 }],
+          secondaryValue: [{ period: 'current', secondaryValue: 0.3927 }],
+        },
+      };
+      expect(transformKpiHeadlineResponse(raw))
+        .to.deep.equal({ value: 0.3726, comparisonValue: null });
+    });
   });
 });
