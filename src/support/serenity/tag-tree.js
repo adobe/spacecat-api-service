@@ -215,6 +215,12 @@ export async function ensureChildren(
  * longer RESOLVES it (WP-O6 removed the tolerant fallback); it is retained only for
  * the observability guardrail in {@link ensureDimensionRoots}, which warns when a
  * project still carries it — a signal the data reshape has not reached that project.
+ *
+ * TEMPORARY — removal horizon: once the data reshape is confirmed complete across all
+ * live projects (this warning no longer fires anywhere), this constant and the
+ * guardrail re-read branch in {@link ensureDimensionRoots} are dead weight and should
+ * be removed together. Follow-up to the dimension-root program (post-WP-S2
+ * stabilization, LLMO-6280).
  */
 const LEGACY_SOURCE_ROOT_NAME = 'source';
 

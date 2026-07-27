@@ -270,11 +270,15 @@ describe('serenity tag-tree', () => {
     it('brings a project that predates the taxonomy forward on first touch', async () => {
       const { listProjectTags, createProjectTags } = makeProvisioningTransportStubs();
       const transport = { listProjectTags, createProjectTags };
-      const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
+      const log = fakeLog();
+      const roots = await ensureDimensionRoots(transport, WS, PROJECT, log);
       expect(createProjectTags).to.have.been.calledOnce;
       expect(createProjectTags.firstCall.args[2])
         .to.deep.equal(['category', 'intent', 'origin', 'type']);
       expect(roots.get('type')).to.equal('created::type');
+      // Complement of the reshape-missed guardrail: `origin` is minted, but no legacy
+      // `source` root is present, so the guardrail must NOT warn on the fresh path.
+      expect(log.warn).to.not.have.been.called;
     });
 
     it('creates a fresh `origin` root, leaving a legacy `source` root untouched', async () => {
@@ -297,9 +301,15 @@ describe('serenity tag-tree', () => {
       };
       const transport = {
         listProjectTags: makeListProjectTagsStub(legacyLevels),
-        createProjectTags: sinon.stub().callsFake((ws, pid, names) => {
+        createProjectTags: sinon.stub().callsFake((ws, pid, names, opts = {}) => {
           created.push(...names);
-          return Promise.resolve(names.map((n) => ({ id: `made-${n}`, name: n })));
+          const parentId = opts.parentId || '';
+          const nodes = names.map((n) => ({ id: `made-${n}`, name: n, children_count: 0 }));
+          // Fold the minted node(s) back into the served level, mirroring upstream's
+          // draft layer, so the guardrail's re-read reflects the write (higher fidelity:
+          // a future `level.has('origin')` assertion on that re-read would then hold).
+          legacyLevels[parentId] = [...(legacyLevels[parentId] || []), ...nodes];
+          return Promise.resolve(nodes);
         }),
       };
       const log = fakeLog();
