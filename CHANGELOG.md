@@ -1,3 +1,10 @@
+# [1.694.0](https://github.com/adobe/spacecat-api-service/compare/v1.693.1...v1.694.0) (2026-07-27)
+
+
+### Features
+
+* **brand-claims:** enable/disable Slack command + brandClaimsEnabled flag (LLMO-5741) ([#2909](https://github.com/adobe/spacecat-api-service/issues/2909)) ([64e25c9](https://github.com/adobe/spacecat-api-service/commit/64e25c9d9c9b31563edcfe48725822032b486499)), closes [#806](https://github.com/adobe/spacecat-api-service/issues/806)
+
 ## [1.693.1](https://github.com/adobe/spacecat-api-service/compare/v1.693.0...v1.693.1) (2026-07-27)
 
 
