@@ -31,7 +31,8 @@ import { resolveElementModel } from '../constants.js';
  * @param {string} [params.platform] - Legacy alias for `model`; `model` wins.
  * @param {string} params.startDate - ISO date (YYYY-MM-DD).
  * @param {string} params.endDate - ISO date (YYYY-MM-DD).
- * @param {string} [params.category] - Category label → tag `category__<label>`.
+ * @param {string} [params.category] - Full `category__<label>` tag value, sent
+ *   as-is (callers already include the `category__` prefix).
  * @param {string} [params.projectId] - Semrush project id (region scope, top-level).
  */
 export function buildDomainUrlsPayload({
@@ -44,7 +45,7 @@ export function buildDomainUrlsPayload({
     { op: 'lte', val: endDate, col: 'CBF_date__end' },
   ];
   if (category) {
-    advancedFilters.push({ op: 'eq', val: `category__${category}`, col: 'CBF_tags' });
+    advancedFilters.push({ op: 'eq', val: category, col: 'CBF_tags' });
   }
   return {
     ...(projectId && { project_id: projectId }),
