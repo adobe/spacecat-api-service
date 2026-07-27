@@ -12008,6 +12008,39 @@ SerenityCompetitorSummary:
           name: { type: string }
           mentions: { type: integer }
           citations: { type: integer }
+SerenityKpiHeadline:
+  type: object
+  description: |
+    A single KPI headline value with its period-over-period comparison figure,
+    sourced from a Semrush `kpiLineChart` element's `mainValue`/`secondaryValue`
+    — the same Semrush-computed aggregate the Brand Presence MFE itself
+    displays (verified live), NOT derived from `SerenityMarketTrackingTrends`'s
+    weekly series. Both fields are 0-1 fractions; the UI multiplies by 100 for
+    display.
+  required: [value, comparisonValue]
+  properties:
+    value:
+      type: number
+      format: double
+      minimum: 0
+      maximum: 1
+      description: The metric's value for the current (requested) period, a 0-1 fraction.
+    comparisonValue:
+      type: number
+      format: double
+      minimum: 0
+      maximum: 1
+      description: The metric's value for the immediately preceding period of equal length, a 0-1 fraction.
+SerenityKpiHeadlines:
+  type: object
+  description: |
+    Share of Voice + Brand Visibility KPI headline cards for Overview-SR — see
+    `SerenityKpiHeadline` for the shape of each. Source Visibility is served by
+    the separate `listSerenitySourceVisibilityHeadline` endpoint.
+  required: [shareOfVoice, brandVisibility]
+  properties:
+    shareOfVoice: { $ref: '#/SerenityKpiHeadline' }
+    brandVisibility: { $ref: '#/SerenityKpiHeadline' }
 SerenityBrandPresenceStatsValues:
   type: object
   description: The four aggregated Brand Presence KPI values, shared by the top-level `stats` and each `trends[].data.stats` entry.

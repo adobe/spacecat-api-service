@@ -379,6 +379,28 @@ const FIXTURES = {
       ],
     },
   },
+  // Overview-SR exact-parity KPI headlines (LLMO-6516 follow-up) — also served
+  // by ElementsController.
+  listSerenityKpiHeadlines: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'getKpiHeadlines',
+    serviceMethod: 'getKpiHeadlines',
+    handlerResult: {
+      shareOfVoice: { value: 0.3628, comparisonValue: 0.3927 },
+      brandVisibility: { value: 0.4959, comparisonValue: 0.548 },
+    },
+  },
+  listSerenitySourceVisibilityHeadline: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'getSourceVisibilityHeadline',
+    serviceMethod: 'getSourceVisibilityHeadline',
+    handlerResult: {
+      value: 0.3954,
+      comparisonValue: 0.4865,
+    },
+  },
   listSerenityBrandPresenceSentimentOverview: {
     expectedStatus: 200,
     usesElementsController: true,
