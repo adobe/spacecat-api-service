@@ -58,7 +58,7 @@ import {
   getIsSummitPlgEnabled,
   isViewAsTrialRequest,
 } from '../support/utils.js';
-import AccessControlUtil from '../support/access-control-util.js';
+import AccessControlUtil, { X_PRODUCT_HEADER } from '../support/access-control-util.js';
 import { redactFeedbackContent } from '../support/feedback-redaction.js';
 import { CAP_FIX_ENTITY_CREATE, CAP_SUGGESTION_WRITE } from '../routes/capability-constants.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
@@ -1309,10 +1309,17 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Site not found');
     }
 
+    // The 'auto_fix' subService maps to the `dx_aem_perf_auto_fix` user scope, which is only
+    // minted for ASO product logins. LLMO logins never carry this scope, so gating LLMO autofix
+    // on it always yields a 403 (LLMO-6553). Only enforce the subService for ASO; for any other
+    // product, fall back to plain org-membership access.
+    const xProduct = context.pathInfo?.headers?.[X_PRODUCT_HEADER];
+    const autoFixSubService = xProduct === 'ASO' ? 'auto_fix' : '';
+
     const s2sResult = await accessControlUtil.hasS2SCapability(CAP_FIX_ENTITY_CREATE);
     if (s2sResult.allowed) {
       ctx.log?.info(`[acl] S2S auto-fix granted - clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId}`);
-    } else if (!await accessControlUtil.hasAccess(site, 'auto_fix')) {
+    } else if (!await accessControlUtil.hasAccess(site, autoFixSubService)) {
       if (s2sResult.reason !== 'not-s2s') {
         ctx.log?.info(`[acl] Denied PATCH auto-fix - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'}`);
       }
