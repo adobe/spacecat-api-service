@@ -1,3 +1,10 @@
+## [1.695.2](https://github.com/adobe/spacecat-api-service/compare/v1.695.1...v1.695.2) (2026-07-27)
+
+
+### Bug Fixes
+
+* preserve wildcard (*) base URLs in Slack URL input parsing ([#2898](https://github.com/adobe/spacecat-api-service/issues/2898)) ([e429356](https://github.com/adobe/spacecat-api-service/commit/e42935661b1b697d04317584d4180112af6d7cc1))
+
 ## [1.695.1](https://github.com/adobe/spacecat-api-service/compare/v1.695.0...v1.695.1) (2026-07-27)
 
 
