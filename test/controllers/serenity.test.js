@@ -1429,6 +1429,10 @@ describe('SerenityController', () => {
       expect(writeDeadline).to.be.a('number');
       expect(marketOptions)
         .to.deep.equal({
+          // LLMO-6554: resolved via resolveDefaultModelIds — [] here because the test's
+          // transport stub doesn't implement the catalog/listing calls it reads from
+          // (both degrade to an empty best-effort default, never throwing).
+          modelIds: [],
           generateTopics: false,
           topicCap: 0,
           brandAliases: ['Acme Inc', 'ACME'],
