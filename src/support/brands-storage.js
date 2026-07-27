@@ -265,6 +265,11 @@ function mapDbBrandToV2(row) {
     brandContext: row.brand_context ?? null,
     mentionSentimentGuidance: row.mention_sentiment_guidance ?? null,
     vertical: row.vertical || null,
+    // Internal ops gate (LLMO-5741): opt-in flag the mystique Brand Claims
+    // consumer reads back to decide whether a BP-sheet-ready event becomes a
+    // claims run. Default false so brands stay off the automated path until an
+    // operator flips it (via the `brand-claims` Slack command).
+    brandClaimsEnabled: row.brand_claims_enabled ?? false,
     region: row.regions || [],
     urls,
     socialAccounts: (row.brand_social_accounts || []).map((s) => ({
@@ -1166,6 +1171,9 @@ export async function updateBrand({
   }
   if (updates.vertical !== undefined) {
     patch.vertical = updates.vertical;
+  }
+  if (updates.brandClaimsEnabled !== undefined) {
+    patch.brand_claims_enabled = updates.brandClaimsEnabled;
   }
 
   // Fetch the persisted row once when baseSiteId or status is changing — it feeds

@@ -253,6 +253,23 @@ describe('brands-storage', () => {
       expect(result[0].brandContext).to.equal('');
       expect(result[0].mentionSentimentGuidance).to.equal('');
     });
+
+    it('maps brand_claims_enabled to brandClaimsEnabled', async () => {
+      const dbRow = makeBrandRow({ brand_claims_enabled: true });
+      const query = createChainableQuery({ data: [dbRow], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await listBrands(ORG_ID, postgrestClient);
+      expect(result[0].brandClaimsEnabled).to.equal(true);
+    });
+
+    it('defaults brandClaimsEnabled to false when the column is absent', async () => {
+      const query = createChainableQuery({ data: [makeBrandRow()], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await listBrands(ORG_ID, postgrestClient);
+      expect(result[0].brandClaimsEnabled).to.equal(false);
+    });
   });
 
   describe('getBrandById', () => {
@@ -2840,6 +2857,26 @@ describe('brands-storage', () => {
       expect(brandsUpdate.row.mention_sentiment_guidance).to.equal('Keep this guidance');
       expect(result.brandContext).to.equal(null);
       expect(result.mentionSentimentGuidance).to.equal('Keep this guidance');
+    });
+
+    it('emits a brand_claims_enabled patch when brandClaimsEnabled is set', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: { id: BRAND_ID }, error: null },
+          { data: makeBrandRow({ brand_claims_enabled: true }), error: null },
+        ],
+      });
+
+      const result = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { brandClaimsEnabled: true },
+        postgrestClient: client,
+      });
+
+      const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
+      expect(brandsUpdate.row.brand_claims_enabled).to.equal(true);
+      expect(result.brandClaimsEnabled).to.equal(true);
     });
 
     it('omits brand guidance columns in update patch when fields are omitted', async () => {

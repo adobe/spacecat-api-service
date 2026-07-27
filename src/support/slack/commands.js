@@ -62,6 +62,7 @@ import checkCdnLogsStatus from './commands/check-cdn-logs-status.js';
 import addOaeStageDomain from './commands/add-oae-stage-domain.js';
 import togglePathSuggestions from './commands/toggle-path-suggestions.js';
 import getPathSuggestionsStatus from './commands/get-path-suggestions-status.js';
+import toggleBrandClaims from './commands/toggle-brand-claims.js';
 
 /**
  * Returns all commands.
@@ -122,4 +123,5 @@ export default (context) => [
   addOaeStageDomain(context),
   togglePathSuggestions(context),
   getPathSuggestionsStatus(context),
+  toggleBrandClaims(context),
 ];
