@@ -453,6 +453,7 @@ shared/tests/sites.js → postgres/sites.test.js (uses Docker PostgreSQL + Postg
 
 - **Behavior changes must include unit tests** - mark as Critical if missing
 - **New or modified endpoints must include integration tests** in `test/it/` — add shared test logic in `shared/tests/`, seed data in `postgres/seed-data/`, and a wiring file in `postgres/`
+- **New or modified endpoints should have e2e coverage reviewed** — triage against `.claude/skills/implement-e2e-tests/SKILL.md`; not every change needs a new e2e scenario, only what unit/IT can't prove
 - Mock external dependencies (databases, HTTP calls, queues) in unit tests
 - Test access control paths (authorized, forbidden, admin-only)
 - Test DTO transformations
@@ -571,6 +572,7 @@ return internalServerError('Internal error occurred');
 11. Run `npm run docs:build` to generate documentation
 12. Run `npm test` to verify unit tests pass
 13. Run IT suites to verify integration tests pass (see Integration Tests commands above)
+14. Review/update e2e coverage in `test/e2e/` per the `implement-e2e-tests` skill's triage — skip if unit + IT already fully cover the new behavior
 
 ### Adding a Slack Command
 
