@@ -1,3 +1,10 @@
+## [1.690.3](https://github.com/adobe/spacecat-api-service/compare/v1.690.2...v1.690.3) (2026-07-27)
+
+
+### Bug Fixes
+
+* exclude decorative images from alt-text PLG grant selection (SITES-44253) ([#2831](https://github.com/adobe/spacecat-api-service/issues/2831)) ([5aaabdd](https://github.com/adobe/spacecat-api-service/commit/5aaabdd4d0b6697724bfe588794b212416ecf7c6))
+
 ## [1.690.2](https://github.com/adobe/spacecat-api-service/compare/v1.690.1...v1.690.2) (2026-07-27)
 
 
