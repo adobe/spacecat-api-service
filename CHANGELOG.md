@@ -1,3 +1,10 @@
+## [1.692.2](https://github.com/adobe/spacecat-api-service/compare/v1.692.1...v1.692.2) (2026-07-27)
+
+
+### Bug Fixes
+
+* **ci:** skip type-check job on push events ([#2903](https://github.com/adobe/spacecat-api-service/issues/2903)) ([b212a09](https://github.com/adobe/spacecat-api-service/commit/b212a096f7b6d226a8fd71ed08c88144b1c66b34)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 ## [1.692.1](https://github.com/adobe/spacecat-api-service/compare/v1.692.0...v1.692.1) (2026-07-27)
 
 
