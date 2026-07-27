@@ -1642,6 +1642,9 @@ export default function ElementsController(context, log, env) {
         projectId,
         projectIds,
         brandName: brand.name,
+        // Already carries the `category__<label>` prefix from the caller; sent
+        // through as-is, not re-prefixed (see PR #2912).
+        category: query.categoryId || query.category,
       });
       return cachedOk(result);
     } catch (e) {
@@ -1732,6 +1735,9 @@ export default function ElementsController(context, log, env) {
         projectId,
         projectIds,
         brandName: brand.name,
+        // Already carries the `category__<label>` prefix from the caller; sent
+        // through as-is, not re-prefixed (see PR #2912).
+        category: query.categoryId || query.category,
       });
       return cachedOk(result);
     } catch (e) {

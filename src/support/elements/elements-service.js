@@ -865,13 +865,15 @@ export function createElementsService(transport, log) {
      * @param {string} params.startDate / params.endDate - Required YYYY-MM-DD (main period).
      * @param {string} [params.projectId] - Single Semrush project UUID (one region).
      * @param {string[]} [params.projectIds] - All the brand's project UUIDs (aggregate).
+     * @param {string} [params.category] - Full `category__<label>` tag value (caller
+     *   includes the `category__` prefix), sent as-is.
      * @returns {Promise<{
      *   shareOfVoice: {value: number, comparisonValue: number | null},
      *   brandVisibility: {value: number, comparisonValue: number | null},
      * }>}
      */
     async getKpiHeadlines(workspaceId, {
-      brandName, model, platform, startDate, endDate, projectId, projectIds,
+      brandName, model, platform, startDate, endDate, projectId, projectIds, category,
     }) {
       const resolvedProjectIds = projectId ? [projectId] : (projectIds ?? []);
       const [sov, brandVis] = await Promise.all([
@@ -879,14 +881,26 @@ export function createElementsService(transport, log) {
           workspaceId,
           ELEMENT_IDS.KPI_SHARE_OF_VOICE,
           buildKpiHeadlinePayload({
-            brandName, model, platform, startDate, endDate, projectIds: resolvedProjectIds,
+            brandName,
+            model,
+            platform,
+            startDate,
+            endDate,
+            projectIds: resolvedProjectIds,
+            category,
           }),
         ),
         transport.fetchElement(
           workspaceId,
           ELEMENT_IDS.KPI_BRAND_VISIBILITY,
           buildKpiHeadlinePayload({
-            brandName, model, platform, startDate, endDate, projectIds: resolvedProjectIds,
+            brandName,
+            model,
+            platform,
+            startDate,
+            endDate,
+            projectIds: resolvedProjectIds,
+            category,
           }),
         ),
       ]);
@@ -923,10 +937,12 @@ export function createElementsService(transport, log) {
      * @param {string} params.startDate / params.endDate - Required YYYY-MM-DD (main period).
      * @param {string} [params.projectId] - Single Semrush project UUID (one region).
      * @param {string[]} [params.projectIds] - All the brand's project UUIDs (aggregate).
+     * @param {string} [params.category] - Full `category__<label>` tag value (caller
+     *   includes the `category__` prefix), sent as-is.
      * @returns {Promise<{value: number, comparisonValue: number | null}>}
      */
     async getSourceVisibilityHeadline(workspaceId, {
-      brandName, model, platform, startDate, endDate, projectId, projectIds,
+      brandName, model, platform, startDate, endDate, projectId, projectIds, category,
     }) {
       const resolvedProjectIds = projectId ? [projectId] : (projectIds ?? []);
       const callOpts = {
@@ -947,7 +963,7 @@ export function createElementsService(transport, log) {
         workspaceId,
         ELEMENT_IDS.KPI_SOURCE_VISIBILITY,
         buildSourceVisibilityPayload({
-          brandUrls, model, platform, startDate, endDate, projectIds: resolvedProjectIds,
+          brandUrls, model, platform, startDate, endDate, projectIds: resolvedProjectIds, category,
         }),
         callOpts,
       );
