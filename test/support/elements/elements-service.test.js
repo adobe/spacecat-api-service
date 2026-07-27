@@ -718,10 +718,10 @@ describe('createElementsService', () => {
       })).to.be.rejectedWith(upstreamError);
     });
 
-    it('passes category through to both KPI element payloads', async () => {
+    it('passes category through to both KPI element payloads as-is', async () => {
       transport.fetchElement.resolves({ blocks: {} });
       await service.getKpiHeadlines('ws-1', {
-        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24', category: 'Firefly',
+        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24', category: 'category__Firefly',
       });
       for (const call of transport.fetchElement.getCalls()) {
         const [, , payload] = call.args;
@@ -792,7 +792,7 @@ describe('createElementsService', () => {
       const result = await service.getSourceVisibilityHeadline('ws-1', {
         brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24',
       });
-      expect(result).to.deep.equal({ value: 0, comparisonValue: 0 });
+      expect(result).to.deep.equal({ value: 0, comparisonValue: null });
       expect(transport.fetchElement).to.have.been.calledOnce;
     });
 
@@ -817,7 +817,7 @@ describe('createElementsService', () => {
       })).to.be.rejectedWith(upstreamError);
     });
 
-    it('passes category through to the KPI element payload', async () => {
+    it('passes category through to the KPI element payload as-is', async () => {
       transport.fetchElement.callsFake(async (workspaceId, elementId) => {
         if (elementId === ELEMENT_IDS.BRAND_URLS) {
           return { blocks: { value: [{ value: 'lovesac.com' }] } };
@@ -825,7 +825,7 @@ describe('createElementsService', () => {
         return { blocks: {} };
       });
       await service.getSourceVisibilityHeadline('ws-1', {
-        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24', category: 'Firefly',
+        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24', category: 'category__Firefly',
       });
       const kpiCall = transport.fetchElement.getCalls()
         .find((c) => c.args[1] === ELEMENT_IDS.KPI_SOURCE_VISIBILITY);

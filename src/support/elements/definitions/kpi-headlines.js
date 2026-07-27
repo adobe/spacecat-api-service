@@ -62,7 +62,8 @@ export function derivePreviousPeriod(startDate, endDate) {
  * @param {string} [params.model] / [params.platform] - AI model filter.
  * @param {string} params.startDate / params.endDate - YYYY-MM-DD (main period).
  * @param {string[]} [params.projectIds] - Semrush project UUIDs to OR together.
- * @param {string} [params.category] - Category label, pushed as the tag `category__<label>`.
+ * @param {string} [params.category] - Full `category__<label>` tag value (caller
+ *   includes the `category__` prefix), sent as-is.
  */
 export function buildKpiHeadlinePayload({
   brandName, model, platform, startDate, endDate, projectIds = [], category,
@@ -77,7 +78,7 @@ export function buildKpiHeadlinePayload({
     filters.push(orFilter('CBF_project', projectIds));
   }
   if (category) {
-    filters.push({ op: 'eq', val: `category__${category}`, col: 'CBF_tags' });
+    filters.push({ op: 'eq', val: category, col: 'CBF_tags' });
   }
   return {
     comparison_data_formatting: 'union',
@@ -137,7 +138,8 @@ export function transformBrandUrlsResponse(raw) {
  * @param {string} [params.model] / [params.platform] - AI model filter.
  * @param {string} params.startDate / params.endDate - YYYY-MM-DD (main period).
  * @param {string[]} [params.projectIds] - Semrush project UUIDs to OR together.
- * @param {string} [params.category] - Category label, pushed as the tag `category__<label>`.
+ * @param {string} [params.category] - Full `category__<label>` tag value (caller
+ *   includes the `category__` prefix), sent as-is.
  */
 export function buildSourceVisibilityPayload({
   brandUrls, model, platform, startDate, endDate, projectIds = [], category,
@@ -155,7 +157,7 @@ export function buildSourceVisibilityPayload({
     filters.push(orFilter('CBF_project', projectIds));
   }
   if (category) {
-    filters.push({ op: 'eq', val: `category__${category}`, col: 'CBF_tags' });
+    filters.push({ op: 'eq', val: category, col: 'CBF_tags' });
   }
   return {
     comparison_data_formatting: 'union',
@@ -179,10 +181,12 @@ export function buildSourceVisibilityPayload({
  * `previous` entries were verified identical live, but matched by `period`
  * rather than positionally — a positional `[0]` read would silently return the
  * wrong figure if the two ever diverge or the array is ever reordered upstream.
- * Defaults to 0 when a field is missing.
+ * `value` defaults to 0 when missing; `comparisonValue` is `null` (not 0) when Semrush has
+ * no numeric data for the comparison period, so callers can distinguish "no data" from a
+ * real 0% and show e.g. "N/A" instead of computing a fake delta against a 0 baseline.
  *
  * @param {object} raw - Raw response from the Elements API.
- * @returns {{ value: number, comparisonValue: number }}
+ * @returns {{ value: number, comparisonValue: number | null }}
  */
 export function transformKpiHeadlineResponse(raw) {
   const value = raw?.blocks?.mainValue?.[0]?.mainValue;
@@ -191,6 +195,6 @@ export function transformKpiHeadlineResponse(raw) {
   const comparisonValue = previous?.secondaryValue;
   return {
     value: typeof value === 'number' ? value : 0,
-    comparisonValue: typeof comparisonValue === 'number' ? comparisonValue : 0,
+    comparisonValue: typeof comparisonValue === 'number' ? comparisonValue : null,
   };
 }

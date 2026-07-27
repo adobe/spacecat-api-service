@@ -1437,8 +1437,8 @@ describe('ElementsController', () => {
       expect(params.projectIds).to.deep.equal(['proj-us']);
     });
 
-    it('passes categoryId through as a prefixed category__ tag', async () => {
-      const ctx = promptsCountCtx({ url: promptsCountUrl('?categoryId=Firefly') });
+    it('passes categoryId through as-is (already prefixed by the caller)', async () => {
+      const ctx = promptsCountCtx({ url: promptsCountUrl('?categoryId=category__Firefly') });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.getUrlInspectorPromptsCount(ctx);
       const [, params] = serviceStub.getPrompts.firstCall.args;

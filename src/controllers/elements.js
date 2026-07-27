@@ -1447,11 +1447,13 @@ export default function ElementsController(context, log, env) {
         workspaceId, query, service, projectIds,
       } = scope;
 
+      // category already carries the `category__<label>` prefix from the caller;
+      // sent through as-is, not re-prefixed.
       const category = query.categoryId || query.category;
       const { count: totalPrompts } = await service.getPrompts(workspaceId, {
         model: query.model,
         platform: query.platform,
-        tags: category ? [`category__${category}`] : [],
+        tags: category ? [category] : [],
         projectIds,
       });
 
@@ -1626,8 +1628,8 @@ export default function ElementsController(context, log, env) {
           .filter(hasText);
         if (projectIds.length === 0) {
           return cachedOk({
-            shareOfVoice: { value: 0, comparisonValue: 0 },
-            brandVisibility: { value: 0, comparisonValue: 0 },
+            shareOfVoice: { value: 0, comparisonValue: null },
+            brandVisibility: { value: 0, comparisonValue: null },
           });
         }
       }
@@ -1640,6 +1642,8 @@ export default function ElementsController(context, log, env) {
         projectId,
         projectIds,
         brandName: brand.name,
+        // Already carries the `category__<label>` prefix from the caller; sent
+        // through as-is, not re-prefixed (see PR #2912).
         category: query.categoryId || query.category,
       });
       return cachedOk(result);
@@ -1719,7 +1723,7 @@ export default function ElementsController(context, log, env) {
           .map((p) => p.semrushProjectId)
           .filter(hasText);
         if (projectIds.length === 0) {
-          return cachedOk({ value: 0, comparisonValue: 0 });
+          return cachedOk({ value: 0, comparisonValue: null });
         }
       }
 
@@ -1731,6 +1735,8 @@ export default function ElementsController(context, log, env) {
         projectId,
         projectIds,
         brandName: brand.name,
+        // Already carries the `category__<label>` prefix from the caller; sent
+        // through as-is, not re-prefixed (see PR #2912).
         category: query.categoryId || query.category,
       });
       return cachedOk(result);

@@ -7704,6 +7704,15 @@ V2Brand:
         - string
         - 'null'
       description: Industry vertical
+    brandClaimsEnabled:
+      type: boolean
+      default: false
+      readOnly: true
+      description: >-
+        Read-only internal ops gate (LLMO-5741). When true, the Brand Claims
+        scheduler turns a brand-presence sheet-ready event into a claims run for
+        this brand. Brand-scoped and opt-in (default false); set by operators via
+        the `brand-claims` Slack command, not customer-writable.
     region:
       type: array
       items:
@@ -7772,6 +7781,7 @@ V2Brand:
     brandContext: "Example Brand is a B2B analytics platform."
     mentionSentimentGuidance: "Treat factual pricing mentions as neutral unless the response recommends against the brand."
     vertical: 'technology'
+    brandClaimsEnabled: false
     region: ['US', 'DE']
     urls:
       - value: 'https://www.example.com'
@@ -12026,11 +12036,15 @@ SerenityKpiHeadline:
       maximum: 1
       description: The metric's value for the current (requested) period, a 0-1 fraction.
     comparisonValue:
-      type: number
+      type: [number, 'null']
       format: double
       minimum: 0
       maximum: 1
-      description: The metric's value for the immediately preceding period of equal length, a 0-1 fraction.
+      description: |
+        The metric's value for the immediately preceding period of equal length, a 0-1
+        fraction. `null` when Semrush has no data for that period (e.g. it predates data
+        collection) — distinct from a real 0%; consumers should render this as "no
+        comparison available" rather than computing a delta against 0.
 SerenityKpiHeadlines:
   type: object
   description: |
