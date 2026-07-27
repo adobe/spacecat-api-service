@@ -1,3 +1,15 @@
+# [1.692.0](https://github.com/adobe/spacecat-api-service/compare/v1.691.0...v1.692.0) (2026-07-27)
+
+
+### Bug Fixes
+
+* updated backoffice link in PLG notification according to the env ([#2905](https://github.com/adobe/spacecat-api-service/issues/2905)) ([51f57c6](https://github.com/adobe/spacecat-api-service/commit/51f57c621de6721862f1f9642f3cbaf6da8f2fca))
+
+
+### Features
+
+* **serenity:** add exact-parity KPI headline endpoints for Overview-SR | LLMO-6515 ([#2902](https://github.com/adobe/spacecat-api-service/issues/2902)) ([9ad53d0](https://github.com/adobe/spacecat-api-service/commit/9ad53d076bb94cffe55182af0ad0c7d4ddd565fe))
+
 # [1.691.0](https://github.com/adobe/spacecat-api-service/compare/v1.690.3...v1.691.0) (2026-07-27)
 
 

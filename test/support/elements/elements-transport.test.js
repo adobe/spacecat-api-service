@@ -247,6 +247,68 @@ describe('createElementsTransport', () => {
       const [, init] = fetchStub.firstCall.args;
       expect(init.signal).to.be.instanceOf(AbortSignal);
     });
+
+    it('honors a per-call timeoutMs override over the transport default', async () => {
+      const clock = sinon.useFakeTimers();
+      try {
+        // Never resolves on its own — only rejects when the abort signal fires,
+        // mirroring real fetch's behavior when combined with AbortController.
+        fetchStub.callsFake((url, init) => new Promise((resolve, reject) => {
+          init.signal.addEventListener('abort', () => {
+            reject(Object.assign(new Error('The operation was aborted'), { name: 'AbortError' }));
+          });
+        }));
+        const transport = createElementsTransport({ env: ENV, imsToken: IMS_TOKEN });
+        // Attached synchronously (same tick the promise is created) so a later
+        // rejection is never "unhandled" from Node's perspective.
+        const settledPromise = transport
+          .fetchElement(WORKSPACE_ID, ELEMENT_ID, {}, { timeoutMs: 5000 })
+          .catch((e) => e);
+
+        // Just before the custom 5s deadline: no abort yet.
+        await clock.tickAsync(4999);
+        // Crossing 5000ms triggers the abort — well short of the 30s default.
+        await clock.tickAsync(1);
+
+        const err = await settledPromise;
+        expect(err).to.be.instanceOf(ElementsTransportError);
+        expect(err.status).to.equal(504);
+      } finally {
+        clock.restore();
+      }
+    });
+
+    it('falls back to the transport default timeoutMs when no per-call override is given', async () => {
+      const clock = sinon.useFakeTimers();
+      try {
+        fetchStub.callsFake((url, init) => new Promise((resolve, reject) => {
+          init.signal.addEventListener('abort', () => {
+            reject(Object.assign(new Error('The operation was aborted'), { name: 'AbortError' }));
+          });
+        }));
+        const transport = createElementsTransport({ env: ENV, imsToken: IMS_TOKEN });
+        let settled = false;
+        // Attached synchronously (same tick the promise is created) so a later
+        // rejection is never "unhandled" from Node's perspective.
+        const settledPromise = transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {})
+          .catch((e) => {
+            settled = true;
+            return e;
+          });
+
+        // Well past a 5s custom timeout, but short of the 30s default: no abort yet.
+        await clock.tickAsync(29_999);
+        expect(settled).to.equal(false);
+
+        // Crossing 30000ms (DEFAULT_TIMEOUT_MS) triggers the abort.
+        await clock.tickAsync(1);
+        const err = await settledPromise;
+        expect(err).to.be.instanceOf(ElementsTransportError);
+        expect(err.status).to.equal(504);
+      } finally {
+        clock.restore();
+      }
+    });
   });
 
   describe('retry on 429', () => {
