@@ -34,8 +34,8 @@
  * `human` are two distinct tags. Never key a tag by name alone; key by id.
  *
  * The authorship root is `origin` (renamed from `source` — origin-dimension.md).
- * The rename is complete: the tag-tree resolver names `origin` strictly. The
- * tolerant dual-name fallback that bridged the migration was removed in WP-O6.
+ * The rename is complete: the tag-tree resolver names `origin` strictly, with no
+ * fallback for the pre-rename `source` name.
  */
 
 /**

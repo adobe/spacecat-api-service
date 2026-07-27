@@ -216,13 +216,16 @@ export async function ensureChildren(
  * them forward on first touch.
  *
  * Every root — `origin` included — is resolved-or-created by bare name. The
- * `source` → `origin` authorship rename is complete (origin-dimension.md), so the
- * tolerant fallback that adopted a legacy `source` root in place of `origin` is
- * gone (WP-O6): a project that still carries a legacy `source` authorship root now
- * gets a fresh `origin` root created, and the stale `source` root is left untouched
- * for the data reshape to retire. The migration reshape guarantees no live project
- * reaches this seam still authorship-on-`source`, so no second authorship root is
- * minted in practice.
+ * `source` → `origin` authorship rename is complete (origin-dimension.md): there is
+ * no fallback for the pre-rename `source` name. A project that still carries a legacy
+ * `source` authorship root gets a fresh `origin` root created here, and the stale
+ * `source` root is left untouched for the data reshape to retire.
+ *
+ * Deploy ordering is the invariant, and it is enforced OUTSIDE this code (the reshape
+ * lands before this resolver ships). If that ordering is violated and a project is
+ * still authorship-on-`source` when this runs, the fresh `origin` root is minted EMPTY
+ * and the populated `source` root's `ai`/`human` values are orphaned. This seam does
+ * not detect or fail on that — the deploy gate owns it.
  *
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {string} semrushWorkspaceId

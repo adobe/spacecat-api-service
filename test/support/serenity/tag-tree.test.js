@@ -276,11 +276,11 @@ describe('serenity tag-tree', () => {
       expect(roots.get('type')).to.equal('created::type');
     });
 
-    it('creates a fresh `origin` root, leaving a legacy `source` root untouched (WP-O6)', async () => {
+    it('creates a fresh `origin` root, leaving a legacy `source` root untouched', async () => {
       // A project the reshape somehow left authorship-on-`source` (ai/human beneath a
       // `source` root, no `origin` root). The tolerant fallback that adopted such a root
-      // in place is GONE (WP-O6): `origin` is created strictly, and the stale `source`
-      // root is neither adopted nor touched — the data reshape retires it separately.
+      // in place is gone: `origin` is created strictly, and the stale `source` root is
+      // neither adopted nor touched — the data reshape retires it separately.
       const created = [];
       const legacyLevels = {
         '': [
