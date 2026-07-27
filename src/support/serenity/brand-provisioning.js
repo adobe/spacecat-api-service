@@ -22,6 +22,7 @@ import { deleteAllProjects, releaseFullAllocation, ensureSubworkspace } from './
 import { handleCreateMarketSubworkspace } from './handlers/markets-subworkspace.js';
 import { computeWriteDeadline } from './intent-classification.js';
 import { isDynamicAllocationEnabled, resolveBrandAiCeiling } from './dynamic-allocation-active.js';
+import { resolveCanonicalDefaultModelIds } from './default-models.js';
 
 // Brand-create generation policy (tunable). Keep the top N generated topics by
 // search volume; brand-topics returns up to 10 topics x up to 100 prompts each,
@@ -64,7 +65,12 @@ export function initialMarketProjectName(market, languageCode) {
  * @param {string} params.market - ISO-2 country code for the initial market.
  * @param {string} params.languageCode - BCP-47 language code for the initial market.
  * @param {string} params.brandDomain - brand domain for the upstream project.
- * @param {string[]} params.modelIds - AI models (LLMs) to attach to the project.
+ * @param {string[]} [params.modelIds] - AI models (LLMs) to attach to the
+ *   project. This is always the brand's FIRST-EVER market (the sub-workspace
+ *   is freshly created below), so an empty/omitted list resolves to the
+ *   canonical net-new default set (LLMO-6554 / LLMO-6338 — see
+ *   {@link resolveCanonicalDefaultModelIds}) rather than creating a
+ *   zero-model project that can't publish real units.
  * @param {boolean} [params.generateTopics] - when true (default), generate +
  *   attach topics/prompts (top N by volume) at create; when false, create the
  *   project empty (models still attached when supplied).
@@ -137,6 +143,14 @@ export async function provisionBrandSubworkspace(context, {
   // 401ing a non-IMS bearer before it can be proxied upstream.
   const imsToken = await resolveSemrushImsToken(context, log, 'brand-provisioning');
   const transport = createSerenityTransport({ env: context.env, imsToken });
+
+  // LLMO-6554: this is always the brand's FIRST-EVER market (the sub-workspace is
+  // freshly created below), so there is nothing to mirror — an empty/omitted
+  // caller-supplied modelIds resolves straight to the canonical net-new default.
+  // A non-empty caller-supplied list (a future API-driven caller) is honored as-is.
+  const resolvedModelIds = Array.isArray(modelIds) && modelIds.length > 0
+    ? modelIds
+    : await resolveCanonicalDefaultModelIds(transport, log);
 
   // Dynamic-allocation kill-switch + per-brand ceiling (LLMO-6190): brand creation is onboarding,
   // and §3/§4a of the design require an onboarded-while-ON brand to get a MINIMAL sub-workspace
@@ -215,7 +229,7 @@ export async function provisionBrandSubworkspace(context, {
       // every project regardless. With generateTopics=false the project is created
       // empty (no prompts); models are still attached when supplied.
       {
-        modelIds,
+        modelIds: resolvedModelIds,
         generateTopics,
         topicCap: generateTopics ? MAX_TOPICS_ON_CREATE : 0,
         brandAliases,
@@ -227,8 +241,11 @@ export async function provisionBrandSubworkspace(context, {
         // "empty units", which Semrush rejects with a disguised quota 405
         // (workspace doc §5). Tolerate that by leaving it a draft (best-effort)
         // instead of failing the whole create; a project that has models OR
-        // prompts has real units and must publish (require).
-        publishMode: (Array.isArray(modelIds) && modelIds.length > 0) || generateTopics
+        // prompts has real units and must publish (require). resolvedModelIds
+        // is non-empty in the common case (LLMO-6554 default), so this is
+        // 'require' unless the canonical-catalog read itself came up empty.
+        publishMode: (Array.isArray(resolvedModelIds) && resolvedModelIds.length > 0)
+          || generateTopics
           ? 'require'
           : 'best-effort',
         dynamicAllocation,
