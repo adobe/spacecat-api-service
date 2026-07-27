@@ -779,7 +779,7 @@ describe('createElementsService', () => {
       const result = await service.getSourceVisibilityHeadline('ws-1', {
         brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24',
       });
-      expect(result).to.deep.equal({ value: 0, comparisonValue: 0 });
+      expect(result).to.deep.equal({ value: 0, comparisonValue: null });
       expect(transport.fetchElement).to.have.been.calledOnce;
     });
 

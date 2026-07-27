@@ -2139,7 +2139,9 @@ v2-serenity-source-visibility-headline:
       sequential upstream lookup before the KPI element itself can be called —
       isolating it keeps that lookup from doubling the other two cards'
       worst-case latency. A brand with no registered URLs returns
-      `{ value: 0, comparisonValue: 0 }`.
+      `{ value: 0, comparisonValue: null }` — no measurement exists for either
+      period, so `comparisonValue` uses the same "no data" convention as a
+      missing Semrush comparison value.
 
       Date range is optional and defaults to a 28-day trailing window. Both
       `startDate` and `endDate` must be supplied together or not at all — a
