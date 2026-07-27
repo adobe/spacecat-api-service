@@ -19,6 +19,7 @@ import {
   listFacsAccessMappingAuditEvents,
   insertFacsAccessMappingAuditEvent,
   getFacsAccessMappingById,
+  getResourceImsOrgId,
   createFacsAccessMappings,
   revokeFacsAccessMappingById,
   updateFacsAccessMappingCapabilities,
@@ -540,6 +541,73 @@ describe('state-access-mapping-utils helpers', () => {
         throw new Error('expected to throw');
       } catch (e) {
         expect(e.message).to.equal('getFacsAccessMappingById failed: boom');
+      }
+    });
+  });
+
+  describe('getResourceImsOrgId', () => {
+    // Per-table fake: `.from(table).select().eq().limit()` resolves to the
+    // result queued for that table (sites/brands, then organizations).
+    function perTableClient(byTable) {
+      return {
+        from(table) {
+          const result = byTable[table] ?? { data: [], error: null };
+          const builder = {
+            select: () => builder,
+            eq: () => builder,
+            limit: () => Promise.resolve(result),
+          };
+          return builder;
+        },
+      };
+    }
+
+    it('resolves brand → organization_id → ims_org_id', async () => {
+      const client = perTableClient({
+        brands: { data: [{ organization_id: 'org-uuid-1' }], error: null },
+        organizations: { data: [{ ims_org_id: 'ABC@AdobeOrg' }], error: null },
+      });
+      const out = await getResourceImsOrgId(client, { resourceType: 'brand', resourceId: 'b1' });
+      expect(out).to.equal('ABC@AdobeOrg');
+    });
+
+    it('resolves site via the sites table', async () => {
+      const client = perTableClient({
+        sites: { data: [{ organization_id: 'org-uuid-2' }], error: null },
+        organizations: { data: [{ ims_org_id: 'DEF@AdobeOrg' }], error: null },
+      });
+      const out = await getResourceImsOrgId(client, { resourceType: 'site', resourceId: 's1' });
+      expect(out).to.equal('DEF@AdobeOrg');
+    });
+
+    it('returns null for an unknown resource type (not ReBAC-scoped)', async () => {
+      const client = perTableClient({});
+      const out = await getResourceImsOrgId(client, { resourceType: 'widget', resourceId: 'x' });
+      expect(out).to.equal(null);
+    });
+
+    it('returns null when the resource row is missing', async () => {
+      const client = perTableClient({ brands: { data: [], error: null } });
+      const out = await getResourceImsOrgId(client, { resourceType: 'brand', resourceId: 'nope' });
+      expect(out).to.equal(null);
+    });
+
+    it('returns null when the org has no ims_org_id', async () => {
+      const client = perTableClient({
+        brands: { data: [{ organization_id: 'org-uuid-3' }], error: null },
+        organizations: { data: [{ ims_org_id: null }], error: null },
+      });
+      const out = await getResourceImsOrgId(client, { resourceType: 'brand', resourceId: 'b1' });
+      expect(out).to.equal(null);
+    });
+
+    it('throws when the resource lookup errors', async () => {
+      const client = perTableClient({ brands: { data: null, error: { message: 'boom' } } });
+      try {
+        await getResourceImsOrgId(client, { resourceType: 'brand', resourceId: 'b1' });
+        throw new Error('expected to throw');
+      } catch (e) {
+        expect(e.message).to.contain('getResourceImsOrgId failed resolving brand: boom');
       }
     });
   });

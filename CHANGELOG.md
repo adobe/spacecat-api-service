@@ -1,3 +1,31 @@
+## [1.690.3](https://github.com/adobe/spacecat-api-service/compare/v1.690.2...v1.690.3) (2026-07-27)
+
+
+### Bug Fixes
+
+* exclude decorative images from alt-text PLG grant selection (SITES-44253) ([#2831](https://github.com/adobe/spacecat-api-service/issues/2831)) ([5aaabdd](https://github.com/adobe/spacecat-api-service/commit/5aaabdd4d0b6697724bfe588794b212416ecf7c6))
+
+## [1.690.2](https://github.com/adobe/spacecat-api-service/compare/v1.690.1...v1.690.2) (2026-07-27)
+
+
+### Bug Fixes
+
+* filter project sites by entitlement in getSitesByProjectId ([#2899](https://github.com/adobe/spacecat-api-service/issues/2899)) ([70d64a0](https://github.com/adobe/spacecat-api-service/commit/70d64a0ca46e06c19a991b9e39081bc4c9a4b2ee))
+
+## [1.690.1](https://github.com/adobe/spacecat-api-service/compare/v1.690.0...v1.690.1) (2026-07-26)
+
+
+### Bug Fixes
+
+* **state-mappings:** scope internal-admin writes to their own org ([#2900](https://github.com/adobe/spacecat-api-service/issues/2900)) ([e8b9b5d](https://github.com/adobe/spacecat-api-service/commit/e8b9b5dd9cdef3ee5c4ea13f3a84ccd8338d4be8)), closes [#2871](https://github.com/adobe/spacecat-api-service/issues/2871) [#2871](https://github.com/adobe/spacecat-api-service/issues/2871)
+
+# [1.690.0](https://github.com/adobe/spacecat-api-service/compare/v1.689.0...v1.690.0) (2026-07-26)
+
+
+### Features
+
+* **run-global-import:** add --validate-only flag for optimize-at-edge-enabled-marking ([#2904](https://github.com/adobe/spacecat-api-service/issues/2904)) ([fac29fb](https://github.com/adobe/spacecat-api-service/commit/fac29fb21199f1ab285a632d7938d09ac9a7cda5))
+
 # [1.689.0](https://github.com/adobe/spacecat-api-service/compare/v1.688.3...v1.689.0) (2026-07-24)
 
 
