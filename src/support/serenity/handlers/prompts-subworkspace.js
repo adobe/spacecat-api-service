@@ -23,6 +23,8 @@ import {
   normalizePromptInput,
   createOnePrompt,
   makePromptTagInjector,
+  makeIntentInjector,
+  validateDeferPublish,
   parseUpdatePromptBody,
   mapLimit,
   publishAffected,
@@ -36,6 +38,9 @@ import { ORIGIN_VALUE } from '../prompt-tags.js';
 import { resolveProject, buildSliceProjectMap, sliceKey } from '../subworkspace-projects.js';
 import { redactUpstreamMessage } from '../rest-transport.js';
 import { createHeadroomGuard } from '../dynamic-allocation-active.js';
+import { classifyPromptIntents } from '../intent-classification.js';
+
+/** @typedef {import('../resource-manager.js').Blocks} Blocks */
 
 /**
  * Subworkspace-mode prompt handlers (serenity dual-mode, subworkspace path). Behaviourally
@@ -127,7 +132,13 @@ export async function handleCreatePromptsSubworkspace(
   body,
   log,
   classifyPromptType,
-  { dynamicAllocation = false, parentWorkspaceId = '' } = {},
+  env,
+  writeDeadline,
+  {
+    dynamicAllocation = false,
+    parentWorkspaceId = '',
+    ceiling = /** @type {Partial<Blocks> | undefined} */ (undefined),
+  } = {},
 ) {
   const inputs = Array.isArray(body?.prompts) ? body.prompts : [];
   if (inputs.length === 0) {
@@ -139,6 +150,7 @@ export async function handleCreatePromptsSubworkspace(
       400,
     );
   }
+  const deferPublish = validateDeferPublish(body);
 
   const projectsBySlice = await buildSliceProjectMap(transport, workspaceId, log);
   // CREATE: user-authenticated write → derived `origin` is `human` (see the
@@ -150,6 +162,25 @@ export async function handleCreatePromptsSubworkspace(
     log,
     { originValue: ORIGIN_VALUE.HUMAN },
   );
+  // Unified layer (serenity-docs#32): batch-classify every distinct text ONCE
+  // under the shared request deadline, then thread the resolved map into each
+  // per-item injection below.
+  // Classify the TRIMMED text: `makeIntentInjector` looks up the map by
+  // `input.text`, which `normalizePromptInput` has already trimmed, so the
+  // classify key must be trimmed to match — otherwise a whitespace-padded prompt
+  // (common in CSV import) misses the map and silently defaults to Informational
+  // despite a real classification.
+  const intentByText = await classifyPromptIntents(
+    inputs.map((raw) => String(raw?.text || '').trim()),
+    {
+      env,
+      log,
+      deadline: writeDeadline,
+      writePath: deferPublish ? 'csv' : 'create',
+      workspaceId,
+    },
+  );
+  const injectComputedIntent = makeIntentInjector(transport, workspaceId, intentByText, log);
 
   // PROMPT metering seam (Rainer, live-verified LLMO-6190): the metered write is
   // `createPromptsByIds` (inside `createOnePrompt` below), NOT publish — a disguised-quota 405
@@ -159,7 +190,9 @@ export async function handleCreatePromptsSubworkspace(
   // under). No-op when the flag is OFF.
   const headroom = createHeadroomGuard(
     transport,
-    { enabled: dynamicAllocation, subWorkspaceId: workspaceId, parentWorkspaceId },
+    {
+      enabled: dynamicAllocation, subWorkspaceId: workspaceId, parentWorkspaceId, ceiling,
+    },
     log,
   );
   await headroom.ensure({ prompts: inputs.length }, { includeDrafted: true });
@@ -185,9 +218,11 @@ export async function handleCreatePromptsSubworkspace(
     }
     const projectId = String(project.id);
     try {
-      // Unified layer: strip any caller-supplied type/origin + inject the
-      // computed type and the derived origin (`human`).
-      const typed = await injectComputedTags(projectId, input);
+      // Unified layer: strip caller-supplied type/origin/intent, then inject the
+      // computed type + derived origin (origin-dimension.md §3) and the classified
+      // intent (serenity-docs#32). The injectors act on disjoint dimensions.
+      let typed = await injectComputedTags(projectId, input);
+      typed = await injectComputedIntent(projectId, typed);
       // LLMO-6190 follow-up: the metered write itself can still 405 as a disguised metered-quota
       // rejection despite the pre-loop sizing above (the live-verified ~9s gateway
       // write-enforcement lag after a JIT top-up) — route it through `headroom.retryOnQuota` (a
@@ -239,11 +274,18 @@ export async function handleCreatePromptsSubworkspace(
     invalidateTagCacheForProject(workspaceId, pid);
   }
 
-  // LLMO-6190 item 4: route each project's publish through `headroom.retryOnQuota` — a bounded
-  // top-up+retry if it STILL 405s as a disguised metered-quota rejection despite the pre-write
-  // sizing above (e.g. a raced concurrent write on the same child). `publishAffected` nests this
-  // per-project, so a surviving 405 after the retry still lands in `publishErrors` for that project
-  // rather than throwing. `headroom` is always defined (a genuine no-op when the flag is OFF).
+  if (deferPublish) {
+    log?.info?.('serenity create-prompts (subworkspace): deferPublish set — prompts written as draft, publish skipped', {
+      workspaceId, created: created.length, skipped: skipped.length, failed: failed.length,
+    });
+    return {
+      created, skipped, failed, published: false,
+    };
+  }
+
+  // Route each project's publish through the headroom guard's retryOnQuota (LLMO-6190 item 4):
+  // a disguised metered-405 gets ONE bounded top-up+retry per project before being recorded as a
+  // failure. No-op passthrough when the flag is OFF (the guard's retryOnQuota is a plain call).
   const publishErrors = await publishAffected(
     transport,
     workspaceId,
@@ -257,7 +299,9 @@ export async function handleCreatePromptsSubworkspace(
     failed.push({ text: '', status: 502, message: `publish: ${pubErr.message}` });
   }
 
-  return { created, skipped, failed };
+  return {
+    created, skipped, failed, published: true,
+  };
 }
 
 /**
@@ -276,6 +320,8 @@ export async function handleUpdatePromptSubworkspace(
   body,
   log,
   classifyPromptType,
+  env,
+  writeDeadline,
 ) {
   const parsedBody = parseUpdatePromptBody(body);
   if (!parsedBody.ok) {
@@ -306,16 +352,24 @@ export async function handleUpdatePromptSubworkspace(
   }
   const projectId = String(project.id);
 
-  // Recompute the type tag from the NEW text BEFORE any upstream write (see
-  // the flat-mode twin): a classification failure aborts cleanly with the
-  // prompt completely untouched.
-  // No `originValue`: origin is never re-derived on edit (origin-dimension.md §3
-  // item 3); the stored origin the caller echoes rides through untouched. See the
-  // flat-mode twin handleUpdatePrompt.
+  // Recompute the type AND intent tags from the NEW text BEFORE any upstream write
+  // (see the flat-mode twin handleUpdatePrompt): the unified layer must run before
+  // the rename so a classification failure aborts cleanly with the prompt untouched
+  // (serenity-docs#31, #32). No `originValue`: origin is never re-derived on edit
+  // (origin-dimension.md §3 item 3); the stored origin the caller echoes rides
+  // through the replace-mode tag write untouched.
   const injectComputedTags = makePromptTagInjector(transport, workspaceId, classifyPromptType, log);
-  const typed = await injectComputedTags(projectId, {
+  const intentByText = await classifyPromptIntents(
+    [nextText],
+    {
+      env, log, deadline: writeDeadline, writePath: 'edit', workspaceId,
+    },
+  );
+  const injectComputedIntent = makeIntentInjector(transport, workspaceId, intentByText, log);
+  let typed = await injectComputedTags(projectId, {
     text: nextText, geoTargetId, tagIds: nextTagIds,
   });
+  typed = await injectComputedIntent(projectId, typed);
 
   try {
     await transport.renamePrompt(workspaceId, projectId, semrushPromptId, nextText);

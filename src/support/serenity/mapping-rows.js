@@ -137,26 +137,37 @@ export async function upsertMappingRow(dataAccess, {
  * sees tombstones too, so a second call on an already-tombstoned row is a
  * harmless re-set.
  *
+ * Returns the tombstoned row's linked `siteId` (captured BEFORE the tombstone),
+ * so the caller can reference-count and clean up an orphaned `brand_sites` link
+ * (LLMO-6405 R12) without a second read. `null` when no row matched, the row had
+ * no linked site, or the write failed.
+ *
  * @param {any} dataAccess
  * @param {string|null|undefined} semrushProjectId
  * @param {any} [log]
+ * @returns {Promise<{ siteId: string|null }>} the deleted row's linked site id (or null).
  */
 export async function tombstoneMappingRow(dataAccess, semrushProjectId, log) {
   const BrandSemrushProject = dataAccess?.BrandSemrushProject;
   if (!BrandSemrushProject || !semrushProjectId || !hasText(semrushProjectId)) {
-    return;
+    return { siteId: null };
   }
   try {
     const row = await BrandSemrushProject.findBySemrushProjectId(semrushProjectId);
     if (!row) {
-      return;
+      return { siteId: null };
     }
+    // Capture the linked Site BEFORE tombstoning (the row survives, but this
+    // spares the caller a second read for the R12 orphan-link cleanup).
+    const siteId = row.getSiteId?.() ?? null;
     row.setDeletedAt(new Date().toISOString());
     await row.save();
+    return { siteId };
   } catch (e) {
     log?.error?.(`serenity mapping row: ${WRITE_FAILED_TOKEN} — tombstone failed`, {
       semrushProjectId, op: 'tombstone', error: e?.message,
     });
+    return { siteId: null };
   }
 }
 

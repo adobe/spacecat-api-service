@@ -19,6 +19,7 @@ import {
   listBrands,
   getBrandById,
   getBrandIdentity,
+  getBrandBaseSiteId,
   getBrandAliases,
   getBrandUrlSources,
   getBrandCompetitors,
@@ -30,6 +31,7 @@ import {
   deleteBrand,
   setBrandStatus,
   listRegions,
+  setBrandClaimsEnabled,
 } from '../../src/support/brands-storage.js';
 
 use(sinonChai);
@@ -251,6 +253,23 @@ describe('brands-storage', () => {
       const result = await listBrands(ORG_ID, postgrestClient);
       expect(result[0].brandContext).to.equal('');
       expect(result[0].mentionSentimentGuidance).to.equal('');
+    });
+
+    it('maps brand_claims_enabled to brandClaimsEnabled', async () => {
+      const dbRow = makeBrandRow({ brand_claims_enabled: true });
+      const query = createChainableQuery({ data: [dbRow], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await listBrands(ORG_ID, postgrestClient);
+      expect(result[0].brandClaimsEnabled).to.equal(true);
+    });
+
+    it('defaults brandClaimsEnabled to false when the column is absent', async () => {
+      const query = createChainableQuery({ data: [makeBrandRow()], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await listBrands(ORG_ID, postgrestClient);
+      expect(result[0].brandClaimsEnabled).to.equal(false);
     });
   });
 
@@ -503,6 +522,48 @@ describe('brands-storage', () => {
 
       await expect(getBrandIdentity(ORG_ID, BRAND_ID, postgrestClient))
         .to.be.rejectedWith('Failed to get brand identity');
+    });
+  });
+
+  describe('getBrandBaseSiteId', () => {
+    // Can't-scope-the-query cases THROW (not return null) so a best-effort caller's
+    // catch fails safe and skips primary-site-dependent cleanup, rather than
+    // proceeding with a null primary that would disable the guard (LLMO-6405 review).
+    it('throws when postgrestClient is missing', async () => {
+      await expect(getBrandBaseSiteId(ORG_ID, BRAND_ID, null))
+        .to.be.rejectedWith('organizationId, brandId, and a postgrest client are all required');
+    });
+
+    it('throws when brandId is empty', async () => {
+      await expect(getBrandBaseSiteId(ORG_ID, '', { from: () => {} }))
+        .to.be.rejectedWith('organizationId, brandId, and a postgrest client are all required');
+    });
+
+    it('throws when organizationId is missing (fail-safe: unresolved, not "no primary")', async () => {
+      await expect(getBrandBaseSiteId('', BRAND_ID, { from: () => {} }))
+        .to.be.rejectedWith('organizationId, brandId, and a postgrest client are all required');
+    });
+
+    it('returns the brand primary site_id', async () => {
+      const query = createChainableQuery({ data: { site_id: 'primary-site-1' }, error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      expect(await getBrandBaseSiteId(ORG_ID, BRAND_ID, postgrestClient)).to.equal('primary-site-1');
+    });
+
+    it('returns null when the brand has no primary site (or is not found)', async () => {
+      const noRow = createChainableQuery({ data: null, error: null });
+      expect(await getBrandBaseSiteId(ORG_ID, BRAND_ID, { from: sinon.stub().returns(noRow) }))
+        .to.be.null;
+      const nullSite = createChainableQuery({ data: { site_id: null }, error: null });
+      expect(await getBrandBaseSiteId(ORG_ID, BRAND_ID, { from: sinon.stub().returns(nullSite) }))
+        .to.be.null;
+    });
+
+    it('throws on database error', async () => {
+      const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+      await expect(getBrandBaseSiteId(ORG_ID, BRAND_ID, postgrestClient))
+        .to.be.rejectedWith('Failed to get brand primary site');
     });
   });
 
@@ -2489,6 +2550,60 @@ describe('brands-storage', () => {
         brand: { name: 'Test', urls: ['https://test.com'] },
         postgrestClient,
       })).to.be.rejectedWith('Failed to sync brand_sites: upsert failed');
+    });
+  });
+
+  describe('setBrandClaimsEnabled', () => {
+    it('throws when postgrestClient is missing', async () => {
+      await expect(setBrandClaimsEnabled({
+        brandId: BRAND_ID, enabled: true, postgrestClient: null,
+      })).to.be.rejectedWith('PostgREST client is required');
+    });
+
+    it('throws when enabled is not a boolean', async () => {
+      await expect(setBrandClaimsEnabled({
+        brandId: BRAND_ID, enabled: 'true', postgrestClient: { from: () => {} },
+      })).to.be.rejectedWith('enabled must be a boolean');
+    });
+
+    it('returns null when brandId is empty', async () => {
+      expect(await setBrandClaimsEnabled({
+        brandId: '', enabled: true, postgrestClient: { from: () => {} },
+      })).to.be.null;
+    });
+
+    it('writes brand_claims_enabled, excludes deleted brands, and returns the updated brand', async () => {
+      const client = createCapturingClient({
+        brands: [{ data: { id: BRAND_ID, name: 'Acme' }, error: null }],
+      });
+
+      const result = await setBrandClaimsEnabled({
+        brandId: BRAND_ID, enabled: true, postgrestClient: client, updatedBy: 'slack:U1',
+      });
+
+      const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
+      expect(brandsUpdate.row.brand_claims_enabled).to.equal(true);
+      expect(brandsUpdate.row.updated_by).to.equal('slack:U1');
+      const neqFilter = client.capturedCalls.neq.find((c) => c.table === 'brands' && c.col === 'status');
+      expect(neqFilter?.val).to.equal('deleted');
+      expect(result).to.deep.equal({ id: BRAND_ID, name: 'Acme' });
+    });
+
+    it('returns null when no brand matches the id', async () => {
+      const client = createTableMockClient({ brands: { data: null, error: null } });
+
+      const result = await setBrandClaimsEnabled({
+        brandId: BRAND_ID, enabled: false, postgrestClient: client,
+      });
+      expect(result).to.be.null;
+    });
+
+    it('throws on database error', async () => {
+      const client = createTableMockClient({ brands: { data: null, error: { message: 'boom' } } });
+
+      await expect(setBrandClaimsEnabled({
+        brandId: BRAND_ID, enabled: true, postgrestClient: client,
+      })).to.be.rejectedWith('Failed to update brand claims flag: boom');
     });
   });
 

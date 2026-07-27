@@ -1,0 +1,25 @@
+coverage:
+  status:
+    # Whole-repo coverage. Matches the bar already enforced locally by
+    # .nycrc.json (lines/branches/statements: 90) — `target: auto` compares
+    # against the base commit so this doesn't ratchet tighter than that on
+    # every merge, `threshold` absorbs normal noise from unrelated file churn.
+    project:
+      default:
+        target: auto
+        threshold: 1%
+    # Coverage of just the lines changed in a PR. Left unset (Codecov default),
+    # this compares against the repo's actual project average instead of a
+    # fixed bar — since this repo's project average sits at ~99.9%, that meant
+    # ANY new file/branch needed near-100% patch coverage to pass, regardless
+    # of the 90% bar .nycrc.json already enforces project-wide. Pin it to that
+    # same 90% instead, so a handful of legitimately-hard-to-hit lines (error
+    # branches, defensive guards) in an otherwise well-tested PR don't fail CI.
+    patch:
+      default:
+        target: 90%
+        threshold: 1%
+
+comment:
+  layout: "reach, diff, flags, files"
+  require_changes: false

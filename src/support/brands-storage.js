@@ -265,6 +265,11 @@ function mapDbBrandToV2(row) {
     brandContext: row.brand_context ?? null,
     mentionSentimentGuidance: row.mention_sentiment_guidance ?? null,
     vertical: row.vertical || null,
+    // Internal ops gate (LLMO-5741): opt-in flag the mystique Brand Claims
+    // consumer reads back to decide whether a BP-sheet-ready event becomes a
+    // claims run. Default false so brands stay off the automated path until an
+    // operator flips it (via the `brand-claims` Slack command).
+    brandClaimsEnabled: row.brand_claims_enabled ?? false,
     region: row.regions || [],
     urls,
     socialAccounts: (row.brand_social_accounts || []).map((s) => ({
@@ -631,6 +636,42 @@ export async function getBrandIdentity(organizationId, brandId, postgrestClient)
 }
 
 /**
+ * Reads a brand's PRIMARY site id (`brands.site_id`) — the site that anchors the
+ * brand shell itself (as opposed to a market-mirror site linked via
+ * `brand_sites`). Used by the serenity market-delete cleanup (LLMO-6405 R12) to
+ * ensure the brand's primary site link is never removed when its last market is
+ * deleted. Lightweight single-column read; returns null when the brand has no
+ * primary site (a serenity shell before activation) or is not found.
+ *
+ * @param {string} organizationId - SpaceCat organization UUID.
+ * @param {string} brandId - Brand UUID.
+ * @param {object} postgrestClient - PostgREST client.
+ * @returns {Promise<string|null>} the brand's primary site id, or null.
+ */
+export async function getBrandBaseSiteId(organizationId, brandId, postgrestClient) {
+  // Can't scope the query without all three → THROW (not return null) so a
+  // best-effort caller's catch treats it as "primary unresolved" and skips
+  // primary-site-dependent cleanup. Returning null here would be ambiguous with a
+  // successfully-resolved "brand has no primary site" and would silently disable
+  // the primary-site guard in the delete-orphan-unlink path (LLMO-6405 review).
+  if (!postgrestClient?.from || !hasText(brandId) || !hasText(organizationId)) {
+    throw new Error('getBrandBaseSiteId: organizationId, brandId, and a postgrest client are all required');
+  }
+
+  const { data, error } = await postgrestClient
+    .from('brands')
+    .select('site_id')
+    .eq('organization_id', organizationId)
+    .eq('id', brandId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to get brand primary site: ${error.message}`);
+  }
+  return data?.site_id ?? null;
+}
+
+/**
  * Reads a brand's aliases (the `brand_aliases` rows) — the extra names the brand
  * is known by, beyond its display name — each with its `regions`. Returned as
  * `{ name, regions }[]` (empty when the brand has none), the shape the Semrush
@@ -795,6 +836,51 @@ export async function getBrandBySite(organizationId, siteId, postgrestClient, lo
     );
   }
   return mapDbBrandToV2(data[0]);
+}
+
+/**
+ * Sets the brand-scoped `brand_claims_enabled` scheduling gate (LLMO-5741),
+ * keyed on the brand UUID (the PK), so operators can enable/disable Brand Claims
+ * for a brand directly. Returns the updated `{ id, name }` or null when no brand
+ * matches the id.
+ *
+ * @param {Object} params
+ * @param {string} params.brandId - Brand UUID.
+ * @param {boolean} params.enabled - Target flag value.
+ * @param {Object} params.postgrestClient - PostgREST client.
+ * @param {string} [params.updatedBy] - Audit actor.
+ * @returns {Promise<{id: string, name: string}|null>}
+ */
+export async function setBrandClaimsEnabled({
+  brandId,
+  enabled,
+  postgrestClient,
+  updatedBy = 'system',
+}) {
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
+  if (typeof enabled !== 'boolean') {
+    throw new Error('enabled must be a boolean');
+  }
+  if (!hasText(brandId)) {
+    return null;
+  }
+
+  const { data, error } = await postgrestClient
+    .from('brands')
+    .update({ brand_claims_enabled: enabled, updated_by: updatedBy })
+    .eq('id', brandId)
+    // Do not flip the flag on a soft-deleted brand (matches the .neq guard used
+    // across brands-storage); a deleted brand returns no row -> null.
+    .neq('status', 'deleted')
+    .select('id, name')
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to update brand claims flag: ${error.message}`);
+  }
+  return data || null;
 }
 
 /**

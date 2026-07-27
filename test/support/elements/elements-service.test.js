@@ -14,6 +14,7 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
+import { hasText } from '@adobe/spacecat-shared-utils';
 import { createElementsService } from '../../../src/support/elements/elements-service.js';
 import { ELEMENT_IDS } from '../../../src/support/elements/element-ids.js';
 import { INTENT_VALUE } from '../../../src/support/serenity/prompt-tags.js';
@@ -463,6 +464,374 @@ describe('createElementsService', () => {
       await expect(service.getBrandPresenceStats('ws-1', {
         startDate: '2026-07-01', endDate: '2026-07-14', brandName: 'Lovesac', projectId: 'proj-1',
       })).to.be.rejectedWith('mentions upstream failure');
+    });
+  });
+
+  describe('getUrlInspectorStats', () => {
+    const STATS_PER_URL_RESULT = {
+      blocks: {
+        data: [
+          {
+            source: '/a', citations: 5, prompts_with_citation: 2, domain_type: 'Owned',
+          },
+          {
+            source: '/b', citations: 3, prompts_with_citation: 1, domain_type: 'Owned',
+          },
+        ],
+      },
+    };
+    beforeEach(() => {
+      transport.fetchElement
+        .withArgs('ws-1', ELEMENT_IDS.STATS_PER_URL, sinon.match.any)
+        .resolves(STATS_PER_URL_RESULT);
+    });
+
+    it('returns aggregated citation KPIs for a single-project (single-region) request', async () => {
+      const result = await service.getUrlInspectorStats('ws-1', {
+        projects: [{ region: 'US', projectId: 'proj-1' }],
+        startDate: '2026-07-01',
+        endDate: '2026-07-07',
+      });
+      expect(result.stats).to.deep.equal({
+        uniqueUrls: 2, totalCitations: 8, totalPromptsCited: 3, partial: false,
+      });
+    });
+
+    it('caps weeklyTrends to the most recent 8 weeks for a wider requested range (single project)', async () => {
+      const result = await service.getUrlInspectorStats('ws-1', {
+        projects: [{ region: 'US', projectId: 'proj-1' }],
+        startDate: '2026-01-01',
+        endDate: '2026-07-14',
+      });
+      expect(result.weeklyTrends).to.have.length(8);
+    });
+
+    it('narrows the weekly cap for a multi-project aggregate view so the fan-out fits one batch', async () => {
+      // floor(STATS_FANOUT_CONCURRENCY=8 / 3 projects) = 2 weeks, not the fixed
+      // 8-week cap used by the single-project case above.
+      const result = await service.getUrlInspectorStats('ws-1', {
+        projects: [
+          { region: 'US', projectId: 'proj-us' },
+          { region: 'AU', projectId: 'proj-au' },
+          { region: 'UK', projectId: 'proj-uk' },
+        ],
+        startDate: '2026-01-01',
+        endDate: '2026-07-14',
+      });
+      expect(result.weeklyTrends).to.have.length(2);
+      // stats (the aggregate card values) still covers the full requested range.
+      expect(result.stats.uniqueUrls).to.equal(2);
+    });
+
+    it('runs the aggregate stats fetch and the weekly trends fan-out concurrently, not sequentially', async () => {
+      let inFlight = 0;
+      let overlapped = false;
+      transport.fetchElement
+        .withArgs('ws-1', ELEMENT_IDS.STATS_PER_URL, sinon.match.any)
+        .callsFake(async () => {
+          inFlight += 1;
+          if (inFlight > 1) {
+            overlapped = true;
+          }
+          await new Promise((resolve) => {
+            setTimeout(resolve, 5);
+          });
+          inFlight -= 1;
+          return STATS_PER_URL_RESULT;
+        });
+      await service.getUrlInspectorStats('ws-1', {
+        projects: [{ region: 'US', projectId: 'proj-1' }],
+        startDate: '2026-07-01',
+        endDate: '2026-07-07',
+      });
+      expect(overlapped).to.equal(true);
+    });
+
+    it('each weeklyTrends entry carries weekStart/weekEnd plus the citation KPIs only', async () => {
+      const result = await service.getUrlInspectorStats('ws-1', {
+        projects: [{ region: 'US', projectId: 'proj-1' }],
+        startDate: '2026-07-01',
+        endDate: '2026-07-07',
+      });
+      expect(result.weeklyTrends[0]).to.deep.equal({
+        weekStart: '2026-07-01',
+        weekEnd: '2026-07-07',
+        uniqueUrls: 2,
+        totalCitations: 8,
+        totalPromptsCited: 3,
+        partial: false,
+      });
+    });
+
+    it('fans out one Stats-per-URL call per project (region) for the aggregate range', async () => {
+      await service.getUrlInspectorStats('ws-1', {
+        projects: [
+          { region: 'US', projectId: 'proj-us' },
+          { region: 'AU', projectId: 'proj-au' },
+        ],
+        startDate: '2026-07-01',
+        endDate: '2026-07-07',
+      });
+      const statsCalls = transport.fetchElement.getCalls()
+        .filter((c) => c.args[1] === ELEMENT_IDS.STATS_PER_URL && c.args[2].project_id);
+      const projectIdsCalled = statsCalls.map((c) => c.args[2].project_id);
+      expect(projectIdsCalled).to.include.members(['proj-us', 'proj-au']);
+    });
+
+    it('omits the project_id field for an unscoped (empty projects) aggregate fetch', async () => {
+      await service.getUrlInspectorStats('ws-1', {
+        projects: [],
+        startDate: '2026-07-01',
+        endDate: '2026-07-07',
+      });
+      const statsCall = transport.fetchElement.getCalls()
+        .find((c) => c.args[1] === ELEMENT_IDS.STATS_PER_URL);
+      expect(statsCall.args[2]).to.not.have.property('project_id');
+    });
+
+    it('settles a failing scope instead of rejecting the whole request, flagging the aggregate as partial', async () => {
+      transport.fetchElement.withArgs('ws-1', ELEMENT_IDS.STATS_PER_URL, sinon.match.any)
+        .rejects(new Error('stats-per-url upstream failure'));
+      const result = await service.getUrlInspectorStats('ws-1', {
+        projects: [{ region: 'US', projectId: 'proj-1' }],
+        startDate: '2026-07-01',
+        endDate: '2026-07-07',
+      });
+      expect(result.stats).to.deep.equal({
+        uniqueUrls: 0, totalCitations: 0, totalPromptsCited: 0, partial: true,
+      });
+      expect(result.weeklyTrends.every((w) => w.partial)).to.equal(true);
+    });
+
+    it('does not flag the aggregate as partial when only some scopes fail', async () => {
+      transport.fetchElement
+        .withArgs('ws-1', ELEMENT_IDS.STATS_PER_URL, sinon.match({ project_id: 'proj-us' }))
+        .resolves(STATS_PER_URL_RESULT);
+      transport.fetchElement
+        .withArgs('ws-1', ELEMENT_IDS.STATS_PER_URL, sinon.match({ project_id: 'proj-au' }))
+        .rejects(new Error('stats-per-url upstream failure for proj-au'));
+      const result = await service.getUrlInspectorStats('ws-1', {
+        projects: [
+          { region: 'US', projectId: 'proj-us' },
+          { region: 'AU', projectId: 'proj-au' },
+        ],
+        startDate: '2026-07-01',
+        endDate: '2026-07-07',
+      });
+      expect(result.stats.partial).to.equal(true);
+      // The succeeding scope's rows still contribute to the aggregate.
+      expect(result.stats.uniqueUrls).to.equal(2);
+    });
+
+    it('does not fan out a workspace-wide call for a projects entry missing a projectId', async () => {
+      await service.getUrlInspectorStats('ws-1', {
+        projects: [
+          { region: 'US', projectId: 'proj-1' },
+          { region: 'ZZ' },
+        ],
+        startDate: '2026-07-01',
+        endDate: '2026-07-07',
+      });
+      const statsCalls = transport.fetchElement.getCalls()
+        .filter((c) => c.args[1] === ELEMENT_IDS.STATS_PER_URL);
+      expect(statsCalls.every((c) => hasText(c.args[2].project_id))).to.equal(true);
+    });
+
+    it('bounds the flattened (week x project) fan-out to a single concurrency limit', async () => {
+      let inFlight = 0;
+      let maxInFlight = 0;
+      transport.fetchElement.callsFake(async (...args) => {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((resolve) => {
+          setTimeout(resolve, 1);
+        });
+        inFlight -= 1;
+        if (args[1] === ELEMENT_IDS.STATS_PER_URL) {
+          return STATS_PER_URL_RESULT;
+        }
+        return {};
+      });
+      await service.getUrlInspectorStats('ws-1', {
+        projects: [
+          { region: 'US', projectId: 'proj-us' },
+          { region: 'AU', projectId: 'proj-au' },
+          { region: 'UK', projectId: 'proj-uk' },
+        ],
+        startDate: '2026-01-01',
+        endDate: '2026-07-14',
+      });
+      expect(maxInFlight).to.be.at.most(8);
+    });
+  });
+
+  const kpiLineChartResponse = (mainValue, secondaryValue) => ({
+    blocks: {
+      mainValue: [{ mainValue }],
+      secondaryValue: [{ period: 'previous', secondaryValue }],
+    },
+  });
+
+  describe('getKpiHeadlines', () => {
+    it('fetches Share of Voice + Brand Visibility in parallel and extracts mainValue/secondaryValue', async () => {
+      transport.fetchElement.callsFake(async (workspaceId, elementId) => {
+        if (elementId === ELEMENT_IDS.KPI_SHARE_OF_VOICE) {
+          return kpiLineChartResponse(0.3628, 0.3927);
+        }
+        if (elementId === ELEMENT_IDS.KPI_BRAND_VISIBILITY) {
+          return kpiLineChartResponse(0.4959, 0.548);
+        }
+        throw new Error(`unexpected elementId: ${elementId}`);
+      });
+
+      const result = await service.getKpiHeadlines('ws-1', {
+        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24',
+      });
+
+      expect(result).to.deep.equal({
+        shareOfVoice: { value: 0.3628, comparisonValue: 0.3927 },
+        brandVisibility: { value: 0.4959, comparisonValue: 0.548 },
+      });
+      expect(transport.fetchElement).to.have.been.calledTwice;
+    });
+
+    it('prefers a single projectId over the aggregate projectIds list', async () => {
+      transport.fetchElement.resolves({ blocks: {} });
+      await service.getKpiHeadlines('ws-1', {
+        brandName: 'Lovesac',
+        startDate: '2026-06-25',
+        endDate: '2026-07-24',
+        projectId: 'proj-single',
+        projectIds: ['proj-a', 'proj-b'],
+      });
+      const [, , payload] = transport.fetchElement.firstCall.args;
+      const projectFilter = payload.filters.advanced.filters
+        .find((f) => f.filters?.some((inner) => inner.col === 'CBF_project'));
+      expect(projectFilter.filters).to.deep.equal([{ op: 'eq', val: 'proj-single', col: 'CBF_project' }]);
+    });
+
+    it('propagates a rejected upstream call rather than swallowing it', async () => {
+      const upstreamError = new Error('Elements API POST failed: 502');
+      transport.fetchElement.rejects(upstreamError);
+      await expect(service.getKpiHeadlines('ws-1', {
+        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24',
+      })).to.be.rejectedWith(upstreamError);
+    });
+
+    it('passes category through to both KPI element payloads as-is', async () => {
+      transport.fetchElement.resolves({ blocks: {} });
+      await service.getKpiHeadlines('ws-1', {
+        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24', category: 'category__Firefly',
+      });
+      for (const call of transport.fetchElement.getCalls()) {
+        const [, , payload] = call.args;
+        expect(payload.filters.advanced.filters).to.deep.include({
+          op: 'eq', val: 'category__Firefly', col: 'CBF_tags',
+        });
+      }
+    });
+  });
+
+  describe('getSourceVisibilityHeadline', () => {
+    it('fetches the brand URL list, then the KPI element scoped by it, sequentially', async () => {
+      const callOrder = [];
+      transport.fetchElement.callsFake(async (workspaceId, elementId) => {
+        callOrder.push(elementId);
+        if (elementId === ELEMENT_IDS.BRAND_URLS) {
+          return { blocks: { value: [{ value: 'lovesac.com' }, { value: 'instagram.com/lovesac' }] } };
+        }
+        if (elementId === ELEMENT_IDS.KPI_SOURCE_VISIBILITY) {
+          return kpiLineChartResponse(0.3954, 0.4865);
+        }
+        throw new Error(`unexpected elementId: ${elementId}`);
+      });
+
+      const result = await service.getSourceVisibilityHeadline('ws-1', {
+        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24',
+      });
+
+      expect(result).to.deep.equal({ value: 0.3954, comparisonValue: 0.4865 });
+      expect(callOrder).to.deep.equal([ELEMENT_IDS.BRAND_URLS, ELEMENT_IDS.KPI_SOURCE_VISIBILITY]);
+    });
+
+    it('passes the brand URL list into the KPI element payload', async () => {
+      transport.fetchElement.callsFake(async (workspaceId, elementId) => {
+        if (elementId === ELEMENT_IDS.BRAND_URLS) {
+          return { blocks: { value: [{ value: 'lovesac.com' }] } };
+        }
+        return { blocks: {} };
+      });
+      await service.getSourceVisibilityHeadline('ws-1', {
+        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24',
+      });
+      const kpiCall = transport.fetchElement.getCalls()
+        .find((c) => c.args[1] === ELEMENT_IDS.KPI_SOURCE_VISIBILITY);
+      const urlFilter = kpiCall.args[2].filters.advanced.filters
+        .find((f) => f.filters?.some((inner) => inner.col === 'CBF_brand_urls'));
+      expect(urlFilter.filters).to.deep.equal([{ op: 'url_match', val: 'lovesac.com', col: 'CBF_brand_urls' }]);
+    });
+
+    it('uses the tightened per-call timeout/retry budget for both hops', async () => {
+      transport.fetchElement.callsFake(async (workspaceId, elementId) => {
+        if (elementId === ELEMENT_IDS.BRAND_URLS) {
+          return { blocks: { value: [{ value: 'lovesac.com' }] } };
+        }
+        return { blocks: {} };
+      });
+      await service.getSourceVisibilityHeadline('ws-1', {
+        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24',
+      });
+      expect(transport.fetchElement).to.have.been.calledTwice;
+      for (const call of transport.fetchElement.getCalls()) {
+        expect(call.args[3]).to.deep.equal({ timeoutMs: 12_000, maxRetries: 1 });
+      }
+    });
+
+    it('returns a zeroed result without calling the KPI element when the brand has no registered URLs', async () => {
+      transport.fetchElement.resolves({ blocks: { value: [] } });
+      const result = await service.getSourceVisibilityHeadline('ws-1', {
+        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24',
+      });
+      expect(result).to.deep.equal({ value: 0, comparisonValue: null });
+      expect(transport.fetchElement).to.have.been.calledOnce;
+    });
+
+    it('propagates a rejected brand-URL-list lookup (first hop) rather than swallowing it', async () => {
+      const upstreamError = new Error('Elements API POST failed: 504');
+      transport.fetchElement.rejects(upstreamError);
+      await expect(service.getSourceVisibilityHeadline('ws-1', {
+        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24',
+      })).to.be.rejectedWith(upstreamError);
+    });
+
+    it('propagates a rejected KPI element call (second hop) after the URL list succeeds', async () => {
+      const upstreamError = new Error('Elements API POST failed: 502');
+      transport.fetchElement.callsFake(async (workspaceId, elementId) => {
+        if (elementId === ELEMENT_IDS.BRAND_URLS) {
+          return { blocks: { value: [{ value: 'lovesac.com' }] } };
+        }
+        throw upstreamError;
+      });
+      await expect(service.getSourceVisibilityHeadline('ws-1', {
+        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24',
+      })).to.be.rejectedWith(upstreamError);
+    });
+
+    it('passes category through to the KPI element payload as-is', async () => {
+      transport.fetchElement.callsFake(async (workspaceId, elementId) => {
+        if (elementId === ELEMENT_IDS.BRAND_URLS) {
+          return { blocks: { value: [{ value: 'lovesac.com' }] } };
+        }
+        return { blocks: {} };
+      });
+      await service.getSourceVisibilityHeadline('ws-1', {
+        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24', category: 'category__Firefly',
+      });
+      const kpiCall = transport.fetchElement.getCalls()
+        .find((c) => c.args[1] === ELEMENT_IDS.KPI_SOURCE_VISIBILITY);
+      expect(kpiCall.args[2].filters.advanced.filters).to.deep.include({
+        op: 'eq', val: 'category__Firefly', col: 'CBF_tags',
+      });
     });
   });
 });
