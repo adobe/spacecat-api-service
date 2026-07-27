@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import { randomBytes } from 'node:crypto';
 import {
   ok, badRequest, notFound, forbidden, unauthorized, internalServerError, createResponse,
 } from '@adobe/spacecat-shared-http-utils';
@@ -21,7 +22,7 @@ import AkamaiClient, {
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
 import {
-  buildRuleConfig, mergeIntoTree, managedRuleNames, redactApiKey,
+  buildRuleConfig, mergeIntoTree, managedRuleNames, redactSecrets,
 } from './llmo-akamai-utils.js';
 
 // EdgeGrid credentials are CLIENT-SUPPLIED per request (never persisted, never logged): the caller
@@ -40,6 +41,13 @@ const CRED_HEADERS = Object.freeze({
 const REQUIRED_CRED_KEYS = ['host', 'clientToken', 'clientSecret', 'accessToken'];
 
 const NETWORKS = ['STAGING', 'PRODUCTION'];
+
+// The fetcher key is a secret we mint server-side and inject as the x-edgeoptimize-fetcher-key
+// request header, so the customer can allowlist Optimize-at-Edge (with the AdobeEdgeOptimize/1.0
+// user agent) in their Bot Manager/WAF. 32 random bytes as hex (like `openssl rand -hex 32`). A
+// fresh key is minted on every deploy, so re-deploying rotates it — the customer must re-add the
+// new value to their allowlist. The value never leaves the rule tree except in the deploy response.
+const generateFetcherKey = () => randomBytes(32).toString('hex');
 
 // Akamai activation statuses that mean the submit actually succeeded (in flight or already live).
 // Used to recover from an activate POST that errored client-side — the PAPI activation call
@@ -235,7 +243,7 @@ function LlmoAkamaiController(ctx) {
   // The LLMO API key is a CONFIDENTIAL string: it is injected into the managed rule tree
   // (x-edgeoptimize-api-key) and sent to Akamai at deploy, but it must never be logged or returned
   // to a client. Never put the resolved key, the config, or the un-redacted merged tree into a log
-  // line or response (plan redacts it via redactApiKey; audit lines carry only ids/versions).
+  // line or response (plan redacts it via redactSecrets; audit lines carry only ids/versions).
   const getLlmoApiKey = async (site, context) => {
     const tokowaka = TokowakaClient.createFrom(context);
     const metaconfig = await tokowaka.fetchMetaconfig(site.getBaseURL());
@@ -281,30 +289,6 @@ function LlmoAkamaiController(ctx) {
     // Require a decimal-integer literal: Number() would otherwise accept true, "0x10", "1e3".
     if (!DECIMAL_INT_RE.test(String(insertIndex))) {
       return badRequest('insertIndex must be a non-negative integer');
-    }
-    return null;
-  };
-
-  /**
-   * Validates the optional, customer-owned fetcherKey. It's a secret the customer generates and
-   * owns (we only forward it as the x-edgeoptimize-fetcher-key header). We stay lenient on content
-   * but enforce: a string, ≤256 chars (matches the OpenAPI maxLength on the RAW value), not blank,
-   * and no control characters (it becomes an HTTP header — reject CR/LF/control-char injection).
-   * @returns {Response|null} a badRequest to block, or null when absent/valid
-   */
-  const validateFetcherKey = (fetcherKey) => {
-    if (fetcherKey === undefined || fetcherKey === null || fetcherKey === '') {
-      return null;
-    }
-    if (typeof fetcherKey !== 'string' || fetcherKey.length > 256) {
-      return badRequest('fetcherKey must be a string of at most 256 characters');
-    }
-    if (fetcherKey.trim() === '') {
-      return badRequest('fetcherKey must not be blank');
-    }
-    // eslint-disable-next-line no-control-regex
-    if (/[\u0000-\u001F\u007F]/.test(fetcherKey)) {
-      return badRequest('fetcherKey must not contain control characters');
     }
     return null;
   };
@@ -503,15 +487,14 @@ function LlmoAkamaiController(ctx) {
     }
 
     const { propertyId, contractId, groupId } = ref;
-    const { insertIndex, fetcherKey } = context.data;
+    const { insertIndex } = context.data;
     const insertIndexError = validateInsertIndex(insertIndex);
     if (insertIndexError) {
       return insertIndexError;
     }
-    const fetcherKeyError = validateFetcherKey(fetcherKey);
-    if (fetcherKeyError) {
-      return fetcherKeyError;
-    }
+    // Mint a throwaway key so the preview reflects (and validates) the header deploy will add. Its
+    // value is redacted from the returned tree; the real deployed key is minted in deploy.
+    const fetcherKey = generateFetcherKey();
 
     try {
       const version = await client.getLatestVersion(propertyId, contractId, groupId);
@@ -583,7 +566,7 @@ function LlmoAkamaiController(ctx) {
         // Redact the injected LLMO API key before returning the preview — plan is read-only and
         // the real key is only needed server-side at deploy; the merged tree ends up in browser
         // devtools / HAR exports / proxy logs otherwise.
-        merged: redactApiKey(merged),
+        merged: redactSecrets(merged),
       });
     } catch (e) {
       return papiErrorResponse(e, 'plan', context, { siteId: site.getId(), propertyId });
@@ -618,15 +601,14 @@ function LlmoAkamaiController(ctx) {
     }
 
     const { propertyId, contractId, groupId } = ref;
-    const { insertIndex, baseVersion: rawBaseVersion, fetcherKey } = context.data;
+    const { insertIndex, baseVersion: rawBaseVersion } = context.data;
     const insertIndexError = validateInsertIndex(insertIndex);
     if (insertIndexError) {
       return insertIndexError;
     }
-    const fetcherKeyError = validateFetcherKey(fetcherKey);
-    if (fetcherKeyError) {
-      return fetcherKeyError;
-    }
+    // Mint the fetcher key server-side (mandatory now — no longer client-supplied) and return it in
+    // the response so the UI can show it for Bot Manager allowlisting. A fresh key per deploy.
+    const fetcherKey = generateFetcherKey();
     // Optional: copy from a specific version instead of the latest. PAPI versions start at 1, so
     // reject 0 here (it passes DECIMAL_INT_RE) for a clean 400 instead of an opaque PAPI 404/500 —
     // mirrors the version check in activate.
@@ -713,6 +695,9 @@ function LlmoAkamaiController(ctx) {
         newVersion,
         managedRules: managedRuleNames(cfg),
         warnings,
+        // The minted fetcher key: the UI shows it so the customer can allowlist Optimize-at-Edge in
+        // Bot Manager. Already baked into the deployed rule; this is the only time we return it.
+        fetcherKey,
       });
     } catch (e) {
       return papiErrorResponse(e, 'deploy', context, { siteId, propertyId, newVersion });

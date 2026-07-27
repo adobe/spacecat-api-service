@@ -555,26 +555,30 @@ export function buildRuleTreePatch(ruleTree, cfg, insertIndex) {
   return ops;
 }
 
-// The request header carrying the site's LLMO API key — a confidential value that must never be
-// logged or returned to clients. See buildRuleConfig.
+// Request headers carrying confidential values that must never be logged or returned to clients:
+// the site's LLMO API key and the customer's fetcher key (the Bot Manager allowlist secret). Both
+// are injected by buildRuleConfig and redacted from any rule tree that leaves the server.
 const API_KEY_HEADER = 'x-edgeoptimize-api-key';
+const FETCHER_KEY_HEADER = 'x-edgeoptimize-fetcher-key';
+const SECRET_HEADERS = new Set([API_KEY_HEADER, FETCHER_KEY_HEADER]);
 const REDACTED = '***';
 
 /**
- * Returns a deep clone of a rule tree with the injected LLMO API key value redacted, for
- * previews/diffs that leave the server (e.g. the plan response). Walks every rule's behaviors and
- * replaces the value of the modifyIncomingRequestHeader that sets the API-key header.
+ * Returns a deep clone of a rule tree with the injected secret header values (the LLMO API key and
+ * the fetcher key) redacted, for previews/diffs that leave the server (e.g. the plan response).
+ * Walks every rule's behaviors and replaces the value of any modifyIncomingRequestHeader that sets
+ * a secret header.
  * @param {object} tree - a PAPI rule tree ({ rules: {...} })
  * @returns {object} a redacted deep clone
  */
-export function redactApiKey(tree) {
+export function redactSecrets(tree) {
   const clone = structuredClone(tree);
   const walk = (rule) => {
     if (!rule || typeof rule !== 'object') {
       return;
     }
     (rule.behaviors || []).forEach((b) => {
-      if (b?.name === 'modifyIncomingRequestHeader' && b.options?.customHeaderName === API_KEY_HEADER) {
+      if (b?.name === 'modifyIncomingRequestHeader' && SECRET_HEADERS.has(b.options?.customHeaderName)) {
         // Mutating a deep clone we own, not the caller's tree.
         // eslint-disable-next-line no-param-reassign
         b.options.headerValue = REDACTED;
@@ -605,10 +609,10 @@ export function redactApiKey(tree) {
  * @param {string} [params.originHostname] - the Edge Optimize worker host to route AI-bot traffic
  *   to. Defaults to the prod worker; pass `env.EDGE_OPTIMIZE_EDGE_DOMAIN` so a dev/stage deployment
  *   routes to dev/stage.edgeoptimize.net. The `matchSan` (`*.edgeoptimize.net`) covers all three.
- * @param {string} [params.fetcherKey] - optional customer-owned secret. When provided, it's set as
- *   the `x-edgeoptimize-fetcher-key` incoming request header (forwarded as-is) so the customer can
- *   allowlist it (with the `AdobeEdgeOptimize/1.0` user agent) in their Akamai Bot Manager/WAF.
- *   The customer generates and owns this value; we only inject what they pass.
+ * @param {string} [params.fetcherKey] - the fetcher key (a secret minted server-side per deploy).
+ *   When provided, it's set as the `x-edgeoptimize-fetcher-key` incoming request header so the
+ *   customer can allowlist it (with the `AdobeEdgeOptimize/1.0` user agent) in their Akamai Bot
+ *   Manager/WAF. The controller always supplies one now; the guard below stays defensive.
  * @returns {object} config consumable by buildParentRule/mergeIntoTree
  */
 export function buildRuleConfig({

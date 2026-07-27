@@ -22,7 +22,7 @@ import {
   mergeIntoTree,
   buildRuleTreePatch,
   managedRuleNames,
-  redactApiKey,
+  redactSecrets,
 } from '../../../src/controllers/llmo/llmo-akamai-utils.js';
 
 const HOSTNAME = 'www.example.com';
@@ -462,21 +462,23 @@ describe('llmo-akamai-utils', () => {
     });
   });
 
-  describe('redactApiKey', () => {
-    it('redacts the api-key header value and leaves other behaviors untouched, without mutating input', () => {
-      const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
+  describe('redactSecrets', () => {
+    it('redacts both the api-key and fetcher-key header values, leaving other behaviors untouched, without mutating input', () => {
+      const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY, fetcherKey: 'fk-secret-xyz' });
       const merged = mergeIntoTree(
         { rules: { name: 'default', children: [], variables: [] } },
         cfg,
       );
-      const redacted = redactApiKey(merged);
+      const redacted = redactSecrets(merged);
       const s = JSON.stringify(redacted);
       expect(s).to.not.contain(API_KEY);
+      expect(s).to.not.contain('fk-secret-xyz');
       expect(s).to.contain('***');
       // origin/config headers are preserved
       expect(s).to.contain('live.edgeoptimize.net');
       // input tree is untouched (deep clone)
       expect(JSON.stringify(merged)).to.contain(API_KEY);
+      expect(JSON.stringify(merged)).to.contain('fk-secret-xyz');
     });
 
     it('tolerates trees with null behaviors, missing options, and no rules', () => {
@@ -490,17 +492,22 @@ describe('llmo-akamai-utils', () => {
               name: 'modifyIncomingRequestHeader',
               options: { customHeaderName: 'x-edgeoptimize-api-key', headerValue: 'secret' },
             },
+            {
+              name: 'modifyIncomingRequestHeader',
+              options: { customHeaderName: 'x-edgeoptimize-fetcher-key', headerValue: 'fk-secret' },
+            },
           ],
           children: [{ name: 'child', behaviors: [] }],
         },
       };
-      const redacted = redactApiKey(tree);
-      const apiKeyBehavior = redacted.rules.behaviors.find(
-        (b) => b && b.options && b.options.customHeaderName === 'x-edgeoptimize-api-key',
+      const redacted = redactSecrets(tree);
+      const byHeader = (name) => redacted.rules.behaviors.find(
+        (b) => b && b.options && b.options.customHeaderName === name,
       );
-      expect(apiKeyBehavior.options.headerValue).to.equal('***');
+      expect(byHeader('x-edgeoptimize-api-key').options.headerValue).to.equal('***');
+      expect(byHeader('x-edgeoptimize-fetcher-key').options.headerValue).to.equal('***');
       // a tree without a rules root is returned unchanged
-      expect(redactApiKey({})).to.deep.equal({});
+      expect(redactSecrets({})).to.deep.equal({});
     });
   });
 });
