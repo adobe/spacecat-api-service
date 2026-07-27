@@ -26,22 +26,23 @@ import { getSessionToken } from './utils/session-auth.js';
  * already proven by both of those.
  *
  * Required environment variables:
- *   - IMS_ACCESS_TOKEN: an IMS user access token, exchanged once per run for
- *     a session token via POST /auth/login (x-api-key is deprecated).
+ *   - API_E2E_TESTS_CLIENT_ID_DEV / API_E2E_TESTS_CLIENT_SECRET_DEV: the
+ *     registered S2S consumer's credentials (SITES-48671), exchanged once
+ *     per run for a session token via IMS client-credentials + POST
+ *     /auth/s2s/login (x-api-key is deprecated).
  *
  * Uses a fixed dev test site rather than auto-discovery, since audit policy
- * mutations need a site with ASO/LLMO write entitlement. Dev-only and
- * local/manual-only by design: SITE_ID below doesn't exist on prod, so this
- * suite always skips when ENVIRONMENT=prod (which is what the scheduled
- * .github/workflows/e2e-tests.yaml cron runs against) - it isn't wired into
- * that workflow and isn't meant to be run there.
+ * mutations need a site with ASO/LLMO write entitlement. Dev-only by design:
+ * SITE_ID below doesn't exist on prod, so this suite always skips when
+ * ENVIRONMENT=prod - the scheduled .github/workflows/e2e-tests.yaml cron
+ * only runs it under the `dev` matrix entry.
  *
  * Running locally:
- *   mysticat login                                  # once, if not already
- *   export IMS_ACCESS_TOKEN=$(mysticat auth token --ims -e dev)
+ *   export API_E2E_TESTS_CLIENT_ID_DEV=<from your secret store>
+ *   export API_E2E_TESTS_CLIENT_SECRET_DEV=<from your secret store>
  *   npx mocha --timeout 30s test/e2e/audit-policy.e2e.js
  *
- * Without IMS_ACCESS_TOKEN set, the suite logs a warning and skips instead
+ * Without those credentials set, the suite logs a warning and skips instead
  * of failing.
  */
 const SITE_ID = '019ef3bd-5e67-7ea1-a4b7-f939f14fdc4e'; // https://main--scope-creep--iuliag.aem.live
@@ -89,9 +90,7 @@ describe('Audit Policy - E2E Tests', function auditPolicySuite() {
   this.timeout(30000);
 
   before(async function beforeAll() {
-    // SITE_ID above only exists on dev - never run this against prod, even if a
-    // future IMS_ACCESS_TOKEN secret gets wired into the scheduled e2e workflow
-    // for other suites (that workflow's matrix is prod-only today).
+    // SITE_ID above only exists on dev - never run this against prod.
     if (process.env.ENVIRONMENT === 'prod') {
       console.log('[WARN] audit-policy e2e suite targets a dev-only test site - skipping in prod');
       this.skip();
@@ -99,7 +98,7 @@ describe('Audit Policy - E2E Tests', function auditPolicySuite() {
     }
     const sessionToken = await getSessionToken();
     if (!sessionToken) {
-      console.log('[WARN] IMS_ACCESS_TOKEN not set - skipping audit-policy e2e suite');
+      console.log('[WARN] API_E2E_TESTS_CLIENT_ID_DEV/SECRET_DEV not set - skipping audit-policy e2e suite');
       this.skip();
       return;
     }
