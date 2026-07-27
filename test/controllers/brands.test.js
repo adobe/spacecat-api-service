@@ -6467,10 +6467,14 @@ describe('Brands Controller', () => {
       expect(syncStub).to.not.have.been.called;
     });
 
-    it('hard-fails the edit when the brand-URL re-sync fails', async () => {
-      const updateBrandStub = sinon.stub().resolves({
+    it('LLMO-6545: soft-fails (200 + semrushSyncPending) when the brand-URL re-sync fails', async () => {
+      // DB row is already committed when the sync throws; returning a 5xx would
+      // mislead the customer into thinking their edit failed. Accept the drift and
+      // let ops recover via --reconcile migration (Phase 3).
+      const updated = {
         id: BRAND_UUID, semrushSubWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
-      });
+      };
+      const updateBrandStub = sinon.stub().resolves(updated);
       const err = new Error('upstream boom');
       err.status = 502;
       const syncStub = sinon.stub().rejects(err);
@@ -6489,7 +6493,8 @@ describe('Brands Controller', () => {
         attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
 
-      expect(response.status).to.equal(502);
+      expect(response.status).to.equal(200);
+      expect(await response.json()).to.include({ semrushSyncPending: true });
       expect(syncStub).to.have.been.calledOnce;
     });
 
@@ -6520,10 +6525,13 @@ describe('Brands Controller', () => {
       expect(syncStub).to.not.have.been.called;
     });
 
-    it('redacts the gateway URL from a Semrush upstream error on brand-edit re-sync', async () => {
-      const updateBrandStub = sinon.stub().resolves({
+    it('LLMO-6545: soft-fails and does not leak the internal gateway URL on a SerenityTransportError re-sync failure', async () => {
+      // Soft-fail means the sync error is swallowed before createErrorResponse,
+      // so the internal gateway URL never reaches the client via body or headers.
+      const updated = {
         id: BRAND_UUID, semrushSubWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
-      });
+      };
+      const updateBrandStub = sinon.stub().resolves(updated);
       const leakUrl = 'https://gw.internal/enterprise/workspaces/ws-9/projects/proj-abc/aio';
       const syncStub = sinon.stub().rejects(
         new SerenityTransportError(502, `Semrush POST ${leakUrl} failed: 502`, {}),
@@ -6543,11 +6551,10 @@ describe('Brands Controller', () => {
         attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
 
-      expect(response.status).to.equal(502);
+      expect(response.status).to.equal(200);
       const body = await response.json();
-      expect(body.message).to.equal('Upstream request failed');
+      expect(body).to.include({ semrushSyncPending: true });
       expect(JSON.stringify(body)).to.not.contain('gw.internal');
-      // ...and not via the x-error header either.
       expect(response.headers.get('x-error') || '').to.not.contain('gw.internal');
     });
 
@@ -6555,10 +6562,14 @@ describe('Brands Controller', () => {
     // 401/403 is passed through as that status with the 'Upstream authorization
     // failed' message (the true side of the status ternary and the false side of
     // the message ternary; the 502 sides are covered by the redaction test above).
-    it('maps a 401 Semrush upstream error to HTTP 401 + generic auth message', async () => {
-      const updateBrandStub = sinon.stub().resolves({
+    it('LLMO-6545: soft-fails (200 + semrushSyncPending) even on a 401 SerenityTransportError re-sync failure', async () => {
+      // DB row is committed; even a Semrush auth failure should not surface as 4xx
+      // to the customer whose edit succeeded. Soft-fail and log for ops investigation.
+      // The internal gateway URL must not leak in the 200 response either.
+      const updated = {
         id: BRAND_UUID, semrushSubWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
-      });
+      };
+      const updateBrandStub = sinon.stub().resolves(updated);
       const leakUrl = 'https://gw.internal/enterprise/workspaces/ws-9/projects/proj-abc/aio';
       const syncStub = sinon.stub().rejects(
         new SerenityTransportError(401, `Semrush POST ${leakUrl} failed: 401`, {}),
@@ -6578,22 +6589,21 @@ describe('Brands Controller', () => {
         attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
 
-      expect(response.status).to.equal(401);
+      expect(response.status).to.equal(200);
       const body = await response.json();
-      expect(body.message).to.equal('Upstream authorization failed');
-      // The internal gateway URL must not leak via body or header.
+      expect(body).to.include({ semrushSyncPending: true });
       expect(JSON.stringify(body)).to.not.contain('gw.internal');
       expect(response.headers.get('x-error') || '').to.not.contain('gw.internal');
     });
 
-    // LLMO-6386: the brand-edit re-sync runs Project Engine calls, which now throw
-    // ProjectEngineApiError directly (adaptPE retired). createErrorResponse must redact it to the
-    // same generic 502 as the SerenityTransportError case — the raw "Project Engine ..." message
-    // (and any body) must never reach the client.
-    it('redacts a ProjectEngineApiError upstream failure to a generic 502 on brand-edit re-sync', async () => {
-      const updateBrandStub = sinon.stub().resolves({
+    // LLMO-6386 + LLMO-6545: ProjectEngineApiError on re-sync is soft-failed (DB committed).
+    // The raw "Project Engine ..." message and secret body must never reach the client in the 200;
+    // ok({ ...updated }) contains only the brand row, not the error internals.
+    it('LLMO-6545: soft-fails and does not leak ProjectEngineApiError internals on brand-edit re-sync', async () => {
+      const updated = {
         id: BRAND_UUID, semrushSubWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
-      });
+      };
+      const updateBrandStub = sinon.stub().resolves(updated);
       const syncStub = sinon.stub().rejects(
         new ProjectEngineApiError(502, 'POST', { secret: 'leak' }),
       );
@@ -6612,20 +6622,22 @@ describe('Brands Controller', () => {
         attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
 
-      expect(response.status).to.equal(502);
+      expect(response.status).to.equal(200);
       const body = await response.json();
-      expect(body.message).to.equal('Upstream request failed');
+      expect(body).to.include({ semrushSyncPending: true });
       expect(JSON.stringify(body)).to.not.match(/leak/);
       expect(JSON.stringify(body)).to.not.match(/Project Engine/);
     });
 
-    // The auth-preservation crux: a no-HTTP-response Project Engine failure (missing IMS token)
-    // is a status-undefined ProjectEngineApiError carrying the 401 SerenityTransportError as
-    // `.cause`. createErrorResponse must unwrap it so the response stays 401 (not flattened).
-    it('unwraps a status-undefined ProjectEngineApiError to preserve the auth 401 on brand-edit re-sync', async () => {
-      const updateBrandStub = sinon.stub().resolves({
+    // LLMO-6545: a status-undefined ProjectEngineApiError (missing IMS token) carrying a 401 cause
+    // is also soft-failed — DB already committed, so auth failures in the sync path don't block
+    // the customer. The auth issue is logged (status field in the log includes syncError?.status
+    // which is undefined here) and ops can investigate via Splunk.
+    it('LLMO-6545: soft-fails a status-undefined ProjectEngineApiError with 401 cause on brand-edit re-sync', async () => {
+      const updated = {
         id: BRAND_UUID, semrushSubWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
-      });
+      };
+      const updateBrandStub = sinon.stub().resolves(updated);
       const authCause = new SerenityTransportError(401, 'Missing IMS bearer token');
       const syncStub = sinon.stub().rejects(
         new ProjectEngineApiError(undefined, 'POST', null, { cause: authCause }),
@@ -6645,9 +6657,8 @@ describe('Brands Controller', () => {
         attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
 
-      expect(response.status).to.equal(401);
-      const body = await response.json();
-      expect(body.message).to.equal('Upstream authorization failed');
+      expect(response.status).to.equal(200);
+      expect(await response.json()).to.include({ semrushSyncPending: true });
     });
 
     it('re-syncs CI competitors (with removed domains) when competitors change on a sub-workspace brand', async () => {
@@ -6752,7 +6763,7 @@ describe('Brands Controller', () => {
       });
 
       expect(response.status).to.equal(200);
-      expect(response.body).to.deep.include({ semrushSyncPending: true });
+      expect(await response.json()).to.include({ semrushSyncPending: true });
       expect(updateBrandStub).to.have.been.calledOnce;
       expect(loggerStub.error).to.have.been.calledWithMatch(
         'serenity: brand-edit Semrush re-sync failed after row commit',
