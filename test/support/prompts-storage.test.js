@@ -3373,6 +3373,22 @@ describe('prompts-storage', () => {
       expect(result.items[0].source).to.equal('has:colon');
     });
 
+    it('returns the RAW value for the dimension-root shadow `source` (root-name guard — not null, not `config`)', async () => {
+      // `source` is a dimension-root name, so `canonicalizeSource` fails the guard
+      // and `mapRowToPrompt` returns the raw stored value — the grid still shows it,
+      // and it is NOT coerced to `null` or to the `config` proxy-create default.
+      const rowWithSource = { ...sampleRow, source: 'source' };
+      const client = {
+        from: (table) => (table === 'brands'
+          ? makeChain({ data: { id: BRAND_UUID }, error: null })
+          : makeChain({ data: [rowWithSource], error: null, count: 1 })),
+      };
+      const result = await listPrompts({
+        organizationId: ORG_ID, brandId: BRAND_UUID, postgrestClient: client,
+      });
+      expect(result.items[0].source).to.equal('source');
+    });
+
     it('sorts source on the source_canonical generated column', async () => {
       const orderCalls = [];
       const recordingChain = (result) => {

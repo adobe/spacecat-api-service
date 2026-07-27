@@ -593,7 +593,7 @@ export async function ensureServerOwnedValue(
 
 /**
  * Resolves the id-based injection of a server-computed value into a prompt write,
- * for any CLOSED dimension (`type`, `origin`, `intent`). Returns the wanted value's
+ * for any SERVER-OWNED dimension (`type`, `origin`, `intent`, `source`). Returns the wanted value's
  * id plus EVERY id under that dimension's root, so the caller can strip any
  * caller-supplied tag id beneath the SAME root before injecting the resolved one.
  *
@@ -607,16 +607,16 @@ export async function ensureServerOwnedValue(
  * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
- * @param {string} dimension - a CLOSED dimension (`type` / `origin` / `intent`).
- * @param {string} wantValue - the bare value to inject (must be in that dimension's
- *   fixed vocabulary).
+ * @param {string} dimension - a SERVER-OWNED dimension (`type` / `origin` / `intent` / `source`).
+ * @param {string} wantValue - the bare value to inject (in the dimension's fixed
+ *   vocabulary for the closed dims; resolved-or-created on demand for the open `source`).
  * @param {object} [log] - logger.
  * @returns {Promise<{ computedId: string, valueTagIds: string[] }>} `computedId` is
  *   always resolved — {@link ensureChildren} throws rather than leave a hole, so a
  *   prompt can never be written with the server-computed tag missing. `valueTagIds`
  *   is every id under the dimension's root (the strip set).
  */
-export async function resolveClosedValueInjection(
+export async function resolveServerOwnedValueInjection(
   transport,
   semrushWorkspaceId,
   projectId,
@@ -642,7 +642,7 @@ export async function resolveClosedValueInjection(
 
 /**
  * Resolves the id-based injection of a server-computed `type` value into a
- * prompt write. Thin wrapper over {@link resolveClosedValueInjection} preserving
+ * prompt write. Thin wrapper over {@link resolveServerOwnedValueInjection} preserving
  * the `type`-specific return key. Returns the wanted value's id plus EVERY id
  * under the `type` root, so the caller can strip any caller-supplied `type` tag
  * id (the client must never set the value itself).
@@ -663,7 +663,7 @@ export async function resolveTypeValueInjection(
   wantValue,
   log,
 ) {
-  const { computedId, valueTagIds } = await resolveClosedValueInjection(
+  const { computedId, valueTagIds } = await resolveServerOwnedValueInjection(
     transport,
     semrushWorkspaceId,
     projectId,
@@ -724,7 +724,7 @@ export async function resolveIntentValueInjection(
     return { computedId: null, intentTagIds: [...byName.values()] };
   }
 
-  const { computedId, valueTagIds } = await resolveClosedValueInjection(
+  const { computedId, valueTagIds } = await resolveServerOwnedValueInjection(
     transport,
     semrushWorkspaceId,
     projectId,

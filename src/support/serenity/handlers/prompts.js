@@ -20,7 +20,7 @@ import { ERROR_CODES, isMeteredQuota, isUpstreamGone } from '../errors.js';
 import { alertQuotaRejection, alertRollbackFailure } from '../quota-alerts.js';
 import { normalizeGeoTargetId, normalizeLanguageCode, isValidTagIdFormat } from '../validation.js';
 import { invalidateTagCacheForProject } from './markets.js';
-import { resolveTypeValueInjection, resolveIntentValueInjection, resolveClosedValueInjection } from '../tag-tree.js';
+import { resolveTypeValueInjection, resolveIntentValueInjection, resolveServerOwnedValueInjection } from '../tag-tree.js';
 import {
   DIMENSION, ORIGIN_VALUE, INTENT_VALUE, PROXY_CREATE_SOURCE_VALUE,
 } from '../prompt-tags.js';
@@ -721,7 +721,7 @@ export async function createOnePrompt(transport, semrushWorkspaceId, projectId, 
  *   - on UPDATE (`sourceValue` unset) the injector leaves source ALONE — a prompt's
  *     producer is fixed at creation.
  *
- * Resolution ({@link resolveTypeValueInjection} / {@link resolveClosedValueInjection},
+ * Resolution ({@link resolveTypeValueInjection} / {@link resolveServerOwnedValueInjection},
  * two tag-tree reads per distinct value per project — the root level plus the
  * root's children) is memoized for the request, so a bulk create fans out over
  * the distinct computed values rather than over the items. The origin and source
@@ -784,7 +784,7 @@ export function makePromptTagInjector(
     if (originValue) {
       let pending = originCache.get(projectId);
       if (!pending) {
-        pending = resolveClosedValueInjection(
+        pending = resolveServerOwnedValueInjection(
           transport,
           semrushWorkspaceId,
           projectId,
@@ -804,7 +804,7 @@ export function makePromptTagInjector(
     if (sourceValue) {
       let pending = sourceCache.get(projectId);
       if (!pending) {
-        pending = resolveClosedValueInjection(
+        pending = resolveServerOwnedValueInjection(
           transport,
           semrushWorkspaceId,
           projectId,

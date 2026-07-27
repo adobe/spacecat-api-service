@@ -2802,6 +2802,9 @@ describe('handlers/prompts.js — origin derivation (origin-dimension.md §3)', 
       TAG_IDS.intentInformational,
     ]);
     expect(result.body.tagIds).to.not.include(TAG_IDS.originHuman);
+    // source is CREATE-only, same asymmetry as origin: an update never injects the
+    // producing-system value, so no `source` tag appears on this edit.
+    expect(result.body.tagIds).to.not.include(TAG_IDS.sourceConfig);
     expect(transport.updatePromptTagsByIds).to.have.been.calledOnceWithExactly(
       WORKSPACE,
       'proj-us-en',
