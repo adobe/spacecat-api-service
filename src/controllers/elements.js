@@ -1559,9 +1559,9 @@ export default function ElementsController(context, log, env) {
    * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/kpi-headlines
    * Overview-SR Share of Voice + Brand Visibility KPI headline cards — the exact
    * numbers the Brand Presence MFE itself shows (its own per-brand `kpiLineChart`
-   * elements), not derived from market-tracking-trends's weekly series (LLMO-6516
+   * elements), not derived from market-tracking-trends's weekly series (LLMO-6515
    * follow-up, exact MFE parity). Param resolution mirrors getMarketTrackingTrends/
-   * getCompetitorSummary. See docs/elements/kpi-headlines-plan.md.
+   * getCompetitorSummary.
    */
   /* c8 ignore start -- kpi-headlines POC endpoint; unit tests intentionally deferred */
   const getKpiHeadlines = async (ctx) => {
