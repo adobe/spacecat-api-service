@@ -171,10 +171,12 @@ export function buildSourceVisibilityPayload({
  * `previous` entries were verified identical live, but matched by `period`
  * rather than positionally — a positional `[0]` read would silently return the
  * wrong figure if the two ever diverge or the array is ever reordered upstream.
- * Defaults to 0 when a field is missing.
+ * `value` defaults to 0 when missing; `comparisonValue` is `null` (not 0) when Semrush has
+ * no numeric data for the comparison period, so callers can distinguish "no data" from a
+ * real 0% and show e.g. "N/A" instead of computing a fake delta against a 0 baseline.
  *
  * @param {object} raw - Raw response from the Elements API.
- * @returns {{ value: number, comparisonValue: number }}
+ * @returns {{ value: number, comparisonValue: number | null }}
  */
 export function transformKpiHeadlineResponse(raw) {
   const value = raw?.blocks?.mainValue?.[0]?.mainValue;
@@ -183,6 +185,9 @@ export function transformKpiHeadlineResponse(raw) {
   const comparisonValue = previous?.secondaryValue;
   return {
     value: typeof value === 'number' ? value : 0,
-    comparisonValue: typeof comparisonValue === 'number' ? comparisonValue : 0,
+    // null (not 0) when Semrush has no data for the comparison period (e.g. a comparison
+    // window predating data collection) — a real 0% and "no data" must stay distinguishable
+    // so consumers can show "N/A" instead of computing a fake delta against a 0 baseline.
+    comparisonValue: typeof comparisonValue === 'number' ? comparisonValue : null,
   };
 }

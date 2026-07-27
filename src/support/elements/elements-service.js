@@ -866,8 +866,8 @@ export function createElementsService(transport, log) {
      * @param {string} [params.projectId] - Single Semrush project UUID (one region).
      * @param {string[]} [params.projectIds] - All the brand's project UUIDs (aggregate).
      * @returns {Promise<{
-     *   shareOfVoice: {value: number, comparisonValue: number},
-     *   brandVisibility: {value: number, comparisonValue: number},
+     *   shareOfVoice: {value: number, comparisonValue: number | null},
+     *   brandVisibility: {value: number, comparisonValue: number | null},
      * }>}
      */
     async getKpiHeadlines(workspaceId, {
@@ -921,7 +921,7 @@ export function createElementsService(transport, log) {
      * @param {string} params.startDate / params.endDate - Required YYYY-MM-DD (main period).
      * @param {string} [params.projectId] - Single Semrush project UUID (one region).
      * @param {string[]} [params.projectIds] - All the brand's project UUIDs (aggregate).
-     * @returns {Promise<{value: number, comparisonValue: number}>}
+     * @returns {Promise<{value: number, comparisonValue: number | null}>}
      */
     async getSourceVisibilityHeadline(workspaceId, {
       brandName, model, platform, startDate, endDate, projectId, projectIds,
