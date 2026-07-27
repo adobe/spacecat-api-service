@@ -5288,6 +5288,65 @@ describe('Brands Controller', () => {
         expect(upsertStub.called).to.equal(false);
       });
 
+      it('redacts the gateway URL from a Semrush upstream error on provisioning', async () => {
+        // A Semrush error's message embeds the internal gateway host plus workspace
+        // and project UUIDs. Provisioning runs unguarded inside createBrandForOrg's
+        // try, so the error reaches createErrorResponse — which must map it to a
+        // generic message and keep the detail in the log, on both the body and the
+        // x-error header.
+        const leakUrl = 'https://gw.internal/enterprise/workspaces/ws-9/projects/proj-abc/aio';
+        const provisionStub = sinon.stub().rejects(
+          new SerenityTransportError(502, `Semrush POST ${leakUrl} failed: 502`, {}),
+        );
+        const upsertStub = sinon.stub().resolves({ id: 'x' });
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(502);
+        const body = await response.json();
+        expect(body.message).to.equal('Upstream request failed');
+        expect(JSON.stringify(body)).to.not.contain('gw.internal');
+        expect(response.headers.get('x-error') || '').to.not.contain('gw.internal');
+        expect(upsertStub.called).to.equal(false);
+      });
+
+      it('maps a 401 Semrush upstream error on provisioning to HTTP 401 + generic auth message', async () => {
+        // The 401/403 side of createErrorResponse's status ternary: the upstream
+        // status is preserved rather than flattened to 502, and the message is the
+        // generic auth one.
+        const leakUrl = 'https://gw.internal/enterprise/workspaces/ws-9/projects';
+        const provisionStub = sinon.stub().rejects(
+          new SerenityTransportError(401, `Semrush GET ${leakUrl} failed: 401`, {}),
+        );
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub,
+          upsertBrand: sinon.stub().resolves({ id: 'x' }),
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(401);
+        const body = await response.json();
+        expect(body.message).to.equal('Upstream authorization failed');
+        expect(JSON.stringify(body)).to.not.contain('gw.internal');
+        expect(response.headers.get('x-error') || '').to.not.contain('gw.internal');
+      });
+
       it('releases the orphaned sub-workspace when the brand row write fails after provisioning', async () => {
         const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-orphan' });
         const releaseStub = sinon.stub().resolves();
@@ -6498,7 +6557,7 @@ describe('Brands Controller', () => {
       expect(syncStub).to.have.been.calledOnce;
     });
 
-    it('rejects a non-IMS caller on the brand-edit re-sync (never forwards the bearer upstream)', async () => {
+    it('never forwards a non-IMS bearer upstream, and soft-fails the re-sync rather than reporting 401 for a committed edit', async () => {
       const updateBrandStub = sinon.stub().resolves({
         id: BRAND_UUID, semrushSubWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
       });
@@ -6519,10 +6578,20 @@ describe('Brands Controller', () => {
         attributes: { authInfo: { getType: () => 'jwt', profile: { email: 'svc@test.com' } } },
       });
 
-      expect(response.status).to.equal(401);
-      // A non-IMS bearer is never built into a transport nor forwarded to Semrush.
+      // Security invariant: a non-IMS bearer is never built into a transport nor
+      // forwarded to Semrush — token resolution refuses it before either happens.
       expect(createTransportStub).to.not.have.been.called;
       expect(syncStub).to.not.have.been.called;
+      // The brand row was committed before the re-sync block, so the refusal is a
+      // re-sync failure like any other: report the persisted edit, flag the drift.
+      expect(updateBrandStub).to.have.been.calledOnce;
+      expect(response.status).to.equal(200);
+      expect(await response.json()).to.include({ semrushSyncPending: true });
+      // 401 is the permanent class — it needs a human, not a retry.
+      expect(loggerStub.warn).to.have.been.calledWithMatch(
+        'serenity: brand-edit Semrush re-sync failed after row commit',
+        sinon.match({ status: 401, permanent: true }),
+      );
     });
 
     it('LLMO-6545: soft-fails and does not leak the internal gateway URL on a SerenityTransportError re-sync failure', async () => {
@@ -7285,11 +7354,14 @@ describe('Brands Controller', () => {
       });
 
       it('degrades to brand-URL-only reserved set when the pre-write project listing fails (LLMO-6545)', async () => {
-        // createErrorResponse is still reachable on the pre-write guard path and
-        // must redact internal gateway URLs. This test also verifies that a
-        // SerenityTransportError on the pre-write listing degrades gracefully
-        // (writes proceed, self-ref guard uses brand URLs only) rather than
-        // hard-failing before the DB write.
+        // A listing failure in the pre-write self-reference guard degrades: the
+        // reserved set falls back to the brand's own URLs and the write proceeds.
+        // The same transport error then also fails the post-commit re-sync, so the
+        // response is the soft-fail 200 — either way the gateway URL embedded in the
+        // error must not reach the client. (The redaction path proper —
+        // createErrorResponse mapping a Semrush error to a generic message — is not
+        // reachable from this handler; it is covered on the create path, where
+        // provisioning errors do escape to the outer catch.)
         const leakUrl = 'https://gw.internal/enterprise/workspaces/ws-7/projects';
         const updated = {
           id: BRAND_UUID,

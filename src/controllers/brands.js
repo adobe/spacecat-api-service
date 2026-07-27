@@ -2009,13 +2009,16 @@ function BrandsController(ctx, log, env) {
       const rejectedAliases = [];
       if ((urlsTouched || competitorsTouched || aliasesTouched)
         && hasText(updated.semrushSubWorkspaceId)) {
-        // Forward only an IMS user token upstream (matches the create path +
-        // the rest of /serenity/*): PATCH /brands is organization:write and thus
-        // S2S-reachable, so prefer an x-promise-token exchange and otherwise
-        // refuse a non-IMS bearer rather than proxy it.
-        const imsToken = await resolveSemrushImsToken(context, log, 'brands');
-        const transport = createSerenityTransport({ env: context.env, imsToken });
         try {
+          // Forward only an IMS user token upstream (matches the create path +
+          // the rest of /serenity/*): PATCH /brands is organization:write and thus
+          // S2S-reachable, so prefer an x-promise-token exchange and otherwise
+          // refuse a non-IMS bearer rather than proxy it. Inside the try because
+          // the row is already committed: a token-resolution 401 here is still a
+          // re-sync failure, and must soft-fail like any other rather than report
+          // an edit that did persist as an auth error.
+          const imsToken = await resolveSemrushImsToken(context, log, 'brands');
+          const transport = createSerenityTransport({ env: context.env, imsToken });
           // List the sub-workspace's projects ONCE and share the result across the
           // URL/competitor/alias syncs below — the listing is stable across the
           // brand-row write above, so this collapses up to three redundant
@@ -2075,7 +2078,9 @@ function BrandsController(ctx, log, env) {
           // LLMO-6545: Accept drift — DB is already committed so hard-failing returns
           // a 500 while the edit actually succeeded. Log all context so the divergence
           // is diagnosable and recoverable via --reconcile migration later.
-          // 401/403 = permanent (user not provisioned in Semrush — needs manual action).
+          // 401/403 = permanent: it needs a human, not a retry — the caller is not
+          // provisioned in Semrush, or could not be authenticated to it at all
+          // (no/expired promise token). Retrying the same request cannot clear it.
           // Other status / no status = transient (network, timeout, upstream hiccup).
           const isPermanent = syncError?.status === 401 || syncError?.status === 403;
           const logFn = isPermanent ? log.warn : log.error;
