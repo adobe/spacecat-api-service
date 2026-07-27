@@ -6656,6 +6656,8 @@ describe('Suggestions Controller', () => {
         data: {
           suggestionIds: [SUGGESTION_IDS[0]],
         },
+        // ASO exercises the auto_fix subService gate (LLMO-6553 scopes it to ASO)
+        pathInfo: { headers: { 'x-product': 'ASO' } },
       });
 
       expect(response.status).to.equal(403);
@@ -6712,6 +6714,8 @@ describe('Suggestions Controller', () => {
           suggestionIds: [SUGGESTION_IDS[0]],
         },
         ...context,
+        // ASO exercises the auto_fix subService gate (LLMO-6553 scopes it to ASO)
+        pathInfo: { headers: { 'x-product': 'ASO' } },
       });
 
       // Should proceed to next checks (not forbidden)
