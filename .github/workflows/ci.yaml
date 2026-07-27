@@ -28,6 +28,7 @@ jobs:
   # The reusable service-ci workflow has no type-check seam yet, so this runs as
   # a self-contained job here. See docs/decisions/005-opt-in-type-checking.md.
   type-check:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
