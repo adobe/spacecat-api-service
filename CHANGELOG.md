@@ -1,3 +1,10 @@
+# [1.693.0](https://github.com/adobe/spacecat-api-service/compare/v1.692.2...v1.693.0) (2026-07-27)
+
+
+### Features
+
+* auto-assign default AI models when a market is created | LLMO-6554 ([#2911](https://github.com/adobe/spacecat-api-service/issues/2911)) ([0036481](https://github.com/adobe/spacecat-api-service/commit/003648188f1fa34b4a5e7b20b6d53afab95de554))
+
 ## [1.692.2](https://github.com/adobe/spacecat-api-service/compare/v1.692.1...v1.692.2) (2026-07-27)
 
 
