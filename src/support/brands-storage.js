@@ -860,6 +860,9 @@ export async function setBrandClaimsEnabled({
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required');
   }
+  if (typeof enabled !== 'boolean') {
+    throw new Error('enabled must be a boolean');
+  }
   if (!hasText(brandId)) {
     return null;
   }
@@ -868,6 +871,9 @@ export async function setBrandClaimsEnabled({
     .from('brands')
     .update({ brand_claims_enabled: enabled, updated_by: updatedBy })
     .eq('id', brandId)
+    // Do not flip the flag on a soft-deleted brand (matches the .neq guard used
+    // across brands-storage); a deleted brand returns no row -> null.
+    .neq('status', 'deleted')
     .select('id, name')
     .maybeSingle();
 

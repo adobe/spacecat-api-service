@@ -2560,13 +2560,19 @@ describe('brands-storage', () => {
       })).to.be.rejectedWith('PostgREST client is required');
     });
 
+    it('throws when enabled is not a boolean', async () => {
+      await expect(setBrandClaimsEnabled({
+        brandId: BRAND_ID, enabled: 'true', postgrestClient: { from: () => {} },
+      })).to.be.rejectedWith('enabled must be a boolean');
+    });
+
     it('returns null when brandId is empty', async () => {
       expect(await setBrandClaimsEnabled({
         brandId: '', enabled: true, postgrestClient: { from: () => {} },
       })).to.be.null;
     });
 
-    it('writes brand_claims_enabled and returns the updated brand', async () => {
+    it('writes brand_claims_enabled, excludes deleted brands, and returns the updated brand', async () => {
       const client = createCapturingClient({
         brands: [{ data: { id: BRAND_ID, name: 'Acme' }, error: null }],
       });
@@ -2578,6 +2584,8 @@ describe('brands-storage', () => {
       const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
       expect(brandsUpdate.row.brand_claims_enabled).to.equal(true);
       expect(brandsUpdate.row.updated_by).to.equal('slack:U1');
+      const neqFilter = client.capturedCalls.neq.find((c) => c.table === 'brands' && c.col === 'status');
+      expect(neqFilter?.val).to.equal('deleted');
       expect(result).to.deep.equal({ id: BRAND_ID, name: 'Acme' });
     });
 
