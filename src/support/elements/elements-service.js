@@ -58,7 +58,21 @@ import {
   buildStatsCitationsPayload,
   transformStatsCitationsResponse,
   aggregateUrlInspectorStats,
+  buildKpiHeadlinePayload,
+  buildBrandUrlsPayload,
+  transformBrandUrlsResponse,
+  buildSourceVisibilityPayload,
+  transformKpiHeadlineResponse,
 } from './definitions/index.js';
+
+// Tightened per-call budget for getSourceVisibilityHeadline's two SEQUENTIAL
+// calls (brand-URL-list, then the KPI itself) — the transport's normal 30s x 2
+// retries would blow the API-Gateway's ~30s hard integration timeout ceiling on
+// its own (see elements-transport.js's DEFAULT_TIMEOUT_MS doc), regardless of
+// what else shares the endpoint. 1 retry max per call keeps the worst case
+// (~12s + one jittered backoff) x 2 safely under that ceiling.
+const SOURCE_VISIBILITY_CALL_TIMEOUT_MS = 12_000;
+const SOURCE_VISIBILITY_CALL_MAX_RETRIES = 1;
 
 // Bounds parallel per-week upstream fan-out for the /stats trends array (up to
 // TRENDS_MAX_WEEKS=8 weeks x 4 element calls each) so a wide date range can't
@@ -828,6 +842,114 @@ export function createElementsService(transport, log) {
       }));
 
       return { stats, weeklyTrends };
+    },
+
+    /**
+     * Fetches the Overview-SR Share of Voice + Brand Visibility KPI headline
+     * cards (`GET .../brand-presence/kpi-headlines`) — the MFE's own per-brand
+     * `kpiLineChart` elements (`KPI_SHARE_OF_VOICE`, `KPI_BRAND_VISIBILITY`),
+     * NOT derived from `market-tracking-trends`'s weekly series (LLMO-6516
+     * follow-up, exact MFE parity — see docs/elements/kpi-headlines-plan.md).
+     *
+     * Both calls are brand-NAME scoped (`CBF_ws_brand`) and independent of each
+     * other, so they run in parallel — this endpoint's own worst-case wall time
+     * stays a single call's worth. Deliberately split from Source Visibility
+     * (below): that one needs a SEQUENTIAL brand-URL-list lookup first, which
+     * would double this endpoint's worst case against the API-Gateway's ~30s
+     * ceiling if bundled in here.
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params
+     * @param {string} params.brandName - Brand display name (`CBF_ws_brand` value).
+     * @param {string} [params.model] / [params.platform] - AI model filter.
+     * @param {string} params.startDate / params.endDate - Required YYYY-MM-DD (main period).
+     * @param {string} [params.projectId] - Single Semrush project UUID (one region).
+     * @param {string[]} [params.projectIds] - All the brand's project UUIDs (aggregate).
+     * @returns {Promise<{
+     *   shareOfVoice: {value: number, comparisonValue: number},
+     *   brandVisibility: {value: number, comparisonValue: number},
+     * }>}
+     */
+    async getKpiHeadlines(workspaceId, {
+      brandName, model, platform, startDate, endDate, projectId, projectIds,
+    }) {
+      const resolvedProjectIds = projectId ? [projectId] : (projectIds ?? []);
+      const [sov, brandVis] = await Promise.all([
+        transport.fetchElement(
+          workspaceId,
+          ELEMENT_IDS.KPI_SHARE_OF_VOICE,
+          buildKpiHeadlinePayload({
+            brandName, model, platform, startDate, endDate, projectIds: resolvedProjectIds,
+          }),
+        ),
+        transport.fetchElement(
+          workspaceId,
+          ELEMENT_IDS.KPI_BRAND_VISIBILITY,
+          buildKpiHeadlinePayload({
+            brandName, model, platform, startDate, endDate, projectIds: resolvedProjectIds,
+          }),
+        ),
+      ]);
+      return {
+        shareOfVoice: transformKpiHeadlineResponse(sov),
+        brandVisibility: transformKpiHeadlineResponse(brandVis),
+      };
+    },
+
+    /**
+     * Fetches the Overview-SR Source Visibility KPI headline card
+     * (`GET .../brand-presence/source-visibility-headline`) — split into its
+     * OWN endpoint from Share of Voice/Brand Visibility because it needs a
+     * SEQUENTIAL two-hop fetch (the brand's URL list via `BRAND_URLS`, then
+     * `KPI_SOURCE_VISIBILITY` scoped by that list's `CBF_brand_urls`), unlike
+     * the other two brand-NAME-scoped, single-hop calls. Each hop uses a
+     * tightened per-call timeout ({@link SOURCE_VISIBILITY_CALL_TIMEOUT_MS}) so
+     * the worst case stays under the API-Gateway's ~30s hard ceiling — the
+     * transport's normal 30s-per-call default x 2 sequential calls would blow
+     * it on its own, independent of what else shares the endpoint.
+     *
+     * A brand with no registered URLs has nothing to scope
+     * `KPI_SOURCE_VISIBILITY` by (an empty `CBF_brand_urls` OR-filter is
+     * unscoped/undefined behavior upstream) — returns a zeroed result rather
+     * than issuing that call, mirroring the empty-projects guards elsewhere in
+     * this service.
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params
+     * @param {string} params.brandName - Brand display name (`CBF_brand` value, for the URL list).
+     * @param {string} [params.model] / [params.platform] - AI model filter.
+     * @param {string} params.startDate / params.endDate - Required YYYY-MM-DD (main period).
+     * @param {string} [params.projectId] - Single Semrush project UUID (one region).
+     * @param {string[]} [params.projectIds] - All the brand's project UUIDs (aggregate).
+     * @returns {Promise<{value: number, comparisonValue: number}>}
+     */
+    async getSourceVisibilityHeadline(workspaceId, {
+      brandName, model, platform, startDate, endDate, projectId, projectIds,
+    }) {
+      const resolvedProjectIds = projectId ? [projectId] : (projectIds ?? []);
+      const callOpts = {
+        timeoutMs: SOURCE_VISIBILITY_CALL_TIMEOUT_MS,
+        maxRetries: SOURCE_VISIBILITY_CALL_MAX_RETRIES,
+      };
+      const brandUrlsRaw = await transport.fetchElement(
+        workspaceId,
+        ELEMENT_IDS.BRAND_URLS,
+        buildBrandUrlsPayload({ brandName }),
+        callOpts,
+      );
+      const brandUrls = transformBrandUrlsResponse(brandUrlsRaw);
+      if (brandUrls.length === 0) {
+        return { value: 0, comparisonValue: 0 };
+      }
+      const raw = await transport.fetchElement(
+        workspaceId,
+        ELEMENT_IDS.KPI_SOURCE_VISIBILITY,
+        buildSourceVisibilityPayload({
+          brandUrls, model, platform, startDate, endDate, projectIds: resolvedProjectIds,
+        }),
+        callOpts,
+      );
+      return transformKpiHeadlineResponse(raw);
     },
   };
 }

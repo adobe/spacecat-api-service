@@ -1555,6 +1555,189 @@ export default function ElementsController(context, log, env) {
   };
   /* c8 ignore stop */
 
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/kpi-headlines
+   * Overview-SR Share of Voice + Brand Visibility KPI headline cards — the exact
+   * numbers the Brand Presence MFE itself shows (its own per-brand `kpiLineChart`
+   * elements), not derived from market-tracking-trends's weekly series (LLMO-6515
+   * follow-up, exact MFE parity). Param resolution mirrors getMarketTrackingTrends/
+   * getCompetitorSummary.
+   */
+  /* c8 ignore start -- kpi-headlines POC endpoint; unit tests intentionally deferred */
+  const getKpiHeadlines = async (ctx) => {
+    try {
+      const auth = await authorizeOrg(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { spaceCatId, brandId } = ctx?.params ?? {};
+      const { workspaceId, brand } = auth;
+      const query = extractQuery(ctx);
+
+      const siteId = query.siteId || query.site_id;
+      if (hasText(siteId)) {
+        const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
+        const resolved = await getBrandBySite(spaceCatId, siteId, postgrestClient, log);
+        if (!resolved || resolved.id !== brand.id) {
+          return badRequest('siteId does not belong to the specified brand');
+        }
+      }
+
+      let startDate = query.startDate || query.start_date;
+      let endDate = query.endDate || query.end_date;
+      if (hasText(startDate) && !isYmdDate(startDate)) {
+        return badRequest('startDate must be a valid YYYY-MM-DD date');
+      }
+      if (hasText(endDate) && !isYmdDate(endDate)) {
+        return badRequest('endDate must be a valid YYYY-MM-DD date');
+      }
+      if (!hasText(startDate) || !hasText(endDate)) {
+        const defaultRange = defaultStatsDateRange();
+        startDate = defaultRange.startDate;
+        endDate = defaultRange.endDate;
+      }
+      if (startDate > endDate) {
+        return badRequest('startDate must not be after endDate');
+      }
+      const MAX_RANGE_DAYS = 366;
+      const spanDays = (Date.parse(`${endDate}T00:00:00Z`)
+        - Date.parse(`${startDate}T00:00:00Z`)) / 86400000;
+      if (spanDays > MAX_RANGE_DAYS) {
+        return badRequest(`Date range must not exceed ${MAX_RANGE_DAYS} days`);
+      }
+
+      const service = await buildService(ctx);
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
+
+      let projectId;
+      let projectIds;
+      const region = query.regionCode || query.region_code || query.region;
+      if (hasText(region) && region.toLowerCase() !== 'all') {
+        projectId = await service.resolveRegionProjectId(workspaceId, {
+          brandId, region, brandSemrushProjects,
+        });
+        if (!hasText(projectId)) {
+          return notFound(`No Semrush market found for region: ${region}`);
+        }
+      } else {
+        projectIds = brandSemrushProjects
+          .map((p) => p.semrushProjectId)
+          .filter(hasText);
+        if (projectIds.length === 0) {
+          return cachedOk({
+            shareOfVoice: { value: 0, comparisonValue: 0 },
+            brandVisibility: { value: 0, comparisonValue: 0 },
+          });
+        }
+      }
+
+      const result = await service.getKpiHeadlines(workspaceId, {
+        model: query.model,
+        platform: query.platform,
+        startDate,
+        endDate,
+        projectId,
+        projectIds,
+        brandName: brand.name,
+      });
+      return cachedOk(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+  /* c8 ignore stop */
+
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/source-visibility-headline
+   * Overview-SR Source Visibility KPI headline card. Split from `getKpiHeadlines`
+   * because it needs a SEQUENTIAL brand-URL-list lookup before the KPI element
+   * itself can be scoped — see {@link getSourceVisibilityHeadline} in
+   * elements-service.js for the timeout-budget rationale. Param resolution
+   * otherwise mirrors getKpiHeadlines.
+   */
+  /* c8 ignore start -- kpi-headlines POC endpoint; unit tests intentionally deferred */
+  const getSourceVisibilityHeadline = async (ctx) => {
+    try {
+      const auth = await authorizeOrg(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { spaceCatId, brandId } = ctx?.params ?? {};
+      const { workspaceId, brand } = auth;
+      const query = extractQuery(ctx);
+
+      const siteId = query.siteId || query.site_id;
+      if (hasText(siteId)) {
+        const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
+        const resolved = await getBrandBySite(spaceCatId, siteId, postgrestClient, log);
+        if (!resolved || resolved.id !== brand.id) {
+          return badRequest('siteId does not belong to the specified brand');
+        }
+      }
+
+      let startDate = query.startDate || query.start_date;
+      let endDate = query.endDate || query.end_date;
+      if (hasText(startDate) && !isYmdDate(startDate)) {
+        return badRequest('startDate must be a valid YYYY-MM-DD date');
+      }
+      if (hasText(endDate) && !isYmdDate(endDate)) {
+        return badRequest('endDate must be a valid YYYY-MM-DD date');
+      }
+      if (!hasText(startDate) || !hasText(endDate)) {
+        const defaultRange = defaultStatsDateRange();
+        startDate = defaultRange.startDate;
+        endDate = defaultRange.endDate;
+      }
+      if (startDate > endDate) {
+        return badRequest('startDate must not be after endDate');
+      }
+      const MAX_RANGE_DAYS = 366;
+      const spanDays = (Date.parse(`${endDate}T00:00:00Z`)
+        - Date.parse(`${startDate}T00:00:00Z`)) / 86400000;
+      if (spanDays > MAX_RANGE_DAYS) {
+        return badRequest(`Date range must not exceed ${MAX_RANGE_DAYS} days`);
+      }
+
+      const service = await buildService(ctx);
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
+
+      let projectId;
+      let projectIds;
+      const region = query.regionCode || query.region_code || query.region;
+      if (hasText(region) && region.toLowerCase() !== 'all') {
+        projectId = await service.resolveRegionProjectId(workspaceId, {
+          brandId, region, brandSemrushProjects,
+        });
+        if (!hasText(projectId)) {
+          return notFound(`No Semrush market found for region: ${region}`);
+        }
+      } else {
+        projectIds = brandSemrushProjects
+          .map((p) => p.semrushProjectId)
+          .filter(hasText);
+        if (projectIds.length === 0) {
+          return cachedOk({ value: 0, comparisonValue: 0 });
+        }
+      }
+
+      const result = await service.getSourceVisibilityHeadline(workspaceId, {
+        model: query.model,
+        platform: query.platform,
+        startDate,
+        endDate,
+        projectId,
+        projectIds,
+        brandName: brand.name,
+      });
+      return cachedOk(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+  /* c8 ignore stop */
+
   return {
     listUrlInspectorFilterDimensions,
     listWeeks,
@@ -1570,5 +1753,7 @@ export default function ElementsController(context, log, env) {
     getUrlInspectorStats,
     getUrlInspectorPromptsCount,
     getCompetitorSummary,
+    getKpiHeadlines,
+    getSourceVisibilityHeadline,
   };
 }
