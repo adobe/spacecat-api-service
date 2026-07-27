@@ -276,9 +276,12 @@ describe('serenity tag-tree', () => {
       expect(roots.get('type')).to.equal('created::type');
     });
 
-    it('adopts a legacy `source` authorship root in place, minting no second `origin`', async () => {
-      // A project the reshape has not yet renamed: its authorship root is still `source`,
-      // with `ai`/`human` beneath it (origin-dimension.md §7 gate 3).
+    it('creates a fresh `origin` root, leaving a legacy `source` root untouched (WP-O6)', async () => {
+      // A project the reshape somehow left authorship-on-`source` (ai/human beneath a
+      // `source` root, no `origin` root). The tolerant fallback that adopted such a root
+      // in place is GONE (WP-O6): `origin` is created strictly, and the stale `source`
+      // root is neither adopted nor touched — the data reshape retires it separately.
+      const created = [];
       const legacyLevels = {
         '': [
           { id: 'root-category', name: 'category', children_count: 0 },
@@ -293,87 +296,18 @@ describe('serenity tag-tree', () => {
       };
       const transport = {
         listProjectTags: makeListProjectTagsStub(legacyLevels),
-        createProjectTags: sinon.stub(),
-      };
-      const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
-      // The `origin` key maps to the physical `source` root — adopted in place …
-      expect(roots.get('origin')).to.equal('root-source');
-      // … and NOTHING was created: no empty second authorship root (spec §8).
-      expect(transport.createProjectTags).to.not.have.been.called;
-    });
-
-    it('does NOT adopt a `source` root carrying non-authorship values; creates `origin`', async () => {
-      // The companion producing-system `source` dimension (source-dimension.md §9): its
-      // children are not {ai, human}, so it must not be mistaken for authorship.
-      const created = [];
-      const levels = {
-        '': [
-          { id: 'root-category', name: 'category', children_count: 0 },
-          { id: 'root-intent', name: 'intent', children_count: 5 },
-          { id: 'root-source', name: 'source', children_count: 1 },
-          { id: 'root-type', name: 'type', children_count: 2 },
-        ],
-        'root-source': [{ id: 'src-config', name: 'config', parent_id: 'root-source' }],
-      };
-      const transport = {
-        listProjectTags: makeListProjectTagsStub(levels),
         createProjectTags: sinon.stub().callsFake((ws, pid, names) => {
           created.push(...names);
           return Promise.resolve(names.map((n) => ({ id: `made-${n}`, name: n })));
         }),
       };
       const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
+      // `origin` is minted fresh — never resolved to the physical `source` root.
       expect(created).to.deep.equal(['origin']);
       expect(roots.get('origin')).to.equal('made-origin');
-    });
-
-    it('prefers `origin` over a legacy `source` when a project carries BOTH roots', async () => {
-      // A partially-migrated project: the new `origin` root already exists alongside
-      // the not-yet-cleaned-up legacy `source` root. `origin` must win, and the
-      // orphan `source` is left untouched (removed at WP-O6) — never a second mint.
-      const bothLevels = {
-        '': [
-          { id: 'root-category', name: 'category', children_count: 0 },
-          { id: 'root-intent', name: 'intent', children_count: 5 },
-          { id: 'root-origin', name: 'origin', children_count: 2 },
-          { id: 'root-source', name: 'source', children_count: 2 },
-          { id: 'root-type', name: 'type', children_count: 2 },
-        ],
-      };
-      const transport = {
-        listProjectTags: makeListProjectTagsStub(bothLevels),
-        createProjectTags: sinon.stub(),
-      };
-      const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
-      // The `origin` key resolves to the real `origin` root, not the legacy `source`.
-      expect(roots.get('origin')).to.equal('root-origin');
-      // Nothing was created and the orphan `source` was not touched.
-      expect(transport.createProjectTags).to.not.have.been.called;
-      // Performance contract: finding `origin` short-circuits before any legacy
-      // adoption, so no child-level read of the orphan `source` — exactly ONE read.
+      // Strict resolution costs a single root-level read: no child-level probe of the
+      // legacy `source` root (the removed guard's read is gone).
       expect(transport.listProjectTags).to.have.callCount(1);
-    });
-
-    it('adopts a CHILDLESS legacy `source` root in place (vacuous authorship guard)', async () => {
-      // The intentional vacuous-true branch of `childrenAreAuthorship`: a `source`
-      // root not yet populated is still an authorship root, so it is adopted rather
-      // than shadowed by a second `origin`. Documents the behavior until WP-O6.
-      const childlessLevels = {
-        '': [
-          { id: 'root-category', name: 'category', children_count: 0 },
-          { id: 'root-intent', name: 'intent', children_count: 5 },
-          { id: 'root-source', name: 'source', children_count: 0 },
-          { id: 'root-type', name: 'type', children_count: 2 },
-        ],
-        'root-source': [],
-      };
-      const transport = {
-        listProjectTags: makeListProjectTagsStub(childlessLevels),
-        createProjectTags: sinon.stub(),
-      };
-      const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
-      expect(roots.get('origin')).to.equal('root-source');
-      expect(transport.createProjectTags).to.not.have.been.called;
     });
   });
 
@@ -415,10 +349,10 @@ describe('serenity tag-tree', () => {
         '': [
           { id: 'r-cat', name: 'category', children_count: 0 },
           { id: 'r-int', name: 'intent', children_count: 0 },
-          { id: 'r-src', name: 'source', children_count: 0 },
+          { id: 'r-org', name: 'origin', children_count: 0 },
         ],
         'r-int': [],
-        'r-src': [],
+        'r-org': [],
       });
       const transport = {
         listProjectTags,

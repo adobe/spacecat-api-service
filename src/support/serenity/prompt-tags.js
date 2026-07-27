@@ -33,10 +33,9 @@
  * `(project, parent)`. A sub-category named `human` and the `origin` value
  * `human` are two distinct tags. Never key a tag by name alone; key by id.
  *
- * The authorship root is being renamed `source` → `origin` in place across the
- * live projects (origin-dimension.md). Until that migration's contract phase
- * (WP-O6) lands, the tag-tree resolver tolerates BOTH names — see
- * {@link LEGACY_AUTHORSHIP_ROOT_NAME} and `tag-tree.js`.
+ * The authorship root is `origin` (renamed from `source` — origin-dimension.md).
+ * The rename is complete: the tag-tree resolver names `origin` strictly. The
+ * tolerant dual-name fallback that bridged the migration was removed in WP-O6.
  */
 
 /**
@@ -48,13 +47,6 @@ export const DIMENSION = Object.freeze({
   ORIGIN: 'origin',
   TYPE: 'type',
 });
-
-/**
- * The pre-rename name of the authorship root. Live projects provisioned before
- * the rename still carry a root named `source` (with `ai` / `human` beneath it);
- * the tolerant resolver accepts it in place of `origin` until WP-O6 drops this.
- */
-export const LEGACY_AUTHORSHIP_ROOT_NAME = 'source';
 
 /** Root names, in the order they are provisioned on a project. */
 export const DIMENSION_ROOT_NAMES = Object.freeze([
@@ -151,18 +143,11 @@ export const STANDARD_PROMPT_TAG_VALUES = Object.freeze([
  * a customer category may not be called `category`, and a closed value may not
  * be minted at the root level.
  *
- * While the `source` → `origin` rename is in flight, the legacy authorship name
- * ({@link LEGACY_AUTHORSHIP_ROOT_NAME}) is ALSO reserved — a customer must not be
- * able to mint a tag named `source` during the migration window, or it could be
- * mistaken for (or collide with) the legacy authorship root the tolerant resolver
- * still adopts. Dropped with the rest of the fallback at WP-O6.
- *
  * @param {string} name - a bare tag name.
  * @returns {boolean}
  */
 export function isDimensionRootName(name) {
-  return name === LEGACY_AUTHORSHIP_ROOT_NAME
-    || (/** @type {readonly string[]} */ (DIMENSION_ROOT_NAMES)).includes(name);
+  return (/** @type {readonly string[]} */ (DIMENSION_ROOT_NAMES)).includes(name);
 }
 
 /**

@@ -51,8 +51,6 @@ import {
   DIMENSION_ROOT_NAMES,
   CLOSED_DIMENSION_VALUES,
   CLOSED_DIMENSIONS,
-  ORIGIN_VALUE,
-  LEGACY_AUTHORSHIP_ROOT_NAME,
 } from './prompt-tags.js';
 
 /**
@@ -130,9 +128,6 @@ export async function indexLevelByName(transport, semrushWorkspaceId, projectId,
  * @param {string} parentId - '' to create at the root level.
  * @param {readonly string[]} wanted - bare names that must exist under `parentId`.
  * @param {object} [log] - logger.
- * @param {Map<string, string>} [preRead] - an already-read `indexLevelByName` of this
- *   parent's level, reused instead of reading it again. Lets a caller that has already
- *   inspected the level (e.g. the tolerant root resolver) avoid a redundant read.
  * @returns {Promise<{ byName: Map<string, string>, createdNames: string[] }>}
  *   `byName` maps every wanted name to its tag id.
  */
@@ -143,10 +138,8 @@ export async function ensureChildren(
   parentId,
   wanted,
   log,
-  preRead,
 ) {
-  const existing = preRead
-    ?? await indexLevelByName(transport, semrushWorkspaceId, projectId, parentId, log);
+  const existing = await indexLevelByName(transport, semrushWorkspaceId, projectId, parentId, log);
   const missing = wanted.filter((name) => !existing.has(name));
   if (missing.length === 0) {
     return { byName: existing, createdNames: [] };
@@ -218,91 +211,39 @@ export async function ensureChildren(
 }
 
 /**
- * True when a root tag's children are a subset of the authorship vocabulary
- * `{ai, human}`. A childless root passes vacuously (a not-yet-populated authorship
- * root); a `source` root carrying producing-system values (`config`, `gsc`, …) does
- * NOT — that is the companion `source` dimension (source-dimension.md §9), not
- * authorship. This guard is what lets the two names coexist safely during the rename.
- *
- * @param {object} transport
- * @param {string} semrushWorkspaceId
- * @param {string} projectId
- * @param {string} rootId
- * @param {object} [log]
- * @returns {Promise<boolean>}
- */
-async function childrenAreAuthorship(transport, semrushWorkspaceId, projectId, rootId, log) {
-  const children = await indexLevelByName(transport, semrushWorkspaceId, projectId, rootId, log);
-  const authorship = new Set(/** @type {readonly string[]} */ (Object.values(ORIGIN_VALUE)));
-  return [...children.keys()].every((name) => authorship.has(name));
-}
-
-/**
  * Resolves the four dimension roots, creating any that a project is missing.
  * Older projects predate this taxonomy entirely, so this is the seam that brings
  * them forward on first touch.
  *
- * The authorship root is resolved TOLERANTLY while the `source` → `origin` rename is
- * in flight (origin-dimension.md): an existing `origin` root, OR a legacy `source`
- * root whose children are a subset of `{ai, human}` ({@link childrenAreAuthorship} —
- * the guard that keeps it from adopting the companion producing-system `source`
- * dimension), satisfies the authorship dimension in place. `origin` is created ONLY
- * when neither exists — a blind create would mint an empty SECOND authorship root the
- * moment code and data disagree (origin-dimension.md §8). Either way the returned
- * map's `origin` key maps to whichever physical root was resolved, so callers key on
- * `DIMENSION.ORIGIN` regardless. Removed with the fallback by WP-O6.
+ * Every root — `origin` included — is resolved-or-created by bare name. The
+ * `source` → `origin` authorship rename is complete (origin-dimension.md), so the
+ * tolerant fallback that adopted a legacy `source` root in place of `origin` is
+ * gone (WP-O6): a project that still carries a legacy `source` authorship root now
+ * gets a fresh `origin` root created, and the stale `source` root is left untouched
+ * for the data reshape to retire. The migration reshape guarantees no live project
+ * reaches this seam still authorship-on-`source`, so no second authorship root is
+ * minted in practice.
  *
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
  * @param {object} [log] - logger.
- * @returns {Promise<Map<string, string>>} root name → tag id, in root order, with the
- *   `origin` key carrying the resolved authorship root's id.
+ * @returns {Promise<Map<string, string>>} root name → tag id, in root order.
  */
 export async function ensureDimensionRoots(transport, semrushWorkspaceId, projectId, log) {
-  const existing = await indexLevelByName(transport, semrushWorkspaceId, projectId, '', log);
-
-  // Tolerant authorship resolution: prefer `origin`; else adopt a legacy `source` root
-  // in place (guarded so the companion producing-system `source` dimension is never
-  // mistaken for authorship).
-  let authorshipId = existing.get(DIMENSION.ORIGIN);
-  if (!authorshipId) {
-    const legacyId = existing.get(LEGACY_AUTHORSHIP_ROOT_NAME);
-    if (legacyId
-      && await childrenAreAuthorship(transport, semrushWorkspaceId, projectId, legacyId, log)) {
-      log?.info?.('ensureDimensionRoots: adopting the legacy `source` authorship root in place', {
-        semrushWorkspaceId, projectId, rootId: legacyId,
-      });
-      authorshipId = legacyId;
-    }
-  }
-
-  // Resolve-or-create every root except `origin`, and `origin` too UNLESS an authorship
-  // root was already found — creating it only then keeps the fresh-project path a single
-  // create call while never minting a second authorship root on a mid-rename project.
-  const wanted = DIMENSION_ROOT_NAMES.filter(
-    (name) => name !== DIMENSION.ORIGIN || !authorshipId,
-  );
-  // Reuse the root-level read above — the tolerant resolve costs no extra read on the
-  // common path (only `childrenAreAuthorship` adds one, and only when a legacy `source`
-  // root is present).
   const { byName } = await ensureChildren(
     transport,
     semrushWorkspaceId,
     projectId,
     '',
-    wanted,
+    DIMENSION_ROOT_NAMES,
     log,
-    existing,
   );
 
-  // Return the roots in canonical order, with `origin` carrying the resolved id.
+  // Return the roots in canonical order.
   const roots = new Map();
   for (const name of DIMENSION_ROOT_NAMES) {
-    roots.set(
-      name,
-      name === DIMENSION.ORIGIN ? (authorshipId ?? byName.get(name)) : byName.get(name),
-    );
+    roots.set(name, byName.get(name));
   }
   return roots;
 }
@@ -580,9 +521,9 @@ export async function ensureClosedValue(
  * The strip set is every id under the dimension's root, NOT a name match: a tag's
  * dimension is its root ancestor, so a customer category legitimately named
  * `branded` or `ai` (the collision the model spec's fixture proves survivable) is
- * NOT in this set and is left untouched. The authorship root is resolved
- * tolerantly by {@link ensureDimensionRoots}, so `DIMENSION.ORIGIN` addresses
- * whichever physical root (`origin` or a legacy `source`) the project carries.
+ * NOT in this set and is left untouched. {@link ensureDimensionRoots} resolves
+ * `DIMENSION.ORIGIN` to the project's `origin` root (the authorship rename is
+ * complete — WP-O6), creating it on a project that predates the taxonomy.
  *
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {string} semrushWorkspaceId
