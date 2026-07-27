@@ -2767,6 +2767,67 @@ describe('SerenityController', () => {
       expect(handlers.handleCreatePromptsSubworkspace).not.to.have.been.called;
     });
 
+    // PROTOTYPE (SITES-47870 item 2): `assertSource` is gated on a FACS producer
+    // capability HERE in the controller, then passed to the handler as an explicit
+    // `options.allowAssertSource` (the 10th positional arg, index 9) — NOT by rewriting
+    // the body. FAIL-CLOSED: allowed only when the caller holds `<product>/can_track`
+    // or is an admin, never merely because FACS is off.
+    const trackData = () => ({
+      assertSource: true,
+      prompts: [{ text: 'x', geoTargetId: 2840, languageCode: 'en' }],
+    });
+
+    it('assertSource: allowed when the caller holds the llmo/can_track capability', async () => {
+      handlers.handleCreatePrompts.resolves({ created: 1, failed: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ data: trackData() });
+      ctx.attributes.facs = { enabled: true, product: 'LLMO', subjectId: 's1' };
+      ctx.attributes.authInfo.hasFacsPermission = sinon.stub()
+        .callsFake((cap) => cap === 'llmo/can_track');
+
+      const response = await controller.createPrompts(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleCreatePrompts.lastCall.args[9].allowAssertSource).to.equal(true);
+    });
+
+    it('assertSource: DROPPED (and warned) when the caller lacks the capability', async () => {
+      handlers.handleCreatePrompts.resolves({ created: 1, failed: [] });
+      const log = fakeLog();
+      const controller = SerenityController({ env: {} }, log, {});
+      const ctx = fakeContext({ data: trackData() });
+      ctx.attributes.facs = { enabled: true, product: 'LLMO', subjectId: 's1' };
+      ctx.attributes.authInfo.hasFacsPermission = sinon.stub().returns(false);
+
+      const response = await controller.createPrompts(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleCreatePrompts.lastCall.args[9].allowAssertSource).to.equal(false);
+      expect(log.warn).to.have.been.calledWithMatch(
+        /assertSource requested without the producer capability/,
+      );
+    });
+
+    it('assertSource: FAIL-CLOSED for a non-FACS, non-admin session (no bypass)', async () => {
+      handlers.handleCreatePrompts.resolves({ created: 1, failed: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      // No facs, no can_track, not admin => denied (the old fail-open bypass is gone).
+      const ctx = fakeContext({ data: trackData() });
+
+      const response = await controller.createPrompts(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleCreatePrompts.lastCall.args[9].allowAssertSource).to.equal(false);
+    });
+
+    it('assertSource: allowed for an admin session', async () => {
+      handlers.handleCreatePrompts.resolves({ created: 1, failed: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ data: trackData() });
+      ctx.attributes.authInfo.isAdmin = () => true;
+
+      const response = await controller.createPrompts(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleCreatePrompts.lastCall.args[9].allowAssertSource).to.equal(true);
+    });
+
     it('builds a working type classifier from the brand name + aliases and passes it to the handler (serenity-docs#31)', async () => {
       handlers.handleCreatePrompts.resolves({ created: 1, failed: [] });
       // Brand name 'Test Brand' + a US-clamped alias 'Acme'.

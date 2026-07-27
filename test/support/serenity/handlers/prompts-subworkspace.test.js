@@ -187,6 +187,30 @@ describe('prompts-subworkspace handlers', () => {
       }, log)).to.be.rejectedWith(ErrorWithStatusCode, /deferPublish must be a boolean/);
     });
 
+    // PROTOTYPE (SITES-47870): Track-flow producer opt-in — twin of the flat-mode test.
+    it('assertSource: honours the per-item producing `source` (semrush over the config default)', async () => {
+      const transport = makeTransport();
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        assertSource: true,
+        prompts: [{
+          text: 'p', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en', source: 'semrush',
+        }],
+      }, log, undefined, undefined, undefined, { allowAssertSource: true });
+      expect(result.created[0].tagIds).to.include(TAG_IDS.sourceSemrush);
+      expect(result.created[0].tagIds).to.not.include(TAG_IDS.sourceConfig);
+    });
+
+    it('WITHOUT assertSource: ignores a body `source` and stays `config` (closed surface)', async () => {
+      const transport = makeTransport();
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [{
+          text: 'p', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en', source: 'semrush',
+        }],
+      }, log);
+      expect(result.created[0].tagIds).to.include(TAG_IDS.sourceConfig);
+      expect(result.created[0].tagIds).to.not.include(TAG_IDS.sourceSemrush);
+    });
+
     it('dynamic-allocation ON: fronts headroom sized on the batch BEFORE the write, not just before publish (LLMO-6190, live-verified)', async () => {
       // The metered write is createPromptsByIds itself (Rainer, live-verified) — a disguised-quota
       // 405 fires there, before any publish. getWorkspaceResources must be read (and, if it were

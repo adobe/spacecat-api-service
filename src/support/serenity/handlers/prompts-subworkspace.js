@@ -138,6 +138,7 @@ export async function handleCreatePromptsSubworkspace(
     dynamicAllocation = false,
     parentWorkspaceId = '',
     ceiling = /** @type {Partial<Blocks> | undefined} */ (undefined),
+    allowAssertSource = false,
   } = {},
 ) {
   const inputs = Array.isArray(body?.prompts) ? body.prompts : [];
@@ -154,8 +155,8 @@ export async function handleCreatePromptsSubworkspace(
 
   const projectsBySlice = await buildSliceProjectMap(transport, workspaceId, log);
   // CREATE: user-authenticated write → derived `origin` is `human` and producing
-  // `source` is the constant `config` (see the flat-mode twin handleCreatePrompts,
-  // origin-dimension.md §3, source-dimension.md §1).
+  // `source` DEFAULTS to the constant `config` (see the flat-mode twin
+  // handleCreatePrompts, origin-dimension.md §3, source-dimension.md §1).
   const injectComputedTags = makePromptTagInjector(
     transport,
     workspaceId,
@@ -182,6 +183,14 @@ export async function handleCreatePromptsSubworkspace(
     },
   );
   const injectComputedIntent = makeIntentInjector(transport, workspaceId, intentByText, log);
+
+  // PROTOTYPE (SITES-47870): Track-flow producer opt-in — twin of the flat-mode
+  // handleCreatePrompts. Requires BOTH the body flag AND the trusted controller's
+  // `allowAssertSource` option (the FACS `can_track` gate result) — see the flat twin's
+  // FIX note. When on, the item's real `source` is honoured (canonicalized, `config`
+  // fallback); otherwise the per-item `source` is ignored so the default surface stays
+  // closed (source-dimension.md §1 item 6).
+  const assertSource = allowAssertSource === true && body?.assertSource === true;
 
   // PROMPT metering seam (Rainer, live-verified LLMO-6190): the metered write is
   // `createPromptsByIds` (inside `createOnePrompt` below), NOT publish — a disguised-quota 405
@@ -221,8 +230,11 @@ export async function handleCreatePromptsSubworkspace(
     try {
       // Unified layer: strip caller-supplied type/origin/intent, then inject the
       // computed type + derived origin (origin-dimension.md §3) and the classified
-      // intent (serenity-docs#32). The injectors act on disjoint dimensions.
-      let typed = await injectComputedTags(projectId, input);
+      // intent (serenity-docs#32). Track override: attach the item's producing
+      // `source` only when the request opted in via `assertSource` (requires the
+      // controller's allowAssertSource — see the flat twin).
+      const withSource = assertSource ? { ...input, source: raw.source } : input;
+      let typed = await injectComputedTags(projectId, withSource);
       typed = await injectComputedIntent(projectId, typed);
       // LLMO-6190 follow-up: the metered write itself can still 405 as a disguised metered-quota
       // rejection despite the pre-loop sizing above (the live-verified ~9s gateway

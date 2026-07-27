@@ -555,6 +555,23 @@ describe('StateAccessMappingsController', () => {
       expect(stored.filter((c) => c === 'llmo/can_view')).to.have.lengthOf(1);
     });
 
+    // PROTOTYPE (SITES-47870): the Track producer capability round-trips through
+    // createMapping — it validates because it is listed in PRODUCTS_CAPABILITIES.LLMO,
+    // and stores alongside the baseline can_view. This is the state-layer binding
+    // grant that lights up the serenity controller's runtime `assertSource` gate.
+    it('accepts a llmo/can_track grant and stores it with the baseline can_view', async () => {
+      const created = makeRow();
+      const createStub = sinon.stub().resolves({ created: [created], skipped: [] });
+      const { Controller } = await loadController({ createFacsAccessMappings: createStub });
+      const ctx = makeContext({
+        body: { ...validBody, grantedCapabilities: ['llmo/can_track'] },
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(201);
+      expect(createStub.firstCall.args[1].grantedCapabilities)
+        .to.have.members(['llmo/can_track', 'llmo/can_view']);
+    });
+
     it('emits a create audit event (allow) on success', async () => {
       const row = makeRow();
       const { Controller, stubs } = await loadController({

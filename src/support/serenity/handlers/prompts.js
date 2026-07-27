@@ -19,9 +19,12 @@ import { redactUpstreamMessage } from '../rest-transport.js';
 import { ERROR_CODES, isUpstreamGone } from '../errors.js';
 import { normalizeGeoTargetId, normalizeLanguageCode, isValidTagIdFormat } from '../validation.js';
 import { invalidateTagCacheForProject } from './markets.js';
-import { resolveTypeValueInjection, resolveIntentValueInjection, resolveServerOwnedValueInjection } from '../tag-tree.js';
+import {
+  resolveTypeValueInjection, resolveIntentValueInjection, resolveServerOwnedValueInjection,
+} from '../tag-tree.js';
 import {
   DIMENSION, ORIGIN_VALUE, INTENT_VALUE, PROXY_CREATE_SOURCE_VALUE,
+  canonicalizeSource, SOURCE_VALUES,
 } from '../prompt-tags.js';
 import { classifyPromptIntents } from '../intent-classification.js';
 
@@ -433,6 +436,12 @@ export async function createOnePrompt(transport, semrushWorkspaceId, projectId, 
  *   - on UPDATE (`sourceValue` unset) the injector leaves source ALONE — a prompt's
  *     producer is fixed at creation.
  *
+ *   PROTOTYPE (SITES-47870): a SERVER-side producer may set a PER-ITEM `input.source`
+ *   to override the request-level `sourceValue` on CREATE, so the SR "Track" flow can
+ *   stamp the real producer (`semrush` / `gsc` / …) rather than the fixed `config`.
+ *   It is canonicalized and falls back to the request default when unparseable. Still
+ *   NOT a client surface — only server callers populate `input.source`.
+ *
  * Resolution ({@link resolveTypeValueInjection} / {@link resolveServerOwnedValueInjection},
  * two tag-tree reads per distinct value per project — the root level plus the
  * root's children) is memoized for the request, so a bulk create fans out over
@@ -450,10 +459,12 @@ export async function createOnePrompt(transport, semrushWorkspaceId, projectId, 
  * @param {object} [log]
  * @param {{ originValue?: string, sourceValue?: string }} [options] - `originValue`
  *   / `sourceValue` are the derived `origin` / `source` to inject on CREATE; omit
- *   each on UPDATE so that dimension is left untouched.
+ *   each on UPDATE so that dimension is left untouched. `sourceValue` is the
+ *   request-level DEFAULT source, overridable per item via `input.source`.
  * @returns {(projectId: string, input: { text: string, geoTargetId: number,
- *   tagIds: string[] }) =>
- *   Promise<{ text: string, geoTargetId: number, tagIds: string[] }>}
+ *   tagIds: string[], source?: string }) =>
+ *   Promise<{ text: string, geoTargetId: number, tagIds: string[] }>} `input.source`
+ *   (server-set only) overrides the request-level `sourceValue` for that item.
  */
 export function makePromptTagInjector(
   transport,
@@ -462,7 +473,7 @@ export function makePromptTagInjector(
   log,
   options = {},
 ) {
-  const { originValue, sourceValue } = options;
+  const { originValue, sourceValue: defaultSourceValue } = options;
   /** @type {Map<string, Promise<{ computedId: string, typeTagIds: string[] }>>} */
   const typeCache = new Map();
   /** @type {Map<string, Promise<{ computedId: string, valueTagIds: string[] }>>} */
@@ -510,21 +521,49 @@ export function makePromptTagInjector(
       tagIds = [...tagIds.filter((id) => !valueTagIds.includes(id)), computedId];
     }
 
-    // source — CREATE only, same asymmetry as origin. `sourceValue` unset means
-    // UPDATE: leave the producer alone (fixed at creation). Stripped by resolved id
-    // beneath the `source` root, never by name (a category may be `gsc`).
-    if (sourceValue) {
-      let pending = sourceCache.get(projectId);
+    // source — CREATE only, same asymmetry as origin. The request-level
+    // `defaultSourceValue` (the constant `config` for the human proxy dialog) is the
+    // default; unset means UPDATE — leave the producer alone (fixed at creation).
+    //
+    // PROTOTYPE (SITES-47870 / Jen's Serenity-path note, PR #2867): a SERVER-side
+    // producer — the SR "Track" flow in Serenity mode — may OVERRIDE the default
+    // PER ITEM via `input.source`, so a tracked prompt keeps its real producing
+    // system (`semrush` / `gsc` / `citation-attempt` / `synthetic-personas`) instead
+    // of collapsing to `config`. The per-item value is canonicalized (server-owned,
+    // resolve-or-create), and an UNPARSEABLE one falls back to the request default
+    // rather than being injected raw. This is a SERVER seam only:
+    // `normalizePromptInput` does NOT read `source` from the request body, so there
+    // is still no CLIENT write surface (source-dimension.md §1 item 6). Stripped by
+    // resolved id beneath the `source` root, never by name (a category may be `gsc`).
+    const perItemSource = input.source != null ? canonicalizeSource(input.source) : null;
+    // FIX (review should-fix): `source` is an OPEN dimension, so an unknown producer is
+    // NOT rejected (a new producer may ship before its catalog entry). But log it, so a
+    // typo (`semrsh`) that would resolve-or-create a junk producer tag is observable
+    // rather than silent.
+    const knownProducers = /** @type {readonly string[]} */ (SOURCE_VALUES);
+    if (perItemSource && !knownProducers.includes(perItemSource)) {
+      log?.warn?.(
+        'makePromptTagInjector: per-item source is not a known producer (resolving anyway)',
+        { source: perItemSource },
+      );
+    }
+    const effectiveSource = perItemSource ?? defaultSourceValue;
+    if (effectiveSource) {
+      // Cache keyed by (project, source): with a per-item override a single batch can
+      // carry several distinct producers, so memoize per resolved value — not per
+      // project as origin does (origin is always constant per request).
+      const key = `${projectId} ${effectiveSource}`;
+      let pending = sourceCache.get(key);
       if (!pending) {
         pending = resolveServerOwnedValueInjection(
           transport,
           semrushWorkspaceId,
           projectId,
           DIMENSION.SOURCE,
-          sourceValue,
+          effectiveSource,
           log,
         );
-        sourceCache.set(projectId, pending);
+        sourceCache.set(key, pending);
       }
       const { computedId, valueTagIds } = await pending;
       tagIds = [...tagIds.filter((id) => !valueTagIds.includes(id)), computedId];
@@ -678,6 +717,10 @@ export async function mapLimit(items, limit, mapper) {
  * for triggering a publish itself (e.g. a normal, non-deferred call on the
  * last chunk of an import, which publishes every project touched across the
  * whole import since a single CSV import always targets one project).
+ *
+ * `options.allowAssertSource` (PROTOTYPE, SITES-47870) — set true ONLY by the
+ * capability-checked controller. When true, a per-item `source` on `body.assertSource`
+ * writes is honoured; otherwise the producer surface stays closed (default `config`).
  */
 export async function handleCreatePrompts(
   transport,
@@ -689,6 +732,7 @@ export async function handleCreatePrompts(
   classifyPromptType,
   env,
   writeDeadline,
+  options = {},
 ) {
   const inputs = Array.isArray(body?.prompts) ? body.prompts : [];
   if (inputs.length === 0) {
@@ -712,8 +756,8 @@ export async function handleCreatePrompts(
   // (origin-dimension.md §3). Any caller-supplied origin tag id is stripped and
   // this value injected; on the twin AI-generation path a service producer stamps
   // `ai` via STANDARD_PROMPT_TAG_VALUES instead (that path does not run here).
-  // The producing `source` is the constant `config` — this human create dialog is
-  // what the same prompt gets in Postgres on the v2 path (source-dimension.md §1).
+  // The producing `source` DEFAULTS to the constant `config` — this human create
+  // dialog is what the same prompt gets in Postgres on the v2 path (source-dimension.md §1).
   const injectComputedTags = makePromptTagInjector(
     transport,
     semrushWorkspaceId,
@@ -741,6 +785,20 @@ export async function handleCreatePrompts(
   );
   const injectComputedIntent = makeIntentInjector(transport, semrushWorkspaceId, intentByText, log);
 
+  // PROTOTYPE (SITES-47870): the SR "Track" flow opts in with a top-level
+  // `assertSource: true` and carries the real producing system per item (`raw.source`,
+  // e.g. `semrush` / `gsc` / `citation-attempt`). WITHOUT the flag a per-item `source`
+  // is IGNORED, so the default human create dialog keeps its closed surface
+  // (source-dimension.md §1 item 6) and every prompt stays `config`. The value is
+  // canonicalized by the injector and falls back to the `config` default when unparseable.
+  //
+  // FIX (review should-fix): the opt-in requires BOTH the body flag AND the trusted
+  // controller's `options.allowAssertSource` (the FACS `can_track` gate result). Gating
+  // on the explicit option — not `body.assertSource` alone — means a future caller that
+  // reaches this handler WITHOUT going through the capability-checked controller cannot
+  // enable the producer surface with a bare body field.
+  const assertSource = options.allowAssertSource === true && body?.assertSource === true;
+
   const results = await mapLimit(inputs, BULK_CREATE_CONCURRENCY, async (raw) => {
     const { value: input, reason } = normalizePromptInput(raw);
     if (!input) {
@@ -763,10 +821,12 @@ export async function handleCreatePrompts(
     const projectId = project.getSemrushProjectId();
     try {
       // Unified layer: strip caller-supplied type/origin/intent, then inject the
-      // computed type + derived origin (origin-dimension.md §3) and the
-      // classified intent (serenity-docs#32). The two injectors act on disjoint
-      // dimensions, so chaining composes cleanly.
-      let typed = await injectComputedTags(projectId, input);
+      // computed type + derived origin (origin-dimension.md §3) and the classified
+      // intent (serenity-docs#32). Track override: attach the item's producing
+      // `source` only when the request opted in via `assertSource` (see the
+      // makePromptTagInjector FIX note — requires the controller's allowAssertSource).
+      const withSource = assertSource ? { ...input, source: raw.source } : input;
+      let typed = await injectComputedTags(projectId, withSource);
       typed = await injectComputedIntent(projectId, typed);
       const semrushPromptId = await createOnePrompt(
         transport,

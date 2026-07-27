@@ -590,6 +590,113 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     expect(transport.publishProject).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en');
   });
 
+  // PROTOTYPE (SITES-47870): the Track-flow producer opt-in on the flat create path.
+  describe('handleCreatePrompts source passthrough (SITES-47870 Track wiring)', () => {
+    const makeCreateTransport = () => ({
+      listProjectTags: makeListProjectTagsStub(),
+      createPromptsByIds: sinon.stub().resolves({
+        page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'hello' }], existing_count: 0,
+      }),
+      publishProject: sinon.stub().resolves(),
+    });
+
+    it('assertSource: honours the per-item producing `source` (semrush, not the config default)', async () => {
+      const project = makeProject({ semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en' });
+      const transport = makeCreateTransport();
+
+      const dataAccess = makeDataAccess([project]);
+      const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+        assertSource: true,
+        prompts: [{
+          text: 'hello', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-cat-1'], source: 'semrush',
+        }],
+      }, fakeLog(), undefined, undefined, undefined, { allowAssertSource: true });
+
+      expect(result.created[0].tagIds).to.include(TAG_IDS.sourceSemrush);
+      expect(result.created[0].tagIds).to.not.include(TAG_IDS.sourceConfig);
+    });
+
+    it('canonicalizes a per-item source (`CITATION_ATTEMPT` -> `citation-attempt`, resolve-or-create)', async () => {
+      const project = makeProject({ semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en' });
+      const transport = makeCreateTransport();
+      // `citation-attempt` is not pre-minted under the source root, so it is created.
+      transport.createProjectTags = sinon.stub().resolves([
+        { id: 'src-citation', name: 'citation-attempt', parent_id: TAG_IDS.sourceRoot },
+      ]);
+
+      const dataAccess = makeDataAccess([project]);
+      const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+        assertSource: true,
+        prompts: [{
+          text: 'hello', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-cat-1'], source: 'CITATION_ATTEMPT',
+        }],
+      }, fakeLog(), undefined, undefined, undefined, { allowAssertSource: true });
+
+      expect(result.created[0].tagIds).to.include('src-citation');
+    });
+
+    it('WITHOUT assertSource: ignores a body `source` and stays `config` (closed surface, §1 item 6)', async () => {
+      const project = makeProject({ semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en' });
+      const transport = makeCreateTransport();
+
+      const dataAccess = makeDataAccess([project]);
+      const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+        prompts: [{
+          text: 'hello', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-cat-1'], source: 'semrush',
+        }],
+      }, fakeLog());
+
+      expect(result.created[0].tagIds).to.include(TAG_IDS.sourceConfig);
+      expect(result.created[0].tagIds).to.not.include(TAG_IDS.sourceSemrush);
+    });
+
+    it('assertSource with an unparseable source falls back to the config default (never raw)', async () => {
+      const project = makeProject({ semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en' });
+      const transport = makeCreateTransport();
+
+      const dataAccess = makeDataAccess([project]);
+      const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+        assertSource: true,
+        prompts: [{
+          text: 'hello', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-cat-1'], source: 'bad:colon',
+        }],
+      }, fakeLog(), undefined, undefined, undefined, { allowAssertSource: true });
+
+      expect(result.created[0].tagIds).to.include(TAG_IDS.sourceConfig);
+    });
+
+    it('requires the body flag too: allowAssertSource without assertSource stays config', async () => {
+      const project = makeProject({ semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en' });
+      const transport = makeCreateTransport();
+
+      const dataAccess = makeDataAccess([project]);
+      // allowAssertSource is granted, but the body did NOT opt in — both are required.
+      const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+        prompts: [{
+          text: 'hello', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-cat-1'], source: 'semrush',
+        }],
+      }, fakeLog(), undefined, undefined, undefined, { allowAssertSource: true });
+
+      expect(result.created[0].tagIds).to.include(TAG_IDS.sourceConfig);
+      expect(result.created[0].tagIds).to.not.include(TAG_IDS.sourceSemrush);
+    });
+
+    it('assertSource with an item that carries NO source falls back to the config default', async () => {
+      const project = makeProject({ semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en' });
+      const transport = makeCreateTransport();
+
+      const dataAccess = makeDataAccess([project]);
+      const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+        assertSource: true,
+        prompts: [{
+          text: 'hello', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-cat-1'],
+        }],
+      }, fakeLog(), undefined, undefined, undefined, { allowAssertSource: true });
+
+      expect(result.created[0].tagIds).to.include(TAG_IDS.sourceConfig);
+    });
+  });
+
   // A name cannot identify a nested tag: the name-keyed upstream write is
   // root-only, so an unknown name would mint a phantom ROOT tag rather than
   // attach the category the caller meant. A `tags` key is therefore rejected
@@ -2628,6 +2735,127 @@ describe('handlers/prompts.js — origin derivation (origin-dimension.md §3)', 
       // Same project => served from the per-project origin cache, no new reads.
       expect(transport.listProjectTags.callCount).to.equal(readsAfterFirst);
       expect(transport.createProjectTags).to.not.have.been.called;
+    });
+  });
+
+  // PROTOTYPE (SITES-47870 / Jen's Serenity-path note on PR #2867): the SR "Track"
+  // flow writes through this injector but genuinely-`semrush`/`gsc`/... prompts were
+  // collapsing to the request-level `config`. These pin the per-item `input.source`
+  // server seam that lets the producing system survive.
+  describe('makePromptTagInjector source passthrough (SITES-47870 prototype)', () => {
+    it('uses the request-level default (`config`) when no per-item source is given', async () => {
+      const transport = {
+        listProjectTags: makeListProjectTagsStub(),
+        createProjectTags: sinon.stub(),
+      };
+      const inject = makePromptTagInjector(transport, WORKSPACE, undefined, fakeLog(), {
+        sourceValue: 'config',
+      });
+
+      const out = await inject('proj-1', {
+        text: 'x', geoTargetId: 2840, tagIds: [TAG_IDS.categoryRunningShoes],
+      });
+
+      expect(out.tagIds).to.include(TAG_IDS.sourceConfig);
+      expect(transport.createProjectTags).to.not.have.been.called;
+    });
+
+    it('per-item `input.source` OVERRIDES the default so the real producer survives', async () => {
+      const transport = {
+        listProjectTags: makeListProjectTagsStub(),
+        createProjectTags: sinon.stub(),
+      };
+      const inject = makePromptTagInjector(transport, WORKSPACE, undefined, fakeLog(), {
+        sourceValue: 'config',
+      });
+
+      const out = await inject('proj-1', {
+        text: 'x', geoTargetId: 2840, tagIds: [TAG_IDS.categoryRunningShoes], source: 'semrush',
+      });
+
+      expect(out.tagIds).to.include(TAG_IDS.sourceSemrush);
+      expect(out.tagIds).to.not.include(TAG_IDS.sourceConfig);
+    });
+
+    it('canonicalizes the per-item source before resolving (`SEMRUSH` -> `semrush`)', async () => {
+      const transport = {
+        listProjectTags: makeListProjectTagsStub(),
+        createProjectTags: sinon.stub(),
+      };
+      const inject = makePromptTagInjector(transport, WORKSPACE, undefined, fakeLog(), {
+        sourceValue: 'config',
+      });
+
+      const out = await inject('proj-1', {
+        text: 'x', geoTargetId: 2840, tagIds: ['keep'], source: 'SEMRUSH',
+      });
+
+      expect(out.tagIds).to.include(TAG_IDS.sourceSemrush);
+    });
+
+    it('falls back to the default (never injects raw) when the per-item source is unparseable', async () => {
+      const transport = {
+        listProjectTags: makeListProjectTagsStub(),
+        createProjectTags: sinon.stub(),
+      };
+      const inject = makePromptTagInjector(transport, WORKSPACE, undefined, fakeLog(), {
+        sourceValue: 'config',
+      });
+
+      const out = await inject('proj-1', {
+        text: 'x', geoTargetId: 2840, tagIds: ['keep'], source: 'bad:colon',
+      });
+
+      expect(out.tagIds).to.include(TAG_IDS.sourceConfig);
+      expect(out.tagIds).to.not.include(TAG_IDS.sourceSemrush);
+    });
+
+    it('memoizes per (project, source): repeats are cached, a new producer re-resolves', async () => {
+      const transport = {
+        listProjectTags: makeListProjectTagsStub(),
+        createProjectTags: sinon.stub(),
+      };
+      const inject = makePromptTagInjector(transport, WORKSPACE, undefined, fakeLog(), {
+        sourceValue: 'config',
+      });
+
+      await inject('proj-1', {
+        text: 'a', geoTargetId: 2840, tagIds: ['x'], source: 'semrush',
+      });
+      const afterFirst = transport.listProjectTags.callCount;
+      // Same (project, source) => served from cache, no new reads.
+      await inject('proj-1', {
+        text: 'b', geoTargetId: 2840, tagIds: ['y'], source: 'semrush',
+      });
+      expect(transport.listProjectTags.callCount).to.equal(afterFirst);
+      // A different producer on the same project => a fresh resolution.
+      await inject('proj-1', {
+        text: 'c', geoTargetId: 2840, tagIds: ['z'], source: 'config',
+      });
+      expect(transport.listProjectTags.callCount).to.be.greaterThan(afterFirst);
+      expect(transport.createProjectTags).to.not.have.been.called;
+    });
+
+    it('warns but still resolves an unknown-but-valid producer (source is an OPEN dimension)', async () => {
+      const log = fakeLog();
+      const transport = {
+        listProjectTags: makeListProjectTagsStub(),
+        // `novel-producer` is not pre-minted under the source root, so it is created.
+        createProjectTags: sinon.stub().resolves([
+          { id: 'src-novel', name: 'novel-producer', parent_id: TAG_IDS.sourceRoot },
+        ]),
+      };
+      const inject = makePromptTagInjector(transport, WORKSPACE, undefined, log, {
+        sourceValue: 'config',
+      });
+
+      const out = await inject('proj-1', {
+        text: 'x', geoTargetId: 2840, tagIds: ['keep'], source: 'novel-producer',
+      });
+
+      // Not rejected (open dimension) — resolved/created — but logged for observability.
+      expect(out.tagIds).to.include('src-novel');
+      expect(log.warn.calledWithMatch(/not a known producer/)).to.equal(true);
     });
   });
 });

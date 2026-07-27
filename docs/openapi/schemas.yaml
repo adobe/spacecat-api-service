@@ -11132,11 +11132,33 @@ SerenityPromptInput:
     languageCode:
       type: string
       pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+    source:
+      type: string
+      description: |
+        PROTOTYPE (SITES-47870): the producing system for this prompt, e.g.
+        `semrush` / `gsc` / `citation-attempt`. Honoured ONLY when the request sets
+        `assertSource: true` (the SR "Track" producer opt-in); otherwise IGNORED and
+        the prompt defaults to `config`. Canonicalized server-side; an unparseable
+        value falls back to `config`. Not a general client write surface
+        (source-dimension.md §1 item 6).
 
 SerenityCreatePromptsRequest:
   type: object
   required: [prompts]
   properties:
+    assertSource:
+      type: boolean
+      default: false
+      description: |
+        PROTOTYPE (SITES-47870): producer opt-in. When `true`, each item's optional
+        `source` is honoured as the producing system (for the SR "Track" flow). When
+        absent/false, per-item `source` is ignored and every prompt is `config` — the
+        default human create dialog keeps its closed source surface.
+
+        GATED on a FACS producer capability (`<product>/can_track`, e.g. `llmo/can_track`)
+        distinct from `llmo/can_configure`: a caller that sets the flag WITHOUT the
+        capability has it dropped (source falls back to `config`) rather than rejected.
+        Non-FACS sessions (admin / internal / s2s) are trusted and bypass the check.
     prompts:
       type: array
       minItems: 1

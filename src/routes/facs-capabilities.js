@@ -274,6 +274,19 @@ const routeFacsCapabilities = {
   //                              catalog, view a user's effective capability
   //                              set. Plural per the hybrid-model capability
   //                              catalog (was `can_manage_user`).
+  //   - llmo/can_track         — PROTOTYPE (SITES-47870): assert the producing
+  //                              `source` on a Serenity "Track" prompt write (the
+  //                              `assertSource` opt-in on POST .../serenity/prompts).
+  //                              Strictly narrower than can_configure: a config editor
+  //                              may create/edit a prompt but NOT attribute its
+  //                              producing system — that stays server-owned
+  //                              (source-dimension.md §1 item 6), and only the Track
+  //                              feature holds this grant. Enforced at RUNTIME in the
+  //                              serenity controller (`hasFacsPermission`), NOT as a
+  //                              route requirement — the route stays can_configure and
+  //                              this is an additional gate on one body field. An
+  //                              unpermitted `assertSource` is dropped (→ `config`),
+  //                              not 403. Resource scope: brand (same as the route).
   //
   // Org-wide viewers (previously gated on `llmo/can_view_all`) now hold an
   // org-scoped state-layer row carrying `granted_capabilities=['llmo/can_view']`.
@@ -1302,6 +1315,12 @@ export const PRODUCTS_CAPABILITIES = {
     'llmo/can_configure',
     'llmo/can_onboard',
     'llmo/can_manage_users',
+    // PROTOTYPE (SITES-47870): producer opt-in for the Serenity "Track" flow —
+    // listed here so a `llmo/can_track` grant validates through createMapping /
+    // patchMapping and surfaces in GET /product/capabilities. Enforced at runtime
+    // in the serenity controller, not as a route requirement. Must also be
+    // registered in the authoritative MAC catalog (mac-state-layer.md).
+    'llmo/can_track',
   ],
   ASO: [
     'aso/can_view',

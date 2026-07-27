@@ -532,11 +532,39 @@ function SerenityController(context, log, env) {
       // serenity-docs#32: one shared write-budget deadline for classify + create
       // + publish, computed once at request entry.
       const writeDeadline = computeWriteDeadline();
+
+      // PROTOTYPE (SITES-47870 item 2): gate the `assertSource` producer opt-in on a
+      // FACS capability so only the SR "Track" feature — not any config editor holding
+      // `llmo/can_configure` — may assert a producing `source`. The result is passed to
+      // the handler as an explicit `allowAssertSource` option (NOT by rewriting the
+      // body), so the capability gate can only be satisfied by this trusted controller
+      // path — a future caller reaching the handler another way cannot enable the
+      // producer surface with a bare body field (review should-fix). The capability name
+      // (`<product>/can_track`) still needs registering in the MAC capability catalog.
+      const facs = ctx?.attributes?.facs;
+      const authInfo = ctx?.attributes?.authInfo;
+      const body = ctx.data || {};
+      const assertSourceRequested = body?.assertSource === true;
+      const trackCapability = `${(facs?.product || 'LLMO').toLowerCase()}/can_track`;
+      // FIX (review must-fix): FAIL-CLOSED. Honour `assertSource` only for a caller that
+      // explicitly holds `<product>/can_track` OR is an admin — never merely because FACS
+      // is off. The old `!facs?.enabled` bypass was fail-OPEN: a non-FACS-enrolled org's
+      // regular IMS users inherited it and could assert an arbitrary producer, crossing the
+      // "no client write surface" line (source-dimension.md §1 item 6) for those orgs.
+      const assertSourceAllowed = authInfo?.hasFacsPermission?.(trackCapability) === true
+        || authInfo?.isAdmin?.() === true;
+      if (assertSourceRequested && !assertSourceAllowed) {
+        log.warn(
+          'serenity createPrompts: assertSource requested without the producer capability; '
+          + 'ignoring it (source defaults to config)',
+          { capability: trackCapability },
+        );
+      }
       const result = auth.mode === 'subworkspace'
         ? await handleCreatePromptsSubworkspace(
           transport,
           auth.workspaceId,
-          ctx.data || {},
+          body,
           log,
           classifyPromptType,
           ctx.env,
@@ -545,6 +573,7 @@ function SerenityController(context, log, env) {
             dynamicAllocation: dynamicAllocationEnabled(ctx),
             parentWorkspaceId: auth.parentWorkspaceId ?? '',
             ceiling: brandAiCeiling(ctx),
+            allowAssertSource: assertSourceAllowed,
           },
         )
         : await handleCreatePrompts(
@@ -552,11 +581,12 @@ function SerenityController(context, log, env) {
           ctx.dataAccess,
           auth.brandUuid,
           auth.workspaceId,
-          ctx.data || {},
+          body,
           log,
           classifyPromptType,
           ctx.env,
           writeDeadline,
+          { allowAssertSource: assertSourceAllowed },
         );
       return createResponse(result, 200);
     } catch (e) {
