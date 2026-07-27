@@ -1,3 +1,10 @@
+## [1.690.2](https://github.com/adobe/spacecat-api-service/compare/v1.690.1...v1.690.2) (2026-07-27)
+
+
+### Bug Fixes
+
+* filter project sites by entitlement in getSitesByProjectId ([#2899](https://github.com/adobe/spacecat-api-service/issues/2899)) ([70d64a0](https://github.com/adobe/spacecat-api-service/commit/70d64a0ca46e06c19a991b9e39081bc4c9a4b2ee))
+
 ## [1.690.1](https://github.com/adobe/spacecat-api-service/compare/v1.690.0...v1.690.1) (2026-07-26)
 
 
