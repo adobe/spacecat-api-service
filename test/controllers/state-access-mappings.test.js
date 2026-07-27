@@ -121,6 +121,9 @@ async function loadController(supportStubs = {}) {
     listFacsAccessMappingAuditEvents: sinon.stub().resolves([]),
     insertFacsAccessMappingAuditEvent: sinon.stub().resolves({}),
     getFacsAccessMappingById: sinon.stub().resolves(null),
+    // Default: the target resource belongs to the caller's own org, so the
+    // admin create-scope guard passes. Out-of-org / unknown cases override this.
+    getResourceImsOrgId: sinon.stub().resolves(CALLER_ORG_CANONICAL),
     requirePostgrestForFacsMappings: () => null,
     ...supportStubs,
   };
@@ -1226,7 +1229,7 @@ describe('StateAccessMappingsController', () => {
     });
   });
 
-  describe('internal admins may not write (create/update) mappings', () => {
+  describe('internal admins are scoped to their own org for writes', () => {
     const adminWriteBody = {
       subjectType: 'user',
       subjectId: 'someone@AdobeID',
@@ -1235,54 +1238,69 @@ describe('StateAccessMappingsController', () => {
       grantedCapabilities: ['llmo/can_view'],
     };
 
-    it('createMapping returns 403 for an internal admin', async () => {
-      const { Controller, stubs } = await loadController();
-      const ctx = makeContext({
-        facsPermissions: [],
-        isAdmin: true,
-        body: adminWriteBody,
+    it('createMapping succeeds (201) when the resource belongs to the admin\'s org', async () => {
+      const created = makeRow();
+      const { Controller, stubs } = await loadController({
+        createFacsAccessMappings: sinon.stub().resolves({ created: [created], skipped: [] }),
+        // Resource resolves to the caller's own org.
+        getResourceImsOrgId: sinon.stub().resolves(CALLER_ORG_CANONICAL),
       });
+      const ctx = makeContext({ isAdmin: true, body: adminWriteBody });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(201);
+      expect(stubs.getResourceImsOrgId.calledWithMatch(sinon.match.any, {
+        resourceType: 'brand', resourceId: VALID_UUID_RES,
+      })).to.be.true;
+    });
+
+    it('createMapping returns 403 when the resource belongs to another org', async () => {
+      const { Controller, stubs } = await loadController({
+        getResourceImsOrgId: sinon.stub().resolves('OTHER-ORG-999@AdobeOrg'),
+      });
+      const ctx = makeContext({ isAdmin: true, body: adminWriteBody });
       const res = await Controller(ctx).createMapping(ctx);
       expect(res.status).to.equal(403);
-      // The block short-circuits before any DB write.
+      // Denied before any write.
       expect(stubs.createFacsAccessMappings.called).to.be.false;
     });
 
-    it('patchMapping returns 403 for an internal admin', async () => {
-      const { Controller, stubs } = await loadController();
+    it('createMapping returns 403 (fail-closed) when the resource is unknown', async () => {
+      const { Controller, stubs } = await loadController({
+        getResourceImsOrgId: sinon.stub().resolves(null),
+      });
+      const ctx = makeContext({ isAdmin: true, body: adminWriteBody });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(403);
+      expect(stubs.createFacsAccessMappings.called).to.be.false;
+    });
+
+    it('patchMapping is allowed for an admin (org-scoped by the RPC)', async () => {
+      const updated = makeRow();
+      const { Controller, stubs } = await loadController({
+        updateFacsAccessMappingCapabilities: sinon.stub().resolves(updated),
+      });
       const ctx = makeContext({
-        facsPermissions: [],
         isAdmin: true,
         pathParams: { id: VALID_UUID_MAPPING },
         body: { grantedCapabilities: ['llmo/can_view'] },
       });
       const res = await Controller(ctx).patchMapping(ctx);
-      expect(res.status).to.equal(403);
-      expect(stubs.updateFacsAccessMappingCapabilities.called).to.be.false;
+      expect(res.status).to.equal(200);
+      // No resource-org lookup on PATCH — the RPC's ims_org_id filter scopes it.
+      expect(stubs.getResourceImsOrgId.called).to.be.false;
     });
 
-    it('deleteMapping (revoke access) returns 403 for an internal admin', async () => {
-      const { Controller, stubs } = await loadController();
+    it('deleteMapping (revoke access) is allowed for an admin (org-scoped by the RPC)', async () => {
+      const updated = makeRow({ granted_capabilities: [] });
+      const { Controller } = await loadController({
+        updateFacsAccessMappingCapabilities: sinon.stub().resolves(updated),
+      });
       const ctx = makeContext({
-        facsPermissions: [],
         isAdmin: true,
         pathParams: { id: VALID_UUID_MAPPING },
       });
       const res = await Controller(ctx).deleteMapping(ctx);
-      expect(res.status).to.equal(403);
-      expect(stubs.updateFacsAccessMappingCapabilities.called).to.be.false;
-    });
-
-    it('an internal admin who also holds FACS can_manage_users is still blocked from create', async () => {
-      const { Controller, stubs } = await loadController();
-      const ctx = makeContext({
-        facsPermissions: ['llmo/can_manage_users'],
-        isAdmin: true,
-        body: adminWriteBody,
-      });
-      const res = await Controller(ctx).createMapping(ctx);
-      expect(res.status).to.equal(403);
-      expect(stubs.createFacsAccessMappings.called).to.be.false;
+      expect(res.status).to.equal(200);
     });
   });
 

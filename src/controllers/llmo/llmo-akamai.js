@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import { randomBytes } from 'node:crypto';
 import {
   ok, badRequest, notFound, forbidden, unauthorized, internalServerError, createResponse,
 } from '@adobe/spacecat-shared-http-utils';
@@ -21,7 +22,7 @@ import AkamaiClient, {
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
 import {
-  buildRuleConfig, mergeIntoTree, managedRuleNames, redactApiKey,
+  buildRuleConfig, mergeIntoTree, managedRuleNames, redactSecrets,
 } from './llmo-akamai-utils.js';
 
 // EdgeGrid credentials are CLIENT-SUPPLIED per request (never persisted, never logged): the caller
@@ -40,6 +41,18 @@ const CRED_HEADERS = Object.freeze({
 const REQUIRED_CRED_KEYS = ['host', 'clientToken', 'clientSecret', 'accessToken'];
 
 const NETWORKS = ['STAGING', 'PRODUCTION'];
+
+// The fetcher key is a secret we mint server-side and inject as the x-edgeoptimize-fetcher-key
+// request header, so the customer can allowlist Optimize-at-Edge (with the AdobeEdgeOptimize/1.0
+// user agent) in their Bot Manager/WAF. 32 random bytes as hex (like `openssl rand -hex 32`). A
+// fresh key is minted on every deploy, so re-deploying rotates it — the customer must re-add the
+// new value to their allowlist. The value never leaves the rule tree except in the deploy response.
+const generateFetcherKey = () => randomBytes(32).toString('hex');
+
+// A non-secret constant used ONLY in the read-only plan preview: it makes the merged tree carry the
+// same x-edgeoptimize-fetcher-key header deploy adds (so the dry-run validates the exact change),
+// and is redacted from the returned tree. Not random — the real key is minted at deploy.
+const PLAN_FETCHER_KEY_PLACEHOLDER = 'preview-only-not-a-secret';
 
 // Akamai activation statuses that mean the submit actually succeeded (in flight or already live).
 // Used to recover from an activate POST that errored client-side — the PAPI activation call
@@ -235,7 +248,7 @@ function LlmoAkamaiController(ctx) {
   // The LLMO API key is a CONFIDENTIAL string: it is injected into the managed rule tree
   // (x-edgeoptimize-api-key) and sent to Akamai at deploy, but it must never be logged or returned
   // to a client. Never put the resolved key, the config, or the un-redacted merged tree into a log
-  // line or response (plan redacts it via redactApiKey; audit lines carry only ids/versions).
+  // line or response (plan redacts it via redactSecrets; audit lines carry only ids/versions).
   const getLlmoApiKey = async (site, context) => {
     const tokowaka = TokowakaClient.createFrom(context);
     const metaconfig = await tokowaka.fetchMetaconfig(site.getBaseURL());
@@ -374,7 +387,7 @@ function LlmoAkamaiController(ctx) {
    *
    * @returns {{ cfg: object } | { error: Response }}
    */
-  const buildCfgFromTree = (host, apiKey, ruleTree, edgeDomain) => {
+  const buildCfgFromTree = (host, apiKey, ruleTree, edgeDomain, fetcherKey) => {
     const ssl = getDefaultOriginSsl(ruleTree);
     if (!ssl || ssl.verificationMode !== 'CUSTOM') {
       const mode = ssl?.verificationMode || 'an unknown mode';
@@ -388,9 +401,11 @@ function LlmoAkamaiController(ctx) {
     const addCaching = !defaultRuleHasCaching(ruleTree);
     // originHostname routes AI-bot traffic to the env-appropriate Edge Optimize worker
     // (dev/stage/live.edgeoptimize.net) via EDGE_OPTIMIZE_EDGE_DOMAIN; falls back to prod default.
+    // fetcherKey (server-minted) adds the x-edgeoptimize-fetcher-key header for Bot Manager
+    // allowlisting.
     return {
       cfg: buildRuleConfig({
-        hostname: host, apiKey, addCaching, originHostname: edgeDomain,
+        hostname: host, apiKey, addCaching, originHostname: edgeDomain, fetcherKey,
       }),
     };
   };
@@ -482,6 +497,9 @@ function LlmoAkamaiController(ctx) {
     if (insertIndexError) {
       return insertIndexError;
     }
+    // Attach the placeholder so the preview reflects (and validates) the header deploy will add;
+    // redactSecrets strips it from the returned tree. The real key is minted only in deploy.
+    const fetcherKey = PLAN_FETCHER_KEY_PLACEHOLDER;
 
     try {
       const version = await client.getLatestVersion(propertyId, contractId, groupId);
@@ -491,7 +509,13 @@ function LlmoAkamaiController(ctx) {
 
       // Enforce the CUSTOM-default scope gate and decide the caching behavior from the actual tree.
       const edgeDomain = context.env?.EDGE_OPTIMIZE_EDGE_DOMAIN;
-      const { cfg, error: gateError } = buildCfgFromTree(host, apiKey, ruleTree, edgeDomain);
+      const { cfg, error: gateError } = buildCfgFromTree(
+        host,
+        apiKey,
+        ruleTree,
+        edgeDomain,
+        fetcherKey,
+      );
       if (gateError) {
         return gateError;
       }
@@ -547,7 +571,7 @@ function LlmoAkamaiController(ctx) {
         // Redact the injected LLMO API key before returning the preview — plan is read-only and
         // the real key is only needed server-side at deploy; the merged tree ends up in browser
         // devtools / HAR exports / proxy logs otherwise.
-        merged: redactApiKey(merged),
+        merged: redactSecrets(merged),
       });
     } catch (e) {
       return papiErrorResponse(e, 'plan', context, { siteId: site.getId(), propertyId });
@@ -587,6 +611,9 @@ function LlmoAkamaiController(ctx) {
     if (insertIndexError) {
       return insertIndexError;
     }
+    // Mint the fetcher key server-side (mandatory now — no longer client-supplied) and return it in
+    // the response so the UI can show it for Bot Manager allowlisting. A fresh key per deploy.
+    const fetcherKey = generateFetcherKey();
     // Optional: copy from a specific version instead of the latest. PAPI versions start at 1, so
     // reject 0 here (it passes DECIMAL_INT_RE) for a clean 400 instead of an opaque PAPI 404/500 —
     // mirrors the version check in activate.
@@ -628,7 +655,13 @@ function LlmoAkamaiController(ctx) {
         groupId,
       );
       const edgeDomain = context.env?.EDGE_OPTIMIZE_EDGE_DOMAIN;
-      const { cfg, error: gateError } = buildCfgFromTree(host, apiKey, ruleTree, edgeDomain);
+      const { cfg, error: gateError } = buildCfgFromTree(
+        host,
+        apiKey,
+        ruleTree,
+        edgeDomain,
+        fetcherKey,
+      );
       if (gateError) {
         return gateError;
       }
@@ -667,6 +700,9 @@ function LlmoAkamaiController(ctx) {
         newVersion,
         managedRules: managedRuleNames(cfg),
         warnings,
+        // The minted fetcher key: the UI shows it so the customer can allowlist Optimize-at-Edge in
+        // Bot Manager. Already baked into the deployed rule; this is the only time we return it.
+        fetcherKey,
       });
     } catch (e) {
       return papiErrorResponse(e, 'deploy', context, { siteId, propertyId, newVersion });
