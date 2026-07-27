@@ -54,13 +54,18 @@ reject when auth scopes are invalid` (a stubbed throw) can't.
 
 See Common Mistakes below for the discard side of this table in practice.
 
-Completion: a short list of kept scenarios, each with a one-line reason from
-the left table, and every discarded case named alongside the unit/IT test
-that already covers it.
+If nothing survives triage, stop here — do not create
+`test/e2e/<feature>.e2e.js`. An endpoint fully covered by unit + IT needs no
+e2e file.
+
+Completion: a short list of kept scenarios (possibly empty), each with a
+one-line reason from the left table, and every discarded case named
+alongside the unit/IT test that already covers it.
 
 ## Step 3: Author or supplement
 
 - Enhancement: extend `test/e2e/<feature>.e2e.js`. New feature: create it.
+  Nothing kept: skip this step and Step 4 — you're done.
 - Auth: reuse `session-auth.js`'s `getSessionToken()` — don't hand-roll a
   second login helper.
 - Base URL: reuse `apiBaseUrl` from `spacecat-utils.js` (dev `/api/ci` vs.
