@@ -88,6 +88,51 @@ function validateTemporalParams({ year, week, month }) {
 
 const isTrue = (value) => value === true || value === 'true' || value === '1' || value === 1;
 
+// Matches a single "(week=W AND year=Y)" clause (week/year order and internal
+// whitespace both flexible) with numeric-only operands.
+const TEMPORAL_CLAUSE_PATTERN = /^\(\s*(?:week\s*=\s*(\d{1,2})\s*AND\s*year\s*=\s*(\d{4})|year\s*=\s*(\d{4})\s*AND\s*week\s*=\s*(\d{1,2}))\s*\)$/i;
+
+// The documented use case is a 4-week window (see docs/openapi/site-paid.yaml); this
+// caps clause count well above that to block resource-abuse via a huge OR-chain
+// while still allowing legitimate callers plenty of headroom.
+const MAX_TEMPORAL_CLAUSES = 8;
+
+/**
+ * Strictly parses a client-supplied temporal condition string into a list of
+ * {week, year} integer pairs, rejecting anything that doesn't match the exact
+ * expected shape. This is the only path by which the value is later used to
+ * build the Athena SQL WHERE clause, so no attacker-controlled text ever
+ * reaches the query - only integers we validated and re-serialize ourselves.
+ * @param {string} decodedTemporalCondition - Decoded temporalCondition query param
+ * @returns {Array<{week: number, year: number}>|null} Parsed pairs, or null if invalid
+ */
+function parseTemporalCondition(decodedTemporalCondition) {
+  const clauses = decodedTemporalCondition.split(/\s+OR\s+/i);
+  if (clauses.length > MAX_TEMPORAL_CLAUSES) {
+    return null;
+  }
+
+  const parsed = [];
+
+  for (const clause of clauses) {
+    const match = TEMPORAL_CLAUSE_PATTERN.exec(clause.trim());
+    if (!match) {
+      return null;
+    }
+
+    const week = Number(match[1] ?? match[4]);
+    const year = Number(match[2] ?? match[3]);
+
+    if (week < 1 || week > 53 || year < 2000 || year > 2100) {
+      return null;
+    }
+
+    parsed.push({ week, year });
+  }
+
+  return parsed;
+}
+
 function TrafficController(context, log, env) {
   const { dataAccess, s3 } = context;
   const { Site } = dataAccess;
@@ -282,10 +327,16 @@ function TrafficController(context, log, env) {
 
     const decodedTemporalCondition = decodeURIComponent(temporalCondition);
 
-    if (!decodedTemporalCondition.includes('week')
-      || !decodedTemporalCondition.includes('year')) {
+    const parsedTemporalCondition = parseTemporalCondition(decodedTemporalCondition);
+    if (!parsedTemporalCondition) {
+      log.info(`Rejected request with invalid temporalCondition | siteId: ${siteId} | reason: failed strict parse/shape validation | requestId: ${requestId}`);
       return badRequest('Invalid temporal condition');
     }
+
+    // Rebuilt from validated integers only - never from the raw client string.
+    const safeTemporalCondition = parsedTemporalCondition
+      .map(({ week, year }) => `(week=${week} AND year=${year})`)
+      .join(' OR ');
 
     const tableName = `${rumMetricsDatabase}.${rumMetricsCompactTable}`;
 
@@ -296,7 +347,7 @@ function TrafficController(context, log, env) {
     const query = getTop3PagesWithBounceGapTemplate({
       siteId,
       tableName,
-      temporalCondition: decodedTemporalCondition,
+      temporalCondition: safeTemporalCondition,
       dimensionColumns,
       groupBy: dimensionColumns,
       dimensionColumnsPrefixed,
@@ -305,7 +356,7 @@ function TrafficController(context, log, env) {
 
     log.info(`getTop3PagesWithBounceGapTemplate Query: ${query}`);
 
-    const description = `fetch top 3 pages traffic data db: ${rumMetricsDatabase}| siteKey: ${siteId} | temporalCondition: ${decodedTemporalCondition} | groupBy: [${dimensions.join(', ')}] `;
+    const description = `fetch top 3 pages traffic data db: ${rumMetricsDatabase}| siteKey: ${siteId} | temporalCondition: ${safeTemporalCondition} | groupBy: [${dimensions.join(', ')}] `;
 
     // first try to get from cache
     const { cachedResultUrl, cacheKey, outPrefix } = await tryGetCacheResult(

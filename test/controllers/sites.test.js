@@ -298,6 +298,38 @@ describe('Sites Controller', () => {
     expect(site).to.have.property('baseURL', 'https://site1.com');
   });
 
+  it('returns bad request when creating a site with an unsafe pageTypes pattern', async () => {
+    mockDataAccess.Site.findByBaseURL.resolves(null);
+
+    const response = await sitesController.createSite({
+      data: {
+        baseURL: 'https://site1.com',
+        pageTypes: [
+          { name: 'Schema probe', pattern: "x' || CAST(CAST(current_schema AS INTEGER) AS VARCHAR) || 'x" },
+        ],
+      },
+    });
+
+    expect(mockDataAccess.Site.create).to.have.not.been.called;
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'pageTypes[0] pattern must not contain a single quote character');
+  });
+
+  it('creates a site with valid pageTypes', async () => {
+    mockDataAccess.Site.findByBaseURL.resolves(null);
+
+    const response = await sitesController.createSite({
+      data: {
+        baseURL: 'https://site1.com',
+        pageTypes: [{ name: 'homepage', pattern: '^/$' }],
+      },
+    });
+
+    expect(mockDataAccess.Site.create).to.have.been.calledOnce;
+    expect(response.status).to.equal(201);
+  });
+
   it('returns 201 even when RUM config update fails after site creation', async () => {
     mockDataAccess.Site.findByBaseURL.resolves(null);
     updateRumConfigStub.rejects(new Error('RUM API unavailable'));
@@ -5270,6 +5302,54 @@ describe('Sites Controller', () => {
       expect(response.status).to.equal(400);
       const error = await response.json();
       expect(error.message).to.include('pageTypes[0] has invalid regex pattern:');
+    });
+
+    it('returns bad request when pageType pattern contains a single quote', async () => {
+      const invalidPageTypes = [
+        { name: 'Schema probe', pattern: "x' || CAST(CAST(current_schema AS INTEGER) AS VARCHAR) || 'x" },
+      ];
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { pageTypes: invalidPageTypes },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'pageTypes[0] pattern must not contain a single quote character');
+    });
+
+    it('returns bad request when pageType pattern is only a single quote', async () => {
+      const invalidPageTypes = [
+        { name: 'quote-only', pattern: "'" },
+      ];
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { pageTypes: invalidPageTypes },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'pageTypes[0] pattern must not contain a single quote character');
+    });
+
+    it('returns bad request when pageType pattern contains a quote mid-string', async () => {
+      const invalidPageTypes = [
+        { name: 'mid-string-quote', pattern: "foo'bar" },
+      ];
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { pageTypes: invalidPageTypes },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'pageTypes[0] pattern must not contain a single quote character');
     });
 
     it('does not update site when pageTypes are the same', async () => {

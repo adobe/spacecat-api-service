@@ -186,22 +186,57 @@ describe('provisionBrandSubworkspace', () => {
     expect(body.brandDomain).to.equal('acme.com');
     expect(body.brandNames).to.deep.equal(['Acme']);
     // Brand-create attaches LLMs, generates+attaches prompts (each carrying the
-    // standard closed-dimension values + its branded/non-branded `type` value),
-    // then publishes best-effort. The dimension-root taxonomy is provisioned by
-    // createMarket itself, so it is not passed through here.
-    expect(options).to.deep.equal({
+    // standard closed-dimension values, a branded/non-branded `type` value, and a
+    // server-classified `intent` value), then publishes best-effort. The
+    // dimension-root taxonomy is provisioned by createMarket itself, so it is not
+    // passed through here. writeDeadline is a request-scoped epoch-ms deadline
+    // (dynamic) — asserted as a number, then dropped before the deep-equal.
+    const { writeDeadline, ...restOptions } = options;
+    expect(writeDeadline).to.be.a('number');
+    expect(restOptions).to.deep.equal({
       modelIds: ['m-1', 'm-2'],
       generateTopics: true,
       topicCap: MAX_TOPICS_ON_CREATE,
       brandAliases: [],
       brandUrlSources: null,
       competitors: [],
+      env: { SEMRUSH_PROJECTS_BASE_URL: 'https://gw.example' },
       publishMode: 'require',
+      // Dynamic-allocation kill-switch defaults OFF (env unset) and the per-brand ceiling defaults
+      // undefined (no ceiling env set) — onboarding is now threaded the same as every other
+      // subworkspace write path (LLMO-6190).
+      dynamicAllocation: false,
+      ceiling: undefined,
     });
     // The stub drives the sub-workspace title off the brand's name + id.
     expect(brandStub.getName()).to.equal('Acme');
     expect(brandStub.getId()).to.equal('brand-1');
     expect(brandStub.getSemrushSubWorkspaceId()).to.equal(undefined);
+  });
+
+  it('threads the dynamic-allocation flag + per-brand ceiling from env into the handler options (LLMO-6190 — onboarding was previously silently excluded)', async () => {
+    const { provisionBrandSubworkspace } = await loadModule({
+      resolveWorkspaceId, handleCreateMarketSubworkspace,
+    });
+    const ctx = buildContext();
+    ctx.env.SERENITY_DYNAMIC_ALLOCATION = 'true';
+    ctx.env.SERENITY_BRAND_AI_CEILING_PROMPTS = '5000';
+    await provisionBrandSubworkspace(ctx, baseParams);
+    const options = handleCreateMarketSubworkspace.firstCall.args[7];
+    expect(options.dynamicAllocation).to.equal(true);
+    expect(options.ceiling).to.deep.equal({ prompts: 5000 });
+  });
+
+  it('forwards a caller-supplied writeDeadline to the create handler (computed once at request entry, not defaulted here)', async () => {
+    const { provisionBrandSubworkspace } = await loadModule({
+      resolveWorkspaceId, handleCreateMarketSubworkspace,
+    });
+    // A deadline far in the future so it is unmistakably the passed-in value,
+    // not a fresh computeWriteDeadline() default (which would be ~now + 12s).
+    const writeDeadline = Date.now() + 999999;
+    await provisionBrandSubworkspace(buildContext(), { ...baseParams, writeDeadline });
+    const options = handleCreateMarketSubworkspace.firstCall.args[7];
+    expect(options.writeDeadline).to.equal(writeDeadline);
   });
 
   it('resolves the IMS token via resolveSemrushImsToken and forwards it to createSerenityTransport (promise-token path)', async () => {
@@ -513,6 +548,16 @@ describe('provisionBrandSubworkspaceBare', () => {
     // Success → no allocation release.
     expect(deleteAllProjects).to.not.have.been.called;
     expect(releaseFullAllocation).to.not.have.been.called;
+    // Kill-switch defaults OFF (env unset) — byte-for-byte the pre-fix flat carve.
+    expect(ensureSubworkspace.firstCall.args[7]).to.deep.equal({ dynamicAllocation: false });
+  });
+
+  it('threads the dynamic-allocation flag from env into ensureSubworkspace (LLMO-6190 — onboarding was previously silently excluded)', async () => {
+    const { provisionBrandSubworkspaceBare } = await loadBareModule();
+    const ctx = buildContext();
+    ctx.env.SERENITY_DYNAMIC_ALLOCATION = 'true';
+    await provisionBrandSubworkspaceBare(ctx, bareParams);
+    expect(ensureSubworkspace.firstCall.args[7]).to.deep.equal({ dynamicAllocation: true });
   });
 
   it('falls back to the captured workspace id when ensureSubworkspace returns nothing', async () => {

@@ -15,7 +15,15 @@ import { ErrorWithStatusCode } from '../utils.js';
 import { ElementsTransportError } from './errors.js';
 
 const ELEMENTS_API_PATH = '/enterprise/pages/api/v3/workspaces';
-const DEFAULT_TIMEOUT_MS = 15_000;
+// Verified against a real Semrush-provisioned brand: individual Stats-per-URL
+// calls were timing out at 15s roughly half the time; 30s was needed for them
+// to reliably complete (and even then, some calls come in close to that
+// ceiling). Endpoints with a wide fan-out (e.g. getUrlInspectorStats) bound
+// their OWN total wall time separately (see STATS_FANOUT_CONCURRENCY /
+// maxTrendWeeks in elements-service.js) rather than relying on this transport
+// timeout to keep the whole request under the gateway's hard integration
+// timeout ceiling.
+const DEFAULT_TIMEOUT_MS = 30_000;
 
 // Retry defaults match the shared Project Engine client (same Semrush gateway contract).
 const DEFAULT_MAX_RETRIES = 2;
@@ -221,10 +229,17 @@ async function request(url, imsToken, body, {
  *   <=0 ⇒ single attempt). Defaults match the shared Project Engine client.
  * @param {number} [args.retryBaseDelayMs] - Base delay for the jittered backoff (default 200).
  *
- * Worst-case wall time per `fetchElement` is bounded but can be significant: with the defaults
- * (`maxRetries` 2, per-attempt `timeoutMs` 15s, backoff capped at `MAX_RETRY_DELAY_MS` 20s) the
- * theoretical ceiling is ~70s (3 × 15s attempts + up to 2 × 20s waits). Callers on a tight
- * execution budget (e.g. a Lambda timeout) should lower `maxRetries` / `timeoutMs` accordingly.
+ * Worst-case wall time per `fetchElement` is bounded but can be significant. The retry loop
+ * only ever retries a 429 (see `request`'s doc for why non-idempotent POSTs can't safely retry
+ * on timeout/5xx) — a plain timeout throws immediately on the FIRST attempt, so that path costs
+ * exactly one `timeoutMs` (30s by default), not the multi-attempt figure below. The multi-attempt
+ * ceiling only applies to a run of repeated 429s: with the defaults (`maxRetries` 2, per-attempt
+ * `timeoutMs` 30s, backoff capped at `MAX_RETRY_DELAY_MS` 20s) that theoretical ceiling is ~130s
+ * (3 × 30s attempts + up to 2 × 20s waits). Callers on a tight execution budget (e.g. a Lambda
+ * timeout, or an API-Gateway-fronted route with a hard ~29-30s integration timeout that no
+ * Lambda-side setting can raise) should lower `maxRetries` / `timeoutMs` accordingly, and bound
+ * their OWN fan-out width so a single request doesn't need more than one round of concurrent
+ * calls to complete (see `getUrlInspectorStats` in elements-service.js for an example).
  */
 export function createElementsTransport({
   env,
