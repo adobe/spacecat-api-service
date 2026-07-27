@@ -1,3 +1,11 @@
+## [1.693.1](https://github.com/adobe/spacecat-api-service/compare/v1.693.0...v1.693.1) (2026-07-27)
+
+
+### Bug Fixes
+
+* comparisonValue null for missing KPI headline data | LLMO-6562 ([#2908](https://github.com/adobe/spacecat-api-service/issues/2908)) ([a5b32fd](https://github.com/adobe/spacecat-api-service/commit/a5b32fd0e4bfe8148f63c6760033bb779753f16f)), closes [#2902](https://github.com/adobe/spacecat-api-service/issues/2902) [#2902](https://github.com/adobe/spacecat-api-service/issues/2902) [project-elmo-ui#2554](https://github.com/project-elmo-ui/issues/2554)
+* send category without prefix appended in the elements ([#2912](https://github.com/adobe/spacecat-api-service/issues/2912)) ([e8e24e3](https://github.com/adobe/spacecat-api-service/commit/e8e24e39ed0415ea9e1d3f6bda8e3423409b01d5))
+
 # [1.693.0](https://github.com/adobe/spacecat-api-service/compare/v1.692.2...v1.693.0) (2026-07-27)
 
 
