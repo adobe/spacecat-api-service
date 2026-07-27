@@ -325,6 +325,13 @@ export async function ensureDimensionRoots(transport, semrushWorkspaceId, projec
   if (legacySourceIsAuthorship) {
     producingSourceId = undefined;
   } else if (physicalSourceId) {
+    // An existing `source` root, with `origin` already present, is the producing-system root.
+    // ASSUMPTION (relied on, deliberately not guarded here): a project never carries BOTH an
+    // `origin` root AND a `source` root whose children are authorship — the reshape renames
+    // source→origin IN PLACE so the two never coexist, and WP-O6 removes this tolerant path
+    // entirely. We therefore do NOT re-run `childrenAreAuthorship` on this branch: it would add
+    // a read on the common post-rename path to defend a split-brain state the migration cannot
+    // produce. (The CLI / WP-S4 guards the equivalent split-brain explicitly on its write side.)
     producingSourceId = physicalSourceId;
   } else {
     producingSourceId = byName.get(DIMENSION.SOURCE);
