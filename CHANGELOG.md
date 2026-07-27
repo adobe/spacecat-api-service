@@ -1,3 +1,10 @@
+# [1.695.0](https://github.com/adobe/spacecat-api-service/compare/v1.694.0...v1.695.0) (2026-07-27)
+
+
+### Features
+
+* add category filter to KPI headline endpoints | LLMO-6559 ([#2913](https://github.com/adobe/spacecat-api-service/issues/2913)) ([91c3ffa](https://github.com/adobe/spacecat-api-service/commit/91c3ffab6cd6b949978e63f6403e3269e06fec30))
+
 # [1.694.0](https://github.com/adobe/spacecat-api-service/compare/v1.693.1...v1.694.0) (2026-07-27)
 
 
