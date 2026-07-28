@@ -733,11 +733,18 @@ export function createSerenityTransport({ env, imsToken }) {
      * parent). v2 takes NO `X-Upload-Receipt` header (v1-only); tier/products
      * inherit from the parent. The new workspace settles `not ready → created` in
      * seconds; poll getWorkspaceStatus before creating projects against it.
+     *
+     * The child is created with an EMPTY `resources` object — it carries no AI allocation of its
+     * own (see `workspace-lifecycle.js`). `resources` is REQUIRED by `createWorkspaceV2Form`
+     * while every field inside `createWorkspaceV2Resources` is optional, so `{}` is the
+     * schema-valid way to say "no allocation". Omitting the key entirely is contract-violating:
+     * the live gateway tolerates it, but a spec-faithful consumer rejects it (our own vendor mock
+     * does, which is what caught this).
      */
-    async createSubworkspace(parentWorkspaceId, title, resources) {
+    async createSubworkspace(parentWorkspaceId, title) {
       return unwrap('POST', await users.POST(
         '/v2/workspaces/{id}/child',
-        { params: { path: { id: parentWorkspaceId } }, body: { title, resources } },
+        { params: { path: { id: parentWorkspaceId } }, body: { title, resources: {} } },
       ));
     },
 
