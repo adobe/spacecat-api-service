@@ -276,23 +276,23 @@ removing one relaxation and fixing the surfaced errors:
    covers the base `include` set, then fold the two configs back into one. This is
    the step that restores `TS2339`, so it is what finally makes an unknown member
    or a wrong response shape a build failure rather than a runtime surprise.
-   Flipping it across the whole base `include` set today reports **727** errors:
+   Flipping it across the whole base `include` set today reports **704** errors:
 
    | code | count | nature |
    |---|---|---|
    | TS7006 / TS7031 / TS7034 / TS7005 / TS7053 | 324 | missing parameter and variable annotations |
-   | TS2339 | 356 | member access on a value annotated `{object}` |
-   | TS2345 / TS2322 / TS18047 | 45 | assignability and possibly-null |
+   | TS2339 | 350 | member access on a value annotated `{object}` |
+   | TS2345 / TS2322 / TS18047 | 28 | assignability and possibly-null |
    | TS7016 | 2 | a dependency ships no declarations |
 
    Concentrated in `controllers/brands.js` (151),
-   `handlers/markets-subworkspace.js` (84), `handlers/markets.js` (53) and
+   `handlers/markets-subworkspace.js` (61), `handlers/markets.js` (53) and
    `controllers/serenity.js` (52) — so take it per file, appending to the strict
    list, rather than in one sweep.
 
    Two shortcuts are worth taking first, because they cut across every file
    rather than sitting inside one. `log` and `context` dominate both error
-   classes — 78 of the 356 `TS2339` are logger-method accesses
+   classes — 78 of the 350 `TS2339` are logger-method accesses
    (`info`/`warn`/`error`/`debug`) and the commonest undocumented parameters are
    `context`, `ctx`, `log` and `dataAccess`. A shared typedef for each therefore
    retires a large share of the total in one uniform, mechanical pass, and
