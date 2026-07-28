@@ -2192,6 +2192,8 @@ function SuggestionsController(ctx, sqs, env) {
           suggestion.setUpdatedBy(profile?.email || 'geo-experiment');
         });
         try {
+          // saveMany is atomic per 25-item chunk; partial failure is acceptable here since the
+          // response below doesn't gate on this write succeeding.
           await Suggestion.saveMany(validSuggestionEntities);
         } catch (markError) {
           context.log.warn(`[geo-experiment-failed] suggestion(s) failed to mark as EXPERIMENT_IN_PROGRESS: ${markError.message}`, {
