@@ -256,9 +256,9 @@ export function createSerenityTransport({ env, imsToken }) {
   // environment (dev/stage/prod) today. Test/smoke-cleanup-only (LLMO-6189): the net-zero live
   // smoke / IT-harness teardown, and manual operator cleanup of throwaway canary workspaces. No
   // production lifecycle path (workspace-lifecycle.js / brand-provisioning.js) calls this or
-  // branches on this flag — those paths reclaim an allocation by lowering it to a non-zero floor
-  // via releaseFullAllocation, never by deleting the workspace (production never deletes a
-  // sub-workspace; a shell is only ever deprovisioned manually by Semrush CS).
+  // branches on this flag — those paths reclaim a sub-workspace by emptying its projects and
+  // leaving the shell in place (production never deletes a sub-workspace; a shell is only ever
+  // deprovisioned manually by Semrush CS).
   const allowWorkspaceDelete = env?.SERENITY_ALLOW_WORKSPACE_DELETE === 'true';
 
   // Shared IMS-bearer getter for both typed clients. Raises the transport's own
@@ -781,9 +781,13 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
-     * POST /v2/workspaces/{ws}/resources/transfer — grant an allocation onto a
-     * subworkspace (activation / re-grant) and release it back to the parent pool
-     * (decommission). A public user-token endpoint (workspace doc §5/§7).
+     * POST /v2/workspaces/{ws}/resources/transfer — set a sub-workspace's AI resource totals
+     * (ABSOLUTE, not a delta), drawing the difference from / returning it to the parent pool.
+     * A public user-token endpoint (workspace doc §5/§7). The only callers are the just-in-time
+     * allocator's `transferOnce` / `transferAndSettle` (`resource-manager.js`) — top-up before a
+     * metered write, best-effort surplus release after a delete or model change. The sub-workspace
+     * lifecycle itself never calls this: a child is created with no allocation and never carries
+     * one (see `workspace-lifecycle.js`).
      * V2 wraps the resources under a `resources` key (WorkspaceResourcesTransferV2Form
      * → createWorkspaceV2Resources); `payload` is the bare resources object
      * (`{ ai: { projects, prompts } }`, the aiProductResources shape), so wrap it
@@ -804,8 +808,8 @@ export function createSerenityTransport({ env, imsToken }) {
      * SERENITY_ALLOW_WORKSPACE_DELETE === 'true' is set in the env, which is unset (off) in every
      * deployed environment by default (LLMO-6189). Production lifecycle paths (decommission,
      * failed-provisioning cleanup) never call this — a sub-workspace is only ever reclaimed by
-     * lowering its allocation to a non-zero floor via `workspace-lifecycle.js`'s
-     * `releaseFullAllocation`, never by deletion. This primitive exists purely for
+     * emptying its projects via `workspace-lifecycle.js`'s `deleteAllProjects`, leaving the shell
+     * in place, never by deletion. This primitive exists purely for
      * net-zero live smoke / IT-harness teardown (its original and only intended use) and manual
      * operator cleanup of throwaway test workspaces. Delete cascades over the workspace's projects
      * (subsequent reads return 403, workspace doc §4).

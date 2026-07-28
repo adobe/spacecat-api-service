@@ -15,9 +15,15 @@
 /**
  * Dynamic (just-in-time) Semrush AI resource allocation — the pure allocator.
  *
- * Replaces the up-front flat carve: before a metered op, read the sub-workspace's real headroom and
- * transfer only the delta from the parent; hand surplus back on delete. Semrush model,
- * live-verified 2026-07-02 ("Gate 0"): a transfer is ABSOLUTE (sets `total`) + idempotent; a carve
+ * Sizes a sub-workspace on demand: before a metered op, read its real headroom and transfer only
+ * the delta from the parent; hand surplus back on delete. This is the ONLY thing that ever moves
+ * resources onto a child — the lifecycle creates one with no allocation at all
+ * (`workspace-lifecycle.js`) — and it runs only when `SERENITY_DYNAMIC_ALLOCATION` is ON, which it
+ * is not in any deployed environment today. It stands ready for a tenant whose parent workspace
+ * enforces limits (`limits_enabled: true`), where a child would genuinely need units.
+ *
+ * Semrush model, live-verified 2026-07-02 ("Gate 0"): a transfer is ABSOLUTE (sets `total`) +
+ * idempotent; a carve
  * decrements the MASTER's `total`; `free = total − used`; over-carving the master → terminal
  * `422 "insufficient available units in subscription"`; a transfer briefly flips the child off
  * `created` and may `422 "workspace not ready"` transiently even past `status:created`.
