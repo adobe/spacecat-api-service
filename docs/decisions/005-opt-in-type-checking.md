@@ -226,9 +226,13 @@ method's parameters, deriving each request shape **from the generated contracts*
 vendor spec change surfaces at the call site instead of on the wire. Every
 serenity function that receives the transport annotates it `SerenityTransport`.
 
-`test/types/serenity-transport.types.js` pins this with `@ts-expect-error`
+`test/types/base/serenity-transport.types.js` pins this with `@ts-expect-error`
 assertions: it is type-checked, never executed, and fails the build if the
-arity/argument/body-shape errors it expects ever stop happening.
+arity/argument/body-shape errors it expects ever stop happening. Its strict-tier
+counterpart, `test/types/strict/serenity-transport-strict.types.js`, pins the
+unknown-member error that only that tier reports; the two live in separate
+directories because a `TS2339` directive is unused — and so itself an error —
+under the base tier.
 
 ### The spec-generated mocks are the contract gate
 

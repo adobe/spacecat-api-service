@@ -43,7 +43,7 @@ over the smaller file list in `tsconfig.strict.json`.
    count. Derive request shapes from the generated contracts (see the typedefs at the
    top of `rest-transport.js`) instead of restating them, so a vendor spec change
    fails the build here rather than reaching the wire.
-   `test/types/serenity-transport.types.js` pins both halves.
+   `test/types/base/serenity-transport.types.js` pins both halves.
 
 ## Known idioms / gotchas (matched in the existing files)
 
