@@ -1,3 +1,10 @@
+# [1.696.0](https://github.com/adobe/spacecat-api-service/compare/v1.695.5...v1.696.0) (2026-07-28)
+
+
+### Features
+
+* **serenity:** Semrush onboarding endpoint (just Slack for now) ([#2805](https://github.com/adobe/spacecat-api-service/issues/2805)) ([7a35f4c](https://github.com/adobe/spacecat-api-service/commit/7a35f4cfab99f18b40bacf165456d3b6c729b728))
+
 ## [1.695.5](https://github.com/adobe/spacecat-api-service/compare/v1.695.4...v1.695.5) (2026-07-28)
 
 
