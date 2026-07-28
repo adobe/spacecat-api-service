@@ -1,0 +1,40 @@
+trigger-onboarding:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+        example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+  post:
+    tags:
+      - semrush-onboarding
+    summary: Trigger a Semrush onboarding notification
+    description: >-
+      Sends a Slack notification announcing an onboarding request for the
+      organization. The customer email is taken from the authenticated
+      identity and the Semrush workspace ID is resolved from the organization.
+    operationId: triggerOnboarding
+    security:
+      - ims_key: []
+    responses:
+      '200':
+        description: Notification sent.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/OnboardingNotificationResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+      '502':
+        description: |
+          Bad gateway. The Slack onboarding-notification webhook was
+          unreachable or returned a non-2xx response.
