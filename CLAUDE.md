@@ -276,7 +276,7 @@ return accepted('Audit queued successfully');
 
 **Files**:
 - `src/controllers/slack.js` - Main controller
-- `src/support/slack/commands/` - Command handlers (36 commands)
+- `src/support/slack/commands/` - Command handlers (37 commands)
 - `src/support/slack/actions/` - Action handlers (17 actions)
 
 Architecture:
@@ -453,6 +453,7 @@ shared/tests/sites.js → postgres/sites.test.js (uses Docker PostgreSQL + Postg
 
 - **Behavior changes must include unit tests** - mark as Critical if missing
 - **New or modified endpoints must include integration tests** in `test/it/` — add shared test logic in `shared/tests/`, seed data in `postgres/seed-data/`, and a wiring file in `postgres/`
+- **New or modified endpoints should have e2e coverage reviewed** — triage against `.claude/skills/implement-e2e-tests/SKILL.md`; not every change needs a new e2e scenario, only what unit/IT can't prove
 - Mock external dependencies (databases, HTTP calls, queues) in unit tests
 - Test access control paths (authorized, forbidden, admin-only)
 - Test DTO transformations
@@ -506,12 +507,12 @@ Most complex domain:
 ### Slack Commands
 **Location**: `src/support/slack/commands/`
 
-36 commands for operations:
+37 commands for operations:
 - Site management: `/add-site`, `/update-site`, `/remove-site`
 - Audit operations: `/run-audit`, `/run-audit-for-all-sites`
 - Organization setup: `/add-slack-channel`, `/configure-slack`
 - Debugging: `/site-info`, `/audit-info`
-- LLMO: `/brand-profile`, `/llmo-onboard`
+- LLMO: `/brand-profile`, `/llmo-onboard`, `enable-brand-claims`, `disable-brand-claims`
 
 ## Common Utilities
 
@@ -571,6 +572,7 @@ return internalServerError('Internal error occurred');
 11. Run `npm run docs:build` to generate documentation
 12. Run `npm test` to verify unit tests pass
 13. Run IT suites to verify integration tests pass (see Integration Tests commands above)
+14. Review/update e2e coverage in `test/e2e/` per the `implement-e2e-tests` skill's triage — skip if unit + IT already fully cover the new behavior
 
 ### Adding a Slack Command
 

@@ -51,6 +51,14 @@ export {
 } from './market-tracking-trends.js';
 export { transformCompetitorSummary } from './competitor-summary.js';
 export {
+  derivePreviousPeriod,
+  buildKpiHeadlinePayload,
+  buildBrandUrlsPayload,
+  transformBrandUrlsResponse,
+  buildSourceVisibilityPayload,
+  transformKpiHeadlineResponse,
+} from './kpi-headlines.js';
+export {
   transformStatsSimpleNumericResponse,
   buildStatsTotalExecutionsPayload,
   transformStatsTotalExecutionsResponse,

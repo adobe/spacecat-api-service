@@ -14,6 +14,7 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
+import { hasText } from '@adobe/spacecat-shared-utils';
 
 import {
   ensureSubworkspace,
@@ -32,12 +33,42 @@ use(sinonChai);
 const PARENT_WS = 'bb0f4e1c-8bb1-402e-88f2-f68618ea7397';
 const SUB_WS = 'subworkspace-ws-1';
 const BRAND_ID = 'e48e9db4-3101-4237-8075-a9132333e8c2';
-// The sub-workspace title embeds the first 8 chars of the immutable brand id for
-// per-brand uniqueness (so ambiguous-create recovery cannot adopt a same-named
-// brand's workspace) while keeping the Semrush UI title short.
-const EXPECTED_TITLE = `Adobe Express [${BRAND_ID.slice(0, 8)}]`;
+// The sub-workspace is titled with the brand's bare display name — the same
+// convention the migration CLI uses, so a customer sees one naming scheme in the
+// Semrush UI. Uniqueness for adoption comes from the claim filter, not the title.
+const EXPECTED_TITLE = 'Adobe Express';
+const OTHER_BRAND_ID = '3b1a7f6e-0c42-4f18-9a55-7d2e6c4b8a10';
 const NOOP_TIMING = { intervalMs: 0, sleep: () => Promise.resolve() };
 const log = { info: () => {}, error: () => {}, warn: () => {} };
+
+// Data-access Brand collection stub backing the claim filter. `claims` maps a
+// workspace id to the brand id currently bound to it (`brands.semrush_sub_workspace_id`);
+// any id not listed is unclaimed.
+function makeBrandCollection(claims = {}) {
+  return {
+    findBySemrushSubWorkspaceId: sinon.stub().callsFake(
+      async (workspaceId) => (hasText(claims[workspaceId])
+        ? { getId: () => claims[workspaceId] }
+        : null),
+    ),
+  };
+}
+
+// A create-path ensureSubworkspace call whose family candidates are all unclaimed —
+// the common case. Tests that exercise the claim filter itself pass their own
+// makeBrandCollection({...}) instead.
+function ensureWithUnclaimedFamily(transport, brand) {
+  return ensureSubworkspace(
+    transport,
+    brand,
+    PARENT_WS,
+    1,
+    log,
+    NOOP_TIMING,
+    null,
+    { brandCollection: makeBrandCollection() },
+  );
+}
 
 function makeTransport(overrides = {}) {
   return {
@@ -164,7 +195,7 @@ describe('workspace-lifecycle', () => {
       const listWorkspaceFamily = sinon.stub();
       listWorkspaceFamily.onFirstCall().resolves([]);
       listWorkspaceFamily.onSecondCall().resolves([
-        { id: 'other-ws', title: 'Some Other Brand [11111111]', status: 'created' },
+        { id: 'other-ws', title: 'Some Other Brand', status: 'created' },
         { id: 'adopted-ws', title: EXPECTED_TITLE, status: 'created' },
       ]);
       const transport = makeTransport({
@@ -173,7 +204,7 @@ describe('workspace-lifecycle', () => {
       });
       const brand = makeBrand();
 
-      const result = await ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING);
+      const result = await ensureWithUnclaimedFamily(transport, brand);
 
       expect(result).to.equal('adopted-ws');
       expect(transport.createSubworkspace).to.have.been.calledOnce;
@@ -193,8 +224,7 @@ describe('workspace-lifecycle', () => {
       });
       const brand = makeBrand();
 
-      await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
-        .to.be.rejectedWith(/refusing to adopt/);
+      await expect(ensureWithUnclaimedFamily(transport, brand)).to.be.rejectedWith(/refusing to adopt/);
       expect(transport.createSubworkspace).to.not.have.been.called;
       expect(brand.setSemrushSubWorkspaceId).to.not.have.been.called;
     });
@@ -205,22 +235,294 @@ describe('workspace-lifecycle', () => {
       });
       const brand = makeBrand();
 
-      await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
-        .to.be.rejectedWith(/sole family match has no id/);
+      await expect(ensureWithUnclaimedFamily(transport, brand)).to.be.rejectedWith(/sole family match has no id/);
       expect(transport.createSubworkspace).to.not.have.been.called;
       expect(transport.listProjects).to.not.have.been.called;
     });
 
-    it('hard-fails (never builds a non-unique title) when the brand has no id', async () => {
-      // The id-suffix is the collision-free adoption key; without it the title
-      // would not be unique per brand, so provisioning must refuse rather than
-      // fall back to a name-only title that adoption could later mis-match.
+    it('hard-fails (never builds an untitled workspace) when the brand has no name', async () => {
+      // The title IS the brand's display name; an untitled workspace would collide
+      // with every other untitled one and is not something adoption could ever
+      // disambiguate. Refuse rather than create one.
       const transport = makeTransport();
-      const brand = makeBrand({ id: null });
+      const brand = makeBrand({ name: null });
 
       await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
-        .to.be.rejectedWith(/requires a brand id/);
+        .to.be.rejectedWith(/requires a brand name/);
       expect(transport.createSubworkspace).to.not.have.been.called;
+    });
+
+    it('hard-fails on an empty-string brand name', async () => {
+      const transport = makeTransport();
+      const brand = makeBrand({ name: '' });
+
+      await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
+        .to.be.rejectedWith(/requires a brand name/);
+      expect(transport.createSubworkspace).to.not.have.been.called;
+    });
+
+    describe('claim filter (same-named sibling brands)', () => {
+      it('does NOT adopt a same-title workspace already bound to another brand; creates a fresh one', async () => {
+        // Titles are bare brand names and names are not unique within an org (prod
+        // carries same-named pairs today, some already holding a sub-workspace). The
+        // sibling's workspace is empty and `created`, so title+status+empty alone
+        // would adopt it — the claim lookup is what keeps this brand off it.
+        const transport = makeTransport({
+          listWorkspaceFamily: sinon.stub().resolves([
+            { id: 'sibling-ws', title: EXPECTED_TITLE, status: 'created' },
+          ]),
+        });
+        const brand = makeBrand();
+
+        const result = await ensureSubworkspace(
+          transport,
+          brand,
+          PARENT_WS,
+          1,
+          log,
+          NOOP_TIMING,
+          null,
+          { brandCollection: makeBrandCollection({ 'sibling-ws': OTHER_BRAND_ID }) },
+        );
+
+        expect(result).to.equal(SUB_WS);
+        expect(transport.createSubworkspace).to.have.been.calledOnce;
+        expect(brand.setSemrushSubWorkspaceId).to.have.been.calledOnceWithExactly(SUB_WS);
+      });
+
+      it('adopts the one unclaimed match when a claimed same-title sibling shares the listing', async () => {
+        // Dropping claimed candidates (rather than escalating to the ambiguity 409)
+        // is what keeps a genuine lone match adoptable beside a sibling's workspace.
+        const transport = makeTransport({
+          listWorkspaceFamily: sinon.stub().resolves([
+            { id: 'sibling-ws', title: EXPECTED_TITLE, status: 'created' },
+            { id: 'ours-ws', title: EXPECTED_TITLE, status: 'created' },
+          ]),
+        });
+        const brand = makeBrand();
+
+        const result = await ensureSubworkspace(
+          transport,
+          brand,
+          PARENT_WS,
+          1,
+          log,
+          NOOP_TIMING,
+          null,
+          { brandCollection: makeBrandCollection({ 'sibling-ws': OTHER_BRAND_ID }) },
+        );
+
+        expect(result).to.equal('ours-ws');
+        expect(transport.createSubworkspace).to.not.have.been.called;
+      });
+
+      it('still adopts a candidate claimed by THIS brand (concurrent request for the same brand)', async () => {
+        // A parallel request for the same brand may have persisted the pointer while
+        // we were listing. That workspace IS ours — adopt it rather than creating a
+        // duplicate; the caller's reloadPointer guard settles the race afterwards.
+        const transport = makeTransport({
+          listWorkspaceFamily: sinon.stub().resolves([
+            { id: 'ours-ws', title: EXPECTED_TITLE, status: 'created' },
+          ]),
+        });
+        const brand = makeBrand();
+
+        const result = await ensureSubworkspace(
+          transport,
+          brand,
+          PARENT_WS,
+          1,
+          log,
+          NOOP_TIMING,
+          null,
+          { brandCollection: makeBrandCollection({ 'ours-ws': BRAND_ID }) },
+        );
+
+        expect(result).to.equal('ours-ws');
+        expect(transport.createSubworkspace).to.not.have.been.called;
+      });
+
+      it('502s on the 504-recovery path when the only same-title match belongs to another brand', async () => {
+        // The create timed out AND the sole candidate is a sibling's — we cannot
+        // tell whether our create landed, so fail rather than adopt the sibling's.
+        const listWorkspaceFamily = sinon.stub();
+        listWorkspaceFamily.onFirstCall().resolves([]);
+        listWorkspaceFamily.onSecondCall().resolves([
+          { id: 'sibling-ws', title: EXPECTED_TITLE, status: 'created' },
+        ]);
+        const transport = makeTransport({
+          createSubworkspace: sinon.stub().rejects(new SerenityTransportError(504, 'timeout')),
+          listWorkspaceFamily,
+        });
+        const brand = makeBrand();
+
+        await expect(ensureSubworkspace(
+          transport,
+          brand,
+          PARENT_WS,
+          1,
+          log,
+          NOOP_TIMING,
+          null,
+          { brandCollection: makeBrandCollection({ 'sibling-ws': OTHER_BRAND_ID }) },
+        )).to.be.rejectedWith(/no family match to adopt/);
+      });
+
+      it('logs the claimed candidates it ignored', async () => {
+        const localLog = { info: sinon.spy(), error: sinon.spy(), warn: sinon.spy() };
+        const transport = makeTransport({
+          listWorkspaceFamily: sinon.stub().resolves([
+            { id: 'sibling-ws', title: EXPECTED_TITLE, status: 'created' },
+          ]),
+        });
+        const brand = makeBrand();
+
+        await ensureSubworkspace(
+          transport,
+          brand,
+          PARENT_WS,
+          1,
+          localLog,
+          NOOP_TIMING,
+          null,
+          { brandCollection: makeBrandCollection({ 'sibling-ws': OTHER_BRAND_ID }) },
+        );
+
+        const logged = localLog.info.getCalls()
+          .find((c) => /already claimed by another brand/.test(c.args[0]));
+        expect(logged, 'expected a claimed-candidate log line').to.exist;
+        expect(logged.args[1]).to.include({ claimedCount: 1 });
+        expect(logged.args[1].claimedIds).to.deep.equal(['sibling-ws']);
+      });
+
+      it('500s rather than evaluating a same-title candidate without a Brand collection', async () => {
+        // Fail-closed: with no claim lookup the bare title is the only key left,
+        // which is exactly the mis-adoption the filter exists to prevent.
+        const transport = makeTransport({
+          listWorkspaceFamily: sinon.stub().resolves([
+            { id: 'some-ws', title: EXPECTED_TITLE, status: 'created' },
+          ]),
+        });
+        const brand = makeBrand();
+
+        await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
+          .to.be.rejectedWith(/no Brand collection/);
+        expect(transport.createSubworkspace).to.not.have.been.called;
+      });
+
+      it('propagates a claim-lookup failure instead of creating blindly (fail-safe)', async () => {
+        // If the data layer cannot tell us who owns the candidate we cannot tell our
+        // own create from a sibling's, and creating anyway would spawn the duplicate
+        // stub the proactive check exists to prevent. Fail rather than guess.
+        const transport = makeTransport({
+          listWorkspaceFamily: sinon.stub().resolves([
+            { id: 'some-ws', title: EXPECTED_TITLE, status: 'created' },
+          ]),
+        });
+        const brand = makeBrand();
+        const brandCollection = {
+          findBySemrushSubWorkspaceId: sinon.stub().rejects(new Error('postgrest unavailable')),
+        };
+
+        await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING, null, { brandCollection })).to.be.rejectedWith(/postgrest unavailable/);
+        expect(transport.createSubworkspace).to.not.have.been.called;
+      });
+
+      it('reports a FRESHLY CREATED workspace through onWorkspaceCreated', async () => {
+        // Failure compensation keys off this signal rather than the returned id, so it
+        // must fire for a workspace this call brought into existence.
+        const transport = makeTransport();
+        const brand = makeBrand();
+        const onWorkspaceCreated = sinon.spy();
+
+        const result = await ensureSubworkspace(
+          transport,
+          brand,
+          PARENT_WS,
+          1,
+          log,
+          NOOP_TIMING,
+          null,
+          { brandCollection: makeBrandCollection(), onWorkspaceCreated },
+        );
+
+        expect(result).to.equal(SUB_WS);
+        expect(onWorkspaceCreated).to.have.been.calledOnceWithExactly(SUB_WS);
+      });
+
+      it('does NOT report an ADOPTED workspace through onWorkspaceCreated', async () => {
+        // The whole point of the signal: an adopted workspace may be a same-named sibling
+        // brand's whose claim is not persisted yet. A caller that tore it down on failure
+        // would delete that brand's projects and strip its allocation.
+        const transport = makeTransport({
+          listWorkspaceFamily: sinon.stub().resolves([
+            { id: 'adopted-ws', title: EXPECTED_TITLE, status: 'created' },
+          ]),
+        });
+        const brand = makeBrand();
+        const onWorkspaceCreated = sinon.spy();
+
+        const result = await ensureSubworkspace(
+          transport,
+          brand,
+          PARENT_WS,
+          1,
+          log,
+          NOOP_TIMING,
+          null,
+          { brandCollection: makeBrandCollection(), onWorkspaceCreated },
+        );
+
+        expect(result).to.equal('adopted-ws');
+        expect(transport.createSubworkspace).to.not.have.been.called;
+        expect(onWorkspaceCreated).to.not.have.been.called;
+      });
+
+      it('a concurrency loser does NOT release a workspace it merely adopted', async () => {
+        // Losing the pointer race releases OUR workspace back to the parent pool — but only
+        // when we created it. Releasing an adopted one would strip a workspace owned by
+        // whoever actually created it.
+        const transport = makeTransport({
+          listWorkspaceFamily: sinon.stub().resolves([
+            { id: 'adopted-ws', title: EXPECTED_TITLE, status: 'created' },
+          ]),
+        });
+        const brand = makeBrand();
+        const reloadPointer = sinon.stub().resolves('winner-ws');
+
+        const result = await ensureSubworkspace(
+          transport,
+          brand,
+          PARENT_WS,
+          1,
+          log,
+          NOOP_TIMING,
+          reloadPointer,
+          { brandCollection: makeBrandCollection() },
+        );
+
+        expect(result).to.equal('winner-ws');
+        // No teardown of the adopted workspace.
+        expect(transport.deleteProject).to.not.have.been.called;
+        expect(transport.transferWorkspaceResources).to.not.have.been.called;
+        expect(brand.setSemrushSubWorkspaceId).to.not.have.been.called;
+      });
+
+      it('needs no Brand collection when the family holds no same-title candidate', async () => {
+        // Nothing to mis-adopt → the lookup is not required, so a clean first create
+        // is unaffected.
+        const transport = makeTransport({
+          listWorkspaceFamily: sinon.stub().resolves([
+            { id: 'unrelated-ws', title: 'Some Other Brand', status: 'created' },
+          ]),
+        });
+        const brand = makeBrand();
+
+        const result = await ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING);
+
+        expect(result).to.equal(SUB_WS);
+        expect(transport.createSubworkspace).to.have.been.calledOnce;
+      });
     });
 
     it('fails with an ambiguousWorkspace alert on multiple CREATED family matches', async () => {
@@ -234,7 +536,7 @@ describe('workspace-lifecycle', () => {
       });
       const brand = makeBrand();
 
-      const promise = ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING);
+      const promise = ensureWithUnclaimedFamily(transport, brand);
       await expect(promise).to.be.rejected;
       try {
         await promise;
@@ -285,7 +587,7 @@ describe('workspace-lifecycle', () => {
         });
         const brand = makeBrand();
 
-        const result = await ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING);
+        const result = await ensureWithUnclaimedFamily(transport, brand);
 
         expect(result).to.equal('existing-ws');
         expect(transport.createSubworkspace).to.not.have.been.called;
@@ -321,7 +623,7 @@ describe('workspace-lifecycle', () => {
         });
         const brand = makeBrand();
 
-        const result = await ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING);
+        const result = await ensureWithUnclaimedFamily(transport, brand);
 
         expect(result).to.equal('good-ws');
         expect(transport.createSubworkspace).to.not.have.been.called;
@@ -706,31 +1008,6 @@ describe('workspace-lifecycle', () => {
     });
   });
   describe('defensive branch coverage', () => {
-    describe('ensureSubworkspace - subworkspaceTitle else branch (brand with id but no name)', () => {
-      it('creates a workspace titled brand-<suffix> when the brand has no name', async () => {
-        // subworkspaceTitle: hasText(name) is false -> uses the brand-<suffix> template (line 94).
-        const transport = makeTransport();
-        const brand = makeBrand({ name: null });
-
-        const result = await ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING);
-
-        expect(result).to.equal(SUB_WS);
-        const [, actualTitle] = transport.createSubworkspace.firstCall.args;
-        expect(actualTitle).to.equal(`brand-${BRAND_ID.slice(0, 8)}`);
-      });
-
-      it('creates a workspace titled brand-<suffix> when the brand name is empty string', async () => {
-        const transport = makeTransport();
-        const brand = makeBrand({ name: '' });
-
-        const result = await ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING);
-
-        expect(result).to.equal(SUB_WS);
-        const [, actualTitle] = transport.createSubworkspace.firstCall.args;
-        expect(actualTitle).to.equal(`brand-${BRAND_ID.slice(0, 8)}`);
-      });
-    });
-
     describe('adoptFromFamily - listWorkspaceFamily resolves non-array', () => {
       it('throws when listWorkspaceFamily returns a non-array body ({})', async () => {
         // familyItems guard: a non-array response (null / malformed) → [] → no match.
@@ -756,7 +1033,7 @@ describe('workspace-lifecycle', () => {
         });
         const brand = makeBrand();
 
-        const result = await ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING);
+        const result = await ensureWithUnclaimedFamily(transport, brand);
 
         expect(result).to.equal('adopted-ws');
         expect(transport.createSubworkspace).to.not.have.been.called;

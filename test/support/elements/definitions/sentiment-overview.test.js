@@ -81,8 +81,8 @@ describe('sentiment-overview definitions', () => {
       expect(findProjectFilterVal(buildSentimentOverviewPayload())).to.be.undefined;
     });
 
-    it('pushes a namespaced category tag onto CBF_tags when category is provided', () => {
-      const payload = buildSentimentOverviewPayload({ category: 'travel' });
+    it('pushes the category tag onto CBF_tags as-is when category is provided', () => {
+      const payload = buildSentimentOverviewPayload({ category: 'category__travel' });
       const tagFilter = payload.filters.advanced.filters
         .find((f) => f.col === 'CBF_tags');
       expect(tagFilter).to.deep.include({ op: 'eq', val: 'category__travel', col: 'CBF_tags' });

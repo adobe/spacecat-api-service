@@ -1,3 +1,135 @@
+## [1.695.2](https://github.com/adobe/spacecat-api-service/compare/v1.695.1...v1.695.2) (2026-07-27)
+
+
+### Bug Fixes
+
+* preserve wildcard (*) base URLs in Slack URL input parsing ([#2898](https://github.com/adobe/spacecat-api-service/issues/2898)) ([e429356](https://github.com/adobe/spacecat-api-service/commit/e42935661b1b697d04317584d4180112af6d7cc1))
+
+## [1.695.1](https://github.com/adobe/spacecat-api-service/compare/v1.695.0...v1.695.1) (2026-07-27)
+
+
+### Bug Fixes
+
+* **serenity:** soft-fail Semrush re-sync on brand URL edit (LLMO-6545) ([#2907](https://github.com/adobe/spacecat-api-service/issues/2907)) ([442ddee](https://github.com/adobe/spacecat-api-service/commit/442ddee7cb19d9fa7b4b44fbdf8df7164a51677c))
+
+# [1.695.0](https://github.com/adobe/spacecat-api-service/compare/v1.694.0...v1.695.0) (2026-07-27)
+
+
+### Features
+
+* add category filter to KPI headline endpoints | LLMO-6559 ([#2913](https://github.com/adobe/spacecat-api-service/issues/2913)) ([91c3ffa](https://github.com/adobe/spacecat-api-service/commit/91c3ffab6cd6b949978e63f6403e3269e06fec30))
+
+# [1.694.0](https://github.com/adobe/spacecat-api-service/compare/v1.693.1...v1.694.0) (2026-07-27)
+
+
+### Features
+
+* **brand-claims:** enable/disable Slack command + brandClaimsEnabled flag (LLMO-5741) ([#2909](https://github.com/adobe/spacecat-api-service/issues/2909)) ([64e25c9](https://github.com/adobe/spacecat-api-service/commit/64e25c9d9c9b31563edcfe48725822032b486499)), closes [#806](https://github.com/adobe/spacecat-api-service/issues/806)
+
+## [1.693.1](https://github.com/adobe/spacecat-api-service/compare/v1.693.0...v1.693.1) (2026-07-27)
+
+
+### Bug Fixes
+
+* comparisonValue null for missing KPI headline data | LLMO-6562 ([#2908](https://github.com/adobe/spacecat-api-service/issues/2908)) ([a5b32fd](https://github.com/adobe/spacecat-api-service/commit/a5b32fd0e4bfe8148f63c6760033bb779753f16f)), closes [#2902](https://github.com/adobe/spacecat-api-service/issues/2902) [#2902](https://github.com/adobe/spacecat-api-service/issues/2902) [project-elmo-ui#2554](https://github.com/project-elmo-ui/issues/2554)
+* send category without prefix appended in the elements ([#2912](https://github.com/adobe/spacecat-api-service/issues/2912)) ([e8e24e3](https://github.com/adobe/spacecat-api-service/commit/e8e24e39ed0415ea9e1d3f6bda8e3423409b01d5))
+
+# [1.693.0](https://github.com/adobe/spacecat-api-service/compare/v1.692.2...v1.693.0) (2026-07-27)
+
+
+### Features
+
+* auto-assign default AI models when a market is created | LLMO-6554 ([#2911](https://github.com/adobe/spacecat-api-service/issues/2911)) ([0036481](https://github.com/adobe/spacecat-api-service/commit/003648188f1fa34b4a5e7b20b6d53afab95de554))
+
+## [1.692.2](https://github.com/adobe/spacecat-api-service/compare/v1.692.1...v1.692.2) (2026-07-27)
+
+
+### Bug Fixes
+
+* **ci:** skip type-check job on push events ([#2903](https://github.com/adobe/spacecat-api-service/issues/2903)) ([b212a09](https://github.com/adobe/spacecat-api-service/commit/b212a096f7b6d226a8fd71ed08c88144b1c66b34)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+## [1.692.1](https://github.com/adobe/spacecat-api-service/compare/v1.692.0...v1.692.1) (2026-07-27)
+
+
+### Bug Fixes
+
+* bypass auto_fix subService gate for non-ASO products (LLMO-6553) ([#2906](https://github.com/adobe/spacecat-api-service/issues/2906)) ([5048003](https://github.com/adobe/spacecat-api-service/commit/5048003ea3f893e3907188ab5cf1cb8b5409443f))
+
+# [1.692.0](https://github.com/adobe/spacecat-api-service/compare/v1.691.0...v1.692.0) (2026-07-27)
+
+
+### Bug Fixes
+
+* updated backoffice link in PLG notification according to the env ([#2905](https://github.com/adobe/spacecat-api-service/issues/2905)) ([51f57c6](https://github.com/adobe/spacecat-api-service/commit/51f57c621de6721862f1f9642f3cbaf6da8f2fca))
+
+
+### Features
+
+* **serenity:** add exact-parity KPI headline endpoints for Overview-SR | LLMO-6515 ([#2902](https://github.com/adobe/spacecat-api-service/issues/2902)) ([9ad53d0](https://github.com/adobe/spacecat-api-service/commit/9ad53d076bb94cffe55182af0ad0c7d4ddd565fe))
+
+# [1.691.0](https://github.com/adobe/spacecat-api-service/compare/v1.690.3...v1.691.0) (2026-07-27)
+
+
+### Features
+
+* **akamai-oae:** mint the fetcher key server-side (mandatory) for Bot Manager allowlisting ([#2886](https://github.com/adobe/spacecat-api-service/issues/2886)) ([fb5f3d8](https://github.com/adobe/spacecat-api-service/commit/fb5f3d88b5e67c353f7353e185bdee049fa534c2)), closes [project-elmo-ui#2407](https://github.com/project-elmo-ui/issues/2407)
+
+## [1.690.3](https://github.com/adobe/spacecat-api-service/compare/v1.690.2...v1.690.3) (2026-07-27)
+
+
+### Bug Fixes
+
+* exclude decorative images from alt-text PLG grant selection (SITES-44253) ([#2831](https://github.com/adobe/spacecat-api-service/issues/2831)) ([5aaabdd](https://github.com/adobe/spacecat-api-service/commit/5aaabdd4d0b6697724bfe588794b212416ecf7c6))
+
+## [1.690.2](https://github.com/adobe/spacecat-api-service/compare/v1.690.1...v1.690.2) (2026-07-27)
+
+
+### Bug Fixes
+
+* filter project sites by entitlement in getSitesByProjectId ([#2899](https://github.com/adobe/spacecat-api-service/issues/2899)) ([70d64a0](https://github.com/adobe/spacecat-api-service/commit/70d64a0ca46e06c19a991b9e39081bc4c9a4b2ee))
+
+## [1.690.1](https://github.com/adobe/spacecat-api-service/compare/v1.690.0...v1.690.1) (2026-07-26)
+
+
+### Bug Fixes
+
+* **state-mappings:** scope internal-admin writes to their own org ([#2900](https://github.com/adobe/spacecat-api-service/issues/2900)) ([e8b9b5d](https://github.com/adobe/spacecat-api-service/commit/e8b9b5dd9cdef3ee5c4ea13f3a84ccd8338d4be8)), closes [#2871](https://github.com/adobe/spacecat-api-service/issues/2871) [#2871](https://github.com/adobe/spacecat-api-service/issues/2871)
+
+# [1.690.0](https://github.com/adobe/spacecat-api-service/compare/v1.689.0...v1.690.0) (2026-07-26)
+
+
+### Features
+
+* **run-global-import:** add --validate-only flag for optimize-at-edge-enabled-marking ([#2904](https://github.com/adobe/spacecat-api-service/issues/2904)) ([fac29fb](https://github.com/adobe/spacecat-api-service/commit/fac29fb21199f1ab285a632d7938d09ac9a7cda5))
+
+# [1.689.0](https://github.com/adobe/spacecat-api-service/compare/v1.688.3...v1.689.0) (2026-07-24)
+
+
+### Features
+
+* **serenity:** expose Share of Voice / Brand & Source Visibility trends | LLMO-6515 ([#2901](https://github.com/adobe/spacecat-api-service/issues/2901)) ([0b98535](https://github.com/adobe/spacecat-api-service/commit/0b98535721c6e2b8417490695ef0e3067f1a0c32))
+
+## [1.688.3](https://github.com/adobe/spacecat-api-service/compare/v1.688.2...v1.688.3) (2026-07-24)
+
+
+### Bug Fixes
+
+* reject single-quote characters in pageTypes pattern to close stored SQL injection | VULN-37318 ([#2895](https://github.com/adobe/spacecat-api-service/issues/2895)) ([1aa75e4](https://github.com/adobe/spacecat-api-service/commit/1aa75e41cae0adbf6e1c436206b750e11808bcdc))
+
+## [1.688.2](https://github.com/adobe/spacecat-api-service/compare/v1.688.1...v1.688.2) (2026-07-24)
+
+
+### Bug Fixes
+
+* validate temporalCondition strictly to close SQL injection in paid traffic endpoints | VULN-37317 ([#2894](https://github.com/adobe/spacecat-api-service/issues/2894)) ([1853786](https://github.com/adobe/spacecat-api-service/commit/185378604f12b46ac93bbcd4216acb6164b08e59)), closes [#3880600](https://github.com/adobe/spacecat-api-service/issues/3880600)
+
+## [1.688.1](https://github.com/adobe/spacecat-api-service/compare/v1.688.0...v1.688.1) (2026-07-23)
+
+
+### Bug Fixes
+
+* **serenity:** wrap delete-market releaseAiSurplus in withResourceLock ([#2897](https://github.com/adobe/spacecat-api-service/issues/2897)) ([969b351](https://github.com/adobe/spacecat-api-service/commit/969b3519de24e18f4b74a0a1883fc59e26a76e59))
+
 # [1.688.0](https://github.com/adobe/spacecat-api-service/compare/v1.687.0...v1.688.0) (2026-07-23)
 
 

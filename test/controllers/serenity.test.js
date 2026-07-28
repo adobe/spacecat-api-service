@@ -1424,11 +1424,19 @@ describe('SerenityController', () => {
       // for the mapping-row upsert (mapping-rows.js).
       // writeDeadline is a request-scoped epoch-ms deadline (dynamic) — asserted
       // as a number, then dropped before the deep-equal.
-      const { writeDeadline, ...marketOptions } = handlers.handleCreateMarketSubworkspace
-        .firstCall.args[7];
+      const {
+        writeDeadline, brandCollection, ...marketOptions
+      } = handlers.handleCreateMarketSubworkspace.firstCall.args[7];
       expect(writeDeadline).to.be.a('number');
+      // Threaded so ensureSubworkspace's claim filter can tell this brand's own
+      // interrupted create from a same-named sibling brand's sub-workspace.
+      expect(brandCollection).to.equal(ctx.dataAccess.Brand);
       expect(marketOptions)
         .to.deep.equal({
+          // LLMO-6554: resolved via resolveDefaultModelIds — [] here because the test's
+          // transport stub doesn't implement the catalog/listing calls it reads from
+          // (both degrade to an empty best-effort default, never throwing).
+          modelIds: [],
           generateTopics: false,
           topicCap: 0,
           brandAliases: ['Acme Inc', 'ACME'],
@@ -1781,6 +1789,26 @@ describe('SerenityController', () => {
       const response = await controller.deactivate(fakeContext({ authType: 'jwt' }));
       expect(response.status).to.equal(401);
       expect(decommissionStub).to.not.have.been.called;
+    });
+
+    it('activate threads the Brand collection into ensureSubworkspace so the claim filter can run', async () => {
+      // Sub-workspace titles are bare brand names, so ensureSubworkspace needs the
+      // Brand collection to tell our own interrupted create from a same-named
+      // sibling brand's workspace. Without it the create path 500s on any
+      // same-title family candidate — so the wiring must be pinned, not assumed.
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      const brand = makeBrandModel({ getStatus: () => 'active' });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        brand,
+        data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }] },
+      });
+
+      await controller.activate(ctx);
+
+      expect(ensureSubworkspaceStub).to.have.been.calledOnce;
+      expect(ensureSubworkspaceStub.firstCall.args[7].brandCollection)
+        .to.equal(ctx.dataAccess.Brand);
     });
 
     it('activate ensures the subworkspace ONCE for the batch and creates each market against it', async () => {

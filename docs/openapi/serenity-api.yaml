@@ -1242,8 +1242,8 @@ v2-serenity-brand-presence-sentiment-overview:
         in: query
         required: false
         description: |
-          Category label sent to Semrush as a `category__<label>` tag. `category`
-          is accepted as an alias.
+          Full `category__<label>` tag value (caller includes the `category__`
+          prefix), sent to Semrush as-is. `category` is accepted as an alias.
         schema: { type: string }
     responses:
       '200':
@@ -1726,7 +1726,7 @@ v2-serenity-url-inspector-stats:
       - name: categoryId
         in: query
         required: false
-        description: Category label, mapped to a Semrush tag (`category__<label>`).
+        description: Full `category__<label>` tag value (caller includes the prefix), sent as-is.
         schema: { type: string }
       - name: category
         in: query
@@ -1839,7 +1839,7 @@ v2-serenity-url-inspector-prompts-count:
       - name: categoryId
         in: query
         required: false
-        description: Category label, mapped to a Semrush tag (`category__<label>`).
+        description: Full `category__<label>` tag value (caller includes the prefix), sent as-is.
         schema: { type: string }
       - name: category
         in: query
@@ -1970,6 +1970,273 @@ v2-serenity-market-tracking-trends:
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityMarketTrackingTrends' }
+      '400': { $ref: './responses.yaml#/400' }
+      '403':
+        description: Caller lacks access to the organization.
+      '404':
+        description: Organization not found, brand not found for this organization, the brand has no resolvable Semrush workspace, or the requested region matches no market.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '503':
+        description: PostgREST client not configured for this deployment.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-kpi-headlines:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: Share of Voice + Brand Visibility KPI headline cards (Overview-SR, exact MFE parity)
+    description: |
+      Returns the tracked brand's Share of Voice and Brand Visibility headline
+      values, sourced from the same per-brand Semrush elements the Brand
+      Presence MFE itself uses for these two cards — a Semrush-computed
+      period aggregate (`mainValue`) plus the immediately preceding period of
+      equal length for comparison (`secondaryValue`), NOT derived from
+      `listSerenityMarketTrackingTrends`'s weekly series (that endpoint's
+      `shareOfVoice`/`brandVisibility` fields are a documented approximation of
+      this exact value — see `SerenityKpiHeadlines`).
+
+      Source Visibility is served by the separate `listSerenitySourceVisibilityHeadline`
+      endpoint — it requires an extra sequential upstream call (the brand's own
+      URL list) that would otherwise double this endpoint's worst-case latency.
+
+      Date range is optional and defaults to a 28-day trailing window. Both
+      `startDate` and `endDate` must be supplied together or not at all — a
+      half-supplied range falls back to the full default as a unit. The resolved
+      span is capped at 366 days (400 otherwise). The comparison period is
+      derived automatically as the immediately preceding period of equal length.
+    operationId: listSerenityKpiHeadlines
+    security:
+      - ims_key: []
+    parameters:
+      - name: startDate
+        in: query
+        required: false
+        description: |
+          Range start (`YYYY-MM-DD`). Alias `start_date`. Defaults to 28 days
+          before today. Must be supplied together with `endDate` (else both are
+          ignored and the default range is used).
+        schema: { type: string, format: date }
+      - name: endDate
+        in: query
+        required: false
+        description: Range end (`YYYY-MM-DD`). Alias `end_date`. Defaults to today.
+        schema: { type: string, format: date }
+      - name: model
+        in: query
+        required: false
+        description: |
+          AI model to scope the headlines to. Accepts a Semrush Elements model
+          name directly, or a SpaceCat/UI platform code (translated
+          server-side). Defaults to `search-gpt` when omitted or unrecognized.
+        schema:
+          type: string
+          x-canonical-values:
+            - google-ai-mode
+            - grok-3
+            - google-ai-overview
+            - microsoft-copilot
+            - open-evidence
+            - gemini-2.5-flash
+            - claude-sonnet-4
+            - gpt-5
+            - deepseek
+            - search-gpt
+            - perplexity
+          x-known-aliases:
+            copilot: microsoft-copilot
+            gemini: gemini-2.5-flash
+            openai: gpt-5
+            chatgpt: search-gpt
+      - name: platform
+        in: query
+        required: false
+        description: Legacy alias for `model`; `model` takes precedence when both are given.
+        schema: { type: string }
+      - name: regionCode
+        in: query
+        required: false
+        description: |
+          One region+language code (e.g. `US`), resolved to a single Semrush
+          project. Aliases `region_code`, `region`. `all` or absent aggregates
+          across every project the brand owns.
+        schema: { type: string }
+      - name: siteId
+        in: query
+        required: false
+        description: |
+          Optional cross-check: must resolve to the same brand as `:brandId`
+          (400 otherwise). Alias `site_id`. Does not itself narrow the query.
+        schema: { type: string }
+      - name: categoryId
+        in: query
+        required: false
+        description: Full `category__<label>` tag value (caller includes the prefix), sent as-is.
+        schema: { type: string }
+      - name: category
+        in: query
+        required: false
+        description: Alias for `categoryId`.
+        schema: { type: string }
+    responses:
+      '200':
+        description: KPI headlines retrieved.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityKpiHeadlines' }
+      '400': { $ref: './responses.yaml#/400' }
+      '403':
+        description: Caller lacks access to the organization.
+      '404':
+        description: Organization not found, brand not found for this organization, the brand has no resolvable Semrush workspace, or the requested region matches no market.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '503':
+        description: PostgREST client not configured for this deployment.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-source-visibility-headline:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: Source Visibility KPI headline card (Overview-SR, exact MFE parity)
+    description: |
+      Returns the tracked brand's Source Visibility headline value, sourced
+      from the same per-brand Semrush element the Brand Presence MFE itself
+      uses for this card. Split from `listSerenityKpiHeadlines` because this
+      metric is scoped by the brand's own URL list (main domain + tracked
+      social profiles) rather than its display name, requiring an extra
+      sequential upstream lookup before the KPI element itself can be called —
+      isolating it keeps that lookup from doubling the other two cards'
+      worst-case latency. A brand with no registered URLs returns
+      `{ value: 0, comparisonValue: null }` — no measurement exists for either
+      period, so `comparisonValue` uses the same "no data" convention as a
+      missing Semrush comparison value.
+
+      Date range is optional and defaults to a 28-day trailing window. Both
+      `startDate` and `endDate` must be supplied together or not at all — a
+      half-supplied range falls back to the full default as a unit. The resolved
+      span is capped at 366 days (400 otherwise). The comparison period is
+      derived automatically as the immediately preceding period of equal length.
+    operationId: listSerenitySourceVisibilityHeadline
+    security:
+      - ims_key: []
+    parameters:
+      - name: startDate
+        in: query
+        required: false
+        description: |
+          Range start (`YYYY-MM-DD`). Alias `start_date`. Defaults to 28 days
+          before today. Must be supplied together with `endDate` (else both are
+          ignored and the default range is used).
+        schema: { type: string, format: date }
+      - name: endDate
+        in: query
+        required: false
+        description: Range end (`YYYY-MM-DD`). Alias `end_date`. Defaults to today.
+        schema: { type: string, format: date }
+      - name: model
+        in: query
+        required: false
+        description: |
+          AI model to scope the headline to. Accepts a Semrush Elements model
+          name directly, or a SpaceCat/UI platform code (translated
+          server-side). Defaults to `search-gpt` when omitted or unrecognized.
+        schema:
+          type: string
+          x-canonical-values:
+            - google-ai-mode
+            - grok-3
+            - google-ai-overview
+            - microsoft-copilot
+            - open-evidence
+            - gemini-2.5-flash
+            - claude-sonnet-4
+            - gpt-5
+            - deepseek
+            - search-gpt
+            - perplexity
+          x-known-aliases:
+            copilot: microsoft-copilot
+            gemini: gemini-2.5-flash
+            openai: gpt-5
+            chatgpt: search-gpt
+      - name: platform
+        in: query
+        required: false
+        description: Legacy alias for `model`; `model` takes precedence when both are given.
+        schema: { type: string }
+      - name: regionCode
+        in: query
+        required: false
+        description: |
+          One region+language code (e.g. `US`), resolved to a single Semrush
+          project. Aliases `region_code`, `region`. `all` or absent aggregates
+          across every project the brand owns.
+        schema: { type: string }
+      - name: siteId
+        in: query
+        required: false
+        description: |
+          Optional cross-check: must resolve to the same brand as `:brandId`
+          (400 otherwise). Alias `site_id`. Does not itself narrow the query.
+        schema: { type: string }
+      - name: categoryId
+        in: query
+        required: false
+        description: Full `category__<label>` tag value (caller includes the prefix), sent as-is.
+        schema: { type: string }
+      - name: category
+        in: query
+        required: false
+        description: Alias for `categoryId`.
+        schema: { type: string }
+    responses:
+      '200':
+        description: Source Visibility headline retrieved.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityKpiHeadline' }
       '400': { $ref: './responses.yaml#/400' }
       '403':
         description: Caller lacks access to the organization.

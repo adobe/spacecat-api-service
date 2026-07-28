@@ -66,6 +66,7 @@ import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/seren
 import { isSerenityActiveForOrg } from '../support/serenity/serenity-active.js';
 import { isDynamicAllocationEnabled, resolveBrandAiCeiling } from '../support/serenity/dynamic-allocation-active.js';
 import { MAX_TOPICS_ON_CREATE } from '../support/serenity/brand-provisioning.js';
+import { resolveDefaultModelIds } from '../support/serenity/default-models.js';
 import { marketForGeoTargetId } from '../support/serenity/locations.js';
 import { brandNeedles, classifyBrandedTag } from '../support/serenity/branded-classifier.js';
 import { computeWriteDeadline } from '../support/serenity/intent-classification.js';
@@ -753,6 +754,18 @@ function SerenityController(context, log, env) {
         // Optional prompt/topic generation for this market, defaulting to off so
         // the endpoint's behavior is unchanged unless the caller opts in.
         const genMarketTopics = effectiveBody.generatePrompts === true;
+        // LLMO-6554: this brand is already active, so its sub-workspace (and
+        // likely other markets) already exists — mirror whichever models those
+        // markets already track, falling back to the canonical net-new default
+        // only if none of them has any (see resolveDefaultModelIds). Without
+        // this, "Add Market" on an active brand attached zero models and the
+        // subsequent publish 405'd as a disguised empty-units quota rejection.
+        const newMarketModelIds = await resolveDefaultModelIds(
+          transport,
+          /** @type {string} */ (auth.workspaceId),
+          auth.brandUuid,
+          log,
+        );
         result = await handleCreateMarketSubworkspace(
           transport,
           brand,
@@ -762,6 +775,7 @@ function SerenityController(context, log, env) {
           null,
           brandPointerReloader(ctx, auth.brandUuid),
           {
+            modelIds: newMarketModelIds,
             generateTopics: genMarketTopics,
             topicCap: genMarketTopics ? MAX_TOPICS_ON_CREATE : 0,
             brandAliases,
@@ -780,6 +794,10 @@ function SerenityController(context, log, env) {
             // positionally above (auth.parentWorkspaceId) — not duplicated in this options bag.
             dynamicAllocation: dynamicAllocationEnabled(ctx),
             ceiling: brandAiCeiling(ctx),
+            // Sub-workspace titles are bare brand names, so ensureSubworkspace needs the Brand
+            // collection to tell this brand's own interrupted create from a same-named sibling
+            // brand's workspace. Only consulted when this brand has no sub-workspace yet.
+            brandCollection: ctx.dataAccess.Brand,
           },
         );
         // Mirror this market as a SpaceCat Site (+ brand_sites link), once its
@@ -1216,6 +1234,7 @@ function SerenityController(context, log, env) {
           brandPointerReloader(ctx, auth.brandUuid),
           {
             dynamicAllocation: dynamicAllocationEnabled(ctx),
+            brandCollection: ctx?.dataAccess?.Brand,
           },
         );
         let pendingActivateSucceeded = true;
@@ -1284,6 +1303,7 @@ function SerenityController(context, log, env) {
           brandPointerReloader(ctx, auth.brandUuid),
           {
             dynamicAllocation: dynamicAllocationEnabled(ctx),
+            brandCollection: ctx?.dataAccess?.Brand,
           },
         );
         let bareSucceeded = true;
@@ -1358,7 +1378,20 @@ function SerenityController(context, log, env) {
         brandPointerReloader(ctx, auth.brandUuid),
         {
           dynamicAllocation: dynamicAllocationEnabled(ctx),
+          brandCollection: ctx?.dataAccess?.Brand,
         },
+      );
+      // LLMO-6554: resolved ONCE for the whole batch (same brand, so every market
+      // in this request gets the same default) — mirrors whichever models the
+      // brand's existing markets already track, falling back to the canonical
+      // net-new default set when none do. A per-market `modelIds` in the body
+      // still wins when supplied (see marketModelIds below), preserving the
+      // override for any API-driven caller.
+      const defaultModelIds = await resolveDefaultModelIds(
+        transport,
+        workspaceId,
+        brandUuid,
+        log,
       );
       const results = [];
       for (const m of markets) {
@@ -1373,8 +1406,10 @@ function SerenityController(context, log, env) {
         // AI models (LLMs) the draft staged for this market (or that the activate
         // request supplied). handleCreateMarketSubworkspace reads them from its
         // OPTIONS arg (NOT the body) and attaches them to the project before
-        // publish; omitted/empty → none attached.
-        const marketModelIds = Array.isArray(m.modelIds) ? m.modelIds : [];
+        // publish; omitted/empty → the resolved default (LLMO-6554) applies.
+        const marketModelIds = Array.isArray(m.modelIds) && m.modelIds.length > 0
+          ? m.modelIds
+          : defaultModelIds;
         let r;
         try {
           // eslint-disable-next-line no-await-in-loop
