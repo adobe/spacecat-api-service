@@ -717,6 +717,19 @@ describe('createElementsService', () => {
         brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24',
       })).to.be.rejectedWith(upstreamError);
     });
+
+    it('passes category through to both KPI element payloads as-is', async () => {
+      transport.fetchElement.resolves({ blocks: {} });
+      await service.getKpiHeadlines('ws-1', {
+        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24', category: 'category__Firefly',
+      });
+      for (const call of transport.fetchElement.getCalls()) {
+        const [, , payload] = call.args;
+        expect(payload.filters.advanced.filters).to.deep.include({
+          op: 'eq', val: 'category__Firefly', col: 'CBF_tags',
+        });
+      }
+    });
   });
 
   describe('getSourceVisibilityHeadline', () => {
@@ -802,6 +815,23 @@ describe('createElementsService', () => {
       await expect(service.getSourceVisibilityHeadline('ws-1', {
         brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24',
       })).to.be.rejectedWith(upstreamError);
+    });
+
+    it('passes category through to the KPI element payload as-is', async () => {
+      transport.fetchElement.callsFake(async (workspaceId, elementId) => {
+        if (elementId === ELEMENT_IDS.BRAND_URLS) {
+          return { blocks: { value: [{ value: 'lovesac.com' }] } };
+        }
+        return { blocks: {} };
+      });
+      await service.getSourceVisibilityHeadline('ws-1', {
+        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24', category: 'category__Firefly',
+      });
+      const kpiCall = transport.fetchElement.getCalls()
+        .find((c) => c.args[1] === ELEMENT_IDS.KPI_SOURCE_VISIBILITY);
+      expect(kpiCall.args[2].filters.advanced.filters).to.deep.include({
+        op: 'eq', val: 'category__Firefly', col: 'CBF_tags',
+      });
     });
   });
 });
