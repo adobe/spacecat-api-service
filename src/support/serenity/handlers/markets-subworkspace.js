@@ -25,8 +25,8 @@ import {
   defaultMarketName,
   listTagsForProject,
   listProjectTagTree,
-  listGlobalModelCatalog,
   listSliceModels,
+  listUnionModels,
   syncModelsForProject,
   countPublishedPrompts,
   MAX_MODEL_IDS,
@@ -1077,17 +1077,19 @@ export async function handleListTagsSubworkspace(transport, workspaceId, query, 
 }
 
 /**
- * GET /serenity/models (subworkspace). No params → the (workspace-independent) global
- * catalog. With (geoTargetId, languageCode) → models on the slice's project,
- * resolved from the live listing. Partial params → 400. A missing slice returns
- * an empty set, matching the flat-mode models contract.
+ * GET /serenity/models (subworkspace). No params → the union of models enabled
+ * across all the workspace's projects. With (geoTargetId, languageCode) → models
+ * on the slice's project, resolved from the live listing. Partial params → 400. A
+ * missing slice returns an empty set, matching the flat-mode models contract.
  */
 export async function handleListModelsSubworkspace(transport, workspaceId, query, log) {
   const geoTargetId = normalizeGeoTargetId(query?.geoTargetId);
   const languageCode = normalizeLanguageCode(query?.languageCode);
 
   if (geoTargetId === null && languageCode === null) {
-    return listGlobalModelCatalog(transport);
+    const projects = await resolveProjects(transport, workspaceId);
+    const projectIds = projects.map((p) => String(p.id));
+    return listUnionModels(transport, workspaceId, projectIds);
   }
   if (geoTargetId === null || languageCode === null) {
     throw new ErrorWithStatusCode(
