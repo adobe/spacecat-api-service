@@ -203,7 +203,6 @@ describe('ElementsController', () => {
       getBrandPresenceStats: sinon.stub().resolves(STATS_RESULT),
       getUrlInspectorStats: sinon.stub().resolves(URL_INSPECTOR_STATS_RESULT),
       getOwnedUrlProjects: sinon.stub().resolves([{ region: 'US', projectId: 'proj-1' }]),
-      resolveRegionProjectId: sinon.stub().resolves(null),
     };
     createElementsServiceStub = sinon.stub().returns(serviceStub);
     createElementsTransportStub = sinon.stub().returns({ fetchElement: sinon.stub() });
@@ -539,6 +538,29 @@ describe('ElementsController', () => {
       await ctrl.listUrlInspectorFilterDimensions(ctx);
       const [, params] = serviceStub.getUrlInspectorFilterDimensions.firstCall.args;
       expect(params.model).to.equal('perplexity');
+    });
+
+    it('splits a comma-separated projectId query param into projectIds', async () => {
+      const ctx = fakeContext({
+        url: `https://api.example.com/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/serenity/brand-presence/url-inspector/filter-dimensions?projectId=proj-a,proj-b`,
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.listUrlInspectorFilterDimensions(ctx);
+      const [, params] = serviceStub.getUrlInspectorFilterDimensions.firstCall.args;
+      expect(params.projectIds).to.deep.equal(['proj-a', 'proj-b']);
+      // The raw unsplit query value is still present alongside it (harmless —
+      // buildTopicsPayload prefers projectIds when both are given).
+      expect(params.projectId).to.equal('proj-a,proj-b');
+    });
+
+    it('accepts the project_id snake_case alias', async () => {
+      const ctx = fakeContext({
+        url: `https://api.example.com/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/serenity/brand-presence/url-inspector/filter-dimensions?project_id=proj-a`,
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.listUrlInspectorFilterDimensions(ctx);
+      const [, params] = serviceStub.getUrlInspectorFilterDimensions.firstCall.args;
+      expect(params.projectIds).to.deep.equal(['proj-a']);
     });
 
     it('builds transport with the bearer token from Authorization header', async () => {
@@ -906,7 +928,7 @@ describe('ElementsController', () => {
     const statsUrl = (qs = '') => `https://api.example.com/v2/orgs/${ORG_ID}`
       + `/brands/${BRAND_ID}/serenity/brand-presence/stats${qs}`;
 
-    // Most aggregate-view (no regionCode) assertions need the brand to own at
+    // Most aggregate-view (no projectId) assertions need the brand to own at
     // least one Semrush project, or getStats 404s (see the dedicated empty-
     // projects test below) before ever reaching the service call.
     const statsCtx = (overrides = {}) => {
@@ -1023,41 +1045,33 @@ describe('ElementsController', () => {
       expect(res.status).to.equal(200);
     });
 
-    it('resolves regionCode to a single projectId via resolveRegionProjectId', async () => {
-      serviceStub.resolveRegionProjectId.resolves('proj-us');
-      const ctx = fakeContext({ url: statsUrl('?regionCode=US') });
+    it('scopes to a single caller-supplied projectId (no lookup/resolution needed)', async () => {
+      const ctx = fakeContext({ url: statsUrl('?projectId=proj-us') });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.getStats(ctx);
       expect(res.status).to.equal(200);
-      expect(serviceStub.resolveRegionProjectId).to.have.been.calledWith(
-        SUB_WORKSPACE_ID,
-        sinon.match({ brandId: BRAND_ID, region: 'US' }),
-      );
       const [, params] = serviceStub.getBrandPresenceStats.firstCall.args;
-      expect(params.projectId).to.equal('proj-us');
-      expect(params.projectIds).to.equal(undefined);
+      expect(params.projectIds).to.deep.equal(['proj-us']);
     });
 
-    it('accepts region_code and region as aliases for regionCode', async () => {
-      serviceStub.resolveRegionProjectId.resolves('proj-us');
-      const ctx = fakeContext({ url: statsUrl('?region_code=US') });
+    it('accepts the project_id snake_case alias for projectId', async () => {
+      const ctx = fakeContext({ url: statsUrl('?project_id=proj-us') });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.getStats(ctx);
-      expect(serviceStub.resolveRegionProjectId).to.have.been.calledWith(
-        SUB_WORKSPACE_ID,
-        sinon.match({ region: 'US' }),
-      );
+      const [, params] = serviceStub.getBrandPresenceStats.firstCall.args;
+      expect(params.projectIds).to.deep.equal(['proj-us']);
     });
 
-    it('returns 404 when regionCode does not resolve to any Semrush market', async () => {
-      serviceStub.resolveRegionProjectId.resolves(null);
-      const ctx = fakeContext({ url: statsUrl('?regionCode=ZZ') });
+    it('splits a comma-separated projectId into multiple ids', async () => {
+      const ctx = fakeContext({ url: statsUrl('?projectId=proj-us,proj-uk') });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.getStats(ctx);
-      expect(res.status).to.equal(404);
+      expect(res.status).to.equal(200);
+      const [, params] = serviceStub.getBrandPresenceStats.firstCall.args;
+      expect(params.projectIds).to.deep.equal(['proj-us', 'proj-uk']);
     });
 
-    it('resolves projectIds from the brand\'s BrandSemrushProject rows when no region is given', async () => {
+    it('resolves projectIds from the brand\'s BrandSemrushProject rows when no projectId is given', async () => {
       const ctx = statsCtx();
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.getStats(ctx);
@@ -1295,34 +1309,34 @@ describe('ElementsController', () => {
       expect(res.status).to.equal(200);
     });
 
-    it('resolves region to a single projectId via resolveRegionProjectId', async () => {
-      serviceStub.resolveRegionProjectId.resolves('proj-us');
-      const ctx = fakeContext({ url: urlInspectorStatsUrl('?region=US') });
+    it('scopes to a single caller-supplied projectId (no lookup/resolution needed)', async () => {
+      const ctx = fakeContext({ url: urlInspectorStatsUrl('?projectId=proj-us') });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.getUrlInspectorStats(ctx);
       expect(res.status).to.equal(200);
-      expect(serviceStub.resolveRegionProjectId).to.have.been.calledWith(
-        SUB_WORKSPACE_ID,
-        sinon.match({ brandId: BRAND_ID, region: 'US' }),
-      );
       const [, params] = serviceStub.getUrlInspectorStats.firstCall.args;
-      expect(params.projects).to.deep.equal([{ region: 'US', projectId: 'proj-us' }]);
+      expect(params.projects).to.deep.equal([{ projectId: 'proj-us' }]);
     });
 
-    it('returns 404 when region does not resolve to any Semrush market', async () => {
-      serviceStub.resolveRegionProjectId.resolves(null);
-      const ctx = fakeContext({ url: urlInspectorStatsUrl('?region=ZZ') });
-      const ctrl = ElementsController(ctx, fakeLog(), ENV);
-      const res = await ctrl.getUrlInspectorStats(ctx);
-      expect(res.status).to.equal(404);
-    });
-
-    it('treats region=all the same as an omitted region (aggregate view)', async () => {
-      const ctx = urlInspectorStatsCtx({ url: urlInspectorStatsUrl('?region=all') });
+    it('splits a comma-separated projectId into multiple scoped projects', async () => {
+      const ctx = fakeContext({ url: urlInspectorStatsUrl('?projectId=proj-us,proj-uk') });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.getUrlInspectorStats(ctx);
       expect(res.status).to.equal(200);
-      expect(serviceStub.resolveRegionProjectId).to.not.have.been.called;
+      const [, params] = serviceStub.getUrlInspectorStats.firstCall.args;
+      expect(params.projects).to.deep.equal([{ projectId: 'proj-us' }, { projectId: 'proj-uk' }]);
+    });
+
+    it('treats an explicit projectId=all as a literal (bogus) id, not the aggregate view', async () => {
+      // Unlike the old `region` param, `projectId` has no "all" special-case — a
+      // caller must omit the param entirely to get the aggregate view.
+      const ctx = fakeContext({ url: urlInspectorStatsUrl('?projectId=all') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorStats(ctx);
+      expect(res.status).to.equal(200);
+      expect(serviceStub.getOwnedUrlProjects).to.not.have.been.called;
+      const [, params] = serviceStub.getUrlInspectorStats.firstCall.args;
+      expect(params.projects).to.deep.equal([{ projectId: 'all' }]);
     });
 
     it('returns 503 (not a masked 404) when the PostgREST client is not available', async () => {
@@ -1394,7 +1408,7 @@ describe('ElementsController', () => {
   });
 
   // The 4th URL Inspector KPI card, split out of getUrlInspectorStats — shares
-  // that endpoint's auth/region-resolution scaffolding (see its tests above
+  // that endpoint's auth/projectId-scoping scaffolding (see its tests above
   // for siteId/503/snake_case-alias coverage of that shared logic), calling
   // service.getPrompts instead of service.getUrlInspectorStats.
   describe('getUrlInspectorPromptsCount', () => {
@@ -1423,18 +1437,22 @@ describe('ElementsController', () => {
       expect(params.projectIds).to.deep.equal(['proj-1']);
     });
 
-    it('resolves region to a single projectId via resolveRegionProjectId', async () => {
-      serviceStub.resolveRegionProjectId.resolves('proj-us');
-      const ctx = fakeContext({ url: promptsCountUrl('?region=US') });
+    it('scopes to a single caller-supplied projectId (no lookup/resolution needed)', async () => {
+      const ctx = fakeContext({ url: promptsCountUrl('?projectId=proj-us') });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.getUrlInspectorPromptsCount(ctx);
       expect(res.status).to.equal(200);
-      expect(serviceStub.resolveRegionProjectId).to.have.been.calledWith(
-        SUB_WORKSPACE_ID,
-        sinon.match({ brandId: BRAND_ID, region: 'US' }),
-      );
       const [, params] = serviceStub.getPrompts.firstCall.args;
       expect(params.projectIds).to.deep.equal(['proj-us']);
+    });
+
+    it('splits a comma-separated projectId into multiple ids', async () => {
+      const ctx = fakeContext({ url: promptsCountUrl('?projectId=proj-us,proj-uk') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.getUrlInspectorPromptsCount(ctx);
+      expect(res.status).to.equal(200);
+      const [, params] = serviceStub.getPrompts.firstCall.args;
+      expect(params.projectIds).to.deep.equal(['proj-us', 'proj-uk']);
     });
 
     it('passes categoryId through as-is (already prefixed by the caller)', async () => {
@@ -1452,14 +1470,6 @@ describe('ElementsController', () => {
       const res = await ctrl.getUrlInspectorPromptsCount(ctx);
       expect(res.status).to.equal(404);
       expect(serviceStub.getPrompts).to.not.have.been.called;
-    });
-
-    it('returns 404 when region does not resolve to any Semrush market', async () => {
-      serviceStub.resolveRegionProjectId.resolves(null);
-      const ctx = fakeContext({ url: promptsCountUrl('?region=ZZ') });
-      const ctrl = ElementsController(ctx, fakeLog(), ENV);
-      const res = await ctrl.getUrlInspectorPromptsCount(ctx);
-      expect(res.status).to.equal(404);
     });
 
     it('returns 400 when siteId resolves to a different brand than :brandId', async () => {
@@ -1523,20 +1533,20 @@ describe('ElementsController', () => {
   // ─── extractQuery edge cases ──────────────────────────────────────────────
 
   describe('extractQuery', () => {
-    it('returns empty params when request URL is missing', async () => {
+    it('returns empty params (plus an empty projectIds) when request URL is missing', async () => {
       const ctx = fakeContext({ url: null });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.listUrlInspectorFilterDimensions(ctx);
       const [, params] = serviceStub.getUrlInspectorFilterDimensions.firstCall.args;
-      expect(params).to.deep.equal({});
+      expect(params).to.deep.equal({ projectIds: [] });
     });
 
-    it('returns empty params when request URL is invalid', async () => {
+    it('returns empty params (plus an empty projectIds) when request URL is invalid', async () => {
       const ctx = fakeContext({ url: 'not-a-url' });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.listUrlInspectorFilterDimensions(ctx);
       const [, params] = serviceStub.getUrlInspectorFilterDimensions.firstCall.args;
-      expect(params).to.deep.equal({});
+      expect(params).to.deep.equal({ projectIds: [] });
     });
 
     it('captures multiple query params', async () => {
