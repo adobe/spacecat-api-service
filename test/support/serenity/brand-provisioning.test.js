@@ -592,8 +592,11 @@ describe('provisionBrandSubworkspaceBare', () => {
     // Kill-switch defaults OFF (env unset) — byte-for-byte the pre-fix flat carve.
     // The Brand collection is threaded through so the claim filter can run, and the
     // created-vs-adopted callback so failure compensation can gate on provenance.
+    // createReadiness 'skip' (LLMO-6569): bare create makes no project/prompts, so it skips the
+    // up-to-30s settle poll and persists the pointer immediately.
     const options = ensureSubworkspace.firstCall.args[7];
     expect(options.dynamicAllocation).to.equal(false);
+    expect(options.createReadiness).to.equal('skip');
     expect(options.brandCollection).to.equal(BRAND_COLLECTION);
     expect(options.onWorkspaceCreated).to.be.a('function');
   });
@@ -605,6 +608,7 @@ describe('provisionBrandSubworkspaceBare', () => {
     await provisionBrandSubworkspaceBare(ctx, bareParams);
     const options = ensureSubworkspace.firstCall.args[7];
     expect(options.dynamicAllocation).to.equal(true);
+    expect(options.createReadiness).to.equal('skip');
     expect(options.brandCollection).to.equal(BRAND_COLLECTION);
   });
 

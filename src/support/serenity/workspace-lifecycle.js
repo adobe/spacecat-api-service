@@ -411,8 +411,8 @@ export async function releaseFullAllocation(
  *                         the transfer contract is Gate-A-pinned). Note a
  *                         deactivated brand has a NULL column (deactivate clears
  *                         it), so it takes the create path below, not this one.
- *   - no column, create → create subworkspace → poll `created` → persist the column
- *                         AFTER it reads back created.
+ *   - no column, create → create subworkspace → gate on `created` per `createReadiness`
+ *                         (poll / skip) → persist the column.
  *   - create timeout    → adopt from the parent family by exact title.
  *
  * Persisting the column flips the brand into subworkspace mode (resolveBrandWorkspace).
@@ -430,6 +430,16 @@ export async function releaseFullAllocation(
  * @param {object} [options] - feature-flag toggles for the dual-mode carve.
  * @param {boolean} [options.dynamicAllocation] - when true (LLMO/dynamic-allocation ON), skip
  *   the flat re-grant on an existing sub-workspace; JIT top-up owns sizing. Default false.
+ * @param {'poll'|'skip'} [options.createReadiness] - how the fresh-CREATE path gates on the new
+ *   sub-workspace settling to `created` (LLMO-6569). 'poll' (default): up to ~30s settle poll —
+ *   the legacy behaviour, kept for callers that create a project/prompts against the workspace in
+ *   THIS request (brand-create-with-market, and the market/project-creating activation branch), so
+ *   the write does not race a not-yet-`created` workspace. 'skip': no readiness gate at all — for
+ *   sub-workspace-only callers that create NOTHING against the workspace in this request (bare
+ *   brand create, and the sub-workspace-only activate branches — pending→active and bare
+ *   reactivation), so the pointer persists immediately and the workspace settles asynchronously (a
+ *   later market-add settles it via the existing-sub-workspace branch before creating a project).
+ *   Only affects the create path; the existing-sub-workspace branch is unchanged.
  * @param {object} [options.brandCollection] - the data-access Brand collection. Required on the
  *   create path whenever the parent family holds a same-title `created` candidate: titles are
  *   bare brand names, so the claim lookup is what distinguishes our own interrupted create from
@@ -452,7 +462,9 @@ export async function ensureSubworkspace(
   reloadPointer = null,
   options = {},
 ) {
-  const { dynamicAllocation = false, brandCollection, onWorkspaceCreated } = options;
+  const {
+    dynamicAllocation = false, createReadiness = 'poll', brandCollection, onWorkspaceCreated,
+  } = options;
   const poll = {
     attempts: timing.attempts ?? DEFAULT_POLL_ATTEMPTS,
     intervalMs: timing.intervalMs ?? DEFAULT_POLL_INTERVAL_MS,
@@ -547,7 +559,16 @@ export async function ensureSubworkspace(
   // never persist the parent as the brand's sub-workspace.
   assertNotParent(workspaceId, parentWorkspaceId);
 
-  await pollUntilCreated(transport, workspaceId, poll);
+  // LLMO-6569: the fresh sub-workspace settle poll (up to 30×1s) was the top cause of the ~15s
+  // Fastly edge timeout, and — sitting between the create above and the pointer persist below — its
+  // timeout was exactly what orphaned brands (workspace created upstream, pointer never written).
+  // 'skip' lets a caller that creates NOTHING against the workspace in this request (bare brand
+  // create) persist the pointer immediately and let the workspace settle asynchronously; the first
+  // market-add later settles it (existing-sub-workspace branch) before creating a project. Any
+  // other value keeps the legacy poll. See @param options.createReadiness.
+  if (createReadiness !== 'skip') {
+    await pollUntilCreated(transport, workspaceId, poll);
+  }
 
   // Concurrency guard (defense-in-depth against a lost-update orphan): a
   // parallel activate / createMarket for the SAME brand may have created and
@@ -599,7 +620,10 @@ export async function ensureSubworkspace(
     onWorkspaceCreated(workspaceId);
   }
 
-  // Persist AFTER the workspace reads back `created` — flips the brand to subworkspace mode.
+  // Persist the pointer — this flips the brand into subworkspace mode. On 'poll' the workspace has
+  // already read back `created` above; on 'skip' (LLMO-6569) we persist WITHOUT waiting for settle,
+  // because the caller creates nothing against the workspace in this request, so readiness is not
+  // required here — the workspace settles asynchronously.
   brand.setSemrushSubWorkspaceId(workspaceId);
   await brand.save();
   // Invalidate the resolver's brand cache so the next request sees subworkspace mode
