@@ -32,11 +32,12 @@
  *
  * What is deliberately NOT asserted here: an unknown member (`transport.noSuchMethod()`).
  * `noImplicitAny: false` suppresses TS2339 in JS files even against a fully-typed
- * receiver, so that check exists only in the strict tier (`tsconfig.strict.json`).
+ * receiver, so that directive would read as UNUSED in this tier and fail the build.
+ * It lives in `test/types/strict/` instead, which only the strict tier checks.
  */
 
 /**
- * @typedef {import('../../src/support/serenity/rest-transport.js').
+ * @typedef {import('../../../src/support/serenity/rest-transport.js').
  *   SerenityTransport} SerenityTransport
  */
 

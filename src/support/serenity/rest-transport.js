@@ -57,8 +57,7 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 /** @typedef {Parameters<PeTransport['createBrandUrls']>[0]['body']} BrandUrlCreateBody */
 /** @typedef {Parameters<PeTransport['updateCompetitors']>[0]['body']} CiCompetitorsBody */
 /** @typedef {CiCompetitorsBody['ci_competitors']} CiCompetitors */
-/** @typedef {Parameters<PeTransport['updatePromptTags']>[0]['body']} PromptTagsBody */
-/** @typedef {PromptTagsBody['items']} PromptTagUpdates */
+/** @typedef {Parameters<PeTransport['updatePromptTags']>[0]['body']['items']} PromptTagUpdates */
 
 /**
  * The `resources` allocation object shared by the v2 child-create and the v2 resources

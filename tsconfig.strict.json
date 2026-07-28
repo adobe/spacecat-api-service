@@ -7,11 +7,19 @@
   //
   // Add a file here once its implicit-`any` params carry @param types. Keep the
   // list explicit: an unfixed file joining by glob would break the gate.
+  //
+  // End state: when this list covers the base config's `include` set, the two
+  // configs fold back into one with `noImplicitAny: true` and the per-file
+  // `// @ts-check` pragma becomes unnecessary. See ADR-005's ratchet path for the
+  // remaining cost and the order to take the files in.
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noImplicitAny": true
   },
   "include": [
-    "src/support/serenity/rest-transport.js"
+    "src/support/serenity/rest-transport.js",
+    // Asserts that this tier reports unknown members — the thing the base tier
+    // cannot. Kept out of `test/types/base/` on purpose (see that file's header).
+    "test/types/strict/**/*.js"
   ]
 }

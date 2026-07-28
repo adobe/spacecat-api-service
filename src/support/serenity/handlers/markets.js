@@ -1133,10 +1133,7 @@ export async function syncModelsForProject(
   const toRemoveAssignmentIds = [...currentSet]
     .filter((id) => !desiredSet.has(id))
     .map((id) => currentMap.get(id))
-    // Every key came from `currentMap`, so the lookup always hits; this drops the
-    // `undefined` the Map signature carries. Spelled out rather than `filter(Boolean)`
-    // because only an explicit `!== undefined` narrows the element type — and the two
-    // differ only on '', which an assignment id (guarded by `hasText` above) never is.
+    // Explicit rather than `filter(Boolean)`, which does not narrow the element type.
     .filter((id) => id !== undefined);
 
   // Short-circuit: nothing to do — return the already-fetched list as-is.
