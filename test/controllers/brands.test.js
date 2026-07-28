@@ -5348,7 +5348,10 @@ describe('Brands Controller', () => {
       });
 
       it('releases the orphaned sub-workspace when the brand row write fails after provisioning', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-orphan' });
+        const provisionStub = sinon.stub().resolves({
+          semrushSubWorkspaceId: 'ws-orphan',
+          createdByThisRequest: true,
+        });
         const releaseStub = sinon.stub().resolves();
         // A routine post-provision DB failure (e.g. unique-constraint 409).
         const upsertStub = sinon.stub().rejects(new Error('duplicate key value violates unique constraint'));
@@ -5377,6 +5380,45 @@ describe('Brands Controller', () => {
         // to the parent pool, not leaked.
         expect(releaseStub.calledOnce).to.equal(true);
         expect(releaseStub.firstCall.args[1]).to.equal('ws-orphan');
+      });
+
+      it('does NOT release a sub-workspace that provisioning only ADOPTED', async () => {
+        // Sub-workspace titles are bare brand display names, which are not unique within
+        // an org. Two same-named brands onboarding concurrently (observed in prod at 0.17s
+        // apart) can both resolve the SAME workspace: the first persists its claim, the
+        // second's brand-row write then fails on the UNIQUE constraint on
+        // brands.semrush_sub_workspace_id. Releasing here would delete the winner's
+        // projects and strip its allocation — on a live, correctly-owned workspace. The
+        // unique-constraint failure is precisely the signal that someone else owns it.
+        const provisionStub = sinon.stub().resolves({
+          semrushSubWorkspaceId: 'ws-adopted',
+          createdByThisRequest: false,
+        });
+        const releaseStub = sinon.stub().resolves();
+        const upsertStub = sinon.stub().rejects(new Error('duplicate key value violates unique constraint'));
+        const Mocked = await esmock('../../src/controllers/brands.js', {
+          '../../src/support/serenity/brand-provisioning.js': {
+            provisionBrandSubworkspace: provisionStub,
+            releaseProvisionedWorkspace: releaseStub,
+          },
+          '../../src/support/serenity/serenity-active.js': { isSerenityActiveForOrg: sinon.stub().resolves(true) },
+          '../../src/support/brands-storage.js': { upsertBrand: upsertStub },
+        });
+        const controller = Mocked.default(context, loggerStub, mockEnv);
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        // The create still errors out for this brand...
+        expect(response.status).to.not.equal(201);
+        expect(provisionStub.calledOnce).to.equal(true);
+        // ...but the adopted workspace — the other brand's — is left untouched.
+        expect(releaseStub.called).to.equal(false);
       });
 
       it('returns 400 when semrushMarket lacks a languageCode', async () => {

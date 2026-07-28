@@ -794,6 +794,10 @@ function SerenityController(context, log, env) {
             // positionally above (auth.parentWorkspaceId) — not duplicated in this options bag.
             dynamicAllocation: dynamicAllocationEnabled(ctx),
             ceiling: brandAiCeiling(ctx),
+            // Sub-workspace titles are bare brand names, so ensureSubworkspace needs the Brand
+            // collection to tell this brand's own interrupted create from a same-named sibling
+            // brand's workspace. Only consulted when this brand has no sub-workspace yet.
+            brandCollection: ctx.dataAccess.Brand,
           },
         );
         // Mirror this market as a SpaceCat Site (+ brand_sites link), once its
@@ -1236,6 +1240,7 @@ function SerenityController(context, log, env) {
             // pointer unwritten (the "created upstream, never linked" orphan); persisting the
             // pointer immediately closes that window. Self-heals on retry, but the user ate a 504.
             createReadiness: 'skip',
+            brandCollection: ctx?.dataAccess?.Brand,
           },
         );
         let pendingActivateSucceeded = true;
@@ -1308,6 +1313,7 @@ function SerenityController(context, log, env) {
             // sub-workspace-only (no project/prompts), so skip the settle poll — same safety and
             // orphan-window rationale as the pending→active branch above.
             createReadiness: 'skip',
+            brandCollection: ctx?.dataAccess?.Brand,
           },
         );
         let bareSucceeded = true;
@@ -1382,6 +1388,7 @@ function SerenityController(context, log, env) {
         brandPointerReloader(ctx, auth.brandUuid),
         {
           dynamicAllocation: dynamicAllocationEnabled(ctx),
+          brandCollection: ctx?.dataAccess?.Brand,
         },
       );
       // LLMO-6554: resolved ONCE for the whole batch (same brand, so every market

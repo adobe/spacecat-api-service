@@ -1,3 +1,10 @@
+## [1.695.3](https://github.com/adobe/spacecat-api-service/compare/v1.695.2...v1.695.3) (2026-07-28)
+
+
+### Bug Fixes
+
+* title Serenity sub-workspaces with the bare brand name ([#2918](https://github.com/adobe/spacecat-api-service/issues/2918)) ([cd17b81](https://github.com/adobe/spacecat-api-service/commit/cd17b819a313c5d45c2ce79d29fd03802bf2b707)), closes [Hi#level](https://github.com/Hi/issues/level) [#2915](https://github.com/adobe/spacecat-api-service/issues/2915)
+
 ## [1.695.2](https://github.com/adobe/spacecat-api-service/compare/v1.695.1...v1.695.2) (2026-07-27)
 
 
