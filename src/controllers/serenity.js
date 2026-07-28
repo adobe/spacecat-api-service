@@ -1230,6 +1230,12 @@ function SerenityController(context, log, env) {
           brandPointerReloader(ctx, auth.brandUuid),
           {
             dynamicAllocation: dynamicAllocationEnabled(ctx),
+            // createReadiness 'skip' (LLMO-6569): pending→active is sub-workspace-only — no project
+            // or prompts are created here — so skip the up-to-30s settle poll. This is the path
+            // where a poll timeout otherwise leaves the brand row present but its sub-workspace
+            // pointer unwritten (the "created upstream, never linked" orphan); persisting the
+            // pointer immediately closes that window. Self-heals on retry, but the user ate a 504.
+            createReadiness: 'skip',
           },
         );
         let pendingActivateSucceeded = true;
@@ -1298,6 +1304,10 @@ function SerenityController(context, log, env) {
           brandPointerReloader(ctx, auth.brandUuid),
           {
             dynamicAllocation: dynamicAllocationEnabled(ctx),
+            // createReadiness 'skip' (LLMO-6569): bare reactivation of an already-active brand is
+            // sub-workspace-only (no project/prompts), so skip the settle poll — same safety and
+            // orphan-window rationale as the pending→active branch above.
+            createReadiness: 'skip',
           },
         );
         let bareSucceeded = true;

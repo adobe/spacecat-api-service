@@ -361,12 +361,14 @@ export async function releaseFullAllocation(
  *   the flat re-grant on an existing sub-workspace; JIT top-up owns sizing. Default false.
  * @param {'poll'|'skip'} [options.createReadiness] - how the fresh-CREATE path gates on the new
  *   sub-workspace settling to `created` (LLMO-6569). 'poll' (default): up to ~30s settle poll —
- *   the legacy behaviour, kept for every caller that creates a project/prompts against the
- *   workspace in THIS request (brand-create-with-market, activate). 'skip': no readiness gate at
- *   all — for callers that create NOTHING against the workspace in this request (bare brand
- *   create), so the pointer persists immediately and the workspace settles asynchronously (the
- *   first market-add later settles it via the existing-sub-workspace branch before creating a
- *   project). Only affects the create path; the existing-sub-workspace branch is unchanged.
+ *   the legacy behaviour, kept for callers that create a project/prompts against the workspace in
+ *   THIS request (brand-create-with-market, and the market/project-creating activation branch), so
+ *   the write does not race a not-yet-`created` workspace. 'skip': no readiness gate at all — for
+ *   sub-workspace-only callers that create NOTHING against the workspace in this request (bare
+ *   brand create, and the sub-workspace-only activate branches — pending→active and bare
+ *   reactivation), so the pointer persists immediately and the workspace settles asynchronously (a
+ *   later market-add settles it via the existing-sub-workspace branch before creating a project).
+ *   Only affects the create path; the existing-sub-workspace branch is unchanged.
  * @returns {Promise<string>} the subworkspace id.
  */
 export async function ensureSubworkspace(
@@ -516,7 +518,10 @@ export async function ensureSubworkspace(
     }
   }
 
-  // Persist AFTER the workspace reads back `created` — flips the brand to subworkspace mode.
+  // Persist the pointer — this flips the brand into subworkspace mode. On 'poll' the workspace has
+  // already read back `created` above; on 'skip' (LLMO-6569) we persist WITHOUT waiting for settle,
+  // because the caller creates nothing against the workspace in this request, so readiness is not
+  // required here — the workspace settles asynchronously.
   brand.setSemrushSubWorkspaceId(workspaceId);
   await brand.save();
   // Invalidate the resolver's brand cache so the next request sees subworkspace mode
