@@ -228,10 +228,12 @@ function baseUrl(env) {
  * @returns {string} canonical `protocol//host` origin
  */
 function usersBaseUrl(env) {
-  // Bound first, then guarded truthiness: `hasText` is not a TS type guard, so it
-  // cannot take a `string | undefined` (see this dir's CLAUDE.md).
+  // Bound first, then narrowed by `typeof`: `hasText` is not a TS type guard, so it
+  // cannot take a `string | undefined` (see this dir's CLAUDE.md). Same idiom as
+  // `normalizeBaseUrl` above. Behaviour is unchanged either way — `hasText` already
+  // rejects non-strings — so this reads as the narrowing it is.
   const usersUrl = env?.SEMRUSH_USERS_BASE_URL;
-  const explicit = !!usersUrl && hasText(usersUrl);
+  const explicit = typeof usersUrl === 'string' && hasText(usersUrl);
   return normalizeBaseUrl(
     explicit ? usersUrl : env?.SEMRUSH_PROJECTS_BASE_URL,
     explicit ? 'SEMRUSH_USERS_BASE_URL' : 'SEMRUSH_PROJECTS_BASE_URL',

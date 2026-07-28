@@ -948,12 +948,12 @@ export async function handleDeleteMarketSubworkspace(
     }
     return { status: 204, deletedSiteId: null };
   }
-  // `resolveProject` above already resolved a project against `workspaceId`, so it is a real,
-  // non-blank id from here on — narrow the (JSDoc-optional) `string|null` once for tsc, which
-  // cannot infer that. Both the upstream DELETE and the release below rely on this invariant.
-  const subWorkspaceId = /** @type {string} */ (workspaceId);
+  // Reaching here means `resolveProject` matched a project from `listProjects(workspaceId)`,
+  // so `workspaceId` is a real, non-blank id — narrow the (JSDoc-optional) `string|null` once
+  // for tsc, which cannot infer that. The DELETE and the release below both rely on it.
+  const resolvedWorkspaceId = /** @type {string} */ (workspaceId);
   try {
-    await transport.deleteProject(subWorkspaceId, projectId);
+    await transport.deleteProject(resolvedWorkspaceId, projectId);
   } catch (e) {
     if (!isUpstreamGone(e)) {
       throw e;
@@ -981,9 +981,9 @@ export async function handleDeleteMarketSubworkspace(
     // the absolute-set race; the cross-container half is the deferred distributed lock (see
     // docs/decisions/007-cross-container-resource-lock.md).
     await withResourceLock(
-      subWorkspaceId,
+      resolvedWorkspaceId,
       () => releaseAiSurplus(transport, {
-        subWorkspaceId,
+        subWorkspaceId: resolvedWorkspaceId,
         floor: { projects: PROJECT_BLOCK, prompts: PROMPT_BLOCK },
         failFast: true,
       }, log),
