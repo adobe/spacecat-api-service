@@ -1495,6 +1495,13 @@ function BrandsController(ctx, log, env) {
     // sub-workspace was provisioned but the brand row failed to persist, the
     // catch releases the orphaned allocation (see below).
     let provisionedWorkspaceId = null;
+    // True only when provisioning CREATED the sub-workspace upstream. Sub-workspace titles are
+    // bare brand display names, which are not unique within an org, so provisioning may instead
+    // ADOPT an existing same-title workspace — possibly one belonging to a same-named sibling
+    // brand whose own create is still in flight and has not persisted its claim yet. The
+    // compensation in the catch below tears the workspace down, so it must fire only for a
+    // workspace this request actually created.
+    let provisionedWorkspaceWasCreated = false;
 
     try {
       if (!hasText(spaceCatId)) {
@@ -1683,6 +1690,7 @@ function BrandsController(ctx, log, env) {
             writeDeadline,
           }, log);
           provisionedWorkspaceId = provisioned.semrushSubWorkspaceId;
+          provisionedWorkspaceWasCreated = provisioned.createdByThisRequest === true;
           provisionedInitialMarket = {
             projectId: provisioned.projectId,
             geoTargetId: provisioned.geoTargetId,
@@ -1700,6 +1708,7 @@ function BrandsController(ctx, log, env) {
             brandName: brandData.name,
           }, log);
           provisionedWorkspaceId = bare.semrushSubWorkspaceId;
+          provisionedWorkspaceWasCreated = bare.createdByThisRequest === true;
         }
       }
 
@@ -1775,11 +1784,18 @@ function BrandsController(ctx, log, env) {
         emitBrandDemotionBlocked(context, 'createBrand');
       }
       log.error(`Error creating brand for organization ${spaceCatId}:`, error);
-      // Compensation: a sub-workspace was provisioned upstream but the brand row
-      // failed to persist (e.g. a unique-constraint 409 or transient PostgREST
-      // error). Nothing references that workspace, so release its allocation back
-      // to the parent pool (best-effort) rather than leaking it.
-      if (provisionedWorkspaceId && hasText(provisionedWorkspaceId)) {
+      // Compensation: a sub-workspace was CREATED upstream but the brand row failed to
+      // persist (e.g. a unique-constraint 409 or transient PostgREST error). Nothing
+      // references that workspace, so release its allocation back to the parent pool
+      // (best-effort) rather than leaking it.
+      //
+      // Gated on having created it. A workspace that provisioning ADOPTED is not ours to
+      // tear down: titles are bare brand display names, so an adopted workspace can be a
+      // same-named sibling brand's, and the unique-constraint failure that lands us here is
+      // itself the signal that the sibling won the race and legitimately owns it. Releasing
+      // it would delete that live brand's projects and strip its allocation.
+      if (provisionedWorkspaceId && hasText(provisionedWorkspaceId)
+        && provisionedWorkspaceWasCreated) {
         log.error('serenity: brand-create failed after subworkspace provision; releasing orphaned allocation', {
           semrushWorkspaceId: provisionedWorkspaceId,
         });
