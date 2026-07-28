@@ -375,6 +375,15 @@ export async function provisionBrandSubworkspaceBare(context, {
   try {
     // marketCount = 1: the bare sub-workspace is carved for a single future project
     // (the first market the user adds). ensureSubworkspace returns the new id.
+    // createReadiness: 'skip' (LLMO-6569) — this path creates NO project/prompts, so nothing
+    // downstream needs a settled workspace. Skipping the up-to-30s settle poll lets the
+    // sub-workspace pointer be captured/persisted immediately (instead of after the poll) and lets
+    // the workspace settle asynchronously; the first market-add later settles it before creating a
+    // project. Pre-fix, a poll timeout here fired BEFORE the id was captured, so the failure
+    // cleanup saw a null id and no-op'd — leaking the sub-workspace upstream (holding its full
+    // CREATE_ALLOCATION) with no brand row yet referencing it. (The "created upstream but never
+    // linked" orphan is the ACTIVATE variant, where the brand row already exists — see
+    // serenity.js.) This is Rainer's point #1 ("we don't create markets in that").
     const subWorkspaceId = await ensureSubworkspace(
       transport,
       brandStub,
@@ -388,6 +397,9 @@ export async function provisionBrandSubworkspaceBare(context, {
       // to a brand is provably another brand's — never this one's.
       {
         dynamicAllocation,
+        // createReadiness 'skip' (LLMO-6569): bare create makes no project/prompts, so skip the
+        // up-to-30s settle poll and persist the pointer immediately; the workspace settles async.
+        createReadiness: 'skip',
         brandCollection: context?.dataAccess?.Brand,
         onWorkspaceCreated: (id) => { createdWorkspaceId = id; },
       },

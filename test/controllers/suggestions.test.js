@@ -8277,7 +8277,7 @@ describe('Suggestions Controller', () => {
     });
 
     it('returns 207 success and logs warning when marking suggestion as EXPERIMENT_IN_PROGRESS fails', async () => {
-      edgeSuggestions[0].save.rejects(new Error('suggestion persist failed'));
+      mockSuggestion.saveMany.rejects(new Error('suggestion persist failed'));
 
       const response = await suggestionsController.deploySuggestionToEdge({
         ...context,
@@ -8347,9 +8347,11 @@ describe('Suggestions Controller', () => {
       expect(dataArg.edgeOptimizeStatus).to.equal('EXPERIMENT_IN_PROGRESS');
       expect(dataArg.geoExperimentId).to.be.undefined;
 
-      expect(edgeSuggestions[0].save).to.have.been.calledOnce;
       expect(edgeSuggestions[1].setData).to.have.been.calledOnce;
-      expect(edgeSuggestions[1].save).to.have.been.calledOnce;
+      expect(mockSuggestion.saveMany).to.have.been.calledOnce;
+      expect(mockSuggestion.saveMany.firstCall.args[0]).to.deep.equal([
+        edgeSuggestions[0], edgeSuggestions[1],
+      ]);
     });
 
     it('uses profile email as updatedBy in async deploy flow', async () => {
