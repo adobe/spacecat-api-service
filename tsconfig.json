@@ -25,6 +25,7 @@
     "src/support/url-utils.js",
     "src/controllers/serenity.js",
     "src/controllers/brands.js",
-    "src/dto/preflight.js"
+    "src/dto/preflight.js",
+    "src/serenity-prompt-classification/**/*.js"
   ]
 }

@@ -1,6 +1,6 @@
 {
   "name": "@adobe/spacecat-api-service",
-  "version": "1.696.0",
+  "version": "1.697.1",
   "description": "SpaceCat API Service",
   "main": "src/index.js",
   "type": "module",
@@ -25,6 +25,10 @@
     "deploy-stage": "hedy -v --deploy --aws-deploy-bucket=spacecat-stage-deploy --pkgVersion=latest",
     "deploy-dev": "hedy -v --deploy --pkgVersion=latest$CI_BUILD_NUM -l latest --aws-deploy-bucket=spacecat-dev-deploy --cleanup-ci=24h",
     "deploy-secrets": "hedy --aws-update-secrets --params-file=secrets/secrets.env",
+    "build:worker": "hedy -v --test-bundle --entryFile=src/serenity-prompt-classification/index.js --name=serenity-prompt-classification",
+    "deploy:worker": "hedy -v --deploy --entryFile=src/serenity-prompt-classification/index.js --name=serenity-prompt-classification --aws-deploy-bucket=spacecat-prod-deploy --pkgVersion=latest",
+    "deploy-stage:worker": "hedy -v --deploy --entryFile=src/serenity-prompt-classification/index.js --name=serenity-prompt-classification --aws-deploy-bucket=spacecat-stage-deploy --pkgVersion=latest",
+    "deploy-dev:worker": "hedy -v --deploy --entryFile=src/serenity-prompt-classification/index.js --name=serenity-prompt-classification --pkgVersion=latest$CI_BUILD_NUM -l latest --aws-deploy-bucket=spacecat-dev-deploy --cleanup-ci=24h",
     "docs": "npm run docs:lint && npm run docs:build",
     "docs:build": "npx @redocly/cli build-docs -o ./docs/index.html --config docs/openapi/redocly-config.yaml",
     "docs:lint": "npx @redocly/cli lint --config docs/openapi/redocly-config.yaml",
