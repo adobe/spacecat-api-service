@@ -14,7 +14,10 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
-import { ProjectEngineApiError } from '@adobe/spacecat-shared-project-engine-client';
+import {
+  ProjectEngineApiError,
+  createSerenityProjectEngineTransport,
+} from '@adobe/spacecat-shared-project-engine-client';
 
 import {
   createSerenityTransport,
@@ -1712,5 +1715,47 @@ describe('Semrush REST transport', () => {
         expect(params.get('country')).to.equal('');
       });
     });
+  });
+});
+
+// WP2 MERGE GATE (LLMO-6289) — structural, not social. WP1's write paths call the
+// v3 authorship-metadata facade on the REAL Project Engine client at RUNTIME
+// (createPromptsWithMetadata / patchPrompt / patchPromptMetadata /
+// patchPromptsMetadataBatch — see rest-transport.js). The installed client does
+// not expose them yet; they arrive with WP2's client re-vendor + dep bump, and
+// the app transport only *type*-checks today via the local
+// `ProjectEngineTransportWithMetadata` cast. If WP1 merged and deployed against
+// the current client, every native prompt write would throw
+// `TypeError: <method> is not a function` in production — the exact "green in
+// tests (mocked transport), broken in prod (real client lacks the method)" class
+// the repo guards against (SITES-45260; see CLAUDE.md "Lambda Bundle Constraints").
+// This test FAILS until the installed client carries all four methods, so CI
+// cannot go green — and this PR cannot merge clean — before the WP2 dependency
+// bump lands. It self-heals (delete this block + the file-level typedef) the
+// moment the bumped client ships the facade.
+describe('WP2 merge gate — Project Engine v3 authorship-metadata facade', () => {
+  const V3_METADATA_METHODS = [
+    'createPromptsWithMetadata',
+    'patchPrompt',
+    'patchPromptMetadata',
+    'patchPromptsMetadataBatch',
+  ];
+
+  it('the installed @adobe/spacecat-shared-project-engine-client exposes every v3 write method (bump before merge)', () => {
+    // Introspection only — the fetch seam rejects so a stray call fails loudly
+    // rather than hitting the network; we never invoke a method here.
+    const transport = createSerenityProjectEngineTransport({
+      baseUrl: 'https://wp2-merge-gate.invalid',
+      authToken: 'gate',
+      fetch: () => Promise.reject(new Error('WP2 gate: introspection only, never called')),
+    });
+    const missing = V3_METADATA_METHODS.filter((m) => typeof transport[m] !== 'function');
+    expect(
+      missing,
+      `Project Engine client is missing v3 facade method(s): [${missing.join(', ')}]. `
+        + 'Bump @adobe/spacecat-shared-project-engine-client to the WP2 release that vendors '
+        + 'them before merging WP1 (LLMO-6289) — deploying against the current client would '
+        + 'throw "is not a function" on every native prompt write.',
+    ).to.deep.equal([]);
   });
 });

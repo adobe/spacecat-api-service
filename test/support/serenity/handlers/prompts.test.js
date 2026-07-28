@@ -48,23 +48,25 @@ const WORKSPACE = 'workspace-1';
 
 // Matches one v3 create item `{ name, metadata }` (LLMO-6289): the create stamp
 // carries all four keys with created_* === updated_*. `by` is the expected
-// caller id (undefined when a test omits callerId — the metadata still carries
-// RFC 3339 timestamps).
+// caller id; when a test omits it we expect the builders' `'unknown'` floor —
+// the exact value real execution stamps for an unresolved caller (see
+// buildCreateMetadata), NOT a bare `undefined`.
 const createItemMatch = (name, by) => sinon.match({
   name,
   metadata: sinon.match({
     created_at: sinon.match.string,
-    created_by: by,
+    created_by: by ?? 'unknown',
     updated_at: sinon.match.string,
-    updated_by: by,
+    updated_by: by ?? 'unknown',
   }),
 });
 
 // Matches the combined v3 text-edit PATCH body `{ name, metadata }` (LLMO-6289):
 // an edit stamps ONLY the updated_* pair (created_* are kept by merge-patch).
+// `by` floors to the builders' `'unknown'` sentinel when a test omits it.
 const patchTextMatch = (name, by) => sinon.match({
   name,
-  metadata: sinon.match({ updated_at: sinon.match.string, updated_by: by }),
+  metadata: sinon.match({ updated_at: sinon.match.string, updated_by: by ?? 'unknown' }),
 });
 
 // A classifier over BARE `type` values — the dimension is the tag's root, never
@@ -1148,7 +1150,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
 
   // Mirror of the create-path contract (normalizePromptInput trims + rejects
   // empty): an edit must not slip an empty prompt past validation into the
-  // rename, where it would be classified and written blank.
+  // patch, where it would be classified and written blank.
   it('400s when text is an empty string', async () => {
     const dataAccess = makeDataAccess([]);
 
@@ -1189,7 +1191,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     expect(result.body.message).to.match(/non-empty/);
   });
 
-  it('edits text+tagIds in place (rename + replace-mode tag write), id unchanged', async () => {
+  it('edits text+tagIds in place (patchPrompt + replace-mode tag write), id unchanged', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
@@ -1451,7 +1453,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     expect(transport.patchPrompt).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', 'sem-1', patchTextMatch('new text', undefined));
   });
 
-  it('upstream rename 404 → return 404 promptNotFound (no tag write)', async () => {
+  it('upstream patchPrompt 404 → return 404 promptNotFound (no tag write)', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
@@ -1520,7 +1522,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
   // sibling prompt's exact text is refused upstream with 409 and NOTHING has
   // mutated — the handler propagates it untouched so the controller's mapError
   // answers 409 `conflict`.
-  it('upstream rename 409 (text collision) → throws with no tag write and no publish', async () => {
+  it('upstream patchPrompt 409 (text collision) → throws with no tag write and no publish', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
@@ -1550,7 +1552,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     expect(transport.publishProject).to.have.callCount(0);
   });
 
-  it('rename non-404 error → throws (no tag write)', async () => {
+  it('patchPrompt non-404 error → throws (no tag write)', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
@@ -1581,7 +1583,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
   // A tag-write failure after a successful rename is a half-applied edit (text
   // updated, tags not) — retryable, nothing lost. The error propagates and the
   // publish never fires, and the partial mutation is logged for on-call.
-  it('throws when the tag write fails after a successful rename (no publish)', async () => {
+  it('throws when the tag write fails after a successful patchPrompt (no publish)', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
@@ -2943,6 +2945,43 @@ describe('handlers/prompts.js — authorship metadata (LLMO-6289)', () => {
         createdBy: 'user-a',
         updatedAt: '2026-07-02T00:00:00Z',
         updatedBy: 'user-b',
+      });
+    });
+
+    // Locks buildPromptDto's per-field `?? null` fallback against a PARTIALLY
+    // populated upstream metadata object — a real shape for an un-backfilled
+    // prompt that was created (created_* stamped) but never edited (updated_*
+    // absent). Each field must fall back independently: present keys map, absent
+    // keys become null. A refactor that mapped metadata as a whole (or defaulted
+    // the object) instead of per-key would regress this and go uncaught.
+    it('maps only the populated metadata keys, nulling the absent ones per-field', async () => {
+      const project = makeProject({ semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en' });
+      const dataAccess = makeDataAccess([]);
+      dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+      const transport = {
+        listPromptsByTags: sinon.stub().resolves({
+          items: [{
+            id: 'sem-1',
+            name: 'a prompt',
+            metadata: {
+              created_at: '2026-07-01T00:00:00Z',
+              created_by: 'user-a',
+              // updated_at / updated_by intentionally absent (never edited).
+            },
+          }],
+          total: 1,
+        }),
+      };
+
+      const result = await handleListPrompts(transport, dataAccess, BRAND, WORKSPACE, {
+        geoTargetId: 2840, languageCode: 'en',
+      });
+
+      expect(result.items[0]).to.include({
+        createdAt: '2026-07-01T00:00:00Z',
+        createdBy: 'user-a',
+        updatedAt: null,
+        updatedBy: null,
       });
     });
 

@@ -111,11 +111,16 @@ export function resolveCallerId(ctx) {
  */
 export function buildCreateMetadata(callerId) {
   const now = new Date().toISOString();
+  // Defensive floor mirroring resolveCallerId's `unknown` sentinel: every
+  // production path already passes a resolved+capped id, but a future direct
+  // caller that skips resolveCallerId must never stamp `created_by: undefined`
+  // (which the upstream metadata column would reject / store as a null author).
+  const id = callerId || 'unknown';
   return {
     created_at: now,
-    created_by: callerId,
+    created_by: id,
     updated_at: now,
-    updated_by: callerId,
+    updated_by: id,
   };
 }
 
@@ -127,9 +132,11 @@ export function buildCreateMetadata(callerId) {
  * @param {string} callerId - already resolved + capped by {@link resolveCallerId}.
  */
 export function buildUpdateMetadata(callerId) {
+  // Same defensive floor as buildCreateMetadata: never stamp `updated_by:
+  // undefined` if a future caller reaches here without resolveCallerId.
   return {
     updated_at: new Date().toISOString(),
-    updated_by: callerId,
+    updated_by: callerId || 'unknown',
   };
 }
 

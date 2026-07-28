@@ -70,19 +70,21 @@ function makeTransport(overrides = {}) {
 const classifyByBrandMention = (text) => (/\bacme\b/i.test(text) ? 'branded' : 'non-branded');
 
 // Matchers for the v3 metadata write shapes (LLMO-6289), mirroring the flat-mode
-// twin's test helpers. `by` is undefined when a test omits callerId.
+// twin's test helpers. When a test omits `by`, we expect the builders' `'unknown'`
+// floor — the exact value real execution stamps for an unresolved caller (see
+// buildCreateMetadata), NOT a bare `undefined`.
 const createItemMatch = (name, by) => sinon.match({
   name,
   metadata: sinon.match({
     created_at: sinon.match.string,
-    created_by: by,
+    created_by: by ?? 'unknown',
     updated_at: sinon.match.string,
-    updated_by: by,
+    updated_by: by ?? 'unknown',
   }),
 });
 const patchTextMatch = (name, by) => sinon.match({
   name,
-  metadata: sinon.match({ updated_at: sinon.match.string, updated_by: by }),
+  metadata: sinon.match({ updated_at: sinon.match.string, updated_by: by ?? 'unknown' }),
 });
 
 describe('prompts-subworkspace handlers', () => {
@@ -285,8 +287,10 @@ describe('prompts-subworkspace handlers', () => {
         prompts: [{
           text: 'p', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
         }],
-      }, log, undefined, 'caller-42');
-      expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(WS, 'p-us-en', [createItemMatch('p', 'caller-42')], ['tag-1']);
+      }, log, undefined, undefined, undefined, 'caller-42');
+      // The create also injects the derived origin + default intent alongside the
+      // caller's tag; the metadata carries the resolved caller id (LLMO-6289).
+      expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(WS, 'p-us-en', [createItemMatch('p', 'caller-42')], ['tag-1', TAG_IDS.originHuman, TAG_IDS.intentInformational]);
     });
 
     it('dynamic-allocation ON: fronts headroom sized on the batch BEFORE the write, not just before publish (LLMO-6190, live-verified)', async () => {
@@ -486,7 +490,7 @@ describe('prompts-subworkspace handlers', () => {
   });
 
   describe('handleUpdatePromptSubworkspace', () => {
-    it('edits the prompt in place (rename + tag write) and publishes', async () => {
+    it('edits the prompt in place (patchPrompt + tag write) and publishes', async () => {
       const transport = makeTransport();
       const result = await handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
         text: 'new', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
@@ -509,7 +513,7 @@ describe('prompts-subworkspace handlers', () => {
       const transport = makeTransport();
       const result = await handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
         text: 'new', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
-      }, log, undefined, 'caller-42');
+      }, log, undefined, undefined, undefined, 'caller-42');
       expect(result.status).to.equal(200);
       expect(transport.patchPrompt).to.have.been.calledOnceWithExactly(WS, 'p-us-en', 'old-id', patchTextMatch('new', 'caller-42'));
       // The combined PATCH carries NO created_* (merge-patch keeps them); the tag
@@ -529,7 +533,7 @@ describe('prompts-subworkspace handlers', () => {
       expect(result.body.error).to.equal('marketNotFound');
     });
 
-    it('404s promptNotFound when the upstream rename 404s (no tag write)', async () => {
+    it('404s promptNotFound when the upstream patchPrompt 404s (no tag write)', async () => {
       const transport = makeTransport({
         patchPrompt: sinon.stub().rejects(new SerenityTransportError(404, 'gone')),
       });
@@ -627,7 +631,7 @@ describe('prompts-subworkspace handlers', () => {
       );
     });
 
-    it('re-throws a rename 409 (text collision) with no tag write and no publish', async () => {
+    it('re-throws a patchPrompt 409 (text collision) with no tag write and no publish', async () => {
       const transport = makeTransport({
         patchPrompt: sinon.stub().rejects(new SerenityTransportError(409, 'conflict')),
       });
@@ -638,7 +642,7 @@ describe('prompts-subworkspace handlers', () => {
       expect(transport.publishProject).to.not.have.been.called;
     });
 
-    it('re-throws a non-404 rename failure (no tag write)', async () => {
+    it('re-throws a non-404 patchPrompt failure (no tag write)', async () => {
       const transport = makeTransport({
         patchPrompt: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
       });
@@ -648,7 +652,7 @@ describe('prompts-subworkspace handlers', () => {
       expect(transport.updatePromptTagsByIds).to.not.have.been.called;
     });
 
-    it('re-throws a tag-write failure after a successful rename (no publish)', async () => {
+    it('re-throws a tag-write failure after a successful patchPrompt (no publish)', async () => {
       const tagErr = Object.assign(new Error('tag write boom'), { status: 500 });
       const transport = makeTransport({
         updatePromptTagsByIds: sinon.stub().rejects(tagErr),
