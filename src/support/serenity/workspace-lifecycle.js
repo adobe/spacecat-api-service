@@ -77,34 +77,31 @@ function assertNotParent(workspaceId, parentWorkspaceId) {
   }
 }
 
-// The sub-workspace title must be UNIQUE per brand within the org parent: it is
-// the ONLY key ambiguous-create recovery (adoptFromFamily) has to match a
-// timed-out create against the parent's family listing. Brand DISPLAY names are
-// NOT unique within an org, so a name-only title would let one brand adopt a
-// different, same-named brand's sub-workspace after a create timeout - and a
-// later deactivate would then decommission the WRONG brand's live markets.
-// Embed (the first 8 chars of) the immutable brand id so the title stays short
-// in the Semrush UI while remaining collision-free for the adoption match: 8 hex
-// chars is 2^32 of space, far more than a single org's brand count, so the
-// name+suffix pair is still effectively unique per brand.
-const ID_SUFFIX_LEN = 8;
-
+// A brand's sub-workspace is titled with the brand's bare display name — the
+// same convention the migration CLI uses, so a customer sees ONE naming scheme
+// in the Semrush UI regardless of how the brand was onboarded.
+//
+// Brand display names are NOT unique within an org, so the title alone is a weak
+// key for the two adoption paths in ensureSubworkspace. It is deliberately not
+// the only one: findAdoptableFamilyMatch drops every family candidate already
+// bound to a DIFFERENT brand before it counts matches, which is what keeps a
+// timed-out create from adopting a same-named sibling brand's sub-workspace (and
+// a later deactivate from decommissioning the wrong brand's live markets). See
+// the claim filter there for the full rule set.
+//
+// The name is therefore required: an untitled workspace would collide with every
+// other untitled one and is not something adoption could ever disambiguate. Every
+// path reaching here validates the name earlier (brand create 400s without one),
+// so this is defensive-only.
 function subworkspaceTitle(brand) {
   const name = brand?.getName?.();
-  const id = brand?.getId?.();
-  const suffix = hasText(id) ? id.slice(0, ID_SUFFIX_LEN) : '';
-  // The id-suffix is the collision-free key the adoption match depends on (see
-  // the block comment above). Without it the title would not be unique per
-  // brand, so a missing brand id is a hard error, NOT a silent fallback to a
-  // non-unique title that adoption could later mis-match. brandId is always a
-  // UUID on every path that reaches here, so this is defensive-only.
-  if (!hasText(suffix)) {
+  if (!hasText(name)) {
     throw new ErrorWithStatusCode(
-      'Brand sub-workspace title requires a brand id (none resolved)',
+      'Brand sub-workspace title requires a brand name (none resolved)',
       500,
     );
   }
-  return hasText(name) ? `${name} [${suffix}]` : `brand-${suffix}`;
+  return name;
 }
 
 export async function pollUntilCreated(transport, workspaceId, { attempts, intervalMs, sleep }) {
@@ -136,8 +133,42 @@ function familyItems(family) {
 }
 
 /**
+ * Resolves the id of the brand currently bound to `workspaceId`, or `null` when no
+ * brand claims it. `brands.semrush_sub_workspace_id` carries a DB UNIQUE constraint,
+ * so at most one brand can ever be returned.
+ *
+ * @param {object} brandCollection - the data-access Brand collection.
+ * @param {string} [workspaceId]
+ * @returns {Promise<string|null>}
+ */
+async function claimedBrandId(brandCollection, workspaceId) {
+  if (!workspaceId || !hasText(workspaceId)) {
+    return null;
+  }
+  const owner = await brandCollection.findBySemrushSubWorkspaceId(workspaceId);
+  return owner?.getId?.() ?? null;
+}
+
+/**
  * Finds the one adoptable same-title child in the parent's family, or `null` when
- * none exists. "Adoptable" means a `created`, project-empty sub-workspace.
+ * none exists. "Adoptable" means a `created`, project-empty sub-workspace that no
+ * other brand has claimed.
+ *
+ * Claim filter: titles are bare brand display names, which are not unique within an
+ * org (prod carries same-named brand pairs today, some with a sub-workspace already
+ * bound). A candidate whose id is already persisted as another brand's
+ * `semrush_sub_workspace_id` is therefore provably NOT ours — adopting it would graft
+ * this brand onto a sibling's workspace, and the sibling's next deactivate would
+ * decommission markets belonging to both. Such candidates are DROPPED rather than
+ * escalated: dropping lets the proactive path correctly create a fresh workspace, and
+ * lets a genuine lone match still be adopted when a claimed twin sits beside it in the
+ * listing. A candidate claimed by THIS brand stays adoptable — that is a concurrent
+ * request for the same brand, which the caller's `reloadPointer` guard settles.
+ *
+ * The claim lookup is mandatory whenever there is at least one same-title `created`
+ * candidate: without it the title is the only key left, which is exactly the
+ * mis-adoption this filter exists to prevent. A create with no candidates has nothing
+ * to mis-adopt, so it does not need one.
  *
  * Status filter (issue #2718): a Semrush child create can be 200-acked and then
  * fail provisioning asynchronously, leaving a stub permanently stuck at
@@ -157,12 +188,43 @@ function familyItems(family) {
  * @param {string} parentWorkspaceId
  * @param {string} title
  * @param {object} log
+ * @param {object} claim - claim-filter inputs.
+ * @param {object} [claim.brandCollection] - the data-access Brand collection used to
+ *   detect a candidate already bound to another brand.
+ * @param {string} [claim.selfBrandId] - this brand's id; a candidate claimed by it is
+ *   still adoptable.
  * @returns {Promise<object|null>} the sole adoptable family entry, or null.
  */
-async function findAdoptableFamilyMatch(transport, parentWorkspaceId, title, log) {
+async function findAdoptableFamilyMatch(transport, parentWorkspaceId, title, log, claim) {
+  const { brandCollection, selfBrandId } = claim;
   const family = await transport.listWorkspaceFamily(parentWorkspaceId);
   const items = familyItems(family);
-  const matches = items.filter((w) => w?.title === title && w?.status === 'created');
+  const sameTitle = items.filter((w) => w?.title === title && w?.status === 'created');
+
+  if (sameTitle.length > 0
+    && typeof brandCollection?.findBySemrushSubWorkspaceId !== 'function') {
+    throw new ErrorWithStatusCode(
+      `Cannot evaluate subworkspace candidates for '${title}': no Brand collection to detect a `
+      + 'candidate already claimed by another brand',
+      500,
+    );
+  }
+  const owners = await Promise.all(
+    sameTitle.map((w) => claimedBrandId(brandCollection, w?.id)),
+  );
+  // One predicate for both partitions so they can never drift apart.
+  const isAdoptable = (i) => !owners[i] || owners[i] === selfBrandId;
+  const matches = sameTitle.filter((w, i) => isAdoptable(i));
+  const claimedByOthers = sameTitle.filter((w, i) => !isAdoptable(i));
+  if (claimedByOthers.length > 0) {
+    log?.info?.('ensureSubworkspace: ignoring same-title family entries already claimed by another brand', {
+      parentWorkspaceId,
+      title,
+      claimedCount: claimedByOthers.length,
+      claimedIds: claimedByOthers.map((w) => w?.id),
+    });
+  }
+
   if (matches.length === 0) {
     // Surface filtered-out non-`created` same-title stubs (Semrush ack-then-fail
     // zombies) so their accumulation is visible in logs without a manual family
@@ -228,14 +290,23 @@ async function findAdoptableFamilyMatch(transport, parentWorkspaceId, title, log
 
 /**
  * Ambiguous-create recovery (design §6): a timed-out createSubworkspace is
- * ambiguous (no idempotency key). List the parent's family, match the exact
- * title, and adopt a `created`, project-empty subworkspace. No match → fail (the
- * create was attempted, so a missing entry is an error here, unlike the proactive
- * path where it just means "create one"). Multiple matches → fail with an alert,
- * never guess.
+ * ambiguous (no idempotency key). List the parent's family, match the title among
+ * the candidates no other brand has claimed, and adopt a `created`, project-empty
+ * subworkspace. No match → fail (the create was attempted, so a missing entry is an
+ * error here, unlike the proactive path where it just means "create one"). Multiple
+ * matches → fail with an alert, never guess.
+ *
+ * @param {object} transport
+ * @param {string} parentWorkspaceId
+ * @param {string} title
+ * @param {object} log
+ * @param {object} claim - claim-filter inputs, forwarded to findAdoptableFamilyMatch.
+ * @param {object} [claim.brandCollection]
+ * @param {string} [claim.selfBrandId]
+ * @returns {Promise<object>} the adopted family entry.
  */
-async function adoptFromFamily(transport, parentWorkspaceId, title, log) {
-  const adopted = await findAdoptableFamilyMatch(transport, parentWorkspaceId, title, log);
+async function adoptFromFamily(transport, parentWorkspaceId, title, log, claim) {
+  const adopted = await findAdoptableFamilyMatch(transport, parentWorkspaceId, title, log, claim);
   if (!adopted) {
     throw new ErrorWithStatusCode(
       `Ambiguous subworkspace create for '${title}' and no family match to adopt`,
@@ -340,8 +411,8 @@ export async function releaseFullAllocation(
  *                         the transfer contract is Gate-A-pinned). Note a
  *                         deactivated brand has a NULL column (deactivate clears
  *                         it), so it takes the create path below, not this one.
- *   - no column, create → create subworkspace → poll `created` → persist the column
- *                         AFTER it reads back created.
+ *   - no column, create → create subworkspace → gate on `created` per `createReadiness`
+ *                         (poll / skip) → persist the column.
  *   - create timeout    → adopt from the parent family by exact title.
  *
  * Persisting the column flips the brand into subworkspace mode (resolveBrandWorkspace).
@@ -359,6 +430,26 @@ export async function releaseFullAllocation(
  * @param {object} [options] - feature-flag toggles for the dual-mode carve.
  * @param {boolean} [options.dynamicAllocation] - when true (LLMO/dynamic-allocation ON), skip
  *   the flat re-grant on an existing sub-workspace; JIT top-up owns sizing. Default false.
+ * @param {'poll'|'skip'} [options.createReadiness] - how the fresh-CREATE path gates on the new
+ *   sub-workspace settling to `created` (LLMO-6569). 'poll' (default): up to ~30s settle poll —
+ *   the legacy behaviour, kept for callers that create a project/prompts against the workspace in
+ *   THIS request (brand-create-with-market, and the market/project-creating activation branch), so
+ *   the write does not race a not-yet-`created` workspace. 'skip': no readiness gate at all — for
+ *   sub-workspace-only callers that create NOTHING against the workspace in this request (bare
+ *   brand create, and the sub-workspace-only activate branches — pending→active and bare
+ *   reactivation), so the pointer persists immediately and the workspace settles asynchronously (a
+ *   later market-add settles it via the existing-sub-workspace branch before creating a project).
+ *   Only affects the create path; the existing-sub-workspace branch is unchanged.
+ * @param {object} [options.brandCollection] - the data-access Brand collection. Required on the
+ *   create path whenever the parent family holds a same-title `created` candidate: titles are
+ *   bare brand names, so the claim lookup is what distinguishes our own interrupted create from
+ *   a same-named sibling brand's sub-workspace (see findAdoptableFamilyMatch).
+ * @param {function} [options.onWorkspaceCreated] - called with the sub-workspace id when this
+ *   call FRESHLY CREATED it upstream, and never when it adopted an existing one. Failure
+ *   compensation must key off this rather than off the returned id: a caller that tears down
+ *   an ADOPTED workspace is tearing down a workspace it does not own. Titles are bare brand
+ *   names, so an adopted workspace can belong to a same-named sibling brand whose own
+ *   provisioning is still in flight and has not yet persisted its claim.
  * @returns {Promise<string>} the subworkspace id.
  */
 export async function ensureSubworkspace(
@@ -371,7 +462,9 @@ export async function ensureSubworkspace(
   reloadPointer = null,
   options = {},
 ) {
-  const { dynamicAllocation = false } = options;
+  const {
+    dynamicAllocation = false, createReadiness = 'poll', brandCollection, onWorkspaceCreated,
+  } = options;
   const poll = {
     attempts: timing.attempts ?? DEFAULT_POLL_ATTEMPTS,
     intervalMs: timing.intervalMs ?? DEFAULT_POLL_INTERVAL_MS,
@@ -419,14 +512,20 @@ export async function ensureSubworkspace(
   }
 
   const title = subworkspaceTitle(brand);
+  const claim = { brandCollection, selfBrandId: brand?.getId?.() };
   // Idempotent create-or-adopt (issue #2718): a retry after a partial
-  // provisioning failure must NOT spawn a duplicate same-title stub (titles embed
-  // the brand-id suffix, so a retry collides on title). Check the parent family
-  // for an existing `created`, empty same-title child FIRST and reuse it; only
-  // create when none exists. Failed `not ready` zombies are filtered out by the
-  // status check in findAdoptableFamilyMatch, so they are never reused and never
-  // inflate the ambiguity 409.
-  let created = await findAdoptableFamilyMatch(transport, parentWorkspaceId, title, log);
+  // provisioning failure must NOT spawn a duplicate stub for this brand (a retry
+  // rebuilds the same title). Check the parent family for an existing `created`,
+  // empty, unclaimed same-title child FIRST and reuse it; only create when none
+  // exists. Failed `not ready` zombies are filtered out by the status check in
+  // findAdoptableFamilyMatch, and a same-named SIBLING brand's workspace by the
+  // claim check there, so neither is ever reused nor inflates the ambiguity 409.
+  let created = await findAdoptableFamilyMatch(transport, parentWorkspaceId, title, log, claim);
+  // Provenance, not just identity: everything that later tears this workspace down must know
+  // whether WE brought it into existence. An adopted workspace may belong to a same-named
+  // sibling brand whose provisioning is still in flight (its claim is not persisted yet), so
+  // releasing it would strip a workspace we do not own.
+  let freshlyCreated = false;
   if (!created) {
     try {
       // Carve a fixed allocation (CREATE_ALLOCATION) onto the child so it has the
@@ -438,13 +537,14 @@ export async function ensureSubworkspace(
         title,
         CREATE_ALLOCATION,
       );
+      freshlyCreated = true;
     } catch (e) {
       // 504 = our transport's timeout signal → ambiguous create, recover by
       // adoption. The transport timeout is a SerenityTransportError (status 504),
       // NOT an ErrorWithStatusCode — guard on that so a 504 from our own poll
       // helper (an ErrorWithStatusCode) re-throws instead of re-entering adoption.
       if (!(e instanceof ErrorWithStatusCode) && e?.status === 504) {
-        created = await adoptFromFamily(transport, parentWorkspaceId, title, log);
+        created = await adoptFromFamily(transport, parentWorkspaceId, title, log, claim);
       } else {
         throw e;
       }
@@ -459,7 +559,16 @@ export async function ensureSubworkspace(
   // never persist the parent as the brand's sub-workspace.
   assertNotParent(workspaceId, parentWorkspaceId);
 
-  await pollUntilCreated(transport, workspaceId, poll);
+  // LLMO-6569: the fresh sub-workspace settle poll (up to 30×1s) was the top cause of the ~15s
+  // Fastly edge timeout, and — sitting between the create above and the pointer persist below — its
+  // timeout was exactly what orphaned brands (workspace created upstream, pointer never written).
+  // 'skip' lets a caller that creates NOTHING against the workspace in this request (bare brand
+  // create) persist the pointer immediately and let the workspace settle asynchronously; the first
+  // market-add later settles it (existing-sub-workspace branch) before creating a project. Any
+  // other value keeps the legacy poll. See @param options.createReadiness.
+  if (createReadiness !== 'skip') {
+    await pollUntilCreated(transport, workspaceId, poll);
+  }
 
   // Concurrency guard (defense-in-depth against a lost-update orphan): a
   // parallel activate / createMarket for the SAME brand may have created and
@@ -475,18 +584,26 @@ export async function ensureSubworkspace(
   if (typeof reloadPointer === 'function') {
     const concurrent = await reloadPointer();
     if (hasText(concurrent) && concurrent !== workspaceId) {
-      log?.error?.('ensureSubworkspace: concurrent activation won; releasing our orphaned workspace allocation', {
+      log?.error?.('ensureSubworkspace: concurrent activation won; standing down', {
         keptWorkspaceId: concurrent,
-        releasedWorkspaceId: workspaceId,
+        standDownWorkspaceId: workspaceId,
+        // False → we adopted this workspace rather than creating it, so it is not
+        // ours to release; we simply let it be.
+        releasing: freshlyCreated,
       });
       try {
+        // Release ONLY a workspace this call created. An ADOPTED one is not ours to tear down:
+        // titles are bare brand names, so it can be a same-named sibling brand's workspace whose
+        // claim is not persisted yet, and emptying it would destroy that brand's provisioning.
         // The loser's workspace is provably project-empty here — the create-or-adopt path above
         // never creates a project itself (that only happens in the CALLER, strictly after this
         // function returns). Still run deleteAllProjects defensively (cheap, idempotent) so this
-        // stays uniform with the other 3 release sites (LLMO-6189) rather than leaning on that
+        // stays uniform with the other release sites (LLMO-6189) rather than leaning on that
         // invariant holding forever.
-        await deleteAllProjects(transport, workspaceId);
-        await releaseFullAllocation(transport, workspaceId, parentWorkspaceId, log);
+        if (freshlyCreated) {
+          await deleteAllProjects(transport, workspaceId);
+          await releaseFullAllocation(transport, workspaceId, parentWorkspaceId, log);
+        }
       } catch (e) {
         // Best-effort: a failed release leaves the orphan resourced, but we
         // still must NOT clobber the winner's pointer below.
@@ -499,7 +616,14 @@ export async function ensureSubworkspace(
     }
   }
 
-  // Persist AFTER the workspace reads back `created` — flips the brand to subworkspace mode.
+  if (freshlyCreated && typeof onWorkspaceCreated === 'function') {
+    onWorkspaceCreated(workspaceId);
+  }
+
+  // Persist the pointer — this flips the brand into subworkspace mode. On 'poll' the workspace has
+  // already read back `created` above; on 'skip' (LLMO-6569) we persist WITHOUT waiting for settle,
+  // because the caller creates nothing against the workspace in this request, so readiness is not
+  // required here — the workspace settles asynchronously.
   brand.setSemrushSubWorkspaceId(workspaceId);
   await brand.save();
   // Invalidate the resolver's brand cache so the next request sees subworkspace mode

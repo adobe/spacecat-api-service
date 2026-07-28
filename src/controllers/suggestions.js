@@ -2184,23 +2184,20 @@ function SuggestionsController(ctx, sqs, env) {
 
         validSuggestionEntities = [...validSuggestions, ...patternSuggestions];
 
-        const markResults = await Promise.allSettled(
-          validSuggestionEntities.map(async (suggestion) => {
-            const currentData = suggestion.getData();
-            suggestion.setData({
-              ...currentData,
-              edgeOptimizeStatus: 'EXPERIMENT_IN_PROGRESS',
-            });
-            suggestion.setUpdatedBy(profile?.email || 'geo-experiment');
-            return suggestion.save();
-          }),
-        );
-
-        const markFailures = markResults.filter((r) => r.status === 'rejected');
-        if (markFailures.length > 0) {
-          context.log.warn(`[geo-experiment-failed] ${markFailures.length} suggestion(s) failed to mark as EXPERIMENT_IN_PROGRESS`, {
+        validSuggestionEntities.forEach((suggestion) => {
+          suggestion.setData({
+            ...suggestion.getData(),
+            edgeOptimizeStatus: 'EXPERIMENT_IN_PROGRESS',
+          });
+          suggestion.setUpdatedBy(profile?.email || 'geo-experiment');
+        });
+        try {
+          // saveMany is atomic per 25-item chunk; partial failure is acceptable here since the
+          // response below doesn't gate on this write succeeding.
+          await Suggestion.saveMany(validSuggestionEntities);
+        } catch (markError) {
+          context.log.warn(`[geo-experiment-failed] suggestion(s) failed to mark as EXPERIMENT_IN_PROGRESS: ${markError.message}`, {
             geoExperimentId,
-            errors: markFailures.map((r) => r.reason?.message),
           });
         }
 
