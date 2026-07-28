@@ -158,12 +158,18 @@ export function resolveBrandAiCeiling(env, log) {
  * @param {Partial<typeof DEFAULT_RETRY_ON_QUOTA>} [opts.retryOnQuota] - poll-retry shape override
  *   for `retryOnQuota` (tests inject a fake `sleep` + tiny `backoffMs`/`totalBudgetMs`; production
  *   uses {@link DEFAULT_RETRY_ON_QUOTA} unmodified).
+ * @param {object | null} [opts.env] - request env, passed through to `ensureAiHeadroom` to feed the
+ *   org-pool early-warning Slack alert (serenity-docs#72 §5) off its existing advisory pool-free
+ *   read. Optional — most call sites don't thread this yet (see quota-alerts.js).
+ * @param {string | null} [opts.orgId] - IMS org id, for the alert payload only.
+ * @param {string | null} [opts.brandId] - brand id, for the alert payload only (also gates the §5
+ *   hard-exhaustion alert on `brandAiLimit`/`orgPoolExhausted` alongside `env`).
  * @param {any} [log]
  * @returns {HeadroomGuard}
  */
 export function createHeadroomGuard(transport, {
   enabled, subWorkspaceId, parentWorkspaceId, ceiling = DEFAULT_BRAND_AI_CEILING, blocks,
-  retryOnQuota: retryOnQuotaOpts = {},
+  retryOnQuota: retryOnQuotaOpts = {}, env, orgId, brandId,
 }, log) {
   if (!enabled) {
     // Disabled path: a genuine no-op, byte-for-byte the pre-PR behavior. retryOnQuota is likewise a
@@ -184,7 +190,15 @@ export function createHeadroomGuard(transport, {
   const ensure = (need = {}, { includeDrafted = false } = {}) => withResourceLock(
     childId,
     () => ensureAiHeadroom(transport, {
-      subWorkspaceId: childId, parentWorkspaceId: parentId, need, ceiling, blocks, includeDrafted,
+      subWorkspaceId: childId,
+      parentWorkspaceId: parentId,
+      need,
+      ceiling,
+      blocks,
+      includeDrafted,
+      env,
+      orgId,
+      brandId,
     }, log),
   );
   const {
