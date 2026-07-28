@@ -12,12 +12,16 @@
 
 import { apiBaseUrl } from './spacecat-utils.js';
 
-// x-api-key is deprecated starting August 2026. Suites now authenticate as a
-// registered S2S consumer (SITES-48671): IMS client-credentials grant -> IMS
-// access token -> POST /auth/s2s/login -> service-signed session token, sent
-// as `Authorization: Bearer <sessionToken>`.
-// See docs/s2s/CONSUMER_INTEGRATION_GUIDE.md for the full flow and this
+// x-api-key is deprecated starting August 2026. Two ways to authenticate:
+// - S2S consumer (SITES-48671, preferred - this is what CI uses): IMS
+//   client-credentials grant -> IMS access token -> POST /auth/s2s/login ->
+//   service-signed session token.
+// - Local fallback for engineers without S2S client credentials: a user's own
+//   IMS access token -> POST /auth/login -> service-signed session token.
+// Either way, the session token is sent as `Authorization: Bearer <sessionToken>`.
+// See docs/s2s/CONSUMER_INTEGRATION_GUIDE.md for the full S2S flow and this
 // consumer's registered scope/org.
+// IMS stage, not prod - dev validates access tokens against IMS stage.
 const IMS_TOKEN_ENDPOINT = 'https://ims-na1-stg1.adobelogin.com/ims/token/v3';
 const IMS_SCOPE = 'openid,AdobeID,user_management_sdk';
 const IMS_ORG_ID = '8C6043F15F43B6390A49401A@AdobeOrg'; // AEM Sites Engineering
@@ -43,12 +47,7 @@ async function getImsAccessToken(clientId, clientSecret) {
   return accessToken;
 }
 
-async function login() {
-  const clientId = process.env.API_E2E_TESTS_CLIENT_ID_DEV;
-  const clientSecret = process.env.API_E2E_TESTS_CLIENT_SECRET_DEV;
-  if (!clientId || !clientSecret) {
-    return null;
-  }
+async function loginViaS2S(clientId, clientSecret) {
   const imsAccessToken = await getImsAccessToken(clientId, clientSecret);
   const response = await fetch(`${apiBaseUrl}/auth/s2s/login`, {
     method: 'POST',
@@ -65,10 +64,38 @@ async function login() {
   return sessionToken;
 }
 
+async function loginViaImsUserToken(imsAccessToken) {
+  const response = await fetch(`${apiBaseUrl}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ accessToken: imsAccessToken }),
+  });
+  if (!response.ok) {
+    throw new Error(`POST /auth/login failed with status ${response.status}`);
+  }
+  const { sessionToken } = await response.json();
+  return sessionToken;
+}
+
+async function login() {
+  const clientId = process.env.API_E2E_TESTS_CLIENT_ID_DEV;
+  const clientSecret = process.env.API_E2E_TESTS_CLIENT_SECRET_DEV;
+  if (clientId && clientSecret) {
+    return loginViaS2S(clientId, clientSecret);
+  }
+  const imsAccessToken = process.env.IMS_ACCESS_TOKEN;
+  if (imsAccessToken) {
+    return loginViaImsUserToken(imsAccessToken);
+  }
+  return null;
+}
+
 /**
- * Resolves to the cached session token, logging in once per test run.
- * Resolves to null (not a throw) when the S2S client credentials are unset,
- * so callers can skip gracefully instead of failing when none were provided.
+ * Resolves to the cached session token, logging in once per test run: the S2S
+ * client-credentials flow when API_E2E_TESTS_CLIENT_ID_DEV/SECRET_DEV are set
+ * (CI, and any engineer with S2S credentials), falling back to a user's own
+ * IMS access token (IMS_ACCESS_TOKEN) otherwise. Resolves to null (not a
+ * throw) when neither is set, so callers can skip gracefully.
  * @returns {Promise<string|null>}
  */
 export function getSessionToken() {
