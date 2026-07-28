@@ -617,6 +617,10 @@ describe('getRouteHandlers', () => {
     listIssueTypes: sinon.stub(),
   };
 
+  const mockOnboardingController = {
+    triggerOnboarding: sinon.stub(),
+  };
+
   const mockRedirectsController = {
     getRedirects: sinon.stub(),
   };
@@ -699,6 +703,7 @@ describe('getRouteHandlers', () => {
       mockElementsController,
       mockProxyController,
       mockTaskManagementController,
+      mockOnboardingController,
       mockRedirectsController,
       mockAuditPolicyController,
     );
@@ -946,6 +951,7 @@ describe('getRouteHandlers', () => {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/source-visibility-headline',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate',
+      'POST /v2/orgs/:spaceCatId/semrush-onboarding',
       'GET /v2/orgs/:spaceCatId/sites/:siteId/brand',
       'GET /org/:spaceCatId/brands/:brandId/fanout-report',
       'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions',
