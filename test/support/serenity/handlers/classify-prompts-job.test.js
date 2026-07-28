@@ -25,7 +25,7 @@ function fakeLog() {
 }
 
 function makeJob(metadata) {
-  return { getMetadata: () => metadata };
+  return { getId: () => 'job-1', getMetadata: () => metadata };
 }
 
 async function load({ intentByTextMap, createAndEnqueueJobStub, transport }) {
@@ -117,6 +117,7 @@ describe('handlers/classify-prompts-job.js (serenity-docs#33)', () => {
       const job = makeJob({
         brandId: 'brand-1',
         semrushWorkspaceId: WORKSPACE,
+        promiseToken: { promise_token: 'ptok-current' },
         prompts: [{
           text: 'ambiguous text', geoTargetId: 2840, languageCode: 'en', tagIds: [TAG_IDS.categoryRunningShoes],
         }],
@@ -141,6 +142,37 @@ describe('handlers/classify-prompts-job.js (serenity-docs#33)', () => {
       expect(enqueueArgs.metadata.mode).to.equal('reclassify');
       expect(enqueueArgs.metadata.items).to.have.lengthOf(1);
       expect(enqueueArgs.metadata.items[0].promptId).to.equal('created-prompt');
+      // Forwards the CURRENT job's already-exchanged promise token — never
+      // mints a fresh one (the worker has no HTTP context to mint from).
+      expect(enqueueArgs.promiseToken).to.deep.equal({ promise_token: 'ptok-current' });
+      expect(enqueueArgs.metadata.requeueDepth).to.equal(1);
+    });
+
+    it('stops requeuing once the depth cap is reached, leaving the rest permanently pending', async () => {
+      const intentByTextMap = new Map([['ambiguous text', null]]);
+      const createAndEnqueueJobStub = sinon.stub();
+      const { classifyPromptsHandler } = await load({
+        intentByTextMap, createAndEnqueueJobStub, transport,
+      });
+
+      const project = { getGeoTargetId: () => 2840, getLanguageCode: () => 'en', getSemrushProjectId: () => 'proj-1' };
+      const context = {
+        env: {}, log: fakeLog(), dataAccess: dataAccessFor([project]),
+      };
+      const job = makeJob({
+        brandId: 'brand-1',
+        semrushWorkspaceId: WORKSPACE,
+        requeueDepth: 5,
+        prompts: [{
+          text: 'ambiguous text', geoTargetId: 2840, languageCode: 'en', tagIds: [TAG_IDS.categoryRunningShoes],
+        }],
+      });
+
+      const result = await classifyPromptsHandler(context, job, 'token');
+
+      expect(result.pendingClassificationCount).to.equal(1);
+      expect(result.requeuedJobId).to.equal(null);
+      expect(createAndEnqueueJobStub).to.not.have.been.called;
     });
 
     it('skips a prompt whose slice has no matching project', async () => {

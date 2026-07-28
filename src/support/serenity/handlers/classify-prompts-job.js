@@ -38,6 +38,16 @@ import { resolveIntentValueInjection } from '../tag-tree.js';
 export const CLASSIFY_PROMPTS_JOB_TYPE = 'serenity-classify-prompts';
 
 /**
+ * Hard cap on self-requeue depth. Each requeue only carries forward prompts still
+ * unresolved after a full `classifyPromptIntentsUnbounded` retry ladder, so a chain
+ * this long means something is persistently wrong (e.g. Azure OpenAI down for an
+ * extended period), not ordinary flakiness — after this many hops the remaining
+ * items are left permanently pending (surfaced via `pendingClassificationCount`)
+ * rather than requeuing forever.
+ */
+const MAX_REQUEUE_DEPTH = 5;
+
+/**
  * Builds the same server-side `branded`/`non-branded` `type`-value classifier
  * the synchronous create path builds per request
  * (`src/controllers/serenity.js`'s `buildPromptTypeClassifier`) — deterministic
@@ -72,21 +82,38 @@ async function buildPromptTypeClassifier(dataAccess, brandId) {
  * job carries `mode: 'reclassify'` — those prompts already exist upstream, so
  * the next run patches their tags in place rather than creating them again.
  *
+ * Carries the CURRENT job's already-exchanged promise token forward explicitly
+ * rather than letting `createAndEnqueueJob` mint a fresh one via
+ * `getIMSPromiseToken` — that helper reads the caller's HTTP `Authorization`
+ * header, which does not exist inside this SQS worker. Depth-guarded: stops
+ * requeuing after {@link MAX_REQUEUE_DEPTH} hops rather than chaining forever.
+ *
  * @param {object} context - worker context (`dataAccess`, `sqs`, `env`, `log`).
+ * @param {object} job - the current `AsyncJob` being processed (its metadata
+ *   carries the promise token and the current requeue depth).
  * @param {string} semrushWorkspaceId
  * @param {Array<{ projectId: string, promptId: string, text: string, tagIds: string[] }>} items
  * @returns {Promise<string|null>} the new job's id, or `null` if there was
- *   nothing to requeue.
+ *   nothing to requeue, or the depth cap was reached.
  */
-async function requeuePending(context, semrushWorkspaceId, items) {
+async function requeuePending(context, job, semrushWorkspaceId, items) {
   if (items.length === 0) {
     return null;
   }
-  const job = await createAndEnqueueJob(context, {
+  const currentMetadata = job.getMetadata() ?? {};
+  const currentDepth = currentMetadata.requeueDepth ?? 0;
+  if (currentDepth >= MAX_REQUEUE_DEPTH) {
+    context.log?.warn(`[serenity-classify-prompts] Requeue depth ${currentDepth} reached max ${MAX_REQUEUE_DEPTH} for job ${job.getId()}; leaving ${items.length} prompt(s) permanently pending`);
+    return null;
+  }
+  const newJob = await createAndEnqueueJob(context, {
     jobType: CLASSIFY_PROMPTS_JOB_TYPE,
-    metadata: { mode: 'reclassify', semrushWorkspaceId, items },
+    promiseToken: currentMetadata.promiseToken,
+    metadata: {
+      mode: 'reclassify', semrushWorkspaceId, items, requeueDepth: currentDepth + 1,
+    },
   });
-  return job.getId();
+  return newJob.getId();
 }
 
 /**
@@ -98,13 +125,15 @@ async function requeuePending(context, semrushWorkspaceId, items) {
  * the `intent` root and requeues a `reclassify` job scoped to just those ids.
  *
  * @param {object} context
+ * @param {object} job - the current `AsyncJob` (for the self-requeue's promise
+ *   token and depth guard).
  * @param {object} transport - Serenity transport built from the exchanged
  *   access token.
  * @param {object} metadata - the job's metadata (`brandId`, `semrushWorkspaceId`,
  *   `prompts`).
  * @returns {Promise<object>} the job result.
  */
-async function createAndClassify(context, transport, metadata) {
+async function createAndClassify(context, job, transport, metadata) {
   const {
     dataAccess, env, log,
   } = context;
@@ -221,7 +250,7 @@ async function createAndClassify(context, transport, metadata) {
     failed.push({ text: '', status: 502, message: `publish: ${pubErr.message}` });
   }
 
-  const requeuedJobId = await requeuePending(context, semrushWorkspaceId, pendingItems);
+  const requeuedJobId = await requeuePending(context, job, semrushWorkspaceId, pendingItems);
 
   return {
     created,
@@ -242,6 +271,8 @@ async function createAndClassify(context, transport, metadata) {
  * `updatePromptTagsByIds` (`replace: true`), never `createPromptsByIds`.
  *
  * @param {object} context
+ * @param {object} job - the current `AsyncJob` (for the self-requeue's promise
+ *   token and depth guard).
  * @param {object} transport
  * @param {object} metadata - `{ semrushWorkspaceId, items: [{ projectId,
  *   promptId, text, tagIds }] }` — `tagIds` is the FULL desired tag set minus
@@ -249,7 +280,7 @@ async function createAndClassify(context, transport, metadata) {
  *   "recompute the whole set, then replace" contract.
  * @returns {Promise<object>} the job result.
  */
-async function reclassifyExisting(context, transport, metadata) {
+async function reclassifyExisting(context, job, transport, metadata) {
   const { env, log } = context;
   const { semrushWorkspaceId } = metadata;
   const items = Array.isArray(metadata.items) ? metadata.items : [];
@@ -323,7 +354,7 @@ async function reclassifyExisting(context, transport, metadata) {
     });
   }
 
-  const requeuedJobId = await requeuePending(context, semrushWorkspaceId, stillPending);
+  const requeuedJobId = await requeuePending(context, job, semrushWorkspaceId, stillPending);
 
   return {
     patched,
@@ -356,7 +387,7 @@ export async function classifyPromptsHandler(context, job, accessToken) {
   const transport = createSerenityTransport({ env, imsToken: accessToken });
 
   if (metadata.mode === 'reclassify') {
-    return reclassifyExisting(context, transport, metadata);
+    return reclassifyExisting(context, job, transport, metadata);
   }
-  return createAndClassify(context, transport, metadata);
+  return createAndClassify(context, job, transport, metadata);
 }

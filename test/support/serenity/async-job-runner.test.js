@@ -193,6 +193,18 @@ describe('async-job-runner', () => {
       await invalidateJobPromiseToken(context, job);
 
       expect(invalidatePromiseTokenStub).to.have.been.calledWith('ptok', false);
+      expect(job.getMetadata().promiseToken).to.be.undefined;
+    });
+
+    it('scrubs the promise token from metadata even when the invalidate call itself fails', async () => {
+      const job = makeJob({ promiseToken: { promise_token: 'ptok' }, other: 'kept' });
+      invalidatePromiseTokenStub.rejects(new Error('ims down'));
+      const context = { env: {}, log: { warn: sandbox.stub() } };
+
+      await invalidateJobPromiseToken(context, job);
+
+      expect(job.getMetadata().promiseToken).to.be.undefined;
+      expect(job.getMetadata().other).to.equal('kept');
     });
 
     it('is a no-op when the job has no promise token', async () => {

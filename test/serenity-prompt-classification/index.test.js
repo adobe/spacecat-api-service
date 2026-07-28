@@ -134,6 +134,19 @@ describe('serenity-prompt-classification worker entry', () => {
     expect(invalidateStub).to.have.been.called;
   });
 
+  it('does not invalidate the promise token when the handler self-requeued (token ownership transferred)', async () => {
+    const job = makeJob();
+    const context = makeContext(job);
+    exchangeAndPersistStub.resolves('access-token');
+    classifyPromptsHandlerStub.resolves({ created: [], requeuedJobId: 'job-followup' });
+
+    await run({ jobId: 'job-123', type: 'serenity-classify-prompts' }, context);
+
+    expect(job.getStatus()).to.equal('COMPLETED');
+    expect(invalidateStub).to.not.have.been.called;
+    expect(job.save).to.have.been.called;
+  });
+
   it('marks the job FAILED with JOB_FAILED when the handler throws', async () => {
     const job = makeJob();
     const context = makeContext(job);

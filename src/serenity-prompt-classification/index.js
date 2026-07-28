@@ -119,17 +119,26 @@ export async function run(message, context) {
     return ok();
   }
 
+  let tokenOwnershipTransferred = false;
   try {
     const result = await handler(context, job, accessToken);
     job.setStatus('COMPLETED');
     job.setResult(result ?? null);
+    // A handler that self-requeues (e.g. classify-prompts-job.js's
+    // `requeuePending`) forwards this job's CURRENT promise token onto the new
+    // job's metadata, rather than minting a fresh one — the worker has no HTTP
+    // context to mint from. Revocation is by identity, so invalidating here
+    // would also kill the requeued job's copy before it ever runs.
+    tokenOwnershipTransferred = Boolean(result?.requeuedJobId);
   } catch (error) {
     log.error(`[serenity-job-runner] Job ${jobId} failed: ${error.message}`);
     job.setStatus('FAILED');
     job.setError({ code: 'JOB_FAILED', message: error.message });
   }
 
-  await invalidateJobPromiseToken(context, job);
+  if (!tokenOwnershipTransferred) {
+    await invalidateJobPromiseToken(context, job);
+  }
   await job.save();
 
   return ok();

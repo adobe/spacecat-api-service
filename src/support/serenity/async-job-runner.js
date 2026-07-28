@@ -76,21 +76,27 @@ const REAUTH_STATUS_PATTERN = /status: (401|403)\b/;
  * runner's SQS queue. The message body is intentionally minimal — `{ jobId, type }` —
  * per the spec: the promise token lives only on the job record so a DLQ redrive can
  * replay the bare message as-is rather than needing per-message token surgery.
- * @param {object} context - Request context (`dataAccess`, `sqs`, `env`, `log`).
+ * @param {object} context - Request/worker context (`dataAccess`, `sqs`, `env`, `log`).
  * @param {object} params
  * @param {string} params.jobType - Job type the worker dispatches on
  *   (e.g. 'serenity-classify-prompts').
  * @param {object} [params.metadata] - Consumer-specific payload, merged onto the job's
  *   `metadata` alongside `jobType` and the promise token.
+ * @param {object} [params.promiseToken] - An already-minted promise token to carry
+ *   onto the new job, bypassing `getIMSPromiseToken`. Required when enqueueing from
+ *   inside the SQS worker itself (e.g. a handler's self-requeue): the worker has no
+ *   HTTP request context (`getIMSPromiseToken` reads the caller's `Authorization`
+ *   header, which does not exist there) — the worker instead forwards the token it
+ *   already exchanged for the job it is currently processing.
  * @returns {Promise<object>} The created job (an AsyncJob instance).
  * @throws On SQS send failure, after rolling back the created job record.
  */
-export async function createAndEnqueueJob(context, { jobType, metadata = {} }) {
+export async function createAndEnqueueJob(context, { jobType, metadata = {}, promiseToken }) {
   const {
     dataAccess, sqs, env, log,
   } = context;
 
-  const promiseTokenResponse = await getIMSPromiseToken(context);
+  const promiseTokenResponse = promiseToken ?? await getIMSPromiseToken(context);
 
   const job = await dataAccess.AsyncJob.create({
     status: 'IN_PROGRESS',
@@ -202,4 +208,11 @@ export async function invalidateJobPromiseToken(context, job) {
   } catch (error) {
     context.log?.warn(`[serenity-job-runner] Failed to invalidate promise token for job ${job.getId()}: ${error.message}`);
   }
+
+  // Scrub the token from the record regardless of whether the invalidate call
+  // itself succeeded — the caller persists this via its own job.save(). A dead
+  // job record should not retain a credential indefinitely at rest.
+  const metadata = { ...(job.getMetadata() ?? {}) };
+  delete metadata.promiseToken;
+  job.setMetadata(metadata);
 }
