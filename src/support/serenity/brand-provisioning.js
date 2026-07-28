@@ -52,15 +52,17 @@ export function initialMarketProjectName(market, languageCode) {
  * quota 405 from publishing surfaces as a 409 "Quota exceeded".
  *
  * The brand row is written by the caller AFTER this resolves, so provisioning is
- * driven through a lightweight brand stub: it supplies the brand's name + the
- * pre-generated id for the "Name [id]" sub-workspace title (the adoption key) and
- * captures the created sub-workspace id. There is no row yet, so the stub's
- * `save` is a no-op — the caller persists the returned id onto the new row.
+ * driven through a lightweight brand stub: it supplies the brand's display name (the
+ * sub-workspace title) plus the pre-generated brand id, and captures the resolved
+ * sub-workspace id. There is no row yet, so the stub's `save` is a no-op — the caller
+ * persists the returned id onto the new row. Because no row exists, this brand cannot yet
+ * claim a sub-workspace, so every claimed family candidate the adoption filter sees belongs
+ * to some other brand.
  *
  * @param {object} context - request context (env, dataAccess, pathInfo headers).
  * @param {object} params
  * @param {string} params.spaceCatId - SpaceCat organization UUID.
- * @param {string} params.brandId - pre-generated brand UUID (sub-workspace title key).
+ * @param {string} params.brandId - pre-generated brand UUID.
  * @param {string} params.brandName - brand display name (sub-workspace title + brand_name).
  * @param {string} params.market - ISO-2 country code for the initial market.
  * @param {string} params.languageCode - BCP-47 language code for the initial market.
@@ -93,11 +95,14 @@ export function initialMarketProjectName(market, languageCode) {
  * @param {object} [log]
  * @returns {Promise<{
  *   semrushSubWorkspaceId: string,
+ *   createdByThisRequest: boolean,
  *   published: boolean,
  *   projectId: string,
  *   geoTargetId: number | null,
  *   languageCode: string,
- * }>} the new sub-workspace id, whether the initial market was published, and
+ * }>} the new sub-workspace id, whether this request CREATED that sub-workspace (as opposed
+ *   to adopting an existing same-title one — the caller's failure compensation must gate on
+ *   it, see {@link provisionBrandSubworkspaceBare}), whether the initial market was published, and
  *   the initial market's identity — deliberately NOT written to
  *   `brand_to_semrush_projects` here (this function runs before the brand row
  *   exists, and the mapping row's FK requires it); the caller writes the
@@ -163,6 +168,12 @@ export async function provisionBrandSubworkspace(context, {
 
   /** @type {string|null} */
   let capturedWorkspaceId = null;
+  // Set ONLY when ensureSubworkspace freshly created the sub-workspace. A workspace it
+  // ADOPTED is not ours to tear down: titles are bare brand names, so an adopted workspace
+  // can belong to a same-named sibling brand whose provisioning is still in flight and has
+  // not yet persisted its claim — emptying it would destroy that brand's live workspace.
+  /** @type {string|null} */
+  let createdWorkspaceId = null;
   const brandStub = {
     getId: () => brandId,
     getName: () => brandName,
@@ -186,19 +197,22 @@ export async function provisionBrandSubworkspace(context, {
   // this point (a failure at/after createProject) or may still be empty (an earlier failure) —
   // deleteAllProjects tolerates both.
   const releaseCapturedOnFailure = async () => {
-    if (!capturedWorkspaceId || !hasText(capturedWorkspaceId)) {
+    // Narrow via a const — a closure-mutated `let` is not narrowed by control flow
+    // (see this dir's CLAUDE.md).
+    const wsId = createdWorkspaceId;
+    if (!wsId || !hasText(wsId)) {
       return;
     }
     try {
-      await deleteAllProjects(transport, capturedWorkspaceId);
-      await releaseFullAllocation(transport, capturedWorkspaceId, parentWorkspaceId, log);
+      await deleteAllProjects(transport, wsId);
+      await releaseFullAllocation(transport, wsId, parentWorkspaceId, log);
       log?.info?.(
         'serenity: emptied sub-workspace after failed brand provisioning — allocation lowered to floor',
-        { semrushWorkspaceId: capturedWorkspaceId },
+        { semrushWorkspaceId: wsId },
       );
     } catch (releaseErr) {
       log?.error?.('serenity: failed to release sub-workspace allocation after failed provisioning', {
-        semrushWorkspaceId: capturedWorkspaceId,
+        semrushWorkspaceId: wsId,
         error: releaseErr?.message,
       });
     }
@@ -250,6 +264,8 @@ export async function provisionBrandSubworkspace(context, {
           : 'best-effort',
         dynamicAllocation,
         ceiling,
+        brandCollection: context?.dataAccess?.Brand,
+        onWorkspaceCreated: (id) => { createdWorkspaceId = id; },
       },
     );
   } catch (e) {
@@ -281,6 +297,9 @@ export async function provisionBrandSubworkspace(context, {
   const resultBody = result.body || {};
   return {
     semrushSubWorkspaceId: capturedWorkspaceId,
+    // See provisionBrandSubworkspaceBare's @returns: the caller's failure compensation must
+    // gate on this so it never tears down a merely-adopted sibling brand's workspace.
+    createdByThisRequest: createdWorkspaceId === capturedWorkspaceId,
     published: Boolean(resultBody.published),
     projectId: String(resultBody.projectId || ''),
     // Absent stays null (not 0) so upsertMappingRow's `!geoTargetId` guard
@@ -305,10 +324,15 @@ export async function provisionBrandSubworkspace(context, {
  * @param {object} context - request context (env, dataAccess, pathInfo headers).
  * @param {object} params
  * @param {string} params.spaceCatId - SpaceCat organization UUID.
- * @param {string} params.brandId - pre-generated brand UUID (sub-workspace title key).
+ * @param {string} params.brandId - pre-generated brand UUID.
  * @param {string} params.brandName - brand display name (sub-workspace title).
  * @param {object} [log]
- * @returns {Promise<{ semrushSubWorkspaceId: string }>} the new sub-workspace id.
+ * @returns {Promise<{ semrushSubWorkspaceId: string, createdByThisRequest: boolean }>} the
+ *   sub-workspace id, plus whether this request CREATED it (as opposed to adopting an existing
+ *   same-title one). The caller's failure compensation must gate on `createdByThisRequest`:
+ *   titles are bare brand names, so an adopted workspace can belong to a same-named sibling
+ *   brand whose own provisioning has not yet persisted its claim, and releasing it would empty
+ *   that brand's live sub-workspace.
  * @throws {ErrorWithStatusCode} on workspace create failure (the caller then skips
  *   the brand write).
  */
@@ -336,6 +360,10 @@ export async function provisionBrandSubworkspaceBare(context, {
 
   /** @type {string|null} */
   let capturedWorkspaceId = null;
+  // Set ONLY when ensureSubworkspace freshly created the sub-workspace — see the identical
+  // note in provisionBrandSubworkspace above for why an ADOPTED one must never be released.
+  /** @type {string|null} */
+  let createdWorkspaceId = null;
   const brandStub = {
     getId: () => brandId,
     getName: () => brandName,
@@ -347,6 +375,15 @@ export async function provisionBrandSubworkspaceBare(context, {
   try {
     // marketCount = 1: the bare sub-workspace is carved for a single future project
     // (the first market the user adds). ensureSubworkspace returns the new id.
+    // createReadiness: 'skip' (LLMO-6569) — this path creates NO project/prompts, so nothing
+    // downstream needs a settled workspace. Skipping the up-to-30s settle poll lets the
+    // sub-workspace pointer be captured/persisted immediately (instead of after the poll) and lets
+    // the workspace settle asynchronously; the first market-add later settles it before creating a
+    // project. Pre-fix, a poll timeout here fired BEFORE the id was captured, so the failure
+    // cleanup saw a null id and no-op'd — leaking the sub-workspace upstream (holding its full
+    // CREATE_ALLOCATION) with no brand row yet referencing it. (The "created upstream but never
+    // linked" orphan is the ACTIVATE variant, where the brand row already exists — see
+    // serenity.js.) This is Rainer's point #1 ("we don't create markets in that").
     const subWorkspaceId = await ensureSubworkspace(
       transport,
       brandStub,
@@ -355,20 +392,34 @@ export async function provisionBrandSubworkspaceBare(context, {
       log,
       {},
       null,
-      { dynamicAllocation },
+      // The brand row does not exist yet on this path (it is written only after a
+      // successful provision), so ANY family candidate the claim lookup finds bound
+      // to a brand is provably another brand's — never this one's.
+      {
+        dynamicAllocation,
+        // createReadiness 'skip' (LLMO-6569): bare create makes no project/prompts, so skip the
+        // up-to-30s settle poll and persist the pointer immediately; the workspace settles async.
+        createReadiness: 'skip',
+        brandCollection: context?.dataAccess?.Brand,
+        onWorkspaceCreated: (id) => { createdWorkspaceId = id; },
+      },
     );
     const resolved = hasText(subWorkspaceId) ? subWorkspaceId : capturedWorkspaceId;
     if (!resolved || !hasText(resolved)) {
       throw new ErrorWithStatusCode('Semrush provisioning returned no sub-workspace id', 502);
     }
-    return { semrushSubWorkspaceId: resolved };
+    return {
+      semrushSubWorkspaceId: resolved,
+      createdByThisRequest: createdWorkspaceId === resolved,
+    };
   } catch (e) {
-    // Release the just-created (empty) sub-workspace's allocation on failure — the
-    // brand row is never written, so nothing references it. Best-effort; never masks
-    // the original error. deleteAllProjects tolerates an empty workspace.
+    // Release the sub-workspace's allocation on failure — the brand row is never written,
+    // so nothing references it. Best-effort; never masks the original error.
+    // deleteAllProjects tolerates an empty workspace. Only a workspace this request
+    // CREATED is released; an adopted one may be a same-named sibling brand's.
     // Narrow via a const (hasText is not a type guard, and a closure-mutated `let`
     // is not narrowed by control flow — see this dir's CLAUDE.md).
-    const wsId = capturedWorkspaceId;
+    const wsId = createdWorkspaceId;
     if (wsId && hasText(wsId)) {
       try {
         await deleteAllProjects(transport, wsId);

@@ -112,6 +112,9 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate',
   'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status',
 
+  // Semrush onboarding - IMS-user, org-membership gated (hasAccess), not S2S.
+  'POST /v2/orgs/:spaceCatId/semrush-onboarding',
+
   // PLG onboarding - IMS token auth, self-service flow, not S2S
   'POST /plg/onboard',
   'GET /plg/sites',

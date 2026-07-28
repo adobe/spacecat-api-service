@@ -15,7 +15,7 @@
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from '../../utils.js';
-import { ERROR_CODES, isUpstreamGone } from '../errors.js';
+import { ERROR_CODES, isMeteredQuota, isUpstreamGone } from '../errors.js';
 import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
 import { invalidateTagCacheForProject } from './markets.js';
 import {
@@ -28,6 +28,7 @@ import {
   parseUpdatePromptBody,
   mapLimit,
   publishAffected,
+  reconcilePublishErrors,
   DEFAULT_PAGE_LIMIT,
   MAX_PAGE_LIMIT,
   MAX_TAG_IDS,
@@ -39,6 +40,7 @@ import { resolveProject, buildSliceProjectMap, sliceKey } from '../subworkspace-
 import { redactUpstreamMessage } from '../rest-transport.js';
 import { createHeadroomGuard } from '../dynamic-allocation-active.js';
 import { classifyPromptIntents } from '../intent-classification.js';
+import { alertQuotaRejection } from '../quota-alerts.js';
 
 /** @typedef {import('../resource-manager.js').Blocks} Blocks */
 
@@ -125,6 +127,21 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
  * POST /serenity/prompts (subworkspace) — bulk create. Resolves every input's owning
  * project from ONE live listing (buildSliceProjectMap) instead of the DB
  * mapping, then reuses the shared per-slice create + publish-once fan-out.
+ * @param {any} transport
+ * @param {string} workspaceId
+ * @param {any} body
+ * @param {any} log
+ * @param {any} classifyPromptType
+ * @param {object | null} env - environment (Azure OpenAI creds), threaded into intent
+ *   classification; ALSO used directly to fire the quota-rejection Slack alert (serenity-docs#72
+ *   §5). Optional — omitted, alerting is a no-op.
+ * @param {number} writeDeadline - shared request-write deadline for intent classification.
+ * @param {object} [options]
+ * @param {boolean} [options.dynamicAllocation]
+ * @param {string} [options.parentWorkspaceId]
+ * @param {Partial<Blocks>} [options.ceiling] - per-brand AI ceiling (LLMO-6190 flag-flip gate).
+ * @param {string | null} [options.orgId] - serenity-docs#72 §5 alert payload only.
+ * @param {string | null} [options.brandId] - serenity-docs#72 §5 alert payload only.
  */
 export async function handleCreatePromptsSubworkspace(
   transport,
@@ -138,6 +155,8 @@ export async function handleCreatePromptsSubworkspace(
     dynamicAllocation = false,
     parentWorkspaceId = '',
     ceiling = /** @type {Partial<Blocks> | undefined} */ (undefined),
+    orgId = null,
+    brandId = null,
   } = {},
 ) {
   const inputs = Array.isArray(body?.prompts) ? body.prompts : [];
@@ -191,7 +210,13 @@ export async function handleCreatePromptsSubworkspace(
   const headroom = createHeadroomGuard(
     transport,
     {
-      enabled: dynamicAllocation, subWorkspaceId: workspaceId, parentWorkspaceId, ceiling,
+      enabled: dynamicAllocation,
+      subWorkspaceId: workspaceId,
+      parentWorkspaceId,
+      ceiling,
+      env,
+      orgId,
+      brandId,
     },
     log,
   );
@@ -243,12 +268,22 @@ export async function handleCreatePromptsSubworkspace(
         affectedProjectId: projectId,
       };
     } catch (e) {
+      // serenity-docs#72 §4.1: a residual disguised-405 quota rejection on the metered write
+      // itself (not just its later publish) must surface as the stable 409 quotaExceeded token —
+      // never the raw upstream status (405) or a generic 500.
+      const quota = isMeteredQuota(e);
+      if (quota) {
+        await alertQuotaRejection({
+          orgId, brandId, workspaceId, caseType: 'brandCarveExhausted', dimension: 'prompts',
+        }, env, log);
+      }
       return {
         failed: {
           text: input.text,
           geoTargetId: input.geoTargetId,
           languageCode: input.languageCode,
-          status: e.status || 500,
+          status: quota ? 409 : (e.status || 500),
+          ...(quota ? { error: ERROR_CODES.QUOTA_EXCEEDED } : {}),
           message: redactUpstreamMessage(e),
         },
       };
@@ -261,7 +296,9 @@ export async function handleCreatePromptsSubworkspace(
   const affectedProjectIds = [];
   for (const r of results) {
     if (r.created) {
-      created.push(r.created);
+      // `rollbackProjectId` is internal bookkeeping for reconcilePublishErrors' rollback below;
+      // stripped before the response is returned.
+      created.push({ ...r.created, rollbackProjectId: r.affectedProjectId });
       affectedProjectIds.push(r.affectedProjectId);
     } else if (r.skipped) {
       skipped.push(r.skipped);
@@ -279,28 +316,45 @@ export async function handleCreatePromptsSubworkspace(
       workspaceId, created: created.length, skipped: skipped.length, failed: failed.length,
     });
     return {
-      created, skipped, failed, published: false,
+      // eslint-disable-next-line no-unused-vars -- omit the bookkeeping field
+      created: created.map(({ rollbackProjectId, ...rest }) => rest),
+      skipped,
+      failed,
+      published: false,
     };
   }
 
   // Route each project's publish through the headroom guard's retryOnQuota (LLMO-6190 item 4):
   // a disguised metered-405 gets ONE bounded top-up+retry per project before being recorded as a
   // failure. No-op passthrough when the flag is OFF (the guard's retryOnQuota is a plain call).
+  const alertContext = { orgId, brandId, env };
   const publishErrors = await publishAffected(
     transport,
     workspaceId,
     affectedProjectIds,
     log,
     (fn) => headroom.retryOnQuota(fn, { callSite: 'publishAffected' }),
+    alertContext,
   );
-  // publishAffected returns { projectId, message } records whose message is
-  // ALREADY redacted (redactUpstreamMessage) — pubErr is a record, not a raw error.
-  for (const pubErr of publishErrors) {
-    failed.push({ text: '', status: 502, message: `publish: ${pubErr.message}` });
-  }
+  // serenity-docs#72 §4.1 atomicity: a quota-rejected publish rolls back (deletes) the prompts
+  // this request staged in that project and moves them into `failed` — never left as unpublished
+  // drafts. A non-quota publish failure is untouched (existing generic `publish:` 502 record).
+  await reconcilePublishErrors(
+    transport,
+    workspaceId,
+    publishErrors,
+    created,
+    failed,
+    log,
+    alertContext,
+  );
 
   return {
-    created, skipped, failed, published: true,
+    // eslint-disable-next-line no-unused-vars -- destructuring-omit to strip the bookkeeping field
+    created: created.map(({ rollbackProjectId, ...rest }) => rest),
+    skipped,
+    failed,
+    published: true,
   };
 }
 
@@ -427,8 +481,22 @@ export async function handleUpdatePromptSubworkspace(
  * POST /serenity/prompts/bulk-delete (subworkspace) — resolve each target's project
  * from ONE live listing, batch deletes per project, publish affected. Upstream
  * 404 == idempotent success.
+ * @param {any} transport
+ * @param {string} workspaceId
+ * @param {any} body
+ * @param {any} log
+ * @param {object} [options]
+ * @param {string | null} [options.orgId] - serenity-docs#72 §5 alert payload only.
+ * @param {string | null} [options.brandId] - serenity-docs#72 §5 alert payload only.
+ * @param {object | null} [options.env] - serenity-docs#72 §5 alert kill-switch/config only.
  */
-export async function handleBulkDeletePromptsSubworkspace(transport, workspaceId, body, log) {
+export async function handleBulkDeletePromptsSubworkspace(
+  transport,
+  workspaceId,
+  body,
+  log,
+  { orgId = null, brandId = null, env = null } = {},
+) {
   const targets = Array.isArray(body?.prompts) ? body.prompts : [];
   if (targets.length === 0) {
     throw new ErrorWithStatusCode('Body must include a non-empty prompts array', 400);
@@ -511,10 +579,18 @@ export async function handleBulkDeletePromptsSubworkspace(transport, workspaceId
     workspaceId,
     Array.from(projectsToPublish),
     log,
+    undefined,
+    { orgId, brandId, env },
   );
-  // pubErr is an already-redacted { projectId, message } record (see above).
+  // pubErr is an already-redacted { projectId, message, code? } record (see above).
   publishErrors.forEach((pubErr) => {
-    failed.push({ semrushPromptId: '', status: 502, message: `publish: ${pubErr.message}` });
+    if (pubErr.code === ERROR_CODES.QUOTA_EXCEEDED) {
+      failed.push({
+        semrushPromptId: '', status: 409, error: ERROR_CODES.QUOTA_EXCEEDED, message: pubErr.message,
+      });
+    } else {
+      failed.push({ semrushPromptId: '', status: 502, message: `publish: ${pubErr.message}` });
+    }
   });
 
   return { deleted, failed };
