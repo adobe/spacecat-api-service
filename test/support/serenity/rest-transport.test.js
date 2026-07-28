@@ -1732,7 +1732,10 @@ describe('Semrush REST transport', () => {
 // This test FAILS until the installed client carries all four methods, so CI
 // cannot go green — and this PR cannot merge clean — before the WP2 dependency
 // bump lands. It self-heals (delete this block + the file-level typedef) the
-// moment the bumped client ships the facade.
+// moment the bumped client ships the facade. REMOVING THIS GATE (this block + the
+// `ProjectEngineTransportWithMetadata` typedef in rest-transport.js) is part of
+// WP2's definition-of-done (LLMO-6289) — it must be torn down with the dep bump,
+// not left behind to fail forever.
 describe('WP2 merge gate — Project Engine v3 authorship-metadata facade', () => {
   const V3_METADATA_METHODS = [
     'createPromptsWithMetadata',

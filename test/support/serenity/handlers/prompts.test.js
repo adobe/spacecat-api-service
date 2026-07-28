@@ -2887,6 +2887,17 @@ describe('handlers/prompts.js — authorship metadata (LLMO-6289)', () => {
       expect(meta.updated_by).to.equal('user-9');
       expect(meta.updated_at).to.match(/^\d{4}-\d{2}-\d{2}T.*Z$/);
     });
+
+    // The builders floor with `||` (falsy-coalescing), so an EMPTY-STRING callerId
+    // floors to `unknown` just like `undefined`/`null` — a resolveCallerId result
+    // can only be a non-empty string or the sentinel, but a future direct caller
+    // that passes `''` must not stamp a blank author. (The test matchers use `??`,
+    // which would keep `''`; this builder-level assertion covers the `||` branch
+    // that the `??` matchers deliberately do not.)
+    it('floors an empty-string callerId to the unknown sentinel in both builders', () => {
+      expect(buildCreateMetadata('')).to.include({ created_by: 'unknown', updated_by: 'unknown' });
+      expect(buildUpdateMetadata('')).to.include({ updated_by: 'unknown' });
+    });
   });
 
   describe('resolveSort', () => {
