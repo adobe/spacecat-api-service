@@ -2087,13 +2087,9 @@ function SuggestionsController(ctx, sqs, env) {
         opportunityId,
         opportunityType: opportunity.getType(),
         siteId,
-        highImpactSuggestionIds: context.data?.metadata?.highImpactSuggestionIds,
       });
 
       let geoExperiment = null;
-      // Tracks whether the Atomic strategy was successfully written, so the
-      // outer catch knows whether to compensate by deleting it if a later
-      // step (e.g. response serialization) throws.
       let atomicStrategyCreated = false;
       let validSuggestionEntities = [];
       try {
@@ -2117,7 +2113,6 @@ function SuggestionsController(ctx, sqs, env) {
 
         const highImpactIds = context.data?.metadata?.highImpactSuggestionIds;
         const hasHighImpactIds = Array.isArray(highImpactIds) && highImpactIds.length > 0;
-
         if (hasPatternDeploy && !hasHighImpactIds) {
           context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, missing/invalid metadata.highImpactSuggestionIds for pattern deploy`);
           throw new Error('metadata.highImpactSuggestionIds is required for domain-wide/segment deployment');
@@ -2128,6 +2123,7 @@ function SuggestionsController(ctx, sqs, env) {
         }
 
         if (hasHighImpactIds) {
+          context.log.info(`[edge-geo-exp] site: ${apexBaseUrl}, highImpactSuggestionIds: ${JSON.stringify(highImpactIds)}`);
           const highImpactIdSet = new Set(highImpactIds);
           const measurementSuggestions = allSuggestions.filter(
             (s) => highImpactIdSet.has(s.getId()),
