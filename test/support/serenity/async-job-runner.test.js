@@ -108,6 +108,33 @@ describe('async-job-runner', () => {
       });
     });
 
+    it('uses an explicitly-supplied promiseToken instead of minting one, when provided', async () => {
+      const job = makeJob();
+      const createStub = sandbox.stub().resolves(job);
+      const context = {
+        dataAccess: { AsyncJob: { create: createStub } },
+        sqs: { sendMessage: sandbox.stub().resolves() },
+        env: { SERENITY_JOB_RUNNER_QUEUE_URL: 'queue-url' },
+        log: { error: sandbox.stub(), warn: sandbox.stub() },
+      };
+
+      await createAndEnqueueJob(context, {
+        jobType: 'serenity-classify-prompts',
+        metadata: { mode: 'reclassify' },
+        promiseToken: { promise_token: 'forwarded-ptok' },
+      });
+
+      expect(getPromiseTokenStub).to.not.have.been.called;
+      expect(createStub).to.have.been.calledWith({
+        status: 'IN_PROGRESS',
+        metadata: {
+          mode: 'reclassify',
+          jobType: 'serenity-classify-prompts',
+          promiseToken: { promise_token: 'forwarded-ptok' },
+        },
+      });
+    });
+
     it('rolls back the created job when the SQS send fails', async () => {
       getPromiseTokenStub.resolves({ promise_token: 'ptok' });
       const job = makeJob();

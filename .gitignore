@@ -32,4 +32,3 @@ mcp-server.log
 
 # oh-my-claudecode workspace state (per-developer, never commit)
 .omc/
-!scripts/test-negation.mjs
