@@ -455,7 +455,8 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  *
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {object} brand - brand record/stub being provisioned.
- * @param {string} parentWorkspaceId - parent workspace the sub-workspace is carved from.
+ * @param {string} parentWorkspaceId - the org parent workspace: the `assertNotParent` guard
+ *   input, and the units pool when JIT allocation is on. Nothing is carved from it.
  * @param {object} body - request body ({ market, languageCode, brandDomain, ... }).
  * @param {object} log - logger.
  * @param {string|null} [preResolvedWorkspaceId] - when set (the activate batch
@@ -500,8 +501,9 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  *   never fails the create). Omit for a `brand` that is not yet a persisted
  *   row — see `mapping-rows.js` `upsertMappingRow` doc.
  * @param {boolean} [options.dynamicAllocation=false] - global kill-switch value. When true, JIT
- *   top-up fronts the project-create and publish seams (fail-fast) and the flat re-grant in
- *   `ensureSubworkspace` is skipped. When false, byte-for-byte the pre-this-PR behavior.
+ *   top-up fronts the project-create and publish seams (fail-fast). When false, the headroom guard
+ *   is a genuine no-op and no resources are read or transferred at all — a sub-workspace carries no
+ *   allocation either way (see `workspace-lifecycle.js`), so there is no alternative sizing path.
  *   (The units pool for JIT sizing is the positional `parentWorkspaceId` arg — the same id given
  *   to `ensureSubworkspace` — so it is not duplicated in this options bag.)
  * @param {Partial<import('../resource-manager.js').Blocks>} [options.ceiling] - per-brand AI
@@ -567,20 +569,18 @@ export async function handleCreateMarketSubworkspace(
   // treats a string as region-less).
   const aliasNames = collectAliasNames(brandAliases, body.market);
 
-  // activate() ensures the sub-workspace once for the whole batch (sized to the
-  // real market count) and passes it in here. The single-market POST /markets
-  // path passes nothing, so we ensure on the spot, sized for one market.
+  // activate() ensures the sub-workspace once for the whole batch and passes it in here. The
+  // single-market POST /markets path passes nothing, so we ensure on the spot.
   const workspaceId = preResolvedWorkspaceId && hasText(preResolvedWorkspaceId)
     ? preResolvedWorkspaceId
     : await ensureSubworkspace(
       transport,
       brand,
       parentWorkspaceId,
-      1,
       log,
       {},
       reloadPointer,
-      { dynamicAllocation, brandCollection, onWorkspaceCreated },
+      { brandCollection, onWorkspaceCreated },
     );
 
   // JIT top-up choke point. The sub-workspace id is only known after ensureSubworkspace resolves
