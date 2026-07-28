@@ -38,7 +38,6 @@ import {
 } from '../subworkspace-projects.js';
 import { ensureSubworkspace } from '../workspace-lifecycle.js';
 import { createHeadroomGuard } from '../dynamic-allocation-active.js';
-
 import { withResourceLock } from '../resource-lock.js';
 import {
   modelChangeUnits, releaseAiSurplus, PROJECT_BLOCK, PROMPT_BLOCK,
@@ -54,6 +53,7 @@ import { collectAliasNames } from '../brand-aliases.js';
 import { upsertMappingRow, tombstoneMappingRow } from '../mapping-rows.js';
 
 /** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
+/** @typedef {import('../rest-transport.js').ProjectCreateBody} ProjectCreateBody */
 
 /**
  * Subworkspace-mode market handlers (serenity design §3/§5). The brand has its own
@@ -223,7 +223,7 @@ function dedupeNames(names) {
     });
 }
 
-/** @returns {import('../rest-transport.js').ProjectCreateBody} */
+/** @returns {ProjectCreateBody} */
 function buildCreateProjectBody(body, location, languageId, brandAliases = []) {
   const name = hasText(body?.name) ? String(body.name) : defaultMarketName(body.brandDisplayName);
   // A Semrush project's brand is described by a display name plus the full set
@@ -935,11 +935,17 @@ export async function handleDeleteMarketSubworkspace(
   // `id` is nullable on the generated listing contract, and everything below keys off it —
   // the upstream DELETE and the mapping-row tombstone both address the project by id. An
   // id-less project is therefore indistinguishable from no project at all: it cannot be
-  // deleted upstream, and tombstoning against a blank id would target the wrong row.
-  // Bound first, then guarded: `hasText` is not a TS type guard, so it cannot narrow
-  // `string | null` on its own (see this dir's CLAUDE.md).
+  // deleted upstream, and tombstoning against a blank id would target the wrong row. It is
+  // still an upstream contract break, so say so rather than reporting a silent 204.
   const projectId = project?.id;
-  if (!projectId || !hasText(projectId)) {
+  if (!projectId) {
+    if (project) {
+      log?.warn?.('serenity subworkspace: listing returned a project with no id — skipping delete', {
+        workspaceId,
+        geoTargetId,
+        languageCode: lang,
+      });
+    }
     return { status: 204, deletedSiteId: null };
   }
   // `resolveProject` above already resolved a project against `workspaceId`, so it is a real,

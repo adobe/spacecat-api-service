@@ -84,8 +84,16 @@ A second config extends the base one with `noImplicitAny: true` over an
 today). `npm run type-check` runs both tiers — `type-check:base` then
 `type-check:strict` — so the CI job and the pre-commit hook need no knowledge of
 the split, and the strict pass cannot be forgotten. A file joins the list once its
-implicit-`any` params carry `@param` types; the list is enumerated rather than
-globbed so an unfixed file cannot join by accident.
+implicit-`any` params carry `@param` types.
+
+The list names the program's **roots**, not the set of files that get checked.
+`noImplicitAny` is a program-wide option, so every `// @ts-check` file reachable by
+import from a root is reported as well, whether or not it appears in the list — a
+program rooted only at `subworkspace-projects.js` also reports `locations.js`, which
+imports pull in. The unit of work is therefore an import closure, not a file. Today's
+one-entry list happens to pull in nothing extra only because `rest-transport.js`'s
+repo-side imports carry no `// @ts-check` pragma; that stops being true at the second
+entry.
 
 `rest-transport.js` leads because it is the module that defines the outbound
 Semrush contract for the whole serenity surface: it is where an unchecked member
@@ -256,9 +264,15 @@ end-to-end run against the real API cannot detect this class of defect at all.
   transport. Drift between those calls and the generated types fails CI.
 - `tsc` runs on every commit (pre-commit) and every PR (CI). The serenity-scoped
   program is small, so the check is fast.
-- No runtime change: `noEmit`, JSDoc-only, no `.ts`. The single behavioural touch
-  is `ErrorWithStatusCode` now initializing `this.code = undefined` — verified
-  against the existing test suite (all serenity + utils tests green).
+- Nothing is emitted: `noEmit`, JSDoc-only, no `.ts`. The gate has nonetheless
+  changed behaviour four times, each because it surfaced something real:
+  `ErrorWithStatusCode` now initializes `this.code = undefined`; a `.filter(Boolean)`
+  in `handlers/markets.js` became an explicit `!== undefined`, since `Boolean` does
+  not narrow; `usersBaseUrl` binds its env value before guarding it, because
+  `hasText` cannot accept a `string | undefined`; and `handleDeleteMarketSubworkspace`
+  now treats a listing entry whose contract-nullable `id` is absent as no project at
+  all, rather than addressing an upstream delete and a mapping-row tombstone by a
+  missing id. Each is covered by the existing suites.
 
 ## Ratchet path (future work)
 
@@ -276,26 +290,39 @@ removing one relaxation and fixing the surfaced errors:
    covers the base `include` set, then fold the two configs back into one. This is
    the step that restores `TS2339`, so it is what finally makes an unknown member
    or a wrong response shape a build failure rather than a runtime surprise.
-   Flipping it across the whole base `include` set today reports **704** errors:
+   Flipping it across the whole base `include` set today reports **705** errors:
 
    | code | count | nature |
    |---|---|---|
    | TS7006 / TS7031 / TS7034 / TS7005 / TS7053 | 324 | missing parameter and variable annotations |
-   | TS2339 | 350 | member access on a value annotated `{object}` |
+   | TS2339 | 351 | member access on a value annotated `{object}` |
    | TS2345 / TS2322 / TS18047 | 28 | assignability and possibly-null |
    | TS7016 | 2 | a dependency ships no declarations |
 
-   Concentrated in `controllers/brands.js` (151),
-   `handlers/markets-subworkspace.js` (61), `handlers/markets.js` (53) and
-   `controllers/serenity.js` (52) — so take it per file, appending to the strict
-   list, rather than in one sweep.
+   Those errors are concentrated in `controllers/brands.js` (151),
+   `handlers/markets-subworkspace.js` (62), `handlers/markets.js` (53) and
+   `controllers/serenity.js` (52), so take it in steps rather than one sweep.
 
-   Two shortcuts are worth taking first, because they cut across every file
-   rather than sitting inside one. `log` and `context` dominate both error
-   classes — 78 of the 350 `TS2339` are logger-method accesses
-   (`info`/`warn`/`error`/`debug`) and the commonest undocumented parameters are
-   `context`, `ctx`, `log` and `dataAccess`. A shared typedef for each therefore
-   retires a large share of the total in one uniform, mechanical pass, and
-   shrinks every per-file step that follows. At that point a per-file `// @ts-check` is no
-   longer needed and the repo can consider `checkJs: true` with `// @ts-nocheck`
-   opt-outs instead.
+   **Grow the strict list leaf-first, and do not use those per-file counts to
+   order the work.** Because the tier follows imports, the cost of adding a file
+   is its whole import closure. `controllers/brands.js` owns 151 errors but sits
+   near the top of the graph: rooting a program there reports **505 errors across
+   23 files**. `handlers/markets.js` owns 53 and pulls in 99 across 6. A leaf such
+   as `support/serenity/errors.js` or `support/serenity/locations.js` costs 1.
+   Ordering by owned errors therefore picks the most expensive step available.
+   Measure a candidate before adding it — copy `tsconfig.strict.json`, set
+   `include` to just that file, and run `tsc` against it.
+
+   One shortcut is worth taking before any of that, because it cuts across every
+   file rather than sitting inside one: a shared `log` typedef. 79 of the 351
+   `TS2339` are logger-method accesses (`info`/`warn`/`error`/`debug`), and `log`
+   is a small, stable shape, so one typedef retires them in a uniform mechanical
+   pass and shrinks every per-file step that follows. `context` looks like the
+   same opportunity and is not — it is the wrapper-assembled universal context
+   (`dataAccess`, `env`, `sqs`, `s3Client`, `imsClient`, `attributes`, … see the
+   middleware stack in `src/index.js`), so typing it accurately is a design task,
+   and an inaccurate typedef relocates errors instead of retiring them.
+
+   Once `noImplicitAny` is on across the whole base `include` set, the two configs
+   fold back into one, the per-file `// @ts-check` pragma is no longer needed, and
+   the repo can consider `checkJs: true` with `// @ts-nocheck` opt-outs instead.

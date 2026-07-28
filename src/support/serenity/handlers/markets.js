@@ -25,6 +25,7 @@ import { resolveSiteDomain } from '../site-linkage.js';
 import { alertQuotaRejection } from '../quota-alerts.js';
 
 /** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
+/** @typedef {import('../rest-transport.js').ProjectCreateBody} ProjectCreateBody */
 
 const LANGUAGE_CACHE_TTL_MS = 60 * 60 * 1000;
 export const MAX_MODEL_IDS = 50;
@@ -362,7 +363,7 @@ export async function handleCreateMarket(
     };
   }
 
-  /** @type {import('../rest-transport.js').ProjectCreateBody} */
+  /** @type {ProjectCreateBody} */
   const upstreamBody = {
     name,
     type: 'ai',

@@ -5,8 +5,18 @@
   // JS file — under noImplicitAny:false TS suppresses it outright, even against
   // a fully-typed receiver, so a method-name typo is invisible to the base tier.
   //
-  // Add a file here once its implicit-`any` params carry @param types. Keep the
-  // list explicit: an unfixed file joining by glob would break the gate.
+  // Add a file here once its implicit-`any` params carry @param types.
+  //
+  // `include` lists the program's ROOTS, not the set of files that get checked.
+  // `noImplicitAny` is program-wide, so every `// @ts-check` file reachable by
+  // import from a root is reported too, listed or not. The unit of work is an
+  // import closure, so grow this list LEAF-FIRST: `src/controllers/brands.js`
+  // has 151 errors of its own but sits near the top of the graph and drags in
+  // 505 across 23 files, while a leaf like `src/support/serenity/errors.js`
+  // costs 1. Measure a candidate before adding it:
+  //   npx tsc -p <a copy of this config with include=[the candidate]>
+  // Today's list happens to pull in nothing extra only because
+  // `rest-transport.js`'s repo-side imports carry no `// @ts-check` pragma.
   //
   // End state: when this list covers the base config's `include` set, the two
   // configs fold back into one with `noImplicitAny: true` and the per-file
