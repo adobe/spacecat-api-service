@@ -1,3 +1,10 @@
+# [1.697.0](https://github.com/adobe/spacecat-api-service/compare/v1.696.0...v1.697.0) (2026-07-28)
+
+
+### Features
+
+* **serenity:** wire runner mechanics for the deferred Semrush job runner ([#186](https://github.com/adobe/spacecat-api-service/issues/186)) ([#2920](https://github.com/adobe/spacecat-api-service/issues/2920)) ([0c71298](https://github.com/adobe/spacecat-api-service/commit/0c71298101e350d4690d96db6132c02d0266f022)), closes [spacecat-shared#1843](https://github.com/spacecat-shared/issues/1843) [adobe/spacecat-infrastructure#708](https://github.com/adobe/spacecat-infrastructure/issues/708)
+
 # [1.696.0](https://github.com/adobe/spacecat-api-service/compare/v1.695.5...v1.696.0) (2026-07-28)
 
 
