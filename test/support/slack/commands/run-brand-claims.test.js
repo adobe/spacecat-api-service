@@ -68,7 +68,9 @@ describe('RunBrandClaimsCommand', () => {
         },
         services: { postgrestClient: { from: sinon.stub() } },
       },
-      log: console,
+      log: {
+        info: sinon.stub(), error: sinon.stub(), warn: sinon.stub(), debug: sinon.stub(),
+      },
       sqs: { sendMessage: sqsSendMessageStub },
       s3: { s3Client: { send: s3SendStub } },
       env: { SQS_BP_SHEET_READY_QUEUE_URL: QUEUE_URL },
@@ -201,6 +203,44 @@ describe('RunBrandClaimsCommand', () => {
 
       expect(context.dataAccess.Site.findById).to.have.been.calledWith(SITE_ID);
       expect(context.dataAccess.Site.findByBaseURL).to.not.have.been.called;
+    });
+
+    it('warns on input that is neither a valid UUID nor a parseable URL, without querying', async () => {
+      const command = RunBrandClaimsCommand(context);
+      await command.handleExecution(['garbage!!!'], slackContext);
+
+      expect(slackContext.say.calledWithMatch(/Could not parse a valid URL or site ID/)).to.equal(true);
+      expect(context.dataAccess.Site.findById).to.not.have.been.called;
+      expect(context.dataAccess.Site.findByBaseURL).to.not.have.been.called;
+    });
+
+    it('errors when the brand name sanitizes to an empty S3 path component', async () => {
+      getBrandBySiteStub.resolves({ id: BRAND_ID, name: '   ', brandClaimsEnabled: true });
+
+      const command = RunBrandClaimsCommand(context);
+      await command.handleExecution(['https://example.com'], slackContext);
+
+      expect(slackContext.say.calledWithMatch(/sanitizes to an empty S3 path component/)).to.equal(true);
+      expect(s3SendStub).to.not.have.been.called;
+      expect(sqsSendMessageStub).to.not.have.been.called;
+    });
+
+    it('caps S3 listing pagination and returns the best candidate seen so far', async () => {
+      getBrandBySiteStub.resolves({ id: BRAND_ID, name: 'Acme', brandClaimsEnabled: true });
+      for (let i = 0; i < 10; i += 1) {
+        s3SendStub.onCall(i).resolves(s3Page(
+          [`${SITE_ID}/acme/analytics/chatgpt_free/2026/07/${String(i + 1).padStart(2, '0')}/brandpresence-chatgpt-w${20 + i}-2026.xlsx`],
+          true,
+          `token-${i}`,
+        ));
+      }
+
+      const command = RunBrandClaimsCommand(context);
+      await command.handleExecution(['https://example.com'], slackContext);
+
+      expect(s3SendStub.callCount).to.equal(10);
+      const [, event] = sqsSendMessageStub.firstCall.args;
+      expect(event.week).to.equal(29);
     });
 
     it('warns and does not send when no site argument is given', async () => {

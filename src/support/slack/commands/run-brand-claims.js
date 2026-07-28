@@ -26,6 +26,9 @@ const BP_PLATFORM = 'chatgpt_free';
 const SHEET_FILENAME_RE = /-w(\d{1,2})-(\d{4})(?:-(\d{6}))?\.xlsx$/i;
 const KEY_DATE_RE = /\/(\d{4})\/(\d{2})\/(\d{2})\//;
 
+// Safety cap so a pathological key space can't hang the command until Lambda timeout.
+const MAX_LISTING_PAGES = 10;
+
 /**
  * Mirrors DRS's `sanitize_path_component` (src/common/utils/path_utils.py) —
  * must match byte-for-byte, since the Brand Claims consumer's own freshness
@@ -63,8 +66,10 @@ export function sanitizePathComponent(component) {
 async function findLatestSheet(s3Client, prefix) {
   let best = null;
   let continuationToken;
+  let pages = 0;
 
   do {
+    pages += 1;
     // eslint-disable-next-line no-await-in-loop
     const response = await s3Client.send(new ListObjectsV2Command({
       Bucket: DRS_BP_BUCKET,
@@ -100,7 +105,7 @@ async function findLatestSheet(s3Client, prefix) {
     }
 
     continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
-  } while (continuationToken);
+  } while (continuationToken && pages < MAX_LISTING_PAGES);
 
   return best;
 }
@@ -144,6 +149,11 @@ function RunBrandClaimsCommand(context) {
       }
 
       const resolvedSiteArg = isValidUUID(siteArg) ? siteArg : extractURLFromSlackInput(siteArg);
+      if (!resolvedSiteArg) {
+        await say(`:warning: Could not parse a valid URL or site ID from \`${siteArg}\`. ${baseCommand.usage()}`);
+        return;
+      }
+
       const site = isValidUUID(resolvedSiteArg)
         ? await Site.findById(resolvedSiteArg)
         : await Site.findByBaseURL(resolvedSiteArg);
@@ -183,6 +193,11 @@ function RunBrandClaimsCommand(context) {
       }
 
       const brandSlug = sanitizePathComponent(brand.name);
+      if (!brandSlug) {
+        await say(`:x: Brand name "${brand.name}" (${brand.id}) sanitizes to an empty S3 path component — cannot look up its sheet.`);
+        return;
+      }
+
       const prefix = `${site.getId()}/${brandSlug}/analytics/${BP_PLATFORM}/`;
       const sheet = await findLatestSheet(context.s3.s3Client, prefix);
 
