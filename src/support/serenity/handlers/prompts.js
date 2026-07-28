@@ -81,6 +81,14 @@ export const CALLER_ID_MAX_LENGTH = 100;
  * {@link CALLER_ID_MAX_LENGTH} so a pathological claim can never trip the
  * upstream length CHECK (which would 400 the write / roll a batch back).
  *
+ * POLICY (LLMO-6289 — intentional, not an oversight): an `unknown`-attributed
+ * write is ACCEPTED, never rejected. Authorship metadata is best-effort
+ * provenance, not an authorization gate — the caller is already authenticated
+ * upstream, so a resolvable identity is preferred but its absence must not block
+ * an otherwise-legitimate write. If a future requirement needs `unknown`-authored
+ * writes rejected, that is a deliberate contract change to make HERE (reject at
+ * this boundary), not a silent behavior to assume.
+ *
  * @param {object} ctx - the controller request context.
  * @returns {string} the caller id, `unknown` when unresolved, ≤100 chars.
  */
@@ -347,8 +355,8 @@ export async function handleListPrompts(
       page,
       limit,
       search,
-      sort,
-      order,
+      // Omit sort/order keys when unsorted (lockstep with twin file prompts-subworkspace.js).
+      ...(sort ? { sort, order } : {}),
     },
   );
   const items = Array.isArray(resp?.items) ? resp.items : [];

@@ -112,8 +112,8 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
     page,
     limit,
     search,
-    sort,
-    order,
+    // Omit sort/order keys when unsorted (lockstep with twin file prompts.js).
+    ...(sort ? { sort, order } : {}),
   });
   const items = Array.isArray(resp?.items) ? resp.items : [];
   let total;
@@ -264,6 +264,13 @@ export async function handleCreatePromptsSubworkspace(
       // write-enforcement lag after a JIT top-up) — route it through `headroom.retryOnQuota` (a
       // no-op passthrough when the flag is OFF) so each item recovers independently; `mapLimit`'s
       // own per-item try/catch below still isolates a surviving failure to this one item.
+      // Intentional (not an inconsistency to fix): each item stamps its OWN
+      // creation instant here — `buildCreateMetadata` runs per prompt inside
+      // `createOnePrompt`, so a bulk batch gets slightly staggered `created_at`
+      // values, each the true moment that item was written. This differs from
+      // `generateAndAttachPrompts` (markets-subworkspace.js), which shares ONE
+      // metadata object (a single batch instant) across its whole group. Both
+      // are defensible; per-item precision is preferred on the direct create path.
       const semrushPromptId = await headroom.retryOnQuota(
         () => createOnePrompt(transport, workspaceId, projectId, typed, callerId),
         { callSite: 'createOnePrompt' },
