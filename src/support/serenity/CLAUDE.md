@@ -26,10 +26,15 @@ over the smaller file list in `tsconfig.strict.json`.
    PostgREST calls or `any`. If a value is genuinely untyped, narrow or assert it
    locally at the boundary — never widen a shared helper's signature to make a
    call site compile.
-4. **Write complete JSDoc `@param` tags.** Incomplete tags break TS's
-   `@param`→param mapping (e.g. a destructured options arg with `= []`/`= {}`
-   defaults then infers `never[]`/missing-prop errors). Document every positional
-   param, in order.
+4. **Write JSDoc `@param` tags in signature order, and never stop short of a
+   destructured options arg.** Tags bind to parameters positionally, so an options
+   arg with `= []`/`= {}` defaults that sits behind an undocumented positional
+   infers `never[]`/missing-prop errors — document every param up to and including
+   it. Documenting a *prefix* of the signature is fine and common: annotate the
+   params whose types are knowable and leave the rest. Know what that costs,
+   though — an undocumented param is implicitly `any`, and TS treats it as
+   **optional**, so it is unchecked and it does not contribute to arity checking.
+   Prefer completing the signature when the types are obvious.
 5. **Annotate the transport `@param {SerenityTransport} transport`** — never
    `{object}` or `{any}`. Import the typedef once per file:
    `/** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */`.
