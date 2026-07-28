@@ -1,3 +1,45 @@
+## [1.697.1](https://github.com/adobe/spacecat-api-service/compare/v1.697.0...v1.697.1) (2026-07-28)
+
+
+### Bug Fixes
+
+* **serenity:** classify prompt-publish quota rejections, not just market-create ([#2889](https://github.com/adobe/spacecat-api-service/issues/2889)) ([c9f7c34](https://github.com/adobe/spacecat-api-service/commit/c9f7c34e062ffbd26238c891c005b90c3c2ee928)), closes [adobe/serenity-docs#72](https://github.com/adobe/serenity-docs/issues/72) [#2854](https://github.com/adobe/spacecat-api-service/issues/2854) [#2854](https://github.com/adobe/spacecat-api-service/issues/2854)
+
+# [1.697.0](https://github.com/adobe/spacecat-api-service/compare/v1.696.0...v1.697.0) (2026-07-28)
+
+
+### Features
+
+* **serenity:** wire runner mechanics for the deferred Semrush job runner ([#186](https://github.com/adobe/spacecat-api-service/issues/186)) ([#2920](https://github.com/adobe/spacecat-api-service/issues/2920)) ([0c71298](https://github.com/adobe/spacecat-api-service/commit/0c71298101e350d4690d96db6132c02d0266f022)), closes [spacecat-shared#1843](https://github.com/spacecat-shared/issues/1843) [adobe/spacecat-infrastructure#708](https://github.com/adobe/spacecat-infrastructure/issues/708)
+
+# [1.696.0](https://github.com/adobe/spacecat-api-service/compare/v1.695.5...v1.696.0) (2026-07-28)
+
+
+### Features
+
+* **serenity:** Semrush onboarding endpoint (just Slack for now) ([#2805](https://github.com/adobe/spacecat-api-service/issues/2805)) ([7a35f4c](https://github.com/adobe/spacecat-api-service/commit/7a35f4cfab99f18b40bacf165456d3b6c729b728))
+
+## [1.695.5](https://github.com/adobe/spacecat-api-service/compare/v1.695.4...v1.695.5) (2026-07-28)
+
+
+### Bug Fixes
+
+* **serenity:** skip sub-workspace settle poll on bare brand create (LLMO-6569) ([#2916](https://github.com/adobe/spacecat-api-service/issues/2916)) ([ff237e4](https://github.com/adobe/spacecat-api-service/commit/ff237e4088e3adb1e891178305efa022c583faf3))
+
+## [1.695.4](https://github.com/adobe/spacecat-api-service/compare/v1.695.3...v1.695.4) (2026-07-28)
+
+
+### Bug Fixes
+
+* batch save suggestions in IME flow ([#2919](https://github.com/adobe/spacecat-api-service/issues/2919)) ([6da7dde](https://github.com/adobe/spacecat-api-service/commit/6da7ddef7e6d99ffebb3a9eb35608294e1684940))
+
+## [1.695.3](https://github.com/adobe/spacecat-api-service/compare/v1.695.2...v1.695.3) (2026-07-28)
+
+
+### Bug Fixes
+
+* title Serenity sub-workspaces with the bare brand name ([#2918](https://github.com/adobe/spacecat-api-service/issues/2918)) ([cd17b81](https://github.com/adobe/spacecat-api-service/commit/cd17b819a313c5d45c2ce79d29fd03802bf2b707)), closes [Hi#level](https://github.com/Hi/issues/level) [#2915](https://github.com/adobe/spacecat-api-service/issues/2915)
+
 ## [1.695.2](https://github.com/adobe/spacecat-api-service/compare/v1.695.1...v1.695.2) (2026-07-27)
 
 

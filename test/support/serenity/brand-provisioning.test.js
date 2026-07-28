@@ -21,13 +21,27 @@ import {
 import { SerenityTransportError } from '../../../src/support/serenity/rest-transport.js';
 
 const PARENT_WS = 'parent-ws-1111';
+
+// The real ensureSubworkspace (and the create handler that fronts it) reports a FRESHLY
+// CREATED sub-workspace through options.onWorkspaceCreated — that signal, not the returned
+// id, is what gates failure compensation, so the doubles must emit it too. `rest` is the
+// trailing args after (transport, brand); the options bag is the last object in it.
+function notifyCreated(rest, workspaceId) {
+  const options = rest.filter((a) => a && typeof a === 'object').pop();
+  options?.onWorkspaceCreated?.(workspaceId);
+}
 const NEW_WS = 'sub-ws-2222';
+
+// Sentinel for the data-access Brand collection ensureSubworkspace uses to detect a
+// family candidate already claimed by another brand.
+const BRAND_COLLECTION = { name: 'brand-collection' };
 
 function buildContext() {
   return {
     env: { SEMRUSH_PROJECTS_BASE_URL: 'https://gw.example' },
     pathInfo: { headers: { authorization: 'Bearer test-ims-token' } },
     attributes: { authInfo: { getType: () => 'ims' } },
+    dataAccess: { Brand: BRAND_COLLECTION },
   };
 }
 
@@ -83,8 +97,9 @@ describe('provisionBrandSubworkspace', () => {
     resolveWorkspaceId = sinon.stub().resolves(PARENT_WS);
     // Mimic the real handler: ensureSubworkspace would set the brand stub's
     // workspace id, then a project is created. Stub captures that side-effect.
-    handleCreateMarketSubworkspace = sinon.stub().callsFake(async (transport, brand) => {
+    handleCreateMarketSubworkspace = sinon.stub().callsFake(async (transport, brand, ...rest) => {
       brand.setSemrushSubWorkspaceId(NEW_WS);
+      notifyCreated(rest, NEW_WS);
       return { status: 201, body: { brandId: brand.getId() } };
     });
   });
@@ -95,7 +110,12 @@ describe('provisionBrandSubworkspace', () => {
     });
     const result = await provisionBrandSubworkspace(buildContext(), baseParams);
     expect(result).to.deep.equal({
-      semrushSubWorkspaceId: NEW_WS, published: false, projectId: '', geoTargetId: null, languageCode: 'en',
+      semrushSubWorkspaceId: NEW_WS,
+      createdByThisRequest: true,
+      published: false,
+      projectId: '',
+      geoTargetId: null,
+      languageCode: 'en',
     });
   });
 
@@ -117,8 +137,9 @@ describe('provisionBrandSubworkspace', () => {
 
   it('returns published:true when the initial market was published', async () => {
     // result.body.published truthy → Boolean(...) true branch (line 225).
-    handleCreateMarketSubworkspace = sinon.stub().callsFake(async (transport, brand) => {
+    handleCreateMarketSubworkspace = sinon.stub().callsFake(async (transport, brand, ...rest) => {
       brand.setSemrushSubWorkspaceId(NEW_WS);
+      notifyCreated(rest, NEW_WS);
       return { status: 201, body: { brandId: brand.getId(), published: true } };
     });
     const { provisionBrandSubworkspace } = await loadModule({
@@ -126,15 +147,21 @@ describe('provisionBrandSubworkspace', () => {
     });
     const result = await provisionBrandSubworkspace(buildContext(), baseParams);
     expect(result).to.deep.equal({
-      semrushSubWorkspaceId: NEW_WS, published: true, projectId: '', geoTargetId: null, languageCode: 'en',
+      semrushSubWorkspaceId: NEW_WS,
+      createdByThisRequest: true,
+      published: true,
+      projectId: '',
+      geoTargetId: null,
+      languageCode: 'en',
     });
   });
 
   it('returns published:false when a successful result carries no body (result.body || {})', async () => {
     // result.body is undefined on the success path → the `|| {}` fallback fires
     // before reading `.published` (line 225 right branch).
-    handleCreateMarketSubworkspace = sinon.stub().callsFake(async (transport, brand) => {
+    handleCreateMarketSubworkspace = sinon.stub().callsFake(async (transport, brand, ...rest) => {
       brand.setSemrushSubWorkspaceId(NEW_WS);
+      notifyCreated(rest, NEW_WS);
       return { status: 200 };
     });
     const { provisionBrandSubworkspace } = await loadModule({
@@ -142,7 +169,12 @@ describe('provisionBrandSubworkspace', () => {
     });
     const result = await provisionBrandSubworkspace(buildContext(), baseParams);
     expect(result).to.deep.equal({
-      semrushSubWorkspaceId: NEW_WS, published: false, projectId: '', geoTargetId: null, languageCode: 'en',
+      semrushSubWorkspaceId: NEW_WS,
+      createdByThisRequest: true,
+      published: false,
+      projectId: '',
+      geoTargetId: null,
+      languageCode: 'en',
     });
   });
 
@@ -150,8 +182,9 @@ describe('provisionBrandSubworkspace', () => {
     // provisionBrandSubworkspace runs before the brand row is written (a
     // throwaway id), so it can't satisfy the mapping row's FK to brands —
     // the caller (brands.js) writes it once the real row is persisted.
-    handleCreateMarketSubworkspace = sinon.stub().callsFake(async (transport, brand) => {
+    handleCreateMarketSubworkspace = sinon.stub().callsFake(async (transport, brand, ...rest) => {
       brand.setSemrushSubWorkspaceId(NEW_WS);
+      notifyCreated(rest, NEW_WS);
       return {
         status: 201,
         body: {
@@ -165,6 +198,7 @@ describe('provisionBrandSubworkspace', () => {
     const result = await provisionBrandSubworkspace(buildContext(), baseParams);
     expect(result).to.deep.equal({
       semrushSubWorkspaceId: NEW_WS,
+      createdByThisRequest: true,
       published: false,
       projectId: 'proj-initial',
       geoTargetId: 2840,
@@ -190,9 +224,14 @@ describe('provisionBrandSubworkspace', () => {
     // server-classified `intent` value), then publishes best-effort. The
     // dimension-root taxonomy is provisioned by createMarket itself, so it is not
     // passed through here. writeDeadline is a request-scoped epoch-ms deadline
-    // (dynamic) — asserted as a number, then dropped before the deep-equal.
-    const { writeDeadline, ...restOptions } = options;
+    // (dynamic) — asserted as a number, then dropped before the deep-equal, as are the
+    // two adoption-safety hooks (identity-compared / typed below rather than deep-equalled).
+    const {
+      writeDeadline, brandCollection, onWorkspaceCreated, ...restOptions
+    } = options;
     expect(writeDeadline).to.be.a('number');
+    expect(brandCollection).to.equal(BRAND_COLLECTION);
+    expect(onWorkspaceCreated).to.be.a('function');
     expect(restOptions).to.deep.equal({
       modelIds: ['m-1', 'm-2'],
       generateTopics: true,
@@ -208,7 +247,7 @@ describe('provisionBrandSubworkspace', () => {
       dynamicAllocation: false,
       ceiling: undefined,
     });
-    // The stub drives the sub-workspace title off the brand's name + id.
+    // The stub drives the sub-workspace title off the brand's display name.
     expect(brandStub.getName()).to.equal('Acme');
     expect(brandStub.getId()).to.equal('brand-1');
     expect(brandStub.getSemrushSubWorkspaceId()).to.equal(undefined);
@@ -442,8 +481,9 @@ describe('provisionBrandSubworkspace', () => {
     const transport = makeReleaseTransport({
       listProjects: sinon.stub().resolves({ items: [{ id: 'proj-1' }] }),
     });
-    const handler = sinon.stub().callsFake(async (t, brand) => {
+    const handler = sinon.stub().callsFake(async (t, brand, ...rest) => {
       brand.setSemrushSubWorkspaceId(NEW_WS);
+      notifyCreated(rest, NEW_WS);
       return { status: 502, body: { message: 'upstream blew up' } };
     });
     const mod = await esmock('../../../src/support/serenity/brand-provisioning.js', {
@@ -513,8 +553,9 @@ describe('provisionBrandSubworkspaceBare', () => {
     resolveWorkspaceId = sinon.stub().resolves(PARENT_WS);
     // Like the real ensureSubworkspace, resolve the new sub-workspace id AND set
     // it on the brand stub via setSemrushSubWorkspaceId.
-    ensureSubworkspace = sinon.stub().callsFake(async (transport, brand) => {
+    ensureSubworkspace = sinon.stub().callsFake(async (transport, brand, ...rest) => {
       brand.setSemrushSubWorkspaceId(NEW_WS);
+      notifyCreated(rest, NEW_WS);
       return NEW_WS;
     });
     deleteAllProjects = sinon.stub().resolves();
@@ -539,7 +580,7 @@ describe('provisionBrandSubworkspaceBare', () => {
   it('provisions the bare sub-workspace (marketCount 1) and returns its id — no project created', async () => {
     const { provisionBrandSubworkspaceBare } = await loadBareModule();
     const result = await provisionBrandSubworkspaceBare(buildContext(), bareParams);
-    expect(result).to.deep.equal({ semrushSubWorkspaceId: NEW_WS });
+    expect(result).to.deep.equal({ semrushSubWorkspaceId: NEW_WS, createdByThisRequest: true });
     // Carved for a single future project (marketCount = 1), against the org parent.
     expect(ensureSubworkspace).to.have.been.calledOnce;
     expect(ensureSubworkspace.firstCall.args[0]).to.equal(TRANSPORT);
@@ -549,7 +590,15 @@ describe('provisionBrandSubworkspaceBare', () => {
     expect(deleteAllProjects).to.not.have.been.called;
     expect(releaseFullAllocation).to.not.have.been.called;
     // Kill-switch defaults OFF (env unset) — byte-for-byte the pre-fix flat carve.
-    expect(ensureSubworkspace.firstCall.args[7]).to.deep.equal({ dynamicAllocation: false });
+    // The Brand collection is threaded through so the claim filter can run, and the
+    // created-vs-adopted callback so failure compensation can gate on provenance.
+    // createReadiness 'skip' (LLMO-6569): bare create makes no project/prompts, so it skips the
+    // up-to-30s settle poll and persists the pointer immediately.
+    const options = ensureSubworkspace.firstCall.args[7];
+    expect(options.dynamicAllocation).to.equal(false);
+    expect(options.createReadiness).to.equal('skip');
+    expect(options.brandCollection).to.equal(BRAND_COLLECTION);
+    expect(options.onWorkspaceCreated).to.be.a('function');
   });
 
   it('threads the dynamic-allocation flag from env into ensureSubworkspace (LLMO-6190 — onboarding was previously silently excluded)', async () => {
@@ -557,18 +606,22 @@ describe('provisionBrandSubworkspaceBare', () => {
     const ctx = buildContext();
     ctx.env.SERENITY_DYNAMIC_ALLOCATION = 'true';
     await provisionBrandSubworkspaceBare(ctx, bareParams);
-    expect(ensureSubworkspace.firstCall.args[7]).to.deep.equal({ dynamicAllocation: true });
+    const options = ensureSubworkspace.firstCall.args[7];
+    expect(options.dynamicAllocation).to.equal(true);
+    expect(options.createReadiness).to.equal('skip');
+    expect(options.brandCollection).to.equal(BRAND_COLLECTION);
   });
 
   it('falls back to the captured workspace id when ensureSubworkspace returns nothing', async () => {
     // Sets the stub id but returns undefined → resolved via capturedWorkspaceId.
-    ensureSubworkspace = sinon.stub().callsFake(async (transport, brand) => {
+    ensureSubworkspace = sinon.stub().callsFake(async (transport, brand, ...rest) => {
       brand.setSemrushSubWorkspaceId(NEW_WS);
+      notifyCreated(rest, NEW_WS);
       return undefined;
     });
     const { provisionBrandSubworkspaceBare } = await loadBareModule();
     const result = await provisionBrandSubworkspaceBare(buildContext(), bareParams);
-    expect(result).to.deep.equal({ semrushSubWorkspaceId: NEW_WS });
+    expect(result).to.deep.equal({ semrushSubWorkspaceId: NEW_WS, createdByThisRequest: true });
   });
 
   it('throws 502 when neither a returned nor a captured sub-workspace id is available', async () => {
@@ -585,8 +638,9 @@ describe('provisionBrandSubworkspaceBare', () => {
   });
 
   it('releases the captured sub-workspace allocation when ensureSubworkspace throws after creating it', async () => {
-    ensureSubworkspace = sinon.stub().callsFake(async (transport, brand) => {
-      brand.setSemrushSubWorkspaceId(NEW_WS); // created upstream...
+    ensureSubworkspace = sinon.stub().callsFake(async (transport, brand, ...rest) => {
+      brand.setSemrushSubWorkspaceId(NEW_WS);
+      notifyCreated(rest, NEW_WS); // created upstream...
       throw new SerenityTransportError(502, 'settle timeout'); // ...then failed
     });
     const { provisionBrandSubworkspaceBare } = await loadBareModule();
@@ -618,8 +672,9 @@ describe('provisionBrandSubworkspaceBare', () => {
   });
 
   it('swallows a release failure (logs at error) and re-throws the original error', async () => {
-    ensureSubworkspace = sinon.stub().callsFake(async (transport, brand) => {
+    ensureSubworkspace = sinon.stub().callsFake(async (transport, brand, ...rest) => {
       brand.setSemrushSubWorkspaceId(NEW_WS);
+      notifyCreated(rest, NEW_WS);
       throw new SerenityTransportError(502, 'settle timeout');
     });
     deleteAllProjects = sinon.stub().rejects(new Error('release network error'));
@@ -827,8 +882,9 @@ describe('defensive branch coverage', () => {
       // releaseCapturedOnFailure, AND emptying the workspace's projects (deleteAllProjects,
       // the first step of any release attempt post-LLMO-6189) throws.
       const listProjects = sinon.stub().rejects(new Error('release network error'));
-      const handler = sinon.stub().callsFake(async (transport, brand) => {
+      const handler = sinon.stub().callsFake(async (transport, brand, ...rest) => {
         brand.setSemrushSubWorkspaceId(NEW_WS);
+        notifyCreated(rest, NEW_WS);
         return { status: 422, body: {} };
       });
       const log = { error: sinon.stub(), info: sinon.stub() };
@@ -870,8 +926,9 @@ describe('defensive branch coverage', () => {
     it('uses fallback message when result has no body.message', async () => {
       // Line 196: result.body?.message || 'Failed to provision Semrush sub-workspace'
       // right side fires when body.message is absent/falsy.
-      const handler = sinon.stub().callsFake(async (transport, brand) => {
+      const handler = sinon.stub().callsFake(async (transport, brand, ...rest) => {
         brand.setSemrushSubWorkspaceId(NEW_WS);
+        notifyCreated(rest, NEW_WS);
         return { status: 422, body: {} };
       });
       const mod = await esmock('../../../src/support/serenity/brand-provisioning.js', {
@@ -897,8 +954,9 @@ describe('defensive branch coverage', () => {
 
     it('uses fallback message when result has no body at all', async () => {
       // result.body is undefined -> result.body?.message = undefined -> fallback.
-      const handler = sinon.stub().callsFake(async (transport, brand) => {
+      const handler = sinon.stub().callsFake(async (transport, brand, ...rest) => {
         brand.setSemrushSubWorkspaceId(NEW_WS);
+        notifyCreated(rest, NEW_WS);
         return { status: 500 };
       });
       const mod = await esmock('../../../src/support/serenity/brand-provisioning.js', {
