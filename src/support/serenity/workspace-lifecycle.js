@@ -106,6 +106,7 @@ function subworkspaceTitle(brand) {
   return name;
 }
 
+/** @param {SerenityTransport} transport */
 export async function pollUntilCreated(transport, workspaceId, { attempts, intervalMs, sleep }) {
   for (let i = 0; i < attempts; i += 1) {
     // eslint-disable-next-line no-await-in-loop

@@ -298,6 +298,7 @@ export async function attachBrandUrlsToProject(
 // quota rejection — same convention as the market-create path); any other
 // failure propagates so the edit hard-fails. Shared by the brand-URL and
 // CI-competitor edit re-syncs.
+/** @param {SerenityTransport} transport */
 export async function republishBestEffort(transport, workspaceId, projectId, log) {
   try {
     await transport.publishProject(workspaceId, projectId);

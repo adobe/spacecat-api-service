@@ -69,6 +69,7 @@ import { alertQuotaRejection } from '../quota-alerts.js';
  * to a project via the live listing; a missing project is a hard 404
  * marketNotFound (same contract as the flat-mode single-slice list — "no such
  * slice" must not masquerade as "slice exists but empty").
+ * @param {SerenityTransport} transport
  */
 export async function handleListPromptsSubworkspace(transport, workspaceId, query, log) {
   const geoTargetId = normalizeGeoTargetId(query?.geoTargetId);
@@ -367,6 +368,7 @@ export async function handleCreatePromptsSubworkspace(
  * 409 text collision → thrown for the controller's `conflict` mapping), then
  * the replace-mode batch tag write. The prompt id is preserved end to end and
  * echoed unchanged in the response; nothing is deleted on this path.
+ * @param {SerenityTransport} transport
  */
 export async function handleUpdatePromptSubworkspace(
   transport,

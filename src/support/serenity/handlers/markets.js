@@ -85,6 +85,7 @@ function isoToEnglishName(languageTag) {
   return name && name.toLowerCase() !== primary ? name : null;
 }
 
+/** @param {SerenityTransport} transport */
 export async function resolveLanguageId(transport, languageTag, log) {
   const now = Date.now();
   if (languageCache.expiresAt <= now) {
@@ -126,6 +127,8 @@ export async function resolveLanguageId(transport, languageTag, log) {
  *
  * `transport` and `semrushWorkspaceId` are kept on the signature for the
  * controller's parity with the other handlers; they are unused here.
+ *
+ * @param {SerenityTransport} transport
  */
 // eslint-disable-next-line no-unused-vars
 export async function handleListMarkets(transport, dataAccess, brandId, semrushWorkspaceId) {
@@ -278,6 +281,7 @@ export function defaultMarketName(brandDisplayName) {
  *   ("handleCreateMarket: orphaned upstream project"); any orphan can
  *   be reconciled by an operator running `transport.deleteProject` (or
  *   via a one-off script reading the same log stream).
+ * @param {SerenityTransport} transport
  */
 export async function handleCreateMarket(
   transport,
@@ -358,6 +362,7 @@ export async function handleCreateMarket(
     };
   }
 
+  /** @type {import('../rest-transport.js').ProjectCreateBody} */
   const upstreamBody = {
     name,
     type: 'ai',
@@ -487,6 +492,7 @@ export async function handleCreateMarket(
  * lookup returns 204. A pre-lock on the slice (advisory lock, conditional
  * delete) would tighten this further but is out of scope for the LLMO-5190
  * cut-over.
+ * @param {SerenityTransport} transport
  */
 export async function handleDeleteMarket(
   transport,
@@ -624,6 +630,7 @@ function evictTagCacheIfNeeded() {
  * docs/decisions/006-serenity-v1-v2-read-drift.md). A slice whose prompts are
  * staged in an unpublished draft therefore yields an EMPTY tag set here until the
  * project is published — that is correct, not a missing-data bug.
+ * @param {SerenityTransport} transport
  */
 export async function listTagsForProject(transport, semrushWorkspaceId, projectId, logCtx, log) {
   const cacheKey = tagCacheKey(semrushWorkspaceId, projectId);
@@ -812,6 +819,7 @@ export async function listProjectTagTree(
  * `listTagsForProject`). When/if Semrush exposes a dedicated tags endpoint
  * (`GET /v1/workspaces/{ws}/projects/{pid}/tags`), this whole loop
  * collapses to one upstream call and the truncation risk goes away.
+ * @param {SerenityTransport} transport
  */
 export async function handleListTags(
   transport,
@@ -860,6 +868,7 @@ export async function handleListTags(
 const AI_MODELS_PAGE = 100;
 const MAX_AI_MODELS_PAGES = 5;
 
+/** @param {SerenityTransport} transport */
 async function fetchAllAiModels(transport, semrushWorkspaceId, projectId) {
   const all = [];
   let page = 1;
@@ -904,6 +913,7 @@ function assignmentToItem(it) {
  * handlers — the no-params path is workspace-independent, so both modes return
  * the identical catalog. Swallows only 404/405 (endpoint not available); auth
  * and server errors propagate.
+ * @param {SerenityTransport} transport
  */
 export async function listGlobalModelCatalog(transport) {
   let rawItems = [];
@@ -958,6 +968,7 @@ export async function listGlobalModelCatalog(transport) {
  * how `resolveLanguageId` matches by English name). Tolerant of a 404/405 catalog
  * (returns an empty list) so a transient upstream gap degrades to "no filter"
  * rather than an error.
+ * @param {SerenityTransport} transport
  */
 export async function listLanguageCatalog(transport) {
   let rawItems = [];
@@ -982,6 +993,7 @@ export async function listLanguageCatalog(transport) {
  * Models configured on one upstream project. Shared by the flat and subworkspace
  * slice-models handlers (the only difference upstream is which projectId the
  * slice resolved to).
+ * @param {SerenityTransport} transport
  */
 export async function listSliceModels(transport, semrushWorkspaceId, projectId) {
   const allItems = await fetchAllAiModels(transport, semrushWorkspaceId, projectId);
@@ -1042,6 +1054,7 @@ export async function countPublishedPrompts(transport, semrushWorkspaceId, proje
   return count;
 }
 
+/** @param {SerenityTransport} transport */
 export async function handleListModels(
   transport,
   dataAccess,

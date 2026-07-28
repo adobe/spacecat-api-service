@@ -169,6 +169,7 @@ export function buildPromptDto(geoTargetId, languageCode, item) {
  * carrying any of the supplied tag IDs are returned, and each id is expanded
  * downward through the tag hierarchy. AND semantics must be enforced by the
  * caller if needed.
+ * @param {SerenityTransport} transport
  */
 export async function handleListPrompts(
   transport,
@@ -1056,6 +1057,7 @@ export async function handleCreatePrompts(
  * (a PATCH can introduce a new tag or drop the last carrier of an old tag),
  * then `publishProject` is fired — edits land in the draft layer, publish
  * moves them live (same publish contract as the create path).
+ * @param {SerenityTransport} transport
  */
 export async function handleUpdatePrompt(
   transport,

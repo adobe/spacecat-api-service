@@ -38,6 +38,8 @@ import {
 } from '../subworkspace-projects.js';
 import { ensureSubworkspace } from '../workspace-lifecycle.js';
 import { createHeadroomGuard } from '../dynamic-allocation-active.js';
+
+/** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
 import { withResourceLock } from '../resource-lock.js';
 import {
   modelChangeUnits, releaseAiSurplus, PROJECT_BLOCK, PROMPT_BLOCK,
@@ -153,6 +155,7 @@ export async function handleListMarketsSubworkspace(
  * GET /serenity/markets/:geo/:lang (subworkspace) — resolve the slice from the live
  * listing; surface semrushProjectId + status + `initialized` (one extra
  * init_status read, detail only). 404 marketNotFound if no project matches.
+ * @param {SerenityTransport} transport
  */
 export async function handleGetMarketSubworkspace(
   transport,
@@ -1024,6 +1027,7 @@ async function listStandaloneProjectTags(transport, workspaceId, projectId, log)
  * Resolves the slice's project from the live listing, then reuses the shared
  * project-keyed tag aggregation (cache + pagination + truncation guard). A
  * missing slice returns an empty set, matching the flat-mode tags contract.
+ * @param {SerenityTransport} transport
  */
 export async function handleListTagsSubworkspace(transport, workspaceId, query, log) {
   const geoTargetId = normalizeGeoTargetId(query?.geoTargetId);
@@ -1116,6 +1120,7 @@ export async function handleListTagsSubworkspace(transport, workspaceId, query, 
  * catalog. With (geoTargetId, languageCode) → models on the slice's project,
  * resolved from the live listing. Partial params → 400. A missing slice returns
  * an empty set, matching the flat-mode models contract.
+ * @param {SerenityTransport} transport
  */
 export async function handleListModelsSubworkspace(transport, workspaceId, query, log) {
   const geoTargetId = normalizeGeoTargetId(query?.geoTargetId);
