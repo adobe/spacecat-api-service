@@ -217,7 +217,7 @@ async function findAdoptableFamilyMatch(transport, parentWorkspaceId, title, log
   const matches = sameTitle.filter((w, i) => isAdoptable(i));
   const claimedByOthers = sameTitle.filter((w, i) => !isAdoptable(i));
   if (claimedByOthers.length > 0) {
-    log?.info?.('ensureSubworkspace: ignoring same-title family entr(ies) already claimed by another brand', {
+    log?.info?.('ensureSubworkspace: ignoring same-title family entries already claimed by another brand', {
       parentWorkspaceId,
       title,
       claimedCount: claimedByOthers.length,
