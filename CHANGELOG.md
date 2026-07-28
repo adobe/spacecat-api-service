@@ -1,3 +1,10 @@
+## [1.695.5](https://github.com/adobe/spacecat-api-service/compare/v1.695.4...v1.695.5) (2026-07-28)
+
+
+### Bug Fixes
+
+* **serenity:** skip sub-workspace settle poll on bare brand create (LLMO-6569) ([#2916](https://github.com/adobe/spacecat-api-service/issues/2916)) ([ff237e4](https://github.com/adobe/spacecat-api-service/commit/ff237e4088e3adb1e891178305efa022c583faf3))
+
 ## [1.695.4](https://github.com/adobe/spacecat-api-service/compare/v1.695.3...v1.695.4) (2026-07-28)
 
 
