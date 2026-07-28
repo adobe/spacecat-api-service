@@ -22,11 +22,11 @@
  * is not in any deployed environment today. It stands ready for a tenant whose parent workspace
  * enforces limits (`limits_enabled: true`), where a child would genuinely need units.
  *
- * Semrush model, live-verified 2026-07-02 ("Gate 0"): a transfer is ABSOLUTE (sets `total`) +
- * idempotent; a carve
- * decrements the MASTER's `total`; `free = total − used`; over-carving the master → terminal
- * `422 "insufficient available units in subscription"`; a transfer briefly flips the child off
- * `created` and may `422 "workspace not ready"` transiently even past `status:created`.
+ * Semrush model, live-verified 2026-07-02 ("Gate 0"): a transfer is ABSOLUTE (sets `total`) and
+ * idempotent; a carve decrements the MASTER's `total`; `free = total − used`; over-carving the
+ * master → terminal `422 "insufficient available units in subscription"`; a transfer briefly flips
+ * the child off `created` and may `422 "workspace not ready"` transiently even past
+ * `status:created`.
  *
  * Two pure, transport-injected entry points sit between the handlers and the transport:
  * - {@link ensureAiHeadroom} BEFORE a metered op — reads child headroom, tops up in grace-sized

@@ -1095,5 +1095,19 @@ describe('workspace-lifecycle', () => {
       expect(count2).to.equal(0);
       expect(transport2.deleteProject).to.not.have.been.called;
     });
+
+    it('refuses to empty the org parent workspace (self-defending)', async () => {
+      // The guard lives in this primitive, so it holds for every caller — emptying the parent
+      // would delete every brand's markets across the whole org. It must fire before the
+      // listing, not after.
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [{ id: 'p1' }] }),
+      });
+
+      await expect(deleteAllProjects(transport, PARENT_WS, PARENT_WS))
+        .to.be.rejectedWith(/must not be the organization parent workspace/);
+      expect(transport.listProjects).to.not.have.been.called;
+      expect(transport.deleteProject).to.not.have.been.called;
+    });
   });
 });

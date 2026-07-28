@@ -462,7 +462,7 @@ describe('provisionBrandSubworkspace', () => {
     expect(handleCreateMarketSubworkspace.called).to.equal(false);
   });
 
-  function makeReleaseTransport(overrides = {}) {
+  function makeCleanupTransport(overrides = {}) {
     return {
       transferWorkspaceResources: sinon.stub().resolves({}),
       listProjects: sinon.stub().resolves({ items: [] }),
@@ -477,7 +477,7 @@ describe('provisionBrandSubworkspace', () => {
     // a later step returns a 4xx — provisioning throws. The orphaned workspace's
     // projects are emptied and the shell is left in place (production never deletes a
     // sub-workspace); it holds no allocation, so no resource transfer is issued.
-    const transport = makeReleaseTransport({
+    const transport = makeCleanupTransport({
       listProjects: sinon.stub().resolves({ items: [{ id: 'proj-1' }] }),
     });
     const handler = sinon.stub().callsFake(async (t, brand, ...rest) => {
@@ -510,8 +510,8 @@ describe('provisionBrandSubworkspace', () => {
 
   it('does NOT attempt a cleanup when provisioning fails before the workspace is created', async () => {
     // ensureSubworkspace never set the workspace id (e.g. parent-workspace
-    // lookup failed inside the handler) → nothing to release.
-    const transport = makeReleaseTransport();
+    // lookup failed inside the handler) → nothing to empty.
+    const transport = makeCleanupTransport();
     const handler = sinon.stub().rejects(new SerenityTransportError(500, 'early boom'));
     const mod = await esmock('../../../src/support/serenity/brand-provisioning.js', {
       '../../../src/support/serenity/workspace-resolver.js': {
@@ -848,13 +848,13 @@ describe('defensive branch coverage', () => {
     });
   });
 
-  describe('releaseCapturedOnFailure catch block (lines 141-145)', () => {
-    it('logs error when provisioning fails after workspace creation AND the release itself throws', async () => {
+  describe('emptyCapturedOnFailure catch block', () => {
+    it('logs error when provisioning fails after workspace creation AND the cleanup itself throws', async () => {
       // The catch fires when: handleCreateMarketSubworkspace captures a workspaceId (via
       // brand.setSemrushSubWorkspaceId) and then returns a 4xx result triggering
-      // releaseCapturedOnFailure, AND emptying the workspace's projects (deleteAllProjects,
-      // the first step of any release attempt post-LLMO-6189) throws.
-      const listProjects = sinon.stub().rejects(new Error('release network error'));
+      // emptyCapturedOnFailure, AND emptying the workspace's projects (deleteAllProjects)
+      // throws.
+      const listProjects = sinon.stub().rejects(new Error('cleanup network error'));
       const handler = sinon.stub().callsFake(async (transport, brand, ...rest) => {
         brand.setSemrushSubWorkspaceId(NEW_WS);
         notifyCreated(rest, NEW_WS);
@@ -891,7 +891,7 @@ describe('defensive branch coverage', () => {
       const [msg, meta] = log.error.firstCall.args;
       expect(msg).to.include('failed to empty');
       expect(meta.semrushWorkspaceId).to.equal(NEW_WS);
-      expect(meta.error).to.equal('release network error');
+      expect(meta.error).to.equal('cleanup network error');
     });
   });
 
