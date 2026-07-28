@@ -2065,6 +2065,8 @@ describe('SerenityController', () => {
       expect(markets).to.deep.equal([]);
       // Sub-workspace ensured once; NO project, NO body-driven market path.
       expect(ensureSubworkspaceStub).to.have.been.calledOnce;
+      // Sub-workspace-only → skips the settle poll (LLMO-6569).
+      expect(ensureSubworkspaceStub.firstCall.args[7]).to.have.property('createReadiness', 'skip');
       expect(handlers.handleCreateMarketSubworkspace).to.not.have.been.called;
       expect(updateBrandStub).to.not.have.been.called;
       expect(brand.setStatus).to.have.been.calledWith('active');
@@ -2104,6 +2106,8 @@ describe('SerenityController', () => {
       const { status } = await readBody(response);
       expect(status).to.equal('active');
       expect(ensureSubworkspaceStub).to.have.been.calledOnce;
+      // Bare reactivation is sub-workspace-only → skips the settle poll (LLMO-6569).
+      expect(ensureSubworkspaceStub.firstCall.args[7]).to.have.property('createReadiness', 'skip');
     });
 
     it('activate prefers body markets + brandDomain over the stash, and clears the stash when its market is provisioned', async () => {
