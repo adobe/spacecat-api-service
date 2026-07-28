@@ -1003,7 +1003,16 @@ export async function listUnionModels(transport, semrushWorkspaceId, projectIds)
     return { items: [] };
   }
   const perProject = await Promise.all(
-    ids.map((projectId) => listSliceModels(transport, semrushWorkspaceId, projectId)),
+    ids.map((projectId) => listSliceModels(transport, semrushWorkspaceId, projectId)
+      .catch((e) => {
+        // Tolerate a stale/deleted project (404/405) — skip it rather than
+        // 500 the whole union, matching the old global-catalog path. Auth and
+        // other errors still propagate.
+        if (isSemrushTransportError(e) && (e.status === 404 || e.status === 405)) {
+          return { items: [] };
+        }
+        throw e;
+      })),
   );
   const byKey = new Map();
   for (const { items } of perProject) {

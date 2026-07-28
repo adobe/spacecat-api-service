@@ -1202,6 +1202,26 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
       .to.be.rejectedWith(SerenityTransportError);
   });
 
+  it('listModels (no market) tolerates a 404 from a stale project and unions the rest', async () => {
+    const dataAccess = makeDataAccess([
+      makeProject({ semrushProjectId: 'proj-a', geoTargetId: 2840, languageCode: 'en' }),
+      makeProject({ semrushProjectId: 'proj-stale', geoTargetId: 2250, languageCode: 'fr' }),
+    ]);
+    const listAiModels = sinon.stub();
+    listAiModels.withArgs(WORKSPACE, 'proj-a').resolves({
+      items: [{
+        model: {
+          id: 'm-1', key: 'chatgpt', name: 'ChatGPT', icon: null,
+        },
+      }],
+    });
+    listAiModels.withArgs(WORKSPACE, 'proj-stale')
+      .rejects(new SerenityTransportError(404, 'not found'));
+    const transport = { listAiModels };
+    const result = await handleListModels(transport, dataAccess, BRAND, WORKSPACE, {});
+    expect(result.items.map((m) => m.key)).to.deep.equal(['chatgpt']);
+  });
+
   it('listModels 400s when only one of geoTargetId/languageCode is provided', async () => {
     const dataAccess = makeDataAccess([]);
     await expect(handleListModels({}, dataAccess, BRAND, WORKSPACE, { geoTargetId: 2840 }))
