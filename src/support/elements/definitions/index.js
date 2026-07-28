@@ -30,7 +30,9 @@ export {
   transformPromptsResponse,
   INTENT_ENRICH_CONCURRENCY,
 } from './prompts.js';
-export { buildCitedDomainsPayload, transformCitedDomainsResponse } from './cited-domains.js';
+export {
+  buildCitedDomainsPayload, transformCitedDomainsResponse, transformCitedDomainsResponses,
+} from './cited-domains.js';
 export { buildTopicPromptsPayload, transformTopicPromptsResponse } from './topic-prompts.js';
 export { aggregateTopicsFromPrompts } from './topics-insights.js';
 export {
