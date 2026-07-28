@@ -2305,6 +2305,44 @@ describe('handlers/prompts.js — unified intent classification (serenity-docs#3
     expect(out.tagIds).to.deep.equal([decoyCategoryId, TAG_IDS.intentCommercial]);
     expect(transport.createProjectTags).to.not.have.been.called;
   });
+
+  // serenity-docs#33 "no terminal Informational default": a text explicitly
+  // mapped to `null` (as the async worker's unbounded classifier returns for a
+  // prompt whose retries are exhausted) must NOT be defaulted to Informational
+  // — it is distinct from a text simply absent from the map.
+  describe('no terminal Informational default (serenity-docs#33)', () => {
+    it('strips any existing intent tag and appends nothing when the map holds an explicit null', async () => {
+      const transport = {
+        listProjectTags: makeListProjectTagsStub(),
+        createProjectTags: sinon.stub(),
+      };
+      const intentByText = new Map([['pending prompt', null]]);
+      const inject = makeIntentInjector(transport, WORKSPACE, intentByText, fakeLog());
+
+      const out = await inject('proj-1', {
+        text: 'pending prompt',
+        geoTargetId: 2840,
+        tagIds: [TAG_IDS.categoryRunningShoes, TAG_IDS.intentInformational],
+      });
+
+      // The stale intent id is stripped and NOTHING is appended in its place.
+      expect(out.tagIds).to.deep.equal([TAG_IDS.categoryRunningShoes]);
+    });
+
+    it('still defaults to Informational for a text genuinely absent from the map', async () => {
+      const transport = {
+        listProjectTags: makeListProjectTagsStub(),
+        createProjectTags: sinon.stub(),
+      };
+      // Present-with-null (pending) vs absent (sync-path default) must not collapse.
+      const intentByText = new Map([['pending prompt', null]]);
+      const inject = makeIntentInjector(transport, WORKSPACE, intentByText, fakeLog());
+
+      const out = await inject('proj-1', { text: 'other prompt', geoTargetId: 2840, tagIds: ['x'] });
+
+      expect(out.tagIds).to.deep.equal(['x', TAG_IDS.intentInformational]);
+    });
+  });
 });
 
 describe('handlers/prompts.js — deferPublish (serenity-docs#32 CSV-chunking)', () => {
