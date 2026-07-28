@@ -12,10 +12,17 @@
 > `decommissionBrandWorkspace`).
 >
 > **Hardening pass (post-review, gap audit):** five further safety/correctness
-> gaps were closed. (1) The sub-workspace **title now embeds the brand id**
-> (`"<name> [<uuid>]"`) so ambiguous-create recovery cannot adopt a *same-named*
-> brand's workspace; adoption additionally verifies the candidate is
-> **project-empty** before adopting. (2) `ensureSubworkspace` takes an optional
+> gaps were closed. (1) The sub-workspace **title is the brand's bare display
+> name**, which is *not* unique within an org, so ambiguous-create recovery does
+> not key on it alone: `findAdoptableFamilyMatch` **drops every candidate already
+> bound to a different brand** (`brands.semrush_sub_workspace_id`, a UNIQUE
+> column) before applying the match/ambiguity rules, and additionally verifies the
+> candidate is **project-empty** before adopting — together these keep a timed-out
+> create from adopting a *same-named* brand's workspace. Because a bare title can
+> resolve to a workspace this request did not create, `ensureSubworkspace` reports
+> a **freshly-created** workspace via `onWorkspaceCreated` and every failure-
+> compensation path releases only on that signal, never on a merely-adopted
+> workspace. (2) `ensureSubworkspace` takes an optional
 > `reloadPointer` and, on the create path, **re-reads the brand pointer before
 > persisting** — if a concurrent activation already won, it releases its own
 > freshly-created workspace's allocation and adopts the winner (residual race
