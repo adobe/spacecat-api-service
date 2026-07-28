@@ -44,6 +44,9 @@ async function getImsAccessToken(clientId, clientSecret) {
     throw new Error(`IMS client-credentials token request failed (${response.status}): ${body}`);
   }
   const { access_token: accessToken } = await response.json();
+  if (!accessToken) {
+    throw new Error('IMS client-credentials token response is missing access_token');
+  }
   return accessToken;
 }
 
@@ -58,7 +61,8 @@ async function loginViaS2S(clientId, clientSecret) {
     body: JSON.stringify({ imsOrgId: IMS_ORG_ID }),
   });
   if (!response.ok) {
-    throw new Error(`POST /auth/s2s/login failed with status ${response.status}`);
+    const body = await response.text();
+    throw new Error(`POST /auth/s2s/login failed (${response.status}): ${body}`);
   }
   const { sessionToken } = await response.json();
   return sessionToken;
