@@ -262,9 +262,13 @@ describe('serenity tag-tree', () => {
         listProjectTags: makeListProjectTagsStub(),
         createProjectTags: sinon.stub(),
       };
-      const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
+      const log = fakeLog();
+      const roots = await ensureDimensionRoots(transport, WS, PROJECT, log);
       expect([...roots.keys()]).to.deep.equal(['category', 'intent', 'origin', 'type']);
       expect(transport.createProjectTags).to.not.have.been.called;
+      // Third leg of the guardrail contract: nothing was created (empty `createdNames`),
+      // so the reshape-missed check is skipped entirely — no re-read, no warning.
+      expect(log.warn).to.not.have.been.called;
     });
 
     it('brings a project that predates the taxonomy forward on first touch', async () => {

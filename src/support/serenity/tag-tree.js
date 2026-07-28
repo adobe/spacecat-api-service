@@ -556,7 +556,7 @@ export async function ensureClosedValue(
  * `branded` or `ai` (the collision the model spec's fixture proves survivable) is
  * NOT in this set and is left untouched. {@link ensureDimensionRoots} resolves
  * `DIMENSION.ORIGIN` to the project's `origin` root (the authorship rename is
- * complete — WP-O6), creating it on a project that predates the taxonomy.
+ * complete), creating it on a project that predates the taxonomy.
  *
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {string} semrushWorkspaceId
