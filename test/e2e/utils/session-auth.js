@@ -36,7 +36,8 @@ async function getImsAccessToken(clientId, clientSecret) {
     }),
   });
   if (!response.ok) {
-    throw new Error(`IMS client-credentials token request failed with status ${response.status}`);
+    const body = await response.text();
+    throw new Error(`IMS client-credentials token request failed (${response.status}): ${body}`);
   }
   const { access_token: accessToken } = await response.json();
   return accessToken;
