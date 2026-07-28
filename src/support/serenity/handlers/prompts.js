@@ -24,6 +24,8 @@ import { resolveTypeValueInjection, resolveIntentValueInjection, resolveClosedVa
 import { DIMENSION, ORIGIN_VALUE, INTENT_VALUE } from '../prompt-tags.js';
 import { classifyPromptIntents } from '../intent-classification.js';
 
+/** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
+
 // TWIN FILE: the slice→project orchestration here is paralleled by the
 // subworkspace-mode handlers in prompts-subworkspace.js. The duplication is
 // DEFERRED, not accidental — this flat path (BrandSemrushProject DB lookup) is
@@ -253,7 +255,7 @@ export async function handleListPrompts(
 /**
  * Publishes every affected project, collecting (not throwing) per-project failures. Shared by flat
  * and subworkspace callers.
- * @param {object} transport
+ * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string[]} projectIds
  * @param {object} log
@@ -333,7 +335,7 @@ export async function publishAffected(
  * bookkeeping field the caller strips before the response is returned (see
  * `handleCreatePrompts` / `handleCreatePromptsSubworkspace`).
  *
- * @param {object} transport
+ * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {Array<{ projectId: string, message: string, code?: string }>} publishErrors
  * @param {Array<{ rollbackProjectId: string, semrushPromptId: string, text: string,
@@ -519,7 +521,7 @@ export function normalizePromptInput(input) {
  * — so every id must already be a known-good upstream tag id, resolved by the
  * caller and never guessed.
  *
- * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
  * @param {{ text: string, tagIds: string[] }} input
@@ -578,7 +580,7 @@ export async function createOnePrompt(transport, semrushWorkspaceId, projectId, 
  * bulk create is atomic and has not run yet) rather than writing an unclassified
  * or unattributed prompt behind a 2xx.
  *
- * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {((text: string, geoTargetId: number) => string) | undefined} classifyPromptType
  * @param {object} [log]
@@ -679,7 +681,7 @@ export function makePromptTagInjector(
  * {@link makePromptTagInjector}'s memoization. `resolveIntentValueInjection` resolves
  * or throws, so the computed tag is always attached and never silently dropped.
  *
- * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {Map<string, string|null>} intentByText - text -> bare `intent` value,
  *   or `null` for a text that is known-pending (no terminal default).
@@ -804,7 +806,7 @@ export async function mapLimit(items, limit, mapper) {
  * for triggering a publish itself (e.g. a normal, non-deferred call on the
  * last chunk of an import, which publishes every project touched across the
  * whole import since a single CSV import always targets one project).
- * @param {any} transport
+ * @param {SerenityTransport} transport
  * @param {any} dataAccess
  * @param {string | undefined} brandId
  * @param {string} semrushWorkspaceId
@@ -1194,7 +1196,7 @@ export async function handleUpdatePrompt(
  * `{ prompts: [{semrushPromptId, geoTargetId, languageCode}, ...] }`.
  * Resolves each row's owning slice, batches deletes per upstream project,
  * publishes affected projects. Upstream 404 == idempotent success.
- * @param {any} transport
+ * @param {SerenityTransport} transport
  * @param {any} dataAccess
  * @param {string | undefined} brandId
  * @param {string} semrushWorkspaceId

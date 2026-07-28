@@ -19,6 +19,8 @@ import { withResourceLock } from './resource-lock.js';
 import { isMeteredQuota } from './errors.js';
 import { recordQuotaRetryOutcome } from './allocation-metrics.js';
 
+/** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */
+
 /** Default poll-retry shape for {@link createHeadroomGuard}'s `retryOnQuota` (LLMO-6190 follow-up:
  * live-verified ~9s Semrush gateway write-enforcement lag after a JIT top-up — see the doc comment
  * on `retryOnQuota` below). Sized with margin over the observed lag; a caller may override via
@@ -145,7 +147,7 @@ export function resolveBrandAiCeiling(env, log) {
  *   PLACEHOLDER, effectively non-enforcing — see its doc) when the caller doesn't pass one, so the
  *   ceiling-enforcement PATH is always in force even though no real product number exists yet.
  *
- * @param {any} transport - Serenity transport.
+ * @param {SerenityTransport} transport
  * @param {object} opts
  * @param {boolean} opts.enabled - the global kill-switch value for this request.
  * @param {string} [opts.subWorkspaceId] - the sub-workspace being written to (`auth.workspaceId`).

@@ -18,6 +18,8 @@ import { ErrorWithStatusCode } from '../utils.js';
 import { ERROR_CODES, isUpstreamGone } from './errors.js';
 import { clearBrandWorkspaceCache } from './workspace-resolver.js';
 
+/** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */
+
 // Per-brand resource allocation. PLACEHOLDER sizing (design §6/§12) until a
 // sizing owner decides: one slot per market plus headroom, prompts scaled to
 // project count. Tunable per call.
@@ -184,7 +186,7 @@ async function claimedBrandId(brandCollection, workspaceId) {
  * place: the proactive create-or-adopt check (returns the match to reuse, or
  * null → create) and the 504 timeout recovery (null → no-match error).
  *
- * @param {object} transport
+ * @param {SerenityTransport} transport
  * @param {string} parentWorkspaceId
  * @param {string} title
  * @param {object} log
@@ -296,7 +298,7 @@ async function findAdoptableFamilyMatch(transport, parentWorkspaceId, title, log
  * error here, unlike the proactive path where it just means "create one"). Multiple
  * matches → fail with an alert, never guess.
  *
- * @param {object} transport
+ * @param {SerenityTransport} transport
  * @param {string} parentWorkspaceId
  * @param {string} title
  * @param {object} log
@@ -321,7 +323,7 @@ async function adoptFromFamily(transport, parentWorkspaceId, title, log, claim) 
  * idempotent). Extracted so it is shared by `decommissionBrandWorkspace` and every other
  * LLMO-6189 full-allocation-release call site that must empty a sub-workspace's projects before
  * {@link releaseFullAllocation} can safely delete the (now-empty) workspace itself.
- * @param {object} transport
+ * @param {SerenityTransport} transport
  * @param {string} workspaceId
  * @returns {Promise<number>} the number of projects the listing returned (i.e. attempted deletes).
  */
@@ -364,7 +366,7 @@ export async function deleteAllProjects(transport, workspaceId) {
  * current caller passes a custom floor, but the option is exported/documented, so a future one
  * could silently reintroduce the stranding bug this PR fixes. Fail loud instead.
  *
- * @param {object} transport
+ * @param {SerenityTransport} transport
  * @param {string} workspaceId - the (already project-emptied) sub-workspace to reclaim.
  * @param {string} [parentWorkspaceId] - the org parent workspace; assertNotParent guard.
  * @param {object} [log]
@@ -417,7 +419,7 @@ export async function releaseFullAllocation(
  *
  * Persisting the column flips the brand into subworkspace mode (resolveBrandWorkspace).
  *
- * @param {object} transport - serenity transport.
+ * @param {SerenityTransport} transport
  * @param {object} brand - Brand model instance (dataAccess.Brand.findById).
  * @param {string} parentWorkspaceId - the org parent workspace.
  * @param {number} marketCount - sizing input for the allocation.
@@ -651,7 +653,7 @@ export async function ensureSubworkspace(
  * the deactivate handler does it after this resolves, leaving the
  * sub-workspace empty and unowned (or, with the flag on, gone).
  *
- * @param {object} transport
+ * @param {SerenityTransport} transport
  * @param {string} subworkspaceId
  * @param {object} log
  * @param {string} [parentWorkspaceId] - when provided, a self-defending guard:

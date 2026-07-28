@@ -1,0 +1,17 @@
+{
+  // Strict tier of the opt-in type-check ratchet (ADR-005). Same program as
+  // tsconfig.json but with noImplicitAny ON, over a small, deliberately-grown
+  // file list. This is the only tier that reports TS2339 (unknown member) in a
+  // JS file — under noImplicitAny:false TS suppresses it outright, even against
+  // a fully-typed receiver, so a method-name typo is invisible to the base tier.
+  //
+  // Add a file here once its implicit-`any` params carry @param types. Keep the
+  // list explicit: an unfixed file joining by glob would break the gate.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noImplicitAny": true
+  },
+  "include": [
+    "src/support/serenity/rest-transport.js"
+  ]
+}

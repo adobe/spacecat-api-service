@@ -46,6 +46,8 @@ import {
 } from './allocation-metrics.js';
 import { alertPoolFreeThreshold, alertQuotaRejection } from './quota-alerts.js';
 
+/** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */
+
 /** @typedef {{ used: number, drafted: number, total: number }} AiDim */
 /** @typedef {{ projects: AiDim, prompts: AiDim }} AiTotals */
 /** @typedef {{ projects?: number, prompts?: number }} Dims a per-dimension unit count */
@@ -231,7 +233,7 @@ function workspaceBusy() {
  * the transient `422 "workspace not ready"` with backoff; maps terminal pool exhaustion to
  * `orgPoolExhausted`. Idempotent, so retry after a poll timeout is safe (the poll's 504 propagates;
  * the controller maps it to a retryable `503`).
- * @param {any} transport
+ * @param {SerenityTransport} transport
  * @param {string} workspaceId
  * @param {{ projects: number, prompts: number }} totals
  * @param {PollOpts} poll
@@ -300,7 +302,7 @@ async function transferAndSettle(transport, workspaceId, totals, poll, log, aler
  * finds it settled. Terminal pool exhaustion still maps to `orgPoolExhausted` (409); anything else
  * propagates for the controller to map. (The multi-second settle is a hot-path defect, not a tuning
  * knob — shrinking the poll doesn't fix it, removing it from the request does.)
- * @param {any} transport
+ * @param {SerenityTransport} transport
  * @param {string} workspaceId
  * @param {{ projects: number, prompts: number }} totals
  * @param {any} [log]
@@ -345,7 +347,7 @@ async function transferOnce(transport, workspaceId, totals, log, alertContext = 
  * Ensure `subWorkspaceId` has headroom for `need` before a metered op. Hot path (already covered)
  * does a single read and returns without a transfer. Otherwise tops up in whole blocks, gating on
  * the per-brand ceiling and the org pool (read from the parent workspace's own `/resources`).
- * @param {any} transport
+ * @param {SerenityTransport} transport
  * @param {object} opts
  * @param {string} opts.subWorkspaceId the sub-workspace being written to
  * @param {string} opts.parentWorkspaceId the parent/master workspace (units source; the org pool)
@@ -462,7 +464,7 @@ export async function ensureAiHeadroom(transport, {
  * still needed"; the earlier "async/reconciler path" framing is superseded by this inline
  * best-effort decision. If/when a caller wires release into the delete / model-remove paths, keep
  * this same inline best-effort shape — do not introduce a queue or worker for it.
- * @param {any} transport
+ * @param {SerenityTransport} transport
  * @param {object} opts
  * @param {string} opts.subWorkspaceId
  * @param {Partial<Blocks>} [opts.floor] minimum `total` per dim to retain (default 0)

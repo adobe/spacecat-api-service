@@ -24,6 +24,8 @@ import { resolveLocation } from '../locations.js';
 import { resolveSiteDomain } from '../site-linkage.js';
 import { alertQuotaRejection } from '../quota-alerts.js';
 
+/** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
+
 const LANGUAGE_CACHE_TTL_MS = 60 * 60 * 1000;
 export const MAX_MODEL_IDS = 50;
 const MAX_PARENT_ID_QUERY_LEN = 200;
@@ -713,7 +715,7 @@ export async function listTagsForProject(transport, semrushWorkspaceId, projectI
  * create + re-parent endpoints operate on — so it is NOT cached (a just-created or
  * re-parented tag must show immediately).
  *
- * @param {any} transport - Serenity transport.
+ * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId - Semrush (sub-)workspace id.
  * @param {string} projectId - AIO project id.
  * @param {string} parentId - '' for roots, an upstream tag id for its children.
@@ -996,7 +998,7 @@ export async function listSliceModels(transport, semrushWorkspaceId, projectId) 
  * `PROMPT_COUNT_PAGE_LIMIT` pages; on a truncated walk it returns the counted-so-far (a floor),
  * which can only UNDER-state the need — the transfer 422 remains the authoritative backstop.
  *
- * @param {any} transport - Serenity transport.
+ * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
  * @param {any} [log]
@@ -1091,7 +1093,7 @@ export async function handleListModels(
  * the inner `publishProject` call. The subworkspace update-models caller passes
  * `headroom.retryOnQuota` (LLMO-6190 item 4) so a disguised metered-405 gets ONE bounded
  * top-up+retry; flat-mode callers omit this param, so flat mode is untouched.
- * @param {any} transport
+ * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
  * @param {string[]} modelIds
@@ -1131,7 +1133,11 @@ export async function syncModelsForProject(
   const toRemoveAssignmentIds = [...currentSet]
     .filter((id) => !desiredSet.has(id))
     .map((id) => currentMap.get(id))
-    .filter(Boolean);
+    // Every key came from `currentMap`, so the lookup always hits; this drops the
+    // `undefined` the Map signature carries. Spelled out rather than `filter(Boolean)`
+    // because only an explicit `!== undefined` narrows the element type — and the two
+    // differ only on '', which an assignment id (guarded by `hasText` above) never is.
+    .filter((id) => id !== undefined);
 
   // Short-circuit: nothing to do — return the already-fetched list as-is.
   if (toAdd.length === 0 && toRemoveAssignmentIds.length === 0) {
@@ -1240,7 +1246,7 @@ export async function syncModelsForProject(
  * internally for the DELETE batch and are never exposed to callers.
  *
  * Returns the final model list in the same shape as `handleListModels`.
- * @param {any} transport
+ * @param {SerenityTransport} transport
  * @param {any} dataAccess
  * @param {string | undefined} brandId
  * @param {string} semrushWorkspaceId

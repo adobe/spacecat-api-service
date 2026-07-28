@@ -43,6 +43,7 @@ import { classifyPromptIntents } from '../intent-classification.js';
 import { alertQuotaRejection } from '../quota-alerts.js';
 
 /** @typedef {import('../resource-manager.js').Blocks} Blocks */
+/** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
 
 /**
  * Subworkspace-mode prompt handlers (serenity dual-mode, subworkspace path). Behaviourally
@@ -127,7 +128,7 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
  * POST /serenity/prompts (subworkspace) — bulk create. Resolves every input's owning
  * project from ONE live listing (buildSliceProjectMap) instead of the DB
  * mapping, then reuses the shared per-slice create + publish-once fan-out.
- * @param {any} transport
+ * @param {SerenityTransport} transport
  * @param {string} workspaceId
  * @param {any} body
  * @param {any} log
@@ -481,7 +482,7 @@ export async function handleUpdatePromptSubworkspace(
  * POST /serenity/prompts/bulk-delete (subworkspace) — resolve each target's project
  * from ONE live listing, batch deletes per project, publish affected. Upstream
  * 404 == idempotent success.
- * @param {any} transport
+ * @param {SerenityTransport} transport
  * @param {string} workspaceId
  * @param {any} body
  * @param {any} log
