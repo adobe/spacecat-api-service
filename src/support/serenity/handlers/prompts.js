@@ -651,16 +651,28 @@ export function makePromptTagInjector(
  * for the `intent` closed dimension. Unlike `type`, the "compute the value" step
  * is a `Map` lookup, not a per-item classify call: intent is batch-classified
  * ONCE per request (see `classifyPromptIntents` in `../intent-classification.js`)
- * because it is an LLM call, not a cheap pure function. A text missing from
+ * because it is an LLM call, not a cheap pure function. A text ABSENT from
  * `intentByText` (e.g. beyond the AI-gen classify cap) falls back to
- * `INTENT_VALUE.INFORMATIONAL`, the seeded standard value.
+ * `INTENT_VALUE.INFORMATIONAL`, the seeded standard value — this sync-path
+ * fallback is unchanged by serenity-docs#33.
+ *
+ * serenity-docs#33 "no terminal Informational default": a text PRESENT in
+ * `intentByText` with an explicit `null` value (as the async worker's
+ * unbounded classifier returns for a prompt whose retries are exhausted) is
+ * NOT defaulted — `injectComputedIntent` strips any existing `intent` tag and
+ * appends nothing, so the prompt is written with no value under the `intent`
+ * root at all. This is the distinction between "missing from the map"
+ * (sync-path default) and "in the map as null" (classification genuinely
+ * failed) — callers that need the no-default behavior must populate the map
+ * with an explicit `null` per pending text, not simply omit the key.
  *
  * Given the map, it returns `injectComputedIntent(projectId, input)` which:
  *   - STRIPS every caller-supplied tag id under the `intent` root (the client may
  *     never set the value), and
- *   - APPENDS the pre-resolved upstream id of the server-computed value. The
- *     atomic `createPromptsByIds` 500s on an unresolved id, so it is resolved
- *     BEFORE the write.
+ *   - APPENDS the pre-resolved upstream id of the server-computed value, UNLESS
+ *     the resolved value is `null` (see above), in which case nothing is
+ *     appended. The atomic `createPromptsByIds` 500s on an unresolved id, so a
+ *     non-null value is always resolved BEFORE the write.
  *
  * Id-based resolution ({@link resolveIntentValueInjection}, two tag-tree reads
  * per distinct `intent` value per project) is memoized for the request, mirroring
@@ -669,18 +681,21 @@ export function makePromptTagInjector(
  *
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {string} semrushWorkspaceId
- * @param {Map<string, string>} intentByText - text -> bare `intent` value.
+ * @param {Map<string, string|null>} intentByText - text -> bare `intent` value,
+ *   or `null` for a text that is known-pending (no terminal default).
  * @param {object} [log]
  * @returns {(projectId: string, input: { text: string, geoTargetId: number,
  *   tagIds: string[] }) =>
  *   Promise<{ text: string, geoTargetId: number, tagIds: string[] }>}
  */
 export function makeIntentInjector(transport, semrushWorkspaceId, intentByText, log) {
-  /** @type {Map<string, Promise<{ computedId: string, intentTagIds: string[] }>>} */
+  /** @type {Map<string, Promise<{ computedId: string|null, intentTagIds: string[] }>>} */
   const cache = new Map();
   return async function injectComputedIntent(projectId, input) {
-    const intentValue = intentByText.get(input.text) ?? INTENT_VALUE.INFORMATIONAL;
-    const key = `${projectId} ${intentValue}`;
+    const intentValue = intentByText.has(input.text)
+      ? (intentByText.get(input.text) ?? null)
+      : INTENT_VALUE.INFORMATIONAL;
+    const key = `${projectId} ${intentValue ?? '__none__'}`;
     let pending = cache.get(key);
     if (!pending) {
       pending = resolveIntentValueInjection(
@@ -694,7 +709,7 @@ export function makeIntentInjector(transport, semrushWorkspaceId, intentByText, 
     }
     const { computedId, intentTagIds } = await pending;
     const stripped = input.tagIds.filter((id) => !intentTagIds.includes(id));
-    return { ...input, tagIds: [...stripped, computedId] };
+    return { ...input, tagIds: computedId === null ? stripped : [...stripped, computedId] };
   };
 }
 
