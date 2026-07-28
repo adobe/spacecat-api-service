@@ -1088,7 +1088,7 @@ export async function handleListModelsSubworkspace(transport, workspaceId, query
 
   if (geoTargetId === null && languageCode === null) {
     const projects = await resolveProjects(transport, workspaceId);
-    const projectIds = projects.map((p) => String(p.id));
+    const projectIds = projects.filter((p) => p?.id != null).map((p) => String(p.id));
     return listUnionModels(transport, workspaceId, projectIds);
   }
   if (geoTargetId === null || languageCode === null) {
