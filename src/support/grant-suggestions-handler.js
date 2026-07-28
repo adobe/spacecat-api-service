@@ -10,7 +10,10 @@
  * governing permissions and limitations under the License.
  */
 
-import { Suggestion as SuggestionModel } from '@adobe/spacecat-shared-data-access';
+import {
+  Opportunity as OpportunityModel,
+  Suggestion as SuggestionModel,
+} from '@adobe/spacecat-shared-data-access';
 import { getTokenGrantConfigByOpportunity } from '@adobe/spacecat-shared-utils';
 
 /**
@@ -352,10 +355,16 @@ async function fillRemainingCapacity(
  * with the new token. Then fills remaining capacity from NEW
  * ungranted suggestions.
  *
+ * Only grants suggestions for opportunities still in NEW status - an
+ * opportunity that has moved to a terminal/in-progress state (RESOLVED,
+ * IGNORED, IN_PROGRESS) should not consume the site's shared per-type
+ * token bucket, even if some of its suggestions are still individually
+ * in NEW status.
+ *
  * @param {Object} dataAccess - Data access collections.
  * @param {Object} site - Site model (getId()).
  * @param {Object} opportunity - Opportunity model
- *   (getId(), getType()).
+ *   (getId(), getType(), getStatus()).
  * @returns {Promise<void>}
  */
 export async function grantSuggestionsForOpportunity(dataAccess, site, opportunity) {
@@ -363,11 +372,12 @@ export async function grantSuggestionsForOpportunity(dataAccess, site, opportuni
   const siteId = site?.getId();
   const opptyId = opportunity?.getId();
   const oppType = opportunity?.getType();
+  const oppStatus = opportunity?.getStatus();
   const config = oppType ? getTokenGrantConfigByOpportunity(oppType) : null;
   const tokenType = config?.tokenType;
 
   if (!Suggestion || !SuggestionGrant || !Token || !siteId || !opptyId || !config
-    || !tokenType) { return; }
+    || !tokenType || oppStatus !== OpportunityModel.STATUSES.NEW) { return; }
 
   const newSuggestions = await Suggestion
     .allByOpportunityIdAndStatus(opptyId, SuggestionModel.STATUSES.NEW);
