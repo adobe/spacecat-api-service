@@ -43,6 +43,27 @@ export const DEDUP_WINDOW_MS = 15 * 60 * 1000;
 
 /** @type {Map<string, { count: number, firstAt: number }>} */
 const seen = new Map();
+// A warm container can live for hours across many distinct org/brand/case/dimension
+// combinations; without eviction `seen` grows one entry per unique key forever (MysticatBot
+// review, PR #2889). Swept lazily on every `seen.set` rather than on a timer — cheap (a handful
+// of quota rejections per container, not a hot path) and needs no extra scheduling.
+const EVICT_SWEEP_THRESHOLD = 500;
+
+/**
+ * Drops every dedup entry whose window has already elapsed once the map grows past a threshold —
+ * keeps `seen` bounded to roughly the number of distinct keys active in the current window,
+ * not the lifetime total for the warm container.
+ */
+function evictExpired(now) {
+  if (seen.size <= EVICT_SWEEP_THRESHOLD) {
+    return;
+  }
+  for (const [key, entry] of seen) {
+    if (now - entry.firstAt >= DEDUP_WINDOW_MS) {
+      seen.delete(key);
+    }
+  }
+}
 
 /** Test-only reset — mirrors `clearLanguageCache` / `clearResourceLocks` in this module family. */
 export function clearQuotaAlertDedup() {
@@ -130,9 +151,14 @@ export async function alertQuotaRejection(payload, env, log) {
   const now = Date.now();
   const entry = seen.get(key);
   if (entry && now - entry.firstAt < DEDUP_WINDOW_MS) {
+    // TODO(serenity-docs#72 §5 follow-up, review PR #2889): `count` is tallied here but never
+    // surfaced — a re-post at the end of the window (or on entry expiry) showing the collapsed
+    // attempt count would fulfil the spec's "one alert with an attempt counter" more literally
+    // than the current "first attempt only, silently tallied" behavior.
     entry.count += 1;
     return;
   }
+  evictExpired(now);
   seen.set(key, { count: 1, firstAt: now });
 
   const channelId = env?.SERENITY_QUOTA_ALERTS_SLACK_CHANNEL_ID;
@@ -189,6 +215,7 @@ export async function alertRollbackFailure({
     entry.count += 1;
     return;
   }
+  evictExpired(now);
   seen.set(key, { count: 1, firstAt: now });
 
   const channelId = env?.SERENITY_QUOTA_ALERTS_SLACK_CHANNEL_ID;
@@ -198,10 +225,16 @@ export async function alertRollbackFailure({
     return;
   }
   try {
+    // Cap the listed ids so a large staged batch can't produce an oversized Slack message that
+    // gets silently dropped by the API (MysticatBot review, PR #2889) — the count itself, plus
+    // the workspace/project, is enough to locate the rest via a CloudWatch/S3 lookup.
+    const idsPreview = semrushPromptIds.length > 10
+      ? `${semrushPromptIds.slice(0, 10).join(', ')}... and ${semrushPromptIds.length - 10} more`
+      : semrushPromptIds.join(', ');
     const message = [
       ':rotating_light: *Serenity quota-rollback FAILED — stranded draft prompts* :bug:',
       `• Org: \`${orgId || 'unknown'}\`  Brand: \`${brandId || 'unknown'}\`  Workspace: \`${workspaceId}\``,
-      `• Project: \`${projectId}\`  Prompt ids (still live, unpublished): \`${semrushPromptIds.join(', ')}\``,
+      `• Project: \`${projectId}\`  Prompt ids (still live, unpublished): \`${idsPreview}\``,
       `• Rollback error: \`${rollbackError || 'n/a'}\``,
       `• ${new Date().toISOString()}`,
     ].join('\n');
@@ -247,6 +280,7 @@ export async function alertPoolFreeThreshold({
     entry.count += 1;
     return;
   }
+  evictExpired(now);
   seen.set(key, { count: 1, firstAt: now });
 
   const channelId = env?.SERENITY_QUOTA_ALERTS_SLACK_CHANNEL_ID;

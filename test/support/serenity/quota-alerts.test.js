@@ -178,6 +178,22 @@ describe('serenity quota-alerts', () => {
       expect(postSlackMessage).to.have.been.calledOnce;
     });
 
+    // MysticatBot review, PR #2889: a large staged batch must not produce an oversized Slack
+    // message (silently dropped by the API) — the id list is capped with a "... and N more" tail.
+    it('truncates a large semrushPromptIds list rather than listing every id', async () => {
+      const ids = Array.from({ length: 15 }, (_, i) => `p${i}`);
+      await alerts.alertRollbackFailure(
+        {
+          orgId: 'org-1', brandId: 'brand-1', workspaceId: 'ws-1', projectId: 'proj-1', semrushPromptIds: ids,
+        },
+        ENABLED_ENV,
+      );
+      const [, message] = postSlackMessage.firstCall.args;
+      expect(message).to.contain('p0, p1, p2, p3, p4, p5, p6, p7, p8, p9');
+      expect(message).to.contain('and 5 more');
+      expect(message).to.not.contain('p14');
+    });
+
     it('does not collapse into (or get suppressed by) an ordinary quota-rejection alert window', async () => {
       await alerts.alertQuotaRejection(
         {

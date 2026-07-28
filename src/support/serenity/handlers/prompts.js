@@ -293,7 +293,11 @@ export async function publishAffected(
       log?.warn?.('publishProject failed', { projectId: pid, error: e.message });
       const quota = isMeteredQuota(e);
       if (quota && alertContext) {
-        await alertQuotaRejection({
+        // MysticatBot review, PR #2889: NOT awaited — alertQuotaRejection is documented
+        // fire-and-forget (never throws), so awaiting it here would add Slack-post latency to
+        // this project's branch of the publish fan-out for no benefit (dedup already guarantees
+        // at most one post per key regardless of timing).
+        alertQuotaRejection({
           orgId: alertContext.orgId,
           brandId: alertContext.brandId,
           workspaceId: semrushWorkspaceId,
@@ -392,16 +396,33 @@ export async function reconcilePublishErrors(
               workspaceId: semrushWorkspaceId,
               projectId: pubErr.projectId,
               semrushPromptIds: staged.map((c) => c.semrushPromptId),
-              rollbackError: rollbackErr?.message,
+              // MysticatBot review, PR #2889: alertRollbackFailure's JSDoc promises an
+              // already-redacted message (this is Slack-bound, not an internal log) — the raw
+              // upstream error can carry internal service URLs/stack traces.
+              rollbackError: redactUpstreamMessage(rollbackErr),
             }, alertContext.env, log);
           }
         }
       }
-      for (const item of staged) {
+      if (staged.length > 0) {
+        for (const item of staged) {
+          failed.push({
+            text: item.text,
+            geoTargetId: item.geoTargetId,
+            languageCode: item.languageCode,
+            status: 409,
+            error: ERROR_CODES.QUOTA_EXCEEDED,
+            message: pubErr.message,
+          });
+        }
+      } else {
+        // aenascut review, PR #2889: a quota-rejected project with NO prompts staged by this
+        // request (e.g. a bulk-delete's publish, or a create where every input for this project
+        // was itself skipped/failed before staging) has nothing to loop over above — without this
+        // fallback the 409 quotaExceeded signal for that project silently vanishes instead of
+        // reaching the caller.
         failed.push({
-          text: item.text,
-          geoTargetId: item.geoTargetId,
-          languageCode: item.languageCode,
+          text: '',
           status: 409,
           error: ERROR_CODES.QUOTA_EXCEEDED,
           message: pubErr.message,

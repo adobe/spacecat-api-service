@@ -24,6 +24,7 @@ import {
   makePromptTagInjector,
   makeIntentInjector,
   validateDeferPublish,
+  reconcilePublishErrors,
 } from '../../../../src/support/serenity/handlers/prompts.js';
 import { ErrorWithStatusCode } from '../../../../src/support/utils.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
@@ -932,6 +933,35 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     expect(result.failed).to.have.lengthOf(1);
     expect(result.failed[0].status).to.equal(409);
     expect(result.failed[0].error).to.equal(ERROR_CODES.QUOTA_EXCEEDED);
+  });
+
+  // aenascut review, PR #2889: a quota-rejected project with NOTHING staged for it in `created`
+  // (e.g. `created` mutated/emptied by an earlier iteration, or a future caller reusing this
+  // shared reconcile step outside the current create-only call sites) must still surface the
+  // 409 quotaExceeded signal — not silently disappear because the rollback splice loop has
+  // nothing to iterate. Exercises `reconcilePublishErrors` directly since none of today's public
+  // handler call sites can produce this input shape (they only add a project to the publish
+  // fan-out when something was created for it).
+  it('reconcilePublishErrors: still reports a 409 quotaExceeded failure when the rejected project has nothing staged in `created`', async () => {
+    const transport = { deletePromptsByIds: sinon.stub().resolves() };
+    const created = [];
+    const failed = [];
+    await reconcilePublishErrors(
+      transport,
+      WORKSPACE,
+      [{ projectId: 'proj-with-nothing-staged', code: ERROR_CODES.QUOTA_EXCEEDED, message: 'publish rejected' }],
+      created,
+      failed,
+      fakeLog(),
+    );
+    expect(transport.deletePromptsByIds).to.not.have.been.called;
+    expect(failed).to.have.lengthOf(1);
+    expect(failed[0]).to.deep.equal({
+      text: '',
+      status: 409,
+      error: ERROR_CODES.QUOTA_EXCEEDED,
+      message: 'publish rejected',
+    });
   });
 });
 

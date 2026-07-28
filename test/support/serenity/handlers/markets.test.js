@@ -1606,6 +1606,40 @@ describe('handlers/markets.js — handleUpdateModels', () => {
     expect(transport.publishProject).to.have.been.calledOnceWith(WORKSPACE, 'proj-1');
   });
 
+  // aenascut review, PR #2889: syncModelsForProject's publish 405→409 classification (shared by
+  // handleUpdateModels and handleUpdateModelsSubworkspace) had no direct test — prompts.test.js
+  // covers the analogous create/publish paths, this is the model-update path's equivalent.
+  it('throws a 409 quotaExceeded ErrorWithStatusCode when the model-set-change publish 405s as a disguised quota rejection', async () => {
+    const project = makeProject({ semrushProjectId: 'proj-1', geoTargetId: 2840, languageCode: 'en' });
+    const da = makeDataAccess([]);
+    da.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = makeTransport({ currentItems: [] });
+    transport.listAiModels.onSecondCall().resolves({
+      items: [{
+        id: 'assign-1',
+        model: {
+          id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null,
+        },
+      }],
+    });
+    transport.publishProject = sinon.stub().rejects(
+      new SerenityTransportError(405, 'publish failed: 405', '<html>405 Not Allowed</html>'),
+    );
+
+    const p = handleUpdateModels(
+      transport,
+      da,
+      BRAND,
+      WORKSPACE,
+      { geoTargetId: 2840, languageCode: 'en', modelIds: ['cat-gpt'] },
+      fakeLog(),
+    );
+    await expect(p).to.be.rejectedWith(ErrorWithStatusCode);
+    const e = await p.catch((x) => x);
+    expect(e.status).to.equal(409);
+    expect(e.code).to.equal('quotaExceeded');
+  });
+
   it('propagates transport errors from deleteAiModelsByIds', async () => {
     const project = makeProject({ semrushProjectId: 'proj-1', geoTargetId: 2840, languageCode: 'en' });
     const da = makeDataAccess([]);

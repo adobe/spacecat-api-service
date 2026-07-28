@@ -359,6 +359,28 @@ describe('prompts-subworkspace handlers', () => {
       expect(transport.deletePromptsByIds)
         .to.have.been.calledOnceWith(WS, 'p-us-en', ['new-prompt']);
     });
+
+    // aenascut review, PR #2889: prompts.test.js has the flat-mode twin of this test (a rollback
+    // delete that itself fails is best-effort — the primary quotaExceeded signal must still reach
+    // the caller); this file was missing it, breaking the twin-lockstep invariant.
+    it('still appends the 409 quotaExceeded failure when the rollback delete itself fails', async () => {
+      const transport = makeTransport({
+        publishProject: sinon.stub().rejects(
+          new SerenityTransportError(405, 'publish failed: 405', '<html>405 Not Allowed</html>'),
+        ),
+        deletePromptsByIds: sinon.stub().rejects(new Error('delete boom')),
+      });
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [{
+          text: 'p', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
+        }],
+      }, log);
+      expect(result.created).to.have.length(0);
+      expect(result.failed).to.have.length(1);
+      expect(result.failed[0].status).to.equal(409);
+      expect(result.failed[0].error).to.equal(ERROR_CODES.QUOTA_EXCEEDED);
+      expect(result.failed[0].text).to.equal('p');
+    });
   });
 
   describe('handleUpdatePromptSubworkspace', () => {
