@@ -1,3 +1,10 @@
+## [1.695.4](https://github.com/adobe/spacecat-api-service/compare/v1.695.3...v1.695.4) (2026-07-28)
+
+
+### Bug Fixes
+
+* batch save suggestions in IME flow ([#2919](https://github.com/adobe/spacecat-api-service/issues/2919)) ([6da7dde](https://github.com/adobe/spacecat-api-service/commit/6da7ddef7e6d99ffebb3a9eb35608294e1684940))
+
 ## [1.695.3](https://github.com/adobe/spacecat-api-service/compare/v1.695.2...v1.695.3) (2026-07-28)
 
 
