@@ -13,7 +13,7 @@
 // @ts-check
 
 import {
-  createResponse, forbidden, internalServerError, noContent, notFound,
+  createResponse, forbidden, internalServerError, noContent, notFound, accepted,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isNonEmptyObject, isValidUUID } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
@@ -29,7 +29,11 @@ import {
   handleCreatePrompts,
   handleUpdatePrompt,
   handleBulkDeletePrompts,
+  validateDeferPublish,
+  BULK_PROMPTS_MAX_ITEMS,
 } from '../support/serenity/handlers/prompts.js';
+import { createAndEnqueueJob } from '../support/serenity/async-job-runner.js';
+import { CLASSIFY_PROMPTS_JOB_TYPE } from '../support/serenity/handlers/classify-prompts-job.js';
 import {
   handleListMarkets,
   handleGetMarket,
@@ -526,6 +530,40 @@ function SerenityController(context, log, env) {
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
+      }
+      // serenity-docs#33: CSV import is the ONLY bulk write path that routes to
+      // the async job runner — every other write path (single create, single
+      // edit, UI multi-add) stays synchronous. Routing is by SOURCE, not array
+      // length: `deferPublish` is the exact flag CSV-chunking already sets
+      // (see handleCreatePrompts' docstring) precisely because a UI multi-add
+      // never sets it, so a three-prompt UI add never pays queue+worker+publish
+      // latency. Flat-mode brands only for now — see this PR's report for why
+      // subworkspace-mode CSV import stays on the synchronous path.
+      const body = ctx.data || {};
+      if (auth.mode !== 'subworkspace' && validateDeferPublish(body)) {
+        const prompts = Array.isArray(body.prompts) ? body.prompts : [];
+        if (prompts.length === 0) {
+          return createResponse(
+            { error: 'invalidRequest', message: 'Body must include a non-empty prompts array' },
+            400,
+          );
+        }
+        if (prompts.length > BULK_PROMPTS_MAX_ITEMS) {
+          return createResponse(
+            { error: 'invalidRequest', message: `prompts array exceeds maxItems=${BULK_PROMPTS_MAX_ITEMS}` },
+            400,
+          );
+        }
+        const job = await createAndEnqueueJob(ctx, {
+          jobType: CLASSIFY_PROMPTS_JOB_TYPE,
+          metadata: {
+            mode: 'create',
+            brandId: auth.brandUuid,
+            semrushWorkspaceId: auth.workspaceId,
+            prompts,
+          },
+        });
+        return accepted({ jobId: job.getId(), status: job.getStatus() });
       }
       const transport = buildTransport(ctx, imsToken);
       const classifyPromptType = await buildPromptTypeClassifier(ctx, auth.brandUuid);

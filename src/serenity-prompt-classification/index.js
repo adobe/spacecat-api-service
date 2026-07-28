@@ -24,6 +24,10 @@ import {
   invalidateJobPromiseToken,
   NeedsReauthError,
 } from '../support/serenity/async-job-runner.js';
+import {
+  classifyPromptsHandler,
+  CLASSIFY_PROMPTS_JOB_TYPE,
+} from '../support/serenity/handlers/classify-prompts-job.js';
 
 /**
  * SQS-triggered entry point for the deferred user-context Semrush job runner
@@ -36,14 +40,16 @@ import {
  *
  * This file owns only the runner mechanics (job-type dispatch, exchange-
  * first-and-persist promise-token handling, terminal-state invalidation).
- * Per-consumer job logic — e.g. serenity-docs#33's prompt intent
- * classification (classify -> create-with-tags -> publish) — is registered
- * as a handler below but is not itself implemented here.
+ * Per-consumer job logic — serenity-docs#33's prompt intent classification
+ * (classify -> create-with-tags -> publish) — lives in
+ * `../support/serenity/handlers/classify-prompts-job.js` and is registered
+ * below.
  *
- * @type {Record<string, (context: UniversalContext, job: object) => Promise<object>>}
+ * @type {Record<string, (context: UniversalContext, job: object,
+ *   accessToken: string) => Promise<object>>}
  */
 const HANDLERS = {
-  // 'serenity-classify-prompts': classifyPromptsHandler, // serenity-docs#33
+  [CLASSIFY_PROMPTS_JOB_TYPE]: classifyPromptsHandler,
 };
 
 /**

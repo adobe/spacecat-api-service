@@ -44,10 +44,13 @@ describe('serenity-prompt-classification worker entry', () => {
   let NeedsReauthError;
   let run;
 
+  let classifyPromptsHandlerStub;
+
   beforeEach(async () => {
     sandbox = sinon.createSandbox();
     exchangeAndPersistStub = sandbox.stub();
     invalidateStub = sandbox.stub().resolves();
+    classifyPromptsHandlerStub = sandbox.stub().resolves({ created: [] });
 
     ({ NeedsReauthError } = await import('../../src/support/serenity/async-job-runner.js'));
 
@@ -56,6 +59,10 @@ describe('serenity-prompt-classification worker entry', () => {
         exchangeAndPersistPromiseToken: exchangeAndPersistStub,
         invalidateJobPromiseToken: invalidateStub,
         NeedsReauthError,
+      },
+      '../../src/support/serenity/handlers/classify-prompts-job.js': {
+        classifyPromptsHandler: classifyPromptsHandlerStub,
+        CLASSIFY_PROMPTS_JOB_TYPE: 'serenity-classify-prompts',
       },
     }));
   });
@@ -112,5 +119,18 @@ describe('serenity-prompt-classification worker entry', () => {
     expect(job.getError().code).to.equal('UNKNOWN_JOB_TYPE');
     expect(invalidateStub).to.have.been.called;
     expect(job.save).to.have.been.called;
+  });
+
+  it('dispatches serenity-classify-prompts to classifyPromptsHandler (serenity-docs#33)', async () => {
+    const job = makeJob();
+    const context = makeContext(job);
+    exchangeAndPersistStub.resolves('access-token');
+
+    await run({ jobId: 'job-123', type: 'serenity-classify-prompts' }, context);
+
+    expect(classifyPromptsHandlerStub).to.have.been.calledOnceWith(context, job, 'access-token');
+    expect(job.getStatus()).to.equal('COMPLETED');
+    expect(job.getResult()).to.deep.equal({ created: [] });
+    expect(invalidateStub).to.have.been.called;
   });
 });

@@ -665,11 +665,15 @@ export async function resolveTypeValueInjection(
  * @param {object} transport - Serenity transport (Semrush proxy client).
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
- * @param {string} wantValue - the computed bare `intent` value (e.g. `Task`).
+ * @param {string|null} wantValue - the computed bare `intent` value (e.g. `Task`),
+ *   or `null` (serenity-docs#33) when classification produced no usable value —
+ *   in that case NOTHING is created under the `intent` root and `computedId` is
+ *   `null`, so the caller strips any existing intent tag without replacing it.
  * @param {object} [log] - logger.
- * @returns {Promise<{ computedId: string, intentTagIds: string[] }>} `computedId`
- *   is always resolved — {@link ensureChildren} throws rather than leave a hole,
- *   so a prompt can never be written with the server-computed `intent` tag missing.
+ * @returns {Promise<{ computedId: string|null, intentTagIds: string[] }>} `computedId`
+ *   is always resolved to a real id — {@link ensureChildren} throws rather than
+ *   leave a hole — UNLESS `wantValue` is `null`, in which case it is `null` by
+ *   design (see above).
  */
 export async function resolveIntentValueInjection(
   transport,
@@ -678,6 +682,28 @@ export async function resolveIntentValueInjection(
   wantValue,
   log,
 ) {
+  // serenity-docs#33 "no terminal Informational default": `wantValue === null`
+  // means classification produced no usable value (LLM failure/timeout/exhausted
+  // retries). Unlike the normal path, this must NOT mint anything under the
+  // `intent` root — it only needs the existing children ids (the strip set) so
+  // the caller can remove any prior intent tag without writing a replacement.
+  // `ensureChildren([])` never creates anything (its `missing` list is empty),
+  // so this reads the root's existing children exactly like the create path
+  // does before deciding what (if anything) is missing.
+  if (wantValue === null) {
+    const roots = await ensureDimensionRoots(transport, semrushWorkspaceId, projectId, log);
+    const rootId = rootIdOf(roots, DIMENSION.INTENT);
+    const { byName } = await ensureChildren(
+      transport,
+      semrushWorkspaceId,
+      projectId,
+      rootId,
+      [],
+      log,
+    );
+    return { computedId: null, intentTagIds: [...byName.values()] };
+  }
+
   const { computedId, valueTagIds } = await resolveClosedValueInjection(
     transport,
     semrushWorkspaceId,
