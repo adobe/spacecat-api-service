@@ -19,8 +19,8 @@ import esmock from 'esmock';
 use(chaiAsPromised);
 use(sinonChai);
 
-function makeJob() {
-  let status;
+function makeJob(initialStatus = 'IN_PROGRESS') {
+  let status = initialStatus;
   let error;
   let result;
   return {
@@ -132,5 +132,30 @@ describe('serenity-prompt-classification worker entry', () => {
     expect(job.getStatus()).to.equal('COMPLETED');
     expect(job.getResult()).to.deep.equal({ created: [] });
     expect(invalidateStub).to.have.been.called;
+  });
+
+  it('marks the job FAILED with JOB_FAILED when the handler throws', async () => {
+    const job = makeJob();
+    const context = makeContext(job);
+    exchangeAndPersistStub.resolves('access-token');
+    classifyPromptsHandlerStub.rejects(new Error('classification blew up'));
+
+    await run({ jobId: 'job-123', type: 'serenity-classify-prompts' }, context);
+
+    expect(job.getStatus()).to.equal('FAILED');
+    expect(job.getError()).to.deep.equal({ code: 'JOB_FAILED', message: 'classification blew up' });
+    expect(invalidateStub).to.have.been.called;
+    expect(job.save).to.have.been.called;
+  });
+
+  it('drops a duplicate delivery for a job already in a terminal state, without re-exchanging the token', async () => {
+    const job = makeJob('COMPLETED');
+    const context = makeContext(job);
+
+    await run({ jobId: 'job-123', type: 'serenity-classify-prompts' }, context);
+
+    expect(exchangeAndPersistStub).to.not.have.been.called;
+    expect(classifyPromptsHandlerStub).to.not.have.been.called;
+    expect(job.getStatus()).to.equal('COMPLETED');
   });
 });

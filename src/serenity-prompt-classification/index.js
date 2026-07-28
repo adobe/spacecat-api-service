@@ -10,11 +10,13 @@
  * governing permissions and limitations under the License.
  */
 
-import wrap from '@adobe/helix-shared-wrap';
+// @ts-check
+
+import * as helixWrapPkg from '@adobe/helix-shared-wrap';
 import { helixStatus } from '@adobe/helix-status';
 import vaultSecrets from '@adobe/spacecat-shared-vault-secrets';
 import { sqsEventAdapter, logWrapper } from '@adobe/spacecat-shared-utils';
-import { imsClientWrapper } from '@adobe/spacecat-shared-ims-client';
+import * as imsClientPkg from '@adobe/spacecat-shared-ims-client';
 import { ok } from '@adobe/spacecat-shared-http-utils';
 
 import dataAccess from '../support/data-access.js';
@@ -28,6 +30,20 @@ import {
   classifyPromptsHandler,
   CLASSIFY_PROMPTS_JOB_TYPE,
 } from '../support/serenity/handlers/classify-prompts-job.js';
+
+// `wrap`'s runtime default export and `imsClientWrapper`'s runtime named export
+// both exist (`@adobe/helix-shared-wrap/src/wrap.js`,
+// `@adobe/spacecat-shared-ims-client/src/index.js`), but their `.d.ts` files
+// don't declare them the same way (`wrap` only as a named export; no
+// `imsClientWrapper` declaration at all) — the same upstream declaration-gap
+// class as `ImsPromiseClient` in `async-job-runner.js`. Reach both through a
+// namespace import rather than widening anything shared.
+const { default: wrap } = /** @type {{ default: (fn: Function) => { with: Function } }} */ (
+  /** @type {unknown} */ (helixWrapPkg)
+);
+const { imsClientWrapper } = /** @type {{ imsClientWrapper: Function }} */ (
+  /** @type {unknown} */ (imsClientPkg)
+);
 
 /**
  * SQS-triggered entry point for the deferred user-context Semrush job runner
@@ -45,7 +61,7 @@ import {
  * `../support/serenity/handlers/classify-prompts-job.js` and is registered
  * below.
  *
- * @type {Record<string, (context: UniversalContext, job: object,
+ * @type {Record<string, (context: object, job: object,
  *   accessToken: string) => Promise<object>>}
  */
 const HANDLERS = {
@@ -56,7 +72,7 @@ const HANDLERS = {
  * @param {object} message - the SQS message body (already JSON-parsed by
  *   `sqsEventAdapter`), carrying only `{ jobId, type }` — no promise token,
  *   per the runner's DLQ-redrive-safety design.
- * @param {UniversalContext} context
+ * @param {object} context
  */
 export async function run(message, context) {
   const { log, dataAccess: da } = context;
@@ -65,6 +81,15 @@ export async function run(message, context) {
   const job = await da.AsyncJob.findById(jobId);
   if (!job) {
     log.error(`[serenity-job-runner] Job ${jobId} not found; dropping message`);
+    return ok();
+  }
+
+  // SQS is at-least-once delivery: a redelivery of a message whose first
+  // delivery already reached a terminal state must not re-exchange the
+  // (already-consumed) promise token — that exchange would fail and
+  // overwrite a COMPLETED job's status with FAILED.
+  if (job.getStatus() !== 'IN_PROGRESS') {
+    log.info(`[serenity-job-runner] Job ${jobId} already in terminal state ${job.getStatus()}; dropping duplicate delivery`);
     return ok();
   }
 

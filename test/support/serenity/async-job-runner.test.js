@@ -123,6 +123,24 @@ describe('async-job-runner', () => {
 
       expect(job.remove).to.have.been.called;
     });
+
+    it('still propagates the original enqueue error when both remove() and the fallback save() fail', async () => {
+      getPromiseTokenStub.resolves({ promise_token: 'ptok' });
+      const job = makeJob();
+      job.remove = sandbox.stub().rejects(new Error('remove failed'));
+      job.save = sandbox.stub().rejects(new Error('save failed'));
+      const context = {
+        dataAccess: { AsyncJob: { create: sandbox.stub().resolves(job) } },
+        sqs: { sendMessage: sandbox.stub().rejects(new Error('sqs down')) },
+        env: { SERENITY_JOB_RUNNER_QUEUE_URL: 'queue-url' },
+        log: { error: sandbox.stub(), warn: sandbox.stub() },
+      };
+
+      await expect(createAndEnqueueJob(context, { jobType: 'x' }))
+        .to.be.rejectedWith('sqs down');
+
+      expect(job.save).to.have.been.called;
+    });
   });
 
   describe('exchangeAndPersistPromiseToken', () => {

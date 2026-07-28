@@ -108,11 +108,16 @@ export async function createAndEnqueueJob(context, { jobType, metadata = {} }) {
     });
   } catch (error) {
     log.error(`[serenity-job-runner] Failed to enqueue job ${job.getId()}: ${error.message}, rolling back`);
-    await job.remove().catch((removeError) => {
+    await job.remove().catch(async (removeError) => {
       log.warn(`[serenity-job-runner] Failed to roll back job ${job.getId()}: ${removeError.message}`);
       job.setStatus('FAILED');
       job.setError({ code: 'ENQUEUE_FAILED', message: error.message });
-      return job.save();
+      // Best-effort: a failure here must never mask the original enqueue
+      // error below — it only means the job record is left IN_PROGRESS
+      // rather than marked FAILED.
+      await job.save().catch((saveError) => {
+        log.warn(`[serenity-job-runner] Failed to mark job ${job.getId()} as FAILED: ${saveError.message}`);
+      });
     });
     throw error;
   }
