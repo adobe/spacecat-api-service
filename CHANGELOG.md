@@ -1,3 +1,10 @@
+## [1.700.2](https://github.com/adobe/spacecat-api-service/compare/v1.700.1...v1.700.2) (2026-07-29)
+
+
+### Bug Fixes
+
+* match worker Lambda deploy name to the merged infra ARN ([#2933](https://github.com/adobe/spacecat-api-service/issues/2933)) ([18b6cb1](https://github.com/adobe/spacecat-api-service/commit/18b6cb1a98db6e3ffdda2d35f6d58dbe5bc1280d)), closes [#708](https://github.com/adobe/spacecat-api-service/issues/708) [adobe/serenity-docs#186](https://github.com/adobe/serenity-docs/issues/186) [#33](https://github.com/adobe/spacecat-api-service/issues/33) [#2920](https://github.com/adobe/spacecat-api-service/issues/2920)
+
 ## [1.700.1](https://github.com/adobe/spacecat-api-service/compare/v1.700.0...v1.700.1) (2026-07-29)
 
 
