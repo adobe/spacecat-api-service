@@ -7696,7 +7696,6 @@ describe('Brands Controller', () => {
       hasAccess = async () => true,
       hasAdminAccess = () => true,
       isLLMOAdministrator = () => true,
-      entitlement = { getTier: () => 'PAID' },
       resolveBrandUuidResult = BRAND_UUID,
       getBrandByIdResult = {
         id: BRAND_UUID,
@@ -7759,10 +7758,6 @@ describe('Brands Controller', () => {
           upsertBrand: sinon.stub().resolves({}),
           deleteBrand: sinon.stub().resolves(true),
           getBrandBySite: sinon.stub().resolves(null),
-        },
-        '../../src/support/llmo-paid-gate.js': {
-          hasPaidLlmoEntitlement: async () => Boolean(entitlement)
-            && entitlement.getTier() === 'PAID',
         },
         '@adobe/spacecat-shared-drs-client': {
           default: {
@@ -7949,7 +7944,7 @@ describe('Brands Controller', () => {
     });
 
     // -------------------------------------------------------------------------
-    // 3. Auth failures — 403
+    // 3. Auth — 403 on membership only; activation is NOT paid-gated (LLMO-6634)
     // -------------------------------------------------------------------------
 
     it('returns 403 when hasAccess is false', async () => {
@@ -7960,18 +7955,22 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(403);
     });
 
-    it('returns 403 when entitlement is null', async () => {
-      const { controller } = await buildActivateController({ entitlement: null });
+    // LLMO-6634: activation performs NO entitlement check — the controller no longer
+    // has any paid-gate dependency, so a brand with a valid onboarded primary site
+    // activates on the org-membership check alone (only hasAccess can 403 here). This
+    // guards against re-introducing an entitlement lookup on this path: an unmocked one
+    // would surface here as a 500. The real free-vs-paid distinction is exercised
+    // against real ORG_1 (FREE_TRIAL) / ORG_2 (no-entitlement) rows in the IT suite
+    // (test/it/shared/tests/activate-brand-for-org.js). The paid gate stays on NEW-URL
+    // onboarding (onboardSiteOnly), covered separately.
+    it('activates a brand with no entitlement check — no paid-gate dependency remains (LLMO-6634)', async () => {
+      const { controller, updateBrandStub } = await buildActivateController();
       const response = await controller.activateBrandForOrg(buildActivateRequest());
-      expect(response.status).to.equal(403);
-    });
-
-    it('returns 403 when entitlement tier is FREE_TRIAL', async () => {
-      const { controller } = await buildActivateController({
-        entitlement: { getTier: () => 'FREE_TRIAL' },
-      });
-      const response = await controller.activateBrandForOrg(buildActivateRequest());
-      expect(response.status).to.equal(403);
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.status).to.equal('active');
+      expect(updateBrandStub).to.have.been.calledOnce;
+      expect(updateBrandStub.firstCall.args[0].updates.status).to.equal('active');
     });
 
     // -------------------------------------------------------------------------
