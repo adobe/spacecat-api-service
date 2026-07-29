@@ -1,3 +1,10 @@
+## [1.704.2](https://github.com/adobe/spacecat-api-service/compare/v1.704.1...v1.704.2) (2026-07-29)
+
+
+### Bug Fixes
+
+* **llmo:** tolerate null opportunity tags in brand aggregate filter | LLMO-6639 ([#2953](https://github.com/adobe/spacecat-api-service/issues/2953)) ([7c5ddcf](https://github.com/adobe/spacecat-api-service/commit/7c5ddcf1b84bfeb3edacff7106af1ef0ff06f798))
+
 ## [1.704.1](https://github.com/adobe/spacecat-api-service/compare/v1.704.0...v1.704.1) (2026-07-29)
 
 
