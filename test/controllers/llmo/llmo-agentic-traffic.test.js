@@ -181,25 +181,26 @@ function makeExportContext(overrides = {}) {
   });
 }
 
-// Resolves with the same shape as the real getSiteAndValidateAccess so that
-// withAgenticTrafficAuth forwards { site, organization } to handlerFn as siteContext.
-const stubbedValidateAccess = sinon.stub().resolves({
-  site: { getOrganizationId: () => 'org-1' },
-  organization: { getId: () => 'org-1' },
-});
+let sandbox;
+let stubbedValidateAccess;
+
+// Fresh sandbox per test, so neither call history nor a per-test behaviour
+// override can reach the next test. `stubbedValidateAccess` resolves with the
+// same shape as the real getSiteAndValidateAccess, so withAgenticTrafficAuth
+// forwards { site, organization } to handlerFn as siteContext.
+function setUpAuthStubs() {
+  sandbox = sinon.createSandbox();
+  stubbedValidateAccess = sandbox.stub().resolves({
+    site: { getOrganizationId: () => 'org-1' },
+    organization: { getId: () => 'org-1' },
+  });
+}
 
 describe('llmo-agentic-traffic', () => {
-  const sandbox = sinon.createSandbox();
+  beforeEach(setUpAuthStubs);
 
   afterEach(() => {
     sandbox.restore();
-    // reset() clears call history AND any per-test behaviour overrides;
-    // then re-apply the default so subsequent tests get the site context.
-    stubbedValidateAccess.reset();
-    stubbedValidateAccess.resolves({
-      site: { getOrganizationId: () => 'org-1' },
-      organization: { getId: () => 'org-1' },
-    });
   });
 
   // ── Shared: PostgREST availability ──────────────────────────────────────────
@@ -2361,9 +2362,13 @@ describe('llmo-agentic-traffic — rotation (demo sites)', () => {
 
   let clock;
   beforeEach(() => {
+    setUpAuthStubs();
     clock = sinon.useFakeTimers({ now: Date.UTC(2026, 6, 6), toFake: ['Date'] });
   });
-  afterEach(() => clock.restore());
+  afterEach(() => {
+    clock.restore();
+    sandbox.restore();
+  });
 
   const assertCannedDates = (client) => {
     expect(client.rpc).to.have.been.called;
