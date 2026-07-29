@@ -22,6 +22,7 @@ import esmock from 'esmock';
 
 import * as utils from '../../src/support/utils.js';
 import PreflightController, {
+  collectSiteKnownHostnames,
   countIssuesForAudit,
   PREFLIGHT_PROCESS_AUDW,
   PREFLIGHT_PROCESS_MYST,
@@ -85,6 +86,14 @@ describe('Preflight Controller', () => {
     getId: () => 'test-site-123',
     getOrganizationId: () => 'org-123',
     getAuthoringType: () => SiteModel.AUTHORING_TYPES.SP,
+    // SITES-48309: the createPreflight hostname-membership check (ADR-002)
+    // reads these getters. Default the site's baseURL to match the
+    // canonical test URL (main--example-site.aem.page) so the majority of
+    // tests that submit that URL still resolve to a "URL belongs to this
+    // site" pass. Per-test AEM CS / EDS site fixtures override as needed.
+    getBaseURL: () => 'https://main--example-site.aem.page',
+    getDeliveryConfig: () => ({}),
+    getHlxConfig: () => ({}),
   };
 
   const preflightId = 'aabbccdd-1234-5678-abcd-111122223333';
@@ -1145,7 +1154,8 @@ describe('Preflight Controller', () => {
 
       mockDataAccess.AsyncJob.create = sandbox.stub().resolves(mockJob);
       mockDataAccess.Site.findById = sandbox.stub().resolves(mockSite);
-      mockDataAccess.Site.findByPreviewURL = sandbox.stub().resolves(mockSite);
+      // SITES-48309: createPreflight no longer calls findByPreviewURL; hostname
+      // validation is now an in-memory check via collectSiteKnownHostnames.
       mockDataAccess.Preflight.create = sandbox.stub().resolves(mockPreflight);
       // SITES-48037: createPreflight resolves imsOrgId via Organization.findById.
       // Re-stub per test to keep the fail-closed cases (null org / null imsOrgId)
@@ -1442,11 +1452,14 @@ describe('Preflight Controller', () => {
       expect(result.errorCode).to.equal('PREFLIGHT_ACCESS_DENIED');
     });
 
-    it('returns 400 when url does not belong to site', async () => {
-      mockDataAccess.Site.findByPreviewURL.resolves(null);
+    it('returns 400 when url hostname is not in the site\'s known-hosts set (SITES-48309)', async () => {
+      // Post-SITES-48309: URL→site validation is a hostname-membership check
+      // against site.getBaseURL() / site.getDeliveryConfig().authorURL / EDS
+      // hostnames derived from hlxConfig.rso — no DB lookup, no findByPreviewURL.
+      // A URL whose hostname isn't in that set → 400 PREFLIGHT_INVALID_REQUEST.
       const response = await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
-        data: { url: 'https://main--example-site.aem.page/test.html' },
+        data: { url: 'https://different-site.example.com/test.html' },
       });
       expect(response.status).to.equal(400);
       const result = await response.json();
@@ -1454,26 +1467,57 @@ describe('Preflight Controller', () => {
       expect(result.message).to.equal('URL does not belong to this site');
     });
 
-    it('returns 400 when url belongs to a different site', async () => {
-      mockDataAccess.Site.findByPreviewURL.resolves({ getId: () => 'different-site-id' });
+    it('accepts author-tier AEM CS URL when site\'s deliveryConfig.authorURL matches (SITES-48309)', async () => {
+      // ADR-002 §"POST /sites/:siteId/preflights" — hostname-membership set
+      // includes deliveryConfig.authorURL so both publish-tier (baseURL) and
+      // author-tier URLs for the same AEM CS site are accepted.
+      const aemCsSite = {
+        getId: () => 'test-site-123',
+        getOrganizationId: () => 'org-123',
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.SP,
+        getBaseURL: () => 'https://publish-p12345-e67890-cmstg.adobeaemcloud.com',
+        getDeliveryConfig: () => ({ authorURL: 'https://author-p12345-e67890-cmstg.adobeaemcloud.com' }),
+        getHlxConfig: () => ({}),
+      };
+      mockDataAccess.Site.findById.resolves(aemCsSite);
       const response = await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
-        data: { url: 'https://main--example-site.aem.page/test.html' },
+        data: { url: 'https://author-p12345-e67890-cmstg.adobeaemcloud.com/us/en.html' },
       });
-      expect(response.status).to.equal(400);
+      // Downstream mysticat / promise-token machinery isn't stubbed for this
+      // fixture, so the request will still fail somewhere later — but the
+      // hostname check specifically must NOT be the failure point.
+      expect(response.status).to.not.equal(400);
       const result = await response.json();
-      expect(result.errorCode).to.equal('PREFLIGHT_INVALID_REQUEST');
+      expect(result.errorCode).to.not.equal('PREFLIGHT_INVALID_REQUEST');
     });
 
-    it('returns 500 when Site.findByPreviewURL throws', async () => {
-      mockDataAccess.Site.findByPreviewURL.rejects(new Error('DB error'));
+    it('accepts publish-tier AEM CS URL when site\'s baseURL is the publish host (SITES-48309)', async () => {
+      // The immediate scenario that motivated SITES-48309 — a real onboarded
+      // AEM CS site with baseURL on the publish tier. Under the legacy
+      // findByPreviewURL check this returned a generic 500 (Unsupported preview
+      // URL) because the regex only matched `author-p<N>-e<M>`.
+      const aemCsSite = {
+        getId: () => 'test-site-123',
+        getOrganizationId: () => 'org-123',
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.SP,
+        getBaseURL: () => 'https://publish-p152454-e364278-cmstg.adobeaemcloud.com',
+        getDeliveryConfig: () => ({}),
+        getHlxConfig: () => ({}),
+      };
+      mockDataAccess.Site.findById.resolves(aemCsSite);
       const response = await preflightController.createPreflight({
         params: { siteId: 'test-site-123' },
-        data: { url: 'https://main--example-site.aem.page/test.html' },
+        data: { url: 'https://publish-p152454-e364278-cmstg.adobeaemcloud.com/us/en.html' },
       });
-      expect(response.status).to.equal(500);
+      // Same as above — downstream isn't stubbed, so we can't assert 202
+      // without more setup. What matters is neither the hostname check (400)
+      // nor the "Unsupported preview URL" regression (500) fires.
+      expect(response.status).to.not.equal(400);
+      expect(response.status).to.not.equal(500);
       const result = await response.json();
-      expect(result.errorCode).to.equal('PREFLIGHT_INTERNAL_ERROR');
+      expect(result.errorCode).to.not.equal('PREFLIGHT_INVALID_REQUEST');
+      expect(result.errorCode).to.not.equal('PREFLIGHT_INTERNAL_ERROR');
     });
 
     it('does not consult Configuration / TierClient (eligibility deferred to Mysticat per SITES-46202)', async () => {
@@ -1766,7 +1810,6 @@ describe('Preflight Controller', () => {
         getDeliveryType: () => 'aem_cs',
       };
       mockDataAccess.Site.findById.resolves(aemCsSite);
-      mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
 
       const pageAuthStub = sandbox.stub().resolves('customer-site-token');
       const controller = await esmock('../../src/controllers/preflight.js', {
@@ -1920,9 +1963,12 @@ describe('Preflight Controller', () => {
         getOrganizationId: () => 'org-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS_CW,
         getDeliveryType: () => 'aem_edge',
+        // SITES-48309: hostname-membership stubs (see mockSite header).
+        getBaseURL: () => 'https://main--example-site.aem.page',
+        getDeliveryConfig: () => ({}),
+        getHlxConfig: () => ({}),
       };
       mockDataAccess.Site.findById.resolves(cwSite);
-      mockDataAccess.Site.findByPreviewURL.resolves(cwSite);
 
       const mockRetrievePageAuth = sandbox.stub().resolves('page-access-token');
       const ControllerWithIms = await esmock('../../src/controllers/preflight.js', {
@@ -1974,9 +2020,12 @@ describe('Preflight Controller', () => {
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
         getDeliveryType: () => 'aem_cs',
         getOrganizationId: () => 'org-123',
+        // SITES-48309: hostname-membership stubs (see mockSite header).
+        getBaseURL: () => 'https://main--example-site.aem.page',
+        getDeliveryConfig: () => ({}),
+        getHlxConfig: () => ({}),
       };
       mockDataAccess.Site.findById.resolves(csSite);
-      mockDataAccess.Site.findByPreviewURL.resolves(csSite);
       const ControllerWithStubbed = await esmock('../../src/controllers/preflight.js', {
         '../../src/support/access-control-util.js': {
           default: { fromContext: () => ({ hasAccess: hasAccessStub }) },
@@ -2018,9 +2067,14 @@ describe('Preflight Controller', () => {
         getAuthoringType: () => { throw new Error('authoring type lookup failed'); },
         getDeliveryType: () => 'aem_cs',
         getOrganizationId: () => 'org-123',
+        // SITES-48309: hostname-membership stubs — need to be present so the
+        // hostname check runs before resolvePromiseToken (which is where the
+        // authoring-type throw fires and this test exercises).
+        getBaseURL: () => 'https://main--example-site.aem.page',
+        getDeliveryConfig: () => ({}),
+        getHlxConfig: () => ({}),
       };
       mockDataAccess.Site.findById.resolves(brokenSite);
-      mockDataAccess.Site.findByPreviewURL.resolves(brokenSite);
       const ControllerWithStubbed = await esmock('../../src/controllers/preflight.js', {
         '../../src/support/access-control-util.js': {
           default: { fromContext: () => ({ hasAccess: hasAccessStub }) },
@@ -2060,9 +2114,12 @@ describe('Preflight Controller', () => {
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
         getDeliveryType: () => 'aem_cs',
         getOrganizationId: () => 'org-123',
+        // SITES-48309: hostname-membership stubs (see mockSite header).
+        getBaseURL: () => 'https://main--example-site.aem.page',
+        getDeliveryConfig: () => ({}),
+        getHlxConfig: () => ({}),
       };
       mockDataAccess.Site.findById.resolves(csSite);
-      mockDataAccess.Site.findByPreviewURL.resolves(csSite);
       const mockRetrievePageAuth = sandbox.stub().rejects(new Error('IMS down'));
       const ControllerWithIms = await esmock('../../src/controllers/preflight.js', {
         '@adobe/spacecat-shared-ims-client': {
@@ -2126,9 +2183,12 @@ describe('Preflight Controller', () => {
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.SP,
         getDeliveryType: () => 'aem_edge',
         getOrganizationId: () => 'org-123',
+        // SITES-48309: hostname-membership stubs (see mockSite header).
+        getBaseURL: () => 'https://main--example-site.aem.page',
+        getDeliveryConfig: () => ({}),
+        getHlxConfig: () => ({}),
       };
       mockDataAccess.Site.findById.resolves(spSite);
-      mockDataAccess.Site.findByPreviewURL.resolves(spSite);
 
       const mockRetrievePageAuth = sandbox.stub().resolves('sp-page-token');
       const ControllerWithIms = await esmock('../../src/controllers/preflight.js', {
@@ -2175,9 +2235,12 @@ describe('Preflight Controller', () => {
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
         getDeliveryType: () => 'aem_cs',
         getOrganizationId: () => 'org-123',
+        // SITES-48309: hostname-membership stubs (see mockSite header).
+        getBaseURL: () => 'https://main--example-site.aem.page',
+        getDeliveryConfig: () => ({}),
+        getHlxConfig: () => ({}),
       };
       mockDataAccess.Site.findById.resolves(csSite);
-      mockDataAccess.Site.findByPreviewURL.resolves(csSite);
 
       const mockRetrievePageAuth = sandbox.stub().resolves('cs-token');
       const ControllerWithIms = await esmock('../../src/controllers/preflight.js', {
@@ -3053,5 +3116,118 @@ describe('countIssuesForAudit', () => {
       ],
     };
     expect(countIssuesForAudit(audit)).to.equal(45);
+  });
+});
+
+describe('collectSiteKnownHostnames (SITES-48309)', () => {
+  const makeSite = ({ baseURL, deliveryConfig, hlxConfig } = {}) => ({
+    getBaseURL: () => baseURL,
+    getDeliveryConfig: () => deliveryConfig || {},
+    getHlxConfig: () => hlxConfig || {},
+  });
+
+  it('collects the baseURL hostname (lowercased) as the primary known host', () => {
+    const hosts = collectSiteKnownHostnames(makeSite({
+      baseURL: 'https://Publish-P12345-E67890-cmstg.adobeaemcloud.com',
+    }));
+    expect([...hosts]).to.deep.equal(['publish-p12345-e67890-cmstg.adobeaemcloud.com']);
+  });
+
+  it('adds deliveryConfig.authorURL host in addition to baseURL (AEM CS two-tier)', () => {
+    const hosts = collectSiteKnownHostnames(makeSite({
+      baseURL: 'https://publish-p12345-e67890-cmstg.adobeaemcloud.com',
+      deliveryConfig: { authorURL: 'https://author-p12345-e67890-cmstg.adobeaemcloud.com' },
+    }));
+    expect(hosts.has('publish-p12345-e67890-cmstg.adobeaemcloud.com')).to.be.true;
+    expect(hosts.has('author-p12345-e67890-cmstg.adobeaemcloud.com')).to.be.true;
+    expect(hosts.size).to.equal(2);
+  });
+
+  it('derives EDS hostnames from hlxConfig.rso — 8 hostnames (2 patterns × 4 suffixes)', () => {
+    const hosts = collectSiteKnownHostnames(makeSite({
+      baseURL: 'https://wknd.site',
+      hlxConfig: { rso: { owner: 'adobe', site: 'wknd', ref: 'main' } },
+    }));
+    // baseURL host + 8 derived EDS hosts = 9 total.
+    expect(hosts.size).to.equal(9);
+    expect(hosts.has('wknd.site')).to.be.true;
+    // 3-part <ref>--<site>--<owner> on all four suffixes.
+    for (const sfx of ['aem.page', 'aem.live', 'hlx.page', 'hlx.live']) {
+      expect(hosts.has(`main--wknd--adobe.${sfx}`)).to.be.true;
+      // 2-part <site>--<owner> on all four suffixes.
+      expect(hosts.has(`wknd--adobe.${sfx}`)).to.be.true;
+    }
+  });
+
+  it('defaults ref to "main" when rso omits it', () => {
+    const hosts = collectSiteKnownHostnames(makeSite({
+      baseURL: 'https://wknd.site',
+      hlxConfig: { rso: { owner: 'adobe', site: 'wknd' } },
+    }));
+    expect(hosts.has('main--wknd--adobe.aem.page')).to.be.true;
+    expect(hosts.has('main--wknd--adobe.aem.live')).to.be.true;
+  });
+
+  it('honors a non-main ref when rso specifies one', () => {
+    const hosts = collectSiteKnownHostnames(makeSite({
+      baseURL: 'https://wknd.site',
+      hlxConfig: { rso: { owner: 'adobe', site: 'wknd', ref: 'feature-x' } },
+    }));
+    expect(hosts.has('feature-x--wknd--adobe.aem.page')).to.be.true;
+    expect(hosts.has('main--wknd--adobe.aem.page')).to.be.false;
+  });
+
+  it('adds NO EDS hostnames when rso is missing owner', () => {
+    const hosts = collectSiteKnownHostnames(makeSite({
+      baseURL: 'https://wknd.site',
+      hlxConfig: { rso: { site: 'wknd', ref: 'main' } },
+    }));
+    expect([...hosts]).to.deep.equal(['wknd.site']);
+  });
+
+  it('adds NO EDS hostnames when rso is missing site', () => {
+    const hosts = collectSiteKnownHostnames(makeSite({
+      baseURL: 'https://wknd.site',
+      hlxConfig: { rso: { owner: 'adobe', ref: 'main' } },
+    }));
+    expect([...hosts]).to.deep.equal(['wknd.site']);
+  });
+
+  it('lowercases rso components (case-insensitive matching)', () => {
+    const hosts = collectSiteKnownHostnames(makeSite({
+      baseURL: 'https://wknd.site',
+      hlxConfig: { rso: { owner: 'Adobe', site: 'WKND', ref: 'Main' } },
+    }));
+    expect(hosts.has('main--wknd--adobe.aem.page')).to.be.true;
+    expect(hosts.has('Main--WKND--Adobe.aem.page')).to.be.false;
+  });
+
+  it('returns an empty set when the site has no usable hostname sources', () => {
+    // No baseURL, no authorURL, no hlxConfig.rso — degenerate but shouldn\'t throw.
+    const hosts = collectSiteKnownHostnames(makeSite({
+      baseURL: null,
+    }));
+    expect(hosts.size).to.equal(0);
+  });
+
+  it('ignores malformed URLs on baseURL / authorURL without throwing', () => {
+    const hosts = collectSiteKnownHostnames(makeSite({
+      baseURL: 'not a url',
+      deliveryConfig: { authorURL: 'also not a url' },
+    }));
+    expect(hosts.size).to.equal(0);
+  });
+
+  it('handles a fully-populated site — baseURL + authorURL + rso all present', () => {
+    const hosts = collectSiteKnownHostnames(makeSite({
+      baseURL: 'https://publish-p12345-e67890-cmstg.adobeaemcloud.com',
+      deliveryConfig: { authorURL: 'https://author-p12345-e67890-cmstg.adobeaemcloud.com' },
+      hlxConfig: { rso: { owner: 'adobe', site: 'demo', ref: 'main' } },
+    }));
+    // 2 explicit + 8 derived = 10 hostnames total.
+    expect(hosts.size).to.equal(10);
+    expect(hosts.has('publish-p12345-e67890-cmstg.adobeaemcloud.com')).to.be.true;
+    expect(hosts.has('author-p12345-e67890-cmstg.adobeaemcloud.com')).to.be.true;
+    expect(hosts.has('main--demo--adobe.aem.page')).to.be.true;
   });
 });

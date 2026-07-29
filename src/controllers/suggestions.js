@@ -43,6 +43,7 @@ import {
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto/suggestion.js';
 import { isValidLocale } from '../utils/validations.js';
+import { applyFieldProjection } from '../utils/field-projection.js';
 import {
   getScheduleParams,
   buildExperimentMetadata,
@@ -57,7 +58,7 @@ import {
   getIsSummitPlgEnabled,
   isViewAsTrialRequest,
 } from '../support/utils.js';
-import AccessControlUtil from '../support/access-control-util.js';
+import AccessControlUtil, { X_PRODUCT_HEADER } from '../support/access-control-util.js';
 import { redactFeedbackContent } from '../support/feedback-redaction.js';
 import { CAP_FIX_ENTITY_CREATE, CAP_SUGGESTION_WRITE } from '../routes/capability-constants.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
@@ -78,6 +79,16 @@ const FEEDBACK_STATE_TRANSITIONS = [
 // suggestion is 2-3, but this bounds payload size (esp. with ?include=patches)
 // and is backed by idx_feedback_event_suggestion (suggestion_id, event_time).
 const FEEDBACK_REVIEW_READ_LIMIT = 100;
+
+// Contextual experiment names by opportunity type to be visible on Oppty Workspace Strategy UI
+const EXPERIMENT_NAME_BY_OPPORTUNITY_TYPE = {
+  prerender: 'Recover content visibility',
+  toc: 'Add table of contents',
+  summarization: 'Add LLM-Friendly Summaries',
+};
+
+const getExperimentName = (opportunityType) => EXPERIMENT_NAME_BY_OPPORTUNITY_TYPE[opportunityType]
+  || `${opportunityType.charAt(0).toUpperCase()}${opportunityType.slice(1).replace(/-/g, ' ')}`;
 
 async function isSitePlgTier(site, log) {
   try {
@@ -465,7 +476,11 @@ function SuggestionsController(ctx, sqs, env) {
     const suggestions = filteredEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
-    return ok(suggestions);
+    const { list, error } = applyFieldProjection(suggestions, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+    return ok(list);
   };
 
   /**
@@ -533,8 +548,12 @@ function SuggestionsController(ctx, sqs, env) {
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
 
+    const { list, error } = applyFieldProjection(suggestions, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
     return ok({
-      suggestions,
+      suggestions: list,
       pagination: {
         limit,
         cursor: newCursor ?? null,
@@ -596,7 +615,11 @@ function SuggestionsController(ctx, sqs, env) {
     const suggestions = filteredEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
-    return ok(suggestions);
+    const { list, error } = applyFieldProjection(suggestions, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+    return ok(list);
   };
 
   /**
@@ -663,8 +686,12 @@ function SuggestionsController(ctx, sqs, env) {
     const suggestions = filteredEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
+    const { list, error } = applyFieldProjection(suggestions, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
     return ok({
-      suggestions,
+      suggestions: list,
       pagination: {
         limit,
         cursor: newCursor ?? null,
@@ -1301,10 +1328,17 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Site not found');
     }
 
+    // The 'auto_fix' subService maps to the `dx_aem_perf_auto_fix` user scope, which is only
+    // minted for ASO product logins. LLMO logins never carry this scope, so gating LLMO autofix
+    // on it always yields a 403 (LLMO-6553). Only enforce the subService for ASO; for any other
+    // product, fall back to plain org-membership access.
+    const xProduct = context.pathInfo?.headers?.[X_PRODUCT_HEADER];
+    const autoFixSubService = xProduct === 'ASO' ? 'auto_fix' : '';
+
     const s2sResult = await accessControlUtil.hasS2SCapability(CAP_FIX_ENTITY_CREATE);
     if (s2sResult.allowed) {
       ctx.log?.info(`[acl] S2S auto-fix granted - clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId}`);
-    } else if (!await accessControlUtil.hasAccess(site, 'auto_fix')) {
+    } else if (!await accessControlUtil.hasAccess(site, autoFixSubService)) {
       if (s2sResult.reason !== 'not-s2s') {
         ctx.log?.info(`[acl] Denied PATCH auto-fix - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'}`);
       }
@@ -2065,7 +2099,6 @@ function SuggestionsController(ctx, sqs, env) {
 
     if (isAsyncExperimentRequested) {
       context.log.info(`[edge-geo-exp] async experiment requested for site: ${apexBaseUrl}`);
-      let urls;
       const geoExperimentId = crypto.randomUUID();
 
       context.log.info('[edge-geo-exp] Initiating experiment', {
@@ -2076,10 +2109,8 @@ function SuggestionsController(ctx, sqs, env) {
       });
 
       let geoExperiment = null;
-      // Tracks whether the Atomic strategy was successfully written, so the
-      // outer catch knows whether to compensate by deleting it if a later
-      // step (e.g. response serialization) throws.
       let atomicStrategyCreated = false;
+      let validSuggestionEntities = [];
       try {
         const preScheduleParams = getScheduleParams(
           context,
@@ -2091,48 +2122,66 @@ function SuggestionsController(ctx, sqs, env) {
           context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, missing schedule config for pre phase`);
           throw new Error('Missing required environment variables');
         }
-        const domainWideSuggestionIds = new Set(
-          domainWideSuggestions.map(({ suggestion }) => suggestion.getId()),
-        );
-        let promptSources;
-        if (domainWideSuggestions.length > 0) {
-          promptSources = [...allSuggestions]
-            .filter((s) => {
-              const data = s.getData() || {};
-              return !domainWideSuggestionIds.has(s.getId())
-                && s.getStatus() === SuggestionModel.STATUSES.NEW
-                && !data.edgeDeployed
-                && data.aiSummary
-                && data.valuable === true;
-            })
-            .sort((a, b) => {
-              const aScore = (a.getData()?.agenticTraffic || 0)
-                * (a.getData()?.contentGainRatio || 0);
-              const bScore = (b.getData()?.agenticTraffic || 0)
-                * (b.getData()?.contentGainRatio || 0);
-              return bScore - aScore;
-            })
-            .slice(0, 100);
-        } else {
-          promptSources = validSuggestions;
+        const hasPatternDeploy = domainWideSuggestions.length > 0 || pathSuggestions.length > 0;
+        // A single request can select multiple pattern suggestions
+        const patternSuggestions = [
+          ...domainWideSuggestions.map(({ suggestion }) => suggestion),
+          ...pathSuggestions.map(({ suggestion }) => suggestion),
+        ];
+        const metadataBase = {};
+
+        const highImpactIds = context.data?.metadata?.highImpactSuggestionIds;
+        const hasHighImpactIds = Array.isArray(highImpactIds) && highImpactIds.length > 0;
+        if (hasPatternDeploy && !hasHighImpactIds) {
+          context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, missing/invalid metadata.highImpactSuggestionIds for pattern deploy`);
+          throw new Error('metadata.highImpactSuggestionIds is required for domain-wide/segment deployment');
         }
-        urls = [...new Set(promptSources
-          .filter((s) => !domainWideSuggestionIds.has(s.getId()))
-          .map((s) => s.getData()?.url)
-          .filter(Boolean))];
+        if (hasHighImpactIds && !highImpactIds.every((id) => isValidUUID(id))) {
+          context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, invalid metadata.highImpactSuggestionIds`);
+          throw new Error('metadata.highImpactSuggestionIds must be an array of valid UUIDs');
+        }
+
+        if (hasHighImpactIds) {
+          context.log.info(`[edge-geo-exp] site: ${apexBaseUrl}, highImpactSuggestionIds: ${JSON.stringify(highImpactIds)}`);
+          const highImpactIdSet = new Set(highImpactIds);
+          const measurementSuggestions = allSuggestions.filter(
+            (s) => highImpactIdSet.has(s.getId()),
+          );
+          if (measurementSuggestions.length === 0) {
+            context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, no high-impact suggestions resolved for the provided IDs`);
+            throw new Error('No high-impact suggestions found for the provided IDs');
+          }
+          // suggestionIds holds everything that actually deploys; the high-impact measurement
+          // suggestions live in metadata and drive prompt generation/measurement only.
+          metadataBase.urls = [
+            ...new Set(measurementSuggestions.map((s) => s.getData()?.url).filter(Boolean)),
+          ];
+          metadataBase.highImpactSuggestionIds = measurementSuggestions.map((s) => s.getId());
+          if (hasPatternDeploy) {
+            metadataBase.patterns = patternSuggestions.map((ps) => (
+              ps.getData()?.isDomainWide ? '/*' : ps.getData()?.allowedRegexPatterns?.[0]
+            ));
+          }
+        } else {
+          metadataBase.urls = [
+            ...new Set(validSuggestions.map((s) => s.getData()?.url).filter(Boolean)),
+          ];
+        }
+
+        const experimentName = context.data?.name || getExperimentName(opportunity.getType());
+
         geoExperiment = await GeoExperiment.create({
           geoExperimentId,
           siteId,
           opportunityId,
           type: GeoExperimentModel.TYPES.ONSITE_OPPORTUNITY_DEPLOYMENT,
-          name: context.data?.name
-            || `${opportunity.getType().charAt(0).toUpperCase()}${opportunity.getType().slice(1)}-${new Date().toISOString().slice(0, 10)}`,
+          name: experimentName,
           status: GeoExperimentModel.STATUSES.GENERATING_BASELINE,
           phase: GeoExperimentModel.PHASES.INITIATED,
           suggestionIds: validSuggestionIds,
           metadata: buildExperimentMetadata(
             context,
-            { urls },
+            metadataBase,
             GeoExperimentModel.TYPES.ONSITE_OPPORTUNITY_DEPLOYMENT,
             opportunity.getType(),
           ),
@@ -2150,36 +2199,29 @@ function SuggestionsController(ctx, sqs, env) {
           geoExperimentId,
           opportunityId,
           opportunityType: opportunity.getType(),
-          name: geoExperiment.getName?.() || `${opportunity.getType()}-${new Date().toISOString().slice(0, 10)}`,
+          name: geoExperiment.getName?.() || experimentName,
           profile,
           s3: context.s3,
           log: context.log,
         });
         atomicStrategyCreated = true;
 
-        const validSuggestionEntities = [
-          ...validSuggestions,
-          ...domainWideSuggestions.map(({ suggestion }) => suggestion),
-          ...pathSuggestions.map(({ suggestion }) => suggestion),
-        ];
+        validSuggestionEntities = [...validSuggestions, ...patternSuggestions];
 
-        const markResults = await Promise.allSettled(
-          validSuggestionEntities.map(async (suggestion) => {
-            const currentData = suggestion.getData();
-            suggestion.setData({
-              ...currentData,
-              edgeOptimizeStatus: 'EXPERIMENT_IN_PROGRESS',
-            });
-            suggestion.setUpdatedBy(profile?.email || 'geo-experiment');
-            return suggestion.save();
-          }),
-        );
-
-        const markFailures = markResults.filter((r) => r.status === 'rejected');
-        if (markFailures.length > 0) {
-          context.log.warn(`[geo-experiment-failed] ${markFailures.length} suggestion(s) failed to mark as EXPERIMENT_IN_PROGRESS`, {
+        validSuggestionEntities.forEach((suggestion) => {
+          suggestion.setData({
+            ...suggestion.getData(),
+            edgeOptimizeStatus: 'EXPERIMENT_IN_PROGRESS',
+          });
+          suggestion.setUpdatedBy(profile?.email || 'geo-experiment');
+        });
+        try {
+          // saveMany is atomic per 25-item chunk; partial failure is acceptable here since the
+          // response below doesn't gate on this write succeeding.
+          await Suggestion.saveMany(validSuggestionEntities);
+        } catch (markError) {
+          context.log.warn(`[geo-experiment-failed] suggestion(s) failed to mark as EXPERIMENT_IN_PROGRESS: ${markError.message}`, {
             geoExperimentId,
-            errors: markFailures.map((r) => r.reason?.message),
           });
         }
 
@@ -2205,6 +2247,25 @@ function SuggestionsController(ctx, sqs, env) {
           prePhaseScheduleId: null,
         };
         experimentResponse.suggestions.sort((a, b) => a.index - b.index);
+
+        // Mark suggestions covered by domain/pattern so they get hidden on the UI (non-fatal).
+        if (hasPatternDeploy) {
+          const tokowakaClient = TokowakaClient.createFrom(context);
+          for (const ps of patternSuggestions) {
+            try {
+              // eslint-disable-next-line no-await-in-loop
+              await tokowakaClient.markPatternCoveredSuggestions(
+                ps,
+                allSuggestions,
+                siteId,
+                profile?.email || 'geo-experiment',
+              );
+            } catch (coverError) {
+              context.log.warn(`[geo-experiment-failed] Failed to mark pattern-covered suggestions for ${ps.getId()}: ${coverError.message}`, coverError);
+            }
+          }
+        }
+
         return createResponse(experimentResponse, 207);
       } catch (error) {
         context.log.error(`[geo-experiment-failed] site: ${apexBaseUrl}, Error initiating experiment: ${error.message}`, error);
@@ -2229,13 +2290,8 @@ function SuggestionsController(ctx, sqs, env) {
             context.log.error(`[atomic-strategy-cleanup-failed] site: ${apexBaseUrl}, Failed to delete atomic strategy ${geoExperimentId}: ${cleanupError.message}`, cleanupError);
           }
         }
-        const allSuggestionEntities = [
-          ...validSuggestions,
-          ...domainWideSuggestions.map(({ suggestion }) => suggestion),
-          ...pathSuggestions.map(({ suggestion }) => suggestion),
-        ];
         await Promise.allSettled(
-          allSuggestionEntities
+          validSuggestionEntities
             .filter((s) => s.getData()?.edgeOptimizeStatus === 'EXPERIMENT_IN_PROGRESS')
             .map(async (s) => {
               try {

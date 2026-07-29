@@ -1,0 +1,189 @@
+/*
+ * Copyright 2026 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+
+// @ts-check
+
+/**
+ * CloudWatch EMF metric emitters for the dynamic (JIT) Semrush AI resource allocator
+ * (LLMO-6191, rollout-hardening item 2 — "observability and SLIs").
+ *
+ * This module is a thin, allocator-specific wrapper over the existing generic EMF emitter
+ * (`../metrics-emf.js`) — it does NOT invent a new metrics pipeline. Every function here is
+ * best-effort (the underlying `emitMetric` already swallows its own errors) and MUST NEVER throw
+ * or otherwise affect the allocator's control flow; a metrics bug must never become a
+ * customer-facing failure.
+ *
+ * Deliberately LOW-CARDINALITY dimensions: metrics are dimensioned by `Environment`, `Dim`
+ * (projects|prompts), and a small closed `Reason`/`Outcome` vocabulary — NEVER by raw
+ * workspace/brand ids (unbounded cardinality, and CloudWatch bills per unique dimension-value
+ * combination). Anything that needs the actual workspace id for triage stays in the existing
+ * `SERENITY_ALLOC` structured log lines (see resource-manager.js) — this mirrors the existing
+ * split between generic client-facing error messages and detailed server-side logs (see
+ * resource-manager.js's typed-errors section).
+ *
+ * Metric catalog (CloudWatch namespace `Mysticat/SerenityAllocation`):
+ * - `HeadroomCheck` (Count, dims: Outcome=hot-path|topped-up) — the hot-path ratio
+ *   (serenity-docs#22 plan §21): a rising topped-up share is the leading indicator of pool drain.
+ * - `TopUpLatencyMs` (Milliseconds, dims: Path=settle|fail-fast) — wall-clock time of a transfer.
+ *   `Path` distinguishes `transferAndSettle` (includes retry-loop sleeps, up to tens of seconds)
+ *   from `transferOnce` (a single transport call, the hot-path fail-fast shape) — the two are NOT
+ *   comparable durations, so an unpartitioned p99 would be bimodal and useless for alerting
+ *   (MysticatBot review, LLMO-6191).
+ * - `PoolFreeRatio` (Percent, dims: Dim) — the master/parent workspace's advisory `free/total`
+ *   ratio, read at the same point `ensureAiHeadroom` already does its (non-gating) pool check.
+ * - `AllocationRejection` (Count, dims: Reason=orgPoolExhausted|brandAiLimit|workspaceBusy) —
+ *   every typed rejection the allocator throws.
+ * - `NotReadyRetry` (Count) — one per `workspace not ready` retry attempt in `transferAndSettle`.
+ * - `ReleaseOutcome` (Count, dims: Reason=released|nothing-to-release|requires-decommission|error|
+ *   dry-run) — `releaseAiSurplus` outcomes; `requires-decommission` is a standing pool-leak signal
+ *   (surplus that cannot be reclaimed short of workspace delete); `dry-run` is the sweep script's
+ *   preview mode, so a dry-run pass is visible in the same dashboard as a real one.
+ * - `MeteredQuotaClassifier` (Count, dims: Matched=true|false) — how often the disguised-405
+ *   quota classifier (`isMeteredQuota`, errors.js) fires. NOTE: as of this PR `isMeteredQuota` has
+ *   no production call site yet (see errors.js doc comment) — this metric exists so a future
+ *   caller gets observability for free, but will read zero until one is wired up.
+ * - `QuotaRetryOutcome` (Count, dims: Outcome=recovered|exhausted|abandoned, Attempt, CallSite) —
+ *   LLMO-6190 follow-up: `retryOnQuota`'s (dynamic-allocation-active.js) poll-retry recovery from
+ *   a disguised metered-405, one emission per bounded recovery cycle regardless of how it ends —
+ *   `recovered` (a retry succeeded), `exhausted` (still a metered 405 after every attempt or the
+ *   shared deadline), or `abandoned` (a genuinely non-quota error cut the cycle short before
+ *   either of the above — distinct from `exhausted` so a dashboard summing
+ *   `recovered + exhausted + abandoned` as "total recovery cycles" doesn't silently undercount,
+ *   per Alicia Adriani's review). `Attempt` (the 1-based poll attempt the cycle ended on, or `0`
+ *   if the shared deadline was already exhausted before any poll attempt could even be made — see
+ *   `retryOnQuota`'s pre-attempt deadline check, adobe/spacecat-api-service#2882) and `CallSite`
+ *   (a small closed set — `publishProject`, `createProject`, `createOnePrompt`,
+ *   `createPromptsByIds`, ...) together give the attempt-to-recovery distribution per write path,
+ *   without which a rising `exhausted` rate or a shift toward later attempts is invisible until it
+ *   becomes an incident (round-2 SRE review).
+ *
+ * Pager-worthy vs dashboard-only (per the original design doc, restated here for the alarm
+ * author): `AllocationRejection{Reason=orgPoolExhausted|brandAiLimit}` is EXPECTED under normal
+ * load on a small pool — dashboard-only, NOT pager-worthy. `AllocationRejection{Reason=
+ * workspaceBusy}` (a transfer that never cleared the async lock) and a `NotReadyRetry` run that
+ * exhausts its retries are signals that JIT top-up itself is degraded — these ARE pager-worthy.
+ * See docs/runbooks/serenity-zombie-workspace-recovery.md for the alarm/paging guidance and the
+ * caveat that this repo has no alerting-as-code file to wire the actual alarm into (a manual
+ * Coralogix/CloudWatch alarm is still required — see the runbook).
+ */
+
+import { emitMetric, resolveEnvironment } from '../metrics-emf.js';
+
+const NAMESPACE = 'Mysticat/SerenityAllocation';
+
+/**
+ * Reads the environment straight off `process.env` rather than requiring every caller (several
+ * layers deep inside the allocator's read/transfer helpers, none of which are otherwise env-aware)
+ * to thread `context.env` through. `AWS_ENV` is a real Lambda process environment variable (set
+ * at deploy time, not a per-request secret), so `process.env.AWS_ENV` and `context.env.AWS_ENV`
+ * read the same value in every deployed environment; the standalone rightsizing-sweep script sets
+ * the same var directly on `process.env` for the same reason.
+ * @returns {string}
+ */
+function currentEnvironment() {
+  return resolveEnvironment(process.env);
+}
+
+/**
+ * @param {{ name: string, value?: number, unit?: string, dimensions?: object }} metric
+ */
+function emit(metric) {
+  emitMetric(metric, { environment: currentEnvironment(), namespace: NAMESPACE });
+}
+
+/**
+ * Hot-path ratio: one call per `ensureAiHeadroom` invocation.
+ * @param {boolean} toppedUp
+ * @returns {void}
+ */
+export function recordHeadroomCheck(toppedUp) {
+  emit({ name: 'HeadroomCheck', dimensions: { Outcome: toppedUp ? 'topped-up' : 'hot-path' } });
+}
+
+/**
+ * @param {number} ms wall-clock duration of one transfer attempt.
+ * @param {'settle'|'fail-fast'} path `settle` for `transferAndSettle` (poll + retry-loop sleeps
+ *   included), `fail-fast` for `transferOnce` (a single transport call) — see the module doc; the
+ *   two are not comparable durations and must never share an unpartitioned percentile.
+ * @returns {void}
+ */
+export function recordTopUpLatency(ms, path) {
+  emit({
+    name: 'TopUpLatencyMs', value: ms, unit: 'Milliseconds', dimensions: { Path: path },
+  });
+}
+
+/**
+ * Advisory master-pool free ratio at the point `ensureAiHeadroom` already reads it. `free`/`total`
+ * may legitimately be 0/0 (an unset pool) — guarded here.
+ * @param {'projects'|'prompts'} dim
+ * @param {number} free
+ * @param {number} total
+ * @returns {void}
+ */
+export function recordPoolFreeRatio(dim, free, total) {
+  if (!(total > 0)) {
+    return; // avoid emitting a divide-by-zero / meaningless ratio for an unset pool
+  }
+  emit({
+    name: 'PoolFreeRatio', value: (free / total) * 100, unit: 'Percent', dimensions: { Dim: dim },
+  });
+}
+
+/**
+ * @param {'orgPoolExhausted'|'brandAiLimit'|'workspaceBusy'|'quotaExceeded'} reason
+ * @returns {void}
+ */
+export function recordRejection(reason) {
+  emit({ name: 'AllocationRejection', dimensions: { Reason: reason } });
+}
+
+/** @returns {void} */
+export function recordNotReadyRetry() {
+  emit({ name: 'NotReadyRetry' });
+}
+
+/**
+ * @param {'released'|'nothing-to-release'|'requires-decommission'|'error'|'dry-run'} reason
+ * @returns {void}
+ */
+export function recordReleaseOutcome(reason) {
+  emit({ name: 'ReleaseOutcome', dimensions: { Reason: reason } });
+}
+
+/**
+ * @param {boolean} matched
+ * @returns {void}
+ */
+export function recordMeteredQuotaClassifier(matched) {
+  emit({ name: 'MeteredQuotaClassifier', dimensions: { Matched: matched } });
+}
+
+/**
+ * @param {'recovered'|'exhausted'|'abandoned'} outcome
+ * @param {{ attempt: number, callSite: string }} dims - `attempt` is the 1-based poll attempt the
+ *   cycle resolved (recovered), gave up on (exhausted), or was cut short on by a non-quota error
+ *   (abandoned) — OR `0` for `exhausted` specifically when the shared deadline was already blown
+ *   before any poll attempt could be made (adobe/spacecat-api-service#2882). `callSite` is a short
+ *   closed-vocabulary label identifying which wrapped write/publish this recovery was for.
+ *   `attempt` is a raw number, not pre-bucketed — it stays low-cardinality only because
+ *   `retryOnQuota`'s `maxAttempts` is small (3 today); if `maxAttempts` is ever raised
+ *   significantly, revisit whether `Attempt` should be capped/bucketed to hold the module's
+ *   low-cardinality dimension contract (see the module doc above).
+ * @returns {void}
+ */
+export function recordQuotaRetryOutcome(outcome, { attempt, callSite }) {
+  emit({
+    name: 'QuotaRetryOutcome',
+    dimensions: { Outcome: outcome, Attempt: attempt, CallSite: callSite },
+  });
+}

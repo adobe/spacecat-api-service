@@ -43,6 +43,7 @@ import { SiteIdentityDto } from '../dto/site-identity.js';
 import { OrganizationDto } from '../dto/organization.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
+import { applyFieldProjection } from '../utils/field-projection.js';
 import {
   wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled, CUSTOMER_VISIBLE_TIERS, isInternalOrg,
 } from '../support/utils.js';
@@ -305,6 +306,13 @@ const applyTopOrganicPagesFilter = async (metricsData, limit, options) => {
   return result;
 };
 
+// pageTypes[].pattern is later spliced, unescaped, into an Athena SQL string literal
+// (REGEXP_LIKE(column, '<pattern>')) by @adobe/spacecat-shared-athena-client. Trino/Presto
+// string literals have no backslash-escape mode, so a bare single quote is the only
+// character that can terminate the literal early and inject SQL - reject it outright
+// rather than trying to escape/re-quote a value we don't control the eventual sink for.
+const SQL_UNSAFE_PATTERN_CHAR = /'/;
+
 /**
  * Validates that pageTypes array contains valid regex patterns
  * @param {Array} pageTypes - Array of page type objects with name and pattern
@@ -322,6 +330,13 @@ const validatePageTypes = (pageTypes) => {
 
     if (!hasText(pageType.pattern)) {
       return { isValid: false, error: `pageTypes[${index}] must have a pattern` };
+    }
+
+    if (SQL_UNSAFE_PATTERN_CHAR.test(pageType.pattern)) {
+      return {
+        isValid: false,
+        error: `pageTypes[${index}] pattern must not contain a single quote character`,
+      };
     }
 
     try {
@@ -393,6 +408,12 @@ function SitesController(ctx, log, env) {
     const { productCode, error: productCodeError } = resolveProductCode(context);
     if (productCodeError) {
       return badRequest(productCodeError);
+    }
+    if (isArray(context.data?.pageTypes)) {
+      const validation = validatePageTypes(context.data.pageTypes);
+      if (!validation.isValid) {
+        return badRequest(validation.error);
+      }
     }
     let site;
     let status;
@@ -536,12 +557,20 @@ function SitesController(ctx, log, env) {
       // query value (URLs may be sensitive) — only its length and result counts.
       log.info(`[sites][baseUrlContains] qlen=${q.length} count=${sites.length} hasMore=${hasMore} requestId=${requestId}`);
 
+      const { list: projectedSites, error: fieldsError } = applyFieldProjection(
+        sites,
+        context?.data?.fields,
+      );
+      if (fieldsError) {
+        return badRequest(fieldsError);
+      }
+
       // Echo the trimmed query in the pagination so a new client can confirm its
       // search was actually applied. An older deployment that ignores `baseUrlContains`
       // but still honors `limit` would return the cursor envelope with unfiltered
       // sites and no `baseUrlContains` echo — letting clients detect the version skew.
       return ok({
-        sites,
+        sites: projectedSites,
         pagination: {
           limit: effectiveLimit, offset, hasMore, baseUrlContains: q,
         },
@@ -612,6 +641,12 @@ function SitesController(ctx, log, env) {
       log.info(`[s2s-readall] GET /sites granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_SITE_READ_ALL} count=${sites.length} requestId=${requestId}`);
     }
 
+    const { list, error } = applyFieldProjection(sites, context?.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+    responseBody = Array.isArray(responseBody) ? list : { ...responseBody, sites: list };
+
     return ok(responseBody);
   };
 
@@ -632,7 +667,11 @@ function SitesController(ctx, log, env) {
 
     const sites = (await Site.allByDeliveryType(deliveryType))
       .map((site) => SiteDto.toJSON(site));
-    return ok(sites);
+    const { list, error } = applyFieldProjection(sites, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+    return ok(list);
   };
 
   /**
@@ -663,7 +702,11 @@ function SitesController(ctx, log, env) {
         const audit = await site.getLatestAuditByAuditType(auditType);
         return SiteDto.toJSON(site, audit);
       }));
-    return ok(result);
+    const { list, error } = applyFieldProjection(result, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+    return ok(list);
   };
 
   /**

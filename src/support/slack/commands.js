@@ -32,6 +32,7 @@ import onboard from './commands/onboard.js';
 import onboardStatus from './commands/onboard-status.js';
 import llmoOnboard from './commands/llmo-onboard.js';
 import setSiteOrganizationCommand from './commands/set-ims-org.js';
+import movePlgSite from './commands/move-plg-site.js';
 import toggleSiteImport from './commands/toggle-site-import.js';
 import runTrafficAnalysisBackfill from './commands/run-traffic-analysis-backfill.js';
 import backfillLlmo from './commands/backfill-llmo.js';
@@ -61,6 +62,7 @@ import checkCdnLogsStatus from './commands/check-cdn-logs-status.js';
 import addOaeStageDomain from './commands/add-oae-stage-domain.js';
 import togglePathSuggestions from './commands/toggle-path-suggestions.js';
 import getPathSuggestionsStatus from './commands/get-path-suggestions-status.js';
+import brandClaims from './commands/toggle-brand-claims.js';
 
 /**
  * Returns all commands.
@@ -92,6 +94,7 @@ export default (context) => [
   onboardStatus(context),
   llmoOnboard(context),
   setSiteOrganizationCommand(context),
+  movePlgSite(context),
   toggleSiteImport(context),
   backfillLlmo(context),
   getPromptUsage(context),
@@ -120,4 +123,5 @@ export default (context) => [
   addOaeStageDomain(context),
   togglePathSuggestions(context),
   getPathSuggestionsStatus(context),
+  brandClaims(context),
 ];

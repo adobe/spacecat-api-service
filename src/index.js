@@ -38,6 +38,7 @@ import {
 } from '@adobe/spacecat-shared-slack-client';
 import { hasText, isValidUUID, logWrapper } from '@adobe/spacecat-shared-utils';
 import { traceIdResponseWrapper } from './support/trace-id-response-wrapper.js';
+import { ensureFetchResponseWrapper } from './support/ensure-fetch-response-wrapper.js';
 
 import dataAccess from './support/data-access.js';
 import sqs from './support/sqs.js';
@@ -113,9 +114,11 @@ import AiVisibilityController from './controllers/ai-visibility.js';
 import StateAccessMappingsController from './controllers/state-access-mappings.js';
 import AgenticCategoriesController from './controllers/agentic-categories.js';
 import AgenticPageTypesController from './controllers/agentic-page-types.js';
+import AuditPolicyController from './controllers/audit-policy.js';
 import SerenityController from './controllers/serenity.js';
 import ElementsController from './controllers/elements.js';
 import ProxyController from './controllers/proxy.js';
+import OnboardingController from './controllers/onboarding.js';
 import GitHubWebhookHmacHandler from './support/github-webhook-hmac-handler.js';
 import AsoOverlayKeyHandler from './support/aso-overlay-key-handler.js';
 import ApiKeyImsHandler from './support/api-key-ims-handler.js';
@@ -293,10 +296,12 @@ async function run(request, context) {
     const stateAccessMappingsController = StateAccessMappingsController(context);
     const agenticCategoriesController = AgenticCategoriesController();
     const agenticPageTypesController = AgenticPageTypesController();
+    const auditPolicyController = AuditPolicyController();
     const serenityController = SerenityController(context, log, context.env);
     const elementsController = ElementsController(context, log, context.env);
     const proxyController = ProxyController();
     const taskManagementController = TaskManagementController(context);
+    const onboardingController = OnboardingController(context, log, context.env);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -363,7 +368,9 @@ async function run(request, context) {
       elementsController,
       proxyController,
       taskManagementController,
+      onboardingController,
       redirectsController,
+      auditPolicyController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
@@ -498,4 +505,11 @@ export const main = wrappedMain
   .with(elevatedSlackClientWrapper, { slackTarget: WORKSPACE_EXTERNAL })
   .with(vaultSecrets)
   .with(compressResponse)
-  .with(helixStatus);
+  .with(helixStatus)
+  // OUTERMOST wrapper (runs LAST on the response path, just before helix-universal's
+  // AWS Lambda adapter serializes the response). Guarantees the response reaching
+  // `aws-adapter.js:254` — `splitHeaders(response.headers.raw(), ...)` — is an
+  // `@adobe/fetch` Response whose Headers has `.raw()`, not a native Web-Fetch-API
+  // Response whose Headers doesn't. See the wrapper's module-level docstring for
+  // the full backstory (SITES-48140 EMF-instrumentation bundling interaction).
+  .with(ensureFetchResponseWrapper);

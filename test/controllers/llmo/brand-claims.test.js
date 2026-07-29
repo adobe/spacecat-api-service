@@ -14,6 +14,7 @@ import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
+import { HeadObjectCommand } from '@aws-sdk/client-s3';
 
 use(sinonChai);
 
@@ -24,6 +25,7 @@ describe('handleBrandClaims', () => {
   let handleBrandClaims;
   let mockLog;
   let mockS3Client;
+  let mockS3Send;
   let mockGetSignedUrl;
   let baseContext;
 
@@ -56,7 +58,9 @@ describe('handleBrandClaims', () => {
       warn: sinon.stub(),
     };
 
-    mockS3Client = {};
+    // HeadObject resolves by default → the object exists.
+    mockS3Send = sinon.stub().resolves({});
+    mockS3Client = { send: mockS3Send };
     mockGetSignedUrl = sinon.stub().resolves(TEST_PRESIGNED_URL);
 
     baseContext = {
@@ -85,6 +89,13 @@ describe('handleBrandClaims', () => {
     expect(body.presignedUrl).to.equal(TEST_PRESIGNED_URL);
     expect(body.expiresAt).to.be.a('string');
 
+    // HeadObject checked existence for the default key before signing
+    expect(mockS3Send).to.have.been.calledOnce;
+    const headCommand = mockS3Send.getCall(0).args[0];
+    expect(headCommand).to.be.instanceOf(HeadObjectCommand);
+    expect(headCommand.input.Bucket).to.equal('test-bucket');
+    expect(headCommand.input.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/data.json.gz`);
+
     // Verify S3 key uses default path
     const commandArg = mockGetSignedUrl.getCall(0).args[1];
     expect(commandArg.params.Bucket).to.equal('test-bucket');
@@ -109,7 +120,9 @@ describe('handleBrandClaims', () => {
     expect(body.model).to.equal('gpt-4.1');
     expect(body.presignedUrl).to.equal(TEST_PRESIGNED_URL);
 
-    // Verify S3 key uses model-specific path
+    // HeadObject + presign both target the model-specific key
+    const headCommand = mockS3Send.getCall(0).args[0];
+    expect(headCommand.input.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/gpt-4.1.json.gz`);
     const commandArg = mockGetSignedUrl.getCall(0).args[1];
     expect(commandArg.params.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/gpt-4.1.json.gz`);
   });
@@ -156,10 +169,10 @@ describe('handleBrandClaims', () => {
     expect(body.message).to.equal('S3 bucket is not configured for this environment');
   });
 
-  it('should return 404 when S3 key not found (NoSuchKey)', async () => {
-    const noSuchKeyError = new Error('The specified key does not exist');
-    noSuchKeyError.name = 'NoSuchKey';
-    mockGetSignedUrl.rejects(noSuchKeyError);
+  it('should return 404 when the object does not exist (HeadObject NotFound)', async () => {
+    const notFoundError = new Error('Not Found');
+    notFoundError.name = 'NotFound';
+    mockS3Send.rejects(notFoundError);
 
     const result = await handleBrandClaims(baseContext);
 
@@ -167,15 +180,29 @@ describe('handleBrandClaims', () => {
     const body = await result.json();
     expect(body.message).to.equal(`Brand claims data not found for site ${TEST_SITE_ID}`);
 
+    // Never sign a URL for a missing object
+    expect(mockGetSignedUrl).not.to.have.been.called;
     expect(mockLog.warn).to.have.been.calledWith(
       `Brand claims file not found for site ${TEST_SITE_ID} at brand_claims/llmo/${TEST_SITE_ID}/data.json.gz`,
     );
   });
 
+  it('should return 404 when HeadObject error carries httpStatusCode 404', async () => {
+    const err = new Error('Object not found');
+    err.name = 'SomethingElse';
+    err.$metadata = { httpStatusCode: 404 };
+    mockS3Send.rejects(err);
+
+    const result = await handleBrandClaims(baseContext);
+
+    expect(result.status).to.equal(404);
+    expect(mockGetSignedUrl).not.to.have.been.called;
+  });
+
   it('should return 400 when bucket not found (NoSuchBucket)', async () => {
     const noSuchBucketError = new Error('The specified bucket does not exist');
     noSuchBucketError.name = 'NoSuchBucket';
-    mockGetSignedUrl.rejects(noSuchBucketError);
+    mockS3Send.rejects(noSuchBucketError);
 
     const result = await handleBrandClaims(baseContext);
 
@@ -191,7 +218,7 @@ describe('handleBrandClaims', () => {
   it('should return 400 for generic S3 errors', async () => {
     const accessDeniedError = new Error('Access denied');
     accessDeniedError.name = 'AccessDenied';
-    mockGetSignedUrl.rejects(accessDeniedError);
+    mockS3Send.rejects(accessDeniedError);
 
     const result = await handleBrandClaims(baseContext);
 

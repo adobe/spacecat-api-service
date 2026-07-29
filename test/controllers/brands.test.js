@@ -15,6 +15,7 @@ import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/confi
 import OrganizationSchema from '@adobe/spacecat-shared-data-access/src/models/organization/organization.schema.js';
 import SiteSchema from '@adobe/spacecat-shared-data-access/src/models/site/site.schema.js';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
+import { ProjectEngineApiError } from '@adobe/spacecat-shared-project-engine-client';
 
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
@@ -1017,6 +1018,83 @@ describe('Brands Controller', () => {
       expect(body).to.have.property('prompts');
     });
 
+    it('createPromptsByBrand honours a SERVICE principal\'s origin: ai (DRS contract, origin-dimension.md §3)', async () => {
+      // A non-ims/non-jwt principal (e.g. DRS via admin x-api-key) is believed:
+      // its asserted `origin` rides through to the store. Deleting or ignoring it
+      // would relabel every DRS-written prompt `human` on its next upsert.
+      const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
+      const insertStub = sandbox.stub()
+        .returns({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) });
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        if (table === 'prompts') {
+          return {
+            select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+            insert: insertStub,
+            update: () => ({ eq: () => thenable({ error: null }) }),
+          };
+        }
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+        };
+        if (table === 'llmo_customer_config') {
+          chain.maybeSingle = sandbox.stub()
+            .resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        }
+        return chain;
+      });
+
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        attributes: { authInfo: { getType: () => 'apikey', profile: { email: 'drs@service' } } },
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: [{ prompt: 'P', regions: ['us'], origin: 'ai' }],
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(201);
+      const inserted = insertStub.firstCall.args[0];
+      expect(inserted[0].origin).to.equal('ai');
+    });
+
+    it('createPromptsByBrand coerces a USER principal\'s origin: ai to human (body ignored, never rejected)', async () => {
+      const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
+      const insertStub = sandbox.stub()
+        .returns({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) });
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        if (table === 'prompts') {
+          return {
+            select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+            insert: insertStub,
+            update: () => ({ eq: () => thenable({ error: null }) }),
+          };
+        }
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+        };
+        if (table === 'llmo_customer_config') {
+          chain.maybeSingle = sandbox.stub()
+            .resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        }
+        return chain;
+      });
+
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: [{ prompt: 'P', regions: ['us'], origin: 'ai' }],
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(201);
+      const inserted = insertStub.firstCall.args[0];
+      expect(inserted[0].origin).to.equal('human');
+    });
+
     it('createPromptsByBrand persists normalized intent from the request body', async () => {
       const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
       const insertStub = sandbox.stub()
@@ -1052,6 +1130,138 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(201);
       const inserted = insertStub.firstCall.args[0];
       expect(inserted[0].intent).to.equal('transactional');
+    });
+
+    // origin-dimension.md §3 gate 5 (v2 API arm): a USER principal may not assert
+    // `origin` — the body value is ignored and `human` is derived and stored.
+    it('createPromptsByBrand ignores a user-supplied origin and stores human (gate 5)', async () => {
+      const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
+      const insertStub = sandbox.stub()
+        .returns({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) });
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        if (table === 'prompts') {
+          return {
+            select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+            insert: insertStub,
+            update: () => ({ eq: () => thenable({ error: null }) }),
+          };
+        }
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+        };
+        if (table === 'llmo_customer_config') {
+          chain.maybeSingle = sandbox.stub()
+            .resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        }
+        return chain;
+      });
+
+      const userContext = {
+        ...context,
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      };
+      const response = await brandsController.createPromptsByBrand({
+        ...userContext,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        // The user tries to assert `ai`; the server ignores it and derives `human`.
+        data: [{ prompt: 'P', regions: ['us'], origin: 'ai' }],
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(201);
+      expect(insertStub.firstCall.args[0][0].origin).to.equal('human');
+    });
+
+    // origin-dimension.md §3 gate 6: a SERVICE principal (auth type neither `ims`
+    // nor `jwt`, e.g. DRS via admin x-api-key) IS believed — its `origin: 'ai'` is
+    // honoured and stored. A regression here silently relabels every generated
+    // prompt `human` on its next upsert (DRS contract).
+    it('createPromptsByBrand honours a service principal origin=ai (gate 6)', async () => {
+      const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
+      const insertStub = sandbox.stub()
+        .returns({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) });
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        if (table === 'prompts') {
+          return {
+            select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+            insert: insertStub,
+            update: () => ({ eq: () => thenable({ error: null }) }),
+          };
+        }
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+        };
+        if (table === 'llmo_customer_config') {
+          chain.maybeSingle = sandbox.stub()
+            .resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        }
+        return chain;
+      });
+
+      const serviceContext = {
+        ...context,
+        attributes: { authInfo: { getType: () => 'legacyApiKey', profile: {} } },
+      };
+      const response = await brandsController.createPromptsByBrand({
+        ...serviceContext,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: [{ prompt: 'P', regions: ['us'], origin: 'ai' }],
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(201);
+      expect(insertStub.firstCall.args[0][0].origin).to.equal('ai');
+    });
+
+    // FIX (MysticatBot nit): direct controller coverage of the fail-safe branch
+    // (`!authType → user`, brands.js:584). An ABSENT or indeterminate auth type
+    // must NEVER reach the privileged service path — a body-asserted `origin: 'ai'`
+    // is coerced to `human`. Previously this branch was only exercised indirectly
+    // via the `deriveV2PromptOrigin` unit tests, not through the controller wiring.
+    [
+      { label: 'authInfo entirely absent (attributes: {})', attributes: {} },
+      { label: 'authInfo present but getType is not a function', attributes: { authInfo: { profile: {} } } },
+    ].forEach(({ label, attributes }) => {
+      it(`createPromptsByBrand fails safe to human when ${label} (gate 5 fail-safe)`, async () => {
+        const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
+        const insertStub = sandbox.stub()
+          .returns({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) });
+        mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          const chain = {
+            select: sandbox.stub().returnsThis(),
+            eq: sandbox.stub().returnsThis(),
+            maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+          };
+          if (table === 'llmo_customer_config') {
+            chain.maybeSingle = sandbox.stub()
+              .resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+          }
+          return chain;
+        });
+
+        const response = await brandsController.createPromptsByBrand({
+          ...context,
+          attributes,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          // A body-asserted `ai` must NOT be honoured for an unattributable caller.
+          data: [{ prompt: 'P', regions: ['us'], origin: 'ai' }],
+          dataAccess: mockDataAccess,
+        });
+
+        expect(response.status).to.equal(201);
+        expect(insertStub.firstCall.args[0][0].origin).to.equal('human');
+      });
     });
 
     it('createPromptsByBrand returns 400 when prompts not an array', async () => {
@@ -4780,14 +4990,20 @@ describe('Brands Controller', () => {
       };
 
       async function buildController({
-        provisionBrandSubworkspace, upsertBrand, ensureMarketSite,
+        provisionBrandSubworkspace, provisionBrandSubworkspaceBare, upsertBrand, ensureMarketSite,
         upsertMappingRow, linkSiteToLiveRows,
         // Serenity active by default (org-wide LLMO/serenity flag ON) so the
         // Semrush-mode create reaches provisioning. The inactive case overrides this.
         isSerenityActiveForOrg = sinon.stub().resolves(true),
       }) {
         const Mocked = await esmock('../../src/controllers/brands.js', {
-          '../../src/support/serenity/brand-provisioning.js': { provisionBrandSubworkspace },
+          '../../src/support/serenity/brand-provisioning.js': {
+            provisionBrandSubworkspace,
+            // Bare (no-market) sub-workspace provisioner (LLMO-6405). Default-stubbed so a
+            // market-less serenity create does not reach the real upstream helper.
+            provisionBrandSubworkspaceBare:
+              provisionBrandSubworkspaceBare || sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-bare' }),
+          },
           // Stub the site mirror by default so these tests stay isolated from the
           // Site/brand_sites side effect; a test that cares passes its own stub.
           '../../src/support/serenity/site-linkage.js': {
@@ -5072,15 +5288,77 @@ describe('Brands Controller', () => {
         expect(upsertStub.called).to.equal(false);
       });
 
+      it('redacts the gateway URL from a Semrush upstream error on provisioning', async () => {
+        // A Semrush error's message embeds the internal gateway host plus workspace
+        // and project UUIDs. Provisioning runs unguarded inside createBrandForOrg's
+        // try, so the error reaches createErrorResponse — which must map it to a
+        // generic message and keep the detail in the log, on both the body and the
+        // x-error header.
+        const leakUrl = 'https://gw.internal/enterprise/workspaces/ws-9/projects/proj-abc/aio';
+        const provisionStub = sinon.stub().rejects(
+          new SerenityTransportError(502, `Semrush POST ${leakUrl} failed: 502`, {}),
+        );
+        const upsertStub = sinon.stub().resolves({ id: 'x' });
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(502);
+        const body = await response.json();
+        expect(body.message).to.equal('Upstream request failed');
+        expect(JSON.stringify(body)).to.not.contain('gw.internal');
+        expect(response.headers.get('x-error') || '').to.not.contain('gw.internal');
+        expect(upsertStub.called).to.equal(false);
+      });
+
+      it('maps a 401 Semrush upstream error on provisioning to HTTP 401 + generic auth message', async () => {
+        // The 401/403 side of createErrorResponse's status ternary: the upstream
+        // status is preserved rather than flattened to 502, and the message is the
+        // generic auth one.
+        const leakUrl = 'https://gw.internal/enterprise/workspaces/ws-9/projects';
+        const provisionStub = sinon.stub().rejects(
+          new SerenityTransportError(401, `Semrush GET ${leakUrl} failed: 401`, {}),
+        );
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub,
+          upsertBrand: sinon.stub().resolves({ id: 'x' }),
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(401);
+        const body = await response.json();
+        expect(body.message).to.equal('Upstream authorization failed');
+        expect(JSON.stringify(body)).to.not.contain('gw.internal');
+        expect(response.headers.get('x-error') || '').to.not.contain('gw.internal');
+      });
+
       it('releases the orphaned sub-workspace when the brand row write fails after provisioning', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-orphan' });
+        const provisionStub = sinon.stub().resolves({
+          semrushSubWorkspaceId: 'ws-orphan',
+          createdByThisRequest: true,
+        });
         const releaseStub = sinon.stub().resolves();
         // A routine post-provision DB failure (e.g. unique-constraint 409).
         const upsertStub = sinon.stub().rejects(new Error('duplicate key value violates unique constraint'));
         const Mocked = await esmock('../../src/controllers/brands.js', {
           '../../src/support/serenity/brand-provisioning.js': {
             provisionBrandSubworkspace: provisionStub,
-            releaseProvisionedWorkspace: releaseStub,
+            emptyProvisionedWorkspace: releaseStub,
           },
           '../../src/support/serenity/serenity-active.js': { isSerenityActiveForOrg: sinon.stub().resolves(true) },
           '../../src/support/brands-storage.js': { upsertBrand: upsertStub },
@@ -5102,6 +5380,45 @@ describe('Brands Controller', () => {
         // to the parent pool, not leaked.
         expect(releaseStub.calledOnce).to.equal(true);
         expect(releaseStub.firstCall.args[1]).to.equal('ws-orphan');
+      });
+
+      it('does NOT release a sub-workspace that provisioning only ADOPTED', async () => {
+        // Sub-workspace titles are bare brand display names, which are not unique within
+        // an org. Two same-named brands onboarding concurrently (observed in prod at 0.17s
+        // apart) can both resolve the SAME workspace: the first persists its claim, the
+        // second's brand-row write then fails on the UNIQUE constraint on
+        // brands.semrush_sub_workspace_id. Releasing here would delete the winner's
+        // projects and strip its allocation — on a live, correctly-owned workspace. The
+        // unique-constraint failure is precisely the signal that someone else owns it.
+        const provisionStub = sinon.stub().resolves({
+          semrushSubWorkspaceId: 'ws-adopted',
+          createdByThisRequest: false,
+        });
+        const releaseStub = sinon.stub().resolves();
+        const upsertStub = sinon.stub().rejects(new Error('duplicate key value violates unique constraint'));
+        const Mocked = await esmock('../../src/controllers/brands.js', {
+          '../../src/support/serenity/brand-provisioning.js': {
+            provisionBrandSubworkspace: provisionStub,
+            emptyProvisionedWorkspace: releaseStub,
+          },
+          '../../src/support/serenity/serenity-active.js': { isSerenityActiveForOrg: sinon.stub().resolves(true) },
+          '../../src/support/brands-storage.js': { upsertBrand: upsertStub },
+        });
+        const controller = Mocked.default(context, loggerStub, mockEnv);
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        // The create still errors out for this brand...
+        expect(response.status).to.not.equal(201);
+        expect(provisionStub.calledOnce).to.equal(true);
+        // ...but the adopted workspace — the other brand's — is left untouched.
+        expect(releaseStub.called).to.equal(false);
       });
 
       it('returns 400 when semrushMarket lacks a languageCode', async () => {
@@ -5207,20 +5524,89 @@ describe('Brands Controller', () => {
         expect(provisionStub.called).to.equal(false);
       });
 
-      it('does NOT provision when no semrushMarket is supplied (flat create)', async () => {
+      it('creates a bare sub-workspace (no project) when no market is supplied (serenity-active)', async () => {
+        // LLMO-6405: market-scoped inputs moved to market creation, so a serenity-active
+        // create with no market provisions just the sub-workspace (no project) — the
+        // market-based project provisioner is never called, and there is no market
+        // domain to mirror, so ensureMarketSite is skipped.
         const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
-        const controller = await buildController({ provisionBrandSubworkspace: provisionStub });
+        const bareStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-bare' });
+        const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        const ensureMarketSiteStub = sinon.stub().resolves('site-x');
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub,
+          provisionBrandSubworkspaceBare: bareStub,
+          upsertBrand: upsertStub,
+          ensureMarketSite: ensureMarketSiteStub,
+        });
 
         const response = await controller.createBrandForOrg({
           ...context,
           params: { spaceCatId: ORGANIZATION_ID },
-          data: { name: 'New Brand' },
+          data: { name: 'New Brand', baseSiteId: 'site-123' },
           dataAccess: mockDataAccess,
           attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
 
         expect(response.status).to.equal(201);
         expect(provisionStub.called).to.equal(false);
+        expect(bareStub.called).to.equal(true);
+        // No market domain on the bare path → the Site mirror is skipped.
+        expect(ensureMarketSiteStub.called).to.equal(false);
+        const upsertArgs = upsertStub.firstCall.args[0];
+        // Anchored by BOTH the bare sub-workspace and the primary site.
+        expect(upsertArgs.semrushSubWorkspaceId).to.equal('ws-bare');
+        expect(upsertArgs.brand.baseSiteId).to.equal('site-123');
+      });
+
+      it('surfaces a bare sub-workspace provisioning failure and does not write the brand', async () => {
+        // The bare sub-workspace is provisioned BEFORE the brand row is written; if
+        // that upstream call throws, the create surfaces the error and never persists
+        // a brand row (provisionedWorkspaceId stays null, so no compensation fires).
+        const bareStub = sinon.stub().rejects(new Error('Semrush provisioning failed'));
+        const upsertStub = sinon.stub().resolves({ id: 'x', name: 'New Brand' });
+        const controller = await buildController({
+          provisionBrandSubworkspace: sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' }),
+          provisionBrandSubworkspaceBare: bareStub,
+          upsertBrand: upsertStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { name: 'New Brand', baseSiteId: 'site-123' },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(bareStub.called).to.equal(true);
+        expect(response.status).to.equal(500);
+        expect(upsertStub.called).to.equal(false);
+      });
+
+      it('does a flat create (no Semrush provisioning) when the org is not serenity-active', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
+        const bareStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-bare' });
+        const upsertStub = sinon.stub().resolves({ id: 'flat-id', name: 'Flat Brand' });
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub,
+          provisionBrandSubworkspaceBare: bareStub,
+          upsertBrand: upsertStub,
+          isSerenityActiveForOrg: sinon.stub().resolves(false),
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { name: 'Flat Brand', baseSiteId: 'site-9' },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(201);
+        expect(provisionStub.called).to.equal(false);
+        expect(bareStub.called).to.equal(false);
+        expect(upsertStub.firstCall.args[0].semrushSubWorkspaceId).to.equal(null);
       });
 
       it('saves a pending draft WITHOUT a primary URL: no provisioning, market stashed (201)', async () => {
@@ -5501,16 +5887,20 @@ describe('Brands Controller', () => {
 
     describe('competitor self-reference guard + Semrush-mode gating (create)', () => {
       async function buildCreateController({
-        upsertBrand, provisionBrandSubworkspace,
+        upsertBrand, provisionBrandSubworkspace, provisionBrandSubworkspaceBare,
         isSerenityActiveForOrg = sinon.stub().resolves(true),
       }) {
         const mocks = {
           '../../src/support/brands-storage.js': { upsertBrand },
           '../../src/support/serenity/serenity-active.js': { isSerenityActiveForOrg },
+          // Bare (no-market) sub-workspace provisioner default-stubbed (LLMO-6405) so a
+          // market-less serenity create does not reach the real upstream helper.
+          '../../src/support/serenity/brand-provisioning.js': {
+            provisionBrandSubworkspaceBare:
+              provisionBrandSubworkspaceBare || sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-bare' }),
+            ...(provisionBrandSubworkspace ? { provisionBrandSubworkspace } : {}),
+          },
         };
-        if (provisionBrandSubworkspace) {
-          mocks['../../src/support/serenity/brand-provisioning.js'] = { provisionBrandSubworkspace };
-        }
         const Mocked = await esmock('../../src/controllers/brands.js', mocks);
         return Mocked.default(context, loggerStub, mockEnv);
       }
@@ -5573,15 +5963,50 @@ describe('Brands Controller', () => {
         ]);
       });
 
-      it('does NOT enter Semrush mode for a flat create carrying generatePrompts:false (no market)', async () => {
-        // Regression guard: a flat (non-Semrush) caller that defensively sends
-        // generatePrompts:false with no semrushMarket must be created as a plain
-        // brand — never pulled into Semrush provisioning.
-        const upsertStub = sinon.stub().resolves({ id: BRAND_UUID, name: 'Flat Brand' });
+      it('enters bare Semrush mode for a serenity-active create with generatePrompts:false and no market', async () => {
+        // LLMO-6405: generatePrompts:false no longer means "flat" in a serenity-active
+        // org — the org flag decides the mode, so a market-less create provisions a bare
+        // sub-workspace (no project), never the market-based project provisioner.
+        const upsertStub = sinon.stub().resolves({ id: BRAND_UUID, name: 'Bare Brand' });
         const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-x' });
+        const bareStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-bare' });
         const controller = await buildCreateController({
           upsertBrand: upsertStub,
           provisionBrandSubworkspace: provisionStub,
+          provisionBrandSubworkspaceBare: bareStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: {
+            name: 'Bare Brand',
+            urls: [{ value: 'https://bare.com' }],
+            baseSiteId: 'site-b',
+            generatePrompts: false,
+          },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(201);
+        expect(provisionStub.called).to.equal(false);
+        expect(bareStub.called).to.equal(true);
+        expect(upsertStub.firstCall.firstArg.semrushSubWorkspaceId).to.equal('ws-bare');
+        expect(upsertStub.firstCall.firstArg.brand.pendingSemrushProvisioning).to.equal(undefined);
+      });
+
+      it('flat-creates (no 403) a non-serenity org sending a bare generatePrompts:false', async () => {
+        // A bare generatePrompts:false from a flat caller is harmless and must NOT be
+        // pulled into provisioning (or rejected) — it stays a plain brand.
+        const upsertStub = sinon.stub().resolves({ id: BRAND_UUID, name: 'Flat Brand' });
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-x' });
+        const bareStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-bare' });
+        const controller = await buildCreateController({
+          upsertBrand: upsertStub,
+          provisionBrandSubworkspace: provisionStub,
+          provisionBrandSubworkspaceBare: bareStub,
+          isSerenityActiveForOrg: sinon.stub().resolves(false),
         });
 
         const response = await controller.createBrandForOrg({
@@ -5598,15 +6023,55 @@ describe('Brands Controller', () => {
 
         expect(response.status).to.equal(201);
         expect(provisionStub.called).to.equal(false);
-        // Plain row written, not bound to any Semrush workspace.
+        expect(bareStub.called).to.equal(false);
         expect(upsertStub.firstCall.firstArg.semrushSubWorkspaceId).to.equal(null);
         expect(upsertStub.firstCall.firstArg.brand.pendingSemrushProvisioning).to.equal(undefined);
       });
 
-      it('STILL enters Semrush mode for a PENDING draft with generatePrompts:false and no market', async () => {
-        // The boolean-presence signal is preserved for drafts: a pending brand
-        // with generatePrompts:false and no market is a legitimate
-        // sub-workspace-only Semrush draft and must stash deferred provisioning.
+      it('403s a non-serenity org that supplies a semrushMarket', async () => {
+        const upsertStub = sinon.stub().resolves({ id: BRAND_UUID, name: 'X' });
+        const controller = await buildCreateController({
+          upsertBrand: upsertStub,
+          isSerenityActiveForOrg: sinon.stub().resolves(false),
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { name: 'X', semrushMarket: { market: 'us', languageCode: 'en' } },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(403);
+        expect(upsertStub.called).to.equal(false);
+      });
+
+      it('403s a non-serenity org that requests generatePrompts:true (no market)', async () => {
+        // The guard rejects an ACTUAL provisioning request from a non-serenity org —
+        // a supplied market OR generatePrompts:true, not just a market.
+        const upsertStub = sinon.stub().resolves({ id: BRAND_UUID, name: 'X' });
+        const controller = await buildCreateController({
+          upsertBrand: upsertStub,
+          isSerenityActiveForOrg: sinon.stub().resolves(false),
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { name: 'X', generatePrompts: true },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(403);
+        expect(upsertStub.called).to.equal(false);
+      });
+
+      it('stashes deferred provisioning for a PENDING serenity-active create (generatePrompts:false, no market)', async () => {
+        // In a serenity-active org a pending create is a Semrush create (the org flag
+        // decides mode, not the generatePrompts flag): it provisions nothing yet and
+        // stashes the deferred-provisioning blob for activation.
         const upsertStub = sinon.stub().resolves({ id: 'draft-id', name: 'Draft', status: 'pending' });
         const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-x' });
         const controller = await buildCreateController({
@@ -6103,10 +6568,14 @@ describe('Brands Controller', () => {
       expect(syncStub).to.not.have.been.called;
     });
 
-    it('hard-fails the edit when the brand-URL re-sync fails', async () => {
-      const updateBrandStub = sinon.stub().resolves({
+    it('LLMO-6545: soft-fails (200 + semrushSyncPending) when the brand-URL re-sync fails', async () => {
+      // DB row is already committed when the sync throws; returning a 5xx would
+      // mislead the customer into thinking their edit failed. Accept the drift and
+      // let ops recover via --reconcile migration (Phase 3).
+      const updated = {
         id: BRAND_UUID, semrushSubWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
-      });
+      };
+      const updateBrandStub = sinon.stub().resolves(updated);
       const err = new Error('upstream boom');
       err.status = 502;
       const syncStub = sinon.stub().rejects(err);
@@ -6125,11 +6594,12 @@ describe('Brands Controller', () => {
         attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
 
-      expect(response.status).to.equal(502);
+      expect(response.status).to.equal(200);
+      expect(await response.json()).to.include({ semrushSyncPending: true });
       expect(syncStub).to.have.been.calledOnce;
     });
 
-    it('rejects a non-IMS caller on the brand-edit re-sync (never forwards the bearer upstream)', async () => {
+    it('never forwards a non-IMS bearer upstream, and soft-fails the re-sync rather than reporting 401 for a committed edit', async () => {
       const updateBrandStub = sinon.stub().resolves({
         id: BRAND_UUID, semrushSubWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
       });
@@ -6150,16 +6620,29 @@ describe('Brands Controller', () => {
         attributes: { authInfo: { getType: () => 'jwt', profile: { email: 'svc@test.com' } } },
       });
 
-      expect(response.status).to.equal(401);
-      // A non-IMS bearer is never built into a transport nor forwarded to Semrush.
+      // Security invariant: a non-IMS bearer is never built into a transport nor
+      // forwarded to Semrush — token resolution refuses it before either happens.
       expect(createTransportStub).to.not.have.been.called;
       expect(syncStub).to.not.have.been.called;
+      // The brand row was committed before the re-sync block, so the refusal is a
+      // re-sync failure like any other: report the persisted edit, flag the drift.
+      expect(updateBrandStub).to.have.been.calledOnce;
+      expect(response.status).to.equal(200);
+      expect(await response.json()).to.include({ semrushSyncPending: true });
+      // 401 is the permanent class — it needs a human, not a retry.
+      expect(loggerStub.warn).to.have.been.calledWithMatch(
+        'serenity: brand-edit Semrush re-sync failed after row commit',
+        sinon.match({ status: 401, permanent: true }),
+      );
     });
 
-    it('redacts the gateway URL from a Semrush upstream error on brand-edit re-sync', async () => {
-      const updateBrandStub = sinon.stub().resolves({
+    it('LLMO-6545: soft-fails and does not leak the internal gateway URL on a SerenityTransportError re-sync failure', async () => {
+      // Soft-fail means the sync error is swallowed before createErrorResponse,
+      // so the internal gateway URL never reaches the client via body or headers.
+      const updated = {
         id: BRAND_UUID, semrushSubWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
-      });
+      };
+      const updateBrandStub = sinon.stub().resolves(updated);
       const leakUrl = 'https://gw.internal/enterprise/workspaces/ws-9/projects/proj-abc/aio';
       const syncStub = sinon.stub().rejects(
         new SerenityTransportError(502, `Semrush POST ${leakUrl} failed: 502`, {}),
@@ -6179,11 +6662,10 @@ describe('Brands Controller', () => {
         attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
 
-      expect(response.status).to.equal(502);
+      expect(response.status).to.equal(200);
       const body = await response.json();
-      expect(body.message).to.equal('Upstream request failed');
+      expect(body).to.include({ semrushSyncPending: true });
       expect(JSON.stringify(body)).to.not.contain('gw.internal');
-      // ...and not via the x-error header either.
       expect(response.headers.get('x-error') || '').to.not.contain('gw.internal');
     });
 
@@ -6191,10 +6673,14 @@ describe('Brands Controller', () => {
     // 401/403 is passed through as that status with the 'Upstream authorization
     // failed' message (the true side of the status ternary and the false side of
     // the message ternary; the 502 sides are covered by the redaction test above).
-    it('maps a 401 Semrush upstream error to HTTP 401 + generic auth message', async () => {
-      const updateBrandStub = sinon.stub().resolves({
+    it('LLMO-6545: soft-fails (200 + semrushSyncPending) even on a 401 SerenityTransportError re-sync failure', async () => {
+      // DB row is committed; even a Semrush auth failure should not surface as 4xx
+      // to the customer whose edit succeeded. Soft-fail and log for ops investigation.
+      // The internal gateway URL must not leak in the 200 response either.
+      const updated = {
         id: BRAND_UUID, semrushSubWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
-      });
+      };
+      const updateBrandStub = sinon.stub().resolves(updated);
       const leakUrl = 'https://gw.internal/enterprise/workspaces/ws-9/projects/proj-abc/aio';
       const syncStub = sinon.stub().rejects(
         new SerenityTransportError(401, `Semrush POST ${leakUrl} failed: 401`, {}),
@@ -6214,12 +6700,76 @@ describe('Brands Controller', () => {
         attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
 
-      expect(response.status).to.equal(401);
+      expect(response.status).to.equal(200);
       const body = await response.json();
-      expect(body.message).to.equal('Upstream authorization failed');
-      // The internal gateway URL must not leak via body or header.
+      expect(body).to.include({ semrushSyncPending: true });
       expect(JSON.stringify(body)).to.not.contain('gw.internal');
       expect(response.headers.get('x-error') || '').to.not.contain('gw.internal');
+    });
+
+    // LLMO-6386 + LLMO-6545: ProjectEngineApiError on re-sync is soft-failed (DB committed).
+    // The raw "Project Engine ..." message and secret body must never reach the client in the 200;
+    // ok({ ...updated }) contains only the brand row, not the error internals.
+    it('LLMO-6545: soft-fails and does not leak ProjectEngineApiError internals on brand-edit re-sync', async () => {
+      const updated = {
+        id: BRAND_UUID, semrushSubWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
+      };
+      const updateBrandStub = sinon.stub().resolves(updated);
+      const syncStub = sinon.stub().rejects(
+        new ProjectEngineApiError(502, 'POST', { secret: 'leak' }),
+      );
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandUrlsAcrossMarkets: syncStub,
+        createSerenityTransport: sinon.stub().returns({ name: 't', listProjects: sinon.stub().resolves({ items: [] }) }),
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { urls: [{ value: 'https://acme.com' }] },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.include({ semrushSyncPending: true });
+      expect(JSON.stringify(body)).to.not.match(/leak/);
+      expect(JSON.stringify(body)).to.not.match(/Project Engine/);
+    });
+
+    // LLMO-6545: a status-undefined ProjectEngineApiError (missing IMS token) carrying a 401 cause
+    // is also soft-failed — DB already committed, so auth failures in the sync path don't block
+    // the customer. The auth issue is logged (status field in the log includes syncError?.status
+    // which is undefined here) and ops can investigate via Splunk.
+    it('LLMO-6545: soft-fails a status-undefined ProjectEngineApiError with 401 cause on brand-edit re-sync', async () => {
+      const updated = {
+        id: BRAND_UUID, semrushSubWorkspaceId: 'ws-9', urls: [], socialAccounts: [], earnedContent: [],
+      };
+      const updateBrandStub = sinon.stub().resolves(updated);
+      const authCause = new SerenityTransportError(401, 'Missing IMS bearer token');
+      const syncStub = sinon.stub().rejects(
+        new ProjectEngineApiError(undefined, 'POST', null, { cause: authCause }),
+      );
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandUrlsAcrossMarkets: syncStub,
+        createSerenityTransport: sinon.stub().returns({ name: 't', listProjects: sinon.stub().resolves({ items: [] }) }),
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { urls: [{ value: 'https://acme.com' }] },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(await response.json()).to.include({ semrushSyncPending: true });
     });
 
     it('re-syncs CI competitors (with removed domains) when competitors change on a sub-workspace brand', async () => {
@@ -6292,6 +6842,93 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(200);
       expect(getBrandCompetitorsStub).to.not.have.been.called;
       expect(ciSyncStub).to.not.have.been.called;
+    });
+
+    it('LLMO-6545: returns 200 with semrushSyncPending:true when Semrush re-sync fails after DB commit', async () => {
+      // Invariant: DB row is committed before the re-sync block runs. A sync
+      // failure must not surface as a 5xx on an edit that persisted. The response
+      // carries semrushSyncPending:true and the error is logged for recovery.
+      const updated = {
+        id: BRAND_UUID,
+        semrushSubWorkspaceId: 'ws-9',
+        urls: [{ value: 'https://acme.com' }],
+        socialAccounts: [],
+        earnedContent: [],
+      };
+      const updateBrandStub = sinon.stub().resolves(updated);
+      const syncError = Object.assign(new Error('Semrush unavailable'), { status: 503 });
+      const syncStub = sinon.stub().rejects(syncError);
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncBrandUrlsAcrossMarkets: syncStub,
+        createSerenityTransport: sinon.stub().returns({ name: 't', listProjects: sinon.stub().resolves({ items: [] }) }),
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { urls: [{ value: 'https://acme.com' }] },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(await response.json()).to.include({ semrushSyncPending: true });
+      expect(updateBrandStub).to.have.been.calledOnce;
+      expect(loggerStub.error).to.have.been.calledWithMatch(
+        'serenity: brand-edit Semrush re-sync failed after row commit',
+      );
+    });
+
+    it('LLMO-6545: includes both semrushSyncPending and semrushRejectedAliases when competitor sync collected rejections before alias sync throws', async () => {
+      // Execution order: competitors → aliases. Competitor sync resolves with
+      // rejected entries (pushed into rejectedAliases[]); alias sync then throws.
+      // The catch must preserve the partial rejections so the UI can still warn
+      // the operator which aliases were refused by Semrush.
+      const rejected = [{ name: 'alias-a' }, { name: 'alias-b' }];
+      const updated = {
+        id: BRAND_UUID,
+        semrushSubWorkspaceId: 'ws-9',
+        urls: [],
+        socialAccounts: [],
+        earnedContent: [],
+        competitors: [{ url: 'https://rival.com', regions: ['us'] }],
+        brandAliases: [{ name: 'alias-a' }, { name: 'alias-c' }],
+      };
+      const updateBrandStub = sinon.stub().resolves(updated);
+      // Competitor sync succeeds with rejections; alias sync throws.
+      const competitorSyncStub = sinon.stub().resolves({ rejected });
+      const aliasSyncStub = sinon.stub().rejects(
+        Object.assign(new Error('Semrush 503'), { status: 503 }),
+      );
+      const controller = await buildUpdateController({
+        updateBrand: updateBrandStub,
+        syncCompetitorBenchmarksAcrossMarkets: competitorSyncStub,
+        syncBrandAliasesAcrossMarkets: aliasSyncStub,
+        createSerenityTransport: sinon.stub().returns({
+          name: 't',
+          listProjects: sinon.stub().resolves({ items: [] }),
+        }),
+        getBrandCompetitors: sinon.stub().resolves([]),
+      });
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: {
+          competitors: [{ url: 'https://rival.com', regions: ['us'] }],
+          brandAliases: [{ name: 'alias-a' }, { name: 'alias-c' }],
+        },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { authorization: 'Bearer tok' } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.include({ semrushSyncPending: true });
+      expect(body.semrushRejectedAliases).to.deep.equal(rejected);
     });
 
     it('returns 409 when demoting an active brand to pending (LLMO-5587)', async () => {
@@ -6756,6 +7393,65 @@ describe('Brands Controller', () => {
         // No rejected aliases accumulated (aliasResult?.rejected ?? [] → []), so
         // the response omits the semrushRejectedAliases key entirely.
         expect(body.semrushRejectedAliases).to.equal(undefined);
+      });
+
+      it('degrades to brand-URL-only reserved set when the pre-write project listing fails (LLMO-6545)', async () => {
+        // A listing failure in the pre-write self-reference guard degrades: the
+        // reserved set falls back to the brand's own URLs and the write proceeds.
+        // The same transport error then also fails the post-commit re-sync, so the
+        // response is the soft-fail 200 — either way the gateway URL embedded in the
+        // error must not reach the client. (The redaction path proper —
+        // createErrorResponse mapping a Semrush error to a generic message — is not
+        // reachable from this handler; it is covered on the create path, where
+        // provisioning errors do escape to the outer catch.)
+        const leakUrl = 'https://gw.internal/enterprise/workspaces/ws-7/projects';
+        const updated = {
+          id: BRAND_UUID,
+          semrushSubWorkspaceId: 'ws-7',
+          competitors: [{ name: 'Rival', url: 'https://rival.com' }],
+          urls: [],
+          socialAccounts: [],
+          earnedContent: [],
+        };
+        const updateBrandStub = sinon.stub().resolves(updated);
+        const getBrandByIdStub = sinon.stub().resolves({
+          id: BRAND_UUID,
+          baseUrl: 'https://acme.com',
+          urls: [],
+          semrushSubWorkspaceId: 'ws-7',
+        });
+        // Pre-write listing fails with a gateway error — must not block the write.
+        const listProjectsStub = sinon.stub().rejects(
+          new SerenityTransportError(502, `GET ${leakUrl} failed: 502`, {}),
+        );
+        const controller = await buildUpdateController({
+          updateBrand: updateBrandStub,
+          getBrandById: getBrandByIdStub,
+          createSerenityTransport: sinon.stub().returns({
+            name: 't', listProjects: listProjectsStub,
+          }),
+        });
+
+        const response = await controller.updateBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: { competitors: [{ name: 'Rival', url: 'https://rival.com' }] },
+          dataAccess: mockDataAccess,
+          pathInfo: { headers: { authorization: 'Bearer tok' } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        // Write must succeed despite the listing failure.
+        expect(response.status).to.equal(200);
+        expect(updateBrandStub).to.have.been.calledOnce;
+        // Guard degraded — warn logged.
+        expect(loggerStub.warn).to.have.been.calledWithMatch(
+          'serenity: competitor-guard project listing failed',
+        );
+        // Internal gateway URL must not leak to the client via body or headers.
+        const body = await response.json();
+        expect(JSON.stringify(body)).to.not.contain('gw.internal');
+        expect(response.headers.get('x-error') || '').to.not.contain('gw.internal');
       });
     });
   });

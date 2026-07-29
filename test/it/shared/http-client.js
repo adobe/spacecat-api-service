@@ -141,6 +141,7 @@ export function createHttpClient(baseUrl, tokens) {
     delegatedUserNoSource: makeMethods(tokens.delegatedUserNoSource),
     readOnlyAdmin: makeMethods(tokens.readOnlyAdmin),
     brandManager: makeMethods(tokens.brandManager),
+    facsManager: makeMethods(tokens.facsManager),
     s2sConsumerReadOnly: makeMethods(tokens.s2sConsumerReadOnly),
     s2sConsumerReadAll: makeMethods(tokens.s2sConsumerReadAll),
     s2sConsumerUnknown: makeMethods(tokens.s2sConsumerUnknown),

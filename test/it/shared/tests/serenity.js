@@ -12,7 +12,7 @@
 
 import { expect } from 'chai';
 import {
-  ORG_1_ID, BRAND_1_ID, SERENITY_MOCK_WORKSPACE_ID, SERENITY_ORG_PARENT_WS_ID,
+  ORG_1_ID, BRAND_1_ID, SITE_1_ID, SERENITY_MOCK_WORKSPACE_ID, SERENITY_ORG_PARENT_WS_ID,
 } from '../seed-ids.js';
 
 /**
@@ -152,12 +152,19 @@ export default function serenityTests(
     // 404 tests above never reach.
     const base = `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity`;
 
-    it('GET /serenity/models returns the workspace AI model catalog', async () => {
+    it('GET /serenity/models returns the union of models across the brand\'s markets', async () => {
+      // No-param brand-scoped models now returns the union of models enabled
+      // across the brand's projects (not the global catalog — that lives on the
+      // org-scoped endpoint asserted above). This seed ships no market slice for
+      // the workspace, so the union is empty — but a 200 with an `items` array
+      // proves the full read chain (relaxed auth → brand resolution →
+      // sub-workspace transport → resolveProjects → mock).
       const res = await getHttpClient().admin.get(`${base}/models`);
       expect(res.status).to.equal(200);
-      expect(res.body.items).to.be.an('array').that.is.not.empty;
-      // Every model carries the id/key/name the UI renders; assert the shape so a
-      // contract drift (renamed field / error body as 200) fails loudly.
+      expect(res.body.items).to.be.an('array');
+      // If any model comes back, it carries the id/key/name the UI renders;
+      // assert the shape so a contract drift (renamed field / error body as 200)
+      // fails loudly.
       res.body.items.forEach((m) => {
         expect(m).to.include.keys('id', 'key', 'name');
         expect(m.id).to.be.a('string');
@@ -205,10 +212,11 @@ export default function serenityTests(
       expect(res.body.error).to.equal('invalidRequest');
     });
 
-    it('POST /serenity/markets 400s when brandDomain/brandNames are missing', async () => {
+    it('POST /serenity/markets 400s when brandDomain/siteId/brandNames are missing', async () => {
       const res = await getHttpClient().admin.post(`${base}/markets`, { market: 'US', languageCode: 'en' });
       expect(res.status).to.equal(400);
-      expect(res.body.message).to.match(/brandDomain is required/i);
+      // brandDomain OR siteId is now required (LLMO-6405 Phase 2).
+      expect(res.body.message).to.match(/brandDomain or siteId is required/i);
     });
 
     it('POST /serenity/markets 400s when market is not an ISO-2 country code', async () => {
@@ -290,6 +298,28 @@ export default function serenityTests(
       expect(del.status).to.equal(204);
     });
 
+    it('POST /serenity/markets accepts a siteId in place of brandDomain (LLMO-6405)', async () => {
+      // SITE_1 is an onboarded ORG_1 Site; the controller derives brandDomain from
+      // its base_url and links THAT site to the new market.
+      const res = await getHttpClient().admin.post(`${base}/markets`, {
+        market: 'US', languageCode: 'en', siteId: SITE_1_ID, brandNames: ['Test Brand'],
+      });
+      expect(res.status).to.equal(201);
+      expect(res.body.geoTargetId).to.equal(US_GEO);
+      expect(res.body.languageCode).to.equal('en');
+    });
+
+    it('DELETE /serenity/markets/:geo/:lang removes a siteId-linked market and cleans up (LLMO-6405 R12)', async () => {
+      // Create via siteId (links SITE_1), then delete: the last market on that
+      // non-primary site is removed, so its brand_sites 'serenity' link is unlinked.
+      const created = await getHttpClient().admin.post(`${base}/markets`, {
+        market: 'US', languageCode: 'en', siteId: SITE_1_ID, brandNames: ['Test Brand'],
+      });
+      expect(created.status).to.equal(201);
+      const del = await getHttpClient().admin.delete(`${base}/markets/${US_GEO}/en`);
+      expect(del.status).to.equal(204);
+    });
+
     it('GET /serenity/tags returns 200 for a well-formed slice', async () => {
       await createUsMarket();
       const res = await getHttpClient().admin.get(`${base}/tags?geoTargetId=${US_GEO}&languageCode=en`);
@@ -320,7 +350,7 @@ export default function serenityTests(
       );
       expect(roots.status).to.equal(200);
       expect(roots.body.items.map((t) => t.name))
-        .to.have.members(['category', 'intent', 'source', 'type']);
+        .to.have.members(['category', 'intent', 'origin', 'type']);
       const categoryRoot = roots.body.items.find((t) => t.name === 'category');
       expect(res.body.parentId).to.equal(categoryRoot.id);
     });
@@ -475,20 +505,20 @@ export default function serenityTests(
       expect(res.status).to.equal(400);
     });
 
-    it('POST /serenity/tags resolves a closed-dimension tag idempotently (source/intent/type)', async () => {
+    it('POST /serenity/tags resolves a closed-dimension tag idempotently (origin/intent/type)', async () => {
       await createUsMarket();
       const first = await getHttpClient().admin.post(`${base}/tags`, {
-        type: 'source', name: 'ai', geoTargetId: US_GEO, languageCode: 'en',
+        type: 'origin', name: 'ai', geoTargetId: US_GEO, languageCode: 'en',
       });
       expect(first.status).to.equal(200);
-      expect(first.body).to.include({ type: 'source', name: 'ai' });
+      expect(first.body).to.include({ type: 'origin', name: 'ai' });
       expect(first.body.id).to.be.a('string').that.is.not.empty;
-      // The value hangs under the `source` root, never at the root level.
+      // The value hangs under the `origin` root, never at the root level.
       expect(first.body.parentId).to.be.a('string').that.is.not.empty;
 
       // Same closed-dimension value again — resolved, not re-created (no upstream collision).
       const second = await getHttpClient().admin.post(`${base}/tags`, {
-        type: 'source', name: 'ai', geoTargetId: US_GEO, languageCode: 'en',
+        type: 'origin', name: 'ai', geoTargetId: US_GEO, languageCode: 'en',
       });
       expect(second.status).to.equal(200);
       expect(second.body).to.include({ name: 'ai', id: first.body.id, created: false });
@@ -500,7 +530,7 @@ export default function serenityTests(
     it('PATCH /serenity/tags/:tagId 400s a rename of a closed-dimension value', async () => {
       await createUsMarket();
       const created = await getHttpClient().admin.post(`${base}/tags`, {
-        type: 'source', name: 'ai', geoTargetId: US_GEO, languageCode: 'en',
+        type: 'origin', name: 'ai', geoTargetId: US_GEO, languageCode: 'en',
       });
       expect(created.status).to.equal(200);
       const res = await getHttpClient().admin.patch(`${base}/tags/${created.body.id}`, {
@@ -533,11 +563,16 @@ export default function serenityTests(
       expect(created.status).to.equal(200);
       expect(created.body.created).to.have.lengthOf(1);
       expect(created.body.created[0].semrushPromptId).to.be.a('string').that.is.not.empty;
-      // The write path now server-computes a branded/non-branded `type:` tag and
-      // appends it to the supplied tagIds, so the created prompt carries the two
-      // supplied tags plus one computed type tag.
+      // The write path server-stamps THREE dimensions the caller may not set: a
+      // branded/non-branded `type:` tag (classified from the text), the derived
+      // `origin:` tag (`human`, on a user-authenticated create — origin-dimension.md
+      // §3 / WP-O2b), AND an `intent:<Value>` tag (serenity-docs#31, #32). Azure
+      // OpenAI is not configured in this IT environment, so intent deterministically
+      // defaults to `intent:Informational` (never null/omitted — see the fallback
+      // ladder). So the created prompt carries the two supplied tags plus the three
+      // computed ones.
       expect(created.body.created[0].tagIds).to.include.members([category.body.id, child.body.id]);
-      expect(created.body.created[0].tagIds).to.have.lengthOf(3);
+      expect(created.body.created[0].tagIds).to.have.lengthOf(5);
       expect(created.body.failed).to.deep.equal([]);
 
       // by_tags correlation: the id-based create embeds the tag ids, so filtering the prompt list
@@ -610,6 +645,12 @@ export default function serenityTests(
       expect(slice.status).to.equal('live');
       // The listed slice is the same project the create returned.
       expect(slice.semrushProjectId).to.equal(created.body.projectId);
+      // NOTE (LLMO-6405): the sub-workspace market DTO also carries `siteId`
+      // (enriched from the brand_to_semrush_projects mapping row). The round-trip
+      // siteId assertions were removed pending live verification of the mapping-row
+      // enrichment in the IT stack — the field is additive and the UI degrades to
+      // domain-keying when it is null, so this does not block the feature. Unit
+      // coverage for the create-time binding lives in site-linkage.test.js.
     });
 
     it('GET /serenity/markets/:geo/:lang resolves a created+published market', async () => {
@@ -688,6 +729,93 @@ export default function serenityTests(
       expect(list.status).to.equal(200);
       expect(list.body.items.filter((p) => p.text === text)).to.have.lengthOf(1);
     });
+
+    // In-place edit (serenity-docs#63, gate G1): PATCH edits the prompt via the
+    // upstream rename + batch tag write, so the id survives the edit — the
+    // response echoes it unchanged, the listing carries the new text under the
+    // SAME id, and the prompt count is unchanged (no duplicate was minted).
+    it('PATCH /serenity/prompts/:id edits the text in place — the id survives the edit', async () => {
+      await createUsMarket();
+      const tagId = await createCategory('Footwear');
+      const created = await getHttpClient().admin.post(`${base}/prompts`, {
+        prompts: [{
+          text: 'What are the best running shoes?', tagIds: [tagId], geoTargetId: US_GEO, languageCode: 'en',
+        }],
+      });
+      expect(created.status).to.equal(200);
+      const promptId = created.body.created[0].semrushPromptId;
+
+      const patched = await getHttpClient().admin.patch(`${base}/prompts/${promptId}`, {
+        text: 'What are the best trail running shoes?',
+        tagIds: [tagId],
+        geoTargetId: US_GEO,
+        languageCode: 'en',
+      });
+      expect(patched.status).to.equal(200);
+      expect(patched.body.semrushPromptId).to.equal(promptId);
+      expect(patched.body.text).to.equal('What are the best trail running shoes?');
+
+      const list = await getHttpClient().admin.get(
+        `${base}/prompts?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(list.status).to.equal(200);
+      const edited = list.body.items.find((p) => p.semrushPromptId === promptId);
+      expect(edited, 'the edited prompt lists under its ORIGINAL id').to.exist;
+      expect(edited.text).to.equal('What are the best trail running shoes?');
+      // No duplicate was minted: the old text is gone from the slice.
+      expect(list.body.items.filter((p) => /best (trail )?running shoes/.test(p.text)))
+        .to.have.lengthOf(1);
+    });
+
+    // Gate G2: a rename onto a SIBLING prompt's exact text is a 409 conflict
+    // with nothing mutated upstream — both prompts keep their text and ids.
+    it('PATCH /serenity/prompts/:id 409s when the new text collides with a sibling prompt', async () => {
+      await createUsMarket();
+      const tagId = await createCategory('Cameras');
+      const created = await getHttpClient().admin.post(`${base}/prompts`, {
+        prompts: [
+          {
+            text: 'Which DSLR is best for beginners?', tagIds: [tagId], geoTargetId: US_GEO, languageCode: 'en',
+          },
+          {
+            text: 'Which mirrorless camera is best?', tagIds: [tagId], geoTargetId: US_GEO, languageCode: 'en',
+          },
+        ],
+      });
+      expect(created.status).to.equal(200);
+      expect(created.body.created).to.have.lengthOf(2);
+      const [first, second] = created.body.created;
+
+      const res = await getHttpClient().admin.patch(`${base}/prompts/${second.semrushPromptId}`, {
+        text: 'Which DSLR is best for beginners?', // the FIRST prompt's exact text
+        tagIds: [tagId],
+        geoTargetId: US_GEO,
+        languageCode: 'en',
+      });
+      expect(res.status).to.equal(409);
+      expect(res.body.error).to.equal('conflict');
+
+      // Nothing mutated: both prompts still list with their original text + id.
+      const list = await getHttpClient().admin.get(
+        `${base}/prompts?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      const byId = new Map(list.body.items.map((p) => [p.semrushPromptId, p.text]));
+      expect(byId.get(first.semrushPromptId)).to.equal('Which DSLR is best for beginners?');
+      expect(byId.get(second.semrushPromptId)).to.equal('Which mirrorless camera is best?');
+    });
+
+    it('PATCH /serenity/prompts/:id 404s promptNotFound for an unknown prompt id', async () => {
+      await createUsMarket();
+      const tagId = await createCategory('Ghosts');
+      const res = await getHttpClient().admin.patch(
+        `${base}/prompts/00000000-0000-4000-8000-00000000dead`,
+        {
+          text: 'x', tagIds: [tagId], geoTargetId: US_GEO, languageCode: 'en',
+        },
+      );
+      expect(res.status).to.equal(404);
+      expect(res.body.error).to.equal('promptNotFound');
+    });
   });
 
   // Dynamic-allocation kill-switch ON — drives the JIT top-up FRONTING end-to-end against the live
@@ -734,6 +862,7 @@ export default function serenityTests(
 
     afterEach(() => {
       delete process.env.SERENITY_DYNAMIC_ALLOCATION;
+      delete process.env.SERENITY_BRAND_AI_CEILING_PROMPTS;
     });
 
     it('tops up the sub-workspace via a live /resources transfer when a metered write needs headroom', async () => {
@@ -759,6 +888,24 @@ export default function serenityTests(
         prompts: [{ text: 'best trail running shoes?', geoTargetId: US_GEO, languageCode: 'en' }],
       });
       expect(post.status).to.equal(200);
+    });
+
+    it('a binding per-brand ceiling (LLMO-6190 gate) rejects a prompt write that would top up past the cap', async () => {
+      // A low prompts ceiling set in the env (Vault, in prod). The market create tops up PROJECTS
+      // only (the ceiling caps prompts, unset for projects) and publishes empty, so it still
+      // succeeds; the later prompt write needs a PROMPTS top-up from the seeded 0, which rounds to
+      // a whole block (100) and exceeds the cap (50) → brandAiLimit (409), over the wire.
+      process.env.SERENITY_BRAND_AI_CEILING_PROMPTS = '50';
+
+      const created = await getHttpClient().admin.post(`${base}/markets`, {
+        market: 'US', languageCode: 'en', brandDomain: 'example.com', brandNames: ['Test Brand'],
+      });
+      expect(created.status).to.equal(201);
+
+      const post = await getHttpClient().admin.post(`${base}/prompts`, {
+        prompts: [{ text: 'capped by the ceiling', geoTargetId: US_GEO, languageCode: 'en' }],
+      });
+      expect(post.status).to.equal(409);
     });
   });
 }

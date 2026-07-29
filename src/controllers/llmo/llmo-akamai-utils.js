@@ -96,7 +96,10 @@ const criterionUserAgent = (userAgents) => ({
   name: 'userAgent',
   options: {
     matchOperator: 'IS_ONE_OF',
-    values: [...userAgents],
+    // Wildcard each value (*GPTBot* etc.) so it matches real-world agent strings like
+    // "Mozilla/5.0 ... GPTBot/1.2", not only an exact "GPTBot". matchWildcard treats a value with
+    // no '*' as an exact match, which would miss almost every real bot request.
+    values: userAgents.map((ua) => (String(ua).includes('*') ? ua : `*${ua}*`)),
     matchCaseSensitive: false,
     matchWildcard: true,
   },
@@ -186,6 +189,27 @@ const behaviorCacheId = (variableName) => ({
   options: { rule: 'INCLUDE_VARIABLE', variableName },
 });
 
+// "Caching Rules" -> Honor origin Cache-Control and Expires (the doc's step-4 config). Cache ID
+// Modification requires a Caching behavior in scope. Added to the OAE rule ONLY when the property's
+// DEFAULT rule has none (see cfg.addCaching): if the default already provides one, adding it here
+// overrides the property's HTML no-store and makes the optimized path cacheable — serving a stale
+// passthrough copy to bots.
+const behaviorCaching = () => ({
+  name: 'caching',
+  options: {
+    behavior: 'CACHE_CONTROL_AND_EXPIRES',
+    mustRevalidate: false,
+    // Fallback TTL used ONLY when the origin response omits Cache-Control/Expires (the doc's
+    // Honor-origin config). AI-bot responses normally carry the worker's no-store, so this is a
+    // safety net, not the common path — bounded to 1 day to avoid indefinitely caching a bad reply.
+    defaultTtl: '1d',
+    honorPrivate: false,
+    honorMustRevalidate: false,
+    enhancedRfcSupport: false,
+    cacheControlDirectives: '',
+  },
+});
+
 // Every request-header criterion we emit is a presence check (EXISTS / DOES_NOT_EXIST): PAPI
 // ignores value/match flags for those, and including them wouldn't match what PAPI itself emits.
 const criterionRequestHeader = (header, matchOperator) => ({
@@ -257,6 +281,12 @@ export function buildRoutingRule(cfg) {
   (cfg.removeIncomingResponseHeaders || []).forEach((header) => {
     behaviors.push(behaviorRemoveIncomingResponseHeader(header));
   });
+  // Caching goes BEFORE cacheId. Only add it when the property's default rule has no Caching of its
+  // own (cfg.addCaching) — cacheId needs a Caching behavior in scope, but adding one when the
+  // default already provides it overrides the property's HTML no-store and breaks bot delivery.
+  if (cfg.addCaching) {
+    behaviors.push(behaviorCaching());
+  }
   behaviors.push(behaviorCacheId(cfg.cacheKeyVariable.name));
 
   if (cfg.wafBypass?.enabled) {
@@ -366,19 +396,25 @@ export function buildFragments(cfg) {
 // Merge into an existing rule tree (idempotent)
 // ---------------------------------------------------------------------------
 
-// PMUSER_* variables must be declared in the rule tree's `variables` list. Mutates the given
-// variables array in place (the caller owns a freshly-cloned tree), returning it for convenience.
-function ensureVariableDeclared(variables, varName) {
-  if (variables.some((v) => v?.name === varName)) {
-    return variables;
-  }
-  variables.push({
+// The PMUSER_* variable declaration the managed rules depend on. Shared by mergeIntoTree (PUT path)
+// and buildRuleTreePatch (PATCH path) so both emit an identical declaration.
+function managedCacheKeyVariable(varName) {
+  return {
     name: varName,
     value: '',
     description: 'Edge Optimize cache key (managed by Adobe LLM Optimizer)',
     hidden: false,
     sensitive: false,
-  });
+  };
+}
+
+// PMUSER_* variables must be declared in the rule tree's `variables` list. Mutates the given
+// variables array in place (the caller owns a freshly-cloned tree), returning it for convenience.
+function ensureVariableDeclared(variables, variable) {
+  if (variables.some((v) => v?.name === variable.name)) {
+    return variables;
+  }
+  variables.push(variable);
   return variables;
 }
 
@@ -390,7 +426,10 @@ function ensureVariableDeclared(variables, varName) {
  * flat (non-wrapped) layout, so upgrading is clean.
  *
  * `insertIndex` positions the wrapper among the *existing* (non-managed) children:
- * 0 = before everything (default), length = after everything.
+ * 0 = before everything, length = after everything. The default (no/blank/garbage index) is
+ * AFTER everything: the wrapper's `origin` + `cacheId` are last-match-wins on Akamai, so it must
+ * sit below the stock delivery rules (Offload origin, Increase availability, …) — otherwise a
+ * later sibling clobbers the OAE origin override and cache isolation and bots never get routed.
  *
  * @param {object} ruleTree - the property's current rule tree ({ rules: {...} })
  * @param {object} cfg
@@ -407,19 +446,23 @@ export function mergeIntoTree(ruleTree, cfg, insertIndex) {
   if (!Array.isArray(root.variables)) {
     root.variables = [];
   }
-  ensureVariableDeclared(root.variables, cfg.cacheKeyVariable.name);
+  ensureVariableDeclared(root.variables, managedCacheKeyVariable(cfg.cacheKeyVariable.name));
 
   const managedNames = new Set([
     cfg.ruleNames.parent,
     cfg.ruleNames.routing,
     cfg.ruleNames.failoverTest,
   ]);
-  const children = (root.children || []).filter((c) => !managedNames.has(c?.name));
+  // Match by TRIMMED name so a legacy `"Optimize at Edge "` (trailing space) is replaced, not left
+  // as a duplicate — keeps this preview in step with buildRuleTreePatch (which also trims).
+  const children = (root.children || []).filter((c) => !managedNames.has((c?.name ?? '').trim()));
 
   const n = Math.trunc(Number(insertIndex));
-  // Non-numeric / NaN (e.g. a direct caller passing garbage) clamps to 0 rather than corrupting
-  // the slice; the controller already rejects malformed values with a 400 before reaching here.
-  const idx = Number.isFinite(n) ? Math.max(0, Math.min(n, children.length)) : 0;
+  // Default to LAST (children.length): only a finite, in-range index moves the wrapper earlier; a
+  // missing/blank/garbage value (the wizard sends none) appends after all existing children so the
+  // OAE origin + cacheId win on Akamai (siblings evaluate top-down, last match wins). The
+  // controller already rejects malformed values with a 400 before reaching here.
+  const idx = Number.isFinite(n) ? Math.max(0, Math.min(n, children.length)) : children.length;
   root.children = [...children.slice(0, idx), buildParentRule(cfg), ...children.slice(idx)];
   return tree;
 }
@@ -433,26 +476,109 @@ export function managedRuleNames(cfg) {
   return [cfg.ruleNames.parent, cfg.ruleNames.routing, cfg.ruleNames.failoverTest];
 }
 
-// The request header carrying the site's LLMO API key — a confidential value that must never be
-// logged or returned to clients. See buildRuleConfig.
+/**
+ * Builds a JSON Patch (RFC 6902) that inserts the managed "Optimize at Edge" wrapper rule (and its
+ * PMUSER cache-key variable) into an existing rule tree WITHOUT re-serialising any existing rule or
+ * behaviour.
+ *
+ * Why a patch instead of mergeIntoTree + full-tree PUT: a GET→merge→PUT round-trip re-stores PAPI's
+ * GET-expanded projection of behaviours we never touch (e.g. an origin on "Use Platform Settings"
+ * comes back with expanded SSL/TLS fields), which validateRules then rejects as incompatible. A
+ * server-side PATCH applies only these deltas to the STORED tree, so untouched behaviours are never
+ * re-serialised by us and that whole class of false rejection disappears.
+ *
+ * Idempotent: any existing managed rule is removed first — matched by TRIMMED name, so a legacy
+ * `"Optimize at Edge "` (trailing space) is cleaned up too — then re-added, never duplicated.
+ *
+ * `insertIndex` positions the wrapper among the *non-managed* children (0 = before everything =
+ * default, length = after everything), matching mergeIntoTree.
+ *
+ * @param {object} ruleTree - the property's current rule-tree document ({ rules: {...}, ... })
+ * @param {object} cfg
+ * @param {number} [insertIndex]
+ * @returns {Array<object>} JSON Patch operations (empty-safe; always adds the wrapper)
+ */
+export function buildRuleTreePatch(ruleTree, cfg, insertIndex) {
+  const root = ruleTree?.rules;
+  if (root === null || typeof root !== 'object') {
+    throw new Error("Rule tree is missing a top-level 'rules' object.");
+  }
+
+  const ops = [];
+
+  // 1. Insert the managed wrapper as a child of the default rule, first removing any existing
+  //    managed rules so a re-run replaces rather than duplicates.
+  if (!Array.isArray(root.children)) {
+    // No children array at all — create it containing just the managed wrapper.
+    ops.push({ op: 'add', path: '/rules/children', value: [buildParentRule(cfg)] });
+  } else {
+    const { children } = root;
+    const managed = new Set(managedRuleNames(cfg).map((name) => name.trim()));
+    // Match by TRIMMED name so a legacy `"Optimize at Edge "` (trailing space) is cleaned up too.
+    const isManaged = (child) => managed.has((child?.name ?? '').trim());
+
+    // Remove existing managed rules highest index first, so the earlier indices we still need stay
+    // valid as the array shrinks (a JSON Patch remove shifts later elements down).
+    const managedIndexes = [];
+    children.forEach((child, i) => {
+      if (isManaged(child)) {
+        managedIndexes.push(i);
+      }
+    });
+    managedIndexes
+      .sort((a, b) => b - a)
+      .forEach((i) => ops.push({ op: 'remove', path: `/rules/children/${i}` }));
+
+    // After those removals run, the array is exactly the non-managed children in their original
+    // order, so clamp insertIndex against that length (mirrors mergeIntoTree). Default (no/blank/
+    // garbage index) appends last so the OAE origin + cacheId win (Akamai is last-match-wins).
+    const nonManagedCount = children.length - managedIndexes.length;
+    const n = Math.trunc(Number(insertIndex));
+    const idx = Number.isFinite(n) ? Math.max(0, Math.min(n, nonManagedCount)) : nonManagedCount;
+    ops.push({
+      op: 'add',
+      // `-` appends; a numeric index inserts before it. Append when idx lands at/after the end.
+      path: idx >= nonManagedCount ? '/rules/children/-' : `/rules/children/${idx}`,
+      value: buildParentRule(cfg),
+    });
+  }
+
+  // 2. Declare the PMUSER cache-key variable if the tree doesn't already have it. `add` to a
+  //    missing `/rules/variables` would fail, so create the array when absent.
+  const varName = cfg.cacheKeyVariable.name;
+  if (!Array.isArray(root.variables)) {
+    ops.push({ op: 'add', path: '/rules/variables', value: [managedCacheKeyVariable(varName)] });
+  } else if (!root.variables.some((v) => v?.name === varName)) {
+    ops.push({ op: 'add', path: '/rules/variables/-', value: managedCacheKeyVariable(varName) });
+  }
+
+  return ops;
+}
+
+// Request headers carrying confidential values that must never be logged or returned to clients:
+// the site's LLMO API key and the customer's fetcher key (the Bot Manager allowlist secret). Both
+// are injected by buildRuleConfig and redacted from any rule tree that leaves the server.
 const API_KEY_HEADER = 'x-edgeoptimize-api-key';
+const FETCHER_KEY_HEADER = 'x-edgeoptimize-fetcher-key';
+const SECRET_HEADERS = new Set([API_KEY_HEADER, FETCHER_KEY_HEADER]);
 const REDACTED = '***';
 
 /**
- * Returns a deep clone of a rule tree with the injected LLMO API key value redacted, for
- * previews/diffs that leave the server (e.g. the plan response). Walks every rule's behaviors and
- * replaces the value of the modifyIncomingRequestHeader that sets the API-key header.
+ * Returns a deep clone of a rule tree with the injected secret header values (the LLMO API key and
+ * the fetcher key) redacted, for previews/diffs that leave the server (e.g. the plan response).
+ * Walks every rule's behaviors and replaces the value of any modifyIncomingRequestHeader that sets
+ * a secret header.
  * @param {object} tree - a PAPI rule tree ({ rules: {...} })
  * @returns {object} a redacted deep clone
  */
-export function redactApiKey(tree) {
+export function redactSecrets(tree) {
   const clone = structuredClone(tree);
   const walk = (rule) => {
     if (!rule || typeof rule !== 'object') {
       return;
     }
     (rule.behaviors || []).forEach((b) => {
-      if (b?.name === 'modifyIncomingRequestHeader' && b.options?.customHeaderName === API_KEY_HEADER) {
+      if (b?.name === 'modifyIncomingRequestHeader' && SECRET_HEADERS.has(b.options?.customHeaderName)) {
         // Mutating a deep clone we own, not the caller's tree.
         // eslint-disable-next-line no-param-reassign
         b.options.headerValue = REDACTED;
@@ -476,25 +602,46 @@ export function redactApiKey(tree) {
  * @param {object} params
  * @param {string} params.hostname - the site's (normalized) hostname
  * @param {string} params.apiKey - the site's LLMO API key
+ * @param {boolean} [params.addCaching=false] - add a Caching behavior to the OAE rule. Set this to
+ *   `!defaultRuleHasCaching(ruleTree)`: only add Caching when the property's default rule has none
+ *   (so Cache ID Modification validates). When the default already caches, leave it OFF so the OAE
+ *   rule inherits the property's HTML no-store instead of overriding it.
+ * @param {string} [params.originHostname] - the Edge Optimize worker host to route AI-bot traffic
+ *   to. Defaults to the prod worker; pass `env.EDGE_OPTIMIZE_EDGE_DOMAIN` so a dev/stage deployment
+ *   routes to dev/stage.edgeoptimize.net. The `matchSan` (`*.edgeoptimize.net`) covers all three.
+ * @param {string} [params.fetcherKey] - the fetcher key (a secret minted server-side per deploy).
+ *   When provided, it's set as the `x-edgeoptimize-fetcher-key` incoming request header so the
+ *   customer can allowlist it (with the `AdobeEdgeOptimize/1.0` user agent) in their Akamai Bot
+ *   Manager/WAF. The controller always supplies one now; the guard below stays defensive.
  * @returns {object} config consumable by buildParentRule/mergeIntoTree
  */
-export function buildRuleConfig({ hostname, apiKey }) {
+export function buildRuleConfig({
+  hostname, apiKey, addCaching = false, originHostname, fetcherKey,
+}) {
   const d = EDGE_OPTIMIZE_DEFAULTS;
+  const resolvedOriginHost = (typeof originHostname === 'string' && originHostname.trim())
+    ? originHostname.trim()
+    : d.origin.hostname;
+  const trimmedFetcherKey = typeof fetcherKey === 'string' ? fetcherKey.trim() : '';
   return {
     match: {
       userAgents: [...d.userAgents],
       fileExtensions: [...d.fileExtensions],
       hostnames: [hostname],
     },
-    origin: { ...d.origin },
+    origin: { ...d.origin, hostname: resolvedOriginHost },
     cacheKeyVariable: { ...d.cacheKeyVariable },
     incomingRequestHeaders: {
       ...d.incomingRequestHeaders,
       'x-edgeoptimize-api-key': apiKey,
+      // Add the server-minted fetcher-key header (Bot Manager allowlist). The controller always
+      // supplies one now; the guard stays defensive against a missing/blank value.
+      ...(trimmedFetcherKey ? { 'x-edgeoptimize-fetcher-key': trimmedFetcherKey } : {}),
     },
     outgoingRequestHeaders: { ...d.outgoingRequestHeaders },
     removeIncomingResponseHeaders: [...d.removeIncomingResponseHeaders],
     ruleNames: { ...d.ruleNames },
     failover: { alternateHostname: hostname },
+    addCaching,
   };
 }

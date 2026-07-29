@@ -12,6 +12,9 @@
 
 import { resolveElementModel } from '../constants.js';
 
+/** Max parallel intent-filtered PROMPTS calls when enriching `userIntent`. */
+export const INTENT_ENRICH_CONCURRENCY = 5;
+
 /**
  * Builds the payload for the Prompts element ({@link ELEMENT_IDS.PROMPTS}).
  *
@@ -89,6 +92,10 @@ export function buildPromptsPayload({
  * @property {number} volume - Estimated number of times per month a user asked the LLM
  *   a question about this topic. A per-topic estimate, so prompts sharing a topic carry
  *   the same volume.
+ * @property {string} [userIntent] - The prompt's OWN intent (a lowercased Semrush intent
+ *   key, e.g. `commercial`), independent of the topic's `primary_intent`. Present only
+ *   when the caller opts into enrichment; `''` when the prompt has no intent tag. Added by
+ *   the service (`getPrompts`), NOT by `transformPromptsResponse`.
  */
 
 /**

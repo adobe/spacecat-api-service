@@ -15,7 +15,6 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
-import crypto from 'crypto';
 import yaml from 'js-yaml';
 import TokowakaClient, {
   calculateForwardedHost,
@@ -65,6 +64,16 @@ function LlmoCloudFrontController(ctx) {
    * @param {object} context - Request context
    * @returns {Promise<Response>} Bootstrap details + CloudFormation quick-create URL
    */
+  // The connector-role assume-role external ID is the site's IMS org id, derived server-side
+  // (never client-supplied) so a caller cannot point the assume at another org's AWS account
+  // (confused-deputy). Bootstrap bakes this same value into the role's trust policy; every
+  // subsequent assume re-derives it here from the site's org. Returns undefined if the org is
+  // missing an IMS org id, which callers surface as a badRequest.
+  const resolveConnectorExternalId = async (site) => {
+    const org = await site.getOrganization();
+    return org?.getImsOrgId();
+  };
+
   const createBootstrapUrl = async (context) => {
     const {
       log, dataAccess, env, s3,
@@ -105,7 +114,12 @@ function LlmoCloudFrontController(ctx) {
       // shrinks the exposure window if the URL leaks (it only grants GetObject on this
       // one template object until expiry — see security notes). Override via env.
       const presignTtlSeconds = Number(env.EDGE_OPTIMIZE_PRESIGN_TTL || 900);
-      const externalId = crypto.randomUUID();
+      // Server-derived external ID (site's IMS org id) baked into the connector-role trust policy
+      // below; never client-supplied. See resolveConnectorExternalId.
+      const externalId = await resolveConnectorExternalId(site);
+      if (!hasText(externalId)) {
+        return badRequest('Site organization has no IMS org ID');
+      }
       const roleArn = `arn:aws:iam::${accountId}:role/${roleName}`;
       // The Adobe principal allowed to assume the customer's connector role — per-environment,
       // from Vault (dx_mysticat/<env>/api-service.SPACECAT_CDN_CLOUDFRONT_TRUSTED_PRINCIPAL_ARN).
@@ -150,9 +164,10 @@ function LlmoCloudFrontController(ctx) {
     }
   };
 
-  // Shared access gate for the CloudFront "Deploy routing" wizard endpoints: the caller
-  // must have access to the site and be an LLMO administrator. Returns { error } (a Response)
-  // when denied, or {} when allowed.
+  // Shared access gate for the CloudFront "Deploy routing" wizard endpoints: the caller must have
+  // access to the site and be an LLMO administrator. Also resolves the connector-role external ID
+  // (the site's IMS org id, derived server-side — see below). Returns { error } (a Response) when
+  // denied, or { site, externalId } when allowed.
   const gateEdgeOptimizeWizard = async (siteId, Site, action) => {
     const site = await Site.findById(siteId);
     if (!site) {
@@ -164,25 +179,27 @@ function LlmoCloudFrontController(ctx) {
     if (!accessControlUtil.isLLMOAdministrator()) {
       return { error: forbidden(`Only LLMO administrators can ${action}`) };
     }
-    return { site };
+    // Server-derived external ID (site's IMS org id); never accepted from the client. Matches what
+    // bootstrap baked into the role's trust policy. See resolveConnectorExternalId.
+    const externalId = await resolveConnectorExternalId(site);
+    if (!hasText(externalId)) {
+      return { error: badRequest('Site organization has no IMS org ID') };
+    }
+    return { site, externalId };
   };
 
-  // Shared input validation for the CloudFront wizard endpoints that act through the
-  // cross-account connector role. Parses + validates the caller-supplied AWS account id and
-  // per-session external id (and optionally the CloudFront distribution id). Returns
-  // `{ accountId, externalId, distributionId, error }` where `error` is a badRequest Response
-  // when validation fails (undefined otherwise) — keeping the messages/status identical to the
-  // previously inlined checks.
+  // Shared input validation for the CloudFront wizard endpoints that act through the cross-account
+  // connector role. Parses + validates the caller-supplied AWS account id (and optionally the
+  // CloudFront distribution id). The assume-role external ID is NOT taken from the client — it is
+  // derived server-side from the site's org in gateEdgeOptimizeWizard. Returns
+  // `{ accountId, distributionId, error }` where `error` is a badRequest Response when validation
+  // fails (undefined otherwise).
   const validateCloudfrontCredentials = (context, { requireDistribution = false } = {}) => {
     const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
-    const externalId = String(context.data?.externalId || '').trim();
     const distributionId = String(context.data?.distributionId || '').trim();
 
     if (accountId.length !== 12) {
       return { error: badRequest('accountId must be a 12-digit AWS account ID') };
-    }
-    if (!hasText(externalId)) {
-      return { error: badRequest('externalId is required') };
     }
     if (requireDistribution && !hasText(distributionId)) {
       return { error: badRequest('distributionId is required') };
@@ -191,7 +208,7 @@ function LlmoCloudFrontController(ctx) {
     if (hasText(distributionId) && !/^[A-Z0-9]{12,14}$/.test(distributionId)) {
       return { error: badRequest('distributionId must be a valid CloudFront distribution ID') };
     }
-    return { accountId, externalId, distributionId };
+    return { accountId, distributionId };
   };
 
   const assumeCloudFrontClient = async ({ accountId, externalId, roleName }) => {
@@ -291,13 +308,13 @@ function LlmoCloudFrontController(ctx) {
     const { Site } = dataAccess;
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
-    const { accountId, externalId, error: credError } = validateCloudfrontCredentials(context);
+    const { accountId, error: credError } = validateCloudfrontCredentials(context);
     if (credError) {
       return credError;
     }
 
     try {
-      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'connect the CloudFront connector role');
+      const { error, externalId } = await gateEdgeOptimizeWizard(siteId, Site, 'connect the CloudFront connector role');
       if (error) {
         return error;
       }
@@ -326,13 +343,13 @@ function LlmoCloudFrontController(ctx) {
     const { Site } = dataAccess;
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
-    const { accountId, externalId, error: credError } = validateCloudfrontCredentials(context);
+    const { accountId, error: credError } = validateCloudfrontCredentials(context);
     if (credError) {
       return credError;
     }
 
     try {
-      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'list CloudFront distributions');
+      const { error, externalId } = await gateEdgeOptimizeWizard(siteId, Site, 'list CloudFront distributions');
       if (error) {
         return error;
       }
@@ -357,13 +374,13 @@ function LlmoCloudFrontController(ctx) {
     const { Site } = dataAccess;
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
-    const { accountId, externalId, error: credError } = validateCloudfrontCredentials(context);
+    const { accountId, error: credError } = validateCloudfrontCredentials(context);
     if (credError) {
       return credError;
     }
 
     try {
-      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'check CloudFront prerequisites');
+      const { error, externalId } = await gateEdgeOptimizeWizard(siteId, Site, 'check CloudFront prerequisites');
       if (error) {
         return error;
       }
@@ -406,14 +423,14 @@ function LlmoCloudFrontController(ctx) {
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
     const {
-      accountId, externalId, distributionId, error: credError,
+      accountId, distributionId, error: credError,
     } = validateCloudfrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
     }
 
     try {
-      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'read CloudFront origins');
+      const { error, externalId } = await gateEdgeOptimizeWizard(siteId, Site, 'read CloudFront origins');
       if (error) {
         return error;
       }
@@ -440,14 +457,14 @@ function LlmoCloudFrontController(ctx) {
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
     const {
-      accountId, externalId, distributionId, error: credError,
+      accountId, distributionId, error: credError,
     } = validateCloudfrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
     }
 
     try {
-      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'read CloudFront behaviors');
+      const { error, externalId } = await gateEdgeOptimizeWizard(siteId, Site, 'read CloudFront behaviors');
       if (error) {
         return error;
       }
@@ -500,14 +517,14 @@ function LlmoCloudFrontController(ctx) {
     const originDomain = env?.EDGE_OPTIMIZE_EDGE_DOMAIN || 'live.edgeoptimize.net';
 
     const {
-      accountId, externalId, distributionId, error: credError,
+      accountId, distributionId, error: credError,
     } = validateCloudfrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
     }
 
     try {
-      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'create the Edge Optimize origin');
+      const { error, site, externalId } = await gateEdgeOptimizeWizard(siteId, Site, 'create the Edge Optimize origin');
       if (error) {
         return error;
       }
@@ -571,7 +588,7 @@ function LlmoCloudFrontController(ctx) {
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
     const {
-      accountId, externalId, distributionId, error: credError,
+      accountId, distributionId, error: credError,
     } = validateCloudfrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
@@ -593,7 +610,7 @@ function LlmoCloudFrontController(ctx) {
     }
 
     try {
-      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'create the CloudFront routing function');
+      const { error, site, externalId } = await gateEdgeOptimizeWizard(siteId, Site, 'create the CloudFront routing function');
       if (error) {
         return error;
       }
@@ -646,14 +663,14 @@ function LlmoCloudFrontController(ctx) {
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
     const {
-      accountId, externalId, distributionId, error: credError,
+      accountId, distributionId, error: credError,
     } = validateCloudfrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
     }
 
     try {
-      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'apply CloudFront cache headers');
+      const { error, site, externalId } = await gateEdgeOptimizeWizard(siteId, Site, 'apply CloudFront cache headers');
       if (error) {
         return error;
       }
@@ -696,14 +713,14 @@ function LlmoCloudFrontController(ctx) {
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
     const {
-      accountId, externalId, distributionId, error: credError,
+      accountId, distributionId, error: credError,
     } = validateCloudfrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
     }
 
     try {
-      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'create the CloudFront Lambda@Edge function');
+      const { error, site, externalId } = await gateEdgeOptimizeWizard(siteId, Site, 'create the CloudFront Lambda@Edge function');
       if (error) {
         return error;
       }
@@ -748,14 +765,14 @@ function LlmoCloudFrontController(ctx) {
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
     const {
-      accountId, externalId, distributionId, error: credError,
+      accountId, distributionId, error: credError,
     } = validateCloudfrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
     }
 
     try {
-      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'read the CloudFront Lambda@Edge status');
+      const { error, externalId } = await gateEdgeOptimizeWizard(siteId, Site, 'read the CloudFront Lambda@Edge status');
       if (error) {
         return error;
       }
@@ -782,7 +799,7 @@ function LlmoCloudFrontController(ctx) {
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
     const {
-      accountId, externalId, distributionId, error: credError,
+      accountId, distributionId, error: credError,
     } = validateCloudfrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
@@ -799,7 +816,7 @@ function LlmoCloudFrontController(ctx) {
     }
 
     try {
-      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'associate CloudFront routing');
+      const { error, site, externalId } = await gateEdgeOptimizeWizard(siteId, Site, 'associate CloudFront routing');
       if (error) {
         return error;
       }
@@ -846,14 +863,14 @@ function LlmoCloudFrontController(ctx) {
     const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
 
     const {
-      accountId, externalId, distributionId, error: credError,
+      accountId, distributionId, error: credError,
     } = validateCloudfrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
     }
 
     try {
-      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'verify CloudFront routing');
+      const { error, site, externalId } = await gateEdgeOptimizeWizard(siteId, Site, 'verify CloudFront routing');
       if (error) {
         return error;
       }
@@ -908,7 +925,7 @@ function LlmoCloudFrontController(ctx) {
     const originDomain = env?.EDGE_OPTIMIZE_EDGE_DOMAIN || 'live.edgeoptimize.net';
 
     const {
-      accountId, externalId, distributionId, error: credError,
+      accountId, distributionId, error: credError,
     } = validateCloudfrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
@@ -921,7 +938,7 @@ function LlmoCloudFrontController(ctx) {
     }
 
     try {
-      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'deploy CloudFront routing');
+      const { error, site, externalId } = await gateEdgeOptimizeWizard(siteId, Site, 'deploy CloudFront routing');
       if (error) {
         return error;
       }
@@ -997,7 +1014,7 @@ function LlmoCloudFrontController(ctx) {
     const originDomain = env?.EDGE_OPTIMIZE_EDGE_DOMAIN || 'live.edgeoptimize.net';
 
     const {
-      accountId, externalId, distributionId, error: credError,
+      accountId, distributionId, error: credError,
     } = validateCloudfrontCredentials(context, { requireDistribution: true });
     if (credError) {
       return credError;
@@ -1010,7 +1027,7 @@ function LlmoCloudFrontController(ctx) {
     }
 
     try {
-      const { error, site } = await gateEdgeOptimizeWizard(siteId, Site, 'preview CloudFront routing');
+      const { error, site, externalId } = await gateEdgeOptimizeWizard(siteId, Site, 'preview CloudFront routing');
       if (error) {
         return error;
       }

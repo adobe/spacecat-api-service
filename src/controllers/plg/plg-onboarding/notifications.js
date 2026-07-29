@@ -113,7 +113,10 @@ export async function postPlgOnboardingNotification(onboarding, context, hints =
       const asoUrl = `${experienceUrl}/?organizationId=${organizationId}#/sites-optimizer/sites/${siteId}`;
       message += `\n• *ASO Link:* ${asoUrl}`;
     }
-    const backofficeUrl = `${experienceUrl}/#/@aem-sites-engineering/custom-apps/24749-EssDeveloperUI/#/sites/${siteId}`;
+    const isProd = env.AWS_ENV === 'prod' || env.ENV === 'prod';
+    const backofficeUrl = isProd
+      ? `https://experience.adobe.com/#/@sitesinternal/custom-apps/245265-EssDeveloperUI/#/sites/${siteId}`
+      : `https://experience-stage.adobe.com/#/@aem-sites-engineering/custom-apps/24749-EssDeveloperUI/#/sites/${siteId}`;
     message += `\n• *Backoffice Link:* ${backofficeUrl}`;
   }
 

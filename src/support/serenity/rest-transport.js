@@ -13,7 +13,11 @@
 // @ts-check
 
 import { hasText } from '@adobe/spacecat-shared-utils';
-import { createSerenityProjectEngineApiClient } from '@adobe/spacecat-shared-project-engine-client';
+import {
+  createSerenityProjectEngineApiClient,
+  createSerenityProjectEngineTransport,
+  ProjectEngineApiError,
+} from '@adobe/spacecat-shared-project-engine-client';
 import { createSerenityUserManagerApiClient } from '@adobe/spacecat-shared-user-manager-client';
 import { ErrorWithStatusCode } from '../utils.js';
 // Two typed Semrush clients back this transport, each owning its own gateway
@@ -36,12 +40,75 @@ import { ErrorWithStatusCode } from '../utils.js';
 const DEFAULT_TIMEOUT_MS = 15_000;
 
 /**
+ * The two generated Semrush contracts this transport speaks. Every request shape below is
+ * DERIVED from them rather than restated here, so a vendor spec change surfaces as a type
+ * error at the call site instead of on the wire.
+ *
+ * @typedef {import('@adobe/spacecat-shared-project-engine-client').
+ *   SerenityProjectEngineTransport} PeTransport
+ * @typedef {import('@adobe/spacecat-shared-user-manager-client').
+ *   components['schemas']} UmSchemas
+ */
+
+/** @typedef {Parameters<PeTransport['createProject']>[0]['body']} ProjectCreateBody */
+/** @typedef {Parameters<PeTransport['updateProject']>[0]['body']} ProjectUpdateBody */
+/** @typedef {Parameters<PeTransport['createBenchmarks']>[0]['body']} BenchmarkCreateBody */
+/** @typedef {Parameters<PeTransport['updateBenchmark']>[0]['body']} BenchmarkUpdateBody */
+/** @typedef {Parameters<PeTransport['createBrandUrls']>[0]['body']} BrandUrlCreateBody */
+/** @typedef {Parameters<PeTransport['updateCompetitors']>[0]['body']} CiCompetitorsBody */
+/** @typedef {CiCompetitorsBody['ci_competitors']} CiCompetitors */
+/** @typedef {Parameters<PeTransport['updatePromptTags']>[0]['body']['items']} PromptTagUpdates */
+
+/**
+ * The `resources` allocation object shared by the v2 child-create and the v2 resources
+ * transfer. It is REQUIRED on child-create: every field inside it is optional, so `{}` is
+ * the contract's way to express "no allocation".
+ *
+ * @typedef {UmSchemas['handlers.createWorkspaceV2Resources']} WorkspaceResources
+ */
+
+/**
+ * The env keys this transport reads. All optional: each is resolved defensively and a
+ * missing gateway origin raises a 503 `configurationError` rather than a runtime bug.
+ *
+ * @typedef {object} TransportEnv
+ * @property {string} [SEMRUSH_PROJECTS_BASE_URL] - Project Engine gateway origin.
+ * @property {string} [SEMRUSH_USERS_BASE_URL] - User Manager gateway origin; falls back
+ *   to the Project Engine one when unset.
+ * @property {string} [SERENITY_ALLOW_WORKSPACE_DELETE] - `'true'` unlocks deleteWorkspace.
+ */
+
+/**
+ * The openapi-fetch result shape both typed clients resolve with — never rejected on an
+ * HTTP error, so a non-2xx arrives here as data rather than as a throw.
+ *
+ * @typedef {object} FetchResult
+ * @property {any} [data] - parsed 2xx body.
+ * @property {any} [error] - parsed non-2xx body ('' when empty).
+ * @property {Response} response
+ */
+
+/**
+ * The transport this module hands to every Serenity lifecycle function. Annotate the
+ * receiving parameter with it (`@param {SerenityTransport} transport`) rather than
+ * `{object}` — an `{object}`-annotated value is `any`, which erases member existence,
+ * argument count and argument types on every call made through it.
+ *
+ * @typedef {ReturnType<typeof createSerenityTransport>} SerenityTransport
+ */
+
+/**
  * Error thrown when the Semrush upstream returns a non-2xx response or refuses
  * the auth header. `status` carries the upstream status; `body` is the parsed
  * JSON (or raw text when not valid JSON). The controller's `mapError` does
  * NOT leak `.body` to clients — it is kept here only for server-side logging.
  */
 export class SerenityTransportError extends Error {
+  /**
+   * @param {number} status - the upstream HTTP status.
+   * @param {string} message
+   * @param {any} [body] - parsed JSON, raw text, or null for an empty body.
+   */
   constructor(status, message, body) {
     super(message);
     this.name = 'SerenityTransportError';
@@ -51,19 +118,35 @@ export class SerenityTransportError extends Error {
 }
 
 /**
- * Returns a client-safe message for an error that may be a SerenityTransportError.
- * A SerenityTransportError's message embeds the gateway URL (internal host +
- * workspace/project UUIDs), so it must never be echoed to clients (response
- * bodies, per-item `failed[].message`). App-level errors carry safe messages and
- * pass through unchanged.
+ * Returns a client-safe message for an error that may be a Semrush transport error. Both the
+ * User Manager / brand-topics `SerenityTransportError` (message embeds the gateway URL — internal
+ * host + workspace/project UUIDs) and the Project Engine `ProjectEngineApiError` (message embeds
+ * the service name + method + status, e.g. "Project Engine POST request failed with status 405")
+ * carry internal detail that must never be echoed to clients (response bodies, per-item
+ * `failed[].message`); both are collapsed to the same generic string. App-level errors carry safe
+ * messages and pass through unchanged.
+ *
+ * A Project Engine call with no HTTP response (per-attempt timeout / exhausted network /
+ * missing-IMS-token 401) surfaces as a ProjectEngineApiError with `status === undefined` that wraps
+ * the original throw as `.cause`; the retired adaptPE boundary rethrew that cause, so unwrap it
+ * first — this keeps the redacted string identical to before (auth → "authorization failed",
+ * timeout → "request failed", raw network → the original error's own message).
+ *
+ * @param {any} e - a caught value, arbitrary by nature (anything can be thrown).
  */
 export function redactUpstreamMessage(e) {
-  if (e instanceof SerenityTransportError) {
-    return (e.status === 401 || e.status === 403)
+  // NOTE: this mirrors errors.js `unwrapTransportCause` inline ON PURPOSE — importing it here
+  // would create an errors.js ↔ rest-transport.js cycle (errors.js imports SerenityTransportError
+  // from this file). Extracting the shared helper to a leaf module is a follow-up. Keep in sync.
+  const err = e instanceof ProjectEngineApiError && e.status === undefined && e.cause != null
+    ? e.cause
+    : e;
+  if (err instanceof SerenityTransportError || err instanceof ProjectEngineApiError) {
+    return (err.status === 401 || err.status === 403)
       ? 'Upstream authorization failed'
       : 'Upstream request failed';
   }
-  return e?.message;
+  return err?.message;
 }
 
 /**
@@ -124,7 +207,7 @@ function normalizeBaseUrl(raw, varName) {
  * No source default: the upstream host is operational config that must be
  * settable per-environment without a code change.
  *
- * @param {object} env
+ * @param {TransportEnv} env
  * @returns {string} canonical `protocol//host` origin
  */
 function baseUrl(env) {
@@ -141,13 +224,18 @@ function baseUrl(env) {
  * (LLMO / api-service#2656). The error message names whichever var was the
  * effective source so a misconfiguration is unambiguous.
  *
- * @param {object} env
+ * @param {TransportEnv} env
  * @returns {string} canonical `protocol//host` origin
  */
 function usersBaseUrl(env) {
-  const explicit = hasText(env?.SEMRUSH_USERS_BASE_URL);
+  // Bound first, then narrowed by `typeof`: `hasText` is not a TS type guard, so it
+  // cannot take a `string | undefined` (see this dir's CLAUDE.md). Same idiom as
+  // `normalizeBaseUrl` above. Behaviour is unchanged either way — `hasText` already
+  // rejects non-strings — so this reads as the narrowing it is.
+  const usersUrl = env?.SEMRUSH_USERS_BASE_URL;
+  const explicit = typeof usersUrl === 'string' && hasText(usersUrl);
   return normalizeBaseUrl(
-    explicit ? env.SEMRUSH_USERS_BASE_URL : env?.SEMRUSH_PROJECTS_BASE_URL,
+    explicit ? usersUrl : env?.SEMRUSH_PROJECTS_BASE_URL,
     explicit ? 'SEMRUSH_USERS_BASE_URL' : 'SEMRUSH_PROJECTS_BASE_URL',
   );
 }
@@ -159,6 +247,9 @@ function usersBaseUrl(env) {
  * SerenityTransportError the hand-rolled user-manager path raises. openapi-fetch
  * invokes this with a `Request` object as `input`; the timeout signal is applied
  * via the `init` argument (which fetch honours even for a Request input).
+ *
+ * @param {number} timeoutMs
+ * @returns {typeof globalThis.fetch} a drop-in fetch, as both typed clients expect.
  */
 function createTimeoutFetch(timeoutMs) {
   return async function timeoutFetch(input, init) {
@@ -191,6 +282,9 @@ function createTimeoutFetch(timeoutMs) {
  * for server-side logging and redacted for clients by the controller's
  * mapError); a 2xx returns the parsed body (or null for an empty body), matching
  * the previous hand-rolled `request()` return shape exactly.
+ *
+ * @param {string} method - HTTP method, for the error message.
+ * @param {FetchResult} result
  */
 function unwrap(method, result) {
   // openapi-fetch always resolves to `{ data, error, response }` with a real
@@ -221,7 +315,7 @@ function unwrap(method, result) {
  * separate user-manager gateway.
  *
  * @param {object} args
- * @param {object} args.env - Environment (reads SEMRUSH_PROJECTS_BASE_URL and,
+ * @param {TransportEnv} args.env - Environment (reads SEMRUSH_PROJECTS_BASE_URL and,
  *   for the User Manager gateway, SEMRUSH_USERS_BASE_URL — falling back to the
  *   projects host when the latter is unset).
  * @param {string} args.imsToken - IMS user bearer token (without 'Bearer ' prefix).
@@ -233,13 +327,14 @@ export function createSerenityTransport({ env, imsToken }) {
   // calls hit a separate (mock) host independently of Project Engine.
   const usersRoot = usersBaseUrl(env);
 
-  // Fail-closed guard for the destructive workspace delete. Deleting a
-  // sub-workspace must be IMPOSSIBLE in every deployed environment
-  // (dev/stage/prod) — production decommission empties and releases a
-  // workspace but never deletes it (design §6); upstream deprovisioning is
-  // Semrush CS's act. The capability is retained only so the net-zero live
-  // smoke can tidy up after itself, and is unlocked solely by this explicit
-  // opt-in flag, which no deployed environment sets (local test-cleanup only).
+  // Fail-closed guard for the destructive workspace delete. Deleting a sub-workspace is
+  // IMPOSSIBLE unless this exact flag is explicitly set — the default in every deployed
+  // environment (dev/stage/prod) today. Test/smoke-cleanup-only (LLMO-6189): the net-zero live
+  // smoke / IT-harness teardown, and manual operator cleanup of throwaway canary workspaces. No
+  // production lifecycle path (workspace-lifecycle.js / brand-provisioning.js) calls this or
+  // branches on this flag — those paths reclaim a sub-workspace by emptying its projects and
+  // leaving the shell in place (production never deletes a sub-workspace; a shell is only ever
+  // deprovisioned manually by Semrush CS).
   const allowWorkspaceDelete = env?.SERENITY_ALLOW_WORKSPACE_DELETE === 'true';
 
   // Shared IMS-bearer getter for both typed clients. Raises the transport's own
@@ -255,26 +350,43 @@ export function createSerenityTransport({ env, imsToken }) {
     return imsToken;
   };
 
-  // Typed Project Engine client over the project gateway. maxRetries:0 preserves
-  // the one-shot behaviour the hand-rolled transport had; the injected fetch
-  // re-adds the 15s timeout + Accept header the client does not impose. `root` is
-  // the validated origin; the client appends its own '/enterprise/projects/api'
-  // prefix.
-  const projects = createSerenityProjectEngineApiClient({
+  // Shared options for both the Project Engine facade and the raw brand-topics
+  // client below — identical to what the raw client was previously built with.
+  const projectEngineOptions = {
     baseUrl: root,
     authToken,
-    maxRetries: 0,
     fetch: createTimeoutFetch(DEFAULT_TIMEOUT_MS),
-  });
+  };
 
-  // Typed User Manager client over the sub-workspace lifecycle gateway. Same
-  // shape as the project client; appends its own '/enterprise/users/api' prefix.
-  // Uses `usersRoot` (SEMRUSH_USERS_BASE_URL, or `root` by fallback) so the
-  // lifecycle gateway can be a separate host from Project Engine.
+  // Shared Project Engine FACADE (ADR-0001); builds its own typed client over
+  // '/enterprise/projects/api' from the same options. Each facade method returns
+  // the unwrapped 2xx body and throws `ProjectEngineApiError` on failure — surfaced
+  // to callers DIRECTLY (LLMO-6386, retiring the old adaptPE boundary adapter); the
+  // classification + error→HTTP layer recognises it alongside `SerenityTransportError`
+  // via `isSemrushTransportError` (see errors.js). Retry, backoff, and the
+  // POST-never-retries-on-5xx idempotency gate are the shared library's contract,
+  // not this file's — see createRetryingFetch in spacecat-shared-project-engine-
+  // client's internal.js (library defaults: maxRetries 2, retryBaseDelayMs 200;
+  // per-attempt timeout via the injected `createTimeoutFetch`, since the retry
+  // layer wraps it and calls it once per attempt).
+  const projects = createSerenityProjectEngineTransport(projectEngineOptions);
+
+  // Raw Project Engine client, ONLY for GET /v1/workspaces/{id}/brand-topics: the
+  // facade does not expose a brand-topics method yet (it is in-spec — the future
+  // 29th facade method — but unshipped as of 1.14.0), so this one call keeps the
+  // raw client + the local `unwrap`. Same options as the facade above.
+  // TODO(LLMO): once @adobe/spacecat-shared-project-engine-client ships a brand-topics facade
+  // method, retire `projectsRaw` and route brand-topics through `projects` like the other 28 ops
+  // (this is the only remaining raw Project Engine caller in this file).
+  const projectsRaw = createSerenityProjectEngineApiClient(projectEngineOptions);
+
+  // Typed User Manager client over the sub-workspace lifecycle gateway (same
+  // retry/timeout contract as above); appends '/enterprise/users/api'. Uses
+  // `usersRoot` (SEMRUSH_USERS_BASE_URL, falling back to `root`) since this
+  // gateway can be a separate host from Project Engine.
   const users = createSerenityUserManagerApiClient({
     baseUrl: usersRoot,
     authToken,
-    maxRetries: 0,
     fetch: createTimeoutFetch(DEFAULT_TIMEOUT_MS),
   });
 
@@ -299,10 +411,18 @@ export function createSerenityTransport({ env, imsToken }) {
      * Note: Semrush rejects `sort_field` / `sort_dir` on this endpoint (see
      * commit history on the prior `serenity` handler). Body is restricted to
      * the fields the upstream documents as accepted.
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {string} projectId
+     * @param {object} [body]
+     * @param {string[]} [body.tag_ids] - OR-filtered; omit or pass [] to list all.
+     * @param {number} [body.page]
+     * @param {number} [body.limit]
+     * @param {string} [body.search]
+     * @param {boolean} [body.unassigned]
      */
     async listPromptsByTags(semrushWorkspaceId, projectId, body) {
-      return unwrap('POST', await projects.POST(
-        '/v2/workspaces/{id}/projects/{project_id}/aio/prompts/by_tags',
+      return projects.listPromptsByTagIds(
         {
           params: { path: { id: semrushWorkspaceId, project_id: projectId } },
           body: {
@@ -313,7 +433,7 @@ export function createSerenityTransport({ env, imsToken }) {
             unassigned: body?.unassigned,
           },
         },
-      ));
+      );
     },
 
     /**
@@ -342,56 +462,116 @@ export function createSerenityTransport({ env, imsToken }) {
      * @param {string[]} tagIds - upstream tag ids attached to EVERY item.
      */
     async createPromptsByIds(semrushWorkspaceId, projectId, items, tagIds) {
-      return unwrap('POST', await projects.POST(
-        '/v2/workspaces/{id}/projects/{project_id}/aio/prompts',
+      return projects.createPrompts(
         {
           params: { path: { id: semrushWorkspaceId, project_id: projectId } },
           body: { items, tag_ids: tagIds },
         },
-      ));
+      );
     },
 
     /**
      * DELETE /v2/.../aio/prompts — deletes prompts by their Semrush ids in
      * this project. Body shape: { ids: [...] }.
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {string} projectId
+     * @param {string[]} ids - upstream prompt ids.
      */
     async deletePromptsByIds(semrushWorkspaceId, projectId, ids) {
-      return unwrap('DELETE', await projects.DELETE(
-        '/v2/workspaces/{id}/projects/{project_id}/aio/prompts',
+      return projects.deletePromptsByIds(
         {
           params: { path: { id: semrushWorkspaceId, project_id: projectId } },
           body: { ids },
         },
-      ));
+      );
+    },
+
+    /**
+     * POST /v2/.../aio/prompts/{prompt_id}/rename — edits ONE prompt's text IN
+     * PLACE. In the AIO model a prompt's `name` IS its text, so rename is the
+     * text-edit operation. Live-verified 2026-07-14 (serenity-docs#63 §2): the
+     * prompt id is preserved across draft, publish and live (`{ id, name,
+     * is_updated }` echoes the SAME id), and renaming onto ANOTHER prompt's
+     * exact text fails with a clean 409 — no mutation, no duplicate. A rename
+     * onto the prompt's OWN current text is a documented `is_updated: false`
+     * no-op, not a conflict. The edit lands in the DRAFT layer; the live view
+     * keeps the old text until the project is published.
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {string} projectId
+     * @param {string} promptId - upstream prompt id to rename.
+     * @param {string} newName - the prompt's next text.
+     */
+    async renamePrompt(semrushWorkspaceId, projectId, promptId, newName) {
+      return projects.renamePrompt(
+        {
+          params: {
+            path: { id: semrushWorkspaceId, project_id: projectId, prompt_id: promptId },
+          },
+          body: { new_name: newName },
+        },
+      );
+    },
+
+    /**
+     * PUT /v2/.../aio/prompts/tags — batch-updates prompts' tag REFERENCES by
+     * id (aio-update-prompts-batch), in place. Body: { items: [{ id,
+     * references: [tagId…], replace }] } — per item, `replace: false` MERGES
+     * the references onto the prompt's existing tag set, `replace: true` makes
+     * the tag set EXACTLY `references`. The prompt id is preserved (verified
+     * live 2026-07-14, serenity-docs#63 §2). Answers 204 with no body; an
+     * unknown prompt id is skipped SILENTLY (still 204), so a caller needing
+     * existence must establish it separately (the update handlers do, via the
+     * preceding rename's 404).
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {string} projectId
+     * @param {PromptTagUpdates} items
+     */
+    async updatePromptTagsByIds(semrushWorkspaceId, projectId, items) {
+      return projects.updatePromptTags(
+        {
+          params: { path: { id: semrushWorkspaceId, project_id: projectId } },
+          body: { items },
+        },
+      );
     },
 
     /**
      * POST /v1/workspaces/{ws}/projects/{pid}/publish — moves draft state to
      * live. Semrush publishes asynchronously; mutations land in draft until
      * this is called.
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {string} projectId
      */
     async publishProject(semrushWorkspaceId, projectId) {
-      return unwrap('POST', await projects.POST(
-        '/v1/workspaces/{id}/projects/{project_id}/publish',
+      return projects.publishProject(
         { params: { path: { id: semrushWorkspaceId, project_id: projectId } } },
-      ));
+      );
     },
 
     /**
      * GET /v1/workspaces/{ws}/projects/{pid}/ai_models — list AI models
      * configured for a project. `model.key` is the value the Reporting API
      * expects as `CBF_model`.
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {string} projectId
+     * @param {object} [opts]
+     * @param {number} [opts.page]
+     * @param {number} [opts.limit]
      */
     async listAiModels(semrushWorkspaceId, projectId, { page = 1, limit = 100 } = {}) {
-      return unwrap('GET', await projects.GET(
-        '/v1/workspaces/{id}/projects/{project_id}/ai_models',
+      return projects.listAiModels(
         {
           params: {
             path: { id: semrushWorkspaceId, project_id: projectId },
             query: { page, limit },
           },
         },
-      ));
+      );
     },
 
     /**
@@ -402,9 +582,16 @@ export function createSerenityTransport({ env, imsToken }) {
      * brand-create to seed the new project's prompt TEXT. The topic name itself
      * is not attached as a tag: the service returns topics with no category to
      * hang them under, so generated prompts arrive uncategorized.
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {object} target
+     * @param {string} [target.domain]
+     * @param {string} [target.country] - ISO country code scoping the market.
      */
     async getBrandTopics(semrushWorkspaceId, { domain, country }) {
-      return unwrap('GET', await projects.GET(
+      // Raw client + local unwrap: the shared facade has no brand-topics method
+      // yet (see `projectsRaw` above). Swap to a facade method once one ships.
+      return unwrap('GET', await projectsRaw.GET(
         '/v1/workspaces/{id}/brand-topics',
         {
           params: {
@@ -437,8 +624,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * @param {string} [opts.parentId] - upstream tag id to nest the names under.
      */
     async createProjectTags(semrushWorkspaceId, projectId, names, { parentId } = {}) {
-      return unwrap('POST', await projects.POST(
-        '/v2/workspaces/{id}/projects/{project_id}/aio/tags',
+      return projects.createProjectTags(
         {
           params: { path: { id: semrushWorkspaceId, project_id: projectId } },
           // Only send parent_id when nesting — an empty string is a no-op
@@ -448,7 +634,7 @@ export function createSerenityTransport({ env, imsToken }) {
             ? { names, parent_id: parentId }
             : { names },
         },
-      ));
+      );
     },
 
     /**
@@ -482,8 +668,7 @@ export function createSerenityTransport({ env, imsToken }) {
         parentId = '', search = '', page = 1, limit = 100, draft,
       } = {},
     ) {
-      return unwrap('GET', await projects.GET(
-        '/v2/workspaces/{id}/projects/{project_id}/aio/tags',
+      return projects.listProjectTags(
         {
           params: {
             path: { id: semrushWorkspaceId, project_id: projectId },
@@ -492,7 +677,7 @@ export function createSerenityTransport({ env, imsToken }) {
             },
           },
         },
-      ));
+      );
     },
 
     /**
@@ -529,25 +714,26 @@ export function createSerenityTransport({ env, imsToken }) {
         );
       }
       const body = { name, parent_id: parentId };
-      return unwrap('PATCH', await projects.PATCH(
-        '/v2/workspaces/{id}/projects/{project_id}/aio/tags/{tag_id}',
+      return projects.updateProjectTag(
         {
           params: {
             path: { id: semrushWorkspaceId, project_id: projectId, tag_id: tagId },
           },
           body,
         },
-      ));
+      );
     },
 
     /**
      * POST /v1/workspaces/{ws}/projects — creates a new Semrush AIO project.
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {ProjectCreateBody} body
      */
     async createProject(semrushWorkspaceId, body) {
-      return unwrap('POST', await projects.POST(
-        '/v1/workspaces/{id}/projects',
+      return projects.createProject(
         { params: { path: { id: semrushWorkspaceId } }, body },
-      ));
+      );
     },
 
     /**
@@ -559,12 +745,14 @@ export function createSerenityTransport({ env, imsToken }) {
      *   DELETE  /v1/workspaces/{ws}/projects/<bogus> → 404 {"message":"not found"}
      *
      * Callers (handleDeleteMarket) treat upstream 404 as idempotent success.
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {string} projectId
      */
     async deleteProject(semrushWorkspaceId, projectId) {
-      return unwrap('DELETE', await projects.DELETE(
-        '/v1/workspaces/{id}/projects/{project_id}',
+      return projects.deleteProject(
         { params: { path: { id: semrushWorkspaceId, project_id: projectId } } },
-      ));
+      );
     },
 
     /**
@@ -574,15 +762,18 @@ export function createSerenityTransport({ env, imsToken }) {
      * `brand_names` (the display name and brand aliases that classify branded
      * prompts) — when a brand's aliases change. Upstream PATCH confirmed live on
      * prod 2026-06-24 (OPTIONS .../projects/{pid} → 405 allow: PATCH, DELETE, GET).
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {string} projectId
+     * @param {ProjectUpdateBody} body
      */
     async updateProject(semrushWorkspaceId, projectId, body) {
-      return unwrap('PATCH', await projects.PATCH(
-        '/v1/workspaces/{id}/projects/{project_id}',
+      return projects.updateProject(
         {
           params: { path: { id: semrushWorkspaceId, project_id: projectId } },
           body,
         },
-      ));
+      );
     },
 
     /**
@@ -593,30 +784,36 @@ export function createSerenityTransport({ env, imsToken }) {
      * response (ProjectAIModelResponse) to the v1 route, so it is a drop-in —
      * matching the createBenchmarks v2 move. The sibling list/delete ai_models
      * routes have no v2 variant (v2 ai_models is POST-only) and stay on v1.
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {string} projectId
+     * @param {string} modelId - catalog model id (`AIModelResponse.id`).
      */
     async addAiModel(semrushWorkspaceId, projectId, modelId) {
-      return unwrap('POST', await projects.POST(
-        '/v2/workspaces/{id}/projects/{project_id}/ai_models',
+      return projects.createAioModel(
         {
           params: { path: { id: semrushWorkspaceId, project_id: projectId } },
           body: { model_id: modelId },
         },
-      ));
+      );
     },
 
     /**
      * DELETE /v1/workspaces/{ws}/projects/{pid}/ai_models — removes AI model
      * assignments by their assignment ids (the outer `id` on
      * `ProjectAIModelResponse`, NOT the catalog `model.id`).
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {string} projectId
+     * @param {string[]} ids - model ASSIGNMENT ids.
      */
     async deleteAiModelsByIds(semrushWorkspaceId, projectId, ids) {
-      return unwrap('DELETE', await projects.DELETE(
-        '/v1/workspaces/{id}/projects/{project_id}/ai_models',
+      return projects.deleteAiModels(
         {
           params: { path: { id: semrushWorkspaceId, project_id: projectId } },
           body: { ids },
         },
-      ));
+      );
     },
 
     /**
@@ -624,12 +821,15 @@ export function createSerenityTransport({ env, imsToken }) {
      * tracking across any workspace. Not scoped to a workspace or project.
      * Used to populate the "available models" list in the UI.
      * Returns {page, total, items: [{id, key, name, icon}]}.
+     *
+     * @param {object} [opts]
+     * @param {number} [opts.page]
+     * @param {number} [opts.limit]
      */
     async listGlobalAiModels({ page = 1, limit = 100 } = {}) {
-      return unwrap('GET', await projects.GET(
-        '/v1/ai_models',
+      return projects.listGlobalAiModels(
         { params: { query: { page, limit } } },
-      ));
+      );
     },
 
     /**
@@ -638,7 +838,7 @@ export function createSerenityTransport({ env, imsToken }) {
      * caller is expected to cache the result (catalog is stable).
      */
     async listLanguages() {
-      return unwrap('GET', await projects.GET('/v1/languages', {}));
+      return projects.listLanguages({});
     },
 
     // ─────────────────────────────────────────────────────────────────────
@@ -658,17 +858,29 @@ export function createSerenityTransport({ env, imsToken }) {
      * parent). v2 takes NO `X-Upload-Receipt` header (v1-only); tier/products
      * inherit from the parent. The new workspace settles `not ready → created` in
      * seconds; poll getWorkspaceStatus before creating projects against it.
+     *
+     * The child is created with an EMPTY `resources` object — it carries no AI allocation of its
+     * own (see `workspace-lifecycle.js`). `resources` is REQUIRED by `createWorkspaceV2Form`
+     * while every field inside `createWorkspaceV2Resources` is optional, so `{}` is the
+     * schema-valid way to say "no allocation". Omitting the key entirely is contract-violating:
+     * the live gateway tolerates it, but a spec-faithful consumer rejects it (our own vendor mock
+     * does, which is what caught this).
+     *
+     * @param {string} parentWorkspaceId
+     * @param {string} title
      */
-    async createSubworkspace(parentWorkspaceId, title, resources) {
+    async createSubworkspace(parentWorkspaceId, title) {
       return unwrap('POST', await users.POST(
         '/v2/workspaces/{id}/child',
-        { params: { path: { id: parentWorkspaceId } }, body: { title, resources } },
+        { params: { path: { id: parentWorkspaceId } }, body: { title, resources: {} } },
       ));
     },
 
     /**
      * GET /v1/workspaces/{ws}/status — poll until `created` after a subworkspace
      * create (creating projects against `not ready` can 500).
+     *
+     * @param {string} workspaceId
      */
     async getWorkspaceStatus(workspaceId) {
       return unwrap('GET', await users.GET(
@@ -684,6 +896,8 @@ export function createSerenityTransport({ env, imsToken }) {
      * (child headroom) and against the MASTER workspace for the org pool (`free = total − used`).
      * NOTE: use this on the master id for the pool — `/parent/resources` returns the workspace's
      * OWN allocation, not the master pool (live-verified 2026-07-02).
+     *
+     * @param {string} workspaceId
      */
     async getWorkspaceResources(workspaceId) {
       return unwrap('GET', await users.GET(
@@ -697,6 +911,8 @@ export function createSerenityTransport({ env, imsToken }) {
      * (and nested sub-workspaces). Used for ambiguous-create recovery: on a
      * timed-out create, match the exact title and adopt a `created`,
      * project-empty sub-workspace (design §6).
+     *
+     * @param {string} parentWorkspaceId
      */
     async listWorkspaceFamily(parentWorkspaceId) {
       return unwrap('GET', await users.GET(
@@ -706,9 +922,13 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
-     * POST /v2/workspaces/{ws}/resources/transfer — grant an allocation onto a
-     * subworkspace (activation / re-grant) and release it back to the parent pool
-     * (decommission). A public user-token endpoint (workspace doc §5/§7).
+     * POST /v2/workspaces/{ws}/resources/transfer — set a sub-workspace's AI resource totals
+     * (ABSOLUTE, not a delta), drawing the difference from / returning it to the parent pool.
+     * A public user-token endpoint (workspace doc §5/§7). The only callers are the just-in-time
+     * allocator's `transferOnce` / `transferAndSettle` (`resource-manager.js`) — top-up before a
+     * metered write, best-effort surplus release after a delete or model change. The sub-workspace
+     * lifecycle itself never calls this: a child is created with no allocation and never carries
+     * one (see `workspace-lifecycle.js`).
      * V2 wraps the resources under a `resources` key (WorkspaceResourcesTransferV2Form
      * → createWorkspaceV2Resources); `payload` is the bare resources object
      * (`{ ai: { projects, prompts } }`, the aiProductResources shape), so wrap it
@@ -716,6 +936,9 @@ export function createSerenityTransport({ env, imsToken }) {
      * `resources` body (createSubworkspace), so this is contract-compatible — the v1
      * route's documented body (flat WorkspaceResources, no `ai` key) never matched
      * what we send. The exact allocation values remain a Gate-A live-smoke pin.
+     *
+     * @param {string} workspaceId
+     * @param {WorkspaceResources} payload - bare resources object, wrapped here.
      */
     async transferWorkspaceResources(workspaceId, payload) {
       return unwrap('POST', await users.POST(
@@ -725,21 +948,23 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
-     * DELETE /v1/workspaces/{ws} — TEST CLEANUP ONLY, and fail-closed: throws
-     * unless SERENITY_ALLOW_WORKSPACE_DELETE === 'true' is set in the env, which
-     * no deployed environment (dev/stage/prod) does. Production flows NEVER
-     * delete sub-workspaces (decommission empties and disconnects them but
-     * never deletes — design §6); workspace deprovisioning at offboarding is
-     * Semrush CS's act. Kept here so the
-     * net-zero live smoke can tidy up after itself. Delete cascades over the
-     * workspace's projects; subsequent reads return 403 (workspace doc §4).
+     * DELETE /v1/workspaces/{ws} — fail-closed: throws unless
+     * SERENITY_ALLOW_WORKSPACE_DELETE === 'true' is set in the env, which is unset (off) in every
+     * deployed environment by default (LLMO-6189). Production lifecycle paths (decommission,
+     * failed-provisioning cleanup) never call this — a sub-workspace is only ever reclaimed by
+     * emptying its projects via `workspace-lifecycle.js`'s `deleteAllProjects`, leaving the shell
+     * in place, never by deletion. This primitive exists purely for
+     * net-zero live smoke / IT-harness teardown (its original and only intended use) and manual
+     * operator cleanup of throwaway test workspaces. Delete cascades over the workspace's projects
+     * (subsequent reads return 403, workspace doc §4).
+     *
+     * @param {string} workspaceId
      */
     async deleteWorkspace(workspaceId) {
       if (!allowWorkspaceDelete) {
         throw new Error(
-          'Serenity workspace deletion is disabled. It is test-cleanup only and '
-          + 'must never run in a deployed environment; set '
-          + 'SERENITY_ALLOW_WORKSPACE_DELETE=true to enable it locally.',
+          'Serenity workspace deletion is disabled. Set SERENITY_ALLOW_WORKSPACE_DELETE=true to '
+          + 'enable it (test/smoke cleanup only — production never deletes a sub-workspace).',
         );
       }
       return unwrap('DELETE', await users.DELETE(
@@ -755,12 +980,13 @@ export function createSerenityTransport({ env, imsToken }) {
      * with "type query parameter is required"). Subworkspace mode enumerates a brand's
      * markets from this; never the v2 list for draft settings (v2 returns a
      * live-view shape with `brand_names: null` for drafts).
+     *
+     * @param {string} workspaceId
      */
     async listProjects(workspaceId) {
-      return unwrap('GET', await projects.GET(
-        '/v1/workspaces/{id}/projects',
+      return projects.listProjects(
         { params: { path: { id: workspaceId }, query: { type: 'ai' } } },
-      ));
+      );
     },
 
     /**
@@ -770,17 +996,21 @@ export function createSerenityTransport({ env, imsToken }) {
      * pre-publish edits and Semrush's auto-generated CI competitors are both
      * visible. Used by the CI-competitor sync to read the current list before the
      * destructive PUT.
+     *
+     * @param {string} workspaceId
+     * @param {string} projectId
+     * @param {object} [opts]
+     * @param {boolean} [opts.draft=true] - read the draft view.
      */
     async getProject(workspaceId, projectId, { draft = true } = {}) {
-      return unwrap('GET', await projects.GET(
-        '/v1/workspaces/{id}/projects/{project_id}',
+      return projects.getProject(
         {
           params: {
             path: { id: workspaceId, project_id: projectId },
             query: { draft: String(draft), type: 'ai' },
           },
         },
-      ));
+      );
     },
 
     /**
@@ -790,15 +1020,18 @@ export function createSerenityTransport({ env, imsToken }) {
      * and Semrush auto-generates its own competitors, callers must read-merge
      * (getProject → merge → put) rather than send only our list. Returns the
      * resulting { ci_competitors: [...] }.
+     *
+     * @param {string} workspaceId
+     * @param {string} projectId
+     * @param {CiCompetitors} ciCompetitors - the FULL replacement list.
      */
     async updateCiCompetitors(workspaceId, projectId, ciCompetitors) {
-      return unwrap('PUT', await projects.PUT(
-        '/v1/workspaces/{id}/projects/{project_id}/ci/competitors',
+      return projects.updateCompetitors(
         {
           params: { path: { id: workspaceId, project_id: projectId } },
           body: { ci_competitors: ciCompetitors },
         },
-      ));
+      );
     },
 
     /**
@@ -812,12 +1045,14 @@ export function createSerenityTransport({ env, imsToken }) {
      * (see listProjects/getProject above) — init_status is a readiness boolean,
      * not draft-settings, so the live-view materialisation v2 reads carries no
      * draft-faithfulness concern here.
+     *
+     * @param {string} workspaceId
+     * @param {string} projectId
      */
     async getInitStatus(workspaceId, projectId) {
-      return unwrap('GET', await projects.GET(
-        '/v2/workspaces/{id}/projects/{project_id}/aio/init_status',
+      return projects.getProjectInitStatus(
         { params: { path: { id: workspaceId, project_id: projectId } } },
-      ));
+      );
     },
 
     // ─────────────────────────────────────────────────────────────────────
@@ -834,12 +1069,14 @@ export function createSerenityTransport({ env, imsToken }) {
      * project's benchmarks (the project's own brand plus competitors). The own
      * brand carries `main_brand: true`; its `id` is the `benchmark_id` the brand
      * URL endpoints require. Returns `{ aio_benchmarks: [...] }`.
+     *
+     * @param {string} workspaceId
+     * @param {string} projectId
      */
     async listBenchmarks(workspaceId, projectId) {
-      return unwrap('GET', await projects.GET(
-        '/v1/workspaces/{id}/projects/{project_id}/ai_models/benchmarks',
+      return projects.listBenchmarks(
         { params: { path: { id: workspaceId, project_id: projectId } } },
-      ));
+      );
     },
 
     /**
@@ -849,15 +1086,18 @@ export function createSerenityTransport({ env, imsToken }) {
      * benchmark is a regular tracked brand. Returns `{ ids: [...], existing_count }`.
      * We use it to create the project's own-brand benchmark when Semrush has not
      * auto-provisioned one (the `benchmark_id` brand URLs must attach to).
+     *
+     * @param {string} workspaceId
+     * @param {string} projectId
+     * @param {BenchmarkCreateBody} benchmarks
      */
     async createBenchmarks(workspaceId, projectId, benchmarks) {
-      return unwrap('POST', await projects.POST(
-        '/v2/workspaces/{id}/projects/{project_id}/ai_models/benchmarks',
+      return projects.createBenchmarks(
         {
           params: { path: { id: workspaceId, project_id: projectId } },
           body: benchmarks,
         },
-      ));
+      );
     },
 
     /**
@@ -865,15 +1105,18 @@ export function createSerenityTransport({ env, imsToken }) {
      * benchmarks by id (body `{ ids: [...] }`). The main-brand benchmark cannot be
      * deleted (409). Used by the competitor-benchmark edit re-sync to drop a
      * competitor that was removed from the brand.
+     *
+     * @param {string} workspaceId
+     * @param {string} projectId
+     * @param {string[]} ids - benchmark ids.
      */
     async deleteBenchmarks(workspaceId, projectId, ids) {
-      return unwrap('DELETE', await projects.DELETE(
-        '/v1/workspaces/{id}/projects/{project_id}/ai_models/benchmarks',
+      return projects.deleteBenchmarks(
         {
           params: { path: { id: workspaceId, project_id: projectId } },
           body: { ids },
         },
-      ));
+      );
     },
 
     /**
@@ -885,17 +1128,21 @@ export function createSerenityTransport({ env, imsToken }) {
      * in-place alias edit. Upstream PUT confirmed live on prod 2026-06-24
      * (OPTIONS .../benchmarks/{bid} → 405 allow: PUT). Semrush may silently reject
      * some aliases; read them back from `listBenchmarks` (`rejected_brand_aliases`).
+     *
+     * @param {string} workspaceId
+     * @param {string} projectId
+     * @param {string} benchmarkId
+     * @param {BenchmarkUpdateBody} benchmark
      */
     async updateBenchmark(workspaceId, projectId, benchmarkId, benchmark) {
-      return unwrap('PUT', await projects.PUT(
-        '/v1/workspaces/{id}/projects/{project_id}/ai_models/benchmarks/{benchmark_id}',
+      return projects.updateBenchmark(
         {
           params: {
             path: { id: workspaceId, project_id: projectId, benchmark_id: benchmarkId },
           },
           body: benchmark,
         },
-      ));
+      );
     },
 
     /**
@@ -919,15 +1166,14 @@ export function createSerenityTransport({ env, imsToken }) {
      * @param {boolean} [opts.draft=false] - read the draft (pending) view.
      */
     async listBrandUrls(workspaceId, projectId, benchmarkId, { draft = false } = {}) {
-      return unwrap('GET', await projects.GET(
-        '/v2/workspaces/{id}/projects/{project_id}/aio/benchmarks/{benchmark_id}/brand_urls',
+      return projects.listBrandUrls(
         {
           params: {
             path: { id: workspaceId, project_id: projectId, benchmark_id: benchmarkId },
             ...(draft ? { query: { draft: true } } : {}),
           },
         },
-      ));
+      );
     },
 
     /**
@@ -935,33 +1181,41 @@ export function createSerenityTransport({ env, imsToken }) {
      * under a benchmark. Body is an ARRAY of `{ url, type }` (url must be https,
      * type ≤ 32 chars). URLs already present in the project are skipped (not
      * duplicated) and counted in the response `existing_count`.
+     *
+     * @param {string} workspaceId
+     * @param {string} projectId
+     * @param {string} benchmarkId
+     * @param {BrandUrlCreateBody} entries
      */
     async createBrandUrls(workspaceId, projectId, benchmarkId, entries) {
-      return unwrap('POST', await projects.POST(
-        '/v2/workspaces/{id}/projects/{project_id}/aio/benchmarks/{benchmark_id}/brand_urls',
+      return projects.createBrandUrls(
         {
           params: {
             path: { id: workspaceId, project_id: projectId, benchmark_id: benchmarkId },
           },
           body: entries,
         },
-      ));
+      );
     },
 
     /**
      * DELETE /v2/.../aio/benchmarks/{bid}/brand_urls — batch-delete brand URLs
      * by id. Body `{ ids: [...] }`. Ids not in this benchmark are ignored.
+     *
+     * @param {string} workspaceId
+     * @param {string} projectId
+     * @param {string} benchmarkId
+     * @param {string[]} ids - brand URL ids.
      */
     async deleteBrandUrls(workspaceId, projectId, benchmarkId, ids) {
-      return unwrap('DELETE', await projects.DELETE(
-        '/v2/workspaces/{id}/projects/{project_id}/aio/benchmarks/{benchmark_id}/brand_urls',
+      return projects.deleteBrandUrls(
         {
           params: {
             path: { id: workspaceId, project_id: projectId, benchmark_id: benchmarkId },
           },
           body: { ids },
         },
-      ));
+      );
     },
   };
 }

@@ -28,7 +28,7 @@ import {
  * does not exist yields an empty page, exactly as upstream does.
  *
  * The fixture deliberately carries a cross-dimension name collision: the
- * sub-category `human` under `Running Shoes` and the `source` value `human` are
+ * sub-category `human` under `Running Shoes` and the `origin` value `human` are
  * different tags with the same bare name. Any handler that keys tags by name
  * rather than id collapses them, and the tests that use this tree catch it.
  */
@@ -36,7 +36,7 @@ import {
 export const TAG_IDS = Object.freeze({
   categoryRoot: 'root-category',
   intentRoot: 'root-intent',
-  sourceRoot: 'root-source',
+  originRoot: 'root-origin',
   typeRoot: 'root-type',
 
   intentInformational: 'intent-informational',
@@ -45,8 +45,8 @@ export const TAG_IDS = Object.freeze({
   intentTransactional: 'intent-transactional',
   intentNavigational: 'intent-navigational',
 
-  sourceAi: 'source-ai',
-  sourceHuman: 'source-human',
+  originAi: 'origin-ai',
+  originHuman: 'origin-human',
 
   typeBranded: 'type-branded',
   typeNonBranded: 'type-non-branded',
@@ -58,7 +58,7 @@ export const TAG_IDS = Object.freeze({
 const ROOT_IDS = Object.freeze({
   category: TAG_IDS.categoryRoot,
   intent: TAG_IDS.intentRoot,
-  source: TAG_IDS.sourceRoot,
+  origin: TAG_IDS.originRoot,
   type: TAG_IDS.typeRoot,
 });
 
@@ -70,7 +70,7 @@ const CLOSED_VALUE_IDS = Object.freeze({
     Transactional: TAG_IDS.intentTransactional,
     Navigational: TAG_IDS.intentNavigational,
   },
-  source: { ai: TAG_IDS.sourceAi, human: TAG_IDS.sourceHuman },
+  origin: { ai: TAG_IDS.originAi, human: TAG_IDS.originHuman },
   type: { branded: TAG_IDS.typeBranded, 'non-branded': TAG_IDS.typeNonBranded },
 });
 
@@ -104,7 +104,7 @@ export function dimensionTreeLevels(extraLevels = {}) {
   }));
 
   const closedLevels = {};
-  for (const dimension of ['intent', 'source', 'type']) {
+  for (const dimension of ['intent', 'origin', 'type']) {
     closedLevels[ROOT_IDS[dimension]] = CLOSED_DIMENSION_VALUES[dimension].map((value) => (
       upstreamTag({
         id: CLOSED_VALUE_IDS[dimension][value],
@@ -125,7 +125,7 @@ export function dimensionTreeLevels(extraLevels = {}) {
       childrenCount: 1,
       path: CATEGORY_CRUMB,
     })],
-    // Depth 3. Shares its bare name with the `source` value `human`.
+    // Depth 3. Shares its bare name with the `origin` value `human`.
     [TAG_IDS.categoryRunningShoes]: [upstreamTag({
       id: TAG_IDS.subCategoryHuman,
       name: 'human',
