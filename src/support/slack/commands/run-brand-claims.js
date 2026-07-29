@@ -19,9 +19,9 @@ import { extractURLFromSlackInput, postErrorMessage } from '../../../utils/slack
 
 const PHRASES = ['run-brand-claims'];
 
-// DRS Brand-Presence bucket comes from env DRS_BP_BUCKET (dev = drs-v2-main-bp,
-// prod = drs-v2-prod-bp). Required — no default, so a misconfigured env can never
-// silently target the prod bucket; the command errors if it's unset.
+// DRS Brand-Presence bucket comes from env DRS_BP_BUCKET (set per environment).
+// Required — no default, so a misconfigured env can never silently target the
+// wrong bucket; the command errors if it's unset.
 const BP_PLATFORM = 'chatgpt_free';
 
 // DRS weekly/daily sheet filenames only; skips experiment and week/year-less names.
