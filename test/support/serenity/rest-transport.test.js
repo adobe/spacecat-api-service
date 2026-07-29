@@ -733,7 +733,7 @@ describe('Semrush REST transport', () => {
       expect(JSON.parse(call.body)).to.not.have.property('include_metadata');
     });
 
-    it('ignores caller-supplied wire keys — only the transport builds the body', async () => {
+    it('does not forward caller-supplied sort_field / sort_dir — only `sort` maps to them', async () => {
       fetchStub.resolves(fetchOk({ items: [] }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
