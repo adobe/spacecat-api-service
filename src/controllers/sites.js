@@ -1818,12 +1818,16 @@ function SitesController(ctx, log, env) {
     );
 
     // Resolves the org's ASO tier for a failure response. Reuses the entitlement already
-    // fetched by the caller when it's the ASO entitlement (x-product: ASO); otherwise (a
-    // different product was requested, or no entitlement was fetched at all) looks it up
-    // independently so asoTier is always populated regardless of which product was resolved.
+    // fetched by the caller only when it's both the ASO entitlement (x-product: ASO) AND
+    // truthy — TierClient.getFirstEnrollment() nulls out `entitlement` whenever no site is
+    // enrolled, even when a real Entitlement row exists (unlike getAllEnrollment(), which
+    // keeps it), so a falsy entitlement here is not a reliable "no ASO entitlement" signal.
+    // Falls back to an independent lookup (unambiguous — queries Entitlement directly)
+    // whenever we can't trust the passed-in value, so asoTier is always populated correctly
+    // regardless of which product was resolved or which TierClient method fetched it.
     const resolveAsoTier = async (orgId, entitlement) => (
-      productCode === ASO_PRODUCT_CODE
-        ? (entitlement?.getTier() ?? null)
+      productCode === ASO_PRODUCT_CODE && entitlement
+        ? entitlement.getTier()
         : getAsoTier(orgId, context)
     );
 

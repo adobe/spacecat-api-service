@@ -7172,10 +7172,13 @@ describe('Sites Controller', () => {
       const body = await response.json();
       expect(body.resolveStatus).to.equal('no_entitlement_for_product');
       expect(body.details).to.deep.include({ productCode: 'ASO' });
-      // productCode is ASO and entitlement (null) was already fetched via TierClient —
-      // no independent Entitlement lookup should happen.
-      expect(body.asoTier).to.equal(null);
-      expect(mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.called).to.equal(false);
+      // A falsy entitlement from TierClient is never trusted as an authoritative "no ASO
+      // entitlement" signal on its own (getFirstEnrollment() nulls it out merely when
+      // there's no enrolled site, even if a real Entitlement row exists — SITES-48838) —
+      // asoTier always falls back to an independent, unambiguous lookup in that case.
+      expect(body.asoTier).to.equal('PLG');
+      expect(mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.calledOnce)
+        .to.equal(true);
     });
 
     it('should return 404 with site_not_enrolled resolveStatus when entitlement is visible but site has no enrollment', async () => {
@@ -7307,6 +7310,7 @@ describe('Sites Controller', () => {
     it('should return 404 with no_entitlement_for_product for admin when organizationId path has no entitlement', async () => {
       sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
       context.data = { organizationId: testOrganizations[0].getId() };
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
       mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
 
       mockTierClientStub.getFirstEnrollment.resolves({
@@ -7321,6 +7325,12 @@ describe('Sites Controller', () => {
       const body = await response.json();
       expect(body.message).to.include('No site found for the provided parameters');
       expect(body.resolveStatus).to.equal('no_entitlement_for_product');
+      // getFirstEnrollment() nulls out `entitlement` whenever no site is enrolled, even
+      // when a real ASO Entitlement row exists (SITES-48838 regression) — asoTier must
+      // come from the independent lookup, not be trusted as null off that null entitlement.
+      expect(body.asoTier).to.equal('PLG');
+      expect(mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.calledOnce)
+        .to.equal(true);
     });
 
     it('should return 404 for admin when imsOrg path has no enrolled site', async () => {
