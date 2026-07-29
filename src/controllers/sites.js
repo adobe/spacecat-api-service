@@ -47,7 +47,7 @@ import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
 import { applyFieldProjection } from '../utils/field-projection.js';
 import {
-  wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled, getAsoTier, CUSTOMER_VISIBLE_TIERS,
+  wwwUrlResolver, resolveWwwUrl, getAsoEntitlement, getAsoTier, CUSTOMER_VISIBLE_TIERS,
   isInternalOrg,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
@@ -70,21 +70,25 @@ import { ASO_PRODUCT_CODE, STATUSES as PLG_STATUSES } from './plg/plg-onboarding
 const VALIDATION_ERROR_NAME = 'ValidationError';
 
 /**
- * Builds the standard resolve-site success payload.
+ * Builds the standard resolve-site success payload. Fetches the org's ASO entitlement at
+ * most once — both `isSummitPlgEnabled` and `asoTier` are derived from that single result
+ * (or from `asoEntitlement`, when the caller already fetched it) to avoid a duplicate
+ * Entitlement lookup.
  * @param {object} org - Organization model instance.
  * @param {object} site - Site model instance.
  * @param {object} context - Request context.
  * @param {object} [asoEntitlement] - The org's ASO entitlement, if the caller already fetched
  *   it (i.e. the request's x-product header is ASO) — pass it to avoid a redundant lookup.
  *   Omit (leave undefined) when the caller doesn't already have the ASO entitlement in hand;
- *   `asoTier` is then resolved with its own lookup. `null` is a valid value (no entitlement).
+ *   it is then resolved with its own lookup. `null` is a valid value (no entitlement).
  * @returns {Promise<object>} Resolve-site response payload.
  */
 async function buildResolveData(org, site, context, asoEntitlement) {
-  const isSummitPlgEnabled = await getIsSummitPlgEnabled(site, context);
-  const asoTier = asoEntitlement !== undefined
-    ? (asoEntitlement?.getTier() ?? null)
-    : await getAsoTier(site.getOrganizationId(), context);
+  const entitlement = asoEntitlement !== undefined
+    ? asoEntitlement
+    : await getAsoEntitlement(site.getOrganizationId(), context);
+  const isSummitPlgEnabled = entitlement?.getTier() === EntitlementModel.TIERS.PLG;
+  const asoTier = entitlement?.getTier() ?? null;
   return {
     organization: OrganizationDto.toJSON(org),
     site: SiteDto.toJSON(site),
@@ -1917,7 +1921,7 @@ function SitesController(ctx, log, env) {
 
     // Shared org-level tier + enrollment check used by both organizationId and imsOrg paths.
     // Captures: resolveFailure, callerIsInternal, callerImsOrg, accessControlUtil, context,
-    //           productCode, CUSTOMER_VISIBLE_TIERS, TierClient, getIsSummitPlgEnabled, log, ok,
+    //           productCode, CUSTOMER_VISIBLE_TIERS, TierClient, resolveAsoTier, log, ok,
     //           OrganizationDto, SiteDto, facs, facsSiteFilterActive — all in enclosing scope.
     const resolveByOrg = async (org, failureDetails) => {
       const args = [org, productCode, context, ctx, accessControlUtil];
@@ -2205,6 +2209,9 @@ function SitesController(ctx, log, env) {
         }
       }
 
+      // Reached only when `organization` resolved but accessControlUtil.hasAccess()
+      // denied the caller — asoTier intentionally stays null (the default) rather than
+      // resolving it for an org the caller isn't authorized to see any data about.
       return resolveFailure('No site found for the provided parameters');
     } catch (error) {
       log.error(`Error resolving site: ${error.message}`);

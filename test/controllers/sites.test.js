@@ -6937,9 +6937,13 @@ describe('Sites Controller', () => {
       expect(response.status).to.equal(200);
       const body = await response.json();
       expect(body.data).to.have.property('asoTier', 'PAID');
-      // Independent lookup is still called once by getIsSummitPlgEnabled (unrelated to
-      // asoTier), but not a second time for asoTier itself — proves the reuse.
-      expect(mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.callCount).to.equal(1);
+      // isSummitPlgEnabled is also derived from the reused entitlement (tier PAID, not
+      // PLG) rather than the independent stub's tier ('PLG'), which would have made this
+      // true had a second lookup happened.
+      expect(body.data).to.have.property('isSummitPlgEnabled', false);
+      // No independent Entitlement lookup at all — both isSummitPlgEnabled and asoTier
+      // are derived from the single already-fetched TierClient entitlement.
+      expect(mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.callCount).to.equal(0);
     });
 
     it('should return 404 with no_entitlement_for_product resolveStatus for non-existent imsOrg (external caller)', async () => {
@@ -7232,6 +7236,8 @@ describe('Sites Controller', () => {
       expect(body.resolveStatus).to.equal('aso_pre_onboard');
       expect(body.details).to.deep.include({ productCode: 'ASO' });
       expect(body.details).to.not.have.property('tier');
+      // Reused from the already-fetched TierClient entitlement (x-product: ASO).
+      expect(body.asoTier).to.equal('PRE_ONBOARD');
     });
 
     it('should return 404 with no_entitlement_for_product resolveStatus when product has no entitlement', async () => {
@@ -7314,6 +7320,9 @@ describe('Sites Controller', () => {
       const body = await response.json();
       expect(body.message).to.include('No site found for the provided parameters');
       expect(body.resolveStatus).to.equal('aso_pre_onboard');
+      // x-product here is not ASO, so asoTier comes from the independent lookup
+      // (the default beforeEach stub's tier), not the TierClient entitlement above.
+      expect(body.asoTier).to.equal('PLG');
     });
 
     it('should return 200 for PRE_ONBOARD-tier site via organizationId path for admin', async () => {

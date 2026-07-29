@@ -26,6 +26,8 @@ import {
   autoResolveAuthorUrl,
   updateCodeConfig,
   getIsSummitPlgEnabled,
+  getAsoEntitlement,
+  getAsoTier,
   getCookieValue,
   filterSitesForProductCode,
   getEntitledProductCodes,
@@ -679,6 +681,106 @@ describe('utils', () => {
       const result = await getIsSummitPlgEnabled(site, context, requestContext);
 
       expect(result).to.be.false;
+    });
+  });
+
+  describe('getAsoEntitlement / getAsoTier', () => {
+    let sandbox;
+    let context;
+
+    beforeEach(() => {
+      sandbox = sinon.createSandbox();
+      context = {
+        log: { error: sandbox.stub() },
+        dataAccess: {},
+      };
+    });
+
+    afterEach(() => {
+      sandbox.restore();
+    });
+
+    it('getAsoEntitlement returns the entitlement for the org', async () => {
+      const entitlement = { getTier: () => 'PAID' };
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub()
+          .withArgs('org-456', 'ASO')
+          .resolves(entitlement),
+      };
+
+      const result = await getAsoEntitlement('org-456', context);
+
+      expect(result).to.equal(entitlement);
+      expect(context.dataAccess.Entitlement.findByOrganizationIdAndProductCode)
+        .to.have.been.calledWith('org-456', 'ASO');
+    });
+
+    it('getAsoEntitlement returns null when organizationId is missing', async () => {
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub(),
+      };
+
+      const result = await getAsoEntitlement(undefined, context);
+
+      expect(result).to.be.null;
+      expect(context.dataAccess.Entitlement.findByOrganizationIdAndProductCode)
+        .to.not.have.been.called;
+    });
+
+    it('getAsoEntitlement returns null when context.dataAccess has no Entitlement', async () => {
+      context.dataAccess = {};
+
+      const result = await getAsoEntitlement('org-456', context);
+
+      expect(result).to.be.null;
+    });
+
+    it('getAsoEntitlement returns null and logs error when the lookup throws', async () => {
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub().rejects(new Error('Entitlement DB error')),
+      };
+
+      const result = await getAsoEntitlement('org-456', context);
+
+      expect(result).to.be.null;
+      expect(context.log.error).to.have.been.calledWithMatch(/Error resolving ASO entitlement/, sinon.match.instanceOf(Error));
+    });
+
+    it('getAsoTier returns the tier when an entitlement exists', async () => {
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub().resolves({ getTier: () => 'PAID' }),
+      };
+
+      const result = await getAsoTier('org-456', context);
+
+      expect(result).to.equal('PAID');
+    });
+
+    it('getAsoTier returns null when no ASO entitlement exists', async () => {
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub().resolves(null),
+      };
+
+      const result = await getAsoTier('org-456', context);
+
+      expect(result).to.be.null;
+    });
+
+    it('getAsoTier returns null when organizationId is missing', async () => {
+      const result = await getAsoTier(undefined, context);
+
+      expect(result).to.be.null;
+    });
+
+    it('getAsoTier returns null and logs error when the lookup throws', async () => {
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub().rejects(new Error('Entitlement DB error')),
+      };
+
+      const result = await getAsoTier('org-456', context);
+
+      expect(result).to.be.null;
+      expect(context.log.error).to.have.been.calledWithMatch(/Error resolving ASO entitlement/, sinon.match.instanceOf(Error));
     });
   });
 

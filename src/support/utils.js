@@ -683,6 +683,32 @@ export async function getIsSummitPlgEnabled(site, context, requestContext) {
 }
 
 /**
+ * Returns the org's ASO entitlement, or null if none exists. Issues a single Entitlement
+ * lookup — callers that need both the tier and other derived flags (e.g. PLG-tier check)
+ * should call this once and derive everything from the result, rather than calling
+ * this and {@link getAsoTier} separately (which would each issue their own lookup).
+ * @param {string} organizationId - Organization id
+ * @param {Object} context - Request context with dataAccess, log
+ * @returns {Promise<Object|null>}
+ */
+export async function getAsoEntitlement(organizationId, context) {
+  try {
+    const { Entitlement } = context.dataAccess || {};
+    if (!Entitlement || !organizationId) {
+      return null;
+    }
+
+    return await Entitlement.findByOrganizationIdAndProductCode(
+      organizationId,
+      EntitlementModel.PRODUCT_CODES.ASO,
+    );
+  } catch (err) {
+    context.log?.error?.('Error resolving ASO entitlement:', err);
+    return null;
+  }
+}
+
+/**
  * Returns the org's ASO entitlement tier, or null if none exists.
  * Callers that already have the org's ASO entitlement in hand (e.g. via TierClient,
  * when the request's x-product header is already ASO) should read the tier directly
@@ -692,22 +718,8 @@ export async function getIsSummitPlgEnabled(site, context, requestContext) {
  * @returns {Promise<string|null>}
  */
 export async function getAsoTier(organizationId, context) {
-  try {
-    const { Entitlement } = context.dataAccess || {};
-    if (!Entitlement || !organizationId) {
-      return null;
-    }
-
-    const entitlement = await Entitlement.findByOrganizationIdAndProductCode(
-      organizationId,
-      EntitlementModel.PRODUCT_CODES.ASO,
-    );
-
-    return entitlement?.getTier() ?? null;
-  } catch (err) {
-    context.log?.error?.('Error resolving ASO tier:', err);
-    return null;
-  }
+  const entitlement = await getAsoEntitlement(organizationId, context);
+  return entitlement?.getTier() ?? null;
 }
 
 /**
