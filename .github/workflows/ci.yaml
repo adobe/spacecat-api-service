@@ -112,6 +112,11 @@ jobs:
         run: npm run ${{ inputs.environment == 'dev' && 'deploy-dev:worker' || 'deploy-stage:worker' }}
         env:
           AWS_REGION: us-east-1
+          # hedy resolves --aws-region from this HLX_-prefixed env var, not
+          # AWS_REGION/AWS_DEFAULT_REGION (those only configure the AWS SDK
+          # client) - the reusable service-ci workflow sets this at its own
+          # workflow level, which this repo-local job doesn't inherit.
+          HLX_AWS_REGION: us-east-1
           AWS_ACCOUNT_ID: ${{ inputs.environment == 'dev' && secrets.AWS_ACCOUNT_ID_DEV || secrets.AWS_ACCOUNT_ID_STAGE }}
           VPC_SUBNET_1: ${{ secrets.VPC_SUBNET_1 }}
           VPC_SUBNET_2: ${{ secrets.VPC_SUBNET_2 }}
