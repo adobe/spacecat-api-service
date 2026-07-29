@@ -55,6 +55,8 @@ import {
   LEGACY_AUTHORSHIP_ROOT_NAME,
 } from './prompt-tags.js';
 
+/** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */
+
 /**
  * Where one tag sits in the dimension tree.
  *
@@ -84,7 +86,7 @@ const MAX_TREE_READS = 200;
  * Lists one level of the tree and indexes it by bare name. Uniqueness is per
  * `(project, parent)`, so a name is unambiguous WITHIN a level.
  *
- * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
  * @param {string} parentId - '' for the root level.
@@ -124,7 +126,7 @@ export async function indexLevelByName(transport, semrushWorkspaceId, projectId,
  *
  * Fails closed: throws a 502 rather than returning a map missing a wanted name.
  *
- * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
  * @param {string} parentId - '' to create at the root level.
@@ -224,7 +226,7 @@ export async function ensureChildren(
  * NOT — that is the companion `source` dimension (source-dimension.md §9), not
  * authorship. This guard is what lets the two names coexist safely during the rename.
  *
- * @param {object} transport
+ * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
  * @param {string} rootId
@@ -252,7 +254,7 @@ async function childrenAreAuthorship(transport, semrushWorkspaceId, projectId, r
  * map's `origin` key maps to whichever physical root was resolved, so callers key on
  * `DIMENSION.ORIGIN` regardless. Removed with the fallback by WP-O6.
  *
- * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
  * @param {object} [log] - logger.
@@ -339,7 +341,7 @@ function rootIdOf(roots, dimension) {
  * width: dropping the tail of a level would report an existing tag as absent,
  * and callers turn `unknown` into a 404.
  *
- * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
  * @param {string[]} tagIds - the upstream ids to locate.
@@ -418,7 +420,7 @@ export async function findTagsInTree(transport, semrushWorkspaceId, projectId, t
  * Private on purpose: a caller that already knows both ids it needs should place
  * them in a single walk rather than call this twice.
  *
- * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
  * @param {string} tagId - the upstream id to locate.
@@ -478,7 +480,7 @@ export function assertParentPlacement(dimension, parent, movingTagId) {
  * the target and the parent together via {@link findTagsInTree} and calls
  * {@link assertParentPlacement} directly.
  *
- * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
  * @param {string} dimension - the dimension the new tag belongs to.
@@ -503,7 +505,7 @@ export async function assertParentWithinDimension(
  * every closed dimension's child vocabulary. The open `category` root is created
  * but left empty — its children are customer content.
  *
- * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
  * @param {object} [log] - logger.
@@ -536,7 +538,7 @@ export async function provisionDimensionTree(transport, semrushWorkspaceId, proj
  * root) only if absent. Idempotent: many independent callers legitimately need
  * the id of a small, project-wide-shared value.
  *
- * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
  * @param {string} dimension - a closed dimension (`intent` / `origin` / `type`).
@@ -584,7 +586,7 @@ export async function ensureClosedValue(
  * tolerantly by {@link ensureDimensionRoots}, so `DIMENSION.ORIGIN` addresses
  * whichever physical root (`origin` or a legacy `source`) the project carries.
  *
- * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
  * @param {string} dimension - a CLOSED dimension (`type` / `origin` / `intent`).
@@ -627,7 +629,7 @@ export async function resolveClosedValueInjection(
  * under the `type` root, so the caller can strip any caller-supplied `type` tag
  * id (the client must never set the value itself).
  *
- * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
  * @param {string} wantValue - the computed bare `type` value (`branded` / `non-branded`).
@@ -662,14 +664,18 @@ export async function resolveTypeValueInjection(
  * strip any caller-supplied `intent` tag id (the client must never set the value
  * itself — it is server-classified).
  *
- * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
- * @param {string} wantValue - the computed bare `intent` value (e.g. `Task`).
+ * @param {string|null} wantValue - the computed bare `intent` value (e.g. `Task`),
+ *   or `null` (serenity-docs#33) when classification produced no usable value —
+ *   in that case NOTHING is created under the `intent` root and `computedId` is
+ *   `null`, so the caller strips any existing intent tag without replacing it.
  * @param {object} [log] - logger.
- * @returns {Promise<{ computedId: string, intentTagIds: string[] }>} `computedId`
- *   is always resolved — {@link ensureChildren} throws rather than leave a hole,
- *   so a prompt can never be written with the server-computed `intent` tag missing.
+ * @returns {Promise<{ computedId: string|null, intentTagIds: string[] }>} `computedId`
+ *   is always resolved to a real id — {@link ensureChildren} throws rather than
+ *   leave a hole — UNLESS `wantValue` is `null`, in which case it is `null` by
+ *   design (see above).
  */
 export async function resolveIntentValueInjection(
   transport,
@@ -678,6 +684,28 @@ export async function resolveIntentValueInjection(
   wantValue,
   log,
 ) {
+  // serenity-docs#33 "no terminal Informational default": `wantValue === null`
+  // means classification produced no usable value (LLM failure/timeout/exhausted
+  // retries). Unlike the normal path, this must NOT mint anything under the
+  // `intent` root — it only needs the existing children ids (the strip set) so
+  // the caller can remove any prior intent tag without writing a replacement.
+  // `ensureChildren([])` never creates anything (its `missing` list is empty),
+  // so this reads the root's existing children exactly like the create path
+  // does before deciding what (if anything) is missing.
+  if (wantValue === null) {
+    const roots = await ensureDimensionRoots(transport, semrushWorkspaceId, projectId, log);
+    const rootId = rootIdOf(roots, DIMENSION.INTENT);
+    const { byName } = await ensureChildren(
+      transport,
+      semrushWorkspaceId,
+      projectId,
+      rootId,
+      [],
+      log,
+    );
+    return { computedId: null, intentTagIds: [...byName.values()] };
+  }
+
   const { computedId, valueTagIds } = await resolveClosedValueInjection(
     transport,
     semrushWorkspaceId,

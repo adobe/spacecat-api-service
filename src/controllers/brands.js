@@ -63,7 +63,7 @@ import {
 } from '../support/brands-storage.js';
 import { listViewableResourceIds } from '../support/state-access-mapping-utils.js';
 import { isFacsRebacResource } from '../routes/facs-capabilities.js';
-import { provisionBrandSubworkspace, provisionBrandSubworkspaceBare, releaseProvisionedWorkspace } from '../support/serenity/brand-provisioning.js';
+import { provisionBrandSubworkspace, provisionBrandSubworkspaceBare, emptyProvisionedWorkspace } from '../support/serenity/brand-provisioning.js';
 import { computeWriteDeadline } from '../support/serenity/intent-classification.js';
 import { ensureMarketSite } from '../support/serenity/site-linkage.js';
 import { upsertMappingRow, linkSiteToLiveRows } from '../support/serenity/mapping-rows.js';
@@ -72,7 +72,7 @@ import { isSemrushTransportError, unwrapTransportCause } from '../support/sereni
 import { syncBrandUrlsAcrossMarkets } from '../support/serenity/brand-urls.js';
 import { syncBrandAliasesAcrossMarkets } from '../support/serenity/brand-aliases.js';
 import { resolveProjects } from '../support/serenity/resolve-projects.js';
-import { isSerenityActiveForOrg } from '../support/serenity/serenity-active.js';
+import { isSerenityActiveForOrg, isSerenityUiActiveForOrg } from '../support/serenity/serenity-active.js';
 import {
   buildReservedDomains,
   dropReservedCompetitors,
@@ -1495,6 +1495,13 @@ function BrandsController(ctx, log, env) {
     // sub-workspace was provisioned but the brand row failed to persist, the
     // catch releases the orphaned allocation (see below).
     let provisionedWorkspaceId = null;
+    // True only when provisioning CREATED the sub-workspace upstream. Sub-workspace titles are
+    // bare brand display names, which are not unique within an org, so provisioning may instead
+    // ADOPT an existing same-title workspace — possibly one belonging to a same-named sibling
+    // brand whose own create is still in flight and has not persisted its claim yet. The
+    // compensation in the catch below tears the workspace down, so it must fire only for a
+    // workspace this request actually created.
+    let provisionedWorkspaceWasCreated = false;
 
     try {
       if (!hasText(spaceCatId)) {
@@ -1683,6 +1690,7 @@ function BrandsController(ctx, log, env) {
             writeDeadline,
           }, log);
           provisionedWorkspaceId = provisioned.semrushSubWorkspaceId;
+          provisionedWorkspaceWasCreated = provisioned.createdByThisRequest === true;
           provisionedInitialMarket = {
             projectId: provisioned.projectId,
             geoTargetId: provisioned.geoTargetId,
@@ -1700,6 +1708,7 @@ function BrandsController(ctx, log, env) {
             brandName: brandData.name,
           }, log);
           provisionedWorkspaceId = bare.semrushSubWorkspaceId;
+          provisionedWorkspaceWasCreated = bare.createdByThisRequest === true;
         }
       }
 
@@ -1775,15 +1784,22 @@ function BrandsController(ctx, log, env) {
         emitBrandDemotionBlocked(context, 'createBrand');
       }
       log.error(`Error creating brand for organization ${spaceCatId}:`, error);
-      // Compensation: a sub-workspace was provisioned upstream but the brand row
-      // failed to persist (e.g. a unique-constraint 409 or transient PostgREST
-      // error). Nothing references that workspace, so release its allocation back
-      // to the parent pool (best-effort) rather than leaking it.
-      if (provisionedWorkspaceId && hasText(provisionedWorkspaceId)) {
-        log.error('serenity: brand-create failed after subworkspace provision; releasing orphaned allocation', {
+      // Compensation: a sub-workspace was CREATED upstream but the brand row failed to
+      // persist (e.g. a unique-constraint 409 or transient PostgREST error). Nothing
+      // references that workspace, so empty its projects (best-effort) rather than leaving
+      // them stranded on a shell nothing points at.
+      //
+      // Gated on having created it. A workspace that provisioning ADOPTED is not ours to
+      // tear down: titles are bare brand display names, so an adopted workspace can be a
+      // same-named sibling brand's, and the unique-constraint failure that lands us here is
+      // itself the signal that the sibling won the race and legitimately owns it. Emptying
+      // it would delete that live brand's projects.
+      if (provisionedWorkspaceId && hasText(provisionedWorkspaceId)
+        && provisionedWorkspaceWasCreated) {
+        log.error('serenity: brand-create failed after subworkspace provision; emptying orphaned sub-workspace', {
           semrushWorkspaceId: provisionedWorkspaceId,
         });
-        await releaseProvisionedWorkspace(context, provisionedWorkspaceId, spaceCatId, log);
+        await emptyProvisionedWorkspace(context, provisionedWorkspaceId, spaceCatId, log);
       }
       return createErrorResponse(error);
     }
@@ -1887,6 +1903,35 @@ function BrandsController(ctx, log, env) {
         }
       }
 
+      // LLMO-6565 migration-window allowance. A Semrush failure on this edit is
+      // absorbed — the row is committed and the response carries
+      // semrushSyncPending — only while the org is still migrating: its LLMO users
+      // may have no Semrush user record yet, so Semrush answers 4xx on every call
+      // made on their behalf and no retry the caller can make will clear it. An org
+      // pinned to the Serenity UI is past that window, its users are provisioned, so
+      // a Semrush failure there is a real error and propagates to the caller.
+      //
+      // Resolved lazily, and at most once per request: only an actual Semrush
+      // failure needs the answer, so the happy path — and every flat-mode brand
+      // edit, which never reaches a Semrush call at all — pays no flag read. The
+      // memo also pins one answer for the whole request, so the pre-write
+      // competitor guard and the post-commit re-sync below cannot disagree and
+      // half-absorb an edit.
+      let serenityUiFlagPromise;
+      /**
+       * MUST be awaited — this returns the memoised PROMISE, not a boolean, so a
+       * bare `if (resolveSurfaceSemrushErrors())` is always truthy and would
+       * silently surface every Semrush error regardless of the flag.
+       *
+       * @returns {Promise<boolean>} `true` when Semrush failures must be reported.
+       */
+      const resolveSurfaceSemrushErrors = () => {
+        if (serenityUiFlagPromise === undefined) {
+          serenityUiFlagPromise = isSerenityUiActiveForOrg(context, spaceCatId, log);
+        }
+        return serenityUiFlagPromise;
+      };
+
       // LLMO-5645: a region must not be removed from a brand while prompts still
       // use it — DRS schedules off each prompt's `regions`, so dropping a brand
       // region would orphan those prompts on a market the brand no longer
@@ -1945,11 +1990,35 @@ function BrandsController(ctx, log, env) {
         if (hasText(brandState?.semrushSubWorkspaceId)) {
           // Semrush brand: market/project domains come from the project listing.
           // List once and stash for the post-commit re-sync (see prefetchedProjects).
-          const imsToken = await resolveSemrushImsToken(context, log, 'brands');
-          const transport = createSerenityTransport({ env: context.env, imsToken });
-          prefetchedProjects = await resolveProjects(transport, brandState.semrushSubWorkspaceId);
+          // Best-effort for a migrating org: if the listing fails (e.g. user not
+          // provisioned in Semrush), degrade to brand-URL-only reserved set and log —
+          // the self-reference guard is a data-quality nicety and must not block the
+          // competitor write entirely. For an org on the Serenity UI the failure is
+          // real and rejects the write before the row is touched.
+          try {
+            const imsToken = await resolveSemrushImsToken(context, log, 'brands');
+            const transport = createSerenityTransport({ env: context.env, imsToken });
+            prefetchedProjects = await resolveProjects(transport, brandState.semrushSubWorkspaceId);
+          } catch (guardError) {
+            // Logged before the rethrow either way: the outer catch only sees a
+            // generic "Error updating brand", so this is the sole record of which
+            // Semrush workspace and which pre-write step failed.
+            const rejectingWrite = await resolveSurfaceSemrushErrors();
+            log.warn('serenity: competitor-guard project listing failed', {
+              brandId,
+              semrushSubWorkspaceId: brandState.semrushSubWorkspaceId,
+              status: guardError?.status,
+              message: guardError?.message,
+              // true → the write is rejected; false → degraded to the reserved set
+              // built from the brand's own URLs alone, and the write proceeds.
+              rejectingWrite,
+            });
+            if (rejectingWrite) {
+              throw guardError;
+            }
+          }
           reservedDomains = buildReservedDomains(
-            prefetchedProjects.map((p) => p?.domain),
+            (prefetchedProjects ?? []).map((p) => p?.domain),
             brandOwnUrls,
           );
         } else {
@@ -1979,17 +2048,19 @@ function BrandsController(ctx, log, env) {
         return notFound(`Brand not found: ${brandId}`);
       }
 
-      // Brand-level Semrush re-sync: when an edit changes URL sources or
-      // competitors and the brand is in sub-workspace mode, propagate the change
-      // onto every market/project (region-filtered per market). Skipped for
-      // flat-mode brands and unrelated edits. Hard-fail so the brand never drifts
-      // out of sync silently. One transport for both syncs.
+      // Brand-level Semrush re-sync: when an edit changes URL sources, competitors
+      // or aliases and the brand is in sub-workspace mode, propagate the change onto
+      // every market/project (region-filtered per market). Skipped for flat-mode
+      // brands and unrelated edits. One transport shared across all three syncs.
       //
-      // NOTE (intentional asymmetry vs create): the SAME URL/competitor
-      // propagation is BEST-EFFORT on the create path (handleCreateMarket-
-      // Subworkspace swallows a benchmark hiccup so it cannot strand a
-      // half-provisioned brand) but HARD-FAIL here on edit — an already-live
-      // brand must not silently diverge from Semrush after a row commit.
+      // For a migrating org this is best-effort, matching the create path: the brand
+      // row is already committed when this block runs, so a re-sync failure must not
+      // surface as a 5xx on an edit that did persist. The response carries
+      // semrushSyncPending:true so the divergence is visible to the caller, and the
+      // error log below carries the context needed to enumerate and recover drifted
+      // brands. For an org on the Serenity UI (see resolveSurfaceSemrushErrors) the
+      // failure is reported instead — that org's users are provisioned in Semrush, so
+      // a failure is a real fault rather than expected migration noise.
       const urlsTouched = updates.urls !== undefined
         || updates.socialAccounts !== undefined
         || updates.earnedContent !== undefined;
@@ -1998,13 +2069,16 @@ function BrandsController(ctx, log, env) {
       const rejectedAliases = [];
       if ((urlsTouched || competitorsTouched || aliasesTouched)
         && hasText(updated.semrushSubWorkspaceId)) {
-        // Forward only an IMS user token upstream (matches the create path +
-        // the rest of /serenity/*): PATCH /brands is organization:write and thus
-        // S2S-reachable, so prefer an x-promise-token exchange and otherwise
-        // refuse a non-IMS bearer rather than proxy it.
-        const imsToken = await resolveSemrushImsToken(context, log, 'brands');
-        const transport = createSerenityTransport({ env: context.env, imsToken });
         try {
+          // Forward only an IMS user token upstream (matches the create path +
+          // the rest of /serenity/*): PATCH /brands is organization:write and thus
+          // S2S-reachable, so prefer an x-promise-token exchange and otherwise
+          // refuse a non-IMS bearer rather than proxy it. Inside the try because
+          // the row is already committed: a token-resolution 401 here is still a
+          // re-sync failure, and must soft-fail like any other rather than report
+          // an edit that did persist as an auth error.
+          const imsToken = await resolveSemrushImsToken(context, log, 'brands');
+          const transport = createSerenityTransport({ env: context.env, imsToken });
           // List the sub-workspace's projects ONCE and share the result across the
           // URL/competitor/alias syncs below — the listing is stable across the
           // brand-row write above, so this collapses up to three redundant
@@ -2061,19 +2135,42 @@ function BrandsController(ctx, log, env) {
             rejectedAliases.push(...(aliasResult?.rejected ?? []));
           }
         } catch (syncError) {
-          // The brand row is already committed; re-sync hard-fails (the brand
-          // must not silently drift out of sync with Semrush). Log the upstream
-          // context (workspace + which sync) so the DB/Semrush divergence is
-          // diagnosable, then rethrow to the handler's catch.
-          log.error('serenity: brand-edit Semrush re-sync failed after row commit', {
+          // LLMO-6545: Accept drift — DB is already committed so hard-failing returns
+          // a 500 while the edit actually succeeded. Log all context so the divergence
+          // is diagnosable and recoverable via --reconcile migration later.
+          // 401/403 = permanent: it needs a human, not a retry — the caller is not
+          // provisioned in Semrush, or could not be authenticated to it at all
+          // (no/expired promise token). Retrying the same request cannot clear it.
+          // Other status / no status = transient (network, timeout, upstream hiccup).
+          const isPermanent = syncError?.status === 401 || syncError?.status === 403;
+          const logFn = isPermanent ? log.warn : log.error;
+          logFn('serenity: brand-edit Semrush re-sync failed after row commit', {
             brandId,
             semrushSubWorkspaceId: updated.semrushSubWorkspaceId,
             urlsTouched,
             competitorsTouched,
             aliasesTouched,
             status: syncError?.status,
+            message: syncError?.message,
+            stack: syncError?.stack,
+            permanent: isPermanent,
           });
-          throw syncError;
+          if (await resolveSurfaceSemrushErrors()) {
+            // The org is on the Serenity UI: its users are provisioned in Semrush, so
+            // this is a genuine upstream failure and the caller is told. The row stays
+            // committed either way — the difference is whether the divergence is
+            // reported or absorbed. createErrorResponse maps the status and keeps the
+            // internal gateway URL out of the response. Any partial rejectedAliases
+            // are dropped with the body; the log above carries the same context.
+            throw syncError;
+          }
+          // Preserve any partial rejectedAliases collected before the throw so
+          // the UI can still warn about aliases that were refused by Semrush.
+          return ok({
+            ...updated,
+            semrushSyncPending: true,
+            ...(rejectedAliases.length > 0 && { semrushRejectedAliases: rejectedAliases }),
+          });
         }
       }
 

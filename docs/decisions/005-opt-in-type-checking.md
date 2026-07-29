@@ -32,7 +32,9 @@ opted-in scope is every file under `src/support/serenity/**`. Enforced in CI
   only `tsconfig` in the ecosystem,
   `spacecat-shared/packages/spacecat-shared-data-access/tsconfig.json` (which
   compiles `.ts`→`.d.ts`; ours type-checks JS with `noEmit`).
-- `npm run type-check` → `tsc -p tsconfig.json`.
+- `npm run type-check` → both tiers: `type-check:base` (`tsc -p tsconfig.json`)
+  then `type-check:strict` (`tsc -p tsconfig.strict.json`). Each is separately
+  runnable; the composite is what CI and pre-commit invoke.
 - A self-contained, **blocking** `type-check` job in `.github/workflows/ci.yaml`
   (the reusable `adobe/mysticat-ci` service-ci workflow has no type-check seam
   yet, so it runs as a local job rather than an upstream input).
@@ -67,6 +69,35 @@ implicit-`any` params (missing `@param` types). `noImplicitAny:false` removes
 that noise. `useUnknownInCatchVariables:false` keeps `catch (e)` variables typed
 `any` (the default-pragmatic pairing) so this first pass is not dominated by
 ~24 mechanical `catch` narrowings — those are deferred to the strict ratchet.
+
+That floor has a **specific, load-bearing cost**, measured rather than assumed:
+under `noImplicitAny:false` TypeScript suppresses `TS2339` (unknown member) in
+JS files **outright** — including against a fully-typed receiver. So a
+method-name typo, and any mistake about a response's shape, is invisible to this
+tier no matter how well the value is typed. That is what `tsconfig.strict.json`
+exists to close, file by file.
+
+### `tsconfig.strict.json` — the strict tier
+
+A second config extends the base one with `noImplicitAny: true` over an
+**explicit, deliberately-grown file list** (`src/support/serenity/rest-transport.js`
+today). `npm run type-check` runs both tiers — `type-check:base` then
+`type-check:strict` — so the CI job and the pre-commit hook need no knowledge of
+the split, and the strict pass cannot be forgotten. A file joins the list once its
+implicit-`any` params carry `@param` types.
+
+The list names the program's **roots**, not the set of files that get checked.
+`noImplicitAny` is a program-wide option, so every `// @ts-check` file reachable by
+import from a root is reported as well, whether or not it appears in the list — a
+program rooted only at `subworkspace-projects.js` also reports `locations.js`, which
+imports pull in. The unit of work is therefore an import closure, not a file. Today's
+one-entry list happens to pull in nothing extra only because `rest-transport.js`'s
+repo-side imports carry no `// @ts-check` pragma; that stops being true at the second
+entry.
+
+`rest-transport.js` leads because it is the module that defines the outbound
+Semrush contract for the whole serenity surface: it is where an unchecked member
+access is most expensive, and it cost 14 mechanical annotations to bring up.
 
 ## What the probe found and how we fixed it
 
@@ -179,15 +210,70 @@ swap, which removes the stray `"null"` body from those 204 responses (spec-corre
 — a 204 carries no body). Everything else is types/JSDoc-only. All controller
 tests stay green.
 
+## How far the gate reaches
+
+A generated contract is only enforced where a **typed value** actually meets the
+generated client. Two properties of JSDoc-typed JS decide that reach, and both are
+easy to lose by accident:
+
+- **`@param {object} x` is `any`.** Every member access, argument count and
+  argument type on such a value is unchecked. A lifecycle function that receives
+  the Semrush transport this way has no checking on any call it makes through it,
+  however sound the client's own types are.
+- **An undocumented parameter is optional.** Naming the transport is therefore
+  not sufficient on its own: against a correctly inferred 35-method object whose
+  methods carry no `@param` tags, TS reports `createSubworkspace()` as taking
+  "0–2 arguments" and accepts the call. Arity checking only returns once the
+  methods' own parameters are documented.
+
+Both halves are required, and both are in place for the transport:
+`rest-transport.js` exports a `SerenityTransport` typedef and documents every
+method's parameters, deriving each request shape **from the generated contracts**
+(`Parameters<PeTransport['createProject']>[0]['body']`,
+`UmSchemas['handlers.createWorkspaceV2Resources']`) rather than restating it, so a
+vendor spec change surfaces at the call site instead of on the wire. Every
+serenity function that receives the transport annotates it `SerenityTransport`.
+
+`test/types/base/serenity-transport.types.js` pins this with `@ts-expect-error`
+assertions: it is type-checked, never executed, and fails the build if the
+arity/argument/body-shape errors it expects ever stop happening. Its strict-tier
+counterpart, `test/types/strict/serenity-transport-strict.types.js`, pins the
+unknown-member error that only that tier reports; the two live in separate
+directories because a `TS2339` directive is unused — and so itself an error —
+under the base tier.
+
+### The spec-generated mocks are the contract gate
+
+Type-check enforces the shapes our code *states*. It cannot enforce what it cannot
+see, and — while `noImplicitAny` stays off outside the strict tier — it never
+reports an unknown member. The gate that validates a real outbound **request body**
+against the vendor spec is the Counterfact vendor mock, which is generated from
+that spec and refuses a non-conforming body. It runs only in the `it-postgres`
+suite, which makes that suite, not `type-check`, the de-facto contract gate
+against Semrush. Treat an `it-postgres` failure on a mock-backed serenity test as
+a contract violation first and a test-wiring problem second.
+
+A live probe is **not** a substitute: the Semrush gateway accepts bodies the spec
+forbids (an omitted-but-required `resources` key among them), so a green
+end-to-end run against the real API cannot detect this class of defect at all.
+
 ## Consequences
 
-- The Semrush `paths` contract is now actually enforced for every `@ts-check`'d
-  serenity file. Drift between our calls and the generated types fails CI.
+- The Semrush contract is enforced wherever a typed value reaches the generated
+  client — which, for the whole serenity surface, means every call through the
+  transport. Drift between those calls and the generated types fails CI.
 - `tsc` runs on every commit (pre-commit) and every PR (CI). The serenity-scoped
   program is small, so the check is fast.
-- No runtime change: `noEmit`, JSDoc-only, no `.ts`. The single behavioural touch
-  is `ErrorWithStatusCode` now initializing `this.code = undefined` — verified
-  against the existing test suite (all serenity + utils tests green).
+- Nothing is emitted: `noEmit`, JSDoc-only, no `.ts`. The gate has nonetheless
+  changed behaviour four times, each because it surfaced something real:
+  `ErrorWithStatusCode` now initializes `this.code = undefined`; a `.filter(Boolean)`
+  in `handlers/markets.js` became an explicit `!== undefined`, since `Boolean` does
+  not narrow; `usersBaseUrl` binds its env value before guarding it, because
+  `hasText` cannot accept a `string | undefined`; and `handleDeleteMarketSubworkspace`
+  now treats a listing entry with no `id` as no project at all, rather than addressing
+  an upstream delete and a mapping-row tombstone by a missing id — the contract declares
+  `id: string`, but the listing response resolves to `any` at every call site, so nothing
+  enforces it. Each is covered by the existing suites.
 
 ## Ratchet path (future work)
 
@@ -201,6 +287,43 @@ removing one relaxation and fixing the surfaced errors:
    is the natural next area.
 2. **`useUnknownInCatchVariables: true`** — narrow each `catch (e)` with
    `instanceof Error` / type guards (~24 sites today).
-3. **`noImplicitAny: true`** — add `@param` types to the implicit-`any` params
-   (~372 today). At that point a per-file `// @ts-check` is no longer needed and
+3. **`noImplicitAny: true`** — grow `tsconfig.strict.json`'s file list until it
+   covers the base `include` set, then fold the two configs back into one. This is
+   the step that restores `TS2339`, so it is what finally makes an unknown member
+   or a wrong response shape a build failure rather than a runtime surprise.
+   Flipping it across the whole base `include` set today reports **705** errors:
+
+   | code | count | nature |
+   |---|---|---|
+   | TS7006 / TS7031 / TS7034 / TS7005 / TS7053 | 324 | missing parameter and variable annotations |
+   | TS2339 | 349 | member access on a value annotated `{object}` |
+   | TS2345 / TS2322 / TS18047 | 30 | assignability and possibly-null |
+   | TS7016 | 2 | a dependency ships no declarations |
+
+   Those errors are concentrated in `controllers/brands.js` (151),
+   `handlers/markets-subworkspace.js` (64), `handlers/markets.js` (55) and
+   `controllers/serenity.js` (52), so take it in steps rather than one sweep.
+
+   **Grow the strict list leaf-first, and do not use those per-file counts to
+   order the work.** Because the tier follows imports, the cost of adding a file
+   is its whole import closure. `controllers/brands.js` owns 151 errors but sits
+   near the top of the graph: rooting a program there reports **506 errors across
+   23 files**. `handlers/markets.js` owns 55 and pulls in 101 across 6. A leaf such
+   as `support/serenity/errors.js` or `support/serenity/locations.js` costs 1.
+   Ordering by owned errors therefore picks the most expensive step available.
+   Measure a candidate before adding it — copy `tsconfig.strict.json`, set
+   `include` to just that file, and run `tsc` against it.
+
+   One shortcut is worth taking before any of that, because it cuts across every
+   file rather than sitting inside one: a shared `log` typedef. 76 of the 349
+   `TS2339` are logger-method accesses (`info`/`warn`/`error`/`debug`), and `log`
+   is a small, stable shape, so one typedef retires them in a uniform mechanical
+   pass and shrinks every per-file step that follows. `context` looks like the
+   same opportunity and is not — it is the wrapper-assembled universal context
+   (`dataAccess`, `env`, `sqs`, `s3Client`, `imsClient`, `attributes`, … see the
+   middleware stack in `src/index.js`), so typing it accurately is a design task,
+   and an inaccurate typedef relocates errors instead of retiring them.
+
+   Once `noImplicitAny` is on across the whole base `include` set, the two configs
+   fold back into one, the per-file `// @ts-check` pragma is no longer needed, and
    the repo can consider `checkJs: true` with `// @ts-nocheck` opt-outs instead.

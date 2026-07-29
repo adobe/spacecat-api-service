@@ -112,6 +112,9 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate',
   'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status',
 
+  // Semrush onboarding - IMS-user, org-membership gated (hasAccess), not S2S.
+  'POST /v2/orgs/:spaceCatId/semrush-onboarding',
+
   // PLG onboarding - IMS token auth, self-service flow, not S2S
   'POST /plg/onboard',
   'GET /plg/sites',
@@ -238,6 +241,7 @@ const routeRequiredCapabilities = {
 
   // Configuration
   'GET /configurations/latest': CAP_CONFIGURATION_READ,
+  'GET /configurations/versions': CAP_CONFIGURATION_READ,
   'PATCH /configurations/latest': CAP_CONFIGURATION_WRITE,
   'POST /configurations/:version/restore': CAP_CONFIGURATION_WRITE,
   'GET /configurations/:version': CAP_CONFIGURATION_READ,
@@ -318,6 +322,10 @@ const routeRequiredCapabilities = {
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/stats': 'brand:read',
   // eslint-disable-next-line max-len
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/prompts/count': 'brand:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/competitor-summary': 'brand:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/kpi-headlines': 'brand:read',
+  // eslint-disable-next-line max-len
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/source-visibility-headline': 'brand:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': 'organization:write',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate': 'organization:write',
   'GET /v2/orgs/:spaceCatId/sites/:siteId/brand': 'organization:read',

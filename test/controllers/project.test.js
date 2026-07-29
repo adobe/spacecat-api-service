@@ -16,6 +16,7 @@ import sinonChai from 'sinon-chai';
 import sinon, { stub } from 'sinon';
 
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
+import TierClient from '@adobe/spacecat-shared-tier-client';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 
 import { Organization, Project, Site } from '@adobe/spacecat-shared-data-access';
@@ -67,7 +68,10 @@ const sites = [
   console,
 ));
 
-const organization = new Organization(
+// Built fresh per test: several specs assign onto these instances
+// (project.save, project.remove), so a shared instance would carry one test's
+// stubs into the next.
+const buildOrganization = () => new Organization(
   {
     entities: {
       organization: {
@@ -92,7 +96,7 @@ const organization = new Organization(
   console,
 );
 
-const project = new Project(
+const buildProject = () => new Project(
   {
     entities: {
       project: {
@@ -134,8 +138,13 @@ describe('Projects Controller', () => {
   let mockDataAccess;
   let context;
   let projectsController;
+  let organization;
+  let project;
 
   beforeEach(() => {
+    organization = buildOrganization();
+    project = buildProject();
+
     mockDataAccess = {
       Project: {
         create: stub().resolves(project),
@@ -151,7 +160,21 @@ describe('Projects Controller', () => {
       Organization: {
         findById: stub().resolves(organization),
       },
+      SiteEnrollment: {
+        allByEntitlementId: stub().resolves([
+          { getId: () => 'enrollment-1', getSiteId: () => 'site1' },
+          { getId: () => 'enrollment-2', getSiteId: () => 'site2' },
+        ]),
+      },
     };
+
+    // filterSitesForProductCode probes entitlement + enrollment via TierClient.
+    // Default: a valid customer-visible entitlement so both project sites pass through.
+    sandbox.stub(TierClient, 'createForOrg').returns({
+      checkValidEntitlement: sinon.stub().resolves({
+        entitlement: { getId: () => 'entitlement-123', getTier: () => 'PAID' },
+      }),
+    });
 
     context = {
       dataAccess: mockDataAccess,
@@ -602,6 +625,18 @@ describe('Projects Controller', () => {
       expect(mockDataAccess.Site.allByProjectId).to.have.been.calledWith('550e8400-e29b-41d4-a716-446655440000');
     });
 
+    it('should return bad request when product code header is missing', async () => {
+      const response = await projectsController.getSitesByProjectId({
+        params: { projectId: '550e8400-e29b-41d4-a716-446655440000' },
+        ...context,
+        pathInfo: { headers: {} },
+      });
+
+      expect(response.status).to.equal(400);
+      const responseBody = await response.json();
+      expect(responseBody.message).to.equal('Product code required');
+    });
+
     it('should return bad request for invalid project ID', async () => {
       const response = await projectsController.getSitesByProjectId({
         params: { projectId: 'invalid-id' },
@@ -611,6 +646,49 @@ describe('Projects Controller', () => {
       expect(response.status).to.equal(400);
       const responseBody = await response.json();
       expect(responseBody.message).to.equal('Project ID required');
+    });
+
+    it('should return not found when the project organization does not exist', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      const response = await projectsController.getSitesByProjectId({
+        params: { projectId: '550e8400-e29b-41d4-a716-446655440000' },
+        ...context,
+      });
+
+      expect(response.status).to.equal(404);
+      const responseBody = await response.json();
+      expect(responseBody.message).to.equal('Organization not found');
+    });
+
+    it('should filter out sites the org is not entitled to', async () => {
+      TierClient.createForOrg.returns({
+        checkValidEntitlement: sinon.stub().resolves({ entitlement: null }),
+      });
+
+      const response = await projectsController.getSitesByProjectId({
+        params: { projectId: '550e8400-e29b-41d4-a716-446655440000' },
+        ...context,
+      });
+
+      expect(response.status).to.equal(200);
+      const responseBody = await response.json();
+      expect(responseBody).to.have.length(0);
+    });
+
+    it('should return only sites enrolled for the product', async () => {
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([
+        { getId: () => 'enrollment-1', getSiteId: () => 'site1' },
+      ]);
+
+      const response = await projectsController.getSitesByProjectId({
+        params: { projectId: '550e8400-e29b-41d4-a716-446655440000' },
+        ...context,
+      });
+
+      expect(response.status).to.equal(200);
+      const responseBody = await response.json();
+      expect(responseBody).to.have.length(1);
+      expect(responseBody[0].id).to.equal('site1');
     });
 
     it('should return not found when project does not exist', async () => {

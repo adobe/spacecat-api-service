@@ -1796,6 +1796,46 @@ describe('utils', () => {
         siteId: 'site-1',
       });
     });
+
+    it('includes validateOnly and forcedBy in the message when provided', async () => {
+      const sqs = { sendMessage: sinon.stub().resolves() };
+      const slackContext = { channelId: 'C1', threadTs: '123' };
+
+      await sendGlobalImportRunMessage(
+        sqs,
+        'queue-url',
+        'optimize-at-edge-enabled-marking',
+        slackContext,
+        { siteId: 'site-1', validateOnly: true, forcedBy: 'jdoe' },
+      );
+
+      expect(sqs.sendMessage).to.have.been.calledWith('queue-url', {
+        type: 'optimize-at-edge-enabled-marking',
+        slackContext,
+        siteId: 'site-1',
+        validateOnly: true,
+        forcedBy: 'jdoe',
+      });
+    });
+
+    it('omits validateOnly when falsy/absent', async () => {
+      const sqs = { sendMessage: sinon.stub().resolves() };
+      const slackContext = { channelId: 'C1', threadTs: '123' };
+
+      await sendGlobalImportRunMessage(
+        sqs,
+        'queue-url',
+        'optimize-at-edge-enabled-marking',
+        slackContext,
+        { siteId: 'site-1', validateOnly: false },
+      );
+
+      expect(sqs.sendMessage).to.have.been.calledWith('queue-url', {
+        type: 'optimize-at-edge-enabled-marking',
+        slackContext,
+        siteId: 'site-1',
+      });
+    });
   });
 
   describe('triggerGlobalImportRun', () => {

@@ -109,12 +109,19 @@ const FIXTURES = {
         languageCode: 'en',
         text: 'sample',
         tagMap: { 'topic-a': 't-1' },
+        // Authorship metadata fields (LLMO-6289) on a list item.
+        createdAt: '2026-07-01T00:00:00Z',
+        createdBy: 'user-a',
+        updatedAt: '2026-07-02T00:00:00Z',
+        updatedBy: 'unknown',
       }],
       total: 1,
       page: 1,
       limit: 50,
     },
-    query: { geoTargetId: '2840', languageCode: 'en', tagIds: ['t-1'] },
+    query: {
+      geoTargetId: '2840', languageCode: 'en', tagIds: ['t-1'], sort: 'metadata.updated_at', order: 'desc',
+    },
   },
   createSerenityPrompts: {
     expectedStatus: 200,
@@ -358,8 +365,47 @@ const FIXTURES = {
         year: 2026,
         mentions: 900,
         citations: 5000,
+        shareOfVoice: 0.42,
+        brandVisibility: 0.61,
+        sourceVisibility: 0.33,
         competitors: [{ name: 'Rival One', mentions: 150, citations: 300 }],
       }],
+    },
+  },
+  // Also served by ElementsController — the lightweight aggregate-totals
+  // counterpart to Market Tracking Trends.
+  listSerenityCompetitorSummary: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'getCompetitorSummary',
+    serviceMethod: 'getCompetitorSummary',
+    handlerResult: {
+      competitors: [
+        { name: 'Rival One', mentions: 900, citations: 5000 },
+        { name: 'Rival Two', mentions: 150, citations: 300 },
+      ],
+    },
+  },
+  // Overview-SR exact-parity KPI headlines (LLMO-6516 follow-up) — also served
+  // by ElementsController.
+  listSerenityKpiHeadlines: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'getKpiHeadlines',
+    serviceMethod: 'getKpiHeadlines',
+    handlerResult: {
+      shareOfVoice: { value: 0.3628, comparisonValue: 0.3927 },
+      brandVisibility: { value: 0.4959, comparisonValue: 0.548 },
+    },
+  },
+  listSerenitySourceVisibilityHeadline: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'getSourceVisibilityHeadline',
+    serviceMethod: 'getSourceVisibilityHeadline',
+    handlerResult: {
+      value: 0.3954,
+      comparisonValue: 0.4865,
     },
   },
   listSerenityBrandPresenceSentimentOverview: {

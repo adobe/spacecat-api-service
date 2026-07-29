@@ -14,7 +14,10 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
-import { ProjectEngineApiError } from '@adobe/spacecat-shared-project-engine-client';
+import {
+  ProjectEngineApiError,
+  createSerenityProjectEngineTransport,
+} from '@adobe/spacecat-shared-project-engine-client';
 
 import {
   createSerenityTransport,
@@ -263,6 +266,24 @@ describe('Semrush REST transport', () => {
         .to.match(/^https:\/\/shared\.semrush\.test\/enterprise\/users\/api\//);
     });
 
+    it('falls back to SEMRUSH_PROJECTS_BASE_URL when SEMRUSH_USERS_BASE_URL is empty', async () => {
+      fetchStub.resolves(fetchOk(null));
+      const transport = createSerenityTransport({
+        env: {
+          SEMRUSH_PROJECTS_BASE_URL: 'https://shared.semrush.test',
+          SEMRUSH_USERS_BASE_URL: '',
+        },
+        imsToken: IMS,
+      });
+
+      await transport.getWorkspaceStatus(WORKSPACE_ID);
+
+      // An empty value is "unset", not an origin — it must not name the USERS var in
+      // an error, and must not be treated as an explicit override.
+      expect((await callOf(fetchStub)).url)
+        .to.match(/^https:\/\/shared\.semrush\.test\/enterprise\/users\/api\//);
+    });
+
     it('rejects a non-https SEMRUSH_USERS_BASE_URL naming the USERS var (503)', () => {
       try {
         createSerenityTransport({
@@ -411,8 +432,7 @@ describe('Semrush REST transport', () => {
       fetchStub.onCall(1).resolves(fetchOk({ id: 'subworkspace-ws-1', status: 'not ready' }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
-      const resources = { ai: { projects: 3, prompts: 1500 } };
-      const promise = transport.createSubworkspace(PARENT_WS, 'Adobe Express', resources);
+      const promise = transport.createSubworkspace(PARENT_WS, 'Adobe Express');
       await clock.tickAsync(60_000);
       const result = await promise;
 
@@ -420,7 +440,7 @@ describe('Semrush REST transport', () => {
       expect(fetchStub.callCount).to.equal(2);
       const retryCall = await callOf(fetchStub, 1);
       expect(retryCall.method).to.equal('POST');
-      expect(JSON.parse(retryCall.body)).to.deep.equal({ title: 'Adobe Express', resources });
+      expect(JSON.parse(retryCall.body)).to.deep.equal({ title: 'Adobe Express', resources: {} });
     }));
 
     it('does NOT retry a 500 on a POST create (createSubworkspace) -- avoids double-provisioning', withFakeTimers(async (clock) => {
@@ -431,8 +451,7 @@ describe('Semrush REST transport', () => {
       fetchStub.resolves(fetchFail(500, { code: 'internal_error' }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
-      const resources = { ai: { projects: 3, prompts: 1500 } };
-      const promise = transport.createSubworkspace(PARENT_WS, 'Adobe Express', resources)
+      const promise = transport.createSubworkspace(PARENT_WS, 'Adobe Express')
         .catch((e) => e);
       await clock.tickAsync(60_000);
       const err = await promise;
@@ -720,6 +739,33 @@ describe('Semrush REST transport', () => {
       expect(body).to.not.have.property('sort_dir');
       expect(body.search).to.equal('photoshop');
     });
+
+    it('forwards sort + order on the with-metadata list path (LLMO-6289)', async () => {
+      fetchStub.resolves(fetchOk({ items: [] }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.listPromptsByTags(WORKSPACE_ID, PROJECT_ID, {
+        sort: 'metadata.updated_at',
+        order: 'desc',
+      });
+
+      const call = await callOf(fetchStub);
+      const body = JSON.parse(call.body);
+      expect(body.sort).to.equal('metadata.updated_at');
+      expect(body.order).to.equal('desc');
+    });
+
+    it('omits sort/order entirely when no sort is requested (byte-for-byte legacy call)', async () => {
+      fetchStub.resolves(fetchOk({ items: [] }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.listPromptsByTags(WORKSPACE_ID, PROJECT_ID, { page: 1 });
+
+      const call = await callOf(fetchStub);
+      const body = JSON.parse(call.body);
+      expect(body).to.not.have.property('sort');
+      expect(body).to.not.have.property('order');
+    });
   });
 
   describe('createPromptsByIds', () => {
@@ -982,6 +1028,27 @@ describe('Semrush REST transport', () => {
         new RegExp(`/v1/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/publish$`),
       );
       expect(call.body).to.equal(undefined);
+    });
+  });
+
+  describe('getProjectStatus', () => {
+    // LLMO-5492 / AC3 — the publish-completion read. Uses the draft view
+    // (draft=true) so a never-published project's `publish_status` is echoed
+    // faithfully (the live view empties a never-published draft, serenity-docs #12 §10).
+    it('GETs /v1/workspaces/{ws}/projects/{pid} with draft=true and no body', async () => {
+      fetchStub.resolves(fetchOk({ id: PROJECT_ID, publish_status: 'live' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const out = await transport.getProjectStatus(WORKSPACE_ID, PROJECT_ID);
+
+      const call = await callOf(fetchStub);
+      expect(call.method).to.equal('GET');
+      expect(call.url).to.match(
+        new RegExp(`/v1/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}\\?`),
+      );
+      expect(call.url).to.include('draft=true');
+      expect(call.body).to.equal(undefined);
+      expect(out.publish_status).to.equal('live');
     });
   });
 
@@ -1291,15 +1358,16 @@ describe('Semrush REST transport', () => {
       fetchStub.resolves(fetchOk({ id: 'subworkspace-ws-1', status: 'not ready' }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
-      const resources = { ai: { projects: 3, prompts: 1500 } };
-      const result = await transport.createSubworkspace(PARENT_WS, 'Adobe Express', resources);
+      const result = await transport.createSubworkspace(PARENT_WS, 'Adobe Express');
 
       const call = await callOf(fetchStub);
       expect(call.method).to.equal('POST');
       expect(call.url).to.equal(
         `https://adobe-hackathon.semrush.com/enterprise/users/api/v2/workspaces/${PARENT_WS}/child`,
       );
-      expect(JSON.parse(call.body)).to.deep.equal({ title: 'Adobe Express', resources });
+      // `resources` is REQUIRED by createWorkspaceV2Form; `{}` is the schema-valid "no
+      // allocation" body. Omitting the key is contract-violating even though live tolerates it.
+      expect(JSON.parse(call.body)).to.deep.equal({ title: 'Adobe Express', resources: {} });
       expect(call.header('X-Upload-Receipt')).to.equal(null);
       expect(result.id).to.equal('subworkspace-ws-1');
     });
@@ -1668,5 +1736,50 @@ describe('Semrush REST transport', () => {
         expect(params.get('country')).to.equal('');
       });
     });
+  });
+});
+
+// WP2 MERGE GATE (LLMO-6289) — structural, not social. WP1's write paths call the
+// v3 authorship-metadata facade on the REAL Project Engine client at RUNTIME
+// (createPromptsWithMetadata / patchPrompt / patchPromptMetadata /
+// patchPromptsMetadataBatch — see rest-transport.js). The installed client does
+// not expose them yet; they arrive with WP2's client re-vendor + dep bump, and
+// the app transport only *type*-checks today via the local
+// `ProjectEngineTransportWithMetadata` cast. If WP1 merged and deployed against
+// the current client, every native prompt write would throw
+// `TypeError: <method> is not a function` in production — the exact "green in
+// tests (mocked transport), broken in prod (real client lacks the method)" class
+// the repo guards against (SITES-45260; see CLAUDE.md "Lambda Bundle Constraints").
+// This test FAILS until the installed client carries all four methods, so CI
+// cannot go green — and this PR cannot merge clean — before the WP2 dependency
+// bump lands. It self-heals (delete this block + the file-level typedef) the
+// moment the bumped client ships the facade. REMOVING THIS GATE (this block + the
+// `ProjectEngineTransportWithMetadata` typedef in rest-transport.js) is part of
+// WP2's definition-of-done (LLMO-6289) — it must be torn down with the dep bump,
+// not left behind to fail forever.
+describe('WP2 merge gate — Project Engine v3 authorship-metadata facade', () => {
+  const V3_METADATA_METHODS = [
+    'createPromptsWithMetadata',
+    'patchPrompt',
+    'patchPromptMetadata',
+    'patchPromptsMetadataBatch',
+  ];
+
+  it('the installed @adobe/spacecat-shared-project-engine-client exposes every v3 write method (bump before merge)', () => {
+    // Introspection only — the fetch seam rejects so a stray call fails loudly
+    // rather than hitting the network; we never invoke a method here.
+    const transport = createSerenityProjectEngineTransport({
+      baseUrl: 'https://wp2-merge-gate.invalid',
+      authToken: 'gate',
+      fetch: () => Promise.reject(new Error('WP2 gate: introspection only, never called')),
+    });
+    const missing = V3_METADATA_METHODS.filter((m) => typeof transport[m] !== 'function');
+    expect(
+      missing,
+      `Project Engine client is missing v3 facade method(s): [${missing.join(', ')}]. `
+        + 'Bump @adobe/spacecat-shared-project-engine-client to the WP2 release that vendors '
+        + 'them before merging WP1 (LLMO-6289) — deploying against the current client would '
+        + 'throw "is not a function" on every native prompt write.',
+    ).to.deep.equal([]);
   });
 });

@@ -300,6 +300,38 @@ describe('Sites Controller', () => {
     expect(site).to.have.property('baseURL', 'https://site1.com');
   });
 
+  it('returns bad request when creating a site with an unsafe pageTypes pattern', async () => {
+    mockDataAccess.Site.findByBaseURL.resolves(null);
+
+    const response = await sitesController.createSite({
+      data: {
+        baseURL: 'https://site1.com',
+        pageTypes: [
+          { name: 'Schema probe', pattern: "x' || CAST(CAST(current_schema AS INTEGER) AS VARCHAR) || 'x" },
+        ],
+      },
+    });
+
+    expect(mockDataAccess.Site.create).to.have.not.been.called;
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'pageTypes[0] pattern must not contain a single quote character');
+  });
+
+  it('creates a site with valid pageTypes', async () => {
+    mockDataAccess.Site.findByBaseURL.resolves(null);
+
+    const response = await sitesController.createSite({
+      data: {
+        baseURL: 'https://site1.com',
+        pageTypes: [{ name: 'homepage', pattern: '^/$' }],
+      },
+    });
+
+    expect(mockDataAccess.Site.create).to.have.been.calledOnce;
+    expect(response.status).to.equal(201);
+  });
+
   it('returns 201 even when RUM config update fails after site creation', async () => {
     mockDataAccess.Site.findByBaseURL.resolves(null);
     updateRumConfigStub.rejects(new Error('RUM API unavailable'));
@@ -4834,6 +4866,65 @@ describe('Sites Controller', () => {
     expect(mergedConfig).to.deep.equal({ slack: { channel: '#new' } });
   });
 
+  it('returns 400 when site.setConfig throws a ValidationError', async () => {
+    const site = sites[0];
+    site.getConfig = sandbox.stub().returns(null);
+    const validationError = new Error('Invalid config for Site: "llmo.showWww" must be a boolean');
+    validationError.name = 'ValidationError';
+    site.setConfig = sandbox.stub().throws(validationError);
+    site.save = sandbox.stub().resolves(site);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: { llmo: { showWww: 'not-a-boolean' } },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(400);
+    const body = await response.json();
+    expect(body.message).to.equal(validationError.message);
+    expect(site.save).to.have.not.been.called;
+  });
+
+  it('sanitizes control characters in the ValidationError message before returning it', async () => {
+    const site = sites[0];
+    site.getConfig = sandbox.stub().returns(null);
+    const validationError = new Error('Invalid config for Site: bad value\r\nX-Injected: true');
+    validationError.name = 'ValidationError';
+    site.setConfig = sandbox.stub().throws(validationError);
+    site.save = sandbox.stub().resolves(site);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: { llmo: { showWww: 'not-a-boolean' } },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(400);
+    const body = await response.json();
+    expect(body.message).to.not.contain('\r');
+    expect(body.message).to.not.contain('\n');
+  });
+
+  it('rethrows a non-ValidationError from site.setConfig', async () => {
+    const site = sites[0];
+    site.getConfig = sandbox.stub().returns(null);
+    site.setConfig = sandbox.stub().throws(new Error('unexpected boom'));
+    site.save = sandbox.stub().resolves(site);
+
+    await expect(sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: { slack: { channel: '#new' } },
+      },
+      ...defaultAuthAttributes,
+    })).to.be.rejectedWith('unexpected boom');
+  });
+
   it('sets config when toDynamoItem returns null for existing config', async () => {
     const site = sites[0];
     site.getConfig = sandbox.stub().returns({ something: true });
@@ -5352,6 +5443,54 @@ describe('Sites Controller', () => {
       expect(response.status).to.equal(400);
       const error = await response.json();
       expect(error.message).to.include('pageTypes[0] has invalid regex pattern:');
+    });
+
+    it('returns bad request when pageType pattern contains a single quote', async () => {
+      const invalidPageTypes = [
+        { name: 'Schema probe', pattern: "x' || CAST(CAST(current_schema AS INTEGER) AS VARCHAR) || 'x" },
+      ];
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { pageTypes: invalidPageTypes },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'pageTypes[0] pattern must not contain a single quote character');
+    });
+
+    it('returns bad request when pageType pattern is only a single quote', async () => {
+      const invalidPageTypes = [
+        { name: 'quote-only', pattern: "'" },
+      ];
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { pageTypes: invalidPageTypes },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'pageTypes[0] pattern must not contain a single quote character');
+    });
+
+    it('returns bad request when pageType pattern contains a quote mid-string', async () => {
+      const invalidPageTypes = [
+        { name: 'mid-string-quote', pattern: "foo'bar" },
+      ];
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { pageTypes: invalidPageTypes },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'pageTypes[0] pattern must not contain a single quote character');
     });
 
     it('does not update site when pageTypes are the same', async () => {

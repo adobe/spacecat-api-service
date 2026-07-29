@@ -58,7 +58,7 @@ import {
   getIsSummitPlgEnabled,
   isViewAsTrialRequest,
 } from '../support/utils.js';
-import AccessControlUtil from '../support/access-control-util.js';
+import AccessControlUtil, { X_PRODUCT_HEADER } from '../support/access-control-util.js';
 import { redactFeedbackContent } from '../support/feedback-redaction.js';
 import { CAP_FIX_ENTITY_CREATE, CAP_SUGGESTION_WRITE } from '../routes/capability-constants.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
@@ -1309,10 +1309,17 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Site not found');
     }
 
+    // The 'auto_fix' subService maps to the `dx_aem_perf_auto_fix` user scope, which is only
+    // minted for ASO product logins. LLMO logins never carry this scope, so gating LLMO autofix
+    // on it always yields a 403 (LLMO-6553). Only enforce the subService for ASO; for any other
+    // product, fall back to plain org-membership access.
+    const xProduct = context.pathInfo?.headers?.[X_PRODUCT_HEADER];
+    const autoFixSubService = xProduct === 'ASO' ? 'auto_fix' : '';
+
     const s2sResult = await accessControlUtil.hasS2SCapability(CAP_FIX_ENTITY_CREATE);
     if (s2sResult.allowed) {
       ctx.log?.info(`[acl] S2S auto-fix granted - clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId}`);
-    } else if (!await accessControlUtil.hasAccess(site, 'auto_fix')) {
+    } else if (!await accessControlUtil.hasAccess(site, autoFixSubService)) {
       if (s2sResult.reason !== 'not-s2s') {
         ctx.log?.info(`[acl] Denied PATCH auto-fix - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'}`);
       }
@@ -2083,9 +2090,6 @@ function SuggestionsController(ctx, sqs, env) {
       });
 
       let geoExperiment = null;
-      // Tracks whether the Atomic strategy was successfully written, so the
-      // outer catch knows whether to compensate by deleting it if a later
-      // step (e.g. response serialization) throws.
       let atomicStrategyCreated = false;
       let validSuggestionEntities = [];
       try {
@@ -2107,30 +2111,38 @@ function SuggestionsController(ctx, sqs, env) {
         ];
         const metadataBase = {};
 
-        if (hasPatternDeploy) {
-          const highImpactIds = context.data?.metadata?.highImpactSuggestionIds;
-          if (!Array.isArray(highImpactIds) || highImpactIds.length === 0
-            || !highImpactIds.every((id) => isValidUUID(id))) {
-            context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, missing/invalid metadata.highImpactSuggestionIds for pattern deploy`);
-            throw new Error('metadata.highImpactSuggestionIds is required for domain-wide/segment deployment');
-          }
+        const highImpactIds = context.data?.metadata?.highImpactSuggestionIds;
+        const hasHighImpactIds = Array.isArray(highImpactIds) && highImpactIds.length > 0;
+        if (hasPatternDeploy && !hasHighImpactIds) {
+          context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, missing/invalid metadata.highImpactSuggestionIds for pattern deploy`);
+          throw new Error('metadata.highImpactSuggestionIds is required for domain-wide/segment deployment');
+        }
+        if (hasHighImpactIds && !highImpactIds.every((id) => isValidUUID(id))) {
+          context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, invalid metadata.highImpactSuggestionIds`);
+          throw new Error('metadata.highImpactSuggestionIds must be an array of valid UUIDs');
+        }
+
+        if (hasHighImpactIds) {
+          context.log.info(`[edge-geo-exp] site: ${apexBaseUrl}, highImpactSuggestionIds: ${JSON.stringify(highImpactIds)}`);
           const highImpactIdSet = new Set(highImpactIds);
           const measurementSuggestions = allSuggestions.filter(
             (s) => highImpactIdSet.has(s.getId()),
           );
           if (measurementSuggestions.length === 0) {
-            context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, no high-impact suggestions resolved for pattern deploy`);
+            context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, no high-impact suggestions resolved for the provided IDs`);
             throw new Error('No high-impact suggestions found for the provided IDs');
           }
-          // suggestionIds holds only what actually deploys (the pattern[s]); the high-impact
-          // measurement suggestions live in metadata and drive prompt generation only.
+          // suggestionIds holds everything that actually deploys; the high-impact measurement
+          // suggestions live in metadata and drive prompt generation/measurement only.
           metadataBase.urls = [
             ...new Set(measurementSuggestions.map((s) => s.getData()?.url).filter(Boolean)),
           ];
-          metadataBase.patterns = patternSuggestions.map((ps) => (
-            ps.getData()?.isDomainWide ? '/*' : ps.getData()?.allowedRegexPatterns?.[0]
-          ));
           metadataBase.highImpactSuggestionIds = measurementSuggestions.map((s) => s.getId());
+          if (hasPatternDeploy) {
+            metadataBase.patterns = patternSuggestions.map((ps) => (
+              ps.getData()?.isDomainWide ? '/*' : ps.getData()?.allowedRegexPatterns?.[0]
+            ));
+          }
         } else {
           metadataBase.urls = [
             ...new Set(validSuggestions.map((s) => s.getData()?.url).filter(Boolean)),
@@ -2177,23 +2189,20 @@ function SuggestionsController(ctx, sqs, env) {
 
         validSuggestionEntities = [...validSuggestions, ...patternSuggestions];
 
-        const markResults = await Promise.allSettled(
-          validSuggestionEntities.map(async (suggestion) => {
-            const currentData = suggestion.getData();
-            suggestion.setData({
-              ...currentData,
-              edgeOptimizeStatus: 'EXPERIMENT_IN_PROGRESS',
-            });
-            suggestion.setUpdatedBy(profile?.email || 'geo-experiment');
-            return suggestion.save();
-          }),
-        );
-
-        const markFailures = markResults.filter((r) => r.status === 'rejected');
-        if (markFailures.length > 0) {
-          context.log.warn(`[geo-experiment-failed] ${markFailures.length} suggestion(s) failed to mark as EXPERIMENT_IN_PROGRESS`, {
+        validSuggestionEntities.forEach((suggestion) => {
+          suggestion.setData({
+            ...suggestion.getData(),
+            edgeOptimizeStatus: 'EXPERIMENT_IN_PROGRESS',
+          });
+          suggestion.setUpdatedBy(profile?.email || 'geo-experiment');
+        });
+        try {
+          // saveMany is atomic per 25-item chunk; partial failure is acceptable here since the
+          // response below doesn't gate on this write succeeding.
+          await Suggestion.saveMany(validSuggestionEntities);
+        } catch (markError) {
+          context.log.warn(`[geo-experiment-failed] suggestion(s) failed to mark as EXPERIMENT_IN_PROGRESS: ${markError.message}`, {
             geoExperimentId,
-            errors: markFailures.map((r) => r.reason?.message),
           });
         }
 

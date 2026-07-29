@@ -184,6 +184,7 @@ describe('SerenityController', () => {
   let exchangePromiseTokenStub;
   let linkSiteToLiveRowsStub;
   let tombstoneAllForBrandStub;
+  let createAndEnqueueJobStub;
   let MockTransportError;
   let SerenityController;
 
@@ -220,6 +221,9 @@ describe('SerenityController', () => {
     exchangePromiseTokenStub = sinon.stub().resolves('exchanged-ims-token');
     linkSiteToLiveRowsStub = sinon.stub().resolves();
     tombstoneAllForBrandStub = sinon.stub().resolves();
+    createAndEnqueueJobStub = sinon.stub().resolves({
+      getId: () => 'job-abc', getStatus: () => 'IN_PROGRESS',
+    });
     // Alias the REAL SerenityTransportError so instances are recognised by errors.js's
     // isSemrushTransportError (which mapError now delegates to). Same (status, message, body)
     // constructor signature the tests already use.
@@ -310,6 +314,12 @@ describe('SerenityController', () => {
       '../../src/support/serenity/mapping-rows.js': {
         linkSiteToLiveRows: linkSiteToLiveRowsStub,
         tombstoneAllForBrand: tombstoneAllForBrandStub,
+      },
+      '../../src/support/serenity/async-job-runner.js': {
+        createAndEnqueueJob: createAndEnqueueJobStub,
+      },
+      '../../src/support/serenity/handlers/classify-prompts-job.js': {
+        CLASSIFY_PROMPTS_JOB_TYPE: 'serenity-classify-prompts',
       },
     })).default;
   });
@@ -1424,11 +1434,19 @@ describe('SerenityController', () => {
       // for the mapping-row upsert (mapping-rows.js).
       // writeDeadline is a request-scoped epoch-ms deadline (dynamic) — asserted
       // as a number, then dropped before the deep-equal.
-      const { writeDeadline, ...marketOptions } = handlers.handleCreateMarketSubworkspace
-        .firstCall.args[7];
+      const {
+        writeDeadline, brandCollection, ...marketOptions
+      } = handlers.handleCreateMarketSubworkspace.firstCall.args[7];
       expect(writeDeadline).to.be.a('number');
+      // Threaded so ensureSubworkspace's claim filter can tell this brand's own
+      // interrupted create from a same-named sibling brand's sub-workspace.
+      expect(brandCollection).to.equal(ctx.dataAccess.Brand);
       expect(marketOptions)
         .to.deep.equal({
+          // LLMO-6554: resolved via resolveDefaultModelIds — [] here because the test's
+          // transport stub doesn't implement the catalog/listing calls it reads from
+          // (both degrade to an empty best-effort default, never throwing).
+          modelIds: [],
           generateTopics: false,
           topicCap: 0,
           brandAliases: ['Acme Inc', 'ACME'],
@@ -1441,6 +1459,11 @@ describe('SerenityController', () => {
           // Per-brand AI ceiling (LLMO-6190 gate): undefined when no ceiling env is set — the
           // guard keeps its non-binding default.
           ceiling: undefined,
+          // serenity-docs#72 §5: threaded through for the (opt-in) quota-rejection Slack alert.
+          orgId: ORG,
+          // Caller identity for the created_* stamp (LLMO-6289); the test context
+          // has no auth profile, so it resolves to the `unknown` sentinel.
+          callerId: 'unknown',
         });
       // The org parent (JIT units pool) is threaded POSITIONALLY (arg index 2), not in the
       // options bag — the same id given to ensureSubworkspace.
@@ -1626,9 +1649,9 @@ describe('SerenityController', () => {
         data: { prompts: [] },
         env: { SERENITY_BRAND_AI_CEILING_PROMPTS: '5000' },
       }));
-      // options bag is the 8th positional arg (transport, workspaceId, data, log,
-      // classifyPromptType, env, writeDeadline, options).
-      const opts = handlers.handleCreatePromptsSubworkspace.firstCall.args[7];
+      // options bag is the 9th positional arg (transport, workspaceId, data, log,
+      // classifyPromptType, env, writeDeadline, callerId, options).
+      const opts = handlers.handleCreatePromptsSubworkspace.firstCall.args[8];
       expect(opts.ceiling).to.deep.equal({ prompts: 5000 });
     });
 
@@ -1636,7 +1659,7 @@ describe('SerenityController', () => {
       handlers.handleCreatePromptsSubworkspace.resolves({ created: [], skipped: [], failed: [] });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       await controller.createPrompts(fakeContext({ data: { prompts: [] } }));
-      const opts = handlers.handleCreatePromptsSubworkspace.firstCall.args[7];
+      const opts = handlers.handleCreatePromptsSubworkspace.firstCall.args[8];
       expect(opts.ceiling).to.equal(undefined);
     });
 
@@ -1648,7 +1671,7 @@ describe('SerenityController', () => {
         env: { SERENITY_BRAND_AI_CEILING_PROMPTS: 'not-a-number' },
       }));
       expect(response.status).to.equal(200);
-      const opts = handlers.handleCreatePromptsSubworkspace.firstCall.args[7];
+      const opts = handlers.handleCreatePromptsSubworkspace.firstCall.args[8];
       expect(opts.ceiling).to.equal(undefined);
     });
 
@@ -1783,6 +1806,26 @@ describe('SerenityController', () => {
       expect(decommissionStub).to.not.have.been.called;
     });
 
+    it('activate threads the Brand collection into ensureSubworkspace so the claim filter can run', async () => {
+      // Sub-workspace titles are bare brand names, so ensureSubworkspace needs the
+      // Brand collection to tell our own interrupted create from a same-named
+      // sibling brand's workspace. Without it the create path 500s on any
+      // same-title family candidate — so the wiring must be pinned, not assumed.
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      const brand = makeBrandModel({ getStatus: () => 'active' });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        brand,
+        data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }] },
+      });
+
+      await controller.activate(ctx);
+
+      expect(ensureSubworkspaceStub).to.have.been.calledOnce;
+      expect(ensureSubworkspaceStub.firstCall.args[6].brandCollection)
+        .to.equal(ctx.dataAccess.Brand);
+    });
+
     it('activate ensures the subworkspace ONCE for the batch and creates each market against it', async () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
       // Body-driven market provisioning runs ONLY for an already-active brand
@@ -1794,9 +1837,8 @@ describe('SerenityController', () => {
         data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }, { market: 'de', languageCode: 'de' }] },
       }));
       expect(response.status).to.equal(200);
-      // ensured exactly once, sized to the real market count (2) — not per market.
+      // ensured exactly once for the whole batch — not per market.
       expect(ensureSubworkspaceStub).to.have.been.calledOnce;
-      expect(ensureSubworkspaceStub.firstCall.args[3]).to.equal(2);
       expect(handlers.handleCreateMarketSubworkspace).to.have.been.calledTwice;
       // each market create receives the pre-resolved workspace id (6th arg) so it
       // skips its own ensure.
@@ -2027,6 +2069,8 @@ describe('SerenityController', () => {
       expect(markets).to.deep.equal([]);
       // Sub-workspace ensured once; NO project, NO body-driven market path.
       expect(ensureSubworkspaceStub).to.have.been.calledOnce;
+      // Sub-workspace-only → skips the settle poll (LLMO-6569).
+      expect(ensureSubworkspaceStub.firstCall.args[6]).to.have.property('createReadiness', 'skip');
       expect(handlers.handleCreateMarketSubworkspace).to.not.have.been.called;
       expect(updateBrandStub).to.not.have.been.called;
       expect(brand.setStatus).to.have.been.calledWith('active');
@@ -2066,6 +2110,8 @@ describe('SerenityController', () => {
       const { status } = await readBody(response);
       expect(status).to.equal('active');
       expect(ensureSubworkspaceStub).to.have.been.calledOnce;
+      // Bare reactivation is sub-workspace-only → skips the settle poll (LLMO-6569).
+      expect(ensureSubworkspaceStub.firstCall.args[6]).to.have.property('createReadiness', 'skip');
     });
 
     it('activate prefers body markets + brandDomain over the stash, and clears the stash when its market is provisioned', async () => {
@@ -2169,6 +2215,11 @@ describe('SerenityController', () => {
         dynamicAllocation: false,
         // Per-brand AI ceiling (LLMO-6190 gate): undefined when no ceiling env is set.
         ceiling: undefined,
+        // serenity-docs#72 §5: threaded through for the (opt-in) quota-rejection Slack alert.
+        orgId: ORG,
+        // Caller id resolved once for the batch; no auth profile in the test
+        // context → the `unknown` sentinel (LLMO-6289).
+        callerId: 'unknown',
       };
       const { firstCall, secondCall } = handlers.handleCreateMarketSubworkspace;
       // writeDeadline is computed ONCE at activate entry, so every market in the
@@ -2761,6 +2812,86 @@ describe('SerenityController', () => {
       expect(response.status).to.equal(200);
       expect(handlers.handleCreatePrompts).to.have.been.calledOnce;
       expect(handlers.handleCreatePromptsSubworkspace).not.to.have.been.called;
+    });
+
+    // serenity-docs#33: CSV import routes to the async job runner instead of the
+    // synchronous classify/create/publish path. `deferPublish: true` is the exact
+    // flag CSV-chunking already sets (a UI multi-add never sets it), so routing
+    // is by source, not array length.
+    describe('CSV import async routing (serenity-docs#33)', () => {
+      it('enqueues a serenity-classify-prompts job and returns 202 when deferPublish is true (flat mode)', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const prompts = [{
+          text: 'What is your return policy?', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'],
+        }];
+        const response = await controller.createPrompts(fakeContext({
+          data: { deferPublish: true, prompts },
+        }));
+
+        expect(response.status).to.equal(202);
+        const body = await readBody(response);
+        expect(body).to.deep.equal({ jobId: 'job-abc', status: 'IN_PROGRESS' });
+        expect(createAndEnqueueJobStub).to.have.been.calledOnce;
+        const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
+        expect(enqueueArgs.jobType).to.equal('serenity-classify-prompts');
+        expect(enqueueArgs.metadata).to.deep.equal({
+          // callerId captured at enqueue time (LLMO-6289) — no auth profile on the
+          // test context, so it resolves to the `unknown` sentinel.
+          mode: 'create', brandId: BRAND, semrushWorkspaceId: WORKSPACE, prompts, callerId: 'unknown',
+        });
+        // The synchronous path never runs.
+        expect(handlers.handleCreatePrompts).to.not.have.been.called;
+      });
+
+      it('stays synchronous (no enqueue) when deferPublish is absent, even for a large batch', async () => {
+        handlers.handleCreatePrompts.resolves({ created: 1, failed: [] });
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.createPrompts(fakeContext({
+          data: { prompts: [{ text: 'x', geoTargetId: 2840, languageCode: 'en' }] },
+        }));
+
+        expect(response.status).to.equal(200);
+        expect(createAndEnqueueJobStub).to.not.have.been.called;
+        expect(handlers.handleCreatePrompts).to.have.been.calledOnce;
+      });
+
+      it('stays synchronous for subworkspace-mode brands even when deferPublish is true', async () => {
+        resolveBrandWorkspaceStub.resolves({
+          mode: 'subworkspace', workspaceId: SUBWS, parentWorkspaceId: WORKSPACE,
+        });
+        handlers.handleCreatePromptsSubworkspace.resolves({ created: 1, failed: [] });
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.createPrompts(fakeContext({
+          data: { deferPublish: true, prompts: [{ text: 'x', geoTargetId: 2840, languageCode: 'en' }] },
+        }));
+
+        expect(response.status).to.equal(200);
+        expect(createAndEnqueueJobStub).to.not.have.been.called;
+        expect(handlers.handleCreatePromptsSubworkspace).to.have.been.calledOnce;
+      });
+
+      it('400s without enqueueing when deferPublish is true but prompts is empty', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.createPrompts(fakeContext({
+          data: { deferPublish: true, prompts: [] },
+        }));
+
+        expect(response.status).to.equal(400);
+        expect(createAndEnqueueJobStub).to.not.have.been.called;
+      });
+
+      it('400s without enqueueing when deferPublish is true and prompts exceeds the max item cap', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const tooMany = Array.from({ length: 501 }, (_, i) => ({
+          text: `p${i}`, geoTargetId: 2840, languageCode: 'en',
+        }));
+        const response = await controller.createPrompts(fakeContext({
+          data: { deferPublish: true, prompts: tooMany },
+        }));
+
+        expect(response.status).to.equal(400);
+        expect(createAndEnqueueJobStub).to.not.have.been.called;
+      });
     });
 
     it('builds a working type classifier from the brand name + aliases and passes it to the handler (serenity-docs#31)', async () => {
