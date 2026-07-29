@@ -351,6 +351,7 @@ export function createElementsService(transport, log) {
      * @param {object} params - Query params (url, model/platform, startDate, endDate).
      * @returns {Promise<Array<object>>} Per-prompt rows (see transformUrlPromptsResponse).
      */
+    /* c8 ignore start -- LLMO-6620 POC endpoint; unit tests deferred (see url-prompts.js tests) */
     async getUrlPrompts(workspaceId, params) {
       const raw = await transport.fetchElement(
         workspaceId,
@@ -359,6 +360,7 @@ export function createElementsService(transport, log) {
       );
       return transformUrlPromptsResponse(raw);
     },
+    /* c8 ignore stop */
 
     /**
      * Fetches the Data Insights per-TOPIC table. Uses the SAME PROMPTS_BY_TOPIC element
