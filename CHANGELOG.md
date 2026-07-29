@@ -1,3 +1,10 @@
+## [1.704.1](https://github.com/adobe/spacecat-api-service/compare/v1.704.0...v1.704.1) (2026-07-29)
+
+
+### Bug Fixes
+
+* restrict LLMO CDN config endpoints to administrator access ([#2951](https://github.com/adobe/spacecat-api-service/issues/2951)) ([3399338](https://github.com/adobe/spacecat-api-service/commit/33993389e28582ba095fdb0cab369b22fdae0cbb))
+
 # [1.704.0](https://github.com/adobe/spacecat-api-service/compare/v1.703.0...v1.704.0) (2026-07-29)
 
 

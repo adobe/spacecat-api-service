@@ -856,8 +856,8 @@ function LlmoController(ctx) {
       }
       const { site, config } = siteValidation;
 
-      if (!await accessControlUtil.hasLlmoCapabilityForSite(site)) {
-        return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can update the CDN logs filter'));
+      if (!accessControlUtil.hasAdminAccess()) {
+        return forbidden('Only administrators can update the CDN logs filter');
       }
 
       if (!isObject(data)) {
@@ -890,8 +890,8 @@ function LlmoController(ctx) {
       }
       const { site, config } = siteValidation;
 
-      if (!await accessControlUtil.hasLlmoCapabilityForSite(site)) {
-        return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can update the CDN bucket config'));
+      if (!accessControlUtil.hasAdminAccess()) {
+        return forbidden('Only administrators can update the CDN bucket config');
       }
 
       if (!isObject(data)) {
