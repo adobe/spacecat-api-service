@@ -81,6 +81,16 @@ export function transformUrlPromptsResponse(raw) {
   const rows = Array.isArray(raw?.blocks?.data) ? raw.blocks.data : [];
   return rows.map((row) => ({
     prompt: typeof row?.prompt === 'string' ? row.prompt : '',
+    // PG url-prompts contract (this endpoint will replace it). The Semrush element
+    // exposes none of these, so they are empty/0 — kept for shape parity so the swap
+    // is a no-op for consumers. `citations` is 0, not a real count: the element
+    // returns one row per distinct prompt with no per-prompt citation count.
+    category: '',
+    region: '',
+    topics: '',
+    citations: 0,
+    // SR-only extras (additional keys; harmless to a PG consumer): power the SR
+    // details dialog's Prompt / Brands mentioned / Last cited columns.
     sourceTitle: typeof row?.source_title === 'string' ? row.source_title : '',
     brandMentioned: typeof row?.brand_mentioned === 'string' ? row.brand_mentioned : '',
     brands: typeof row?.brands_string === 'string' && row.brands_string

@@ -94,6 +94,10 @@ describe('url-prompts definitions', () => {
       };
       expect(transformUrlPromptsResponse(raw)).to.deep.equal([{
         prompt: 'What size Lovesac sectional is best for a studio apartment?',
+        category: '',
+        region: '',
+        topics: '',
+        citations: 0,
         sourceTitle: 'Modular Sectional Couches | Lovesac Sactionals',
         brandMentioned: 'mentioned',
         brands: ['Lovesac', 'Figma'],

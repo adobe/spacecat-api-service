@@ -977,9 +977,9 @@ export default function ElementsController(context, log, env) {
    * see url-prompts.js). Pagination is client-side; `totalCount` is the full count.
    *
    * Query params: `url` (required, the cited URL), `startDate`/`endDate` (required,
-   * YYYY-MM-DD), `model`/`platform` (optional, default search-gpt), `page` (0-based),
-   * `pageSize` (1..1000, default 50). `siteId` is accepted but ignored (the sub-workspace
-   * authorization already scopes to the brand).
+   * YYYY-MM-DD), `model`/`platform` (optional, default search-gpt). `siteId` is accepted
+   * but ignored (the sub-workspace authorization already scopes to the brand). Returns the
+   * full prompt list in one `{ prompts }` envelope, matching the PG url-prompts endpoint.
    */
   /* c8 ignore start -- LLMO-6620 POC endpoint; unit tests deferred (see url-prompts.js tests) */
   const listUrlPrompts = async (ctx) => {
@@ -1021,23 +1021,16 @@ export default function ElementsController(context, log, env) {
       }
 
       const service = await buildService(ctx);
-      const allPrompts = await service.getUrlPrompts(workspaceId, {
+      const prompts = await service.getUrlPrompts(workspaceId, {
         url,
         model: query.model || query.platform,
         startDate,
         endDate,
       });
 
-      // Client-side pagination (mirrors listOwnedUrls/listTopicPrompts); totalCount is full.
-      const page = Math.max(0, Number.parseInt(query.page, 10) || 0);
-      const pageSize = Math.min(Math.max(1, Number.parseInt(query.pageSize, 10) || 50), 1000);
-      const totalCount = allPrompts.length;
-      const offset = page * pageSize;
-      const prompts = allPrompts.slice(offset, offset + pageSize);
-
-      return cachedOk({
-        url, prompts, totalCount, page, pageSize,
-      });
+      // Match the PG url-prompts envelope this endpoint will replace: a bare `{ prompts }`
+      // with no server-side pagination (the element returns the full list in one call).
+      return cachedOk({ prompts });
     } catch (e) {
       return mapError(e, log);
     }
