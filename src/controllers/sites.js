@@ -20,6 +20,7 @@ import {
   notFound,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
+import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import {
   hasText,
   isBoolean,
@@ -63,6 +64,8 @@ import { listViewableResourceIds } from '../support/state-access-mapping-utils.j
 import { requirePostgrestForFacsMappings } from '../support/postgrest-availability.js';
 import { isFacsRebacResource } from '../routes/facs-capabilities.js';
 import { ASO_PRODUCT_CODE, STATUSES as PLG_STATUSES } from './plg/plg-onboarding/constants.js';
+
+const VALIDATION_ERROR_NAME = 'ValidationError';
 
 /**
  * Builds the standard resolve-site success payload.
@@ -1115,8 +1118,11 @@ function SitesController(ctx, log, env) {
       try {
         site.setConfig(merged);
       } catch (error) {
-        if (error?.name === 'ValidationError') {
-          return badRequest(error.message);
+        if (error?.name === VALIDATION_ERROR_NAME) {
+          // cleanupHeaderValue strips chars HTTP headers can't carry (CR/LF and
+          // non-ASCII that would otherwise throw ERR_INVALID_CHAR); the Joi error
+          // message can echo back arbitrary request input.
+          return badRequest(cleanupHeaderValue(error.message || 'Invalid config').slice(0, 500));
         }
         throw error;
       }
