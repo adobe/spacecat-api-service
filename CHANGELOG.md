@@ -1,3 +1,10 @@
+## [1.700.3](https://github.com/adobe/spacecat-api-service/compare/v1.700.2...v1.700.3) (2026-07-29)
+
+
+### Bug Fixes
+
+* **test:** create sinon fakes per test, not at module scope ([#2934](https://github.com/adobe/spacecat-api-service/issues/2934)) ([aefe781](https://github.com/adobe/spacecat-api-service/commit/aefe781d7e02c9f46512eaa5e5dcc63a05abbb04)), closes [Hi#level](https://github.com/Hi/issues/level) [#2932](https://github.com/adobe/spacecat-api-service/issues/2932)
+
 ## [1.700.2](https://github.com/adobe/spacecat-api-service/compare/v1.700.1...v1.700.2) (2026-07-29)
 
 
