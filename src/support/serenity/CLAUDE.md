@@ -6,8 +6,10 @@ to lean on the typed API clients and typed models as hard as possible so we make
 fewer wiring mistakes against Semrush / data-access / PostgREST.
 
 See `docs/decisions/005-opt-in-type-checking.md` for the why and the ratchet
-plan. `npm run type-check` (`tsc -p tsconfig.json`) is a **blocking** gate in CI
-(`.github/workflows/ci.yaml`) and in `.husky/pre-commit`.
+plan. `npm run type-check` is a **blocking** gate in CI
+(`.github/workflows/ci.yaml`) and in `.husky/pre-commit`. It runs two tiers: the
+base pass over every `// @ts-check` file, then a strict pass (`noImplicitAny`)
+over the smaller file list in `tsconfig.strict.json`.
 
 ## Rules for every JS file here
 
@@ -24,10 +26,29 @@ plan. `npm run type-check` (`tsc -p tsconfig.json`) is a **blocking** gate in CI
    PostgREST calls or `any`. If a value is genuinely untyped, narrow or assert it
    locally at the boundary — never widen a shared helper's signature to make a
    call site compile.
-4. **Write complete JSDoc `@param` tags.** Incomplete tags break TS's
-   `@param`→param mapping (e.g. a destructured options arg with `= []`/`= {}`
-   defaults then infers `never[]`/missing-prop errors). Document every positional
-   param, in order.
+4. **Write JSDoc `@param` tags in signature order, and never stop short of a
+   destructured options arg.** Tags bind to parameters positionally, so an options
+   arg with `= []`/`= {}` defaults that sits behind an undocumented positional
+   infers `never[]`/missing-prop errors — document every param up to and including
+   it. Documenting a *prefix* of the signature is fine and common: annotate the
+   params whose types are knowable and leave the rest. Know what that costs,
+   though — an undocumented param is implicitly `any`, and TS treats it as
+   **optional**, so it is unchecked and it does not contribute to arity checking.
+   Prefer completing the signature when the types are obvious.
+5. **Annotate the transport `@param {SerenityTransport} transport`** — never
+   `{object}` or `{any}`. Import the typedef once per file:
+   `/** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */`.
+   An `{object}`-annotated value is `any`, which erases member existence, argument
+   count *and* argument types on every call made through it, so the generated
+   Semrush types are never reached. The same applies to any other value whose type
+   is knowable — reach for the named type rather than `{object}`.
+6. **A new transport method documents its own parameters.** Naming the transport is
+   only half the gate: an undocumented parameter is implicitly `any` and TS therefore
+   treats it as *optional*, so a method with no `@param` tags accepts any argument
+   count. Derive request shapes from the generated contracts (see the typedefs at the
+   top of `rest-transport.js`) instead of restating them, so a vendor spec change
+   fails the build here rather than reaching the wire.
+   `test/types/base/serenity-transport.types.js` pins both halves.
 
 ## Known idioms / gotchas (matched in the existing files)
 
@@ -45,6 +66,12 @@ plan. `npm run type-check` (`tsc -p tsconfig.json`) is a **blocking** gate in CI
   the options object and its fields optional in JSDoc (`@param {object} [opts]`,
   `@param {string} [opts.foo]`) and narrow the fields before use — otherwise the
   `= {}` default trips a "missing required properties" error.
+- **Unknown members are NOT reported here.** `noImplicitAny: false` suppresses
+  `TS2339` in JS files outright — even against a fully-typed receiver — so
+  `transport.noSuchMethod()` and a wrong assumption about a response's shape both
+  compile clean. Only the strict tier reports them, and it covers
+  `rest-transport.js` alone today. Don't read a green `type-check` as proof that a
+  member exists.
 - Pragmatic floor (see ADR-005): `noImplicitAny: false` and
   `useUnknownInCatchVariables: false`. Don't rely on those staying relaxed — the
-  ratchet tightens them later.
+  ratchet tightens them later, per file, via `tsconfig.strict.json`.

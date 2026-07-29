@@ -246,6 +246,9 @@ describe('provisionBrandSubworkspace', () => {
       // subworkspace write path (LLMO-6190).
       dynamicAllocation: false,
       ceiling: undefined,
+      // Caller identity for the created_* stamp (LLMO-6289); the test context
+      // has no auth profile → the `unknown` sentinel.
+      callerId: 'unknown',
     });
     // The stub drives the sub-workspace title off the brand's display name.
     expect(brandStub.getName()).to.equal('Acme');
@@ -326,6 +329,22 @@ describe('provisionBrandSubworkspace', () => {
     expect(options.generateTopics).to.equal(false);
     expect(options.topicCap).to.equal(0);
     expect(options.publishMode).to.equal('best-effort');
+  });
+
+  it('leaves the initial market a DRAFT (publishMode "skip") when SERENITY_DEFER_PUBLISH is on (LLMO-5492)', async () => {
+    const { provisionBrandSubworkspace } = await loadModule({
+      resolveWorkspaceId, handleCreateMarketSubworkspace,
+    });
+    const context = buildContext();
+    context.env.SERENITY_DEFER_PUBLISH = 'true';
+    // modelIds + generateTopics would normally force publishMode 'require'; the
+    // defer-publish flag overrides it so the create path leaves a draft for finalize.
+    await provisionBrandSubworkspace(context, {
+      ...baseParams, modelIds: ['m1'], generateTopics: true,
+    });
+    const { args } = handleCreateMarketSubworkspace.firstCall;
+    const [, , , , , , , options] = args;
+    expect(options.publishMode).to.equal('skip');
   });
 
   it('forwards brandAliases to the handler for branded prompt classification', async () => {
