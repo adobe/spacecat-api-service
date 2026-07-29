@@ -1112,7 +1112,14 @@ function SitesController(ctx, log, env) {
       if (auditTargetURLsResult?.normalized !== undefined) {
         merged.auditTargetURLs = auditTargetURLsResult.normalized;
       }
-      site.setConfig(merged);
+      try {
+        site.setConfig(merged);
+      } catch (error) {
+        if (error?.name === 'ValidationError') {
+          return badRequest(error.message);
+        }
+        throw error;
+      }
       updates = true;
     }
 
