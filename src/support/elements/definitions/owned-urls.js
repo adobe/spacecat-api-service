@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { resolveElementModel } from '../constants.js';
+import { resolveElementModel, normalizeChannel } from '../constants.js';
 import { dateToIsoWeek } from '../week-utils.js';
 
 /* c8 ignore start -- LLMO-6086 POC endpoint; unit tests intentionally deferred */
@@ -104,9 +104,13 @@ export function buildOwnedUrlsTrendPayload({
  *   urlId ('' — Semrush has no source_urls.id), products ([]), weeklyPromptsCited ([]).
  *
  * Only `domain_type='Owned'` rows are kept (client-side; the element ignores a
- * server-side content-type filter). Returns the FULL owned list sorted by
- * citations desc — the controller applies client-side pagination and then joins
- * traffic for just the page's URLs (Semrush has no server-side pagination).
+ * server-side content-type filter), via {@link normalizeChannel} for a
+ * case/format-insensitive match. This endpoint is owned-only BY DESIGN — unlike
+ * cited-domains/domain-urls, it does NOT take a `channel` param; any such
+ * param on the request is ignored (see the controller). Returns the FULL owned
+ * list sorted by citations desc — the controller applies client-side pagination
+ * and then joins traffic for just the page's URLs (Semrush has no server-side
+ * pagination).
  *
  * @param {Array<{region?: string, stats: object, trend: object}>} projectResults
  * @returns {Array<object>} Full owned-URL list, sorted by citations desc.
@@ -127,13 +131,13 @@ export function transformOwnedUrlsResponse(projectResults = []) {
 
   for (const { region, stats, trend } of projectResults) {
     for (const row of (stats?.blocks?.data ?? [])) {
-      // Owned filter is client-side: the element ignores a server-side
+      // Channel filter is client-side: the element ignores a server-side
       // content-type filter (verified on cited-domains).
       if (!row || row.source == null) {
         // eslint-disable-next-line no-continue
         continue;
       }
-      if (String(row.domain_type ?? '').toLowerCase() !== 'owned') {
+      if (normalizeChannel(row.domain_type) !== 'owned') {
         // eslint-disable-next-line no-continue
         continue;
       }
