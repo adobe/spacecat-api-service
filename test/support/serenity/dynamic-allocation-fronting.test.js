@@ -132,23 +132,24 @@ describe('dynamic-allocation fronting — create-market', () => {
     expect(t.getWorkspaceResources.calledBefore(t.publishProject)).to.equal(true);
   });
 
-  it('ON + covered child: NO transfer at all — proves the flat re-grant carve is skipped', async () => {
+  it('ON + covered child: NO transfer at all', async () => {
     const t = makeTransport();
     await handleCreateMarketSubworkspace(t, makeBrand(), PARENT, createBody, log, null, null, {
       dynamicAllocation: true, parentWorkspaceId: MASTER, publishMode: 'require',
     });
-    // With the flag ON, ensureSubworkspace skips the flat resourceAllocation re-grant AND the
-    // covered child needs no JIT top-up → zero transfers.
+    // ensureSubworkspace never transfers an allocation, and a covered child needs no JIT
+    // top-up → zero transfers.
     expect(t.transferWorkspaceResources).to.not.have.been.called;
   });
 
-  it('OFF: byte-for-byte — the flat re-grant transfer still runs and NO headroom read happens', async () => {
+  it('OFF: no transfer and no headroom read — the whole allocation surface is inert', async () => {
     const t = makeTransport();
     await handleCreateMarketSubworkspace(t, makeBrand(), PARENT, createBody, log, null, null, {
       dynamicAllocation: false, parentWorkspaceId: MASTER, publishMode: 'require',
     });
-    // Flag OFF: the pre-PR flat re-grant transfer runs, and the guard is a genuine no-op.
-    expect(t.transferWorkspaceResources).to.have.been.called;
+    // Flag OFF: the guard is a genuine no-op, and nothing else transfers resources either — a
+    // market create issues zero calls against the Semrush resource endpoints (issue #2922).
+    expect(t.transferWorkspaceResources).to.not.have.been.called;
     expect(t.getWorkspaceResources).to.not.have.been.called;
   });
 
