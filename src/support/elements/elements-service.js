@@ -254,13 +254,19 @@ export function createElementsService(transport, log) {
      *   page, pageSize).
      * @param {string[]} [params.projectIds] - Semrush project ids to scope to. The
      *   element only accepts one project per call, so more than one id fans out a
-     *   call per project (bounded concurrency) and merges the results.
+     *   call per project (bounded concurrency) and merges the results. Deduplicated
+     *   here as a safety net — a repeated id would otherwise double-count that
+     *   project's citations in the merge (the controller already dedupes, but this
+     *   fan-out is where a duplicate would actually corrupt counts, so it dedupes
+     *   independently rather than relying solely on the caller).
      * @returns {Promise<object>} Legacy contract `{ domains: [...], totalCount }`.
      */
     /* c8 ignore start -- LLMO-6020 POC endpoint; unit tests intentionally deferred */
     async getCitedDomains(workspaceId, params) {
       const { projectIds, ...rest } = params;
-      const ids = Array.isArray(projectIds) ? projectIds.filter(hasText) : [];
+      const ids = Array.isArray(projectIds)
+        ? [...new Set(projectIds.filter(hasText))]
+        : [];
       if (ids.length > 1) {
         const CITED_DOMAINS_PROJECT_CONCURRENCY = 8;
         const rawList = await mapWithConcurrency(

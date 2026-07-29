@@ -887,10 +887,26 @@ describe('createElementsService', () => {
       expect(payload.project_id).to.equal('proj-us');
     });
 
-    it('propagates a rejected upstream call rather than swallowing it', async () => {
+    it('deduplicates a repeated projectId before fanning out (no double-counted citations)', async () => {
+      transport.fetchElement.resolves(rawWith(domainRow({ mentions_end: 5 })));
+      const result = await service.getCitedDomains('ws-1', { projectIds: ['proj-us', 'proj-us'] });
+      expect(transport.fetchElement).to.have.been.calledOnce;
+      expect(result.domains[0].totalCitations).to.equal(5);
+    });
+
+    it('propagates a rejected upstream call rather than swallowing it (single-call path)', async () => {
       const upstreamError = new Error('Elements API POST failed: 502');
       transport.fetchElement.rejects(upstreamError);
       await expect(service.getCitedDomains('ws-1', {})).to.be.rejectedWith(upstreamError);
+    });
+
+    it('propagates a rejected upstream call from the fan-out (mapWithConcurrency) path', async () => {
+      const upstreamError = new Error('Elements API POST failed: 502');
+      transport.fetchElement.rejects(upstreamError);
+      await expect(
+        service.getCitedDomains('ws-1', { projectIds: ['proj-a', 'proj-b'] }),
+      ).to.be.rejectedWith(upstreamError);
+      expect(transport.fetchElement).to.have.been.calledTwice;
     });
   });
 });

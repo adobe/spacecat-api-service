@@ -1119,8 +1119,8 @@ v2-serenity-url-inspector-filter-dimensions:
         description: |
           Comma-separated Semrush project UUIDs to scope the Topics element to
           (e.g. `projectId=<uuid1>,<uuid2>`). Alias `project_id`. Omitted →
-          the Topics element is unscoped.
-        schema: { type: string }
+          the Topics element is unscoped. Maximum 8 ids; each must be a valid UUID (400 otherwise).
+        schema: { type: string, pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}){0,7}$' }
       - name: project_id
         in: query
         required: false
@@ -1246,8 +1246,8 @@ v2-serenity-brand-presence-sentiment-overview:
         description: |
           Comma-separated Semrush project UUIDs to scope to (e.g.
           `projectId=<uuid1>,<uuid2>`). Alias `project_id`. Omitted →
-          aggregate across the brand's markets.
-        schema: { type: string }
+          aggregate across the brand's markets. Maximum 8 ids; each must be a valid UUID (400 otherwise).
+        schema: { type: string, pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}){0,7}$' }
       - name: project_id
         in: query
         required: false
@@ -1345,8 +1345,8 @@ v2-serenity-brand-presence-topics:
         description: |
           Comma-separated Semrush project UUIDs to scope to (e.g.
           `projectId=<uuid1>,<uuid2>`). Alias `project_id`. Omitted →
-          across the brand's markets.
-        schema: { type: string }
+          across the brand's markets. Maximum 8 ids; each must be a valid UUID (400 otherwise).
+        schema: { type: string, pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}){0,7}$' }
       - name: project_id
         in: query
         required: false
@@ -1444,8 +1444,8 @@ v2-serenity-brand-presence-topic-prompts:
         description: |
           Comma-separated Semrush project UUIDs to scope to (e.g.
           `projectId=<uuid1>,<uuid2>`). Alias `project_id`. Omitted →
-          across the brand's markets.
-        schema: { type: string }
+          across the brand's markets. Maximum 8 ids; each must be a valid UUID (400 otherwise).
+        schema: { type: string, pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}){0,7}$' }
       - name: project_id
         in: query
         required: false
@@ -1591,8 +1591,8 @@ v2-serenity-brand-presence-stats:
         description: |
           Comma-separated Semrush project UUIDs to scope to (e.g.
           `projectId=<uuid1>,<uuid2>`). Alias `project_id`. When omitted,
-          aggregates across every project the brand owns.
-        schema: { type: string }
+          aggregates across every project the brand owns. Maximum 8 ids; each must be a valid UUID (400 otherwise).
+        schema: { type: string, pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}){0,7}$' }
       - name: project_id
         in: query
         required: false
@@ -1743,8 +1743,8 @@ v2-serenity-url-inspector-stats:
         description: |
           Comma-separated Semrush project UUIDs to scope to (e.g.
           `projectId=<uuid1>,<uuid2>`). Alias `project_id`. Omitted
-          aggregates across every project the brand owns.
-        schema: { type: string }
+          aggregates across every project the brand owns. Maximum 8 ids; each must be a valid UUID (400 otherwise).
+        schema: { type: string, pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}){0,7}$' }
       - name: project_id
         in: query
         required: false
@@ -1860,8 +1860,8 @@ v2-serenity-url-inspector-prompts-count:
         description: |
           Comma-separated Semrush project UUIDs to scope to (e.g.
           `projectId=<uuid1>,<uuid2>`). Alias `project_id`. Omitted
-          aggregates across every project the brand owns.
-        schema: { type: string }
+          aggregates across every project the brand owns. Maximum 8 ids; each must be a valid UUID (400 otherwise).
+        schema: { type: string, pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}){0,7}$' }
       - name: project_id
         in: query
         required: false
@@ -1986,8 +1986,8 @@ v2-serenity-market-tracking-trends:
         description: |
           Comma-separated Semrush project UUIDs to scope to (e.g.
           `projectId=<uuid1>,<uuid2>`). Alias `project_id`. Absent
-          aggregates across every project the brand owns.
-        schema: { type: string }
+          aggregates across every project the brand owns. Maximum 8 ids; each must be a valid UUID (400 otherwise).
+        schema: { type: string, pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}){0,7}$' }
       - name: project_id
         in: query
         required: false
@@ -2115,8 +2115,8 @@ v2-serenity-kpi-headlines:
         description: |
           Comma-separated Semrush project UUIDs to scope to (e.g.
           `projectId=<uuid1>,<uuid2>`). Alias `project_id`. Absent
-          aggregates across every project the brand owns.
-        schema: { type: string }
+          aggregates across every project the brand owns. Maximum 8 ids; each must be a valid UUID (400 otherwise).
+        schema: { type: string, pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}){0,7}$' }
       - name: project_id
         in: query
         required: false
@@ -2253,8 +2253,8 @@ v2-serenity-source-visibility-headline:
         description: |
           Comma-separated Semrush project UUIDs to scope to (e.g.
           `projectId=<uuid1>,<uuid2>`). Alias `project_id`. Absent
-          aggregates across every project the brand owns.
-        schema: { type: string }
+          aggregates across every project the brand owns. Maximum 8 ids; each must be a valid UUID (400 otherwise).
+        schema: { type: string, pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}){0,7}$' }
       - name: project_id
         in: query
         required: false
@@ -2386,8 +2386,8 @@ v2-serenity-competitor-summary:
         description: |
           Comma-separated Semrush project UUIDs to scope to (e.g.
           `projectId=<uuid1>,<uuid2>`). Alias `project_id`. Absent
-          aggregates across every project the brand owns.
-        schema: { type: string }
+          aggregates across every project the brand owns. Maximum 8 ids; each must be a valid UUID (400 otherwise).
+        schema: { type: string, pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}){0,7}$' }
       - name: project_id
         in: query
         required: false

@@ -65,6 +65,35 @@ async function fetchBrandSemrushProjects(BrandSemrushProject, brands) {
   return perBrand.flat().map(toPlainProject);
 }
 
+/**
+ * Authorization check for caller-supplied `projectId`(s): every id must be one
+ * this brand actually owns (per its `BrandSemrushProject` rows — the same
+ * source the aggregate "all projects" view already uses), or a caller who
+ * knows another brand's Semrush project UUID could scope a query to that
+ * brand's data. This is the invariant `resolveRegionProjectId` used to
+ * enforce implicitly (a region only ever resolved to a project the Markets
+ * element tied back to the caller's own brand); a raw caller-supplied id has
+ * no such lookup, so it must be checked explicitly here instead.
+ *
+ * @param {string[]} requestedProjectIds - Parsed `projectId` query value.
+ * @param {object[]} brandSemrushProjects - This brand's `BrandSemrushProject`
+ *   rows (plain objects with `semrushProjectId`).
+ * @returns {Response|null} A 403 `Response` if any id isn't owned by the
+ *   brand; `null` when the aggregate view was requested (no ids) or every id
+ *   checks out.
+ */
+function checkProjectIdsOwnership(requestedProjectIds, brandSemrushProjects) {
+  if (requestedProjectIds.length === 0) {
+    return null;
+  }
+  const owned = new Set(brandSemrushProjects.map((p) => p.semrushProjectId));
+  const unauthorized = requestedProjectIds.filter((id) => !owned.has(id));
+  if (unauthorized.length > 0) {
+    return forbidden(`projectId not owned by this brand: ${unauthorized.join(', ')}`);
+  }
+  return null;
+}
+
 function safeError(msg) {
   return cleanupHeaderValue(String(msg || '')).slice(0, MAX_ERR_MSG_LEN);
 }
@@ -158,6 +187,15 @@ function splitCsv(value) {
   return value.split(',').map((v) => v.trim()).filter((v) => v.length > 0);
 }
 
+// Upper bound on how many project ids a caller can pass in one `projectId` CSV
+// value. Unlike the old `region` param — where the Markets-element lookup
+// implicitly rejected anything that wasn't a real market — a caller-supplied
+// project id is used as-is with no lookup, so nothing else caps the fan-out
+// (CITED_DOMAINS/STATS_PER_URL/URL_TRENDS issue one upstream call per id) or
+// the size of the CBF_project/CBF_projects OR-filter sent to every other
+// element. This cap bounds both.
+const MAX_PROJECT_IDS = 8;
+
 /**
  * Extracts caller-supplied Semrush project ids from the `projectId`/`project_id`
  * query param (CSV, e.g. `projectId=uuid1,uuid2`). Replaces the old single-value
@@ -166,11 +204,41 @@ function splitCsv(value) {
  * via the Markets element. Absent/empty → caller wants the aggregate view across
  * every project the brand owns.
  *
+ * Deduplicates (order-preserving) before validating: a repeated id is harmless
+ * for the `CBF_project`/`CBF_projects` OR-filter builders (a duplicated `eq`
+ * term is a no-op), but the CITED_DOMAINS/STATS_PER_URL/URL_TRENDS per-project
+ * fan-out issues one upstream call per id and sums the results — an
+ * undeduplicated `projectId=X,X` would double-count that project's citations.
+ * Dedup happens before the count cap so a caller repeating the same id many
+ * times isn't rejected for exceeding {@link MAX_PROJECT_IDS}.
+ *
+ * Validates each id is a UUID and caps the (deduplicated) count at
+ * {@link MAX_PROJECT_IDS} — with no Markets-element lookup in this path
+ * anymore, nothing else rejects a malformed or excessively long id list before
+ * it reaches the upstream calls.
+ *
  * @param {object} query - Parsed query params (from `extractQuery`).
- * @returns {string[]} Requested project ids, or [] for the aggregate view.
+ * @returns {string[]} Deduplicated, requested project ids, or [] for the
+ *   aggregate view.
+ * @throws {ErrorWithStatusCode} 400 if more than {@link MAX_PROJECT_IDS}
+ *   (deduplicated) ids are given, or any id is not a valid UUID.
  */
 function extractProjectIds(query) {
-  return splitCsv(query.projectId || query.project_id);
+  const ids = [...new Set(splitCsv(query.projectId || query.project_id))];
+  if (ids.length > MAX_PROJECT_IDS) {
+    throw new ErrorWithStatusCode(
+      `projectId supports at most ${MAX_PROJECT_IDS} comma-separated ids (received ${ids.length})`,
+      400,
+    );
+  }
+  const invalidIds = ids.filter((id) => !isValidUUID(id));
+  if (invalidIds.length > 0) {
+    throw new ErrorWithStatusCode(
+      `projectId must be a comma-separated list of UUIDs (invalid: ${invalidIds.join(', ')})`,
+      400,
+    );
+  }
+  return ids;
 }
 
 /**
@@ -454,6 +522,10 @@ export default function ElementsController(context, log, env) {
     let projects;
     let projectIds;
     const requestedProjectIds = extractProjectIds(query);
+    const ownershipError = checkProjectIdsOwnership(requestedProjectIds, brandSemrushProjects);
+    if (ownershipError) {
+      return { error: ownershipError };
+    }
     if (requestedProjectIds.length > 0) {
       projects = requestedProjectIds.map((projectId) => ({ projectId }));
       projectIds = requestedProjectIds;
@@ -505,10 +577,17 @@ export default function ElementsController(context, log, env) {
       );
 
       const query = extractQuery(ctx);
+      // Any caller-supplied id must belong to this brand — otherwise it could scope the
+      // Topics element to another brand's data.
+      const projectIds = extractProjectIds(query);
+      const ownershipError = checkProjectIdsOwnership(projectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
       const service = await buildService(ctx);
       const result = await service.getUrlInspectorFilterDimensions(
         auth.workspaceId,
-        { ...query, projectIds: extractProjectIds(query) },
+        { ...query, projectIds },
         spacecatBrands,
         brandSemrushProjects,
       );
@@ -607,7 +686,7 @@ export default function ElementsController(context, log, env) {
       // resolved the brand's Semrush **sub-workspace** — every element is scoped by that
       // workspace, not the org's (LLMO-5990/6029). The URL Inspector UI has no brand picker,
       // so it cross-maps its selected site → brandId before calling.
-      const { workspaceId } = auth;
+      const { workspaceId, brand } = auth;
       const query = extractQuery(ctx);
 
       // Date range is required (the UI always sends it) and must be a valid YYYY-MM-DD —
@@ -630,8 +709,15 @@ export default function ElementsController(context, log, env) {
       const service = await buildService(ctx);
 
       // Project scoping: caller-supplied projectId(s) (CSV) scope directly to those
-      // Semrush projects; absent → all of the brand's markets.
+      // Semrush projects; absent → all of the brand's markets. Any caller-supplied id
+      // must belong to this brand — otherwise it could scope to another brand's data.
       const projectIds = extractProjectIds(query);
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
+      const ownershipError = checkProjectIdsOwnership(projectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
 
       // Explicitly pick the params the service needs (normalizing the aliases the UI may send
       // under either casing/key) rather than spreading all raw query keys through. `category`
@@ -670,7 +756,7 @@ export default function ElementsController(context, log, env) {
       if (auth.error) {
         return auth.error;
       }
-      const { workspaceId } = auth;
+      const { workspaceId, brand } = auth;
       const query = extractQuery(ctx);
 
       // Date range is required + validated (mirrors cited-domains) — never silently
@@ -698,8 +784,15 @@ export default function ElementsController(context, log, env) {
       const service = await buildService(ctx);
 
       // Project scoping: caller-supplied projectId(s) (CSV) → `CBF_project` filter;
-      // absent → aggregate across all the brand's markets.
+      // absent → aggregate across all the brand's markets. Any caller-supplied id
+      // must belong to this brand — otherwise it could scope to another brand's data.
       const projectIds = extractProjectIds(query);
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
+      const ownershipError = checkProjectIdsOwnership(projectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
 
       const params = {
         projectIds,
@@ -738,6 +831,7 @@ export default function ElementsController(context, log, env) {
       if (auth.error) {
         return auth.error;
       }
+      const { brandId } = ctx?.params ?? {};
       const { workspaceId } = auth;
       const query = extractQuery(ctx);
 
@@ -756,7 +850,18 @@ export default function ElementsController(context, log, env) {
       const service = await buildService(ctx);
 
       // Project scoping: caller-supplied projectId(s) (CSV) → CBF_project; absent → all markets.
+      // Any caller-supplied id must belong to this brand — otherwise it could scope to
+      // another brand's data.
       const projectIds = extractProjectIds(query);
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const brandSemrushProjects = await fetchBrandSemrushProjects(
+        BrandSemrushProject,
+        [{ id: brandId }],
+      );
+      const ownershipError = checkProjectIdsOwnership(projectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
 
       const topics = await service.getTopics(workspaceId, {
         model: query.model || query.platform,
@@ -794,7 +899,7 @@ export default function ElementsController(context, log, env) {
       if (auth.error) {
         return auth.error;
       }
-      const { topicId } = ctx?.params ?? {};
+      const { brandId, topicId } = ctx?.params ?? {};
       const { workspaceId } = auth;
 
       // :topicId is the URL-encoded topic NAME. enrichPathInfo already decodes path
@@ -825,7 +930,18 @@ export default function ElementsController(context, log, env) {
       const service = await buildService(ctx);
 
       // Project scoping: caller-supplied projectId(s) (CSV) → CBF_project; absent → all markets.
+      // Any caller-supplied id must belong to this brand — otherwise it could scope to
+      // another brand's data.
       const projectIds = extractProjectIds(query);
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const brandSemrushProjects = await fetchBrandSemrushProjects(
+        BrandSemrushProject,
+        [{ id: brandId }],
+      );
+      const ownershipError = checkProjectIdsOwnership(projectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
 
       const allPrompts = await service.getTopicPrompts(workspaceId, {
         topic,
@@ -914,8 +1030,14 @@ export default function ElementsController(context, log, env) {
       // Scope per project: caller-supplied projectId(s) → those projects; otherwise
       // all the brand's markets. Per-project keeps each element call under the
       // Semrush 50k-row cap and lets the transform tag each URL with its project.
+      // Any caller-supplied id must belong to this brand — otherwise it could scope to
+      // another brand's data.
       let projects;
       const requestedProjectIds = extractProjectIds(query);
+      const ownershipError = checkProjectIdsOwnership(requestedProjectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
       if (requestedProjectIds.length > 0) {
         projects = requestedProjectIds.map((projectId) => ({ projectId }));
       } else {
@@ -1014,8 +1136,14 @@ export default function ElementsController(context, log, env) {
       // Scope per project: caller-supplied projectId(s) → those projects; otherwise
       // all the brand's markets. Per-project keeps each element call under the
       // Semrush 50k-row cap and lets the transform tag each URL with its project.
+      // Any caller-supplied id must belong to this brand — otherwise it could scope to
+      // another brand's data.
       let projects;
       const requestedProjectIds = extractProjectIds(query);
+      const ownershipError = checkProjectIdsOwnership(requestedProjectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
       if (requestedProjectIds.length > 0) {
         projects = requestedProjectIds.map((projectId) => ({ projectId }));
       } else {
@@ -1117,8 +1245,13 @@ export default function ElementsController(context, log, env) {
 
       // Caller-supplied projectId(s) scope directly to those Semrush projects; absent
       // → every project the brand owns (the payload builder ORs them into one call, so
-      // neither path fans out).
+      // neither path fans out). Any caller-supplied id must belong to this brand —
+      // otherwise it could scope to another brand's data.
       const requestedProjectIds = extractProjectIds(query);
+      const ownershipError = checkProjectIdsOwnership(requestedProjectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
       let projectIds = requestedProjectIds;
       if (projectIds.length === 0) {
         projectIds = brandSemrushProjects
@@ -1211,8 +1344,13 @@ export default function ElementsController(context, log, env) {
 
       // Caller-supplied projectId(s) map directly to Semrush project ids — the
       // common case, needing no fan-out. Absent → aggregate "all projects" view,
-      // scoped to every project this brand owns.
+      // scoped to every project this brand owns. Any caller-supplied id must
+      // belong to this brand — otherwise it could scope to another brand's data.
       const requestedProjectIds = extractProjectIds(query);
+      const ownershipError = checkProjectIdsOwnership(requestedProjectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
       let projectIds = requestedProjectIds;
       if (projectIds.length === 0) {
         projectIds = brandSemrushProjects
@@ -1433,7 +1571,13 @@ export default function ElementsController(context, log, env) {
       const { BrandSemrushProject } = ctx?.dataAccess ?? {};
       const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
 
+      // Any caller-supplied id must belong to this brand — otherwise it could scope to
+      // another brand's data.
       const requestedProjectIds = extractProjectIds(query);
+      const ownershipError = checkProjectIdsOwnership(requestedProjectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
       let projectIds = requestedProjectIds;
       if (projectIds.length === 0) {
         projectIds = brandSemrushProjects
@@ -1518,7 +1662,13 @@ export default function ElementsController(context, log, env) {
       const { BrandSemrushProject } = ctx?.dataAccess ?? {};
       const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
 
+      // Any caller-supplied id must belong to this brand — otherwise it could scope to
+      // another brand's data.
       const requestedProjectIds = extractProjectIds(query);
+      const ownershipError = checkProjectIdsOwnership(requestedProjectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
       let projectIds = requestedProjectIds;
       if (projectIds.length === 0) {
         projectIds = brandSemrushProjects
@@ -1605,7 +1755,13 @@ export default function ElementsController(context, log, env) {
       const { BrandSemrushProject } = ctx?.dataAccess ?? {};
       const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
 
+      // Any caller-supplied id must belong to this brand — otherwise it could scope to
+      // another brand's data.
       const requestedProjectIds = extractProjectIds(query);
+      const ownershipError = checkProjectIdsOwnership(requestedProjectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
       let projectIds = requestedProjectIds;
       if (projectIds.length === 0) {
         projectIds = brandSemrushProjects
