@@ -56,12 +56,13 @@ jobs:
         run: npm run type-check
 
   # TEMPORARY probe (chore/sr-sdk-artifactory) - do NOT merge.
-  # Answers whether a GitHub-hosted runner (public internet, off the Adobe corp
-  # network) can reach the Adobe Artifactory npm remote proxy that fronts
-  # Semrush's Google Artifact Registry, and whether off-corp read needs auth.
-  # No secret used: the repo (npm-quazar-gar-tf-remote) allows anonymous read
-  # from corp. This job proves or disproves that from CI before we commit to
-  # un-vendoring @quazar/ai-seo-ts. Remove before the migration PR is finalized.
+  # Settled already: the corp host artifactory.corp.adobe.com is behind Adobe's
+  # Banyan ZTNA gateway (interactive SSO) and is unusable from a public runner.
+  # Open question this job answers: is the MACHINE host artifactory-uw2.adobeitc.com
+  # (public TLS cert, token auth, used by mystique CI) reachable from a public
+  # GitHub-hosted runner? We expect HTTP 401 (reachable, needs a token, which we
+  # don't have yet). A timeout / http_code=000 / DNS failure means it is
+  # internal-only and GH-hosted CI can't use it either. No auth, no secret.
   sr-artifactory-probe:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -69,43 +70,25 @@ jobs:
     permissions:
       contents: read
     steps:
-      # Prior run: the runner reaches the host but npm/curl fail TLS with
-      # "unable to get local issuer certificate". From a corp-network machine the
-      # cert chains cleanly to public DigiCert, so the runner must receive a
-      # different chain. Read-only inspection to see what the runner actually gets
-      # (DNS target + full TLS chain + issuers + verify code). No TLS disabling.
-      - name: Inspect DNS + TLS chain from the runner
+      - name: Probe machine host reachability (no auth)
         run: |
-          HOST=artifactory.corp.adobe.com
+          set +e
+          HOST=artifactory-uw2.adobeitc.com
+          PKG="https://$HOST/artifactory/api/npm/npm-quazar-gar-tf-remote/@semrush%2fai-seo-ts"
           echo "== DNS resolution on the runner =="
-          getent ahosts "$HOST" || echo "(no getent result)"
-          echo "== TLS chain the runner receives =="
-          echo | openssl s_client -showcerts -connect "$HOST:443" -servername "$HOST" 2>/dev/null \
-            | grep -E "^ *[0-9]+ s:|^ *i:|Verify return code|CONNECTED" \
-            || echo "(openssl produced no chain output)"
-      # The runner hits an Adobe Banyan (ZTNA) gateway whose cert chains to the
-      # private "Adobe Enterprise Root CA". Trust that root (public cert, not a
-      # secret) and see what the gateway does: HTTP 200 means CA trust was the
-      # only barrier and read is anonymous; 401/403/redirect means the Zero Trust
-      # gateway also enforces device/identity and public runners can't get in.
-      - name: npm install with Adobe Enterprise Root CA trusted (the real fix)
-        env:
-          ADOBE_ROOT_CA_B64: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUZ0VENDQTUyZ0F3SUJBZ0lRUkpReFdaanFIeVErQThhUlFWbXFxakFOQmdrcWhraUc5dzBCQVFzRkFEQnoKTVFzd0NRWURWUVFHRXdKVlV6RWpNQ0VHQTFVRUNoTWFRV1J2WW1VZ1UzbHpkR1Z0Y3lCSmJtTnZjbkJ2Y21GMApaV1F4SERBYUJnTlZCQXNURTBWdWRHVnljSEpwYzJVZ1UyVmpkWEpwZEhreElUQWZCZ05WQkFNVEdFRmtiMkpsCklFVnVkR1Z5Y0hKcGMyVWdVbTl2ZENCRFFUQWVGdzB4TnpBMk1qY3dNREF3TURCYUZ3MDBOekEyTWpZeU16VTUKTlRsYU1ITXhDekFKQmdOVkJBWVRBbFZUTVNNd0lRWURWUVFLRXhwQlpHOWlaU0JUZVhOMFpXMXpJRWx1WTI5eQpjRzl5WVhSbFpERWNNQm9HQTFVRUN4TVRSVzUwWlhKd2NtbHpaU0JUWldOMWNtbDBlVEVoTUI4R0ExVUVBeE1ZClFXUnZZbVVnUlc1MFpYSndjbWx6WlNCU2IyOTBJRU5CTUlJQ0lqQU5CZ2txaGtpRzl3MEJBUUVGQUFPQ0FnOEEKTUlJQ0NnS0NBZ0VBdkN3TW9hellzK1VCaEx2akdKaStzYWFsM2FSSFZFc1FUbWxDNE9tOTJQd2xIaDU2Ym1rRwpvU3I2azc2bEZ3T2FGZ001ci9xZzZoQUd1bGlZczQ2bnRiUjZjVDF5dnFyT2VHTXlKMWhUc053TVF4MjY4cjFpCmM3dmVFQ0dMaWl5VDFRQ1pjZWg4cVpuQlBkUC9SRUkvQm45L1hkTmlnbmppT2Zka2l2Nzd1amZFdFdxVE9zbkYKTHlEVFZvdCtlRmpPRDJLamd2dExHaVJiUDJWWmdpTTZGZWhxd2pyL1RzRU5yU2pVZHZYQkRqVWpDOXhzb0phaApWb3JPcGdCYm5iL05IeExOaHcxTUVtUG81bzhMMFVodmZJT3V0c1BWN0ljdmtGc05wTG5aSEhtd0ZneGtBR29oCmZtdkFyangweStRNU02L2RaVkhTckxLdmdySnF2Y3hsZ2lVeG1YRm9UWitWamJVNFF1dXpBcVAxcFZML3JnQXgKZmdHOXNlTTc4bS9lMHJ2R0ZYdWlPVHFza1ZVVUJNZ3RPTkJBTzJreTZyNk42MytPcTFXNXQ2NG1qdlZlZjgrUwpvL2dsSDBSTHB2eXFZVjVJOUdERTd3L2FyRFBTNGRSYXVNN2JoZ2EvR0VVVmpPQlNlTTArQml2RlJsaEpGeDJMCk9DaHpPVXNNbnBBdHpYbmN1ZTFXUDNXWVpKY2NLZnNKbHBIck5vTjVoYmFXdXlWQUNzK1dNRDJYUTZnMmgreVYKNllqbFgvanpNNmRiL3JuOStIWjBHZUFWQlp1a1Q3V3R3YXBEVC9JWnZXZzZuZmoxa284Z011UFpNUnkwdzE0VgpKSnJKeEgrSUxFYVlWQys2eENNM3g5NUI2SStSdEhlcVV2SmkrbXVmbXRpOFo3d0VFTy9jZ1kwQ0F3RUFBYU5GCk1FTXdEZ1lEVlIwUEFRSC9CQVFEQWdFR01CSUdBMVVkRXdFQi93UUlNQVlCQWY4Q0FRRXdIUVlEVlIwT0JCWUUKRlAvWjRVY3p1U2M3WHVCTzlxdEgvdWJvbS9DdE1BMEdDU3FHU0liM0RRRUJDd1VBQTRJQ0FRQkwvQUZMU2tuZAprYXBRTDRpQVhFdXVLYWo1QjBjMTdwN1V5UU5WL3FxeWl6WitVVkFyOXZMS0xqa1VXMWRSREJHdUVtMzVQUjFuCjhDTmdLcFNrK1ZseEhBdW1qcjVvVXdkc25MczdtVWJqdHU1UDg3ckhRK1IrUmUvTENsZXVGaTIvbDhyeW9UUSsKMm8vT004WllySHhhVmlucWZVc3hwaUZtYTlXWDlQV05DNUlxZFByVGVFb2NKWnJtSFpzQjhCQ3FDWFBGRnlMRgpJTGJUU0JndVphckVQMm1nZkJ0NG85dU9PbVQramJiWUNZMU9jUnBKeFo4YVhtbWtHeTV2RUVuNFdrUlM2U0RqCjd5THVVUFM0Ymw5ZGZmaTltUm5lOHZhM29YRzFnUzFpR1Z1TTJsREovakN1RDRnYUxBZk1pNFRMelNiZ3hPcE4KMG9PdHpFbGtCMkxUbGJiaGV3M2VLbTdpOW9ZMnF2NUYwbU1LTW1EZ2M4Vk80V1hzK2VxVVRPUk1kbnZXSHkyVQpmMTVtY0NycmJ0ZFVSbmQzZ0xpU2N2a1VZUnhxTE5mK1dhVkhTdjNOMmF1VDJxck80MGFuRzNrYytsbVk3WVRxCmp6NDFIVDNqTWVtWWtjRjhmd09LSUFYMjFDZzl1RmVaOHd2UExVUjhYY2xUckRhZms2U2pKVXNoS3g3VzlqOVAKSURXZk40YW1VSk1DM0tTSTkzekErdzRXaUwxc2hpYm9yaVQyTXpETWVGekVIMGduc1Z6ZzIzUzFKdVl3UkJjMgpHWmlUZEcvRkRwcjgrejdPd2hZMU9HcFNMMzB6ZHhlM29kWDVRaHQ2Mm9VM1RCTUlhbkVjMStibWljZXZMMjkvCi83UVFkK2pzTURCTkMrb2hlS21RVnVLN0NvaXhJRFZsUkE9PQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==
-        run: |
-          echo "$ADOBE_ROOT_CA_B64" | base64 -d > /tmp/adobe-root.pem
-          export NODE_EXTRA_CA_CERTS=/tmp/adobe-root.pem
-          HOST=artifactory.corp.adobe.com
-          REG="https://$HOST/artifactory/api/npm/npm-quazar-gar-tf-remote/"
-          echo "== openssl verify with the root =="
-          echo | openssl s_client -connect "$HOST:443" -servername "$HOST" -CAfile /tmp/adobe-root.pem 2>/dev/null \
-            | grep "Verify return code" || echo "(no verify line)"
-          echo "== curl the package metadata (--cacert) - watch the HTTP code =="
-          curl -sS -o /dev/null -w "curl http_code=%{http_code}\n" --max-time 30 \
-            --cacert /tmp/adobe-root.pem "${REG}@semrush%2fai-seo-ts" || echo "(curl connection failed)"
-          WORK="$(mktemp -d)"; cd "$WORK"; npm init -y >/dev/null
-          { echo "@semrush:registry=$REG"; echo "@quazar:registry=$REG"; } > .npmrc
-          echo "== npm install (root CA trusted, no token) =="
-          npm install @semrush/ai-seo-ts@0.102.1-gen2.7.0 && echo "INSTALL_OK"
+          getent ahosts "$HOST" || echo "(DNS resolution FAILED)"
+          echo "== TLS verify (public cert expected -> return code 0) =="
+          echo | openssl s_client -connect "$HOST:443" -servername "$HOST" 2>/dev/null \
+            | grep -E "Verify return code" || echo "(no TLS handshake)"
+          echo "== HTTP status hitting the npm repo, no auth =="
+          code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 30 "$PKG")
+          echo "http_code=$code"
+          case "$code" in
+            401|403) echo "RESULT: REACHABLE (auth required, as expected). GH-hosted CI can use this host once we have a scoped token." ;;
+            000)     echo "RESULT: NOT REACHABLE (connection failed/timeout). Likely internal-only; GH-hosted CI can't use it." ;;
+            2*|3*)   echo "RESULT: reachable, unexpected open access (http $code) - inspect above." ;;
+            *)       echo "RESULT: got http $code - inspect above." ;;
+          esac
 
   # Manually-triggered deploy for the serenity job runner worker (adobe/serenity-docs#186),
   # a second Lambda built from a distinct hedy --entryFile
