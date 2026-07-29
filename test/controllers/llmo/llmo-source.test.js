@@ -159,6 +159,8 @@ describe('llmo-source', () => {
     } catch (err) {
       expect(err.isConfigError).to.equal(true);
       expect(tracingFetchStub).to.not.have.been.called;
+      // No attribution log for a fetch that never happens (guard precedes it).
+      expect(context.log.info).to.not.have.been.calledWith('llmo_source_client');
     }
   });
 

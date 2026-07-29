@@ -46,8 +46,16 @@ export const EMPTY_SHEET_PAYLOAD = {
 export const fetchLlmoSource = async (context, url) => {
   const { log, env } = context;
 
+  if (!env.LLMO_HLX_API_KEY) {
+    const err = new Error('LLMO_HLX_API_KEY environment variable is not configured');
+    err.isConfigError = true;
+    throw err;
+  }
+
   // Structured, queryable client-attribution signal for every outbound source
-  // fetch (both /llmo/data and /llmo/sheet-data route through here). Emitted at
+  // fetch (both /llmo/data and /llmo/sheet-data route through here). Placed
+  // after the config guard so it only fires for fetches that actually proceed
+  // (a missing key throws above and produces no outbound request). Emitted at
   // `info` (NOT debug): prod suppresses debug. `x-client-type` and `referer`
   // distinguish the calling app (e.g. llmo-spacecat-dashboard vs llm-optimizer-ui)
   // 1:1 with the fetched `url`, since request headers are otherwise not logged.
@@ -61,12 +69,6 @@ export const fetchLlmoSource = async (context, url) => {
     userAgent: headers['user-agent'] || null,
     authType: authInfo?.getType?.() || null,
   });
-
-  if (!env.LLMO_HLX_API_KEY) {
-    const err = new Error('LLMO_HLX_API_KEY environment variable is not configured');
-    err.isConfigError = true;
-    throw err;
-  }
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
