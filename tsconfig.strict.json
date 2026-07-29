@@ -12,7 +12,7 @@
   // import from a root is reported too, listed or not. The unit of work is an
   // import closure, so grow this list LEAF-FIRST: `src/controllers/brands.js`
   // has 151 errors of its own but sits near the top of the graph and drags in
-  // 502 across 23 files, while a leaf like `src/support/serenity/errors.js`
+  // 506 across 23 files, while a leaf like `src/support/serenity/errors.js`
   // costs 1. Measure a candidate before adding it:
   //   npx tsc -p <a copy of this config with include=[the candidate]>
   // Today's list happens to pull in nothing extra only because

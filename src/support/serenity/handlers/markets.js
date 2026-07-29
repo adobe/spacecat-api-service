@@ -1003,6 +1003,50 @@ export async function listSliceModels(transport, semrushWorkspaceId, projectId) 
 }
 
 /**
+ * Union of the models enabled across a set of projects. Fetches each project's
+ * assigned models (`listSliceModels`) in parallel and dedups by model `key`
+ * (falling back to `id`). Returns `{ items }` in the same shape as
+ * `listSliceModels`/`listGlobalModelCatalog`. An empty/blank project list yields
+ * an empty set — never the global catalog.
+ *
+ * @param {object} transport - Semrush transport.
+ * @param {string} semrushWorkspaceId - Semrush workspace id the projects live in.
+ * @param {Array<string>} projectIds - the Semrush project ids to union over.
+ * @returns {Promise<{ items: Array<{ id: string, key: string, name: (string|null),
+ *   icon: (string|null) }> }>}
+ */
+export async function listUnionModels(transport, semrushWorkspaceId, projectIds) {
+  const ids = [...new Set((projectIds ?? []).filter((id) => hasText(id)).map(String))];
+  if (ids.length === 0) {
+    return { items: [] };
+  }
+  const perProject = await Promise.all(
+    ids.map((projectId) => listSliceModels(transport, semrushWorkspaceId, projectId)
+      .catch((e) => {
+        // Tolerate a stale/deleted project (404/405) — skip it rather than
+        // 500 the whole union, matching the old global-catalog path. Auth and
+        // other errors still propagate.
+        if (isSemrushTransportError(e) && (e.status === 404 || e.status === 405)) {
+          return { items: [] };
+        }
+        throw e;
+      })),
+  );
+  const byKey = new Map();
+  for (const { items } of perProject) {
+    for (const m of items) {
+      if (m) {
+        const dedupKey = hasText(m.key) ? m.key : m.id;
+        if (!byKey.has(dedupKey)) {
+          byKey.set(dedupKey, m);
+        }
+      }
+    }
+  }
+  return { items: [...byKey.values()] };
+}
+
+/**
  * Counts the project's currently-PUBLISHED prompts (the live layer), by paginating
  * `listPromptsByTags` with an empty tag filter — the same live-layer walk `listTagsForProject`
  * uses, with the same page ceiling. Used by the dynamic allocator to size the prompt re-meter of a
@@ -1066,9 +1110,12 @@ export async function handleListModels(
   const geoTargetId = normalizeGeoTargetId(query?.geoTargetId);
   const languageCode = normalizeLanguageCode(query?.languageCode);
 
-  // No-params path: return global model catalog.
+  // No-params path: return the union of models enabled across all the brand's
+  // projects (not the global catalog — that lives on the org-scoped endpoint).
   if (geoTargetId === null && languageCode === null) {
-    return listGlobalModelCatalog(transport);
+    const rows = await dataAccess.BrandSemrushProject.allByBrandId(brandId);
+    const projectIds = (rows ?? []).map((r) => r.getSemrushProjectId());
+    return listUnionModels(transport, semrushWorkspaceId, projectIds);
   }
 
   // Partial params: both must be provided together.

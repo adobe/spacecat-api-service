@@ -152,12 +152,19 @@ export default function serenityTests(
     // 404 tests above never reach.
     const base = `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity`;
 
-    it('GET /serenity/models returns the workspace AI model catalog', async () => {
+    it('GET /serenity/models returns the union of models across the brand\'s markets', async () => {
+      // No-param brand-scoped models now returns the union of models enabled
+      // across the brand's projects (not the global catalog — that lives on the
+      // org-scoped endpoint asserted above). This seed ships no market slice for
+      // the workspace, so the union is empty — but a 200 with an `items` array
+      // proves the full read chain (relaxed auth → brand resolution →
+      // sub-workspace transport → resolveProjects → mock).
       const res = await getHttpClient().admin.get(`${base}/models`);
       expect(res.status).to.equal(200);
-      expect(res.body.items).to.be.an('array').that.is.not.empty;
-      // Every model carries the id/key/name the UI renders; assert the shape so a
-      // contract drift (renamed field / error body as 200) fails loudly.
+      expect(res.body.items).to.be.an('array');
+      // If any model comes back, it carries the id/key/name the UI renders;
+      // assert the shape so a contract drift (renamed field / error body as 200)
+      // fails loudly.
       res.body.items.forEach((m) => {
         expect(m).to.include.keys('id', 'key', 'name');
         expect(m.id).to.be.a('string');

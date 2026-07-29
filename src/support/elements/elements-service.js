@@ -35,6 +35,7 @@ import {
   INTENT_ENRICH_CONCURRENCY,
   buildCitedDomainsPayload,
   transformCitedDomainsResponse,
+  transformCitedDomainsResponses,
   buildTopicPromptsPayload,
   transformTopicPromptsResponse,
   aggregateTopicsFromPrompts,
@@ -251,16 +252,40 @@ export function createElementsService(transport, log) {
      * @param {string} workspaceId - Semrush workspace UUID.
      * @param {object} params - Query params (model/platform, brand, startDate, endDate,
      *   page, pageSize).
+     * @param {string[]} [params.projectIds] - Semrush project ids to scope to. The
+     *   element only accepts one project per call, so more than one id fans out a
+     *   call per project (bounded concurrency) and merges the results. Deduplicated
+     *   here as a safety net — a repeated id would otherwise double-count that
+     *   project's citations in the merge (the controller already dedupes, but this
+     *   fan-out is where a duplicate would actually corrupt counts, so it dedupes
+     *   independently rather than relying solely on the caller).
      * @returns {Promise<object>} Legacy contract `{ domains: [...], totalCount }`.
      */
     /* c8 ignore start -- LLMO-6020 POC endpoint; unit tests intentionally deferred */
     async getCitedDomains(workspaceId, params) {
+      const { projectIds, ...rest } = params;
+      const ids = Array.isArray(projectIds)
+        ? [...new Set(projectIds.filter(hasText))]
+        : [];
+      if (ids.length > 1) {
+        const CITED_DOMAINS_PROJECT_CONCURRENCY = 8;
+        const rawList = await mapWithConcurrency(
+          ids,
+          CITED_DOMAINS_PROJECT_CONCURRENCY,
+          (projectId) => transport.fetchElement(
+            workspaceId,
+            ELEMENT_IDS.CITED_DOMAINS,
+            buildCitedDomainsPayload({ ...rest, projectId }),
+          ),
+        );
+        return transformCitedDomainsResponses(rawList, rest);
+      }
       const raw = await transport.fetchElement(
         workspaceId,
         ELEMENT_IDS.CITED_DOMAINS,
-        buildCitedDomainsPayload(params),
+        buildCitedDomainsPayload({ ...rest, projectId: ids[0] }),
       );
-      return transformCitedDomainsResponse(raw, params);
+      return transformCitedDomainsResponse(raw, rest);
     },
 
     /**
@@ -271,13 +296,13 @@ export function createElementsService(transport, log) {
      * Single call (like getCitedDomains, not a per-project fan-out): with
      * `auto_bucketing: 'week'` the element returns weekly sentiment buckets directly
      * (server-side, honoring the requested date range) — no daily→weekly rollup here.
-     * Region scoping, when requested, is a `CBF_project` (Semrush project id) advanced
-     * filter (resolved by the controller via resolveRegionProjectId); region=all/absent →
-     * the brand's whole sub-workspace.
+     * Project scoping, when requested, is a `CBF_project` (Semrush project id) advanced
+     * filter built from the caller-supplied `projectId`/`projectIds`; absent → the brand's
+     * whole sub-workspace.
      *
      * @param {string} workspaceId - Semrush workspace UUID.
      * @param {object} params - Query params (model/platform, startDate, endDate, category,
-     *   projectId).
+     *   projectId, projectIds).
      * @returns {Promise<{ weeklyTrends: object[] }>} Legacy contract.
      */
     async getSentimentOverview(workspaceId, params) {
@@ -337,50 +362,12 @@ export function createElementsService(transport, log) {
     /* c8 ignore stop */
 
     /**
-     * Resolves a URL Inspector `region` code (e.g. `US`) to its Semrush `project_id` for the
-     * given brand, by fetching the Markets element and matching the region label + brand.
-     * Semrush projects are unique per (brand, market), so the resulting project_id scopes
-     * subsequent element calls to that brand + region via a top-level `project_id`.
-     *
-     * @param {string} workspaceId - Semrush workspace UUID.
-     * @param {object} opts
-     * @param {string} [opts.brandId] - SpaceCat brand UUID for the site; used only as a
-     *   tiebreaker when several brands have a project for the same region.
-     * @param {string} opts.region - UI region code (e.g. `US`).
-     * @param {object[]} [opts.brandSemrushProjects] - Flattened BrandSemrushProject rows for
-     *   ALL org brands (the site's own brand may not own any Semrush projects), used to
-     *   enrich/match the Markets response.
-     * @returns {Promise<string|null>} The matching `semrush_project_id`, or null if none.
-     */
-    async resolveRegionProjectId(workspaceId, {
-      brandId, region, brandSemrushProjects = [],
-    }) {
-      // Fetch markets workspace-wide (mirrors getUrlInspectorFilterDimensions) — a
-      // brand-scoped Markets call (CBF_ws_brand) can come back empty when the Semrush
-      // brand value differs from our brand name.
-      const raw = await transport.fetchElement(
-        workspaceId,
-        ELEMENT_IDS.MARKETS,
-        buildMarketsPayload({}),
-      );
-      const regions = transformMarketsToFilterDimensions(raw, brandSemrushProjects);
-      const wanted = String(region).toLowerCase();
-      const matches = regions.filter((r) => r.semrush_project_id
-        && String(r.id ?? '').toLowerCase() === wanted);
-      if (matches.length === 0) {
-        return null;
-      }
-      // Prefer the site's brand when it owns a project for this region; else first match.
-      const preferred = matches.find((r) => r.spacecat_brand_id === brandId);
-      return (preferred ?? matches[0]).semrush_project_id;
-    },
-
-    /**
-     * Resolves every (region, projectId) pair for the workspace, used to fan the
-     * owned-urls query out per-project. Per-project scoping keeps each element
-     * call under the Semrush 50k-row cap (a workspace-wide call hit it) and lets
-     * the transform tag each URL with the region it was cited in. Reuses the
-     * Markets element + transform (same as resolveRegionProjectId).
+     * Resolves every (region, projectId) pair for the workspace, used as the
+     * aggregate ("all projects") fallback when the caller doesn't supply a
+     * `projectId` filter, and to fan the owned-urls query out per-project.
+     * Per-project scoping keeps each element call under the Semrush 50k-row cap
+     * (a workspace-wide call hit it) and lets the transform tag each URL with the
+     * region it was cited in. Reuses the Markets element + transform.
      *
      * @param {string} workspaceId - Semrush workspace UUID.
      * @param {object} [opts]
