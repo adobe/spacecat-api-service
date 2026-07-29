@@ -69,23 +69,27 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Probe reachability
+      # Prior run: the runner reaches the host but npm/curl fail TLS with
+      # "unable to get local issuer certificate". From a corp-network machine the
+      # cert chains cleanly to public DigiCert, so the runner must receive a
+      # different chain. Read-only inspection to see what the runner actually gets
+      # (DNS target + full TLS chain + issuers + verify code). No TLS disabling.
+      - name: Inspect DNS + TLS chain from the runner
+        run: |
+          HOST=artifactory.corp.adobe.com
+          echo "== DNS resolution on the runner =="
+          getent ahosts "$HOST" || echo "(no getent result)"
+          echo "== TLS chain the runner receives =="
+          echo | openssl s_client -showcerts -connect "$HOST:443" -servername "$HOST" 2>/dev/null \
+            | grep -E "^ *[0-9]+ s:|^ *i:|Verify return code|CONNECTED" \
+            || echo "(openssl produced no chain output)"
+      - name: npm install with public CA bundle (confirm verify error, no TLS disable)
         run: |
           REG=https://artifactory.corp.adobe.com/artifactory/api/npm/npm-quazar-gar-tf-remote/
-          echo "== curl -I the registry root (reachability + TLS) =="
-          curl -sS -I --max-time 30 "$REG" || echo "CURL_FAILED (unreachable / DNS / timeout)"
-      - name: Probe npm install (no auth)
-        run: |
-          REG=https://artifactory.corp.adobe.com/artifactory/api/npm/npm-quazar-gar-tf-remote/
-          WORK="$(mktemp -d)"
-          cd "$WORK"
-          npm init -y >/dev/null
-          {
-            echo "@semrush:registry=$REG"
-            echo "@quazar:registry=$REG"
-          } > .npmrc
-          echo "== npm install @semrush/ai-seo-ts@0.102.1-gen2.7.0 =="
-          npm install @semrush/ai-seo-ts@0.102.1-gen2.7.0
+          WORK="$(mktemp -d)"; cd "$WORK"; npm init -y >/dev/null
+          { echo "@semrush:registry=$REG"; echo "@quazar:registry=$REG"; } > .npmrc
+          echo "== npm install (verification ON) =="
+          npm install @semrush/ai-seo-ts@0.102.1-gen2.7.0 || echo "(install failed as expected - see error above)"
 
   # Manually-triggered deploy for the serenity job runner worker (adobe/serenity-docs#186),
   # a second Lambda built from a distinct hedy --entryFile
