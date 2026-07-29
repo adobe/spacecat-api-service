@@ -1,3 +1,17 @@
+# [1.702.0](https://github.com/adobe/spacecat-api-service/compare/v1.701.1...v1.702.0) (2026-07-29)
+
+
+### Features
+
+* **brand-claims:** add run-brand-claims Slack command (LLMO-6143) ([#2924](https://github.com/adobe/spacecat-api-service/issues/2924)) ([b217ee5](https://github.com/adobe/spacecat-api-service/commit/b217ee5623530aa83ab704aa95108d943b1e5fc6))
+
+## [1.701.1](https://github.com/adobe/spacecat-api-service/compare/v1.701.0...v1.701.1) (2026-07-29)
+
+
+### Bug Fixes
+
+* worker Lambda deployed under wrong name (default--serenity-job-runner) ([#2941](https://github.com/adobe/spacecat-api-service/issues/2941)) ([6c64e12](https://github.com/adobe/spacecat-api-service/commit/6c64e126cc1b3804be015a15022548366830f8f8)), closes [#2936](https://github.com/adobe/spacecat-api-service/issues/2936) [spacecat-infrastructure#708](https://github.com/spacecat-infrastructure/issues/708) [#2936](https://github.com/adobe/spacecat-api-service/issues/2936)
+
 # [1.701.0](https://github.com/adobe/spacecat-api-service/compare/v1.700.4...v1.701.0) (2026-07-29)
 
 
