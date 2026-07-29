@@ -31,6 +31,7 @@ import {
   handleBulkDeletePrompts,
   validateDeferPublish,
   BULK_PROMPTS_MAX_ITEMS,
+  resolveCallerId,
 } from '../support/serenity/handlers/prompts.js';
 import { createAndEnqueueJob } from '../support/serenity/async-job-runner.js';
 import { CLASSIFY_PROMPTS_JOB_TYPE } from '../support/serenity/handlers/classify-prompts-job.js';
@@ -561,6 +562,10 @@ function SerenityController(context, log, env) {
             brandId: auth.brandUuid,
             semrushWorkspaceId: auth.workspaceId,
             prompts,
+            // Authorship (LLMO-6289): capture the caller id at enqueue time — from
+            // the auth profile, never the forwarded upstream bearer — so the async
+            // classify-on-create job stamps the submitter, not the job runner.
+            callerId: resolveCallerId(ctx),
           },
         });
         return accepted({ jobId: job.getId(), status: job.getStatus() });
@@ -570,6 +575,10 @@ function SerenityController(context, log, env) {
       // serenity-docs#32: one shared write-budget deadline for classify + create
       // + publish, computed once at request entry.
       const writeDeadline = computeWriteDeadline();
+      // CORRECTNESS-CRITICAL (LLMO-6289): resolve the caller identity ONCE, from
+      // the request's auth profile — NEVER from the bearer forwarded upstream —
+      // and thread it into every write below to stamp created_*/updated_*.
+      const callerId = resolveCallerId(ctx);
       const result = auth.mode === 'subworkspace'
         ? await handleCreatePromptsSubworkspace(
           transport,
@@ -579,6 +588,7 @@ function SerenityController(context, log, env) {
           classifyPromptType,
           ctx.env,
           writeDeadline,
+          callerId,
           {
             dynamicAllocation: dynamicAllocationEnabled(ctx),
             parentWorkspaceId: auth.parentWorkspaceId ?? '',
@@ -599,6 +609,7 @@ function SerenityController(context, log, env) {
           classifyPromptType,
           ctx.env,
           writeDeadline,
+          callerId,
           { orgId: ctx?.params?.spaceCatId },
         );
       return createResponse(result, 200);
@@ -621,6 +632,9 @@ function SerenityController(context, log, env) {
       const transport = buildTransport(ctx, imsToken);
       const classifyPromptType = await buildPromptTypeClassifier(ctx, auth.brandUuid);
       const writeDeadline = computeWriteDeadline();
+      // Caller identity for the updated_* stamp — resolved from the auth profile,
+      // never the forwarded upstream bearer (LLMO-6289).
+      const callerId = resolveCallerId(ctx);
       const result = auth.mode === 'subworkspace'
         ? await handleUpdatePromptSubworkspace(
           transport,
@@ -631,6 +645,7 @@ function SerenityController(context, log, env) {
           classifyPromptType,
           ctx.env,
           writeDeadline,
+          callerId,
         )
         : await handleUpdatePrompt(
           transport,
@@ -643,6 +658,7 @@ function SerenityController(context, log, env) {
           classifyPromptType,
           ctx.env,
           writeDeadline,
+          callerId,
         );
       return createResponse(result.body, result.status);
     } catch (e) {
@@ -846,6 +862,9 @@ function SerenityController(context, log, env) {
             // serenity-docs#72 §5: feeds the quota-rejection Slack alert (opt-in via
             // SERENITY_QUOTA_ALERTS_ENABLED) — never required, a no-op when unset.
             orgId: ctx?.params?.spaceCatId,
+            // Caller identity for the created_* stamp on any generated prompt
+            // (LLMO-6289) — from the auth profile, never the upstream bearer.
+            callerId: resolveCallerId(ctx),
           },
         );
         // Mirror this market as a SpaceCat Site (+ brand_sites link), once its
@@ -1445,6 +1464,10 @@ function SerenityController(context, log, env) {
         brandUuid,
         log,
       );
+      // Caller identity for the created_* stamp on generated prompts, resolved
+      // ONCE for the whole activate batch (LLMO-6289) — from the auth profile,
+      // never the forwarded upstream bearer.
+      const callerId = resolveCallerId(ctx);
       const results = [];
       for (const m of markets) {
         const createBody = {
@@ -1502,6 +1525,7 @@ function SerenityController(context, log, env) {
               // serenity-docs#72 §5: feeds the quota-rejection Slack alert (opt-in via
               // SERENITY_QUOTA_ALERTS_ENABLED) — never required, a no-op when unset.
               orgId: ctx?.params?.spaceCatId,
+              callerId,
             },
           );
         } catch (e) {

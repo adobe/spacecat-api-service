@@ -20,9 +20,11 @@ import { isSemrushTransportError } from './errors.js';
 import { resolveWorkspaceId } from './workspace-resolver.js';
 import { deleteAllProjects, ensureSubworkspace } from './workspace-lifecycle.js';
 import { handleCreateMarketSubworkspace } from './handlers/markets-subworkspace.js';
+import { isSerenityDeferPublishEnabled } from './defer-publish-active.js';
 import { computeWriteDeadline } from './intent-classification.js';
 import { isDynamicAllocationEnabled, resolveBrandAiCeiling } from './dynamic-allocation-active.js';
 import { resolveCanonicalDefaultModelIds } from './default-models.js';
+import { resolveCallerId } from './handlers/prompts.js';
 
 // Brand-create generation policy (tunable). Keep the top N generated topics by
 // search volume; brand-topics returns up to 10 topics x up to 100 prompts each,
@@ -230,6 +232,25 @@ export async function provisionBrandSubworkspace(context, {
     await emptyWorkspaceBestEffort(transport, wsId, parentWorkspaceId, log, 'brand-create');
   };
 
+  // LLMO-5492 publish-after-populate: defer-publish flag ON → leave the project a
+  // DRAFT ('skip') for a later finalize step (prompts + models pushed, published
+  // once). OFF (default) preserves inline publish: a project with models OR
+  // generated prompts has real units and must publish ('require'); an empty
+  // project would publish "empty units" (a disguised quota 405), so leave it a
+  // draft ('best-effort') instead of failing the create. Checked against
+  // resolvedModelIds, not the raw caller-supplied modelIds: LLMO-6554 resolves an
+  // empty/omitted modelIds to the canonical net-new default, so resolvedModelIds
+  // is non-empty in the common case — checking the raw list would wrongly fall
+  // through to 'best-effort' (leaving a model-bearing project as an unpublished
+  // draft) whenever the caller omitted modelIds.
+  /** @type {'require' | 'best-effort' | 'skip'} */
+  let publishMode = 'best-effort';
+  if (isSerenityDeferPublishEnabled(context.env)) {
+    publishMode = 'skip';
+  } else if ((Array.isArray(resolvedModelIds) && resolvedModelIds.length > 0) || generateTopics) {
+    publishMode = 'require';
+  }
+
   let result;
   try {
     result = await handleCreateMarketSubworkspace(
@@ -263,21 +284,16 @@ export async function provisionBrandSubworkspace(context, {
         writeDeadline,
         brandUrlSources,
         competitors,
-        // A project with neither models nor generated prompts would publish
-        // "empty units", which Semrush rejects with a disguised quota 405
-        // (workspace doc §5). Tolerate that by leaving it a draft (best-effort)
-        // instead of failing the whole create; a project that has models OR
-        // prompts has real units and must publish (require). resolvedModelIds
-        // is non-empty in the common case (LLMO-6554 default), so this is
-        // 'require' unless the canonical-catalog read itself came up empty.
-        publishMode: (Array.isArray(resolvedModelIds) && resolvedModelIds.length > 0)
-          || generateTopics
-          ? 'require'
-          : 'best-effort',
+        publishMode,
         dynamicAllocation,
         ceiling,
         brandCollection: context?.dataAccess?.Brand,
         onWorkspaceCreated: (id) => { createdWorkspaceId = id; },
+        // Caller identity for the created_* stamp on generated prompts (LLMO-6289),
+        // resolved from the request auth profile — never the forwarded upstream
+        // bearer. This create runs before the brand row exists; the caller
+        // (brands.js POST /brands) is the human/service provisioning the brand.
+        callerId: resolveCallerId(context),
       },
     );
   } catch (e) {
