@@ -1,3 +1,10 @@
+## [1.705.1](https://github.com/adobe/spacecat-api-service/compare/v1.705.0...v1.705.1) (2026-07-29)
+
+
+### Bug Fixes
+
+* **serenity:** request prompt metadata and use the real sort keys on by_tags (LLMO-6289) ([#2957](https://github.com/adobe/spacecat-api-service/issues/2957)) ([4cc7026](https://github.com/adobe/spacecat-api-service/commit/4cc7026a2d09e3aba310a4f0c95ecd514d6ea476)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 # [1.705.0](https://github.com/adobe/spacecat-api-service/compare/v1.704.2...v1.705.0) (2026-07-29)
 
 
