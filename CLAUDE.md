@@ -424,6 +424,14 @@ describe('Sites Controller', () => {
 });
 ```
 
+**Build every fake inside `beforeEach`, on a per-test sandbox** — never at module scope. A fake created at module scope is registered on sinon's *default* sandbox, and `sinon.restore()` in **any** other spec file empties that sandbox's fake collection. From then on `sinon.reset()` silently stops clearing the fake and its call history accumulates across the tests in your file, so an assertion like `getCalls().find(...)` starts reading an earlier test's call. Cleanup in your own `afterEach` does not protect you — the fake is created in the wrong place, not cleaned up in the wrong place.
+
+`mocha --parallel` (what `npm test` and CI run) gives each spec file its own process, so no other file's `sinon.restore()` can reach it and the whole failure mode is invisible. It appears only in serial runs — including the scoped single-file and single-directory runs under **Single Test Execution** above.
+
+A fake declared directly in a `describe` body is shared the same way, because mocha evaluates suite callbacks during collection, before any test runs. Assertions that scan call history — `getCalls().find(...)`, `calledOnce` — are the ones that break under sharing.
+
+A `no-restricted-syntax` rule in `eslint.config.js` fails the build on `sinon.stub/spy/fake/mock/createStubInstance/useFakeTimers()` evaluated at module load in `test/**/*.js`, in both the `sinon.stub()` and bare `stub()` call shapes. It catches the module-scope form only. The `describe`-body form is long-established style in this suite and is not enforced; nor can a syntactic rule see a fake built by a helper that is itself *called* at module load. Build fakes in `beforeEach` and none of these distinctions arise.
+
 **Tools**:
 - **Mocha**: Test runner
 - **Chai**: Assertions (`expect`, `chai-as-promised`)
@@ -634,6 +642,8 @@ For this repo:
 - Verify stubs are restored in `afterEach`
 - Use `esmock` for ES module mocking
 - Check test fixtures match current schema
+
+**A test that passes alone and fails in a serial run** (or passes under `npm test` and fails under `npx mocha <dir>/*.test.js`): look for a fake built at module scope rather than in `beforeEach`. Its call history survives across the tests in the file once another spec calls `sinon.restore()` — see the sandbox rules under **Standard Test Pattern**. The reverse pairing, green in serial and red in parallel, is a different problem: cross-file order dependence or a shared external resource.
 
 ### Debugging
 

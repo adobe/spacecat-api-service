@@ -108,18 +108,24 @@ function makeContext(overrides = {}) {
   };
 }
 
-const stubbedValidateAccess = sinon.stub().resolves({
-  site: { getOrganizationId: () => 'org-1' },
-  organization: { getId: () => 'org-1' },
-});
+let sandbox;
+let stubbedValidateAccess;
+
+// Fresh sandbox per test, so neither call history nor a per-test behaviour
+// override can reach the next test.
+function setUpAuthStubs() {
+  sandbox = sinon.createSandbox();
+  stubbedValidateAccess = sandbox.stub().resolves({
+    site: { getOrganizationId: () => 'org-1' },
+    organization: { getId: () => 'org-1' },
+  });
+}
 
 describe('llmo-referral-traffic', () => {
+  beforeEach(setUpAuthStubs);
+
   afterEach(() => {
-    stubbedValidateAccess.reset();
-    stubbedValidateAccess.resolves({
-      site: { getOrganizationId: () => 'org-1' },
-      organization: { getId: () => 'org-1' },
-    });
+    sandbox.restore();
   });
 
   // ── auth / PostgREST availability ──────────────────────────────────────────
@@ -1457,11 +1463,13 @@ describe('llmo-referral-traffic — rotation (demo sites)', () => {
     conversion_rate: 0.03,
   };
 
-  let clock;
   beforeEach(() => {
-    clock = sinon.useFakeTimers({ now: Date.UTC(2026, 6, 6), toFake: ['Date'] });
+    setUpAuthStubs();
+    sandbox.useFakeTimers({ now: Date.UTC(2026, 6, 6), toFake: ['Date'] });
   });
-  afterEach(() => clock.restore());
+  afterEach(() => {
+    sandbox.restore();
+  });
 
   const assertCannedDates = (client) => {
     expect(client.rpc).to.have.been.called;
