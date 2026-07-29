@@ -46,6 +46,8 @@ import {
   transformOwnedUrlsResponse,
   buildDomainUrlsPayload,
   transformDomainUrlsResponse,
+  buildUrlPromptsPayload,
+  transformUrlPromptsResponse,
   buildMarketMentionsTrendPayload,
   buildMarketCitationsTrendPayload,
   transformMarketTrackingTrends,
@@ -338,6 +340,25 @@ export function createElementsService(transport, log) {
         .sort((a, b) => (Number(b.volume) || 0) - (Number(a.volume) || 0));
     },
     /* c8 ignore stop */
+
+    /**
+     * Fetches the URL Inspector details drill-down: the prompts that cited a specific
+     * URL, from the URL_PROMPTS element (b4f1ead7), scoped by `CBF_source` (the URL).
+     * Single call (no fan-out); returns a flat array of per-prompt rows. Pagination is
+     * applied client-side by the controller (Semrush has no server-side paging).
+     *
+     * @param {string} workspaceId - Semrush sub-workspace UUID (projects/prompts live here).
+     * @param {object} params - Query params (url, model/platform, startDate, endDate).
+     * @returns {Promise<Array<object>>} Per-prompt rows (see transformUrlPromptsResponse).
+     */
+    async getUrlPrompts(workspaceId, params) {
+      const raw = await transport.fetchElement(
+        workspaceId,
+        ELEMENT_IDS.URL_PROMPTS,
+        buildUrlPromptsPayload(params),
+      );
+      return transformUrlPromptsResponse(raw);
+    },
 
     /**
      * Fetches the Data Insights per-TOPIC table. Uses the SAME PROMPTS_BY_TOPIC element
