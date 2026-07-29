@@ -73,10 +73,12 @@ function defaultDateRange() {
  * @param {string} [params.endDate] - ISO date (YYYY-MM-DD). Defaults to today.
  * @param {string} [params.category] - Full `category__<label>` tag value, sent
  *   as-is (callers already include the `category__` prefix).
- * @param {string} [params.projectId] - Semrush project id for region scoping (as `CBF_project`).
+ * @param {string} [params.projectId] - Single Semrush project id to scope to (`CBF_project`).
+ * @param {string[]} [params.projectIds] - Multiple Semrush project ids to OR together
+ *   (`CBF_project`); takes precedence over `projectId` when both are given.
  */
 export function buildSentimentOverviewPayload({
-  model, platform, startDate, endDate, category, projectId,
+  model, platform, startDate, endDate, category, projectId, projectIds,
 } = {}) {
   const resolvedModel = resolveElementModel(model || platform);
   const defaults = defaultDateRange();
@@ -86,10 +88,16 @@ export function buildSentimentOverviewPayload({
   const advancedFilters = [
     { op: 'or', filters: [{ op: 'eq', val: resolvedModel, col: 'CBF_model' }] },
   ];
-  // Region: this element scopes by CBF_project (a Semrush project id), NOT a top-level
-  // project_id. Resolved from the UI region code by the controller (via the Markets element).
-  if (projectId) {
-    advancedFilters.push({ op: 'or', filters: [{ op: 'eq', val: projectId, col: 'CBF_project' }] });
+  // Project scoping: this element scopes by CBF_project (one or more Semrush project ids),
+  // NOT a top-level project_id. Supplied by the caller via the `projectId` query param.
+  const ids = Array.isArray(projectIds) && projectIds.length > 0
+    ? projectIds
+    : [projectId].filter(Boolean);
+  if (ids.length > 0) {
+    advancedFilters.push({
+      op: 'or',
+      filters: ids.map((id) => ({ op: 'eq', val: id, col: 'CBF_project' })),
+    });
   }
   if (category) {
     advancedFilters.push({ op: 'eq', val: category, col: 'CBF_tags' });

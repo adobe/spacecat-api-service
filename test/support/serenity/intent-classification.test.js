@@ -19,15 +19,17 @@ import { PER_CALL_MS } from '../../../src/support/serenity/intent-taxonomy.js';
 import { classifyIntents as realClassifyIntents } from '../../../src/support/intent-classifier.js';
 import { resolveEnvironment as realResolveEnvironment } from '../../../src/support/metrics-emf.js';
 
-const log = {
-  info: sinon.stub(), warn: sinon.stub(), error: sinon.stub(), debug: sinon.stub(),
-};
+// Assigned per test in beforeEach. The loader helpers below build their fakes on
+// `sandbox`, so they are callable only from inside a test or hook — never at
+// module load or in a describe body, where `sandbox` is still undefined.
+let sandbox;
+let log;
 
 // Shared EMF spy; a fresh reference per load so assertions target one call log.
 let emitMetricSpy;
 
 function metricsMock() {
-  emitMetricSpy = sinon.spy();
+  emitMetricSpy = sandbox.spy();
   return {
     '../../../src/support/metrics-emf.js': {
       emitMetric: emitMetricSpy,
@@ -46,8 +48,8 @@ function emittedMetric(name) {
 async function loadWithClassifier({ classify, classifyIntentsStub } = {}) {
   return esmock('../../../src/support/serenity/intent-classification.js', {
     '../../../src/support/intent-classifier.js': {
-      createIntentClassifier: sinon.stub().returns(classify),
-      classifyIntents: classifyIntentsStub || sinon.stub().resolves(new Map()),
+      createIntentClassifier: sandbox.stub().returns(classify),
+      classifyIntents: classifyIntentsStub || sandbox.stub().resolves(new Map()),
     },
     ...metricsMock(),
   });
@@ -78,12 +80,19 @@ async function loadWithRealBatch({ classifyByText }) {
 }
 
 describe('intent-classification.js — classifyPromptIntents (serenity-docs#32)', () => {
+  beforeEach(() => {
+    sandbox = sinon.createSandbox();
+    log = {
+      info: sandbox.stub(), warn: sandbox.stub(), error: sandbox.stub(), debug: sandbox.stub(),
+    };
+  });
+
   afterEach(() => {
-    sinon.reset();
+    sandbox.restore();
   });
 
   it('returns an empty map for an empty/falsy text list without touching the classifier', async () => {
-    const classifyIntentsStub = sinon.stub();
+    const classifyIntentsStub = sandbox.stub();
     const { classifyPromptIntents } = await loadWithClassifier({
       classify: () => {}, classifyIntentsStub,
     });
@@ -93,7 +102,7 @@ describe('intent-classification.js — classifyPromptIntents (serenity-docs#32)'
   });
 
   it('treats a null/undefined texts argument as empty', async () => {
-    const classifyIntentsStub = sinon.stub();
+    const classifyIntentsStub = sandbox.stub();
     const { classifyPromptIntents } = await loadWithClassifier({
       classify: () => {}, classifyIntentsStub,
     });
@@ -105,7 +114,7 @@ describe('intent-classification.js — classifyPromptIntents (serenity-docs#32)'
   });
 
   it('hard skip-gate: defaults everything and logs budget_skipped when no room at entry, without constructing a classifier', async () => {
-    const classifyIntentsStub = sinon.stub();
+    const classifyIntentsStub = sandbox.stub();
     const { classifyPromptIntents, computeWriteDeadline } = await loadWithClassifier({
       classify: () => {}, classifyIntentsStub,
     });
@@ -146,7 +155,7 @@ describe('intent-classification.js — classifyPromptIntents (serenity-docs#32)'
   });
 
   it('uses the first-pass classification result and counts classified_ok, no retry when everything resolves', async () => {
-    const classifyIntentsStub = sinon.stub().resolves(new Map([
+    const classifyIntentsStub = sandbox.stub().resolves(new Map([
       ['a', 'Task'], ['b', 'Commercial'],
     ]));
     const { classifyPromptIntents } = await loadWithClassifier({
@@ -162,7 +171,7 @@ describe('intent-classification.js — classifyPromptIntents (serenity-docs#32)'
   });
 
   it('retries once for unresolved texts when the budget allows, and uses the retry result on success', async () => {
-    const classifyIntentsStub = sinon.stub();
+    const classifyIntentsStub = sandbox.stub();
     classifyIntentsStub.onCall(0).resolves(new Map([['a', 'Task']])); // 'b' left unresolved
     classifyIntentsStub.onCall(1).resolves(new Map([['b', 'Navigational']]));
     const { classifyPromptIntents } = await loadWithClassifier({
@@ -179,7 +188,7 @@ describe('intent-classification.js — classifyPromptIntents (serenity-docs#32)'
   });
 
   it('defaults to Informational when the retry also fails to resolve a text', async () => {
-    const classifyIntentsStub = sinon.stub();
+    const classifyIntentsStub = sandbox.stub();
     classifyIntentsStub.onCall(0).resolves(new Map()); // nothing resolved
     classifyIntentsStub.onCall(1).resolves(new Map()); // retry also resolves nothing
     const { classifyPromptIntents } = await loadWithClassifier({
@@ -195,14 +204,14 @@ describe('intent-classification.js — classifyPromptIntents (serenity-docs#32)'
 
   it('skips the retry (defaults immediately) when the deadline has no room left for a second call', async () => {
     const t0 = 1_000_000_000;
-    const clock = sinon.useFakeTimers(t0);
+    const clock = sandbox.useFakeTimers(t0);
     try {
       // Entry hard-skip-gate passes (remaining ≈ PER_CALL_MS + 50ms of slack), but
       // the mocked first-pass classify call "spends" 60ms of wall-clock via the
       // fake timer, so by the time the retry-gate check runs, remaining budget has
       // dropped below PER_CALL_MS — the retry is skipped, not attempted.
       const deadline = t0 + CREATE_PUBLISH_RESERVE_MS + PER_CALL_MS + 50;
-      const classifyIntentsStub = sinon.stub().callsFake(async () => {
+      const classifyIntentsStub = sandbox.stub().callsFake(async () => {
         clock.tick(60);
         return new Map(); // nothing resolved on the first pass
       });
@@ -220,12 +229,19 @@ describe('intent-classification.js — classifyPromptIntents (serenity-docs#32)'
 });
 
 describe('intent-classification.js — observability (serenity-docs#32)', () => {
+  beforeEach(() => {
+    sandbox = sinon.createSandbox();
+    log = {
+      info: sandbox.stub(), warn: sandbox.stub(), error: sandbox.stub(), debug: sandbox.stub(),
+    };
+  });
+
   afterEach(() => {
-    sinon.reset();
+    sandbox.restore();
   });
 
   it('emits IntentOutcome counters dimensioned by WritePath + Workspace, and IntentValueDistribution by WritePath', async () => {
-    const classifyIntentsStub = sinon.stub().resolves(new Map([
+    const classifyIntentsStub = sandbox.stub().resolves(new Map([
       ['a', 'Task'], ['b', 'Task'], ['c', 'Commercial'],
     ]));
     const { classifyPromptIntents } = await loadWithClassifier({
@@ -364,7 +380,7 @@ describe('intent-classification.js — observability (serenity-docs#32)', () => 
 
   it('emits per-call latency (p50/p95), a per-call timeout tally, and a prod repeated-invoke-failure signal', async () => {
     const t0 = 1_000_000_000;
-    const clock = sinon.useFakeTimers(t0);
+    const clock = sandbox.useFakeTimers(t0);
     try {
       // Every call "spends" the full per-call budget and resolves null → a
       // heuristic timeout, and no text ever resolves → repeated-invoke-failure.
@@ -414,10 +430,10 @@ describe('intent-classification.js — observability (serenity-docs#32)', () => 
   });
 
   it('never throws into the classify path when emitMetric itself throws', async () => {
-    const classifyIntentsStub = sinon.stub().resolves(new Map([['a', 'Task']]));
+    const classifyIntentsStub = sandbox.stub().resolves(new Map([['a', 'Task']]));
     const mod = await esmock('../../../src/support/serenity/intent-classification.js', {
       '../../../src/support/intent-classifier.js': {
-        createIntentClassifier: sinon.stub().returns(() => {}),
+        createIntentClassifier: sandbox.stub().returns(() => {}),
         classifyIntents: classifyIntentsStub,
       },
       '../../../src/support/metrics-emf.js': {

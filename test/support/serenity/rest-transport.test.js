@@ -263,6 +263,24 @@ describe('Semrush REST transport', () => {
         .to.match(/^https:\/\/shared\.semrush\.test\/enterprise\/users\/api\//);
     });
 
+    it('falls back to SEMRUSH_PROJECTS_BASE_URL when SEMRUSH_USERS_BASE_URL is empty', async () => {
+      fetchStub.resolves(fetchOk(null));
+      const transport = createSerenityTransport({
+        env: {
+          SEMRUSH_PROJECTS_BASE_URL: 'https://shared.semrush.test',
+          SEMRUSH_USERS_BASE_URL: '',
+        },
+        imsToken: IMS,
+      });
+
+      await transport.getWorkspaceStatus(WORKSPACE_ID);
+
+      // An empty value is "unset", not an origin — it must not name the USERS var in
+      // an error, and must not be treated as an explicit override.
+      expect((await callOf(fetchStub)).url)
+        .to.match(/^https:\/\/shared\.semrush\.test\/enterprise\/users\/api\//);
+    });
+
     it('rejects a non-https SEMRUSH_USERS_BASE_URL naming the USERS var (503)', () => {
       try {
         createSerenityTransport({
@@ -411,8 +429,7 @@ describe('Semrush REST transport', () => {
       fetchStub.onCall(1).resolves(fetchOk({ id: 'subworkspace-ws-1', status: 'not ready' }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
-      const resources = { ai: { projects: 3, prompts: 1500 } };
-      const promise = transport.createSubworkspace(PARENT_WS, 'Adobe Express', resources);
+      const promise = transport.createSubworkspace(PARENT_WS, 'Adobe Express');
       await clock.tickAsync(60_000);
       const result = await promise;
 
@@ -420,7 +437,7 @@ describe('Semrush REST transport', () => {
       expect(fetchStub.callCount).to.equal(2);
       const retryCall = await callOf(fetchStub, 1);
       expect(retryCall.method).to.equal('POST');
-      expect(JSON.parse(retryCall.body)).to.deep.equal({ title: 'Adobe Express', resources });
+      expect(JSON.parse(retryCall.body)).to.deep.equal({ title: 'Adobe Express', resources: {} });
     }));
 
     it('does NOT retry a 500 on a POST create (createSubworkspace) -- avoids double-provisioning', withFakeTimers(async (clock) => {
@@ -431,8 +448,7 @@ describe('Semrush REST transport', () => {
       fetchStub.resolves(fetchFail(500, { code: 'internal_error' }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
-      const resources = { ai: { projects: 3, prompts: 1500 } };
-      const promise = transport.createSubworkspace(PARENT_WS, 'Adobe Express', resources)
+      const promise = transport.createSubworkspace(PARENT_WS, 'Adobe Express')
         .catch((e) => e);
       await clock.tickAsync(60_000);
       const err = await promise;
@@ -1291,15 +1307,16 @@ describe('Semrush REST transport', () => {
       fetchStub.resolves(fetchOk({ id: 'subworkspace-ws-1', status: 'not ready' }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
-      const resources = { ai: { projects: 3, prompts: 1500 } };
-      const result = await transport.createSubworkspace(PARENT_WS, 'Adobe Express', resources);
+      const result = await transport.createSubworkspace(PARENT_WS, 'Adobe Express');
 
       const call = await callOf(fetchStub);
       expect(call.method).to.equal('POST');
       expect(call.url).to.equal(
         `https://adobe-hackathon.semrush.com/enterprise/users/api/v2/workspaces/${PARENT_WS}/child`,
       );
-      expect(JSON.parse(call.body)).to.deep.equal({ title: 'Adobe Express', resources });
+      // `resources` is REQUIRED by createWorkspaceV2Form; `{}` is the schema-valid "no
+      // allocation" body. Omitting the key is contract-violating even though live tolerates it.
+      expect(JSON.parse(call.body)).to.deep.equal({ title: 'Adobe Express', resources: {} });
       expect(call.header('X-Upload-Receipt')).to.equal(null);
       expect(result.id).to.equal('subworkspace-ws-1');
     });
