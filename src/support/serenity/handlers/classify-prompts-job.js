@@ -31,6 +31,8 @@ import {
 import { ORIGIN_VALUE } from '../prompt-tags.js';
 import { resolveIntentValueInjection } from '../tag-tree.js';
 
+/** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
+
 /**
  * Job type dispatched to {@link classifyPromptsHandler} by the runner
  * (`src/serenity-prompt-classification/index.js`).
@@ -127,7 +129,7 @@ async function requeuePending(context, job, semrushWorkspaceId, items) {
  * @param {object} context
  * @param {object} job - the current `AsyncJob` (for the self-requeue's promise
  *   token and depth guard).
- * @param {object} transport - Serenity transport built from the exchanged
+ * @param {SerenityTransport} transport - Serenity transport built from the exchanged
  *   access token.
  * @param {object} metadata - the job's metadata (`brandId`, `semrushWorkspaceId`,
  *   `prompts`).
@@ -273,7 +275,7 @@ async function createAndClassify(context, job, transport, metadata) {
  * @param {object} context
  * @param {object} job - the current `AsyncJob` (for the self-requeue's promise
  *   token and depth guard).
- * @param {object} transport
+ * @param {SerenityTransport} transport
  * @param {object} metadata - `{ semrushWorkspaceId, items: [{ projectId,
  *   promptId, text, tagIds }] }` — `tagIds` is the FULL desired tag set minus
  *   `intent` (caller tags + server type/origin), matching the edit handlers'

@@ -1045,6 +1045,25 @@ describe('markets-subworkspace handlers', () => {
       expect(row.save).to.have.been.calledOnce;
     });
 
+    it('treats a matched project carrying no id as nothing to delete, and warns', async () => {
+      // The contract declares `id: string`, but the response is `any` at every call site,
+      // so an id-less entry reaches us unchecked. It cannot be deleted upstream and must
+      // not be tombstoned, since the row is addressed by id.
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [proj({ id: null })] }),
+      });
+      const findBySemrushProjectId = sinon.stub().resolves(null);
+      const dataAccess = { BrandSemrushProject: { findBySemrushProjectId } };
+      const warn = sinon.stub();
+      const opts = { dataAccess };
+      const res = await handleDeleteMarketSubworkspace(transport, WS, 2840, 'en', { ...log, warn }, opts);
+      expect(res).to.deep.equal({ status: 204, deletedSiteId: null });
+      expect(transport.deleteProject).to.not.have.been.called;
+      expect(findBySemrushProjectId).to.not.have.been.called;
+      // The upstream contract break must not be reported as a silent 204.
+      expect(warn).to.have.been.calledOnce;
+    });
+
     it('does not tombstone when the project is not found in the listing at all (accepted, reconcile-recoverable drift)', async () => {
       const findBySemrushProjectId = sinon.stub().resolves(null);
       const dataAccess = { BrandSemrushProject: { findBySemrushProjectId } };

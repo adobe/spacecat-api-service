@@ -263,6 +263,24 @@ describe('Semrush REST transport', () => {
         .to.match(/^https:\/\/shared\.semrush\.test\/enterprise\/users\/api\//);
     });
 
+    it('falls back to SEMRUSH_PROJECTS_BASE_URL when SEMRUSH_USERS_BASE_URL is empty', async () => {
+      fetchStub.resolves(fetchOk(null));
+      const transport = createSerenityTransport({
+        env: {
+          SEMRUSH_PROJECTS_BASE_URL: 'https://shared.semrush.test',
+          SEMRUSH_USERS_BASE_URL: '',
+        },
+        imsToken: IMS,
+      });
+
+      await transport.getWorkspaceStatus(WORKSPACE_ID);
+
+      // An empty value is "unset", not an origin — it must not name the USERS var in
+      // an error, and must not be treated as an explicit override.
+      expect((await callOf(fetchStub)).url)
+        .to.match(/^https:\/\/shared\.semrush\.test\/enterprise\/users\/api\//);
+    });
+
     it('rejects a non-https SEMRUSH_USERS_BASE_URL naming the USERS var (503)', () => {
       try {
         createSerenityTransport({
