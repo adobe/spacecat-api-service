@@ -5358,7 +5358,7 @@ describe('Brands Controller', () => {
         const Mocked = await esmock('../../src/controllers/brands.js', {
           '../../src/support/serenity/brand-provisioning.js': {
             provisionBrandSubworkspace: provisionStub,
-            releaseProvisionedWorkspace: releaseStub,
+            emptyProvisionedWorkspace: releaseStub,
           },
           '../../src/support/serenity/serenity-active.js': { isSerenityActiveForOrg: sinon.stub().resolves(true) },
           '../../src/support/brands-storage.js': { upsertBrand: upsertStub },
@@ -5399,7 +5399,7 @@ describe('Brands Controller', () => {
         const Mocked = await esmock('../../src/controllers/brands.js', {
           '../../src/support/serenity/brand-provisioning.js': {
             provisionBrandSubworkspace: provisionStub,
-            releaseProvisionedWorkspace: releaseStub,
+            emptyProvisionedWorkspace: releaseStub,
           },
           '../../src/support/serenity/serenity-active.js': { isSerenityActiveForOrg: sinon.stub().resolves(true) },
           '../../src/support/brands-storage.js': { upsertBrand: upsertStub },
