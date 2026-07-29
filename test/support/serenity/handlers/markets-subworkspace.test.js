@@ -1322,18 +1322,21 @@ describe('markets-subworkspace handlers', () => {
   });
 
   describe('handleListModelsSubworkspace', () => {
-    it('returns the global catalog when called without a slice', async () => {
+    it('unions the models enabled across all the workspace\'s projects when called without a slice', async () => {
+      const listAiModels = sinon.stub();
+      listAiModels.withArgs(WS, 'p-a').resolves({
+        items: [{ id: 'a-1', model: { id: 'm1', key: 'gpt-4o', name: 'GPT-4o' } }],
+      });
+      listAiModels.withArgs(WS, 'p-b').resolves({
+        items: [{ id: 'b-1', model: { id: 'm2', key: 'claude', name: 'Claude' } }],
+      });
       const transport = makeTransport({
-        listGlobalAiModels: sinon.stub().resolves({
-          items: [{ id: 'm1', key: 'gpt-4o', name: 'GPT-4o' }],
-        }),
+        listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-a' }), proj({ id: 'p-b' })] }),
+        listAiModels,
       });
       const result = await handleListModelsSubworkspace(transport, WS, {}, log);
-      expect(result.items).to.deep.equal([{
-        id: 'm1', key: 'gpt-4o', name: 'GPT-4o', icon: null,
-      }]);
-      expect(transport.listGlobalAiModels).to.have.been.called;
-      expect(transport.listAiModels).to.not.have.been.called;
+      expect(result.items.map((m) => m.key)).to.have.members(['gpt-4o', 'claude']);
+      expect(transport.listGlobalAiModels).to.not.have.been.called;
     });
 
     it('returns the slice models when called with geo+lang', async () => {

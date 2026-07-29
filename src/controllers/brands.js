@@ -63,7 +63,7 @@ import {
 } from '../support/brands-storage.js';
 import { listViewableResourceIds } from '../support/state-access-mapping-utils.js';
 import { isFacsRebacResource } from '../routes/facs-capabilities.js';
-import { provisionBrandSubworkspace, provisionBrandSubworkspaceBare, releaseProvisionedWorkspace } from '../support/serenity/brand-provisioning.js';
+import { provisionBrandSubworkspace, provisionBrandSubworkspaceBare, emptyProvisionedWorkspace } from '../support/serenity/brand-provisioning.js';
 import { computeWriteDeadline } from '../support/serenity/intent-classification.js';
 import { ensureMarketSite } from '../support/serenity/site-linkage.js';
 import { upsertMappingRow, linkSiteToLiveRows } from '../support/serenity/mapping-rows.js';
@@ -1786,20 +1786,20 @@ function BrandsController(ctx, log, env) {
       log.error(`Error creating brand for organization ${spaceCatId}:`, error);
       // Compensation: a sub-workspace was CREATED upstream but the brand row failed to
       // persist (e.g. a unique-constraint 409 or transient PostgREST error). Nothing
-      // references that workspace, so release its allocation back to the parent pool
-      // (best-effort) rather than leaking it.
+      // references that workspace, so empty its projects (best-effort) rather than leaving
+      // them stranded on a shell nothing points at.
       //
       // Gated on having created it. A workspace that provisioning ADOPTED is not ours to
       // tear down: titles are bare brand display names, so an adopted workspace can be a
       // same-named sibling brand's, and the unique-constraint failure that lands us here is
-      // itself the signal that the sibling won the race and legitimately owns it. Releasing
-      // it would delete that live brand's projects and strip its allocation.
+      // itself the signal that the sibling won the race and legitimately owns it. Emptying
+      // it would delete that live brand's projects.
       if (provisionedWorkspaceId && hasText(provisionedWorkspaceId)
         && provisionedWorkspaceWasCreated) {
-        log.error('serenity: brand-create failed after subworkspace provision; releasing orphaned allocation', {
+        log.error('serenity: brand-create failed after subworkspace provision; emptying orphaned sub-workspace', {
           semrushWorkspaceId: provisionedWorkspaceId,
         });
-        await releaseProvisionedWorkspace(context, provisionedWorkspaceId, spaceCatId, log);
+        await emptyProvisionedWorkspace(context, provisionedWorkspaceId, spaceCatId, log);
       }
       return createErrorResponse(error);
     }

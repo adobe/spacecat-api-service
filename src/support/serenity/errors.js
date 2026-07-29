@@ -208,9 +208,11 @@ export const ERROR_CODES = Object.freeze({
 });
 
 /**
- * Case-1 quota rejection (serenity-docs#72 §2): the brand's flat pre-carved sub-workspace
- * allocation is exhausted — the allocator-OFF path production runs today, or the allocator-ON
- * path's per-child ceiling isn't the cause but the disguised 405 still surfaced. Maps the
+ * Case-1 quota rejection (serenity-docs#72 §2): the disguised 405 surfaced on a metered write.
+ * A sub-workspace carries no allocation of its own to exhaust (see `workspace-lifecycle.js`), so
+ * our own sizing is never the cause in either flag state — this means the upstream refused the
+ * write on its own terms, which for a tenant whose parent enforces limits is the signal to turn
+ * the JIT allocator on (docs/serenity.md). Maps the
  * classified {@link isMeteredQuota} signal to the same customer-facing contract as
  * `orgPoolExhausted` / `brandAiLimit` (409, stable token), so a caller never needs to
  * distinguish them — see `ERROR_CODES.QUOTA_EXCEEDED`.

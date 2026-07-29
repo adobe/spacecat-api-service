@@ -1,3 +1,59 @@
+## [1.700.1](https://github.com/adobe/spacecat-api-service/compare/v1.700.0...v1.700.1) (2026-07-29)
+
+
+### Bug Fixes
+
+* return only enabled models in SR platform filter | LLMO-6589 ([#2927](https://github.com/adobe/spacecat-api-service/issues/2927)) ([8b2edef](https://github.com/adobe/spacecat-api-service/commit/8b2edef930c0b95e0fc8e9e35c221afe909331de))
+
+# [1.700.0](https://github.com/adobe/spacecat-api-service/compare/v1.699.1...v1.700.0) (2026-07-29)
+
+
+### Features
+
+* introduce projectId CSV parameters in the serenity apis ([#2926](https://github.com/adobe/spacecat-api-service/issues/2926)) ([45cc753](https://github.com/adobe/spacecat-api-service/commit/45cc7532ce86edea06839c749811e306646f9fd5))
+
+## [1.699.1](https://github.com/adobe/spacecat-api-service/compare/v1.699.0...v1.699.1) (2026-07-29)
+
+
+### Bug Fixes
+
+* only allow opportunities with new status to grant suggestions ([#2921](https://github.com/adobe/spacecat-api-service/issues/2921)) ([ae487ad](https://github.com/adobe/spacecat-api-service/commit/ae487add587f95a54e9551b0dadcc2f176fc9650))
+
+# [1.699.0](https://github.com/adobe/spacecat-api-service/compare/v1.698.1...v1.699.0) (2026-07-29)
+
+
+### Features
+
+* **llmo:** include siteId in edge-optimize enabled-marking SQS message ([#2930](https://github.com/adobe/spacecat-api-service/issues/2930)) ([7e89411](https://github.com/adobe/spacecat-api-service/commit/7e89411c4747d7731ae0dc43bde2eefdd6050317))
+
+## [1.698.1](https://github.com/adobe/spacecat-api-service/compare/v1.698.0...v1.698.1) (2026-07-28)
+
+
+### Bug Fixes
+
+* **serenity:** create sub-workspaces with no resource allocation ([#2923](https://github.com/adobe/spacecat-api-service/issues/2923)) ([c204874](https://github.com/adobe/spacecat-api-service/commit/c204874db70d7b1fb823b29325a2535e6e1aab87)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+# [1.698.0](https://github.com/adobe/spacecat-api-service/compare/v1.697.1...v1.698.0) (2026-07-28)
+
+
+### Features
+
+* **e2e:** authenticate audit-policy e2e suite as a registered S2S consumer ([#2914](https://github.com/adobe/spacecat-api-service/issues/2914)) ([045b736](https://github.com/adobe/spacecat-api-service/commit/045b736804302e33e8e66b6c2528b9708d4f81f0)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+## [1.697.1](https://github.com/adobe/spacecat-api-service/compare/v1.697.0...v1.697.1) (2026-07-28)
+
+
+### Bug Fixes
+
+* **serenity:** classify prompt-publish quota rejections, not just market-create ([#2889](https://github.com/adobe/spacecat-api-service/issues/2889)) ([c9f7c34](https://github.com/adobe/spacecat-api-service/commit/c9f7c34e062ffbd26238c891c005b90c3c2ee928)), closes [adobe/serenity-docs#72](https://github.com/adobe/serenity-docs/issues/72) [#2854](https://github.com/adobe/spacecat-api-service/issues/2854) [#2854](https://github.com/adobe/spacecat-api-service/issues/2854)
+
+# [1.697.0](https://github.com/adobe/spacecat-api-service/compare/v1.696.0...v1.697.0) (2026-07-28)
+
+
+### Features
+
+* **serenity:** wire runner mechanics for the deferred Semrush job runner ([#186](https://github.com/adobe/spacecat-api-service/issues/186)) ([#2920](https://github.com/adobe/spacecat-api-service/issues/2920)) ([0c71298](https://github.com/adobe/spacecat-api-service/commit/0c71298101e350d4690d96db6132c02d0266f022)), closes [spacecat-shared#1843](https://github.com/spacecat-shared/issues/1843) [adobe/spacecat-infrastructure#708](https://github.com/adobe/spacecat-infrastructure/issues/708)
+
 # [1.696.0](https://github.com/adobe/spacecat-api-service/compare/v1.695.5...v1.696.0) (2026-07-28)
 
 

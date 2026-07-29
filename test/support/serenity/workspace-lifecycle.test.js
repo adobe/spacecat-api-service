@@ -19,10 +19,7 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import {
   ensureSubworkspace,
   decommissionBrandWorkspace,
-  resourceAllocation,
   deleteAllProjects,
-  releaseFullAllocation,
-  CREATE_ALLOCATION,
 } from '../../../src/support/serenity/workspace-lifecycle.js';
 import { SerenityTransportError } from '../../../src/support/serenity/rest-transport.js';
 import { clearBrandWorkspaceCache } from '../../../src/support/serenity/workspace-resolver.js';
@@ -62,7 +59,6 @@ function ensureWithUnclaimedFamily(transport, brand) {
     transport,
     brand,
     PARENT_WS,
-    1,
     log,
     NOOP_TIMING,
     null,
@@ -100,70 +96,20 @@ describe('workspace-lifecycle', () => {
     clearBrandWorkspaceCache();
   });
 
-  describe('resourceAllocation', () => {
-    it('sizes projects = markets + 2 and prompts = 500 * projects', () => {
-      expect(resourceAllocation(3)).to.deep.equal({ ai: { projects: 5, prompts: 2500 } });
-    });
-    it('floors a non-positive market count to one slot of headroom', () => {
-      expect(resourceAllocation(0)).to.deep.equal({ ai: { projects: 3, prompts: 1500 } });
-      expect(resourceAllocation(undefined)).to.deep.equal({ ai: { projects: 3, prompts: 1500 } });
-    });
-  });
-
   describe('ensureSubworkspace', () => {
-    it('re-grants an allocation when the brand already has a (kept) workspace', async () => {
+    it('settles and returns the workspace when the brand already has a (kept) one', async () => {
       const transport = makeTransport();
       const brand = makeBrand({ workspaceId: SUB_WS });
 
-      const result = await ensureSubworkspace(transport, brand, PARENT_WS, 2, log, NOOP_TIMING);
+      const result = await ensureSubworkspace(transport, brand, PARENT_WS, log, NOOP_TIMING);
 
       expect(result).to.equal(SUB_WS);
-      expect(transport.transferWorkspaceResources)
-        .to.have.been.calledOnceWithExactly(SUB_WS, resourceAllocation(2));
+      // No allocation is ever transferred onto a bound sub-workspace — the readiness settle is
+      // the whole of this branch's upstream work.
+      expect(transport.transferWorkspaceResources).to.not.have.been.called;
+      expect(transport.getWorkspaceStatus).to.have.been.calledOnceWith(SUB_WS);
       expect(transport.createSubworkspace).to.not.have.been.called;
       expect(brand.save).to.not.have.been.called;
-    });
-
-    it('dynamic-allocation ON: SKIPS the flat re-grant on an existing workspace (JIT owns sizing)', async () => {
-      const transport = makeTransport();
-      const brand = makeBrand({ workspaceId: SUB_WS });
-
-      const result = await ensureSubworkspace(
-        transport,
-        brand,
-        PARENT_WS,
-        2,
-        log,
-        NOOP_TIMING,
-        null,
-        { dynamicAllocation: true },
-      );
-
-      expect(result).to.equal(SUB_WS);
-      // No flat re-grant transfer — the metered handlers top up just-in-time instead.
-      expect(transport.transferWorkspaceResources).to.not.have.been.called;
-      expect(transport.createSubworkspace).to.not.have.been.called;
-      // The readiness settle still runs (workspace must be `created` before return).
-      expect(transport.getWorkspaceStatus).to.have.been.calledOnceWith(SUB_WS);
-    });
-
-    it('dynamic-allocation OFF (default): re-grant is byte-for-byte unchanged', async () => {
-      const transport = makeTransport();
-      const brand = makeBrand({ workspaceId: SUB_WS });
-
-      await ensureSubworkspace(
-        transport,
-        brand,
-        PARENT_WS,
-        2,
-        log,
-        NOOP_TIMING,
-        null,
-        { dynamicAllocation: false },
-      );
-
-      expect(transport.transferWorkspaceResources)
-        .to.have.been.calledOnceWithExactly(SUB_WS, resourceAllocation(2));
     });
 
     it('creates, polls until created, then persists the column', async () => {
@@ -173,13 +119,14 @@ describe('workspace-lifecycle', () => {
         .onSecondCall().resolves({ status: 'created' });
       const brand = makeBrand();
 
-      const result = await ensureSubworkspace(transport, brand, PARENT_WS, 2, log, NOOP_TIMING);
+      const result = await ensureSubworkspace(transport, brand, PARENT_WS, log, NOOP_TIMING);
 
       expect(result).to.equal(SUB_WS);
-      // Create carves the fixed CREATE_ALLOCATION (1 project, 500 prompts) so the
-      // child has metered quota; marketCount does not size the create.
+      // No `resources` body: the child draws nothing from the parent pool, so a create can never
+      // be refused for capacity (issue #2922).
       expect(transport.createSubworkspace)
-        .to.have.been.calledOnceWithExactly(PARENT_WS, EXPECTED_TITLE, CREATE_ALLOCATION);
+        .to.have.been.calledOnceWithExactly(PARENT_WS, EXPECTED_TITLE);
+      expect(transport.transferWorkspaceResources).to.not.have.been.called;
       expect(transport.getWorkspaceStatus).to.have.been.calledTwice;
       expect(brand.setSemrushSubWorkspaceId).to.have.been.calledOnceWithExactly(SUB_WS);
       expect(brand.save).to.have.been.calledOnce;
@@ -196,7 +143,6 @@ describe('workspace-lifecycle', () => {
         transport,
         brand,
         PARENT_WS,
-        1,
         log,
         NOOP_TIMING,
         null,
@@ -205,7 +151,7 @@ describe('workspace-lifecycle', () => {
 
       expect(result).to.equal(SUB_WS);
       expect(transport.createSubworkspace)
-        .to.have.been.calledOnceWithExactly(PARENT_WS, EXPECTED_TITLE, CREATE_ALLOCATION);
+        .to.have.been.calledOnceWithExactly(PARENT_WS, EXPECTED_TITLE);
       // The whole point of the fix: no settle poll on the create path.
       expect(transport.getWorkspaceStatus).to.not.have.been.called;
       // Pointer still persisted immediately, closing the orphan window.
@@ -275,7 +221,7 @@ describe('workspace-lifecycle', () => {
       const transport = makeTransport();
       const brand = makeBrand({ name: null });
 
-      await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
+      await expect(ensureSubworkspace(transport, brand, PARENT_WS, log, NOOP_TIMING))
         .to.be.rejectedWith(/requires a brand name/);
       expect(transport.createSubworkspace).to.not.have.been.called;
     });
@@ -284,7 +230,7 @@ describe('workspace-lifecycle', () => {
       const transport = makeTransport();
       const brand = makeBrand({ name: '' });
 
-      await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
+      await expect(ensureSubworkspace(transport, brand, PARENT_WS, log, NOOP_TIMING))
         .to.be.rejectedWith(/requires a brand name/);
       expect(transport.createSubworkspace).to.not.have.been.called;
     });
@@ -306,7 +252,6 @@ describe('workspace-lifecycle', () => {
           transport,
           brand,
           PARENT_WS,
-          1,
           log,
           NOOP_TIMING,
           null,
@@ -333,7 +278,6 @@ describe('workspace-lifecycle', () => {
           transport,
           brand,
           PARENT_WS,
-          1,
           log,
           NOOP_TIMING,
           null,
@@ -359,7 +303,6 @@ describe('workspace-lifecycle', () => {
           transport,
           brand,
           PARENT_WS,
-          1,
           log,
           NOOP_TIMING,
           null,
@@ -388,7 +331,6 @@ describe('workspace-lifecycle', () => {
           transport,
           brand,
           PARENT_WS,
-          1,
           log,
           NOOP_TIMING,
           null,
@@ -409,7 +351,6 @@ describe('workspace-lifecycle', () => {
           transport,
           brand,
           PARENT_WS,
-          1,
           localLog,
           NOOP_TIMING,
           null,
@@ -433,7 +374,7 @@ describe('workspace-lifecycle', () => {
         });
         const brand = makeBrand();
 
-        await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
+        await expect(ensureSubworkspace(transport, brand, PARENT_WS, log, NOOP_TIMING))
           .to.be.rejectedWith(/no Brand collection/);
         expect(transport.createSubworkspace).to.not.have.been.called;
       });
@@ -452,7 +393,7 @@ describe('workspace-lifecycle', () => {
           findBySemrushSubWorkspaceId: sinon.stub().rejects(new Error('postgrest unavailable')),
         };
 
-        await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING, null, { brandCollection })).to.be.rejectedWith(/postgrest unavailable/);
+        await expect(ensureSubworkspace(transport, brand, PARENT_WS, log, NOOP_TIMING, null, { brandCollection })).to.be.rejectedWith(/postgrest unavailable/);
         expect(transport.createSubworkspace).to.not.have.been.called;
       });
 
@@ -467,7 +408,6 @@ describe('workspace-lifecycle', () => {
           transport,
           brand,
           PARENT_WS,
-          1,
           log,
           NOOP_TIMING,
           null,
@@ -494,7 +434,6 @@ describe('workspace-lifecycle', () => {
           transport,
           brand,
           PARENT_WS,
-          1,
           log,
           NOOP_TIMING,
           null,
@@ -522,7 +461,6 @@ describe('workspace-lifecycle', () => {
           transport,
           brand,
           PARENT_WS,
-          1,
           log,
           NOOP_TIMING,
           reloadPointer,
@@ -546,7 +484,7 @@ describe('workspace-lifecycle', () => {
         });
         const brand = makeBrand();
 
-        const result = await ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING);
+        const result = await ensureSubworkspace(transport, brand, PARENT_WS, log, NOOP_TIMING);
 
         expect(result).to.equal(SUB_WS);
         expect(transport.createSubworkspace).to.have.been.calledOnce;
@@ -583,7 +521,7 @@ describe('workspace-lifecycle', () => {
       });
       const brand = makeBrand();
 
-      await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
+      await expect(ensureSubworkspace(transport, brand, PARENT_WS, log, NOOP_TIMING))
         .to.be.rejectedWith(/no family match to adopt/);
     });
 
@@ -593,7 +531,7 @@ describe('workspace-lifecycle', () => {
       });
       const brand = makeBrand();
 
-      await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
+      await expect(ensureSubworkspace(transport, brand, PARENT_WS, log, NOOP_TIMING))
         .to.be.rejectedWith(SerenityTransportError);
     });
 
@@ -601,7 +539,7 @@ describe('workspace-lifecycle', () => {
       const transport = makeTransport();
       const brand = makeBrand();
 
-      await expect(ensureSubworkspace(transport, brand, '', 1, log, NOOP_TIMING))
+      await expect(ensureSubworkspace(transport, brand, '', log, NOOP_TIMING))
         .to.be.rejectedWith(/has no parent workspace/);
     });
 
@@ -633,7 +571,7 @@ describe('workspace-lifecycle', () => {
         });
         const brand = makeBrand();
 
-        const result = await ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING);
+        const result = await ensureSubworkspace(transport, brand, PARENT_WS, log, NOOP_TIMING);
 
         expect(result).to.equal(SUB_WS);
         expect(transport.createSubworkspace).to.have.been.calledOnce;
@@ -669,7 +607,7 @@ describe('workspace-lifecycle', () => {
         });
         const brand = makeBrand();
 
-        const result = await ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING);
+        const result = await ensureSubworkspace(transport, brand, PARENT_WS, log, NOOP_TIMING);
 
         expect(result).to.equal(SUB_WS);
         expect(transport.createSubworkspace).to.have.been.calledOnce;
@@ -690,7 +628,7 @@ describe('workspace-lifecycle', () => {
         });
         const brand = makeBrand();
 
-        await ensureSubworkspace(transport, brand, PARENT_WS, 1, localLog, NOOP_TIMING);
+        await ensureSubworkspace(transport, brand, PARENT_WS, localLog, NOOP_TIMING);
 
         const logged = localLog.info.getCalls()
           .find((c) => /ignoring non-created same-title/.test(c.args[0]));
@@ -706,7 +644,7 @@ describe('workspace-lifecycle', () => {
         const transport = makeTransport();
         const brand = makeBrand();
 
-        await ensureSubworkspace(transport, brand, PARENT_WS, 1, localLog, NOOP_TIMING);
+        await ensureSubworkspace(transport, brand, PARENT_WS, localLog, NOOP_TIMING);
 
         const logged = localLog.info.getCalls()
           .find((c) => /ignoring non-created same-title/.test(c.args[0]));
@@ -722,7 +660,7 @@ describe('workspace-lifecycle', () => {
         });
         const brand = makeBrand();
 
-        await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
+        await expect(ensureSubworkspace(transport, brand, PARENT_WS, log, NOOP_TIMING))
           .to.be.rejectedWith(SerenityTransportError);
         expect(transport.createSubworkspace).to.not.have.been.called;
       });
@@ -734,7 +672,7 @@ describe('workspace-lifecycle', () => {
       });
       const brand = makeBrand();
 
-      await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
+      await expect(ensureSubworkspace(transport, brand, PARENT_WS, log, NOOP_TIMING))
         .to.be.rejectedWith(/returned no workspace id/);
     });
 
@@ -744,7 +682,7 @@ describe('workspace-lifecycle', () => {
       });
       const brand = makeBrand();
 
-      await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, { attempts: 2, intervalMs: 0, sleep: () => Promise.resolve() })).to.be.rejectedWith(/did not settle to 'created'/);
+      await expect(ensureSubworkspace(transport, brand, PARENT_WS, log, { attempts: 2, intervalMs: 0, sleep: () => Promise.resolve() })).to.be.rejectedWith(/did not settle to 'created'/);
     });
 
     it('uses the real timer when no sleep is injected (bounded poll)', async () => {
@@ -756,7 +694,7 @@ describe('workspace-lifecycle', () => {
       // attempts:1, intervalMs:0, sleep NOT injected -> exercises the default
       // setTimeout-based sleep once before the bounded poll gives up.
       const timing = { attempts: 1, intervalMs: 0 };
-      await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, timing))
+      await expect(ensureSubworkspace(transport, brand, PARENT_WS, log, timing))
         .to.be.rejectedWith(/did not settle to 'created'/);
     });
 
@@ -764,7 +702,7 @@ describe('workspace-lifecycle', () => {
       const transport = makeTransport();
       const brand = makeBrand({ workspaceId: PARENT_WS });
 
-      await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
+      await expect(ensureSubworkspace(transport, brand, PARENT_WS, log, NOOP_TIMING))
         .to.be.rejectedWith(/must not be the organization parent workspace/);
       expect(transport.transferWorkspaceResources).to.not.have.been.called;
     });
@@ -775,17 +713,16 @@ describe('workspace-lifecycle', () => {
       });
       const brand = makeBrand();
 
-      await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
+      await expect(ensureSubworkspace(transport, brand, PARENT_WS, log, NOOP_TIMING))
         .to.be.rejectedWith(/must not be the organization parent workspace/);
       expect(brand.save).to.not.have.been.called;
     });
 
-    it('empties + lowers the orphaned workspace allocation to a non-zero floor', async () => {
+    it('empties the orphaned workspace it created', async () => {
       // reloadPointer reports a DIFFERENT id was persisted while we created ours.
-      // The orphan's projects are emptied (defensively — it is provably already
-      // empty) and its allocation is lowered to a non-zero floor, returning the
-      // surplus to the parent pool (LLMO-6189) — the workspace itself is never
-      // deleted (production never deletes a sub-workspace).
+      // The orphan's projects are emptied (defensively — it is provably already empty); the
+      // shell is left in place (production never deletes a sub-workspace) and no resource
+      // transfer is issued, because the orphan never carried an allocation.
       const transport = makeTransport();
       const brand = makeBrand();
       const reloadPointer = sinon.stub().resolves('winner-ws');
@@ -794,7 +731,6 @@ describe('workspace-lifecycle', () => {
         transport,
         brand,
         PARENT_WS,
-        1,
         log,
         NOOP_TIMING,
         reloadPointer,
@@ -802,10 +738,7 @@ describe('workspace-lifecycle', () => {
 
       expect(result).to.equal('winner-ws');
       expect(transport.listProjects).to.have.been.calledWith(SUB_WS);
-      expect(transport.transferWorkspaceResources).to.have.been.calledOnceWithExactly(
-        SUB_WS,
-        { ai: { projects: 1, prompts: 1 } },
-      );
+      expect(transport.transferWorkspaceResources).to.not.have.been.called;
       expect(transport.deleteWorkspace).to.not.have.been.called;
       // The winner's pointer is NOT clobbered.
       expect(brand.setSemrushSubWorkspaceId).to.not.have.been.called;
@@ -821,7 +754,6 @@ describe('workspace-lifecycle', () => {
         transport,
         brand,
         PARENT_WS,
-        1,
         log,
         NOOP_TIMING,
         reloadPointer,
@@ -852,8 +784,8 @@ describe('workspace-lifecycle', () => {
       const reloadNull = sinon.stub().resolves(null);
 
       const [resA, resB] = await Promise.all([
-        ensureSubworkspace(transportA, brandA, PARENT_WS, 1, log, NOOP_TIMING, reloadNull),
-        ensureSubworkspace(transportB, brandB, PARENT_WS, 1, log, NOOP_TIMING, reloadNull),
+        ensureSubworkspace(transportA, brandA, PARENT_WS, log, NOOP_TIMING, reloadNull),
+        ensureSubworkspace(transportB, brandB, PARENT_WS, log, NOOP_TIMING, reloadNull),
       ]);
 
       // Both persist (divergent): neither releases its allocation, both save.
@@ -876,7 +808,6 @@ describe('workspace-lifecycle', () => {
         transport,
         brand,
         PARENT_WS,
-        1,
         log,
         NOOP_TIMING,
         reloadPointer,
@@ -888,7 +819,7 @@ describe('workspace-lifecycle', () => {
   });
 
   describe('decommissionBrandWorkspace', () => {
-    it('deletes every listed project, then lowers the allocation to a non-zero floor', async () => {
+    it('deletes every listed project and leaves the shell in place', async () => {
       const transport = makeTransport({
         listProjects: sinon.stub().resolves({ items: [{ id: 'p1' }, { id: 'p2' }] }),
       });
@@ -898,16 +829,13 @@ describe('workspace-lifecycle', () => {
 
       expect(transport.deleteProject).to.have.been.calledWith(SUB_WS, 'p1');
       expect(transport.deleteProject).to.have.been.calledWith(SUB_WS, 'p2');
-      // LLMO-6189: never a to-zero transfer (proven no-op) and never a workspace delete
-      // (production never deletes a sub-workspace) — always a non-zero floor transfer.
-      expect(transport.transferWorkspaceResources).to.have.been.calledOnceWithExactly(
-        SUB_WS,
-        { ai: { projects: 1, prompts: 1 } },
-      );
+      // The shell is never deleted (production never deletes a sub-workspace) and carries no
+      // allocation to reclaim, so decommission issues no resource transfer at all.
+      expect(transport.transferWorkspaceResources).to.not.have.been.called;
       expect(transport.deleteWorkspace).to.not.have.been.called;
-      const infoLine = localLog.info.getCalls().find((c) => /emptied projects, allocation lowered/.test(c.args[0]));
-      expect(infoLine, 'expected a lowered-to-floor info summary').to.exist;
-      expect(infoLine.args[1]).to.include({ released: true, reason: 'lowered-to-floor', deletedProjects: 2 });
+      const infoLine = localLog.info.getCalls().find((c) => /emptied projects/.test(c.args[0]));
+      expect(infoLine, 'expected an emptied-projects info summary').to.exist;
+      expect(infoLine.args[1]).to.include({ subworkspaceId: SUB_WS, deletedProjects: 2 });
     });
 
     it('treats an upstream 404 on project delete as success (convergent)', async () => {
@@ -1008,10 +936,7 @@ describe('workspace-lifecycle', () => {
       );
 
       expect(transport.deleteProject).to.have.been.calledOnceWithExactly(SUB_WS, 'p1');
-      expect(transport.transferWorkspaceResources).to.have.been.calledOnceWithExactly(
-        SUB_WS,
-        { ai: { projects: 1, prompts: 1 } },
-      );
+      expect(transport.transferWorkspaceResources).to.not.have.been.called;
       expect(transport.deleteWorkspace).to.not.have.been.called;
     });
 
@@ -1028,10 +953,7 @@ describe('workspace-lifecycle', () => {
 
       expect(transport.listWorkspaceFamily).to.not.have.been.called;
       expect(transport.deleteProject).to.have.been.calledOnceWithExactly(SUB_WS, 'p1');
-      expect(transport.transferWorkspaceResources).to.have.been.calledOnceWithExactly(
-        SUB_WS,
-        { ai: { projects: 1, prompts: 1 } },
-      );
+      expect(transport.transferWorkspaceResources).to.not.have.been.called;
       expect(transport.deleteWorkspace).to.not.have.been.called;
     });
   });
@@ -1045,7 +967,7 @@ describe('workspace-lifecycle', () => {
         });
         const brand = makeBrand();
 
-        await expect(ensureSubworkspace(transport, brand, PARENT_WS, 1, log, NOOP_TIMING))
+        await expect(ensureSubworkspace(transport, brand, PARENT_WS, log, NOOP_TIMING))
           .to.be.rejectedWith(/no family match to adopt/);
       });
     });
@@ -1086,15 +1008,12 @@ describe('workspace-lifecycle', () => {
         );
 
         expect(transport.deleteProject).to.have.been.calledOnceWithExactly(SUB_WS, 'p1');
-        expect(transport.transferWorkspaceResources).to.have.been.calledOnceWithExactly(
-          SUB_WS,
-          { ai: { projects: 1, prompts: 1 } },
-        );
+        expect(transport.transferWorkspaceResources).to.not.have.been.called;
       });
     });
 
     describe('decommissionBrandWorkspace - listProjects resolves non-array', () => {
-      it('treats {} listing as no projects, still lowers the allocation to a non-zero floor', async () => {
+      it('treats {} listing as no projects and issues no deletes', async () => {
         // Line 390: Array.isArray false branch -> projects = [] -> no deletes.
         const transport = makeTransport({
           listProjects: sinon.stub().resolves({}),
@@ -1103,10 +1022,7 @@ describe('workspace-lifecycle', () => {
         await decommissionBrandWorkspace(transport, SUB_WS, log);
 
         expect(transport.deleteProject).to.not.have.been.called;
-        expect(transport.transferWorkspaceResources).to.have.been.calledOnceWithExactly(
-          SUB_WS,
-          { ai: { projects: 1, prompts: 1 } },
-        );
+        expect(transport.transferWorkspaceResources).to.not.have.been.called;
         expect(transport.deleteWorkspace).to.not.have.been.called;
       });
     });
@@ -1122,7 +1038,6 @@ describe('workspace-lifecycle', () => {
           transport,
           brand,
           PARENT_WS,
-          1,
           log,
           { attempts: 1, sleep: () => Promise.resolve() },
         );
@@ -1180,83 +1095,19 @@ describe('workspace-lifecycle', () => {
       expect(count2).to.equal(0);
       expect(transport2.deleteProject).to.not.have.been.called;
     });
-  });
 
-  describe('releaseFullAllocation (LLMO-6189)', () => {
-    it('is a no-op for a blank workspace id', async () => {
-      const transport = makeTransport();
-
-      const result = await releaseFullAllocation(transport, '', PARENT_WS, log);
-
-      expect(result).to.deep.equal({ released: false, reason: 'no-workspace' });
-      expect(transport.deleteWorkspace).to.not.have.been.called;
-    });
-
-    it('refuses to act on the org parent workspace', async () => {
-      const transport = makeTransport();
-
-      await expect(
-        releaseFullAllocation(transport, PARENT_WS, PARENT_WS, log),
-      ).to.be.rejectedWith(/must not be the organization parent workspace/);
-      expect(transport.transferWorkspaceResources).to.not.have.been.called;
-      expect(transport.deleteWorkspace).to.not.have.been.called;
-    });
-
-    it('lowers the allocation to the default non-zero floor and reports a genuine reclaim', async () => {
-      const transport = makeTransport();
-      const localLog = { info: sinon.spy(), error: sinon.spy(), warn: sinon.spy() };
-
-      const result = await releaseFullAllocation(transport, SUB_WS, PARENT_WS, localLog);
-
-      expect(result).to.deep.equal({ released: true, reason: 'lowered-to-floor' });
-      expect(transport.transferWorkspaceResources).to.have.been.calledOnceWithExactly(
-        SUB_WS,
-        { ai: { projects: 1, prompts: 1 } },
-      );
-      expect(transport.deleteWorkspace).to.not.have.been.called;
-      expect(localLog.info).to.have.been.calledOnce;
-    });
-
-    it('accepts a caller-supplied floor override', async () => {
-      const transport = makeTransport();
-
-      const result = await releaseFullAllocation(
-        transport,
-        SUB_WS,
-        PARENT_WS,
-        log,
-        { floor: { projects: 2, prompts: 100 } },
-      );
-
-      expect(result).to.deep.equal({ released: true, reason: 'lowered-to-floor' });
-      expect(transport.transferWorkspaceResources).to.have.been.calledOnceWithExactly(
-        SUB_WS,
-        { ai: { projects: 2, prompts: 100 } },
-      );
-    });
-
-    it('propagates a transfer failure', async () => {
+    it('refuses to empty the org parent workspace (self-defending)', async () => {
+      // The guard lives in this primitive, so it holds for every caller — emptying the parent
+      // would delete every brand's markets across the whole org. It must fire before the
+      // listing, not after.
       const transport = makeTransport({
-        transferWorkspaceResources: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
+        listProjects: sinon.stub().resolves({ items: [{ id: 'p1' }] }),
       });
 
-      await expect(
-        releaseFullAllocation(transport, SUB_WS, PARENT_WS, log),
-      ).to.be.rejectedWith(SerenityTransportError);
-    });
-
-    it('rejects a caller-supplied floor with a zero dimension (MysticatBot review, PR #2812)', async () => {
-      // A zero-dimension floor is exactly the payload this whole fix exists to eliminate — a
-      // transfer to zero is a proven silent no-op. Must throw before ever calling the transport.
-      const transport = makeTransport();
-      const zeroProjectsFloor = { floor: { projects: 0, prompts: 100 } };
-      const zeroPromptsFloor = { floor: { projects: 1, prompts: 0 } };
-
-      await expect(releaseFullAllocation(transport, SUB_WS, PARENT_WS, log, zeroProjectsFloor))
-        .to.be.rejectedWith(/floor must have both dimensions > 0/);
-      await expect(releaseFullAllocation(transport, SUB_WS, PARENT_WS, log, zeroPromptsFloor))
-        .to.be.rejectedWith(/floor must have both dimensions > 0/);
-      expect(transport.transferWorkspaceResources).to.not.have.been.called;
+      await expect(deleteAllProjects(transport, PARENT_WS, PARENT_WS))
+        .to.be.rejectedWith(/must not be the organization parent workspace/);
+      expect(transport.listProjects).to.not.have.been.called;
+      expect(transport.deleteProject).to.not.have.been.called;
     });
   });
 });

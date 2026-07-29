@@ -49,7 +49,10 @@ function defaultDateRange() {
  * @param {string} [params.endDate] - ISO date (YYYY-MM-DD). Defaults to today.
  * @param {string} [params.category] - Full `category__<label>` tag value, sent
  *   as-is (callers already include the `category__` prefix).
- * @param {string} [params.projectId] - Semrush project id for region scoping (top-level).
+ * @param {string} [params.projectId] - Semrush project id to scope to (top-level).
+ *   This element only accepts ONE project per call (no OR-list equivalent) —
+ *   {@link transformCitedDomainsResponses} fans out one call per id and merges
+ *   when a caller selects more than one project.
  */
 export function buildCitedDomainsPayload({
   model, platform, startDate, endDate, category, projectId,
@@ -72,10 +75,10 @@ export function buildCitedDomainsPayload({
   }
 
   return {
-    // Region scoping: a Semrush project == one (brand, market/region). Selecting it via the
+    // Project scoping: a Semrush project == one (brand, market). Selecting it via the
     // top-level `project_id` (NOT a CBF_* filter — the element ignores those) scopes results to
-    // that market. Resolved from the UI's region code by the controller (via the Markets
-    // element). Verified honored by this element. Omitted → all of the workspace's markets.
+    // that project. Supplied by the caller via the `projectId` query param. Omitted → all of
+    // the workspace's projects.
     ...(projectId && { project_id: projectId }),
     comparison_data_formatting: 'union',
     filters: {
@@ -122,40 +125,105 @@ function parsePagination({ page, pageSize } = {}) {
  * pre-slice row count.
  *
  * @param {object} raw - Raw response from the Elements API.
- * @param {object} [params] - Query params (page, pageSize, channel).
- * @returns {{ domains: Array<object>, totalCount: number }}
+ * @returns {Array<object>} Unpaginated, unsorted domain rows.
  */
-export function transformCitedDomainsResponse(raw, params = {}) {
-  const { page, pageSize } = parsePagination(params);
-  const channel = typeof params.channel === 'string' ? params.channel.trim() : '';
+function extractDomainRows(raw) {
   const rows = (raw?.blocks?.data ?? [])
     .filter((row) => row && row.domain != null);
 
-  let domains = rows
-    .map((row) => ({
-      domain: row.domain || '',
-      // `Number(x) || 0` (not `Number(x ?? 0)`) so a non-numeric value coerces to 0 instead
-      // of NaN — NaN would corrupt the totalCitations sort and serialize as null.
-      totalCitations: Number(row.mentions_end) || 0,
-      totalUrls: Number(row.urls_count) || 0,
-      promptsCited: Number(row.prompts_with_citations) || 0,
-      // Semrush ownership classification; drives the UI's owned-vs-third-party filter.
-      contentType: row.domain_type || '',
-      // No source on element 98b91d00 (Semrush gap) — '' matches the legacy handler.
-      categories: '',
-      regions: '',
-    }));
+  return rows.map((row) => ({
+    domain: row.domain || '',
+    // `Number(x) || 0` (not `Number(x ?? 0)`) so a non-numeric value coerces to 0 instead
+    // of NaN — NaN would corrupt the totalCitations sort and serialize as null.
+    totalCitations: Number(row.mentions_end) || 0,
+    totalUrls: Number(row.urls_count) || 0,
+    promptsCited: Number(row.prompts_with_citations) || 0,
+    // Semrush ownership classification; drives the UI's owned-vs-third-party filter.
+    contentType: row.domain_type || '',
+    // No source on element 98b91d00 (Semrush gap) — '' matches the legacy handler.
+    categories: '',
+    regions: '',
+  }));
+}
 
+/**
+ * Merges domain rows from multiple per-project Cited Domains calls (one call per
+ * selected `projectId` — this element accepts only one project per call, see
+ * {@link buildCitedDomainsPayload}), summing the numeric fields for domains cited
+ * under more than one project.
+ *
+ * @param {Array<Array<object>>} rowsByProject - One row array per project (from
+ *   {@link extractDomainRows}).
+ * @returns {Array<object>} Merged domain rows.
+ */
+function mergeDomainRows(rowsByProject) {
+  const byDomain = new Map();
+  for (const rows of rowsByProject) {
+    for (const row of rows) {
+      const existing = byDomain.get(row.domain);
+      if (!existing) {
+        byDomain.set(row.domain, { ...row });
+      } else {
+        existing.totalCitations += row.totalCitations;
+        existing.totalUrls += row.totalUrls;
+        existing.promptsCited += row.promptsCited;
+        existing.contentType = existing.contentType || row.contentType;
+      }
+    }
+  }
+  return [...byDomain.values()];
+}
+
+/**
+ * Applies the client-side `channel` (content-type) filter, citations-desc sort, and
+ * pagination shared by both the single- and multi-project entry points.
+ *
+ * @param {Array<object>} domainsIn - Rows from {@link extractDomainRows} or
+ *   {@link mergeDomainRows}.
+ * @param {object} [params] - Query params (page, pageSize, channel).
+ * @returns {{ domains: Array<object>, totalCount: number }}
+ */
+function paginateDomains(domainsIn, params = {}) {
+  const { page, pageSize } = parsePagination(params);
+  const channel = typeof params.channel === 'string' ? params.channel.trim() : '';
+
+  let domains = domainsIn;
   // `channel` = content-type filter, applied client-side (element ignores it server-side).
   if (channel) {
     const wanted = channel.toLowerCase();
     domains = domains.filter((d) => d.contentType.toLowerCase() === wanted);
   }
 
-  domains.sort((a, b) => b.totalCitations - a.totalCitations);
+  domains = [...domains].sort((a, b) => b.totalCitations - a.totalCitations);
 
   const totalCount = domains.length;
   const offset = page * pageSize;
   return { domains: domains.slice(offset, offset + pageSize), totalCount };
+}
+
+/**
+ * Transforms a single raw Cited Domains element response into the legacy URL
+ * Inspector `cited-domains` contract (see module doc above for field mapping).
+ *
+ * @param {object} raw - Raw response from the Elements API.
+ * @param {object} [params] - Query params (page, pageSize, channel).
+ * @returns {{ domains: Array<object>, totalCount: number }}
+ */
+export function transformCitedDomainsResponse(raw, params = {}) {
+  return paginateDomains(extractDomainRows(raw), params);
+}
+
+/**
+ * Transforms and merges raw Cited Domains responses from multiple per-project
+ * calls (one per caller-selected `projectId`) into the same legacy contract as
+ * {@link transformCitedDomainsResponse}, summing counts for domains cited under
+ * more than one project before sorting/paginating once over the merged set.
+ *
+ * @param {Array<object>} rawList - One raw element response per project.
+ * @param {object} [params] - Query params (page, pageSize, channel).
+ * @returns {{ domains: Array<object>, totalCount: number }}
+ */
+export function transformCitedDomainsResponses(rawList, params = {}) {
+  return paginateDomains(mergeDomainRows(rawList.map(extractDomainRows)), params);
 }
 /* c8 ignore stop */

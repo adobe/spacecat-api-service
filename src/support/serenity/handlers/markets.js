@@ -16,10 +16,13 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import crypto from 'node:crypto';
 
 import { ErrorWithStatusCode } from '../../utils.js';
-import { ERROR_CODES, isUpstreamGone, isSemrushTransportError } from '../errors.js';
+import {
+  ERROR_CODES, isMeteredQuota, isUpstreamGone, isSemrushTransportError, toQuotaExceededError,
+} from '../errors.js';
 import { normalizeLanguageCode, normalizeGeoTargetId } from '../validation.js';
 import { resolveLocation } from '../locations.js';
 import { resolveSiteDomain } from '../site-linkage.js';
+import { alertQuotaRejection } from '../quota-alerts.js';
 
 const LANGUAGE_CACHE_TTL_MS = 60 * 60 * 1000;
 export const MAX_MODEL_IDS = 50;
@@ -985,6 +988,50 @@ export async function listSliceModels(transport, semrushWorkspaceId, projectId) 
 }
 
 /**
+ * Union of the models enabled across a set of projects. Fetches each project's
+ * assigned models (`listSliceModels`) in parallel and dedups by model `key`
+ * (falling back to `id`). Returns `{ items }` in the same shape as
+ * `listSliceModels`/`listGlobalModelCatalog`. An empty/blank project list yields
+ * an empty set — never the global catalog.
+ *
+ * @param {object} transport - Semrush transport.
+ * @param {string} semrushWorkspaceId - Semrush workspace id the projects live in.
+ * @param {Array<string>} projectIds - the Semrush project ids to union over.
+ * @returns {Promise<{ items: Array<{ id: string, key: string, name: (string|null),
+ *   icon: (string|null) }> }>}
+ */
+export async function listUnionModels(transport, semrushWorkspaceId, projectIds) {
+  const ids = [...new Set((projectIds ?? []).filter((id) => hasText(id)).map(String))];
+  if (ids.length === 0) {
+    return { items: [] };
+  }
+  const perProject = await Promise.all(
+    ids.map((projectId) => listSliceModels(transport, semrushWorkspaceId, projectId)
+      .catch((e) => {
+        // Tolerate a stale/deleted project (404/405) — skip it rather than
+        // 500 the whole union, matching the old global-catalog path. Auth and
+        // other errors still propagate.
+        if (isSemrushTransportError(e) && (e.status === 404 || e.status === 405)) {
+          return { items: [] };
+        }
+        throw e;
+      })),
+  );
+  const byKey = new Map();
+  for (const { items } of perProject) {
+    for (const m of items) {
+      if (m) {
+        const dedupKey = hasText(m.key) ? m.key : m.id;
+        if (!byKey.has(dedupKey)) {
+          byKey.set(dedupKey, m);
+        }
+      }
+    }
+  }
+  return { items: [...byKey.values()] };
+}
+
+/**
  * Counts the project's currently-PUBLISHED prompts (the live layer), by paginating
  * `listPromptsByTags` with an empty tag filter — the same live-layer walk `listTagsForProject`
  * uses, with the same page ceiling. Used by the dynamic allocator to size the prompt re-meter of a
@@ -1047,9 +1094,12 @@ export async function handleListModels(
   const geoTargetId = normalizeGeoTargetId(query?.geoTargetId);
   const languageCode = normalizeLanguageCode(query?.languageCode);
 
-  // No-params path: return global model catalog.
+  // No-params path: return the union of models enabled across all the brand's
+  // projects (not the global catalog — that lives on the org-scoped endpoint).
   if (geoTargetId === null && languageCode === null) {
-    return listGlobalModelCatalog(transport);
+    const rows = await dataAccess.BrandSemrushProject.allByBrandId(brandId);
+    const projectIds = (rows ?? []).map((r) => r.getSemrushProjectId());
+    return listUnionModels(transport, semrushWorkspaceId, projectIds);
   }
 
   // Partial params: both must be provided together.
@@ -1088,6 +1138,18 @@ export async function handleListModels(
  * the inner `publishProject` call. The subworkspace update-models caller passes
  * `headroom.retryOnQuota` (LLMO-6190 item 4) so a disguised metered-405 gets ONE bounded
  * top-up+retry; flat-mode callers omit this param, so flat mode is untouched.
+ * @param {any} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string[]} modelIds
+ * @param {object} logCtx
+ * @param {any} log
+ * @param {object} [options]
+ * @param {boolean} [options.publish]
+ * @param {(fn: () => Promise<any>) => Promise<any>} [options.wrapPublish]
+ * @param {{ orgId?: string | null, brandId?: string | null, env?: object | null } | null}
+ *   [options.alertContext] - serenity-docs#72 §5: when supplied, fires the quota-rejection Slack
+ *   alert on a residual publish-leg rejection.
  */
 export async function syncModelsForProject(
   transport,
@@ -1096,7 +1158,9 @@ export async function syncModelsForProject(
   modelIds,
   logCtx,
   log,
-  { publish = true, wrapPublish = (fn) => fn() } = {},
+  {
+    publish = true, wrapPublish = (fn) => fn(), alertContext = null,
+  } = {},
 ) {
   const ctx = logCtx || {};
   // Fetch current assignments: catalog-id → assignment-id mapping
@@ -1168,7 +1232,30 @@ export async function syncModelsForProject(
   // Only reached when something actually changed (the no-op path returned above).
   // Skipped when the caller batches its own publish (brand-create, see jsdoc).
   if (publish) {
-    await wrapPublish(() => transport.publishProject(semrushWorkspaceId, projectId));
+    try {
+      await wrapPublish(() => transport.publishProject(semrushWorkspaceId, projectId));
+    } catch (e) {
+      // serenity-docs#72 §4.1: a model-set-change publish is a metered write too — a residual
+      // disguised-405 quota rejection (after wrapPublish's own retry, when wired) must surface as
+      // the stable 409 quotaExceeded token, never propagate raw into mapError's generic 502. This
+      // is the shared core for BOTH the flat and sub-workspace PUT /models callers.
+      if (isMeteredQuota(e)) {
+        log?.warn?.('handleUpdateModels: publish rejected — quota exceeded', {
+          ...ctx, semrushWorkspaceId, projectId,
+        });
+        if (alertContext) {
+          await alertQuotaRejection({
+            orgId: alertContext.orgId,
+            brandId: alertContext.brandId ?? ctx.brandId,
+            workspaceId: semrushWorkspaceId,
+            caseType: 'brandCarveExhausted',
+            dimension: 'prompts',
+          }, alertContext.env, log);
+        }
+        throw toQuotaExceededError();
+      }
+      throw e;
+    }
   }
 
   // Return the refreshed model list
@@ -1200,6 +1287,15 @@ export async function syncModelsForProject(
  * internally for the DELETE batch and are never exposed to callers.
  *
  * Returns the final model list in the same shape as `handleListModels`.
+ * @param {any} transport
+ * @param {any} dataAccess
+ * @param {string | undefined} brandId
+ * @param {string} semrushWorkspaceId
+ * @param {any} body
+ * @param {any} log
+ * @param {object} [options]
+ * @param {string | null} [options.orgId] - serenity-docs#72 §5 alert payload only.
+ * @param {object | null} [options.env] - serenity-docs#72 §5 alert kill-switch/config only.
  */
 export async function handleUpdateModels(
   transport,
@@ -1208,6 +1304,7 @@ export async function handleUpdateModels(
   semrushWorkspaceId,
   body,
   log,
+  { orgId = null, env = null } = {},
 ) {
   const geoTargetId = normalizeGeoTargetId(Number(body?.geoTargetId));
   const languageCode = normalizeLanguageCode(body?.languageCode);
@@ -1246,5 +1343,6 @@ export async function handleUpdateModels(
     modelIds,
     { brandId, geoTargetId, languageCode },
     log,
+    { alertContext: { orgId, brandId, env } },
   );
 }
