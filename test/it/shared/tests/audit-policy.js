@@ -11,7 +11,7 @@
  */
 
 import { expect } from 'chai';
-import { SITE_1_ID, SITE_3_ID } from '../seed-ids.js';
+import { SITE_1_ID, SITE_1_BASE_URL, SITE_3_ID } from '../seed-ids.js';
 
 /**
  * Shared Audit Policy contract tests (SITES-47306).
@@ -30,10 +30,21 @@ import { SITE_1_ID, SITE_3_ID } from '../seed-ids.js';
  * SITE_3_ID (ORG_2, "denied") for the cross-org 403 check — see
  * test/it/shared/tests/audit-urls.js for the same SITE_1/SITE_3 convention.
  *
+ * The `GET /audit-scope/pages` (E4, SITES-46351) describe block below reads
+ * `v_audit_scope_pages`, a data-service view added in mysticat-data-service
+ * migration `20260729162246_audit_scope_pages_view.sql` (feat/sites-46351-b4,
+ * not yet merged/released at the time this IT was written) — it is NOT part
+ * of the pinned image above. See seedAuditScopePages in test/it/postgres/seed.js
+ * and this repo's Task C4 report for how this was validated locally before that
+ * migration ships.
+ *
  * @param {() => object} getHttpClient - Getter returning the initialized HTTP client
  * @param {() => Promise<void>} resetData - Truncates all data and re-seeds baseline
+ * @param {(siteId: string, pages: Array<{ url: string, urlPath: string,
+ *   inScope?: boolean }>) => Promise<void>} seedAuditScopePages - Seeds
+ *   page_inventory + matching d_page_in_scope facts for a site (see seed.js).
  */
-export default function auditPolicyTests(getHttpClient, resetData) {
+export default function auditPolicyTests(getHttpClient, resetData, seedAuditScopePages) {
   describe('Audit Policy', () => {
     before(() => resetData());
 
@@ -97,6 +108,47 @@ export default function auditPolicyTests(getHttpClient, resetData) {
       const http = getHttpClient();
       const res = await http.admin.get(`/sites/${SITE_1_ID}/audit-scope/summary`);
       expect(res.status).to.equal(501);
+    });
+
+    describe('GET /audit-scope/pages (E4)', () => {
+      const pageA = { url: `${SITE_1_BASE_URL}/audit-scope-a`, urlPath: '/audit-scope-a', inScope: true };
+      const pageB = { url: `${SITE_1_BASE_URL}/audit-scope-b`, urlPath: '/audit-scope-b', inScope: true };
+      const pageC = { url: `${SITE_1_BASE_URL}/audit-scope-c`, urlPath: '/audit-scope-c', inScope: false };
+
+      before(() => seedAuditScopePages(SITE_1_ID, [pageA, pageB, pageC]));
+
+      it('returns only in-scope pages, ordered by url, with the DTO shape', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get(`/sites/${SITE_1_ID}/audit-scope/pages`);
+        expect(res.status).to.equal(200);
+        const { items } = res.body;
+        expect(items.map((i) => i.url)).to.deep.equal([pageA.url, pageB.url]);
+        expect(items[0]).to.have.keys(['url', 'urlPath', 'discoverySource', 'lastModified', 'lifecycleState']);
+        expect(items[0].urlPath).to.equal(pageA.urlPath);
+        expect(items[0].discoverySource).to.deep.equal(['sitemap']);
+        expect(items[0].lifecycleState).to.equal('discovered');
+      });
+
+      it('paginates with limit + cursor', async () => {
+        const http = getHttpClient();
+        const firstPage = await http.admin.get(`/sites/${SITE_1_ID}/audit-scope/pages?limit=1`);
+        expect(firstPage.status).to.equal(200);
+        expect(firstPage.body.items.map((i) => i.url)).to.deep.equal([pageA.url]);
+        expect(firstPage.body.cursor).to.be.a('string');
+
+        const secondPage = await http.admin.get(
+          `/sites/${SITE_1_ID}/audit-scope/pages?limit=1&cursor=${firstPage.body.cursor}`,
+        );
+        expect(secondPage.status).to.equal(200);
+        expect(secondPage.body.items.map((i) => i.url)).to.deep.equal([pageB.url]);
+        expect(secondPage.body.cursor).to.be.undefined;
+      });
+
+      it('user: denied for a cross-org site', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${SITE_3_ID}/audit-scope/pages`);
+        expect(res.status).to.equal(403);
+      });
     });
   });
 }
