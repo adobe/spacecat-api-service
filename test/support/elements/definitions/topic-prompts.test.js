@@ -78,6 +78,29 @@ describe('topic-prompts definitions', () => {
       expect(findFilterVal(buildTopicPromptsPayload(), 'CBF_project')).to.be.undefined;
     });
 
+    it('ORs multiple projectIds together into a single CBF_project filter', () => {
+      const payload = buildTopicPromptsPayload({ projectIds: ['proj-a', 'proj-b'] });
+      const projectBlock = payload.filters.advanced.filters.find(
+        (f) => Array.isArray(f.filters) && f.filters.some((inner) => inner.col === 'CBF_project'),
+      );
+      expect(projectBlock).to.deep.equal({
+        op: 'or',
+        filters: [
+          { op: 'eq', val: 'proj-a', col: 'CBF_project' },
+          { op: 'eq', val: 'proj-b', col: 'CBF_project' },
+        ],
+      });
+    });
+
+    it('omits CBF_project when projectIds is an empty array (falls back to projectId)', () => {
+      expect(findFilterVal(buildTopicPromptsPayload({ projectIds: [] }), 'CBF_project')).to.be.undefined;
+    });
+
+    it('prefers projectIds over projectId when both are given', () => {
+      const payload = buildTopicPromptsPayload({ projectId: 'ignored', projectIds: ['proj-a'] });
+      expect(findFilterVal(payload, 'CBF_project')).to.equal('proj-a');
+    });
+
     it('sends filters.simple date window only when both dates are present', () => {
       const payload = buildTopicPromptsPayload({ startDate: '2026-06-01', endDate: '2026-06-30' });
       expect(payload.filters.simple).to.deep.equal({
