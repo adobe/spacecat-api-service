@@ -77,3 +77,15 @@ export const AuditPolicyRevisionDto = {
     };
   },
 };
+
+export const AuditScopePageDto = {
+  toJSON(row) {
+    return {
+      url: row.url,
+      urlPath: row.url_path,
+      discoverySource: row.discovery_source,
+      lastModified: toISO(row.last_modified),
+      lifecycleState: row.lifecycle_state,
+    };
+  },
+};
