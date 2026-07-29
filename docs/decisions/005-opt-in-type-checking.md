@@ -270,9 +270,10 @@ end-to-end run against the real API cannot detect this class of defect at all.
   in `handlers/markets.js` became an explicit `!== undefined`, since `Boolean` does
   not narrow; `usersBaseUrl` binds its env value before guarding it, because
   `hasText` cannot accept a `string | undefined`; and `handleDeleteMarketSubworkspace`
-  now treats a listing entry whose contract-nullable `id` is absent as no project at
-  all, rather than addressing an upstream delete and a mapping-row tombstone by a
-  missing id. Each is covered by the existing suites.
+  now treats a listing entry with no `id` as no project at all, rather than addressing
+  an upstream delete and a mapping-row tombstone by a missing id — the contract declares
+  `id: string`, but the listing response resolves to `any` at every call site, so nothing
+  enforces it. Each is covered by the existing suites.
 
 ## Ratchet path (future work)
 

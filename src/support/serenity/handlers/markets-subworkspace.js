@@ -932,11 +932,13 @@ export async function handleDeleteMarketSubworkspace(
   validateSlice(geoTargetId, languageCode);
   const lang = normalizeLanguageCode(languageCode);
   const project = await resolveProject(transport, workspaceId, Number(geoTargetId), lang, log);
-  // `id` is nullable on the generated listing contract, and everything below keys off it —
-  // the upstream DELETE and the mapping-row tombstone both address the project by id. An
-  // id-less project is therefore indistinguishable from no project at all: it cannot be
-  // deleted upstream, and tombstoning against a blank id would target the wrong row. It is
-  // still an upstream contract break, so say so rather than reporting a silent 204.
+  // Nothing checks this read. The generated contract declares `id: string` — required and
+  // non-nullable — but the listing response resolves to `any` at every call site, and the
+  // live gateway is documented to return bodies the spec forbids. Everything below keys off
+  // the id: the upstream DELETE and the mapping-row tombstone both address the project by
+  // it. An id-less entry is therefore indistinguishable from no project at all — it cannot
+  // be deleted upstream, and tombstoning against a blank id would target the wrong row. It
+  // is a contract break either way, so say so rather than reporting a silent 204.
   const projectId = project?.id;
   if (!projectId) {
     if (project) {

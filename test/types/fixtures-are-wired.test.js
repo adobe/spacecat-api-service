@@ -25,7 +25,12 @@ import { expect } from 'chai';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
-/** tsconfigs carry `//` comments, which `JSON.parse` rejects. */
+/**
+ * tsconfigs carry `//` comments, which `JSON.parse` rejects. Only whole-line comments are
+ * stripped — which is all either config uses. A trailing `// …` or a `/* … *\/` block would
+ * survive the filter and make `JSON.parse` throw, failing this test loudly; it cannot parse
+ * to a wrong answer, so a full JSONC parser buys nothing here.
+ */
 function readTsconfig(name) {
   const raw = readFileSync(path.join(repoRoot, name), 'utf-8');
   const stripped = raw

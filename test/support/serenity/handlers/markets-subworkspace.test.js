@@ -1046,8 +1046,9 @@ describe('markets-subworkspace handlers', () => {
     });
 
     it('treats a matched project carrying no id as nothing to delete, and warns', async () => {
-      // `id` is nullable on the generated listing contract. Such a project cannot be
-      // deleted upstream and must not be tombstoned, since the row is addressed by id.
+      // The contract declares `id: string`, but the response is `any` at every call site,
+      // so an id-less entry reaches us unchecked. It cannot be deleted upstream and must
+      // not be tombstoned, since the row is addressed by id.
       const transport = makeTransport({
         listProjects: sinon.stub().resolves({ items: [proj({ id: null })] }),
       });
