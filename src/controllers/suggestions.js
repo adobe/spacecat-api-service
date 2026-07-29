@@ -2090,9 +2090,6 @@ function SuggestionsController(ctx, sqs, env) {
       });
 
       let geoExperiment = null;
-      // Tracks whether the Atomic strategy was successfully written, so the
-      // outer catch knows whether to compensate by deleting it if a later
-      // step (e.g. response serialization) throws.
       let atomicStrategyCreated = false;
       let validSuggestionEntities = [];
       try {
@@ -2114,30 +2111,38 @@ function SuggestionsController(ctx, sqs, env) {
         ];
         const metadataBase = {};
 
-        if (hasPatternDeploy) {
-          const highImpactIds = context.data?.metadata?.highImpactSuggestionIds;
-          if (!Array.isArray(highImpactIds) || highImpactIds.length === 0
-            || !highImpactIds.every((id) => isValidUUID(id))) {
-            context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, missing/invalid metadata.highImpactSuggestionIds for pattern deploy`);
-            throw new Error('metadata.highImpactSuggestionIds is required for domain-wide/segment deployment');
-          }
+        const highImpactIds = context.data?.metadata?.highImpactSuggestionIds;
+        const hasHighImpactIds = Array.isArray(highImpactIds) && highImpactIds.length > 0;
+        if (hasPatternDeploy && !hasHighImpactIds) {
+          context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, missing/invalid metadata.highImpactSuggestionIds for pattern deploy`);
+          throw new Error('metadata.highImpactSuggestionIds is required for domain-wide/segment deployment');
+        }
+        if (hasHighImpactIds && !highImpactIds.every((id) => isValidUUID(id))) {
+          context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, invalid metadata.highImpactSuggestionIds`);
+          throw new Error('metadata.highImpactSuggestionIds must be an array of valid UUIDs');
+        }
+
+        if (hasHighImpactIds) {
+          context.log.info(`[edge-geo-exp] site: ${apexBaseUrl}, highImpactSuggestionIds: ${JSON.stringify(highImpactIds)}`);
           const highImpactIdSet = new Set(highImpactIds);
           const measurementSuggestions = allSuggestions.filter(
             (s) => highImpactIdSet.has(s.getId()),
           );
           if (measurementSuggestions.length === 0) {
-            context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, no high-impact suggestions resolved for pattern deploy`);
+            context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, no high-impact suggestions resolved for the provided IDs`);
             throw new Error('No high-impact suggestions found for the provided IDs');
           }
-          // suggestionIds holds only what actually deploys (the pattern[s]); the high-impact
-          // measurement suggestions live in metadata and drive prompt generation only.
+          // suggestionIds holds everything that actually deploys; the high-impact measurement
+          // suggestions live in metadata and drive prompt generation/measurement only.
           metadataBase.urls = [
             ...new Set(measurementSuggestions.map((s) => s.getData()?.url).filter(Boolean)),
           ];
-          metadataBase.patterns = patternSuggestions.map((ps) => (
-            ps.getData()?.isDomainWide ? '/*' : ps.getData()?.allowedRegexPatterns?.[0]
-          ));
           metadataBase.highImpactSuggestionIds = measurementSuggestions.map((s) => s.getId());
+          if (hasPatternDeploy) {
+            metadataBase.patterns = patternSuggestions.map((ps) => (
+              ps.getData()?.isDomainWide ? '/*' : ps.getData()?.allowedRegexPatterns?.[0]
+            ));
+          }
         } else {
           metadataBase.urls = [
             ...new Set(validSuggestions.map((s) => s.getData()?.url).filter(Boolean)),
