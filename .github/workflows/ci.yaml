@@ -10,6 +10,14 @@ on:
   push:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened, edited]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy the serenity job runner worker to'
+        required: true
+        type: choice
+        options: [dev, stage]
+        default: dev
 
 jobs:
   ci:
@@ -46,3 +54,65 @@ jobs:
 
       - name: Type-check
         run: npm run type-check
+
+  # Manually-triggered deploy for the serenity job runner worker (adobe/serenity-docs#186),
+  # a second Lambda built from a distinct hedy --entryFile
+  # (src/serenity-prompt-classification/index.js, deployed as
+  # spacecat-services--serenity-job-runner) rather than the reusable service-ci
+  # workflow's single deploy-dev/deploy-stage target, which has no seam for a
+  # second Lambda per service.
+  #
+  # workflow_dispatch-only, not push-triggered: this still needs to happen
+  # under CI's spacecat-role-github-actions (personal dev credentials lack the
+  # iam:PassRole permission the reusable workflow's deploy jobs are granted),
+  # but the worker isn't part of steady-state traffic yet
+  # (create_serenity_job_runner_esms defaults false in every environment) -
+  # tying it to every push would add permanent CI surface for a feature not
+  # yet in continuous use. Trigger manually via the Actions tab or
+  # `gh workflow run ci.yaml -f environment=dev`.
+  #
+  # Prod is intentionally not an option here: prod deploys go through
+  # `npm run semantic-release` (an exec plugin, not a direct `npm run deploy`
+  # call), which does not yet invoke deploy:worker. Wiring the worker into the
+  # release process is a separate follow-up once it needs continuous prod
+  # deployment.
+  deploy-worker:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      (inputs.environment == 'dev' || github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: deploy-worker-${{ inputs.environment }}
+      cancel-in-progress: false
+    needs: [ci]
+    environment: ${{ inputs.environment == 'dev' && 'dev-branches' || 'stage' }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node & NPM
+        uses: adobe/mysticat-ci/.github/actions/setup-node-npm@v1
+        env:
+          MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN: ${{ secrets.MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN }}
+
+      - name: Configure AWS
+        uses: adobe/mysticat-ci/.github/actions/configure-aws@v1
+        with:
+          aws_role_to_assume: ${{ inputs.environment == 'dev'
+            && format('arn:aws:iam::{0}:role/spacecat-role-github-actions', secrets.AWS_ACCOUNT_ID_DEV)
+            || format('arn:aws:iam::{0}:role/spacecat-role-github-actions', secrets.AWS_ACCOUNT_ID_STAGE) }}
+
+      - name: Deploy worker
+        run: npm run ${{ inputs.environment == 'dev' && 'deploy-dev:worker' || 'deploy-stage:worker' }}
+        env:
+          AWS_REGION: us-east-1
+          AWS_ACCOUNT_ID: ${{ inputs.environment == 'dev' && secrets.AWS_ACCOUNT_ID_DEV || secrets.AWS_ACCOUNT_ID_STAGE }}
+          VPC_SUBNET_1: ${{ secrets.VPC_SUBNET_1 }}
+          VPC_SUBNET_2: ${{ secrets.VPC_SUBNET_2 }}
+          VPC_SG_ID: ${{ secrets.VPC_SG_ID }}
