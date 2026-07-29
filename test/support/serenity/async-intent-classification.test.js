@@ -14,9 +14,8 @@ import { expect } from 'chai';
 import sinon from 'sinon';
 import esmock from 'esmock';
 
-const log = {
-  info: sinon.stub(), warn: sinon.stub(), error: sinon.stub(), debug: sinon.stub(),
-};
+let sandbox;
+let log;
 
 async function loadWith({ createIntentClassifierStub, classifyIntentsStub }) {
   return esmock('../../../src/support/serenity/async-intent-classification.js', {
@@ -29,15 +28,21 @@ async function loadWith({ createIntentClassifierStub, classifyIntentsStub }) {
 
 describe('async-intent-classification.js — classifyPromptIntentsUnbounded (serenity-docs#33)', () => {
   beforeEach(() => {
-    log.info.resetHistory();
-    log.warn.resetHistory();
+    sandbox = sinon.createSandbox();
+    log = {
+      info: sandbox.stub(), warn: sandbox.stub(), error: sandbox.stub(), debug: sandbox.stub(),
+    };
+  });
+
+  afterEach(() => {
+    sandbox.restore();
   });
 
   it('returns an empty map for no texts, without constructing a classifier', async () => {
-    const createIntentClassifierStub = sinon.stub();
+    const createIntentClassifierStub = sandbox.stub();
     const { classifyPromptIntentsUnbounded } = await loadWith({
       createIntentClassifierStub,
-      classifyIntentsStub: sinon.stub(),
+      classifyIntentsStub: sandbox.stub(),
     });
 
     const result = await classifyPromptIntentsUnbounded([], { log });
@@ -48,8 +53,8 @@ describe('async-intent-classification.js — classifyPromptIntentsUnbounded (ser
 
   it('leaves every text unclassified (null) when Azure is not configured', async () => {
     const { classifyPromptIntentsUnbounded } = await loadWith({
-      createIntentClassifierStub: sinon.stub().returns(null),
-      classifyIntentsStub: sinon.stub(),
+      createIntentClassifierStub: sandbox.stub().returns(null),
+      classifyIntentsStub: sandbox.stub(),
     });
 
     const result = await classifyPromptIntentsUnbounded(['a', 'b'], { log });
@@ -59,9 +64,9 @@ describe('async-intent-classification.js — classifyPromptIntentsUnbounded (ser
   });
 
   it('resolves on the first round without retrying when everything classifies', async () => {
-    const classifyIntentsStub = sinon.stub().resolves(new Map([['a', 'Task'], ['b', 'Commercial']]));
+    const classifyIntentsStub = sandbox.stub().resolves(new Map([['a', 'Task'], ['b', 'Commercial']]));
     const { classifyPromptIntentsUnbounded } = await loadWith({
-      createIntentClassifierStub: sinon.stub().returns(() => 'Task'),
+      createIntentClassifierStub: sandbox.stub().returns(() => 'Task'),
       classifyIntentsStub,
     });
 
@@ -73,11 +78,11 @@ describe('async-intent-classification.js — classifyPromptIntentsUnbounded (ser
   });
 
   it('retries only the still-unresolved subset on a later round, with no per-round timeout', async () => {
-    const classifyIntentsStub = sinon.stub();
+    const classifyIntentsStub = sandbox.stub();
     classifyIntentsStub.onCall(0).resolves(new Map([['a', 'Task']])); // 'b' unresolved
     classifyIntentsStub.onCall(1).resolves(new Map([['b', 'Commercial']]));
     const { classifyPromptIntentsUnbounded } = await loadWith({
-      createIntentClassifierStub: sinon.stub().returns(() => 'Task'),
+      createIntentClassifierStub: sandbox.stub().returns(() => 'Task'),
       classifyIntentsStub,
     });
 
@@ -93,9 +98,9 @@ describe('async-intent-classification.js — classifyPromptIntentsUnbounded (ser
   });
 
   it('leaves a text explicitly null (never defaults) once maxAttempts is exhausted', async () => {
-    const classifyIntentsStub = sinon.stub().resolves(new Map()); // never resolves 'a'
+    const classifyIntentsStub = sandbox.stub().resolves(new Map()); // never resolves 'a'
     const { classifyPromptIntentsUnbounded } = await loadWith({
-      createIntentClassifierStub: sinon.stub().returns(() => null),
+      createIntentClassifierStub: sandbox.stub().returns(() => null),
       classifyIntentsStub,
     });
 
@@ -107,9 +112,9 @@ describe('async-intent-classification.js — classifyPromptIntentsUnbounded (ser
   });
 
   it('dedupes texts before classifying', async () => {
-    const classifyIntentsStub = sinon.stub().resolves(new Map([['a', 'Task']]));
+    const classifyIntentsStub = sandbox.stub().resolves(new Map([['a', 'Task']]));
     const { classifyPromptIntentsUnbounded } = await loadWith({
-      createIntentClassifierStub: sinon.stub().returns(() => 'Task'),
+      createIntentClassifierStub: sandbox.stub().returns(() => 'Task'),
       classifyIntentsStub,
     });
 
