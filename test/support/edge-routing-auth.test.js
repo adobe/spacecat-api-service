@@ -178,6 +178,68 @@ describe('edge-routing-auth', () => {
       ).to.be.fulfilled;
     });
 
+    // FACS-deferred paid path: authorization comes from the state-layer
+    // capability (hasLlmoCapabilityForSite), not the IMS product profile. The
+    // site entity is fetched from siteId inside the function.
+    const site = { getId: () => 's1', getOrganizationId: () => 'org-1' };
+    async function loadWithAcl(hasCapability) {
+      return esmock('../../src/support/edge-routing-auth.js', {
+        '@adobe/spacecat-shared-data-access': {
+          Entitlement: {
+            PRODUCT_CODES: { LLMO: 'LLMO' },
+            TIERS: { PAID: 'PAID', FREE_TRIAL: 'FREE_TRIAL', PLG: 'PLG' },
+          },
+        },
+        '../../src/support/access-control-util.js': {
+          default: {
+            fromContext: () => ({
+              hasLlmoCapabilityForSite: sandbox.stub().resolves(hasCapability),
+            }),
+          },
+        },
+      });
+    }
+
+    // baseCtx() + a facs defer marker + a Site collection resolving `site`.
+    const facsCtx = (siteResult = site) => {
+      const ctx = baseCtx();
+      ctx.attributes = { facs: { enabled: true, product: 'LLMO', subjectId: 'u@AdobeID' } };
+      ctx.dataAccess.Site = { findById: sandbox.stub().resolves(siteResult) };
+      return ctx;
+    };
+
+    it('paid + FACS deferred: allows when the caller holds the site capability', async () => {
+      const { authorizeEdgeCdnRouting: fn } = await loadWithAcl(true);
+      const ctx = facsCtx();
+      await expect(
+        fn(ctx, {
+          org, imsOrgId: 'x@AdobeOrg', imsUserToken: 't', siteId: 's1',
+        }, log),
+      ).to.be.fulfilled;
+      // The IMS product-context profile is NOT consulted on the FACS path.
+      expect(ctx.imsClient.getImsUserProfile).to.not.have.been.called;
+    });
+
+    it('paid + FACS deferred: rejects (403) when the caller lacks the site capability', async () => {
+      const { authorizeEdgeCdnRouting: fn } = await loadWithAcl(false);
+      const ctx = facsCtx();
+      await expect(
+        fn(ctx, {
+          org, imsOrgId: 'x@AdobeOrg', imsUserToken: 't', siteId: 's1',
+        }, log),
+      ).to.be.rejectedWith('User does not hold the required LLMO capability to configure CDN routing for this site');
+    });
+
+    it('paid + FACS deferred: rejects (403) when the site is not found', async () => {
+      const { authorizeEdgeCdnRouting: fn } = await loadWithAcl(true);
+      const ctx = facsCtx(null);
+      await expect(
+        fn(ctx, {
+          org, imsOrgId: 'x@AdobeOrg', imsUserToken: 't', siteId: 's1',
+        }, log),
+      ).to.be.rejectedWith('Site not found');
+    });
+
     it('rejects when entitlement lookup throws (treated as no tier)', async () => {
       const ctx = baseCtx();
       ctx.dataAccess.Entitlement.findByOrganizationIdAndProductCode.rejects(new Error('db'));

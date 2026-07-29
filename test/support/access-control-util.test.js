@@ -2355,7 +2355,7 @@ describe('Access Control Util', () => {
       expect(listResourceIdsWithCapability).to.not.have.been.called;
     });
 
-    it('derives the capability from the route (edge-optimize → can_deploy)', async () => {
+    it('derives the capability from the route (edge-optimize → can_configure)', async () => {
       listBrandIdsForSite.resolves(new Set(['brand-A']));
       listResourceIdsWithCapability.resolves(new Set(['brand-A']));
       const util = ACU.fromContext(makeCtx({
@@ -2366,7 +2366,7 @@ describe('Access Control Util', () => {
       }));
       expect(await util.hasLlmoCapabilityForSite(site)).to.be.true;
       expect(listResourceIdsWithCapability).to.have.been.calledWithMatch(sinon.match.any, {
-        capability: 'llmo/can_deploy',
+        capability: 'llmo/can_configure',
       });
     });
 
