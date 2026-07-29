@@ -104,6 +104,7 @@ describe('serenity error classification', () => {
       expect(ERROR_CODES.LINKED_SUBWORKSPACES).to.equal('linkedSubworkspaces');
       expect(ERROR_CODES.ORG_POOL_EXHAUSTED).to.equal('orgPoolExhausted');
       expect(ERROR_CODES.BRAND_AI_LIMIT).to.equal('brandAiLimit');
+      expect(ERROR_CODES.PUBLISH_QUOTA_EXHAUSTED).to.equal('publishQuotaExhausted');
       expect(ERROR_CODES.QUOTA_EXCEEDED).to.equal('quotaExceeded');
       expect(Object.isFrozen(ERROR_CODES)).to.be.true;
     });

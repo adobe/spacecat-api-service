@@ -940,12 +940,18 @@ export async function mapLimit(items, limit, mapper) {
  * POST /serenity/prompts — bulk create.
  * Each input must carry `(geoTargetId, languageCode, text, tagIds)`. Inputs
  * are grouped by slice; the matching BrandSemrushProject row resolves the
- * upstream project; publish runs once per affected project at the end —
- * unless `body.deferPublish` is true (serenity-docs#32 CSV-chunking), in
- * which case the create is a draft-only write and the caller is responsible
- * for triggering a publish itself (e.g. a normal, non-deferred call on the
- * last chunk of an import, which publishes every project touched across the
- * whole import since a single CSV import always targets one project).
+ * upstream project; publish runs once per affected project at the end.
+ *
+ * Two independent switches suppress that end-of-call publish:
+ *   - `body.deferPublish` (serenity-docs#32 CSV-chunking): a draft-only write;
+ *     the caller triggers publish itself (e.g. a normal, non-deferred call on the
+ *     last chunk of an import, which publishes every project touched across the
+ *     whole import since a single CSV import always targets one project).
+ *   - the `publish` option (default true — the standalone-endpoint contract):
+ *     set it false when the caller batches its own publish afterwards
+ *     (LLMO-5492 publish-after-populate: finalize pushes prompts + models and
+ *     publishes each project once) — an intermediate publish would either go
+ *     live half-populated or, on a model-less draft, throw.
  * @param {SerenityTransport} transport
  * @param {any} dataAccess
  * @param {string | undefined} brandId
@@ -956,9 +962,15 @@ export async function mapLimit(items, limit, mapper) {
  * @param {object | null} env - environment (Azure OpenAI creds), threaded into intent
  *   classification; ALSO used directly to fire the quota-rejection Slack alert (serenity-docs#72
  *   §5). Optional — omitted, alerting is a no-op.
- * @param {number} writeDeadline - shared request-write deadline for intent classification.
+ * @param {number | undefined} writeDeadline - shared request-write deadline for intent
+ *   classification. A caller with no deadline of its own (e.g. finalize's deferred prompt push)
+ *   passes undefined; classifyPromptIntents defaults to Informational whenever env is also unset,
+ *   before the deadline math is ever evaluated. (Typed as a required union, not an optional
+ *   param, because it precedes the required callerId below — tsc rejects an optional parameter
+ *   ahead of a required one.)
  * @param {string} callerId - resolved caller id (LLMO-6289) stamped as the created/updated author.
  * @param {object} [options]
+ * @param {boolean} [options.publish] - see above.
  * @param {string | null} [options.orgId] - serenity-docs#72 §5 alert payload only.
  */
 export async function handleCreatePrompts(
@@ -972,7 +984,7 @@ export async function handleCreatePrompts(
   env,
   writeDeadline,
   callerId,
-  { orgId = null } = {},
+  { publish = true, orgId = null } = {},
 ) {
   const inputs = Array.isArray(body?.prompts) ? body.prompts : [];
   if (inputs.length === 0) {
@@ -1118,6 +1130,8 @@ export async function handleCreatePrompts(
     invalidateTagCacheForProject(semrushWorkspaceId, pid);
   }
 
+  // body.deferPublish (CSV-chunking) — draft-only write, publish deferred to a
+  // later non-deferred call; return early flagged not-published.
   if (deferPublish) {
     log?.info?.('serenity create-prompts: deferPublish set — prompts written as draft, publish skipped', {
       brandId, created: created.length, skipped: skipped.length, failed: failed.length,
@@ -1131,27 +1145,32 @@ export async function handleCreatePrompts(
     };
   }
 
-  const alertContext = { orgId, brandId, env };
-  const publishErrors = await publishAffected(
-    transport,
-    semrushWorkspaceId,
-    affectedProjectIds,
-    log,
-    undefined,
-    alertContext,
-  );
-  // serenity-docs#72 §4.1 atomicity: a quota-rejected publish rolls back (deletes) the prompts
-  // this request staged in that project and moves them into `failed` — never left as unpublished
-  // drafts. A non-quota publish failure is untouched (existing generic `publish:` 502 record).
-  await reconcilePublishErrors(
-    transport,
-    semrushWorkspaceId,
-    publishErrors,
-    created,
-    failed,
-    log,
-    alertContext,
-  );
+  // publish:false — the caller (finalize) batches a single publish after models
+  // are also set, so skip the per-create publish (and its quota-rollback
+  // reconciliation) here; finalize's own publish step is the one that runs it.
+  if (publish) {
+    const alertContext = { orgId, brandId, env };
+    const publishErrors = await publishAffected(
+      transport,
+      semrushWorkspaceId,
+      affectedProjectIds,
+      log,
+      undefined,
+      alertContext,
+    );
+    // serenity-docs#72 §4.1 atomicity: a quota-rejected publish rolls back (deletes) the prompts
+    // this request staged in that project and moves them into `failed` — never left as unpublished
+    // drafts. A non-quota publish failure is untouched (existing generic `publish:` 502 record).
+    await reconcilePublishErrors(
+      transport,
+      semrushWorkspaceId,
+      publishErrors,
+      created,
+      failed,
+      log,
+      alertContext,
+    );
+  }
 
   return {
     // eslint-disable-next-line no-unused-vars -- destructuring-omit to strip the bookkeeping field
