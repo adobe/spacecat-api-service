@@ -999,14 +999,25 @@ export default function ElementsController(context, log, env) {
         return badRequest('url is required');
       }
 
-      // Date range is required (mirrors listOwnedUrls); must be a valid, ordered pair.
+      // Date range is required (mirrors listOwnedUrls): a valid, ordered, bounded pair.
       const startDate = query.startDate || query.start_date;
       const endDate = query.endDate || query.end_date;
+      if (!hasText(startDate) || !hasText(endDate)) {
+        return badRequest('startDate and endDate are required (YYYY-MM-DD)');
+      }
       if (!isYmdDate(startDate) || !isYmdDate(endDate)) {
         return badRequest('startDate and endDate must be valid YYYY-MM-DD dates');
       }
       if (startDate > endDate) {
         return badRequest('startDate must not be after endDate');
+      }
+      // Bound the span (mirrors listOwnedUrls/listDomainUrls): a multi-year window would buffer
+      // an unbounded result set into `allPrompts` before pagination slices it.
+      const MAX_RANGE_DAYS = 366;
+      const spanDays = (Date.parse(`${endDate}T00:00:00Z`)
+        - Date.parse(`${startDate}T00:00:00Z`)) / 86400000;
+      if (spanDays > MAX_RANGE_DAYS) {
+        return badRequest(`Date range must not exceed ${MAX_RANGE_DAYS} days`);
       }
 
       const service = await buildService(ctx);
