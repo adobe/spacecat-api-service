@@ -1,3 +1,10 @@
+# [1.705.0](https://github.com/adobe/spacecat-api-service/compare/v1.704.2...v1.705.0) (2026-07-29)
+
+
+### Features
+
+* Adds getAllByEnrollmentAndTier ([#2289](https://github.com/adobe/spacecat-api-service/issues/2289)) ([5691133](https://github.com/adobe/spacecat-api-service/commit/569113312ce4eb25a4c005938da2d0abc7e510e2))
+
 ## [1.704.2](https://github.com/adobe/spacecat-api-service/compare/v1.704.1...v1.704.2) (2026-07-29)
 
 
