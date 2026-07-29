@@ -1,3 +1,10 @@
+## [1.700.1](https://github.com/adobe/spacecat-api-service/compare/v1.700.0...v1.700.1) (2026-07-29)
+
+
+### Bug Fixes
+
+* return only enabled models in SR platform filter | LLMO-6589 ([#2927](https://github.com/adobe/spacecat-api-service/issues/2927)) ([8b2edef](https://github.com/adobe/spacecat-api-service/commit/8b2edef930c0b95e0fc8e9e35c221afe909331de))
+
 # [1.700.0](https://github.com/adobe/spacecat-api-service/compare/v1.699.1...v1.700.0) (2026-07-29)
 
 
