@@ -1,3 +1,11 @@
+## [1.700.4](https://github.com/adobe/spacecat-api-service/compare/v1.700.3...v1.700.4) (2026-07-29)
+
+
+### Bug Fixes
+
+* **serenity:** make the Semrush transport a real type-check gate ([#2928](https://github.com/adobe/spacecat-api-service/issues/2928)) ([4933ba5](https://github.com/adobe/spacecat-api-service/commit/4933ba5ea9b932e10bfd6dfcd168a9ef9001f602)), closes [Hi#level](https://github.com/Hi/issues/level) [#2925](https://github.com/adobe/spacecat-api-service/issues/2925)
+* worker deploy job missing HLX_AWS_REGION for hedy's --aws-region resolution ([#2936](https://github.com/adobe/spacecat-api-service/issues/2936)) ([10b6f35](https://github.com/adobe/spacecat-api-service/commit/10b6f35e7c025178169654cd80d5eb211d2e932e)), closes [#2935](https://github.com/adobe/spacecat-api-service/issues/2935)
+
 ## [1.700.3](https://github.com/adobe/spacecat-api-service/compare/v1.700.2...v1.700.3) (2026-07-29)
 
 
