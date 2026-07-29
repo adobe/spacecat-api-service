@@ -4784,6 +4784,65 @@ describe('Sites Controller', () => {
     expect(mergedConfig).to.deep.equal({ slack: { channel: '#new' } });
   });
 
+  it('returns 400 when site.setConfig throws a ValidationError', async () => {
+    const site = sites[0];
+    site.getConfig = sandbox.stub().returns(null);
+    const validationError = new Error('Invalid config for Site: "llmo.showWww" must be a boolean');
+    validationError.name = 'ValidationError';
+    site.setConfig = sandbox.stub().throws(validationError);
+    site.save = sandbox.stub().resolves(site);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: { llmo: { showWww: 'not-a-boolean' } },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(400);
+    const body = await response.json();
+    expect(body.message).to.equal(validationError.message);
+    expect(site.save).to.have.not.been.called;
+  });
+
+  it('sanitizes control characters in the ValidationError message before returning it', async () => {
+    const site = sites[0];
+    site.getConfig = sandbox.stub().returns(null);
+    const validationError = new Error('Invalid config for Site: bad value\r\nX-Injected: true');
+    validationError.name = 'ValidationError';
+    site.setConfig = sandbox.stub().throws(validationError);
+    site.save = sandbox.stub().resolves(site);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: { llmo: { showWww: 'not-a-boolean' } },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(400);
+    const body = await response.json();
+    expect(body.message).to.not.contain('\r');
+    expect(body.message).to.not.contain('\n');
+  });
+
+  it('rethrows a non-ValidationError from site.setConfig', async () => {
+    const site = sites[0];
+    site.getConfig = sandbox.stub().returns(null);
+    site.setConfig = sandbox.stub().throws(new Error('unexpected boom'));
+    site.save = sandbox.stub().resolves(site);
+
+    await expect(sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: { slack: { channel: '#new' } },
+      },
+      ...defaultAuthAttributes,
+    })).to.be.rejectedWith('unexpected boom');
+  });
+
   it('sets config when toDynamoItem returns null for existing config', async () => {
     const site = sites[0];
     site.getConfig = sandbox.stub().returns({ something: true });
