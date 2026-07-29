@@ -49,4 +49,8 @@ describe('normalizeChannel', () => {
   it('leaves a single-word value unaffected apart from casing', () => {
     expect(normalizeChannel('Owned')).to.equal('owned');
   });
+
+  it('collapses repeated internal whitespace to match the snake_case form', () => {
+    expect(normalizeChannel('Benchmark  Competitors')).to.equal('benchmark competitors');
+  });
 });
