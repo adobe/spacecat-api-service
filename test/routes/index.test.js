@@ -548,6 +548,9 @@ describe('getRouteHandlers', () => {
     getV1SourceGapSourceDomains: sinon.stub(),
     getV1SourceGapSourceDomainsExport: sinon.stub(),
     getV1SourceGapSourceDomainsTotals: sinon.stub(),
+    getV1SourceCitedPages: sinon.stub(),
+    getV1SourceCitedPagesExport: sinon.stub(),
+    getV1SourceCitedPagesTotals: sinon.stub(),
     getV1PromptResearchPromptsExport: sinon.stub(),
     getV1PromptResearchBrandsExport: sinon.stub(),
     getV1PromptResearchSourceDomainsExport: sinon.stub(),
@@ -783,6 +786,9 @@ describe('getRouteHandlers', () => {
       'GET /llmo/ai-visibility/v1/source/gap-source-domains',
       'GET /llmo/ai-visibility/v1/source/gap-source-domains-export',
       'GET /llmo/ai-visibility/v1/source/gap-source-domains-totals',
+      'GET /llmo/ai-visibility/v1/source/cited-pages',
+      'GET /llmo/ai-visibility/v1/source/cited-pages-export',
+      'GET /llmo/ai-visibility/v1/source/cited-pages-totals',
       'GET /llmo/ai-visibility/v1/prompt-research/prompts-export',
       'GET /llmo/ai-visibility/v1/prompt-research/brands-export',
       'GET /llmo/ai-visibility/v1/prompt-research/source-domains-export',
@@ -859,6 +865,9 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /llmo/ai-visibility/v1/source/gap-source-domains']).to.equal(mockAiVisibilityController.getV1SourceGapSourceDomains);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/source/gap-source-domains-export']).to.equal(mockAiVisibilityController.getV1SourceGapSourceDomainsExport);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/source/gap-source-domains-totals']).to.equal(mockAiVisibilityController.getV1SourceGapSourceDomainsTotals);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/source/cited-pages']).to.equal(mockAiVisibilityController.getV1SourceCitedPages);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/source/cited-pages-export']).to.equal(mockAiVisibilityController.getV1SourceCitedPagesExport);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/source/cited-pages-totals']).to.equal(mockAiVisibilityController.getV1SourceCitedPagesTotals);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt-research/prompts-export']).to.equal(mockAiVisibilityController.getV1PromptResearchPromptsExport);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt-research/brands-export']).to.equal(mockAiVisibilityController.getV1PromptResearchBrandsExport);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt-research/source-domains-export']).to.equal(mockAiVisibilityController.getV1PromptResearchSourceDomainsExport);

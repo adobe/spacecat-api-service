@@ -9870,21 +9870,19 @@ AiVisibilitySrFilters:
     markets:
       type: array
       items:
-        type: object
-        properties:
-          code:
-            type: string
-          name:
-            type: string
+        type: string
     models:
       type: array
       items:
-        type: object
-        properties:
-          code:
-            type: string
-          name:
-            type: string
+        type: string
+    marketsCatalog:
+      type: array
+      items:
+        type: string
+    modelsCatalog:
+      type: array
+      items:
+        type: string
 
 AiVisibilityBrandStats:
   type: object
@@ -10798,6 +10796,80 @@ AiVisibilityV1SourceGapSourceDomainsExportResponse:
       type: string
       description: Suggested CSV file name from `ExportResponse.file_name`.
       example: gap-source-domains.csv
+    contentType:
+      type: string
+      description: MIME type from `ExportResponse.content_type`.
+      example: text/csv
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1SourceCitedPageRow:
+  type: object
+  description: |
+    One cited page from Semrush `SourcesResponse.Source` as protobuf JSON (camelCase).
+    The `uint64` prompt count is serialized as a JSON string.
+  properties:
+    url:
+      type: string
+      format: uri
+      description: Page URL on the target domain cited by an LLM response
+    promptsCount:
+      type: string
+      pattern: '^[0-9]+$'
+      description: Number of prompt responses citing the page (`uint64`)
+    country:
+      description: Market (COUNTRY enum name or integer)
+      oneOf:
+        - $ref: '#/AiVisibilitySemrushCountry'
+        - type: integer
+  additionalProperties: true
+
+AiVisibilityV1SourceCitedPagesResponse:
+  type: object
+  description: |
+    Cited pages list from `GET /llmo/ai-visibility/v1/source/cited-pages`.
+    Wraps Semrush v2 source `Sources` JSON plus `srFilters` from the API layer.
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1SourceCitedPageRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1SourceCitedPagesTotalsResponse:
+  type: object
+  description: |
+    Cited pages count from `GET /llmo/ai-visibility/v1/source/cited-pages-totals`.
+    Returns only the count matching the request filters, without paginated data.
+  properties:
+    total:
+      description: Total owned/cited pages matching the request filters (`uint64`)
+      oneOf:
+        - type: string
+          pattern: '^[0-9]+$'
+        - type: integer
+          minimum: 0
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1SourceCitedPagesExportResponse:
+  type: object
+  description: |
+    Cited pages CSV export from `GET /llmo/ai-visibility/v1/source/cited-pages-export`.
+    Native Semrush v2 `ExportResponse` protobuf JSON plus `srFilters` from the API layer.
+  properties:
+    fileContent:
+      type: string
+      format: byte
+      description: Base64-encoded CSV file content from `ExportResponse.file_content`.
+    fileName:
+      type: string
+      description: Suggested CSV file name from `ExportResponse.file_name`.
+      example: cited-pages.csv
     contentType:
       type: string
       description: MIME type from `ExportResponse.content_type`.

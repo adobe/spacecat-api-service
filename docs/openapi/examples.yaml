@@ -824,3 +824,41 @@ page-relationships-search-unsupported-response:
     supported: false
     relationships: {}
     errors: {}
+
+AiVisibilityV1SourceCitedPages:
+  description: Native SourceService cited-page rows with API search-result filters
+  value:
+    data:
+      - url: https://example.com/products/analytics
+        promptsCount: '42'
+        country: US
+      - url: https://example.com/resources/measurement-guide
+        promptsCount: '18'
+        country: US
+    srFilters:
+      markets: [AE, AR, US, WW]
+      models: [chatgpt]
+      marketsCatalog: [WW, AE, AR, US]
+      modelsCatalog: [all, chatgpt, gemini, googleAiMode, googleAiOverview]
+
+AiVisibilityV1SourceCitedPagesTotals:
+  description: Total cited pages matching the same URL and snapshot filters
+  value:
+    total: '137'
+    srFilters:
+      markets: [AE, AR, US, WW]
+      models: [chatgpt]
+      marketsCatalog: [WW, AE, AR, US]
+      modelsCatalog: [all, chatgpt, gemini, googleAiMode, googleAiOverview]
+
+AiVisibilityV1SourceCitedPagesExport:
+  description: CSV export payload returned by SourceService
+  value:
+    fileContent: dXJsLHByb21wdHNfY291bnQK
+    fileName: cited-pages.csv
+    contentType: text/csv
+    srFilters:
+      markets: [AE, AR, US, WW]
+      models: [chatgpt]
+      marketsCatalog: [WW, AE, AR, US]
+      modelsCatalog: [all, chatgpt, gemini, googleAiMode, googleAiOverview]

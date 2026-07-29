@@ -59,6 +59,9 @@ describe('AiVisibilityController', () => {
   let mockHandleV1SourceGapSourceDomains;
   let mockHandleV1SourceGapSourceDomainsExport;
   let mockHandleV1SourceGapSourceDomainsTotals;
+  let mockHandleV1SourceCitedPages;
+  let mockHandleV1SourceCitedPagesExport;
+  let mockHandleV1SourceCitedPagesTotals;
   let mockHandleV1BrandStatsByCountry;
   let mockHandleV1BrandStatsByLlm;
   let mockHandleV1MetaMeta;
@@ -181,6 +184,15 @@ describe('AiVisibilityController', () => {
     mockHandleV1SourceGapSourceDomainsTotals = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
+    mockHandleV1SourceCitedPages = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
+    mockHandleV1SourceCitedPagesExport = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
+    mockHandleV1SourceCitedPagesTotals = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
     mockHandleV1BrandStatsByCountry = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
@@ -278,6 +290,16 @@ describe('AiVisibilityController', () => {
       },
       '../../src/support/ai-visibility/handlers/v1/source/gap-source-domains-totals.js': {
         handleGapSourceDomainsTotals: mockHandleV1SourceGapSourceDomainsTotals,
+      },
+      '../../src/support/ai-visibility/handlers/v1/source/cited-pages.js': {
+        handleCitedPages: mockHandleV1SourceCitedPages,
+        buildCitedPagesFilterQl: sandbox.stub().returns(''),
+      },
+      '../../src/support/ai-visibility/handlers/v1/source/cited-pages-export.js': {
+        handleCitedPagesExport: mockHandleV1SourceCitedPagesExport,
+      },
+      '../../src/support/ai-visibility/handlers/v1/source/cited-pages-totals.js': {
+        handleCitedPagesTotals: mockHandleV1SourceCitedPagesTotals,
       },
       '../../src/support/ai-visibility/handlers/v1/brand/stats-by-country.js': {
         handleStatsByCountry: mockHandleV1BrandStatsByCountry,
@@ -604,6 +626,9 @@ describe('AiVisibilityController', () => {
       getV1SourceGapSourceDomains: mockHandleV1SourceGapSourceDomains,
       getV1SourceGapSourceDomainsExport: mockHandleV1SourceGapSourceDomainsExport,
       getV1SourceGapSourceDomainsTotals: mockHandleV1SourceGapSourceDomainsTotals,
+      getV1SourceCitedPages: mockHandleV1SourceCitedPages,
+      getV1SourceCitedPagesExport: mockHandleV1SourceCitedPagesExport,
+      getV1SourceCitedPagesTotals: mockHandleV1SourceCitedPagesTotals,
       getV1BrandStatsByCountry: mockHandleV1BrandStatsByCountry,
       getV1BrandStatsByLlm: mockHandleV1BrandStatsByLlm,
       getV1MetaMeta: mockHandleV1MetaMeta,

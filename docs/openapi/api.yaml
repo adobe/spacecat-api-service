@@ -862,6 +862,12 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-gap-source-domains-export'
   /llmo/ai-visibility/v1/source/gap-source-domains-totals:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-gap-source-domains-totals'
+  /llmo/ai-visibility/v1/source/cited-pages:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-cited-pages'
+  /llmo/ai-visibility/v1/source/cited-pages-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-cited-pages-export'
+  /llmo/ai-visibility/v1/source/cited-pages-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-cited-pages-totals'
   /llmo/ai-visibility/v1/prompt-research/prompts-export:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-research-prompts-export'
   /llmo/ai-visibility/v1/prompt-research/brands-export:

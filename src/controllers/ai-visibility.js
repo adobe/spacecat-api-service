@@ -61,6 +61,9 @@ import { handlePromptResponse as handlePromptResponseV1 } from '../support/ai-vi
 import { handleGapSourceDomains as handleGapSourceDomainsV1 } from '../support/ai-visibility/handlers/v1/source/gap-source-domains.js';
 import { handleGapSourceDomainsExport as handleGapSourceDomainsExportV1 } from '../support/ai-visibility/handlers/v1/source/gap-source-domains-export.js';
 import { handleGapSourceDomainsTotals as handleGapSourceDomainsTotalsV1 } from '../support/ai-visibility/handlers/v1/source/gap-source-domains-totals.js';
+import { handleCitedPages as handleCitedPagesV1 } from '../support/ai-visibility/handlers/v1/source/cited-pages.js';
+import { handleCitedPagesExport as handleCitedPagesExportV1 } from '../support/ai-visibility/handlers/v1/source/cited-pages-export.js';
+import { handleCitedPagesTotals as handleCitedPagesTotalsV1 } from '../support/ai-visibility/handlers/v1/source/cited-pages-totals.js';
 import { handleStatsByCountry as handleBrandStatsByCountryV1 } from '../support/ai-visibility/handlers/v1/brand/stats-by-country.js';
 import { handleStatsByLLM as handleBrandStatsByLLMV1 } from '../support/ai-visibility/handlers/v1/brand/stats-by-llm.js';
 import { handleMeta as handleMetaV1 } from '../support/ai-visibility/handlers/v1/meta/meta.js';
@@ -109,6 +112,9 @@ const ROUTE_MAP = [
   ['/v1/source/gap-source-domains', handleGapSourceDomainsV1],
   ['/v1/source/gap-source-domains-export', handleGapSourceDomainsExportV1],
   ['/v1/source/gap-source-domains-totals', handleGapSourceDomainsTotalsV1],
+  ['/v1/source/cited-pages', handleCitedPagesV1],
+  ['/v1/source/cited-pages-export', handleCitedPagesExportV1],
+  ['/v1/source/cited-pages-totals', handleCitedPagesTotalsV1],
   ['/v1/brand/stats-by-country', handleBrandStatsByCountryV1],
   ['/v1/brand/stats-by-llm', handleBrandStatsByLLMV1],
   ['/v1/meta/meta', handleMetaV1],
