@@ -1,3 +1,10 @@
+# [1.702.0](https://github.com/adobe/spacecat-api-service/compare/v1.701.1...v1.702.0) (2026-07-29)
+
+
+### Features
+
+* **brand-claims:** add run-brand-claims Slack command (LLMO-6143) ([#2924](https://github.com/adobe/spacecat-api-service/issues/2924)) ([b217ee5](https://github.com/adobe/spacecat-api-service/commit/b217ee5623530aa83ab704aa95108d943b1e5fc6))
+
 ## [1.701.1](https://github.com/adobe/spacecat-api-service/compare/v1.701.0...v1.701.1) (2026-07-29)
 
 
