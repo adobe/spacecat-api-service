@@ -90,6 +90,10 @@ const ROUTE_MAP = [
   ['/topics/research/source-domains', handleTopicsResearchSourceDomains],
   ['/topics/research', handleTopicsResearch],
   ['/topics/stats', handleTopicsStats],
+  ['/v1/prompt-research/prompts-export', handlePromptsResearchExportV1],
+  ['/v1/prompt-research/brands-export', handleBrandsResearchExportV1],
+  ['/v1/prompt-research/source-domains-export', handleSourceDomainsResearchExportV1],
+  ['/v1/prompt-research/topics-export', handleTopicsResearchExportV1],
   ['/v1/topic/brand-topics', handleBrandTopicsV1],
   ['/v1/topic/brand-topics-export', handleBrandTopicsExportV1],
   ['/v1/topic/brand-topics-totals', handleBrandTopicsTotalsV1],
@@ -108,10 +112,6 @@ const ROUTE_MAP = [
   ['/v1/brand/stats-by-country', handleBrandStatsByCountryV1],
   ['/v1/brand/stats-by-llm', handleBrandStatsByLLMV1],
   ['/v1/meta/meta', handleMetaV1],
-  ['/v1/prompt-research/prompts-export', handlePromptsResearchExportV1],
-  ['/v1/prompt-research/brands-export', handleBrandsResearchExportV1],
-  ['/v1/prompt-research/source-domains-export', handleSourceDomainsResearchExportV1],
-  ['/v1/prompt-research/topics-export', handleTopicsResearchExportV1],
 ];
 
 function extractSearchParams(context) {
