@@ -1,3 +1,24 @@
+## [1.699.1](https://github.com/adobe/spacecat-api-service/compare/v1.699.0...v1.699.1) (2026-07-29)
+
+
+### Bug Fixes
+
+* only allow opportunities with new status to grant suggestions ([#2921](https://github.com/adobe/spacecat-api-service/issues/2921)) ([ae487ad](https://github.com/adobe/spacecat-api-service/commit/ae487add587f95a54e9551b0dadcc2f176fc9650))
+
+# [1.699.0](https://github.com/adobe/spacecat-api-service/compare/v1.698.1...v1.699.0) (2026-07-29)
+
+
+### Features
+
+* **llmo:** include siteId in edge-optimize enabled-marking SQS message ([#2930](https://github.com/adobe/spacecat-api-service/issues/2930)) ([7e89411](https://github.com/adobe/spacecat-api-service/commit/7e89411c4747d7731ae0dc43bde2eefdd6050317))
+
+## [1.698.1](https://github.com/adobe/spacecat-api-service/compare/v1.698.0...v1.698.1) (2026-07-28)
+
+
+### Bug Fixes
+
+* **serenity:** create sub-workspaces with no resource allocation ([#2923](https://github.com/adobe/spacecat-api-service/issues/2923)) ([c204874](https://github.com/adobe/spacecat-api-service/commit/c204874db70d7b1fb823b29325a2535e6e1aab87)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 # [1.698.0](https://github.com/adobe/spacecat-api-service/compare/v1.697.1...v1.698.0) (2026-07-28)
 
 

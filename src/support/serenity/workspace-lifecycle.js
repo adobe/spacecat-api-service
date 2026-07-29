@@ -20,40 +20,17 @@ import { clearBrandWorkspaceCache } from './workspace-resolver.js';
 
 /** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */
 
-// Per-brand resource allocation. PLACEHOLDER sizing (design §6/§12) until a
-// sizing owner decides: one slot per market plus headroom, prompts scaled to
-// project count. Tunable per call.
-export function resourceAllocation(marketCount) {
-  const projects = Math.max(1, Number(marketCount) || 0) + 2;
-  return { ai: { projects, prompts: 500 * projects } };
-}
-
-// Fixed resource allocation carved onto a brand's child workspace at CREATE.
-// A child created with an empty/inherited allocation lands with 0 metered quota,
-// so anything metered (prompt writes, live publish) 405s as a disguised quota
-// rejection (workspace doc §5). Carving a real allocation up front gives the
-// child the quota it needs to take prompts and publish. Flat sizing (1 project,
-// 500 prompts) per the sizing owner; this draws from the parent pool, so a
-// parent without enough free units 422s "insufficient available units".
-// Object.freeze so a caller can't mutate the shared singleton.
-export const CREATE_ALLOCATION = Object.freeze({ ai: { projects: 1, prompts: 500 } });
-
-// HISTORICAL NOTE (LLMO-6189): a payload of `{ ai: { projects: 0, prompts: 0 } }` was the
-// documented "release everything back to the parent pool" shape, sent via
-// transferWorkspaceResources. The Gate-A live smoke this comment used to defer to has since run:
-// it confirmed a transfer that sets a dimension to ZERO is silently ignored by the Semrush gateway
-// (2xx, no units moved). Every call site that sent this payload was therefore logging false success
-// while permanently stranding the released workspace's ENTIRE carve on the parent pool — brand
-// deactivation, the ensureSubworkspace concurrency-loser cleanup, and both brand-provisioning
-// failure-cleanup paths.
+// INVARIANT: a brand's sub-workspace carries NO AI resource allocation of its own. It is created
+// without a `resources` payload, and nothing in this module ever transfers units onto or off it.
+// A child sits at `total: 0` on every AI dimension and still accepts every metered write, because
+// our parent workspaces run with `limits_enabled: false`.
 //
-// CORRECTED APPROACH (Rainer, 2026-07-16 PR review): production never deletes a sub-workspace —
-// only Semrush CS reclaims a shell (docs/serenity.md). So the fix is not "delete instead of
-// transfer-to-zero" — it is "transfer to a small NON-ZERO floor instead of zero". A non-zero
-// transfer resizes a child up/down instantly and reliably (live-verified, resource-manager.js's
-// `releaseAiSurplus` already relies on exactly this for ordinary rightsizing); only the to-ZERO
-// case is the broken one. See {@link releaseFullAllocation} below.
-export const DEFAULT_RELEASE_FLOOR = Object.freeze({ projects: 1, prompts: 1 });
+// Just-in-time allocation (`resource-manager.js`, gated by `SERENITY_DYNAMIC_ALLOCATION`) is the
+// only thing that ever sizes a child, and it is off in every deployed environment.
+//
+// The live evidence for the invariant, why an up-front carve is actively harmful rather than
+// merely redundant, and when the JIT allocator would need turning on: see docs/serenity.md
+// § Sub-workspace resource allocation.
 
 // Workspace create normally settles `not ready → created` in seconds (workspace
 // doc §4), but a busy upstream can take noticeably longer — so we poll up to ~30s
@@ -67,9 +44,9 @@ const defaultSleep = (ms) => new Promise((resolve) => {
 });
 
 // A brand's sub-workspace must never coincide with the org's shared parent
-// workspace - sub-workspace ops (notably decommission: delete every project +
-// release the allocation) against the parent would wipe the shared pool for
-// the whole org. Throw rather than ever act on the parent.
+// workspace — a sub-workspace op against the parent (notably decommission, which deletes every
+// project) would wipe out every brand's markets across the whole org. Throw rather than ever act
+// on the parent.
 function assertNotParent(workspaceId, parentWorkspaceId) {
   if (hasText(parentWorkspaceId) && workspaceId === parentWorkspaceId) {
     throw new ErrorWithStatusCode(
@@ -321,14 +298,20 @@ async function adoptFromFamily(transport, parentWorkspaceId, title, log, claim) 
 
 /**
  * Deletes every project currently listed in `workspaceId` (404-as-success, convergent /
- * idempotent). Extracted so it is shared by `decommissionBrandWorkspace` and every other
- * LLMO-6189 full-allocation-release call site that must empty a sub-workspace's projects before
- * {@link releaseFullAllocation} can safely delete the (now-empty) workspace itself.
+ * idempotent). Shared by `decommissionBrandWorkspace` and by every brand-provisioning
+ * failure-cleanup path that must empty a sub-workspace it provisioned.
+ *
+ * Self-defending: this is the destructive primitive, so it refuses to run against the org's shared
+ * PARENT workspace when the caller supplies one — emptying the parent would delete every brand's
+ * markets across the whole org. Callers that can resolve the parent should always pass it.
+ *
  * @param {SerenityTransport} transport
  * @param {string} workspaceId
+ * @param {string} [parentWorkspaceId] - the org parent workspace; assertNotParent guard.
  * @returns {Promise<number>} the number of projects the listing returned (i.e. attempted deletes).
  */
-export async function deleteAllProjects(transport, workspaceId) {
+export async function deleteAllProjects(transport, workspaceId, parentWorkspaceId) {
+  assertNotParent(workspaceId, parentWorkspaceId);
   const listing = await transport.listProjects(workspaceId);
   const projects = Array.isArray(listing?.items) ? listing.items : [];
   for (const project of projects) {
@@ -350,68 +333,9 @@ export async function deleteAllProjects(transport, workspaceId) {
 }
 
 /**
- * Reclaims `workspaceId`'s AI resource carve back to the parent pool, down to a small non-zero
- * floor (LLMO-6189). Production never deletes a sub-workspace (docs/serenity.md — a shell is only
- * ever reclaimed by Semrush CS), so this does NOT delete anything. It transfers the workspace's
- * `{projects, prompts}` totals down to `floor` — a NON-ZERO target, which resizes reliably
- * (live-verified; the same mechanism `releaseAiSurplus` already uses for ordinary rightsizing).
- * Only a transfer that sets a dimension to exactly ZERO is a silent no-op against the gateway —
- * this function's whole point is to never send that payload.
- *
- * `assertNotParent` guards the call — a captured/adopted id that turns out to be the org parent (a
- * gateway bug; see the create-path comment on `assertNotParent`) must never have its allocation
- * touched.
- *
- * A caller-supplied `floor` with either dimension `<= 0` is REJECTED (MysticatBot review, PR
- * #2812): that is exactly the zero-transfer payload this whole fix exists to eliminate — no
- * current caller passes a custom floor, but the option is exported/documented, so a future one
- * could silently reintroduce the stranding bug this PR fixes. Fail loud instead.
- *
- * @param {SerenityTransport} transport
- * @param {string} workspaceId - the (already project-emptied) sub-workspace to reclaim.
- * @param {string} [parentWorkspaceId] - the org parent workspace; assertNotParent guard.
- * @param {object} [log]
- * @param {object} [options]
- * @param {{projects: number, prompts: number}} [options.floor] - the non-zero total to lower the
- *   workspace's AI allocation to. Defaults to {@link DEFAULT_RELEASE_FLOOR} (1 project, 1 prompt) —
- *   enough to keep the workspace immediately usable on its next re-activation without a fresh
- *   create, while returning everything above that to the shared pool. Both dimensions must be > 0.
- * @returns {Promise<{ released: boolean, reason: 'lowered-to-floor' | 'no-workspace' }>}
- */
-export async function releaseFullAllocation(
-  transport,
-  workspaceId,
-  parentWorkspaceId,
-  log,
-  { floor = DEFAULT_RELEASE_FLOOR } = {},
-) {
-  if (!hasText(workspaceId)) {
-    return { released: false, reason: 'no-workspace' };
-  }
-  if (!(floor?.projects > 0) || !(floor?.prompts > 0)) {
-    throw new ErrorWithStatusCode(
-      'releaseFullAllocation: floor must have both dimensions > 0 — a zero-dimension transfer is '
-      + 'a silent no-op against the Semrush gateway (the exact bug this function exists to fix)',
-      500,
-    );
-  }
-  assertNotParent(workspaceId, parentWorkspaceId);
-
-  await transport.transferWorkspaceResources(workspaceId, { ai: floor });
-  log?.info?.(
-    'SERENITY_ALLOC releaseFullAllocation: allocation lowered to floor, surplus returned to the parent pool',
-    { workspaceId, floor },
-  );
-  return { released: true, reason: 'lowered-to-floor' };
-}
-
-/**
- * Guarantees the brand has a resourced subworkspace and returns its id
- * (design §6). Three cases:
+ * Guarantees the brand has a subworkspace and returns its id (design §6). Three cases:
  *   - column set        → the brand is already bound to a sub-workspace
- *                         (idempotent re-activate): re-grant an allocation onto
- *                         it (a no-op-ish re-grant on an already-resourced ws —
- *                         the transfer contract is Gate-A-pinned). Note a
+ *                         (idempotent re-activate): settle it and hand it back. Note a
  *                         deactivated brand has a NULL column (deactivate clears
  *                         it), so it takes the create path below, not this one.
  *   - no column, create → create subworkspace → gate on `created` per `createReadiness`
@@ -423,16 +347,13 @@ export async function releaseFullAllocation(
  * @param {SerenityTransport} transport
  * @param {object} brand - Brand model instance (dataAccess.Brand.findById).
  * @param {string} parentWorkspaceId - the org parent workspace.
- * @param {number} marketCount - sizing input for the allocation.
  * @param {object} log
  * @param {object} [timing] - injectable poll timing for tests.
  * @param {function|null} [reloadPointer] - optional async () => string|null that
  *   re-reads the brand's CURRENT semrush_sub_workspace_id from the data layer.
  *   When supplied, the create path uses it as a last-update concurrency guard
- *   (see below) so a parallel activation cannot orphan a resourced workspace.
- * @param {object} [options] - feature-flag toggles for the dual-mode carve.
- * @param {boolean} [options.dynamicAllocation] - when true (LLMO/dynamic-allocation ON), skip
- *   the flat re-grant on an existing sub-workspace; JIT top-up owns sizing. Default false.
+ *   (see below) so a parallel activation cannot orphan a workspace.
+ * @param {object} [options]
  * @param {'poll'|'skip'} [options.createReadiness] - how the fresh-CREATE path gates on the new
  *   sub-workspace settling to `created` (LLMO-6569). 'poll' (default): up to ~30s settle poll —
  *   the legacy behaviour, kept for callers that create a project/prompts against the workspace in
@@ -442,7 +363,9 @@ export async function releaseFullAllocation(
  *   brand create, and the sub-workspace-only activate branches — pending→active and bare
  *   reactivation), so the pointer persists immediately and the workspace settles asynchronously (a
  *   later market-add settles it via the existing-sub-workspace branch before creating a project).
- *   Only affects the create path; the existing-sub-workspace branch is unchanged.
+ *   Affects only the create path — the existing-sub-workspace branch always settles, because a
+ *   'skip' create persists the pointer before the workspace is `created`, so a bound pointer can
+ *   legitimately point at one that has not settled yet and the next caller must wait for it.
  * @param {object} [options.brandCollection] - the data-access Brand collection. Required on the
  *   create path whenever the parent family holds a same-title `created` candidate: titles are
  *   bare brand names, so the claim lookup is what distinguishes our own interrupted create from
@@ -459,14 +382,13 @@ export async function ensureSubworkspace(
   transport,
   brand,
   parentWorkspaceId,
-  marketCount,
   log,
   timing = {},
   reloadPointer = null,
   options = {},
 ) {
   const {
-    dynamicAllocation = false, createReadiness = 'poll', brandCollection, onWorkspaceCreated,
+    createReadiness = 'poll', brandCollection, onWorkspaceCreated,
   } = options;
   const poll = {
     attempts: timing.attempts ?? DEFAULT_POLL_ATTEMPTS,
@@ -476,37 +398,13 @@ export async function ensureSubworkspace(
 
   const existing = brand.getSemrushSubWorkspaceId?.();
   if (hasText(existing)) {
-    // Defense-in-depth: a sub-workspace must never BE the org parent (else a
-    // re-grant/transfer would mutate the shared pool). The controller's
-    // authorize() already refuses such requests; guard here too so a direct
-    // caller can never transfer-onto / later decommission the parent.
+    // Defense-in-depth: a sub-workspace must never BE the org parent (else a later decommission
+    // would empty the shared pool). The controller's authorize() already refuses such requests;
+    // guard here too so a direct caller can never bind to / later decommission the parent.
     assertNotParent(existing, parentWorkspaceId);
-    // Re-grant the allocation onto the already-bound sub-workspace (idempotent
-    // re-activate of a still-active brand; a deactivated brand has a NULL
-    // pointer and takes the create path instead).
-    // resources/transfer is ASYNC: it briefly flips the workspace to `locked`
-    // and a subsequent op 422s "workspace not ready" (verified live
-    // 2026-06-15). So settle before AND after the transfer so the caller can
-    // immediately create/publish projects against it.
-    // This pre-poll runs regardless of mode — the workspace must be `created` before we return it
-    // (dynamic allocation only skips the flat re-grant below, not the readiness settle).
+    // Settle before handing the workspace back: the caller may create/publish projects against it
+    // immediately, and an op against a workspace that is not yet `created` can 500.
     await pollUntilCreated(transport, existing, poll);
-    // Dynamic allocation (flag ON): SKIP the flat re-grant. The pre-sized
-    // `resourceAllocation(marketCount)` carve is exactly the up-front over/under-allocation JIT
-    // replaces — the metered handlers top up just-in-time (ensureAiHeadroom) and release surplus,
-    // so re-flattening the total here would both undo a JIT top-up and, on an ON→OFF rollback of an
-    // already-grown child, risk setting `total` below `used`. Flag OFF unchanged (byte-for-byte).
-    //
-    // SCOPE DECISION (serenity-docs#22, Rainer 2026-07-08 — explicit, NOT a deferral): there is NO
-    // rightsizing/backfill sweep for children already carved under the OLD flat allocation, and
-    // none is planned. It was evaluated and rejected as unnecessary: decommission already releases
-    // a child's FULL allocation to the parent pool, and any over-provisioned survivor self-heals
-    // on its next delete/model-remove release or on decommission (the carve only over-reserves — it
-    // never breaks the child). So do not read the absence of a migration sweep as missing work.
-    if (!dynamicAllocation) {
-      await transport.transferWorkspaceResources(existing, resourceAllocation(marketCount));
-      await pollUntilCreated(transport, existing, poll);
-    }
     return existing;
   }
 
@@ -527,19 +425,14 @@ export async function ensureSubworkspace(
   // Provenance, not just identity: everything that later tears this workspace down must know
   // whether WE brought it into existence. An adopted workspace may belong to a same-named
   // sibling brand whose provisioning is still in flight (its claim is not persisted yet), so
-  // releasing it would strip a workspace we do not own.
+  // emptying it would strip a workspace we do not own.
   let freshlyCreated = false;
   if (!created) {
     try {
-      // Carve a fixed allocation (CREATE_ALLOCATION) onto the child so it has the
-      // metered quota to take prompts and publish. marketCount does not size the
-      // create — the allocation is flat (1 project, 500 prompts). If the parent
-      // pool can't cover it the create 422s "insufficient available units".
-      created = await transport.createSubworkspace(
-        parentWorkspaceId,
-        title,
-        CREATE_ALLOCATION,
-      );
+      // No `resources` body: the child is created with no AI allocation of its own and draws
+      // nothing from the parent pool, so a create can never be refused for capacity. See the
+      // module header for why a child needs no allocation to take metered writes.
+      created = await transport.createSubworkspace(parentWorkspaceId, title);
       freshlyCreated = true;
     } catch (e) {
       // 504 = our transport's timeout signal → ambiguous create, recover by
@@ -576,11 +469,10 @@ export async function ensureSubworkspace(
   // Concurrency guard (defense-in-depth against a lost-update orphan): a
   // parallel activate / createMarket for the SAME brand may have created and
   // persisted its own sub-workspace while we were creating + polling ours.
-  // Overwriting the pointer now would orphan the winner's workspace AND leave
-  // two resourced sub-workspaces drawing from the shared parent pool. Re-read
-  // the brand's current pointer; if another request already won, release OUR
-  // freshly-created workspace's allocation back to the parent (it cannot be
-  // deleted — deletion is forbidden) and adopt the winner's id instead.
+  // Overwriting the pointer now would orphan the winner's workspace. Re-read
+  // the brand's current pointer; if another request already won, empty OUR
+  // freshly-created workspace (it cannot be deleted — deletion is forbidden)
+  // and adopt the winner's id instead.
   // Residual: two requests that both re-read null in the same instant still
   // both persist; a fully race-free fix needs a conditional "set pointer where
   // pointer is null" write at the data layer (tracked follow-up).
@@ -591,27 +483,25 @@ export async function ensureSubworkspace(
         keptWorkspaceId: concurrent,
         standDownWorkspaceId: workspaceId,
         // False → we adopted this workspace rather than creating it, so it is not
-        // ours to release; we simply let it be.
-        releasing: freshlyCreated,
+        // ours to empty; we simply let it be.
+        emptying: freshlyCreated,
       });
       try {
-        // Release ONLY a workspace this call created. An ADOPTED one is not ours to tear down:
+        // Empty ONLY a workspace this call created. An ADOPTED one is not ours to tear down:
         // titles are bare brand names, so it can be a same-named sibling brand's workspace whose
         // claim is not persisted yet, and emptying it would destroy that brand's provisioning.
         // The loser's workspace is provably project-empty here — the create-or-adopt path above
         // never creates a project itself (that only happens in the CALLER, strictly after this
-        // function returns). Still run deleteAllProjects defensively (cheap, idempotent) so this
-        // stays uniform with the other release sites (LLMO-6189) rather than leaning on that
-        // invariant holding forever.
+        // function returns). Still run deleteAllProjects defensively (cheap, idempotent) rather
+        // than leaning on that invariant holding forever.
         if (freshlyCreated) {
-          await deleteAllProjects(transport, workspaceId);
-          await releaseFullAllocation(transport, workspaceId, parentWorkspaceId, log);
+          await deleteAllProjects(transport, workspaceId, parentWorkspaceId);
         }
       } catch (e) {
-        // Best-effort: a failed release leaves the orphan resourced, but we
+        // Best-effort: a failed cleanup leaves the orphan populated, but we
         // still must NOT clobber the winner's pointer below.
-        log?.error?.('ensureSubworkspace: failed to release orphaned workspace allocation', {
-          releasedWorkspaceId: workspaceId,
+        log?.error?.('ensureSubworkspace: failed to empty orphaned workspace', {
+          orphanedWorkspaceId: workspaceId,
           error: e.message,
         });
       }
@@ -639,12 +529,13 @@ export async function ensureSubworkspace(
  * Decommissions a brand's sub-workspace (design §6) — convergent and
  * idempotent. Steps:
  *   1. delete every project from the listing (404-as-success)
- *   2. reclaim the ai allocation back to the parent pool via
- *      {@link releaseFullAllocation} — lowered to a small non-zero floor, never deleted —
- *      production never deletes a sub-workspace (LLMO-6189).
- *   3. (member removal is best-effort and currently deferred — parent admins
+ *   2. (member removal is best-effort and currently deferred — parent admins
  *      inherit access regardless, workspace doc §7; enumerating members needs
  *      a listMembers transport method not added in this phase)
+ *
+ * The workspace shell itself is left in place and holds no AI allocation to reclaim — production
+ * never deletes a sub-workspace (docs/serenity.md — only Semrush CS deprovisions a shell), and a
+ * brand's sub-workspace never carried an allocation to begin with (see the module header).
  *
  * Self-defending: refuses if the target is the org parent OR still has active
  * linked (child) sub-workspaces.
@@ -652,13 +543,13 @@ export async function ensureSubworkspace(
  * This touches only the upstream workspace. Clearing the brand's
  * `semrush_sub_workspace_id` pointer (the disconnect) is the CALLER's job —
  * the deactivate handler does it after this resolves, leaving the
- * sub-workspace empty and unowned (or, with the flag on, gone).
+ * sub-workspace empty and unowned.
  *
  * @param {SerenityTransport} transport
  * @param {string} subworkspaceId
  * @param {object} log
  * @param {string} [parentWorkspaceId] - when provided, a self-defending guard:
- *   refuse to empty/release the org's shared parent workspace even if a caller
+ *   refuse to empty the org's shared parent workspace even if a caller
  *   ever reaches here without the controller's authorize() guard.
  * @param {object} [options]
  * @param {boolean} [options.enforceLinkedGuard=false] - enable the
@@ -681,13 +572,14 @@ export async function decommissionBrandWorkspace(
   if (!hasText(subworkspaceId)) {
     return;
   }
-  // Destructive primitive made self-defending: never delete projects from /
-  // release the allocation of the shared org parent workspace.
+  // Never delete projects from the shared org parent workspace. `deleteAllProjects` asserts this
+  // too (it is the destructive primitive), but assert here as well so we fail BEFORE the
+  // `enforceLinkedGuard` family listing below rather than after a pointless upstream round trip.
   assertNotParent(subworkspaceId, parentWorkspaceId);
 
   // Defense-in-depth: refuse to decommission a workspace that still has active
-  // linked (child / nested) sub-workspaces - releasing its allocation would pull
-  // the resource pool out from under its dependents. A brand sub-workspace is a
+  // linked (child / nested) sub-workspaces - emptying it would pull content out
+  // from under its dependents. A brand sub-workspace is a
   // leaf by design, so this is normally empty; any child means the target is
   // acting as a parent and must not be emptied. Fail-closed: a family-listing
   // error propagates and aborts the decommission rather than guessing.
@@ -709,12 +601,9 @@ export async function decommissionBrandWorkspace(
     }
   }
 
-  const deletedProjects = await deleteAllProjects(transport, subworkspaceId);
-  const release = await releaseFullAllocation(transport, subworkspaceId, parentWorkspaceId, log);
+  const deletedProjects = await deleteAllProjects(transport, subworkspaceId, parentWorkspaceId);
   log?.info?.(
-    'decommissionBrandWorkspace: emptied projects, allocation lowered to floor — surplus returned to the parent pool',
-    {
-      subworkspaceId, deletedProjects, released: release.released, reason: release.reason,
-    },
+    'decommissionBrandWorkspace: emptied projects — the workspace shell is left in place',
+    { subworkspaceId, deletedProjects },
   );
 }

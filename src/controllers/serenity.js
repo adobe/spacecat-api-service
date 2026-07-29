@@ -1280,12 +1280,10 @@ function SerenityController(context, log, env) {
           transport,
           brand,
           auth.parentWorkspaceId ?? '',
-          1,
           log,
           {},
           brandPointerReloader(ctx, auth.brandUuid),
           {
-            dynamicAllocation: dynamicAllocationEnabled(ctx),
             // createReadiness 'skip' (LLMO-6569): pending→active is sub-workspace-only — no project
             // or prompts are created here — so skip the up-to-30s settle poll. This is the path
             // where a poll timeout otherwise leaves the brand row present but its sub-workspace
@@ -1355,12 +1353,10 @@ function SerenityController(context, log, env) {
           transport,
           brand,
           auth.parentWorkspaceId ?? '',
-          1,
           log,
           {},
           brandPointerReloader(ctx, auth.brandUuid),
           {
-            dynamicAllocation: dynamicAllocationEnabled(ctx),
             // createReadiness 'skip' (LLMO-6569): bare reactivation of an already-active brand is
             // sub-workspace-only (no project/prompts), so skip the settle poll — same safety and
             // orphan-window rationale as the pending→active branch above.
@@ -1425,23 +1421,17 @@ function SerenityController(context, log, env) {
         ctx.dataAccess.services.postgrestClient,
       );
 
-      // Ensure the sub-workspace ONCE for the whole batch, sized to the real
-      // market count, then create each market against the resolved workspace.
-      // (Calling ensureSubworkspace per market would re-grant + double-poll N
-      // times — seconds of redundant settling that risks the Lambda timeout —
-      // and size the allocation as if there were a single market.)
+      // Ensure the sub-workspace ONCE for the whole batch, then create each market against the
+      // resolved workspace. (Calling ensureSubworkspace per market would re-poll N times —
+      // seconds of redundant settling that risks the Lambda timeout.)
       const workspaceId = await ensureSubworkspace(
         transport,
         brand,
         auth.parentWorkspaceId ?? '',
-        markets.length,
         log,
         {},
         brandPointerReloader(ctx, auth.brandUuid),
-        {
-          dynamicAllocation: dynamicAllocationEnabled(ctx),
-          brandCollection: ctx?.dataAccess?.Brand,
-        },
+        { brandCollection: ctx?.dataAccess?.Brand },
       );
       // LLMO-6554: resolved ONCE for the whole batch (same brand, so every market
       // in this request gets the same default) — mirrors whichever models the
@@ -1686,12 +1676,11 @@ function SerenityController(context, log, env) {
 
   /**
    * POST /serenity/deactivate — decommissions the brand's sub-workspace
-   * (design flow 6): delete every project and lower the allocation to a small non-zero floor,
-   * returning the surplus to the parent pool, then DISCONNECT the brand by clearing its
+   * (design flow 6): delete every project, then DISCONNECT the brand by clearing its
    * semrush_sub_workspace_id pointer. The sub-workspace itself is never deleted — production never
-   * deletes a sub-workspace (upstream deprovisioning is Semrush CS's act) — it is left empty,
-   * unowned, and minimally resourced (LLMO-6189 — a to-zero transfer is a silent gateway no-op, so
-   * lowering to a non-zero floor is the only reliable way to actually reclaim the surplus).
+   * deletes a sub-workspace (upstream deprovisioning is Semrush CS's act) — it is left empty and
+   * unowned. There is no allocation to reclaim: a sub-workspace is created without a `resources`
+   * payload and nothing ever transfers units onto it (see docs/serenity.md).
    * Clearing the pointer flips the brand back to flat mode, so a future
    * activate allocates a fresh sub-workspace. Sets brands.status = 'pending'.
    * No-op decommission (still 200) for a brand with no sub-workspace.

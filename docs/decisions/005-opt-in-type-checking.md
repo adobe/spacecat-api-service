@@ -290,13 +290,13 @@ removing one relaxation and fixing the surfaced errors:
    covers the base `include` set, then fold the two configs back into one. This is
    the step that restores `TS2339`, so it is what finally makes an unknown member
    or a wrong response shape a build failure rather than a runtime surprise.
-   Flipping it across the whole base `include` set today reports **705** errors:
+   Flipping it across the whole base `include` set today reports **701** errors:
 
    | code | count | nature |
    |---|---|---|
-   | TS7006 / TS7031 / TS7034 / TS7005 / TS7053 | 324 | missing parameter and variable annotations |
-   | TS2339 | 351 | member access on a value annotated `{object}` |
-   | TS2345 / TS2322 / TS18047 | 28 | assignability and possibly-null |
+   | TS7006 / TS7031 / TS7034 / TS7005 / TS7053 | 323 | missing parameter and variable annotations |
+   | TS2339 | 347 | member access on a value annotated `{object}` |
+   | TS2345 / TS2322 / TS18047 | 29 | assignability and possibly-null |
    | TS7016 | 2 | a dependency ships no declarations |
 
    Those errors are concentrated in `controllers/brands.js` (151),
@@ -306,7 +306,7 @@ removing one relaxation and fixing the surfaced errors:
    **Grow the strict list leaf-first, and do not use those per-file counts to
    order the work.** Because the tier follows imports, the cost of adding a file
    is its whole import closure. `controllers/brands.js` owns 151 errors but sits
-   near the top of the graph: rooting a program there reports **505 errors across
+   near the top of the graph: rooting a program there reports **502 errors across
    23 files**. `handlers/markets.js` owns 53 and pulls in 99 across 6. A leaf such
    as `support/serenity/errors.js` or `support/serenity/locations.js` costs 1.
    Ordering by owned errors therefore picks the most expensive step available.
@@ -314,7 +314,7 @@ removing one relaxation and fixing the surfaced errors:
    `include` to just that file, and run `tsc` against it.
 
    One shortcut is worth taking before any of that, because it cuts across every
-   file rather than sitting inside one: a shared `log` typedef. 79 of the 351
+   file rather than sitting inside one: a shared `log` typedef. 76 of the 347
    `TS2339` are logger-method accesses (`info`/`warn`/`error`/`debug`), and `log`
    is a small, stable shape, so one typedef retires them in a uniform mechanical
    pass and shrinks every per-file step that follows. `context` looks like the

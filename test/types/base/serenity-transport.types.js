@@ -46,15 +46,15 @@
  * @param {string} parentWorkspaceId
  */
 export async function transportContractIsEnforced(transport, parentWorkspaceId) {
-  // Arity. `resources` is required by `handlers.createWorkspaceV2Form`; omitting it
-  // serializes the body without the key, which the live gateway tolerates and the
-  // spec-generated vendor mock refuses.
-  // @ts-expect-error - Expected 3 arguments, but got 2.
-  await transport.createSubworkspace(parentWorkspaceId, 'title');
+  // Arity. Both of `createSubworkspace`'s parameters are documented, so a call that
+  // omits one is an error — an UNdocumented parameter is implicitly `any`, which TS
+  // also treats as optional, and the call would go unchecked.
+  // @ts-expect-error - Expected 2 arguments, but got 1.
+  await transport.createSubworkspace(parentWorkspaceId);
 
   // Body shape, derived from the generated contract: `ai` carries unit counts.
   // @ts-expect-error - string has no properties in common with { projects?, prompts? }.
-  await transport.createSubworkspace(parentWorkspaceId, 'title', { ai: 'unlimited' });
+  await transport.transferWorkspaceResources(parentWorkspaceId, { ai: 'unlimited' });
 
   // Argument types.
   // @ts-expect-error - number is not assignable to parameter of type string.
@@ -64,8 +64,7 @@ export async function transportContractIsEnforced(transport, parentWorkspaceId) 
   // @ts-expect-error - Expected 4 arguments, but got 2.
   await transport.createPromptsByIds('workspace-id', 'project-id');
 
-  // The contract-valid calls must stay clean — `{}` is how the spec expresses
-  // "no allocation", since every field inside `resources` is itself optional.
-  await transport.createSubworkspace(parentWorkspaceId, 'title', {});
+  // The contract-valid calls must stay clean.
+  await transport.createSubworkspace(parentWorkspaceId, 'title');
   await transport.createPromptsByIds('workspace-id', 'project-id', ['a prompt'], ['tag-id']);
 }

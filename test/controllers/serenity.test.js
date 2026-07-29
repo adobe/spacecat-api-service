@@ -1819,7 +1819,7 @@ describe('SerenityController', () => {
       await controller.activate(ctx);
 
       expect(ensureSubworkspaceStub).to.have.been.calledOnce;
-      expect(ensureSubworkspaceStub.firstCall.args[7].brandCollection)
+      expect(ensureSubworkspaceStub.firstCall.args[6].brandCollection)
         .to.equal(ctx.dataAccess.Brand);
     });
 
@@ -1834,9 +1834,8 @@ describe('SerenityController', () => {
         data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }, { market: 'de', languageCode: 'de' }] },
       }));
       expect(response.status).to.equal(200);
-      // ensured exactly once, sized to the real market count (2) — not per market.
+      // ensured exactly once for the whole batch — not per market.
       expect(ensureSubworkspaceStub).to.have.been.calledOnce;
-      expect(ensureSubworkspaceStub.firstCall.args[3]).to.equal(2);
       expect(handlers.handleCreateMarketSubworkspace).to.have.been.calledTwice;
       // each market create receives the pre-resolved workspace id (6th arg) so it
       // skips its own ensure.
@@ -2068,7 +2067,7 @@ describe('SerenityController', () => {
       // Sub-workspace ensured once; NO project, NO body-driven market path.
       expect(ensureSubworkspaceStub).to.have.been.calledOnce;
       // Sub-workspace-only → skips the settle poll (LLMO-6569).
-      expect(ensureSubworkspaceStub.firstCall.args[7]).to.have.property('createReadiness', 'skip');
+      expect(ensureSubworkspaceStub.firstCall.args[6]).to.have.property('createReadiness', 'skip');
       expect(handlers.handleCreateMarketSubworkspace).to.not.have.been.called;
       expect(updateBrandStub).to.not.have.been.called;
       expect(brand.setStatus).to.have.been.calledWith('active');
@@ -2109,7 +2108,7 @@ describe('SerenityController', () => {
       expect(status).to.equal('active');
       expect(ensureSubworkspaceStub).to.have.been.calledOnce;
       // Bare reactivation is sub-workspace-only → skips the settle poll (LLMO-6569).
-      expect(ensureSubworkspaceStub.firstCall.args[7]).to.have.property('createReadiness', 'skip');
+      expect(ensureSubworkspaceStub.firstCall.args[6]).to.have.property('createReadiness', 'skip');
     });
 
     it('activate prefers body markets + brandDomain over the stash, and clears the stash when its market is provisioned', async () => {
