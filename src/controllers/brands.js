@@ -1917,12 +1917,19 @@ function BrandsController(ctx, log, env) {
       // memo also pins one answer for the whole request, so the pre-write
       // competitor guard and the post-commit re-sync below cannot disagree and
       // half-absorb an edit.
-      let serenityUiFlag;
-      const shouldSurfaceSemrushErrors = () => {
-        if (serenityUiFlag === undefined) {
-          serenityUiFlag = isSerenityUiActiveForOrg(context, spaceCatId, log);
+      let serenityUiFlagPromise;
+      /**
+       * MUST be awaited — this returns the memoised PROMISE, not a boolean, so a
+       * bare `if (resolveSurfaceSemrushErrors())` is always truthy and would
+       * silently surface every Semrush error regardless of the flag.
+       *
+       * @returns {Promise<boolean>} `true` when Semrush failures must be reported.
+       */
+      const resolveSurfaceSemrushErrors = () => {
+        if (serenityUiFlagPromise === undefined) {
+          serenityUiFlagPromise = isSerenityUiActiveForOrg(context, spaceCatId, log);
         }
-        return serenityUiFlag;
+        return serenityUiFlagPromise;
       };
 
       // LLMO-5645: a region must not be removed from a brand while prompts still
@@ -1996,7 +2003,7 @@ function BrandsController(ctx, log, env) {
             // Logged before the rethrow either way: the outer catch only sees a
             // generic "Error updating brand", so this is the sole record of which
             // Semrush workspace and which pre-write step failed.
-            const rejectingWrite = await shouldSurfaceSemrushErrors();
+            const rejectingWrite = await resolveSurfaceSemrushErrors();
             log.warn('serenity: competitor-guard project listing failed', {
               brandId,
               semrushSubWorkspaceId: brandState.semrushSubWorkspaceId,
@@ -2051,7 +2058,7 @@ function BrandsController(ctx, log, env) {
       // surface as a 5xx on an edit that did persist. The response carries
       // semrushSyncPending:true so the divergence is visible to the caller, and the
       // error log below carries the context needed to enumerate and recover drifted
-      // brands. For an org on the Serenity UI (see shouldSurfaceSemrushErrors) the
+      // brands. For an org on the Serenity UI (see resolveSurfaceSemrushErrors) the
       // failure is reported instead — that org's users are provisioned in Semrush, so
       // a failure is a real fault rather than expected migration noise.
       const urlsTouched = updates.urls !== undefined
@@ -2148,7 +2155,7 @@ function BrandsController(ctx, log, env) {
             stack: syncError?.stack,
             permanent: isPermanent,
           });
-          if (await shouldSurfaceSemrushErrors()) {
+          if (await resolveSurfaceSemrushErrors()) {
             // The org is on the Serenity UI: its users are provisioned in Semrush, so
             // this is a genuine upstream failure and the caller is told. The row stays
             // committed either way — the difference is whether the divergence is

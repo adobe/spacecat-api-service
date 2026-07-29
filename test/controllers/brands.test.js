@@ -7008,7 +7008,37 @@ describe('Brands Controller', () => {
         const response = await controller.updateBrandForOrg(urlEditRequest());
 
         expect(response.status).to.equal(502);
-        expect((await response.json()).message).to.equal('Upstream request failed');
+        const body = await response.json();
+        expect(body.message).to.equal('Upstream request failed');
+        // Same redaction guarantee as the 403 path: the generic 502 message must
+        // not carry the internal gateway URL embedded in the upstream error.
+        expect(JSON.stringify(body)).to.not.contain('gw.internal');
+        expect(response.headers.get('x-error') || '').to.not.contain('gw.internal');
+      });
+
+      it('reports a 401 when the caller cannot be authenticated to Semrush', async () => {
+        // resolveSemrushImsToken throws ErrorWithStatusCode(401) for an expired
+        // promise-token exchange or a non-IMS bearer. It sits inside the re-sync
+        // try, so mid-migration it soft-fails like any other re-sync failure; with
+        // the flag on it maps through to the 401 the OpenAPI spec documents.
+        const updateBrandStub = sinon.stub().resolves(SUB_WORKSPACE_BRAND);
+        const controller = await buildUpdateController({
+          updateBrand: updateBrandStub,
+          createSerenityTransport: sinon.stub().returns({
+            name: 't', listProjects: sinon.stub().resolves({ items: [] }),
+          }),
+          resolveSemrushImsToken: sinon.stub().rejects(
+            Object.assign(new Error('Invalid or expired promise token'), { status: 401 }),
+          ),
+          isSerenityUiActiveForOrg: sinon.stub().resolves(true),
+        });
+
+        const response = await controller.updateBrandForOrg(urlEditRequest());
+
+        expect(response.status).to.equal(401);
+        expect((await response.json()).message).to.equal('Invalid or expired promise token');
+        // The row still committed — only the re-sync failed.
+        expect(updateBrandStub).to.have.been.calledOnce;
       });
 
       it('rejects the write when the pre-write competitor guard listing fails', async () => {
@@ -7080,6 +7110,13 @@ describe('Brands Controller', () => {
         // One answer pinned per request: the guard and the re-sync must not disagree
         // and leave an edit half-absorbed.
         const flagStub = sinon.stub().resolves(false);
+        // The guard and the re-sync each list the sub-workspace's projects. The
+        // guard's listing failure leaves nothing prefetched, so the re-sync lists
+        // again and fails there too — before it reaches any per-entity sync. Two
+        // calls on this stub is therefore the proof that BOTH catch blocks ran.
+        const listProjectsStub = sinon.stub().rejects(
+          new SerenityTransportError(403, 'Semrush GET https://gw.internal/x failed: 403', {}),
+        );
         const controller = await buildUpdateController({
           updateBrand: sinon.stub().resolves({
             ...SUB_WORKSPACE_BRAND,
@@ -7091,14 +7128,9 @@ describe('Brands Controller', () => {
             urls: [],
             semrushSubWorkspaceId: 'ws-9',
           }),
-          syncCompetitorBenchmarksAcrossMarkets: sinon.stub().rejects(
-            new SerenityTransportError(403, 'Semrush PUT https://gw.internal/x failed: 403', {}),
-          ),
           createSerenityTransport: sinon.stub().returns({
             name: 't',
-            listProjects: sinon.stub().rejects(
-              new SerenityTransportError(403, 'Semrush GET https://gw.internal/x failed: 403', {}),
-            ),
+            listProjects: listProjectsStub,
           }),
           isSerenityUiActiveForOrg: flagStub,
         });
@@ -7116,6 +7148,10 @@ describe('Brands Controller', () => {
         expect(response.status).to.equal(200);
         expect(await response.json()).to.include({ semrushSyncPending: true });
         expect(flagStub).to.have.been.calledOnce;
+        // Both call sites really were reached — without this the single flag read
+        // would prove nothing about the memo, since a handler that short-circuited
+        // before the re-sync would also read the flag exactly once.
+        expect(listProjectsStub).to.have.been.calledTwice;
       });
     });
 

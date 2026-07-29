@@ -187,9 +187,10 @@ v2-brand-for-org:
       '401':
         description: |
           Upstream authorization failed. The org carries the `LLMO/serenity_ui`
-          feature flag and the caller could not be authenticated to Semrush for the
-          re-sync (no or expired promise token). The brand row may already be
-          committed; the re-sync did not run.
+          feature flag and the caller could not be authenticated to the upstream
+          provider for the re-sync — the request carried no usable IMS user token,
+          or the token had expired. The brand row may already be committed; the
+          re-sync did not run.
       '403':
         description: |
           Forbidden. One of:
