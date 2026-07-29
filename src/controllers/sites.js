@@ -45,7 +45,8 @@ import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
 import { applyFieldProjection } from '../utils/field-projection.js';
 import {
-  wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled, CUSTOMER_VISIBLE_TIERS, isInternalOrg,
+  wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled, getAsoTier, CUSTOMER_VISIBLE_TIERS,
+  isInternalOrg,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { CAP_SITE_READ_ALL, CAP_SITE_CREATE } from '../routes/capability-constants.js';
@@ -69,10 +70,12 @@ import { ASO_PRODUCT_CODE, STATUSES as PLG_STATUSES } from './plg/plg-onboarding
  */
 async function buildResolveData(org, site, context) {
   const isSummitPlgEnabled = await getIsSummitPlgEnabled(site, context);
+  const asoTier = await getAsoTier(site, context);
   return {
     organization: OrganizationDto.toJSON(org),
     site: SiteDto.toJSON(site),
     isSummitPlgEnabled,
+    asoTier,
   };
 }
 

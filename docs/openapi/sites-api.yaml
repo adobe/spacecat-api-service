@@ -436,6 +436,12 @@ sites-resolve:
                     isSummitPlgEnabled:
                       type: boolean
                       description: Whether the summit-plg audit is enabled for the resolved site
+                    asoTier:
+                      type: ['string', 'null']
+                      description: >-
+                        The resolved site's organization's ASO entitlement tier
+                        (FREE_TRIAL, PAID, PLG, PRE_ONBOARD), or null if no ASO
+                        entitlement exists.
               example:
                 data:
                   organization:
@@ -450,6 +456,7 @@ sites-resolve:
                     deliveryType: 'aem_edge'
                     isLive: true
                   isSummitPlgEnabled: true
+                  asoTier: 'PAID'
       '400':
         description: Bad request - missing required parameters or invalid input
         headers:

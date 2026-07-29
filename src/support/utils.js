@@ -683,6 +683,32 @@ export async function getIsSummitPlgEnabled(site, context, requestContext) {
 }
 
 /**
+ * Returns the org's ASO entitlement tier for the given site, or null if none exists.
+ * @param {Object} site - Site entity
+ * @param {Object} context - Request context with dataAccess, log
+ * @returns {Promise<string|null>}
+ */
+export async function getAsoTier(site, context) {
+  try {
+    const { Entitlement } = context.dataAccess || {};
+    const organizationId = site.getOrganizationId();
+    if (!Entitlement || !organizationId) {
+      return null;
+    }
+
+    const entitlement = await Entitlement.findByOrganizationIdAndProductCode(
+      organizationId,
+      EntitlementModel.PRODUCT_CODES.ASO,
+    );
+
+    return entitlement?.getTier() ?? null;
+  } catch (err) {
+    context.log?.error?.('Error resolving ASO tier for site:', err);
+    return null;
+  }
+}
+
+/**
  * Get the IMS user token from the context.
  * @param {object} context - The context of the request.
  * @returns {string} imsUserToken - The IMS User access token.

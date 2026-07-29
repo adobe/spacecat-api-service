@@ -6734,6 +6734,46 @@ describe('Sites Controller', () => {
       expect(body.data).to.have.property('isSummitPlgEnabled', false);
     });
 
+    it('should include asoTier in response reflecting the org ASO entitlement tier', async () => {
+      mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves({
+        getTier: () => 'PAID',
+      });
+
+      context.data = { organizationId: testOrganizations[0].getId() };
+      mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+      mockDataAccess.Site.findById.resolves(testSites[0]);
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: { getId: () => 'entitlement-123', getTier: () => 'FREE_TRIAL' },
+        enrollment: { getId: () => 'enrollment-1', getSiteId: () => SITE_IDS[0] },
+        site: testSites[0],
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.data).to.have.property('asoTier', 'PAID');
+    });
+
+    it('should set asoTier to null when no ASO entitlement exists', async () => {
+      mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves(null);
+
+      context.data = { organizationId: testOrganizations[0].getId() };
+      mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+      mockDataAccess.Site.findById.resolves(testSites[0]);
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: { getId: () => 'entitlement-123', getTier: () => 'FREE_TRIAL' },
+        enrollment: { getId: () => 'enrollment-1', getSiteId: () => SITE_IDS[0] },
+        site: testSites[0],
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.data).to.have.property('asoTier', null);
+    });
+
     it('should return 404 with no_entitlement_for_product resolveStatus for non-existent imsOrg (external caller)', async () => {
       context.data = { imsOrg: 'nonexistent@AdobeOrg' };
       mockDataAccess.Organization.findByImsOrgId.resolves(null);
