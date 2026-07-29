@@ -19,7 +19,9 @@ import { extractURLFromSlackInput, postErrorMessage } from '../../../utils/slack
 
 const PHRASES = ['run-brand-claims'];
 
-const DRS_BP_BUCKET = 'drs-v2-prod-bp';
+// DRS Brand-Presence bucket comes from env DRS_BP_BUCKET (dev = drs-v2-main-bp,
+// prod = drs-v2-prod-bp). Required — no default, so a misconfigured env can never
+// silently target the prod bucket; the command errors if it's unset.
 const BP_PLATFORM = 'chatgpt_free';
 
 // DRS weekly/daily sheet filenames only; skips experiment and week/year-less names.
@@ -61,9 +63,10 @@ export function sanitizePathComponent(component) {
  *
  * @param {object} s3Client - AWS SDK S3 client.
  * @param {string} prefix - `{siteId}/{brandSlug}/analytics/{platform}/`.
+ * @param {string} bucket - DRS Brand-Presence bucket name (env DRS_BP_BUCKET).
  * @returns {Promise<object|null>} `{key, week, year, cadence, sheetDate}` or null.
  */
-async function findLatestSheet(s3Client, prefix) {
+async function findLatestSheet(s3Client, prefix, bucket) {
   let best = null;
   let continuationToken;
   let pages = 0;
@@ -72,7 +75,7 @@ async function findLatestSheet(s3Client, prefix) {
     pages += 1;
     // eslint-disable-next-line no-await-in-loop
     const response = await s3Client.send(new ListObjectsV2Command({
-      Bucket: DRS_BP_BUCKET,
+      Bucket: bucket,
       Prefix: prefix,
       ContinuationToken: continuationToken,
     }));
@@ -142,6 +145,12 @@ function RunBrandClaimsCommand(context) {
         return;
       }
 
+      const drsBpBucket = context.env?.DRS_BP_BUCKET;
+      if (!drsBpBucket) {
+        await say(':x: DRS_BP_BUCKET is not configured in this environment.');
+        return;
+      }
+
       const [siteArg] = args;
       if (!siteArg) {
         await say(baseCommand.usage());
@@ -199,7 +208,7 @@ function RunBrandClaimsCommand(context) {
       }
 
       const prefix = `${site.getId()}/${brandSlug}/analytics/${BP_PLATFORM}/`;
-      const sheet = await findLatestSheet(context.s3.s3Client, prefix);
+      const sheet = await findLatestSheet(context.s3.s3Client, prefix, drsBpBucket);
 
       if (!sheet) {
         await say(`:warning: No Brand Presence sheet found yet for \`${site.getBaseURL()}\` on platform \`${BP_PLATFORM}\` — nothing to run.`);
@@ -218,7 +227,7 @@ function RunBrandClaimsCommand(context) {
         cadence: sheet.cadence,
         sheet_date: sheet.sheetDate,
         platform: BP_PLATFORM,
-        s3_bucket: DRS_BP_BUCKET,
+        s3_bucket: drsBpBucket,
         s3_key: sheet.key,
         parent_job_id: null,
         batch_id: null,

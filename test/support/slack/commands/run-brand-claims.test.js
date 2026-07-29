@@ -73,7 +73,7 @@ describe('RunBrandClaimsCommand', () => {
       },
       sqs: { sendMessage: sqsSendMessageStub },
       s3: { s3Client: { send: s3SendStub } },
-      env: { SQS_BP_SHEET_READY_QUEUE_URL: QUEUE_URL },
+      env: { SQS_BP_SHEET_READY_QUEUE_URL: QUEUE_URL, DRS_BP_BUCKET: 'test-bp-bucket' },
     };
     slackContext = { say: sinon.spy() };
   });
@@ -137,7 +137,7 @@ describe('RunBrandClaimsCommand', () => {
         cadence: 'weekly',
         sheet_date: '2026-07-27',
         platform: 'chatgpt_free',
-        s3_bucket: 'drs-v2-prod-bp',
+        s3_bucket: 'test-bp-bucket',
         s3_key: `${SITE_ID}/acme/analytics/chatgpt_free/2026/07/27/brandpresence-chatgpt-w30-2026.xlsx`,
         parent_job_id: null,
         batch_id: null,
@@ -258,6 +258,16 @@ describe('RunBrandClaimsCommand', () => {
       await command.handleExecution(['https://example.com'], slackContext);
 
       expect(slackContext.say.calledWithMatch(/not configured/)).to.equal(true);
+      expect(context.dataAccess.Site.findByBaseURL).to.not.have.been.called;
+    });
+
+    it('errors when the DRS bucket is not configured', async () => {
+      context.env.DRS_BP_BUCKET = undefined;
+
+      const command = RunBrandClaimsCommand(context);
+      await command.handleExecution(['https://example.com'], slackContext);
+
+      expect(slackContext.say.calledWithMatch(/DRS_BP_BUCKET is not configured/)).to.equal(true);
       expect(context.dataAccess.Site.findByBaseURL).to.not.have.been.called;
     });
 
