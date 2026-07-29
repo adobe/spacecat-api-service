@@ -683,15 +683,17 @@ export async function getIsSummitPlgEnabled(site, context, requestContext) {
 }
 
 /**
- * Returns the org's ASO entitlement tier for the given site, or null if none exists.
- * @param {Object} site - Site entity
+ * Returns the org's ASO entitlement tier, or null if none exists.
+ * Callers that already have the org's ASO entitlement in hand (e.g. via TierClient,
+ * when the request's x-product header is already ASO) should read the tier directly
+ * off it instead of calling this — it always issues its own Entitlement lookup.
+ * @param {string} organizationId - Organization id
  * @param {Object} context - Request context with dataAccess, log
  * @returns {Promise<string|null>}
  */
-export async function getAsoTier(site, context) {
+export async function getAsoTier(organizationId, context) {
   try {
     const { Entitlement } = context.dataAccess || {};
-    const organizationId = site.getOrganizationId();
     if (!Entitlement || !organizationId) {
       return null;
     }
@@ -703,7 +705,7 @@ export async function getAsoTier(site, context) {
 
     return entitlement?.getTier() ?? null;
   } catch (err) {
-    context.log?.error?.('Error resolving ASO tier for site:', err);
+    context.log?.error?.('Error resolving ASO tier:', err);
     return null;
   }
 }
