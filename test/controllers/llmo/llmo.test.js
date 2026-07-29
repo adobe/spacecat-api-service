@@ -5772,7 +5772,7 @@ describe('LlmoController', () => {
         expect(mockConfig.updateEdgeOptimizeConfig.firstCall.args[0]).to.not.have.property('enabled');
         expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
           mockEnv.IMPORT_WORKER_QUEUE_URL,
-          { type: 'optimize-at-edge-enabled-marking' },
+          { type: 'optimize-at-edge-enabled-marking', siteId: TEST_SITE_ID },
           undefined,
           { delaySeconds: 300 },
         );
