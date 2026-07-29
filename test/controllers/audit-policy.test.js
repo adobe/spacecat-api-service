@@ -936,6 +936,19 @@ describe('AuditPolicyController — E4 getScopePages', () => {
     expect(gtSpy).to.have.been.calledWith('url', 'https://example.com/a');
   });
 
+  it('returns 400 for a malformed cursor instead of silently falling back to page 1', async () => {
+    // Buffer.from(str, 'base64url') does not throw on invalid input - it decodes leniently
+    // to garbage bytes - so this must be caught by a round-trip/format check, not try/catch.
+    const { client, gtSpy, limitSpy } = buildScopeClient({ rows: [] });
+    const controller = loadController();
+    const res = await controller.getScopePages(
+      buildContext({ client, params: { cursor: '!!!not-valid!!!' } }),
+    );
+    expect(res.status).to.equal(400);
+    expect(gtSpy).to.not.have.been.called;
+    expect(limitSpy).to.not.have.been.called;
+  });
+
   it('returns 403 when the caller fails read authorization, without querying pages', async () => {
     const client = buildClient();
     const fromSpy = sinon.spy(client, 'from');

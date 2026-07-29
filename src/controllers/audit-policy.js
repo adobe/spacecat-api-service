@@ -67,15 +67,16 @@ function encodeCursor(version) {
 }
 
 // Cursor for the scope page list encodes the last row's `url` string (opaque base64url) -
-// distinct from the version-int cursor above. There's no numeric range to validate here,
-// just non-empty text; a malformed cursor decodes to null and is treated as "no cursor".
+// distinct from the version-int cursor above. `Buffer.from(c, 'base64url')` does not throw
+// on malformed input - it decodes leniently to garbage bytes - so validity is checked by
+// re-encoding the decoded value and comparing it back to the original string. Callers must
+// distinguish "no cursor supplied" from "invalid cursor supplied" themselves via hasText(c).
 function decodePageCursor(c) {
-  try {
-    const s = Buffer.from(c, 'base64url').toString('utf8');
-    return hasText(s) ? s : null;
-  } catch {
+  const decoded = Buffer.from(c, 'base64url').toString('utf8');
+  if (!hasText(decoded) || Buffer.from(decoded, 'utf8').toString('base64url') !== c) {
     return null;
   }
+  return decoded;
 }
 
 function encodePageCursor(url) {
@@ -326,7 +327,13 @@ export default function AuditPolicyController() {
       MAX_PAGE,
     );
     const rawCursor = context.params?.cursor;
-    const cursor = hasText(rawCursor) ? decodePageCursor(rawCursor) : null;
+    let cursor = null;
+    if (hasText(rawCursor)) {
+      cursor = decodePageCursor(rawCursor);
+      if (cursor === null) {
+        return badRequest('cursor is invalid');
+      }
+    }
 
     let q = client.from(SCOPE_PAGES_VIEW).select('*').eq('site_id', siteId);
     if (cursor !== null) {
