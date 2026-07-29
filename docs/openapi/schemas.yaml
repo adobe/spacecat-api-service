@@ -7823,6 +7823,9 @@ V2BrandUpdateResponse:
             re-sync failed (transient upstream error or user not provisioned in
             Semrush). The edit is persisted; Semrush will be reconciled via
             `--reconcile` migration once the underlying issue is resolved.
+            Returned only for organizations still inside the Semrush migration
+            window. An org carrying the `LLMO/serenity_ui` feature flag gets the
+            upstream failure reported instead (401/403/502), never this field.
         semrushRejectedAliases:
           type: array
           description: >-
