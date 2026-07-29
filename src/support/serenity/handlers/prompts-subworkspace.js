@@ -43,6 +43,7 @@ import { classifyPromptIntents } from '../intent-classification.js';
 import { alertQuotaRejection } from '../quota-alerts.js';
 
 /** @typedef {import('../resource-manager.js').Blocks} Blocks */
+/** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
 
 /**
  * Subworkspace-mode prompt handlers (serenity dual-mode, subworkspace path). Behaviourally
@@ -68,6 +69,7 @@ import { alertQuotaRejection } from '../quota-alerts.js';
  * to a project via the live listing; a missing project is a hard 404
  * marketNotFound (same contract as the flat-mode single-slice list — "no such
  * slice" must not masquerade as "slice exists but empty").
+ * @param {SerenityTransport} transport
  */
 export async function handleListPromptsSubworkspace(transport, workspaceId, query, log) {
   const geoTargetId = normalizeGeoTargetId(query?.geoTargetId);
@@ -127,7 +129,7 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
  * POST /serenity/prompts (subworkspace) — bulk create. Resolves every input's owning
  * project from ONE live listing (buildSliceProjectMap) instead of the DB
  * mapping, then reuses the shared per-slice create + publish-once fan-out.
- * @param {any} transport
+ * @param {SerenityTransport} transport
  * @param {string} workspaceId
  * @param {any} body
  * @param {any} log
@@ -366,6 +368,7 @@ export async function handleCreatePromptsSubworkspace(
  * 409 text collision → thrown for the controller's `conflict` mapping), then
  * the replace-mode batch tag write. The prompt id is preserved end to end and
  * echoed unchanged in the response; nothing is deleted on this path.
+ * @param {SerenityTransport} transport
  */
 export async function handleUpdatePromptSubworkspace(
   transport,
@@ -481,7 +484,7 @@ export async function handleUpdatePromptSubworkspace(
  * POST /serenity/prompts/bulk-delete (subworkspace) — resolve each target's project
  * from ONE live listing, batch deletes per project, publish affected. Upstream
  * 404 == idempotent success.
- * @param {any} transport
+ * @param {SerenityTransport} transport
  * @param {string} workspaceId
  * @param {any} body
  * @param {any} log
