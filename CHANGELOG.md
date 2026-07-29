@@ -1,3 +1,10 @@
+## [1.701.1](https://github.com/adobe/spacecat-api-service/compare/v1.701.0...v1.701.1) (2026-07-29)
+
+
+### Bug Fixes
+
+* worker Lambda deployed under wrong name (default--serenity-job-runner) ([#2941](https://github.com/adobe/spacecat-api-service/issues/2941)) ([6c64e12](https://github.com/adobe/spacecat-api-service/commit/6c64e126cc1b3804be015a15022548366830f8f8)), closes [#2936](https://github.com/adobe/spacecat-api-service/issues/2936) [spacecat-infrastructure#708](https://github.com/spacecat-infrastructure/issues/708) [#2936](https://github.com/adobe/spacecat-api-service/issues/2936)
+
 # [1.701.0](https://github.com/adobe/spacecat-api-service/compare/v1.700.4...v1.701.0) (2026-07-29)
 
 
