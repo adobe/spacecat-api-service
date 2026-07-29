@@ -938,9 +938,16 @@ export default function serenityTests(
       await resetMocks();
     });
 
-    const createUsMarket = () => getHttpClient().admin.post(`${base}/markets`, {
-      market: 'US', languageCode: 'en', brandDomain: 'example.com', brandNames: ['Test Brand'],
-    });
+    // Setup, not subject: every test here needs a live US market, and none asserts on the market
+    // response itself. Checking the status inside the helper means a refused create (a 422 on
+    // insufficient units, say) fails here, rather than surfacing later as a confusing failure on
+    // the tag or prompt call that depended on it.
+    const createUsMarket = async () => {
+      const res = await getHttpClient().admin.post(`${base}/markets`, {
+        market: 'US', languageCode: 'en', brandDomain: 'example.com', brandNames: ['Test Brand'],
+      });
+      expect(res.status).to.equal(201);
+    };
 
     const createCategory = async (name) => {
       const res = await getHttpClient().admin.post(`${base}/tags`, {
