@@ -908,4 +908,133 @@ export default function serenityTests(
       expect(post.status).to.equal(409);
     });
   });
+
+  // Prompt authorship metadata on the LIST READ (LLMO-6289).
+  //
+  // The stamping itself happens on the write; these cases prove the four values come back out
+  // again through `GET /serenity/prompts`. That round trip is not automatic: upstream omits the
+  // `metadata` block from every item unless the read opts in with the `include_metadata=true`
+  // QUERY parameter, and `buildPromptDto` maps a missing block to four nulls. So a read that
+  // fails to opt in returns a 200 whose authorship fields are all null for prompts that ARE
+  // stamped — no error anywhere, just silently empty values in the UI. These tests fail exactly
+  // that way if the opt-in regresses.
+  //
+  // The mock gates the block on the same query parameter (and omits the key entirely without it),
+  // so this is a real end-to-end assertion of the flag, not a mock convenience.
+  describe('Serenity API — prompt authorship metadata on the list read (live mock)', () => {
+    const base = `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity`;
+    const US_GEO = 2840;
+    beforeEach(async () => {
+      await resetData();
+      await resetMocks();
+    });
+
+    const createUsMarket = () => getHttpClient().admin.post(`${base}/markets`, {
+      market: 'US', languageCode: 'en', brandDomain: 'example.com', brandNames: ['Test Brand'],
+    });
+
+    const createCategory = async (name) => {
+      const res = await getHttpClient().admin.post(`${base}/tags`, {
+        type: 'category', name, geoTargetId: US_GEO, languageCode: 'en',
+      });
+      expect(res.status).to.equal(201);
+      return res.body.id;
+    };
+
+    const listPrompts = async (extraQuery = '') => {
+      const res = await getHttpClient().admin.get(
+        `${base}/prompts?geoTargetId=${US_GEO}&languageCode=en${extraQuery}`,
+      );
+      expect(res.status).to.equal(200);
+      return res.body.items;
+    };
+
+    const readPromptById = async (semrushPromptId, extraQuery = '') => {
+      const item = (await listPrompts(extraQuery)).find(
+        (p) => p.semrushPromptId === semrushPromptId,
+      );
+      expect(item, `expected prompt ${semrushPromptId} in the list read`).to.exist;
+      return item;
+    };
+
+    const createPrompt = async (persona, text, tagIds) => {
+      const res = await getHttpClient()[persona].post(`${base}/prompts`, {
+        prompts: [{
+          text, tagIds, geoTargetId: US_GEO, languageCode: 'en',
+        }],
+      });
+      expect(res.status).to.equal(200);
+      expect(res.body.created).to.have.lengthOf(1);
+      return res.body.created[0].semrushPromptId;
+    };
+
+    it('GET /serenity/prompts returns the four authorship fields for a stamped prompt', async () => {
+      await createUsMarket();
+      const tagId = await createCategory('Running');
+      const promptId = await createPrompt('admin', 'What are the best trail shoes?', [tagId]);
+
+      const item = await readPromptById(promptId);
+      // The decisive assertions: all four are populated. Without the read-side opt-in every one of
+      // these is null even though the prompt is stamped upstream.
+      expect(item.createdAt, 'createdAt reaches the DTO').to.be.a('string');
+      expect(item.updatedAt, 'updatedAt reaches the DTO').to.be.a('string');
+      expect(item.createdBy).to.equal('test-admin@adobe.com');
+      expect(item.updatedBy).to.equal('test-admin@adobe.com');
+      // A create is its own first edit, so the two instants match.
+      expect(item.createdAt).to.equal(item.updatedAt);
+      expect(item.createdAt).to.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/);
+    });
+
+    // The whole point of surfacing these fields is "who last touched this, and when" — so the
+    // edit must be visible THROUGH the read, not merely stored upstream. Two personas, so the
+    // authorship change is asserted on identity rather than on clock granularity.
+    it('surfaces the editor in updatedBy while createdBy keeps the original author', async () => {
+      await createUsMarket();
+      const tagId = await createCategory('Footwear');
+      const promptId = await createPrompt('admin', 'What are the best running shoes?', [tagId]);
+      const before = await readPromptById(promptId);
+
+      const patched = await getHttpClient().user.patch(`${base}/prompts/${promptId}`, {
+        text: 'What are the best trail running shoes?',
+        tagIds: [tagId],
+        geoTargetId: US_GEO,
+        languageCode: 'en',
+      });
+      expect(patched.status).to.equal(200);
+
+      const after = await readPromptById(promptId);
+      expect(after.createdBy, 'the original author survives the edit').to.equal('test-admin@adobe.com');
+      expect(after.createdAt).to.equal(before.createdAt);
+      expect(after.updatedBy, 'the editor is attributed').to.equal('test-user@example.com');
+      expect(Date.parse(after.updatedAt)).to.be.at.least(Date.parse(before.updatedAt));
+    });
+
+    // The unstamped-prompt case — a prompt predating authorship stamping, whose read must degrade
+    // to four nulls rather than erroring — is NOT covered here. It is unreachable through this
+    // surface: the mock's only unstamped prompt lives in its own seeded workspace/project, while a
+    // brand's slice resolves to a project created fresh per run, so no unstamped row is ever
+    // visible on the slice this endpoint reads. Reaching it would mean injecting one through the
+    // mock's `__seed` control route into the resolved project — harness work beyond this change.
+    // `buildPromptDto`'s `metadata?.x ?? null` mapping carries that path at the unit level.
+
+    // The metadata opt-in travels on the QUERY string while the sort keys travel in the BODY, so a
+    // sorted read exercises both at once. This guards the interaction: a regression that moved the
+    // opt-in into the body alongside the sort keys would strip the authorship fields here while
+    // leaving the unsorted read above green.
+    //
+    // Ordering itself is deliberately NOT asserted — the mock implements no sort logic, so any
+    // order assertion would pass regardless of which keys were sent and prove nothing.
+    it('still returns the authorship fields on a sorted read', async () => {
+      await createUsMarket();
+      const tagId = await createCategory('Cameras');
+      const promptId = await createPrompt('admin', 'Which mirrorless camera is best?', [tagId]);
+
+      for (const sort of ['metadata.created_at', 'metadata.updated_at']) {
+        // eslint-disable-next-line no-await-in-loop
+        const item = await readPromptById(promptId, `&sort=${sort}&order=desc`);
+        expect(item.createdBy, `${sort} sorted read keeps createdBy`).to.equal('test-admin@adobe.com');
+        expect(item.updatedAt, `${sort} sorted read keeps updatedAt`).to.be.a('string');
+      }
+    });
+  });
 }
