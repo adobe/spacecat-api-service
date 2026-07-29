@@ -506,6 +506,13 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  * @param {Partial<import('../resource-manager.js').Blocks>} [options.ceiling] - per-brand AI
  *   ceiling (LLMO-6190 flag-flip gate), resolved from Vault by the controller and passed through to
  *   `createHeadroomGuard`. Omitted → non-binding default. No-op when `dynamicAllocation` is false.
+ * @param {object} [options.brandCollection] - the data-access Brand collection, threaded to
+ *   `ensureSubworkspace` on the single-market POST path so its claim filter can tell this
+ *   brand's own interrupted create from a same-named sibling brand's sub-workspace (titles are
+ *   bare brand names). Unused when `preResolvedWorkspaceId` is supplied.
+ * @param {function} [options.onWorkspaceCreated] - forwarded to `ensureSubworkspace`; called
+ *   only when the sub-workspace was FRESHLY CREATED here, so the caller's failure compensation
+ *   never tears down a workspace that was merely adopted.
  * @param {object} [options.env] - environment (Azure OpenAI creds), threaded into
  *   intent classification when `generateTopics` is set (serenity-docs#32).
  * @param {number} [options.writeDeadline] - shared request-write deadline; defaults
@@ -528,6 +535,8 @@ export async function handleCreateMarketSubworkspace(
     competitors = [],
     publishMode = 'require',
     dataAccess = null,
+    brandCollection = undefined,
+    onWorkspaceCreated = undefined,
     dynamicAllocation = false,
     ceiling = undefined,
     env = null,
@@ -565,7 +574,7 @@ export async function handleCreateMarketSubworkspace(
       log,
       {},
       reloadPointer,
-      { dynamicAllocation },
+      { dynamicAllocation, brandCollection, onWorkspaceCreated },
     );
 
   // JIT top-up choke point. The sub-workspace id is only known after ensureSubworkspace resolves

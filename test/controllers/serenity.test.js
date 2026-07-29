@@ -1424,9 +1424,13 @@ describe('SerenityController', () => {
       // for the mapping-row upsert (mapping-rows.js).
       // writeDeadline is a request-scoped epoch-ms deadline (dynamic) — asserted
       // as a number, then dropped before the deep-equal.
-      const { writeDeadline, ...marketOptions } = handlers.handleCreateMarketSubworkspace
-        .firstCall.args[7];
+      const {
+        writeDeadline, brandCollection, ...marketOptions
+      } = handlers.handleCreateMarketSubworkspace.firstCall.args[7];
       expect(writeDeadline).to.be.a('number');
+      // Threaded so ensureSubworkspace's claim filter can tell this brand's own
+      // interrupted create from a same-named sibling brand's sub-workspace.
+      expect(brandCollection).to.equal(ctx.dataAccess.Brand);
       expect(marketOptions)
         .to.deep.equal({
           // LLMO-6554: resolved via resolveDefaultModelIds — [] here because the test's
@@ -1787,6 +1791,26 @@ describe('SerenityController', () => {
       expect(decommissionStub).to.not.have.been.called;
     });
 
+    it('activate threads the Brand collection into ensureSubworkspace so the claim filter can run', async () => {
+      // Sub-workspace titles are bare brand names, so ensureSubworkspace needs the
+      // Brand collection to tell our own interrupted create from a same-named
+      // sibling brand's workspace. Without it the create path 500s on any
+      // same-title family candidate — so the wiring must be pinned, not assumed.
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      const brand = makeBrandModel({ getStatus: () => 'active' });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        brand,
+        data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }] },
+      });
+
+      await controller.activate(ctx);
+
+      expect(ensureSubworkspaceStub).to.have.been.calledOnce;
+      expect(ensureSubworkspaceStub.firstCall.args[7].brandCollection)
+        .to.equal(ctx.dataAccess.Brand);
+    });
+
     it('activate ensures the subworkspace ONCE for the batch and creates each market against it', async () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
       // Body-driven market provisioning runs ONLY for an already-active brand
@@ -2031,6 +2055,8 @@ describe('SerenityController', () => {
       expect(markets).to.deep.equal([]);
       // Sub-workspace ensured once; NO project, NO body-driven market path.
       expect(ensureSubworkspaceStub).to.have.been.calledOnce;
+      // Sub-workspace-only → skips the settle poll (LLMO-6569).
+      expect(ensureSubworkspaceStub.firstCall.args[7]).to.have.property('createReadiness', 'skip');
       expect(handlers.handleCreateMarketSubworkspace).to.not.have.been.called;
       expect(updateBrandStub).to.not.have.been.called;
       expect(brand.setStatus).to.have.been.calledWith('active');
@@ -2070,6 +2096,8 @@ describe('SerenityController', () => {
       const { status } = await readBody(response);
       expect(status).to.equal('active');
       expect(ensureSubworkspaceStub).to.have.been.calledOnce;
+      // Bare reactivation is sub-workspace-only → skips the settle poll (LLMO-6569).
+      expect(ensureSubworkspaceStub.firstCall.args[7]).to.have.property('createReadiness', 'skip');
     });
 
     it('activate prefers body markets + brandDomain over the stash, and clears the stash when its market is provisioned', async () => {
