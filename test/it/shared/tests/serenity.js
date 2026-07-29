@@ -923,15 +923,22 @@ export default function serenityTests(
   // so this is a real end-to-end assertion of the flag, not a mock convenience.
   describe('Serenity API — prompt authorship metadata on the list read (live mock)', () => {
     const base = `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity`;
-    const US_GEO = 2840;
+    const US_GEO = 2840; // US resolves to Google geoTargetId 2840.
     beforeEach(async () => {
       await resetData();
       await resetMocks();
     });
 
-    const createUsMarket = () => getHttpClient().admin.post(`${base}/markets`, {
-      market: 'US', languageCode: 'en', brandDomain: 'example.com', brandNames: ['Test Brand'],
-    });
+    // Setup, not subject: every test here needs a live US market, and none asserts on the market
+    // response itself. Checking the status inside the helper means a refused create (a 422 on
+    // insufficient units, say) fails here, rather than surfacing later as a confusing failure on
+    // the tag or prompt call that depended on it.
+    const createUsMarket = async () => {
+      const res = await getHttpClient().admin.post(`${base}/markets`, {
+        market: 'US', languageCode: 'en', brandDomain: 'example.com', brandNames: ['Test Brand'],
+      });
+      expect(res.status).to.equal(201);
+    };
 
     const createCategory = async (name) => {
       const res = await getHttpClient().admin.post(`${base}/tags`, {
@@ -950,10 +957,12 @@ export default function serenityTests(
     };
 
     const readPromptById = async (semrushPromptId, extraQuery = '') => {
-      const item = (await listPrompts(extraQuery)).find(
-        (p) => p.semrushPromptId === semrushPromptId,
-      );
-      expect(item, `expected prompt ${semrushPromptId} in the list read`).to.exist;
+      const items = await listPrompts(extraQuery);
+      const item = items.find((p) => p.semrushPromptId === semrushPromptId);
+      // Name what the read DID return: it separates "the list came back empty" from "the ids
+      // drifted", where a bare presence check reports only that `undefined` does not exist.
+      const seen = items.map((p) => p.semrushPromptId).join(', ');
+      expect(item, `expected prompt ${semrushPromptId} in the list read, got [${seen}]`).to.exist;
       return item;
     };
 
@@ -1020,21 +1029,29 @@ export default function serenityTests(
     // The metadata opt-in travels on the QUERY string while the sort keys travel in the BODY, so a
     // sorted read exercises both at once. This guards the interaction: a regression that moved the
     // opt-in into the body alongside the sort keys would strip the authorship fields here while
-    // leaving the unsorted read above green.
+    // leaving the unsorted read above green. One case per sortable field, so a regression that
+    // reaches only one of them is reported on its own rather than hidden behind the other.
     //
     // Ordering itself is deliberately NOT asserted — the mock implements no sort logic, so any
     // order assertion would pass regardless of which keys were sent and prove nothing.
-    it('still returns the authorship fields on a sorted read', async () => {
+    it('still returns the authorship fields on a read sorted by created_at', async () => {
       await createUsMarket();
       const tagId = await createCategory('Cameras');
       const promptId = await createPrompt('admin', 'Which mirrorless camera is best?', [tagId]);
 
-      for (const sort of ['metadata.created_at', 'metadata.updated_at']) {
-        // eslint-disable-next-line no-await-in-loop
-        const item = await readPromptById(promptId, `&sort=${sort}&order=desc`);
-        expect(item.createdBy, `${sort} sorted read keeps createdBy`).to.equal('test-admin@adobe.com');
-        expect(item.updatedAt, `${sort} sorted read keeps updatedAt`).to.be.a('string');
-      }
+      const item = await readPromptById(promptId, '&sort=metadata.created_at&order=desc');
+      expect(item.createdBy).to.equal('test-admin@adobe.com');
+      expect(item.updatedAt).to.be.a('string');
+    });
+
+    it('still returns the authorship fields on a read sorted by updated_at', async () => {
+      await createUsMarket();
+      const tagId = await createCategory('Lenses');
+      const promptId = await createPrompt('admin', 'Which prime lens is sharpest?', [tagId]);
+
+      const item = await readPromptById(promptId, '&sort=metadata.updated_at&order=desc');
+      expect(item.createdBy).to.equal('test-admin@adobe.com');
+      expect(item.updatedAt).to.be.a('string');
     });
   });
 }
