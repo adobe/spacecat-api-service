@@ -55,6 +55,38 @@ jobs:
       - name: Type-check
         run: npm run type-check
 
+  # TEMPORARY probe (chore/sr-sdk-artifactory) - do NOT merge.
+  # Answers whether a GitHub-hosted runner (public internet, off the Adobe corp
+  # network) can reach the Adobe Artifactory npm remote proxy that fronts
+  # Semrush's Google Artifact Registry, and whether off-corp read needs auth.
+  # No secret used: the repo (npm-quazar-gar-tf-remote) allows anonymous read
+  # from corp. This job proves or disproves that from CI before we commit to
+  # un-vendoring @quazar/ai-seo-ts. Remove before the migration PR is finalized.
+  sr-artifactory-probe:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Probe reachability
+        run: |
+          REG=https://artifactory.corp.adobe.com/artifactory/api/npm/npm-quazar-gar-tf-remote/
+          echo "== curl -I the registry root (reachability + TLS) =="
+          curl -sS -I --max-time 30 "$REG" || echo "CURL_FAILED (unreachable / DNS / timeout)"
+      - name: Probe npm install (no auth)
+        run: |
+          REG=https://artifactory.corp.adobe.com/artifactory/api/npm/npm-quazar-gar-tf-remote/
+          WORK="$(mktemp -d)"
+          cd "$WORK"
+          npm init -y >/dev/null
+          {
+            echo "@semrush:registry=$REG"
+            echo "@quazar:registry=$REG"
+          } > .npmrc
+          echo "== npm install @semrush/ai-seo-ts@0.102.1-gen2.7.0 =="
+          npm install @semrush/ai-seo-ts@0.102.1-gen2.7.0
+
   # Manually-triggered deploy for the serenity job runner worker (adobe/serenity-docs#186),
   # a second Lambda built from a distinct hedy --entryFile
   # (src/serenity-prompt-classification/index.js, deployed as
