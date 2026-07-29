@@ -46,6 +46,22 @@ export const EMPTY_SHEET_PAYLOAD = {
 export const fetchLlmoSource = async (context, url) => {
   const { log, env } = context;
 
+  // Structured, queryable client-attribution signal for every outbound source
+  // fetch (both /llmo/data and /llmo/sheet-data route through here). Emitted at
+  // `info` (NOT debug): prod suppresses debug. `x-client-type` and `referer`
+  // distinguish the calling app (e.g. llmo-spacecat-dashboard vs llm-optimizer-ui)
+  // 1:1 with the fetched `url`, since request headers are otherwise not logged.
+  const headers = context.pathInfo?.headers || {};
+  const authInfo = context.attributes?.authInfo;
+  log.info('llmo_source_client', {
+    event: 'llmo_source_client',
+    url,
+    xClientType: headers['x-client-type'] || null,
+    referer: headers.referer || headers.referrer || null,
+    userAgent: headers['user-agent'] || null,
+    authType: authInfo?.getType?.() || null,
+  });
+
   if (!env.LLMO_HLX_API_KEY) {
     const err = new Error('LLMO_HLX_API_KEY environment variable is not configured');
     err.isConfigError = true;
