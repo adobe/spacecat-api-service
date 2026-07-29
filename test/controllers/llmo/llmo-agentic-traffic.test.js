@@ -2363,10 +2363,9 @@ describe('llmo-agentic-traffic — rotation (demo sites)', () => {
   let clock;
   beforeEach(() => {
     setUpAuthStubs();
-    clock = sinon.useFakeTimers({ now: Date.UTC(2026, 6, 6), toFake: ['Date'] });
+    clock = sandbox.useFakeTimers({ now: Date.UTC(2026, 6, 6), toFake: ['Date'] });
   });
   afterEach(() => {
-    clock.restore();
     sandbox.restore();
   });
 
@@ -2440,7 +2439,7 @@ describe('llmo-agentic-traffic — rotation (demo sites)', () => {
     // now=2026-07-13 (phase 1) ⇒ P0=Jun 15, window Jun 15–Jul 12. The last two slots
     // (j2,j3 = Jun 29–Jul 12) map to frozen weeks {3,0} → 2 non-contiguous segments.
     clock.restore();
-    clock = sinon.useFakeTimers({ now: Date.UTC(2026, 6, 13), toFake: ['Date'] });
+    clock = sandbox.useFakeTimers({ now: Date.UTC(2026, 6, 13), toFake: ['Date'] });
     const client = createMockClient({
       rpc_agentic_traffic_by_region: { data: [{ region: 'US', total_hits: 10 }], error: null },
     });

@@ -19,6 +19,9 @@ import { PER_CALL_MS } from '../../../src/support/serenity/intent-taxonomy.js';
 import { classifyIntents as realClassifyIntents } from '../../../src/support/intent-classifier.js';
 import { resolveEnvironment as realResolveEnvironment } from '../../../src/support/metrics-emf.js';
 
+// Assigned per test in beforeEach. The loader helpers below build their fakes on
+// `sandbox`, so they are callable only from inside a test or hook — never at
+// module load or in a describe body, where `sandbox` is still undefined.
 let sandbox;
 let log;
 

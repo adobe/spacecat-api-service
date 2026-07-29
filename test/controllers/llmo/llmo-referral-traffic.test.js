@@ -1463,13 +1463,11 @@ describe('llmo-referral-traffic — rotation (demo sites)', () => {
     conversion_rate: 0.03,
   };
 
-  let clock;
   beforeEach(() => {
     setUpAuthStubs();
-    clock = sinon.useFakeTimers({ now: Date.UTC(2026, 6, 6), toFake: ['Date'] });
+    sandbox.useFakeTimers({ now: Date.UTC(2026, 6, 6), toFake: ['Date'] });
   });
   afterEach(() => {
-    clock.restore();
     sandbox.restore();
   });
 

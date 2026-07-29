@@ -77,8 +77,10 @@ describe('llmo-sheet-write', () => {
   });
 
   afterEach(() => {
-    // sandbox.restore() clears the per-test log fakes; sinon.restore() clears
-    // the ad hoc sinon.stub() calls the tests below make on the default sandbox.
+    // sandbox.restore() releases the per-test log fakes. sinon.restore() stays
+    // for the ad hoc sinon.stub() calls the tests below make on the default
+    // sandbox: those are built per test and are not the cross-file hazard, so
+    // they are left as they are rather than migrated in this change.
     sandbox.restore();
     sinon.restore();
   });
