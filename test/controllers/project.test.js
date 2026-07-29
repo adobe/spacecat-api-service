@@ -68,7 +68,10 @@ const sites = [
   console,
 ));
 
-const organization = new Organization(
+// Built fresh per test: several specs assign onto these instances
+// (project.save, project.remove), so a shared instance would carry one test's
+// stubs into the next.
+const buildOrganization = () => new Organization(
   {
     entities: {
       organization: {
@@ -93,7 +96,7 @@ const organization = new Organization(
   console,
 );
 
-const project = new Project(
+const buildProject = () => new Project(
   {
     entities: {
       project: {
@@ -135,8 +138,13 @@ describe('Projects Controller', () => {
   let mockDataAccess;
   let context;
   let projectsController;
+  let organization;
+  let project;
 
   beforeEach(() => {
+    organization = buildOrganization();
+    project = buildProject();
+
     mockDataAccess = {
       Project: {
         create: stub().resolves(project),

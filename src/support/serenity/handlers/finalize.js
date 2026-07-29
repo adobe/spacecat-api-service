@@ -16,7 +16,7 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from '../../utils.js';
 import { ERROR_CODES, isMeteredQuota } from '../errors.js';
-import { handleCreatePrompts } from './prompts.js';
+import { handleCreatePrompts, resolveCallerId } from './prompts.js';
 import { handleUpdateModels } from './markets.js';
 import { pollProjectPublished, PUBLISH_OUTCOME } from './publish-status.js';
 
@@ -134,6 +134,11 @@ export async function finalizeSerenityProjects(
       // single authoritative publish happens in step 3.
       options.env,
       options.writeDeadline,
+      // No controller request context exists on this trigger-driven path, so
+      // there is no IMS identity to resolve — resolveCallerId(undefined) degrades
+      // to the documented 'unknown' sentinel (LLMO-6289 policy: an unknown-attributed
+      // write is accepted, never rejected).
+      resolveCallerId(undefined),
       { publish: false },
     );
   }

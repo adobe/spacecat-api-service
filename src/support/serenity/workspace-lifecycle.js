@@ -18,6 +18,8 @@ import { ErrorWithStatusCode } from '../utils.js';
 import { ERROR_CODES, isUpstreamGone } from './errors.js';
 import { clearBrandWorkspaceCache } from './workspace-resolver.js';
 
+/** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */
+
 // INVARIANT: a brand's sub-workspace carries NO AI resource allocation of its own. It is created
 // without a `resources` payload, and nothing in this module ever transfers units onto or off it.
 // A child sits at `total: 0` on every AI dimension and still accepts every metered write, because
@@ -81,6 +83,7 @@ function subworkspaceTitle(brand) {
   return name;
 }
 
+/** @param {SerenityTransport} transport */
 export async function pollUntilCreated(transport, workspaceId, { attempts, intervalMs, sleep }) {
   for (let i = 0; i < attempts; i += 1) {
     // eslint-disable-next-line no-await-in-loop
@@ -161,7 +164,7 @@ async function claimedBrandId(brandCollection, workspaceId) {
  * place: the proactive create-or-adopt check (returns the match to reuse, or
  * null → create) and the 504 timeout recovery (null → no-match error).
  *
- * @param {object} transport
+ * @param {SerenityTransport} transport
  * @param {string} parentWorkspaceId
  * @param {string} title
  * @param {object} log
@@ -273,7 +276,7 @@ async function findAdoptableFamilyMatch(transport, parentWorkspaceId, title, log
  * error here, unlike the proactive path where it just means "create one"). Multiple
  * matches → fail with an alert, never guess.
  *
- * @param {object} transport
+ * @param {SerenityTransport} transport
  * @param {string} parentWorkspaceId
  * @param {string} title
  * @param {object} log
@@ -302,7 +305,7 @@ async function adoptFromFamily(transport, parentWorkspaceId, title, log, claim) 
  * PARENT workspace when the caller supplies one — emptying the parent would delete every brand's
  * markets across the whole org. Callers that can resolve the parent should always pass it.
  *
- * @param {object} transport
+ * @param {SerenityTransport} transport
  * @param {string} workspaceId
  * @param {string} [parentWorkspaceId] - the org parent workspace; assertNotParent guard.
  * @returns {Promise<number>} the number of projects the listing returned (i.e. attempted deletes).
@@ -341,7 +344,7 @@ export async function deleteAllProjects(transport, workspaceId, parentWorkspaceI
  *
  * Persisting the column flips the brand into subworkspace mode (resolveBrandWorkspace).
  *
- * @param {object} transport - serenity transport.
+ * @param {SerenityTransport} transport
  * @param {object} brand - Brand model instance (dataAccess.Brand.findById).
  * @param {string} parentWorkspaceId - the org parent workspace.
  * @param {object} log
@@ -542,7 +545,7 @@ export async function ensureSubworkspace(
  * the deactivate handler does it after this resolves, leaving the
  * sub-workspace empty and unowned.
  *
- * @param {object} transport
+ * @param {SerenityTransport} transport
  * @param {string} subworkspaceId
  * @param {object} log
  * @param {string} [parentWorkspaceId] - when provided, a self-defending guard:

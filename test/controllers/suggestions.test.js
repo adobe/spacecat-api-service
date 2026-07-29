@@ -8354,6 +8354,94 @@ describe('Suggestions Controller', () => {
       ]);
     });
 
+    it('deploys all requested suggestions but scopes measurement metadata to highImpactSuggestionIds when opted in (non-pattern deploy)', async () => {
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+          metadata: { highImpactSuggestionIds: [SUGGESTION_IDS[1]] },
+        },
+        env: asyncExperimentEnv,
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      // Both requested suggestions still deploy.
+      expect(body.metadata.success).to.equal(2);
+      expect(body.suggestions.map((s) => s.uuid)).to.have.members([
+        SUGGESTION_IDS[0], SUGGESTION_IDS[1],
+      ]);
+      expect(mockSuggestion.saveMany.firstCall.args[0]).to.deep.equal([
+        edgeSuggestions[0], edgeSuggestions[1],
+      ]);
+
+      // But measurement metadata is scoped to the high-impact subset only, with no `patterns`
+      // key (that's pattern-deploy-only).
+      const createArg = mockSuggestionDataAccess.GeoExperiment.create.firstCall.args[0];
+      expect(createArg.suggestionIds).to.have.members([SUGGESTION_IDS[0], SUGGESTION_IDS[1]]);
+      expect(createArg.metadata.highImpactSuggestionIds).to.deep.equal([SUGGESTION_IDS[1]]);
+      expect(createArg.metadata.urls).to.deep.equal(['https://example.com/page2']);
+      expect(createArg.metadata).to.not.have.property('patterns');
+    });
+
+    it('trusts the UI: resolves highImpactSuggestionIds against the full opportunity even when not in this request\'s suggestionIds', async () => {
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          metadata: { highImpactSuggestionIds: [SUGGESTION_IDS[1]] },
+        },
+        env: asyncExperimentEnv,
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      // Only SUGGESTION_IDS[0] deploys...
+      expect(body.metadata.success).to.equal(1);
+      expect(body.suggestions.map((s) => s.uuid)).to.deep.equal([SUGGESTION_IDS[0]]);
+      // ...but measurement metadata is scoped to the high-impact id, resolved from the opportunity
+      // as a whole (SUGGESTION_IDS[1]), not restricted to what's in suggestionIds.
+      const createArg = mockSuggestionDataAccess.GeoExperiment.create.firstCall.args[0];
+      expect(createArg.suggestionIds).to.deep.equal([SUGGESTION_IDS[0]]);
+      expect(createArg.metadata.highImpactSuggestionIds).to.deep.equal([SUGGESTION_IDS[1]]);
+      expect(createArg.metadata.urls).to.deep.equal(['https://example.com/page2']);
+    });
+
+    it('fails a non-pattern deploy when highImpactSuggestionIds matches nothing in the opportunity', async () => {
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          metadata: { highImpactSuggestionIds: ['99999999-9999-4999-8999-999999999999'] },
+        },
+        env: asyncExperimentEnv,
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.suggestions[0].statusCode).to.equal(500);
+      expect(body.suggestions[0].message).to.include('No high-impact suggestions found');
+    });
+
+    it('falls back to legacy behavior for a non-pattern deploy with no highImpactSuggestionIds', async () => {
+      await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
+        env: asyncExperimentEnv,
+      });
+
+      const createArg = mockSuggestionDataAccess.GeoExperiment.create.firstCall.args[0];
+      expect(createArg.metadata.urls).to.have.members([
+        'https://example.com/page1', 'https://example.com/page2',
+      ]);
+      expect(createArg.metadata).to.not.have.property('highImpactSuggestionIds');
+      expect(createArg.metadata).to.not.have.property('patterns');
+    });
+
     it('uses profile email as updatedBy in async deploy flow', async () => {
       context.attributes.authInfo.profile = { email: 'owner@example.com' };
 

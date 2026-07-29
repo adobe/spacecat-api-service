@@ -20,6 +20,7 @@ import {
 } from '../errors.js';
 import { alertQuotaRejection } from '../quota-alerts.js';
 import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
+import { buildCreateMetadata } from './prompts.js';
 import {
   resolveLocation,
   resolveLanguageId,
@@ -51,6 +52,9 @@ import { resolveProjects } from '../resolve-projects.js';
 import { buildReservedDomains, syncCompetitorBenchmarksForProject } from '../competitor-benchmarks.js';
 import { collectAliasNames } from '../brand-aliases.js';
 import { upsertMappingRow, tombstoneMappingRow } from '../mapping-rows.js';
+
+/** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
+/** @typedef {import('../rest-transport.js').ProjectCreateBody} ProjectCreateBody */
 
 /**
  * Subworkspace-mode market handlers (serenity design §3/§5). The brand has its own
@@ -126,7 +130,7 @@ function validateSlice(geoTargetId, languageCode) {
  * mapping rows (LLMO-6405 Phase 2). `projectToSlice` has no DB access, so the
  * enrichment happens here; a missing/failed read leaves every siteId null.
  *
- * @param {any} transport - Serenity transport.
+ * @param {SerenityTransport} transport
  * @param {string} brandId - the brand UUID.
  * @param {string} workspaceId - the brand's sub-workspace id.
  * @param {any} [dataAccess] - `ctx.dataAccess`; when absent, siteId stays null.
@@ -153,6 +157,7 @@ export async function handleListMarketsSubworkspace(
  * GET /serenity/markets/:geo/:lang (subworkspace) — resolve the slice from the live
  * listing; surface semrushProjectId + status + `initialized` (one extra
  * init_status read, detail only). 404 marketNotFound if no project matches.
+ * @param {SerenityTransport} transport
  */
 export async function handleGetMarketSubworkspace(
   transport,
@@ -219,6 +224,7 @@ function dedupeNames(names) {
     });
 }
 
+/** @returns {ProjectCreateBody} */
 function buildCreateProjectBody(body, location, languageId, brandAliases = []) {
   const name = hasText(body?.name) ? String(body.name) : defaultMarketName(body.brandDisplayName);
   // A Semrush project's brand is described by a display name plus the full set
@@ -286,12 +292,12 @@ function validateCreateBody(body) {
  * there is no correct parent to create them below. Generated prompts therefore
  * arrive uncategorized and are categorized later (adobe/serenity-docs#44).
  *
- * Writes are id-based: `createPromptsByIds` takes ONE shared `tag_ids` array per
+ * Writes are id-based: `createPromptsWithMetadata` takes ONE shared `tag_ids` array per
  * call, so the texts are partitioned by their resolved tag-id set — the (type,
  * intent) pair, since topics are gone and everything else is constant. Identical
  * text collapses to one entry per group.
  *
- * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {SerenityTransport} transport
  * @param {string} workspaceId - sub-workspace the project lives in.
  * @param {string} projectId - project to attach generated prompts to.
  * @param {object} options - generation options.
@@ -313,13 +319,15 @@ function validateCreateBody(body) {
  *   REQUIRED, not optional: a genuine no-op object when the flag is OFF, never `undefined`. Not
  *   optional-chained at the call site below (Rainer review) — a caller that forgets to thread it
  *   must fail loud, not silently skip metering. PROMPT metering seam (Rainer, live-verified
- *   LLMO-6190): the metered write is `createPromptsByIds` below, NOT publish — front it BEFORE the
- *   write loop, sized on the real prompt count now that it's known (`texts.size`), not an estimate.
+ *   LLMO-6190): the metered write is `createPromptsWithMetadata` below, NOT publish — front it
+ *   BEFORE the write loop, sized on the real prompt count now known (`texts.size`), not estimated.
+ * @param {string} callerId - resolved caller id (see `resolveCallerId`) stamped as
+ *   `created_by`/`updated_by` on every generated prompt (LLMO-6289).
  */
 async function generateAndAttachPrompts(transport, workspaceId, projectId, {
   domain, country, topicCap = 0, brandNames = [], provisioned, env,
   writeDeadline = computeWriteDeadline(),
-}, log, headroom) {
+}, log, headroom, callerId) {
   const raw = await transport.getBrandTopics(workspaceId, { domain, country });
   let topics = [];
   if (Array.isArray(raw)) {
@@ -355,7 +363,7 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
     return { topicCount: 0, promptCount: 0 };
   }
 
-  // Resolve every tag id we are about to attach. `createPromptsByIds` is ATOMIC on
+  // Resolve every tag id we are about to attach. `createPromptsWithMetadata` is ATOMIC on
   // an unresolvable id (live 500s and creates nothing), so ids are never guessed.
   // `provisionDimensionTree` resolved every closed value or threw a 502, so the
   // standard values and the whole `type`/`intent` vocabularies are present here by
@@ -428,6 +436,10 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
   // forgets to thread the guard must fail loud.
   await headroom.ensure({ prompts: texts.size }, { includeDrafted: true });
 
+  // STAMP (LLMO-6289): AI-generated prompts are created through the v3
+  // metadata-carrying write, `created_* = updated_* = now / callerId`. One
+  // metadata object per batch (same instant for every text in the group).
+  const metadata = buildCreateMetadata(callerId);
   for (const { items, tagIds } of byTagSet.values()) {
     // LLMO-6190 follow-up: the metered write can still 405 as a disguised metered-quota rejection
     // despite the `ensure` above (live-verified ~9s gateway write-enforcement lag after a JIT
@@ -435,8 +447,13 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
     // `tagIds` is precomputed per (type, intent) bucket above (standard + intent + type).
     // eslint-disable-next-line no-await-in-loop
     await headroom.retryOnQuota(
-      () => transport.createPromptsByIds(workspaceId, projectId, items, tagIds),
-      { callSite: 'createPromptsByIds' },
+      () => transport.createPromptsWithMetadata(
+        workspaceId,
+        projectId,
+        items.map((name) => ({ name, metadata })),
+        tagIds,
+      ),
+      { callSite: 'createPromptsWithMetadata' },
     );
   }
   return { topicCount: selected.length, promptCount: texts.size };
@@ -453,7 +470,7 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  * omit it for callers whose `brand` is not yet a persisted row (see
  * `mapping-rows.js` `upsertMappingRow` doc).
  *
- * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {SerenityTransport} transport
  * @param {object} brand - brand record/stub being provisioned.
  * @param {string} parentWorkspaceId - the org parent workspace: the `assertNotParent` guard
  *   input, and the units pool when JIT allocation is on. Nothing is carved from it.
@@ -524,6 +541,10 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  * @param {number} [options.writeDeadline] - shared request-write deadline; defaults
  *   to a fresh {@link computeWriteDeadline} for direct/test callers.
  * @param {string | null} [options.orgId] - IMS org id, for the Slack alert payload only.
+ * @param {string} [options.callerId='unknown'] - resolved caller id (see
+ *   `resolveCallerId`) stamped as `created_by`/`updated_by` on any AI-generated
+ *   prompt this create attaches (LLMO-6289). Defaults to the `unknown` sentinel
+ *   so a caller that omits it never writes an empty author.
  */
 export async function handleCreateMarketSubworkspace(
   transport,
@@ -549,6 +570,7 @@ export async function handleCreateMarketSubworkspace(
     env = null,
     writeDeadline = computeWriteDeadline(),
     orgId = null,
+    callerId = 'unknown',
   } = {},
 ) {
   const errors = validateCreateBody(body);
@@ -689,6 +711,7 @@ export async function handleCreateMarketSubworkspace(
       },
       log,
       headroom,
+      callerId,
     );
   }
 
@@ -906,7 +929,7 @@ export async function handleCreateMarketSubworkspace(
  * expected transport/pool failures — a release hiccup must never fail an otherwise-successful
  * DELETE), post-delete. No-op when the flag is OFF.
  *
- * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {SerenityTransport} transport
  * @param {string|null} workspaceId - sub-workspace id the market's project lives in.
  * @param {string|number|null} geoTargetId - the market's Google Ads Geo Target id.
  * @param {string|null} languageCode - the market's BCP-47 language code.
@@ -927,11 +950,30 @@ export async function handleDeleteMarketSubworkspace(
   validateSlice(geoTargetId, languageCode);
   const lang = normalizeLanguageCode(languageCode);
   const project = await resolveProject(transport, workspaceId, Number(geoTargetId), lang, log);
-  if (!project) {
+  // Nothing checks this read. The generated contract declares `id: string` — required and
+  // non-nullable — but the listing response resolves to `any` at every call site, and the
+  // live gateway is documented to return bodies the spec forbids. Everything below keys off
+  // the id: the upstream DELETE and the mapping-row tombstone both address the project by
+  // it. An id-less entry is therefore indistinguishable from no project at all — it cannot
+  // be deleted upstream, and tombstoning against a blank id would target the wrong row. It
+  // is a contract break either way, so say so rather than reporting a silent 204.
+  const projectId = project?.id;
+  if (!projectId) {
+    if (project) {
+      log?.warn?.('serenity subworkspace: listing returned a project with no id — skipping delete', {
+        workspaceId,
+        geoTargetId,
+        languageCode: lang,
+      });
+    }
     return { status: 204, deletedSiteId: null };
   }
+  // Reaching here means `resolveProject` matched a project from `listProjects(workspaceId)`,
+  // so `workspaceId` is a real, non-blank id — narrow the (JSDoc-optional) `string|null` once
+  // for tsc, which cannot infer that. The DELETE and the release below both rely on it.
+  const resolvedWorkspaceId = /** @type {string} */ (workspaceId);
   try {
-    await transport.deleteProject(workspaceId, project.id);
+    await transport.deleteProject(resolvedWorkspaceId, projectId);
   } catch (e) {
     if (!isUpstreamGone(e)) {
       throw e;
@@ -942,7 +984,7 @@ export async function handleDeleteMarketSubworkspace(
   // an orphaned brand_sites row. Best-effort — never fails a successful delete.
   let deletedSiteId = null;
   if (dataAccess) {
-    const tombstoned = await tombstoneMappingRow(dataAccess, project.id, log);
+    const tombstoned = await tombstoneMappingRow(dataAccess, projectId, log);
     deletedSiteId = tombstoned?.siteId ?? null;
   }
   if (dynamicAllocation) {
@@ -950,9 +992,7 @@ export async function handleDeleteMarketSubworkspace(
     // transfer (silently ignored by the gateway — see resource-manager.js). Best-effort: a release
     // failure must not turn an already-successful delete into a 500 — releaseAiSurplus's own
     // try/catch guarantees this by construction (it never throws for expected failures).
-    // `resolveProject` above already resolved a project against `workspaceId`, so it is a real,
-    // non-blank id here; releaseAiSurplus's own requireWorkspaceId re-asserts this at runtime —
-    // narrow the (JSDoc-optional) `string|null` param for tsc, which cannot infer that.
+    // releaseAiSurplus's own requireWorkspaceId re-asserts the non-blank id at runtime.
     //
     // Wrapped in `withResourceLock` (LLMO-6191 item 3), mirroring `handleUpdateModelsSubworkspace`:
     // `releaseAiSurplus` does the same read-then-absolute-set as `ensureAiHeadroom`, so an
@@ -961,9 +1001,9 @@ export async function handleDeleteMarketSubworkspace(
     // the absolute-set race; the cross-container half is the deferred distributed lock (see
     // docs/decisions/007-cross-container-resource-lock.md).
     await withResourceLock(
-      /** @type {string} */ (workspaceId),
+      resolvedWorkspaceId,
       () => releaseAiSurplus(transport, {
-        subWorkspaceId: /** @type {string} */ (workspaceId),
+        subWorkspaceId: resolvedWorkspaceId,
         floor: { projects: PROJECT_BLOCK, prompts: PROMPT_BLOCK },
         failFast: true,
       }, log),
@@ -984,7 +1024,7 @@ export async function handleDeleteMarketSubworkspace(
  * cannot see a category this proxy just created — which is the one thing this
  * function exists to surface.
  *
- * @param {any} transport - Serenity transport.
+ * @param {SerenityTransport} transport
  * @param {string} workspaceId - Semrush (sub-)workspace id.
  * @param {string} projectId - AIO project id.
  * @param {any} [log] - logger, used to surface a ceiling-hit truncation warning.
@@ -1024,6 +1064,7 @@ async function listStandaloneProjectTags(transport, workspaceId, projectId, log)
  * Resolves the slice's project from the live listing, then reuses the shared
  * project-keyed tag aggregation (cache + pagination + truncation guard). A
  * missing slice returns an empty set, matching the flat-mode tags contract.
+ * @param {SerenityTransport} transport
  */
 export async function handleListTagsSubworkspace(transport, workspaceId, query, log) {
   const geoTargetId = normalizeGeoTargetId(query?.geoTargetId);
@@ -1116,6 +1157,7 @@ export async function handleListTagsSubworkspace(transport, workspaceId, query, 
  * across all the workspace's projects. With (geoTargetId, languageCode) → models
  * on the slice's project, resolved from the live listing. Partial params → 400. A
  * missing slice returns an empty set, matching the flat-mode models contract.
+ * @param {SerenityTransport} transport
  */
 export async function handleListModelsSubworkspace(transport, workspaceId, query, log) {
   const geoTargetId = normalizeGeoTargetId(query?.geoTargetId);
@@ -1144,7 +1186,7 @@ export async function handleListModelsSubworkspace(transport, workspaceId, query
  * the slice's project from the live listing (404 if absent), then reuses the
  * shared diff-based sync. Validation mirrors the flat-mode handler exactly.
  *
- * @param {object} transport
+ * @param {SerenityTransport} transport
  * @param {string} workspaceId
  * @param {object} body
  * @param {object} log

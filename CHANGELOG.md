@@ -1,3 +1,46 @@
+# [1.702.0](https://github.com/adobe/spacecat-api-service/compare/v1.701.1...v1.702.0) (2026-07-29)
+
+
+### Features
+
+* **brand-claims:** add run-brand-claims Slack command (LLMO-6143) ([#2924](https://github.com/adobe/spacecat-api-service/issues/2924)) ([b217ee5](https://github.com/adobe/spacecat-api-service/commit/b217ee5623530aa83ab704aa95108d943b1e5fc6))
+
+## [1.701.1](https://github.com/adobe/spacecat-api-service/compare/v1.701.0...v1.701.1) (2026-07-29)
+
+
+### Bug Fixes
+
+* worker Lambda deployed under wrong name (default--serenity-job-runner) ([#2941](https://github.com/adobe/spacecat-api-service/issues/2941)) ([6c64e12](https://github.com/adobe/spacecat-api-service/commit/6c64e126cc1b3804be015a15022548366830f8f8)), closes [#2936](https://github.com/adobe/spacecat-api-service/issues/2936) [spacecat-infrastructure#708](https://github.com/spacecat-infrastructure/issues/708) [#2936](https://github.com/adobe/spacecat-api-service/issues/2936)
+
+# [1.701.0](https://github.com/adobe/spacecat-api-service/compare/v1.700.4...v1.701.0) (2026-07-29)
+
+
+### Features
+
+* partial ime deployment support ([#2929](https://github.com/adobe/spacecat-api-service/issues/2929)) ([b57e77f](https://github.com/adobe/spacecat-api-service/commit/b57e77f9e207f499445eaa07fdb1570bbabec887))
+
+## [1.700.4](https://github.com/adobe/spacecat-api-service/compare/v1.700.3...v1.700.4) (2026-07-29)
+
+
+### Bug Fixes
+
+* **serenity:** make the Semrush transport a real type-check gate ([#2928](https://github.com/adobe/spacecat-api-service/issues/2928)) ([4933ba5](https://github.com/adobe/spacecat-api-service/commit/4933ba5ea9b932e10bfd6dfcd168a9ef9001f602)), closes [Hi#level](https://github.com/Hi/issues/level) [#2925](https://github.com/adobe/spacecat-api-service/issues/2925)
+* worker deploy job missing HLX_AWS_REGION for hedy's --aws-region resolution ([#2936](https://github.com/adobe/spacecat-api-service/issues/2936)) ([10b6f35](https://github.com/adobe/spacecat-api-service/commit/10b6f35e7c025178169654cd80d5eb211d2e932e)), closes [#2935](https://github.com/adobe/spacecat-api-service/issues/2935)
+
+## [1.700.3](https://github.com/adobe/spacecat-api-service/compare/v1.700.2...v1.700.3) (2026-07-29)
+
+
+### Bug Fixes
+
+* **test:** create sinon fakes per test, not at module scope ([#2934](https://github.com/adobe/spacecat-api-service/issues/2934)) ([aefe781](https://github.com/adobe/spacecat-api-service/commit/aefe781d7e02c9f46512eaa5e5dcc63a05abbb04)), closes [Hi#level](https://github.com/Hi/issues/level) [#2932](https://github.com/adobe/spacecat-api-service/issues/2932)
+
+## [1.700.2](https://github.com/adobe/spacecat-api-service/compare/v1.700.1...v1.700.2) (2026-07-29)
+
+
+### Bug Fixes
+
+* match worker Lambda deploy name to the merged infra ARN ([#2933](https://github.com/adobe/spacecat-api-service/issues/2933)) ([18b6cb1](https://github.com/adobe/spacecat-api-service/commit/18b6cb1a98db6e3ffdda2d35f6d58dbe5bc1280d)), closes [#708](https://github.com/adobe/spacecat-api-service/issues/708) [adobe/serenity-docs#186](https://github.com/adobe/serenity-docs/issues/186) [#33](https://github.com/adobe/spacecat-api-service/issues/33) [#2920](https://github.com/adobe/spacecat-api-service/issues/2920)
+
 ## [1.700.1](https://github.com/adobe/spacecat-api-service/compare/v1.700.0...v1.700.1) (2026-07-29)
 
 
