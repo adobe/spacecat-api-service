@@ -1304,6 +1304,12 @@ export async function syncModelsForProject(
  * internally for the DELETE batch and are never exposed to callers.
  *
  * Returns the final model list in the same shape as `handleListModels`.
+ *
+ * `publish` (default true — the standalone-endpoint contract) commits the
+ * model-set change to the live project. Set it false when the caller batches
+ * its own publish afterwards (LLMO-5492 publish-after-populate: finalize sets
+ * models with publish deferred, then publishes each project once) — the inner
+ * publish is forwarded to {@link syncModelsForProject}.
  * @param {SerenityTransport} transport
  * @param {any} dataAccess
  * @param {string | undefined} brandId
@@ -1311,6 +1317,7 @@ export async function syncModelsForProject(
  * @param {any} body
  * @param {any} log
  * @param {object} [options]
+ * @param {boolean} [options.publish] - see above.
  * @param {string | null} [options.orgId] - serenity-docs#72 §5 alert payload only.
  * @param {object | null} [options.env] - serenity-docs#72 §5 alert kill-switch/config only.
  */
@@ -1321,7 +1328,7 @@ export async function handleUpdateModels(
   semrushWorkspaceId,
   body,
   log,
-  { orgId = null, env = null } = {},
+  { publish = true, orgId = null, env = null } = {},
 ) {
   const geoTargetId = normalizeGeoTargetId(Number(body?.geoTargetId));
   const languageCode = normalizeLanguageCode(body?.languageCode);
@@ -1360,6 +1367,6 @@ export async function handleUpdateModels(
     modelIds,
     { brandId, geoTargetId, languageCode },
     log,
-    { alertContext: { orgId, brandId, env } },
+    { publish, alertContext: { orgId, brandId, env } },
   );
 }

@@ -6161,6 +6161,9 @@ describe('Brands Controller', () => {
       // Serenity active by default so a sync-field edit reaches the re-sync block.
       // The inactive case overrides this to assert the gate rejects.
       isSerenityActiveForOrg = sinon.stub().resolves(true),
+      // Serenity-UI OFF by default: the org is mid-migration, so Semrush failures
+      // are absorbed. Tests that assert failures propagate override this to true.
+      isSerenityUiActiveForOrg = sinon.stub().resolves(false),
       // Only override when a test supplies one; otherwise the real
       // support/utils.js#resolveSemrushImsToken runs (its own decode/exchange
       // logic is covered directly in test/support/utils.test.js).
@@ -6180,7 +6183,10 @@ describe('Brands Controller', () => {
         // removedCompetitorDomains is left REAL so the diff logic is exercised.
         '../../src/support/serenity/competitor-benchmarks.js': { syncCompetitorBenchmarksAcrossMarkets },
         '../../src/support/serenity/brand-aliases.js': { syncBrandAliasesAcrossMarkets },
-        '../../src/support/serenity/serenity-active.js': { isSerenityActiveForOrg },
+        '../../src/support/serenity/serenity-active.js': {
+          isSerenityActiveForOrg,
+          isSerenityUiActiveForOrg,
+        },
       };
       if (resolveSemrushImsToken) {
         overrides['../../src/support/utils.js'] = { resolveSemrushImsToken };
@@ -6929,6 +6935,224 @@ describe('Brands Controller', () => {
       const body = await response.json();
       expect(body).to.include({ semrushSyncPending: true });
       expect(body.semrushRejectedAliases).to.deep.equal(rejected);
+    });
+
+    describe('LLMO-6565: the serenity_ui flag ends the migration-window allowance', () => {
+      // Contract: serenity ON + serenity_ui OFF (mid-migration) absorbs a Semrush
+      // failure — covered by the LLMO-6545 cases above, which run on the helper's
+      // default of serenity_ui OFF. serenity ON + serenity_ui ON reports it: that
+      // org's users are provisioned in Semrush, so a failure is a real fault.
+      const SUB_WORKSPACE_BRAND = {
+        id: BRAND_UUID,
+        semrushSubWorkspaceId: 'ws-9',
+        urls: [{ value: 'https://acme.com' }],
+        socialAccounts: [],
+        earnedContent: [],
+      };
+
+      function urlEditRequest() {
+        return {
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: { urls: [{ value: 'https://acme.com' }] },
+          dataAccess: mockDataAccess,
+          pathInfo: { headers: { authorization: 'Bearer tok' } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        };
+      }
+
+      it('reports a Semrush 403 on the post-commit re-sync instead of semrushSyncPending', async () => {
+        // The unprovisioned-user case the allowance existed for. With the flag on it
+        // is a 403 the customer is meant to see, not drift to absorb silently.
+        const updateBrandStub = sinon.stub().resolves(SUB_WORKSPACE_BRAND);
+        const controller = await buildUpdateController({
+          updateBrand: updateBrandStub,
+          syncBrandUrlsAcrossMarkets: sinon.stub().rejects(
+            new SerenityTransportError(403, 'Semrush PUT https://gw.internal/x failed: 403', {}),
+          ),
+          createSerenityTransport: sinon.stub().returns({
+            name: 't', listProjects: sinon.stub().resolves({ items: [] }),
+          }),
+          isSerenityUiActiveForOrg: sinon.stub().resolves(true),
+        });
+
+        const response = await controller.updateBrandForOrg(urlEditRequest());
+
+        expect(response.status).to.equal(403);
+        const body = await response.json();
+        expect(body.semrushSyncPending).to.equal(undefined);
+        // The row is still committed — the flag changes what the caller is told,
+        // not whether the write happened.
+        expect(updateBrandStub).to.have.been.calledOnce;
+        // The breadcrumb for drift recovery is emitted on both paths.
+        expect(loggerStub.warn).to.have.been.calledWithMatch(
+          'serenity: brand-edit Semrush re-sync failed after row commit',
+        );
+        // The gateway URL stays out of the response on this path too.
+        expect(JSON.stringify(body)).to.not.contain('gw.internal');
+        expect(response.headers.get('x-error') || '').to.not.contain('gw.internal');
+      });
+
+      it('reports a non-auth Semrush failure as 502', async () => {
+        const controller = await buildUpdateController({
+          updateBrand: sinon.stub().resolves(SUB_WORKSPACE_BRAND),
+          syncBrandUrlsAcrossMarkets: sinon.stub().rejects(
+            new SerenityTransportError(503, 'Semrush PUT https://gw.internal/x failed: 503', {}),
+          ),
+          createSerenityTransport: sinon.stub().returns({
+            name: 't', listProjects: sinon.stub().resolves({ items: [] }),
+          }),
+          isSerenityUiActiveForOrg: sinon.stub().resolves(true),
+        });
+
+        const response = await controller.updateBrandForOrg(urlEditRequest());
+
+        expect(response.status).to.equal(502);
+        const body = await response.json();
+        expect(body.message).to.equal('Upstream request failed');
+        // Same redaction guarantee as the 403 path: the generic 502 message must
+        // not carry the internal gateway URL embedded in the upstream error.
+        expect(JSON.stringify(body)).to.not.contain('gw.internal');
+        expect(response.headers.get('x-error') || '').to.not.contain('gw.internal');
+      });
+
+      it('reports a 401 when the caller cannot be authenticated to Semrush', async () => {
+        // resolveSemrushImsToken throws ErrorWithStatusCode(401) for an expired
+        // promise-token exchange or a non-IMS bearer. It sits inside the re-sync
+        // try, so mid-migration it soft-fails like any other re-sync failure; with
+        // the flag on it maps through to the 401 the OpenAPI spec documents.
+        const updateBrandStub = sinon.stub().resolves(SUB_WORKSPACE_BRAND);
+        const controller = await buildUpdateController({
+          updateBrand: updateBrandStub,
+          createSerenityTransport: sinon.stub().returns({
+            name: 't', listProjects: sinon.stub().resolves({ items: [] }),
+          }),
+          resolveSemrushImsToken: sinon.stub().rejects(
+            Object.assign(new Error('Invalid or expired promise token'), { status: 401 }),
+          ),
+          isSerenityUiActiveForOrg: sinon.stub().resolves(true),
+        });
+
+        const response = await controller.updateBrandForOrg(urlEditRequest());
+
+        expect(response.status).to.equal(401);
+        expect((await response.json()).message).to.equal('Invalid or expired promise token');
+        // The row still committed — only the re-sync failed.
+        expect(updateBrandStub).to.have.been.calledOnce;
+      });
+
+      it('rejects the write when the pre-write competitor guard listing fails', async () => {
+        // Mid-migration this degrades to a brand-URL-only reserved set and the write
+        // proceeds. With the flag on the listing failure is real, so the write must
+        // not happen at all — no row is touched.
+        const updateBrandStub = sinon.stub().resolves({
+          ...SUB_WORKSPACE_BRAND,
+          competitors: [{ name: 'Rival', url: 'https://rival.com' }],
+        });
+        const controller = await buildUpdateController({
+          updateBrand: updateBrandStub,
+          getBrandById: sinon.stub().resolves({
+            id: BRAND_UUID,
+            baseUrl: 'https://acme.com',
+            urls: [],
+            semrushSubWorkspaceId: 'ws-9',
+          }),
+          createSerenityTransport: sinon.stub().returns({
+            name: 't',
+            listProjects: sinon.stub().rejects(
+              new SerenityTransportError(403, 'Semrush GET https://gw.internal/x failed: 403', {}),
+            ),
+          }),
+          isSerenityUiActiveForOrg: sinon.stub().resolves(true),
+        });
+
+        const response = await controller.updateBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: { competitors: [{ name: 'Rival', url: 'https://rival.com' }] },
+          dataAccess: mockDataAccess,
+          pathInfo: { headers: { authorization: 'Bearer tok' } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(403);
+        expect(updateBrandStub).to.not.have.been.called;
+        // The outer catch only logs a generic "Error updating brand", so the guard's
+        // own warn is the sole record of which workspace and which step failed. It
+        // must survive the rethrow, flagged as having rejected the write.
+        expect(loggerStub.warn).to.have.been.calledWithMatch(
+          'serenity: competitor-guard project listing failed',
+          sinon.match({ semrushSubWorkspaceId: 'ws-9', rejectingWrite: true }),
+        );
+      });
+
+      it('does not read the flag when no Semrush call fails', async () => {
+        // The flag only decides how a failure is reported, so a successful edit —
+        // and every flat-mode brand edit, which reaches no Semrush call at all —
+        // must not pay the flag read. Most orgs are not on Serenity, so this is the
+        // common path.
+        const flagStub = sinon.stub().resolves(true);
+        const controller = await buildUpdateController({
+          updateBrand: sinon.stub().resolves(SUB_WORKSPACE_BRAND),
+          createSerenityTransport: sinon.stub().returns({
+            name: 't', listProjects: sinon.stub().resolves({ items: [] }),
+          }),
+          isSerenityUiActiveForOrg: flagStub,
+        });
+
+        const response = await controller.updateBrandForOrg(urlEditRequest());
+
+        expect(response.status).to.equal(200);
+        expect(flagStub).to.not.have.been.called;
+      });
+
+      it('reads the flag once when both the guard and the re-sync fail', async () => {
+        // One answer pinned per request: the guard and the re-sync must not disagree
+        // and leave an edit half-absorbed.
+        const flagStub = sinon.stub().resolves(false);
+        // The guard and the re-sync each list the sub-workspace's projects. The
+        // guard's listing failure leaves nothing prefetched, so the re-sync lists
+        // again and fails there too — before it reaches any per-entity sync. Two
+        // calls on this stub is therefore the proof that BOTH catch blocks ran.
+        const listProjectsStub = sinon.stub().rejects(
+          new SerenityTransportError(403, 'Semrush GET https://gw.internal/x failed: 403', {}),
+        );
+        const controller = await buildUpdateController({
+          updateBrand: sinon.stub().resolves({
+            ...SUB_WORKSPACE_BRAND,
+            competitors: [{ name: 'Rival', url: 'https://rival.com' }],
+          }),
+          getBrandById: sinon.stub().resolves({
+            id: BRAND_UUID,
+            baseUrl: 'https://acme.com',
+            urls: [],
+            semrushSubWorkspaceId: 'ws-9',
+          }),
+          createSerenityTransport: sinon.stub().returns({
+            name: 't',
+            listProjects: listProjectsStub,
+          }),
+          isSerenityUiActiveForOrg: flagStub,
+        });
+
+        const response = await controller.updateBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: { competitors: [{ name: 'Rival', url: 'https://rival.com' }] },
+          dataAccess: mockDataAccess,
+          pathInfo: { headers: { authorization: 'Bearer tok' } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        // Flag off → both failures absorbed, and the flag was resolved exactly once.
+        expect(response.status).to.equal(200);
+        expect(await response.json()).to.include({ semrushSyncPending: true });
+        expect(flagStub).to.have.been.calledOnce;
+        // Both call sites really were reached — without this the single flag read
+        // would prove nothing about the memo, since a handler that short-circuited
+        // before the re-sync would also read the flag exactly once.
+        expect(listProjectsStub).to.have.been.calledTwice;
+      });
     });
 
     it('returns 409 when demoting an active brand to pending (LLMO-5587)', async () => {
