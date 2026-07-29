@@ -7704,6 +7704,15 @@ V2Brand:
         - string
         - 'null'
       description: Industry vertical
+    brandClaimsEnabled:
+      type: boolean
+      default: false
+      readOnly: true
+      description: >-
+        Read-only internal ops gate (LLMO-5741). When true, the Brand Claims
+        scheduler turns a brand-presence sheet-ready event into a claims run for
+        this brand. Brand-scoped and opt-in (default false); set by operators via
+        the `brand-claims` Slack command, not customer-writable.
     region:
       type: array
       items:
@@ -7772,6 +7781,7 @@ V2Brand:
     brandContext: "Example Brand is a B2B analytics platform."
     mentionSentimentGuidance: "Treat factual pricing mentions as neutral unless the response recommends against the brand."
     vertical: 'technology'
+    brandClaimsEnabled: false
     region: ['US', 'DE']
     urls:
       - value: 'https://www.example.com'
@@ -7796,14 +7806,23 @@ V2Brand:
 
 V2BrandUpdateResponse:
   description: >-
-    A brand (as returned by GET) plus, when the edit re-synced aliases/competitors
-    to a sub-workspace brand's Semrush markets and Semrush refused some aliases,
-    the `semrushRejectedAliases` set. The field is omitted when nothing was
-    rejected (or the brand is flat-mode).
+    A brand (as returned by GET) plus optional fields when a sub-workspace brand's
+    Semrush re-sync produced notable results. `semrushSyncPending` is set when the
+    row was committed but the re-sync could not be completed (Semrush unavailable or
+    user not provisioned) — the edit persisted and will be reconciled later.
+    `semrushRejectedAliases` is set when Semrush refused some aliases during an
+    otherwise successful re-sync.
   allOf:
     - $ref: '#/V2Brand'
     - type: object
       properties:
+        semrushSyncPending:
+          type: boolean
+          description: >-
+            Present and `true` when the brand row was committed but the Semrush
+            re-sync failed (transient upstream error or user not provisioned in
+            Semrush). The edit is persisted; Semrush will be reconciled via
+            `--reconcile` migration once the underlying issue is resolved.
         semrushRejectedAliases:
           type: array
           description: >-
@@ -11927,11 +11946,13 @@ SerenityMarketTrackingTrends:
   type: object
   description: |
     Weekly Market Tracking Trends for the Serenity (Semrush Elements-backed)
-    Brand Presence Competitor Comparison chart. Each entry is one ISO week; the
-    tracked brand's own totals are at the top level and every tracked competitor
-    (a Semrush benchmark) is an entry in `competitors`. Mentions come from the
-    Trends Mentions/Visibility element and citations from the Market Tracking
-    citations element; both are already weekly-bucketed by Semrush.
+    Brand Presence Competitor Comparison chart and the Overview-SR KPI cards
+    (LLMO-6515). Each entry is one ISO week; the tracked brand's own totals are
+    at the top level and every tracked competitor (a Semrush benchmark) is an
+    entry in `competitors`. Mentions/Share of Voice/Brand Visibility come from
+    the Trends Mentions/Visibility element and citations/Source Visibility from
+    the Market Tracking citations element; both are already weekly-bucketed by
+    Semrush.
   required: [weeklyTrends]
   properties:
     weeklyTrends:
@@ -11939,7 +11960,7 @@ SerenityMarketTrackingTrends:
       description: One entry per ISO week, sorted ascending by `week`.
       items:
         type: object
-        required: [week, weekNumber, year, mentions, citations, competitors]
+        required: [week, weekNumber, year, mentions, citations, shareOfVoice, brandVisibility, sourceVisibility, competitors]
         properties:
           week:
             type: string
@@ -11957,6 +11978,24 @@ SerenityMarketTrackingTrends:
           citations:
             type: integer
             description: The tracked brand's own citations in this week.
+          shareOfVoice:
+            type: number
+            format: double
+            minimum: 0
+            maximum: 1
+            description: The tracked brand's Share of Voice this week, a 0–1 fraction (defaults to 0 if not returned upstream).
+          brandVisibility:
+            type: number
+            format: double
+            minimum: 0
+            maximum: 1
+            description: The tracked brand's Brand Visibility this week — fraction of analyzed prompts where the brand appears (prompts_mentioned / total_num_prompts), 0–1 (defaults to 0 if not returned upstream).
+          sourceVisibility:
+            type: number
+            format: double
+            minimum: 0
+            maximum: 1
+            description: The tracked brand's Source Visibility this week — fraction of analyzed prompts where the brand's domain is cited (prompts_with_mentions / total_prompts), 0–1 (defaults to 0 if not returned upstream).
           competitors:
             type: array
             description: Per-competitor mentions + citations for this week, sorted by mentions desc.
@@ -11967,6 +12006,64 @@ SerenityMarketTrackingTrends:
                 name: { type: string }
                 mentions: { type: integer }
                 citations: { type: integer }
+SerenityCompetitorSummary:
+  type: object
+  description: |
+    Aggregate per-competitor mentions/citations totals (no weekly breakdown) for
+    the Overview Competitor Comparison bar chart — the lightweight counterpart
+    to `SerenityMarketTrackingTrends`. Sourced from the same two Semrush
+    elements (Trends Mentions/Visibility + Market Tracking citations), summed
+    across the requested date range instead of bucketed by week. The tracked
+    brand itself is excluded; only competitors (Semrush benchmarks) are returned.
+  required: [competitors]
+  properties:
+    competitors:
+      type: array
+      description: One entry per tracked competitor, sorted by mentions desc.
+      items:
+        type: object
+        required: [name, mentions, citations]
+        properties:
+          name: { type: string }
+          mentions: { type: integer }
+          citations: { type: integer }
+SerenityKpiHeadline:
+  type: object
+  description: |
+    A single KPI headline value with its period-over-period comparison figure,
+    sourced from a Semrush `kpiLineChart` element's `mainValue`/`secondaryValue`
+    — the same Semrush-computed aggregate the Brand Presence MFE itself
+    displays (verified live), NOT derived from `SerenityMarketTrackingTrends`'s
+    weekly series. Both fields are 0-1 fractions; the UI multiplies by 100 for
+    display.
+  required: [value, comparisonValue]
+  properties:
+    value:
+      type: number
+      format: double
+      minimum: 0
+      maximum: 1
+      description: The metric's value for the current (requested) period, a 0-1 fraction.
+    comparisonValue:
+      type: [number, 'null']
+      format: double
+      minimum: 0
+      maximum: 1
+      description: |
+        The metric's value for the immediately preceding period of equal length, a 0-1
+        fraction. `null` when Semrush has no data for that period (e.g. it predates data
+        collection) — distinct from a real 0%; consumers should render this as "no
+        comparison available" rather than computing a delta against 0.
+SerenityKpiHeadlines:
+  type: object
+  description: |
+    Share of Voice + Brand Visibility KPI headline cards for Overview-SR — see
+    `SerenityKpiHeadline` for the shape of each. Source Visibility is served by
+    the separate `listSerenitySourceVisibilityHeadline` endpoint.
+  required: [shareOfVoice, brandVisibility]
+  properties:
+    shareOfVoice: { $ref: '#/SerenityKpiHeadline' }
+    brandVisibility: { $ref: '#/SerenityKpiHeadline' }
 SerenityBrandPresenceStatsValues:
   type: object
   description: The four aggregated Brand Presence KPI values, shared by the top-level `stats` and each `trends[].data.stats` entry.
@@ -13042,3 +13139,22 @@ TicketCreateRequest:
       items:
         $ref: '#/TicketAttachment'
       maxItems: 10
+OnboardingNotificationResponse:
+  type: object
+  required:
+    - notified
+    - workspaceId
+  properties:
+    notified:
+      type: boolean
+      example: true
+    workspaceId:
+      type: [string, 'null']
+      description: The org-level Semrush workspace ID, or null if the org has none.
+      example: "ws-123"
+    reason:
+      type: string
+      description: >-
+        Present only when notified is false. Explains why no notification was
+        sent (e.g. a duplicate request arrived within the per-org cooldown window).
+      example: "recently notified"

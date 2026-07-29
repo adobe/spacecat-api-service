@@ -627,6 +627,43 @@ describe('serenity tag-tree', () => {
         .to.be.rejectedWith(/listProjectTags 502/);
       expect(transport.createProjectTags).to.not.have.been.called;
     });
+
+    // serenity-docs#33 "no terminal Informational default": `wantValue === null`
+    // means classification produced no usable value. Nothing may be minted
+    // under the `intent` root in that case — this must be a pure read of the
+    // existing strip set, never a create.
+    describe('wantValue === null (serenity-docs#33)', () => {
+      it('returns a null computedId and the existing intent ids without creating anything', async () => {
+        const transport = {
+          listProjectTags: makeListProjectTagsStub(),
+          createProjectTags: sinon.stub(),
+        };
+        const res = await resolveIntentValueInjection(transport, WS, PROJECT, null, fakeLog());
+        expect(res.computedId).to.equal(null);
+        expect(res.intentTagIds).to.have.members([
+          TAG_IDS.intentInformational,
+          TAG_IDS.intentTask,
+          TAG_IDS.intentCommercial,
+          TAG_IDS.intentTransactional,
+          TAG_IDS.intentNavigational,
+        ]);
+        expect(transport.createProjectTags).to.not.have.been.called;
+      });
+
+      it('never mints an intent VALUE (only the dimension root, if missing) on a project predating the taxonomy', async () => {
+        const { listProjectTags, createProjectTags } = makeProvisioningTransportStubs();
+        const transport = { listProjectTags, createProjectTags };
+        const res = await resolveIntentValueInjection(transport, WS, PROJECT, null, fakeLog());
+        expect(res.computedId).to.equal(null);
+        expect(res.intentTagIds).to.deep.equal([]);
+        // Any `createProjectTags` call here is root-provisioning only — never a
+        // call naming a bare `intent` value (which `ensureChildren([])` cannot
+        // produce, since its `missing` list is always empty for an empty `wanted`).
+        createProjectTags.getCalls().forEach((call) => {
+          expect(call.args[2]).to.not.include.members(['Task', 'Informational', 'Commercial', 'Transactional', 'Navigational']);
+        });
+      });
+    });
   });
 
   describe('findTagsInTree', () => {

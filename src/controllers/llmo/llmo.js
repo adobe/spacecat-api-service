@@ -1744,7 +1744,7 @@ function LlmoController(ctx) {
           try {
             await context.sqs.sendMessage(
               env.IMPORT_WORKER_QUEUE_URL,
-              { type: OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE },
+              { type: OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE, siteId },
               undefined,
               { delaySeconds: EDGE_OPTIMIZE_MARKING_DELAY_SECONDS },
             );

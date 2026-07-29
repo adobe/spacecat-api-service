@@ -132,23 +132,24 @@ describe('dynamic-allocation fronting — create-market', () => {
     expect(t.getWorkspaceResources.calledBefore(t.publishProject)).to.equal(true);
   });
 
-  it('ON + covered child: NO transfer at all — proves the flat re-grant carve is skipped', async () => {
+  it('ON + covered child: NO transfer at all', async () => {
     const t = makeTransport();
     await handleCreateMarketSubworkspace(t, makeBrand(), PARENT, createBody, log, null, null, {
       dynamicAllocation: true, parentWorkspaceId: MASTER, publishMode: 'require',
     });
-    // With the flag ON, ensureSubworkspace skips the flat resourceAllocation re-grant AND the
-    // covered child needs no JIT top-up → zero transfers.
+    // ensureSubworkspace never transfers an allocation, and a covered child needs no JIT
+    // top-up → zero transfers.
     expect(t.transferWorkspaceResources).to.not.have.been.called;
   });
 
-  it('OFF: byte-for-byte — the flat re-grant transfer still runs and NO headroom read happens', async () => {
+  it('OFF: no transfer and no headroom read — the whole allocation surface is inert', async () => {
     const t = makeTransport();
     await handleCreateMarketSubworkspace(t, makeBrand(), PARENT, createBody, log, null, null, {
       dynamicAllocation: false, parentWorkspaceId: MASTER, publishMode: 'require',
     });
-    // Flag OFF: the pre-PR flat re-grant transfer runs, and the guard is a genuine no-op.
-    expect(t.transferWorkspaceResources).to.have.been.called;
+    // Flag OFF: the guard is a genuine no-op, and nothing else transfers resources either — a
+    // market create issues zero calls against the Semrush resource endpoints (issue #2922).
+    expect(t.transferWorkspaceResources).to.not.have.been.called;
     expect(t.getWorkspaceResources).to.not.have.been.called;
   });
 
@@ -209,6 +210,43 @@ describe('dynamic-allocation fronting — create-prompts', () => {
       { dynamicAllocation: false, parentWorkspaceId: MASTER },
     );
     expect(t.getWorkspaceResources).to.not.have.been.called;
+  });
+
+  it('ON + a binding ceiling (LLMO-6190 gate): a top-up past the cap throws brandAiLimit (409) before any write/transfer', async () => {
+    // Child seeded at zero prompts, so the pre-loop `ensure` must top up; the top-up rounds to a
+    // whole PROMPT_BLOCK (→100) which exceeds the low cap (50) → brandAiLimit, thrown out of the
+    // handler before any metered write or transfer fires.
+    const getWorkspaceResources = sinon.stub();
+    getWorkspaceResources.withArgs(WS).resolves(resources(dimObj(0, 0, 50), dimObj(0, 0, 0)));
+    getWorkspaceResources.withArgs(MASTER).resolves(AMPLE_MASTER);
+    const t = makeTransport({
+      listProjects: sinon.stub().resolves({ items: [proj()] }),
+      getWorkspaceResources,
+    });
+    let caught;
+    try {
+      await handleCreatePromptsSubworkspace(
+        t,
+        WS,
+        {
+          prompts: [{
+            text: 'q', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'],
+          }],
+        },
+        log,
+        undefined, // classifyPromptType
+        undefined, // env
+        undefined, // writeDeadline
+        { dynamicAllocation: true, parentWorkspaceId: MASTER, ceiling: { prompts: 50 } },
+      );
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught?.code).to.equal('brandAiLimit');
+    expect(caught?.status).to.equal(409);
+    // The child read fed the ceiling check, but the cap fired BEFORE the pool read/transfer.
+    expect(t.getWorkspaceResources).to.have.been.calledWith(WS);
+    expect(t.transferWorkspaceResources).to.not.have.been.called;
   });
 });
 
@@ -444,6 +482,45 @@ describe('dynamic-allocation fronting — delete-market release', () => {
     expect(t.transferWorkspaceResources).to.have.been.calledWith(WS, {
       ai: { projects: PROJECT_BLOCK, prompts: PROMPT_BLOCK },
     });
+  });
+
+  it('ON + two concurrent deletes on the SAME child: releases are serialized through withResourceLock '
+    + '(LLMO-6191 item 3), matching handleUpdateModelsSubworkspace — no interleaved read/write', async () => {
+    // Without the lock, both releases' getWorkspaceResources reads would fire before either
+    // transferWorkspaceResources write (the read-then-absolute-set race the lock closes). Hold the
+    // first call's write open with a deferred promise so a second, concurrent call to the SAME
+    // workspace can only start its own read/write pair once the first has fully settled.
+    let resolveFirstTransfer;
+    const firstTransferGate = new Promise((resolve) => {
+      resolveFirstTransfer = resolve;
+    });
+    const callOrder = [];
+    const getWorkspaceResources = sinon.stub().callsFake(async () => {
+      callOrder.push('read');
+      return RELEASABLE_CHILD;
+    });
+    const transferWorkspaceResources = sinon.stub().callsFake(async () => {
+      callOrder.push('write-start');
+      if (callOrder.filter((e) => e === 'write-start').length === 1) {
+        await firstTransferGate;
+      }
+      callOrder.push('write-end');
+      return null;
+    });
+    const t = makeDeleteTransport({ getWorkspaceResources, transferWorkspaceResources });
+
+    const p1 = handleDeleteMarketSubworkspace(t, WS, 2840, 'en', log, { dynamicAllocation: true });
+    // Let the first call's release reach its (gated) write before starting the second.
+    await new Promise((resolve) => {
+      setTimeout(() => resolve(), 0);
+    });
+    const p2 = handleDeleteMarketSubworkspace(t, WS, 2840, 'en', log, { dynamicAllocation: true });
+    // The second call's read must NOT have fired yet — it is queued behind the first call's whole
+    // critical section (read + write), not just its read.
+    expect(callOrder).to.deep.equal(['read', 'write-start']);
+    resolveFirstTransfer();
+    await Promise.all([p1, p2]);
+    expect(callOrder).to.deep.equal(['read', 'write-start', 'write-end', 'read', 'write-start', 'write-end']);
   });
 
   it('ON + upstream deleteProject 404s (already gone): release still fires (project is confirmed gone either way)', async () => {

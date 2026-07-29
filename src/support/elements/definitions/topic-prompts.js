@@ -61,11 +61,13 @@ function toNumberOrNull(value) {
  * @param {string} [params.platform] - Legacy alias for `model`; `model` takes precedence.
  * @param {string} [params.startDate] - ISO date (YYYY-MM-DD). Optional.
  * @param {string} [params.endDate] - ISO date (YYYY-MM-DD). Optional.
- * @param {string} [params.projectId] - Semrush project id for region scoping (`CBF_project`).
+ * @param {string} [params.projectId] - Single Semrush project id to scope to (`CBF_project`).
+ * @param {string[]} [params.projectIds] - Multiple Semrush project ids to OR together
+ *   (`CBF_project`); takes precedence over `projectId` when both are given.
  * @returns {object} Semrush element request payload.
  */
 export function buildTopicPromptsPayload({
-  topic, model, platform, startDate, endDate, projectId,
+  topic, model, platform, startDate, endDate, projectId, projectIds,
 } = {}) {
   const resolvedModel = resolveElementModel(model || platform);
 
@@ -76,9 +78,15 @@ export function buildTopicPromptsPayload({
   if (topic) {
     advancedFilters.push({ op: 'or', filters: [{ op: 'eq', val: topic, col: 'CBF_topic' }] });
   }
-  // Region: CBF_project (a Semrush project id), inside its own `or` block.
-  if (projectId) {
-    advancedFilters.push({ op: 'or', filters: [{ op: 'eq', val: projectId, col: 'CBF_project' }] });
+  // Project scoping: CBF_project (one or more Semrush project ids), inside its own `or` block.
+  const ids = Array.isArray(projectIds) && projectIds.length > 0
+    ? projectIds
+    : [projectId].filter(Boolean);
+  if (ids.length > 0) {
+    advancedFilters.push({
+      op: 'or',
+      filters: ids.map((id) => ({ op: 'eq', val: id, col: 'CBF_project' })),
+    });
   }
 
   const filters = { advanced: { op: 'and', filters: advancedFilters } };

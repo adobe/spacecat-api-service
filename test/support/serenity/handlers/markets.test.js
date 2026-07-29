@@ -1131,100 +1131,95 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     );
   });
 
-  it('listModels (catalog mode) calls listGlobalAiModels and returns items', async () => {
-    const dataAccess = makeDataAccess([]);
-    const transport = {
-      listGlobalAiModels: sinon.stub().resolves({
-        items: [
-          {
-            id: 'cat-gpt-4o', key: 'chatgpt', name: 'ChatGPT', icon: null,
-          },
-          {
-            id: 'cat-claude', key: 'claude', name: 'Claude', icon: null,
-          },
-        ],
-      }),
-    };
+  it('listModels (no market) unions the models enabled across all the brand\'s projects', async () => {
+    const dataAccess = makeDataAccess([
+      makeProject({ semrushProjectId: 'proj-a', geoTargetId: 2840, languageCode: 'en' }),
+      makeProject({ semrushProjectId: 'proj-b', geoTargetId: 2250, languageCode: 'fr' }),
+    ]);
+    const listAiModels = sinon.stub();
+    listAiModels.withArgs(WORKSPACE, 'proj-a').resolves({
+      items: [{
+        model: {
+          id: 'm-1', key: 'chatgpt', name: 'ChatGPT', icon: null,
+        },
+      }],
+    });
+    listAiModels.withArgs(WORKSPACE, 'proj-b').resolves({
+      items: [{
+        model: {
+          id: 'm-2', key: 'claude', name: 'Claude', icon: null,
+        },
+      }],
+    });
+    const transport = { listAiModels };
     const result = await handleListModels(transport, dataAccess, BRAND, WORKSPACE, {});
     expect(result.items).to.have.lengthOf(2);
-    expect(result.items[0].id).to.equal('cat-gpt-4o');
-    expect(transport.listGlobalAiModels).to.have.callCount(1);
+    expect(result.items.map((m) => m.key)).to.have.members(['chatgpt', 'claude']);
+    expect(dataAccess.BrandSemrushProject.allByBrandId).to.have.been.calledOnceWith(BRAND);
   });
 
-  it('listModels (catalog mode) paginates when page 1 is full (100 items)', async () => {
-    const dataAccess = makeDataAccess([]);
-    const page1 = Array.from({ length: 100 }, (_, i) => ({
-      id: `cat-${i}`, key: `model-${i}`, name: null, icon: null,
-    }));
-    const stub = sinon.stub();
-    stub.onFirstCall().resolves({ items: page1 });
-    stub.onSecondCall().resolves({ items: [] });
-    const transport = { listGlobalAiModels: stub };
-    const result = await handleListModels(transport, dataAccess, BRAND, WORKSPACE, {});
-    expect(result.items).to.have.lengthOf(100);
-    expect(stub).to.have.callCount(2);
-  });
-
-  it('listModels (catalog mode) stops at MAX_AI_MODELS_PAGES (5) when upstream always returns full pages', async () => {
-    const dataAccess = makeDataAccess([]);
-    const fullPage = Array.from({ length: 100 }, (_, i) => ({
-      id: `cat-${i}`, key: `model-${i}`, name: null, icon: null,
-    }));
-    // Always return a full page — the ceiling guard must terminate the loop.
-    const stub = sinon.stub().resolves({ items: fullPage });
-    const transport = { listGlobalAiModels: stub };
-    const result = await handleListModels(transport, dataAccess, BRAND, WORKSPACE, {});
-    expect(stub).to.have.callCount(5);
-    expect(result.items).to.have.lengthOf(500);
-  });
-
-  it('listModels (catalog mode) also normalises wrapped assignment items from workspace endpoint', async () => {
-    const dataAccess = makeDataAccess([]);
-    const transport = {
-      listGlobalAiModels: sinon.stub().resolves({
-        items: [
-          {
-            id: 'assign-1',
-            model: {
-              id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null,
-            },
-          },
-        ],
-      }),
+  it('listModels (no market) dedups a model enabled on more than one project', async () => {
+    const dataAccess = makeDataAccess([
+      makeProject({ semrushProjectId: 'proj-a', geoTargetId: 2840, languageCode: 'en' }),
+      makeProject({ semrushProjectId: 'proj-b', geoTargetId: 2250, languageCode: 'fr' }),
+    ]);
+    const shared = {
+      model: {
+        id: 'm-1', key: 'chatgpt', name: 'ChatGPT', icon: null,
+      },
     };
+    const listAiModels = sinon.stub();
+    listAiModels.withArgs(WORKSPACE, 'proj-a').resolves({ items: [shared] });
+    listAiModels.withArgs(WORKSPACE, 'proj-b').resolves({
+      items: [shared, {
+        model: {
+          id: 'm-2', key: 'claude', name: 'Claude', icon: null,
+        },
+      }],
+    });
+    const transport = { listAiModels };
     const result = await handleListModels(transport, dataAccess, BRAND, WORKSPACE, {});
-    expect(result.items).to.have.lengthOf(1);
-    expect(result.items[0].id).to.equal('cat-gpt');
+    expect(result.items).to.have.lengthOf(2);
+    expect(result.items.map((m) => m.key)).to.have.members(['chatgpt', 'claude']);
   });
 
-  it('listModels (catalog mode) returns empty when workspace endpoint responds 404/405', async () => {
+  it('listModels (no market) returns empty (never the global catalog) when the brand has no projects', async () => {
     const dataAccess = makeDataAccess([]);
-    const transport404 = {
-      listGlobalAiModels: sinon.stub().rejects(new SerenityTransportError(404, 'not found')),
-    };
-    const result404 = await handleListModels(transport404, dataAccess, BRAND, WORKSPACE, {});
-    expect(result404).to.deep.equal({ items: [] });
-
-    const transport405 = {
-      listGlobalAiModels: sinon.stub().rejects(new SerenityTransportError(405, 'not allowed')),
-    };
-    const result405 = await handleListModels(transport405, dataAccess, BRAND, WORKSPACE, {});
-    expect(result405).to.deep.equal({ items: [] });
+    const transport = { listAiModels: sinon.stub() };
+    const result = await handleListModels(transport, dataAccess, BRAND, WORKSPACE, {});
+    expect(result).to.deep.equal({ items: [] });
+    expect(transport.listAiModels).to.have.callCount(0);
   });
 
-  it('listModels (catalog mode) propagates auth errors (401/403) from workspace endpoint', async () => {
-    const dataAccess = makeDataAccess([]);
+  it('listModels (no market) propagates auth errors (401/403) from a per-project fetch', async () => {
+    const dataAccess = makeDataAccess([
+      makeProject({ semrushProjectId: 'proj-a', geoTargetId: 2840, languageCode: 'en' }),
+    ]);
     const transport401 = {
-      listGlobalAiModels: sinon.stub().rejects(new SerenityTransportError(401, 'unauthorized')),
+      listAiModels: sinon.stub().rejects(new SerenityTransportError(401, 'unauthorized')),
     };
     await expect(handleListModels(transport401, dataAccess, BRAND, WORKSPACE, {}))
       .to.be.rejectedWith(SerenityTransportError);
+  });
 
-    const transport403 = {
-      listGlobalAiModels: sinon.stub().rejects(new SerenityTransportError(403, 'forbidden')),
-    };
-    await expect(handleListModels(transport403, dataAccess, BRAND, WORKSPACE, {}))
-      .to.be.rejectedWith(SerenityTransportError);
+  it('listModels (no market) tolerates a 404 from a stale project and unions the rest', async () => {
+    const dataAccess = makeDataAccess([
+      makeProject({ semrushProjectId: 'proj-a', geoTargetId: 2840, languageCode: 'en' }),
+      makeProject({ semrushProjectId: 'proj-stale', geoTargetId: 2250, languageCode: 'fr' }),
+    ]);
+    const listAiModels = sinon.stub();
+    listAiModels.withArgs(WORKSPACE, 'proj-a').resolves({
+      items: [{
+        model: {
+          id: 'm-1', key: 'chatgpt', name: 'ChatGPT', icon: null,
+        },
+      }],
+    });
+    listAiModels.withArgs(WORKSPACE, 'proj-stale')
+      .rejects(new SerenityTransportError(404, 'not found'));
+    const transport = { listAiModels };
+    const result = await handleListModels(transport, dataAccess, BRAND, WORKSPACE, {});
+    expect(result.items.map((m) => m.key)).to.deep.equal(['chatgpt']);
   });
 
   it('listModels 400s when only one of geoTargetId/languageCode is provided', async () => {
@@ -1635,6 +1630,40 @@ describe('handlers/markets.js — handleUpdateModels', () => {
     );
 
     expect(transport.publishProject).to.have.been.calledOnceWith(WORKSPACE, 'proj-1');
+  });
+
+  // aenascut review, PR #2889: syncModelsForProject's publish 405→409 classification (shared by
+  // handleUpdateModels and handleUpdateModelsSubworkspace) had no direct test — prompts.test.js
+  // covers the analogous create/publish paths, this is the model-update path's equivalent.
+  it('throws a 409 quotaExceeded ErrorWithStatusCode when the model-set-change publish 405s as a disguised quota rejection', async () => {
+    const project = makeProject({ semrushProjectId: 'proj-1', geoTargetId: 2840, languageCode: 'en' });
+    const da = makeDataAccess([]);
+    da.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = makeTransport({ currentItems: [] });
+    transport.listAiModels.onSecondCall().resolves({
+      items: [{
+        id: 'assign-1',
+        model: {
+          id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null,
+        },
+      }],
+    });
+    transport.publishProject = sinon.stub().rejects(
+      new SerenityTransportError(405, 'publish failed: 405', '<html>405 Not Allowed</html>'),
+    );
+
+    const p = handleUpdateModels(
+      transport,
+      da,
+      BRAND,
+      WORKSPACE,
+      { geoTargetId: 2840, languageCode: 'en', modelIds: ['cat-gpt'] },
+      fakeLog(),
+    );
+    await expect(p).to.be.rejectedWith(ErrorWithStatusCode);
+    const e = await p.catch((x) => x);
+    expect(e.status).to.equal(409);
+    expect(e.code).to.equal('quotaExceeded');
   });
 
   it('propagates transport errors from deleteAiModelsByIds', async () => {

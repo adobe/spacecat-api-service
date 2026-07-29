@@ -17,7 +17,9 @@ import esmock from 'esmock';
 import {
   isDynamicAllocationEnabled,
   createHeadroomGuard,
+  resolveBrandAiCeiling,
   DYNAMIC_ALLOCATION_ENV_FLAG,
+  BRAND_AI_CEILING_ENV_FLAGS,
 } from '../../../src/support/serenity/dynamic-allocation-active.js';
 import { clearResourceLocks } from '../../../src/support/serenity/resource-lock.js';
 import { SerenityTransportError } from '../../../src/support/serenity/rest-transport.js';
@@ -57,6 +59,52 @@ describe('dynamic-allocation-active — isDynamicAllocationEnabled', () => {
     expect(isDynamicAllocationEnabled({ [DYNAMIC_ALLOCATION_ENV_FLAG]: '1' })).to.equal(false);
     expect(isDynamicAllocationEnabled({ [DYNAMIC_ALLOCATION_ENV_FLAG]: true })).to.equal(false);
     expect(isDynamicAllocationEnabled(undefined)).to.equal(false);
+  });
+});
+
+describe('dynamic-allocation-active — resolveBrandAiCeiling', () => {
+  const PROJECTS = BRAND_AI_CEILING_ENV_FLAGS.projects;
+  const PROMPTS = BRAND_AI_CEILING_ENV_FLAGS.prompts;
+
+  it('returns undefined when neither dimension is set (keeps the guard non-binding default)', () => {
+    expect(resolveBrandAiCeiling(undefined)).to.equal(undefined);
+    expect(resolveBrandAiCeiling({})).to.equal(undefined);
+    expect(resolveBrandAiCeiling({ UNRELATED: '5' })).to.equal(undefined);
+  });
+
+  it('parses a clean positive integer per dimension', () => {
+    expect(resolveBrandAiCeiling({ [PROMPTS]: '5000' })).to.deep.equal({ prompts: 5000 });
+    expect(resolveBrandAiCeiling({ [PROJECTS]: '8' })).to.deep.equal({ projects: 8 });
+    expect(resolveBrandAiCeiling({ [PROJECTS]: '8', [PROMPTS]: '5000' }))
+      .to.deep.equal({ projects: 8, prompts: 5000 });
+  });
+
+  it('leaves a partial ceiling when only one dimension is set (the other stays unenforced)', () => {
+    const c = resolveBrandAiCeiling({ [PROMPTS]: '5000' });
+    expect(c).to.deep.equal({ prompts: 5000 });
+    expect(c).to.not.have.property('projects');
+  });
+
+  it('FAIL-SAFE: a malformed / non-positive value warns and leaves that dimension unenforced (never throws)', () => {
+    const warn = sinon.stub();
+    const spyLog = { info: () => {}, error: () => {}, warn };
+    // parseInt would wrongly accept '5o00' as 5 — the digit-only guard rejects it instead.
+    for (const bad of ['abc', '5o00', '-1', '0', '5.5', '1e3', '  ']) {
+      warn.resetHistory();
+      const c = resolveBrandAiCeiling({ [PROMPTS]: bad }, spyLog);
+      expect(c, `bad value ${JSON.stringify(bad)} must not bind`).to.equal(undefined);
+      // Whitespace-only is "unset" (silent); the rest are malformed (warned).
+      if (bad.trim() !== '') {
+        expect(warn, `bad value ${JSON.stringify(bad)} should warn`).to.have.been.calledOnce;
+      }
+    }
+  });
+
+  it('binds the good dimension and warns on the bad one when mixed', () => {
+    const warn = sinon.stub();
+    const c = resolveBrandAiCeiling({ [PROJECTS]: 'oops', [PROMPTS]: '5000' }, { warn });
+    expect(c).to.deep.equal({ prompts: 5000 });
+    expect(warn).to.have.been.calledOnce;
   });
 });
 
@@ -162,6 +210,72 @@ describe('dynamic-allocation-active — createHeadroomGuard', () => {
     const r = await guard.ensure({ prompts: 5000 });
     expect(r.toppedUp).to.equal(true);
     expect(t.transferWorkspaceResources).to.have.been.calledOnce;
+  });
+
+  it('an explicit BINDING ceiling: a top-up past the cap throws brandAiLimit (409), no transfer', async () => {
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    const guard = createHeadroomGuard(
+      t,
+      {
+        enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: MASTER, ceiling: { prompts: 100 },
+      },
+      log,
+    );
+    let caught;
+    try {
+      await guard.ensure({ prompts: 500 }); // target rounds to 500 > cap 100
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught?.code).to.equal('brandAiLimit');
+    expect(caught?.status).to.equal(409);
+    expect(t.transferWorkspaceResources).to.not.have.been.called;
+  });
+
+  it('an explicit ceiling that COVERS the need: tops up normally (does NOT 409)', async () => {
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    const guard = createHeadroomGuard(
+      t,
+      {
+        enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: MASTER, ceiling: { prompts: 1000 },
+      },
+      log,
+    );
+    const r = await guard.ensure({ prompts: 500 }); // target 500 <= cap 1000
+    expect(r.toppedUp).to.equal(true);
+    expect(t.transferWorkspaceResources).to.have.been.calledOnce;
+  });
+
+  it('a PARTIAL ceiling binds only its dimension — the unset dimension stays unenforced', async () => {
+    // ceiling only caps prompts; projects has no cap, so a large project top-up is not gated.
+    const t = makeTransport({
+      child: resources(dimObj(0, 0, 0), dimObj(0, 0, 0)),
+      master: resources(dimObj(0, 0, 100), dimObj(0, 0, 800)),
+    });
+    const guard = createHeadroomGuard(
+      t,
+      {
+        enabled: true, subWorkspaceId: CHILD, parentWorkspaceId: MASTER, ceiling: { prompts: 100 },
+      },
+      log,
+    );
+    // projects dimension: no cap present → tops up without a brandAiLimit throw.
+    const rProjects = await guard.ensure({ projects: 5 });
+    expect(rProjects.toppedUp).to.equal(true);
+    // prompts dimension on the same guard: still bound by the cap → throws past it.
+    let caught;
+    try {
+      await guard.ensure({ prompts: 500 });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught?.code).to.equal('brandAiLimit');
   });
 });
 

@@ -110,6 +110,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} elementsController - Elements API controller (Semrush Elements wrappers).
  * @param {Object} proxyController - URL proxy controller for client-side previews.
  * @param {Object} taskManagementController - Task-management (Jira ticket creation) controller.
+ * @param {Object} onboardingController - Semrush onboarding notification controller.
  * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
  * @param {Object} auditPolicyController - Audit policy + audit scope controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
@@ -179,6 +180,7 @@ export default function getRouteHandlers(
   elementsController,
   proxyController,
   taskManagementController,
+  onboardingController,
   redirectsController,
   auditPolicyController,
 ) {
@@ -189,6 +191,9 @@ export default function getRouteHandlers(
     'GET /config/:service/redirects.txt': redirectsController.getRedirects,
     'GET /audits/latest/:auditType': auditsController.getAllLatest,
     'GET /configurations/latest': configurationController.getLatest,
+    // Static route — matched before the dynamic `GET /configurations/:version`
+    // (see src/utils/route-utils.js), so "versions" is never treated as a VersionId.
+    'GET /configurations/versions': configurationController.listVersions,
     'PATCH /configurations/latest': configurationController.updateConfiguration,
     'POST /configurations/:version/restore': configurationController.restoreVersion,
     'GET /configurations/:version': configurationController.getByVersion,
@@ -269,10 +274,19 @@ export default function getRouteHandlers(
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/stats': elementsController.getUrlInspectorStats,
     // eslint-disable-next-line max-len
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/prompts/count': elementsController.getUrlInspectorPromptsCount,
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/competitor-summary': elementsController.getCompetitorSummary,
+    // Overview-SR exact-parity KPI headlines (LLMO-6515 follow-up). Source Visibility is
+    // split into its own route — see getSourceVisibilityHeadline's timeout-budget rationale.
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/kpi-headlines': elementsController.getKpiHeadlines,
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/source-visibility-headline': elementsController.getSourceVisibilityHeadline,
     // Brand-independent Semrush language catalog (add-brand wizard language picker).
     'GET /v2/orgs/:spaceCatId/serenity/languages': serenityController.listOrgLanguages,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': serenityController.activate,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate': serenityController.deactivate,
+    'POST /v2/orgs/:spaceCatId/semrush-onboarding': onboardingController.triggerOnboarding,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.listPromptsByBrand,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats': brandsController.getPromptStatsByBrand,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.createPromptsByBrand,

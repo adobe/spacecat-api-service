@@ -252,9 +252,9 @@ export const sendInternalReportRunMessage = async (
 /**
  * Sends a message to run a global import job to the provided SQS queue.
  * Global imports don't require a siteId - they run across all data - but an optional siteId
- * scopes the run to just that one site (e.g. for an ad hoc re-check), and an optional force
- * flag (only meaningful alongside a siteId) tells the target handler to skip whatever gating
- * check it normally requires, when it supports both.
+ * scopes the run to just that one site (e.g. for an ad hoc re-check), and optional force /
+ * validateOnly flags (only meaningful alongside a siteId) tell the target handler to skip, or
+ * run only, whatever gating check it normally requires, when it supports them.
  *
  * @param {Object} sqs - The SQS service object.
  * @param {string} queueUrl - The SQS queue URL.
@@ -263,19 +263,25 @@ export const sendInternalReportRunMessage = async (
  * @param {Object} [options] - Optional single-site scoping.
  * @param {string} [options.siteId] - Site ID to scope the run to a single site.
  * @param {boolean} [options.force] - Skip the handler's normal gating check for that site.
- * @param {string} [options.forcedBy] - Slack user who requested the force run (log context).
+ * @param {boolean} [options.validateOnly] - Run only the handler's validation check for that
+ *   site, without applying whatever result it normally gates.
+ * @param {string} [options.forcedBy] - Slack user who requested the force/validateOnly run
+ *   (log context).
  */
 export const sendGlobalImportRunMessage = async (
   sqs,
   queueUrl,
   importType,
   slackContext,
-  { siteId, force, forcedBy } = {},
+  {
+    siteId, force, forcedBy, validateOnly,
+  } = {},
 ) => sqs.sendMessage(queueUrl, {
   type: importType,
   slackContext,
   ...(siteId && { siteId }),
   ...(force && { force }),
+  ...(validateOnly && { validateOnly }),
   ...(forcedBy && { forcedBy }),
 });
 

@@ -4281,6 +4281,32 @@ describe('Suggestions Controller', () => {
       sandbox.restore();
     });
 
+    it('bypasses the auto_fix subService for non-ASO products so LLMO logins are not 403d (LLMO-6553)', async () => {
+      const hasAccessStub = sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+        pathInfo: { headers: { 'x-product': 'LLMO' } },
+      });
+
+      expect(response.status).to.equal(403);
+      expect(hasAccessStub).to.have.been.calledWithExactly(sinon.match.any, '');
+    });
+
+    it('enforces the auto_fix subService for the ASO product', async () => {
+      const hasAccessStub = sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+        pathInfo: { headers: { 'x-product': 'ASO' } },
+      });
+
+      expect(response.status).to.equal(403);
+      expect(hasAccessStub).to.have.been.calledWithExactly(sinon.match.any, 'auto_fix');
+    });
+
     it('proceeds with autofix when summit-plg is enabled and all suggestions are granted', async () => {
       opportunity.getType = sandbox.stub().returns('meta-tags');
       mockSuggestionGrant.splitSuggestionsByGrantStatus.resolves({
@@ -6630,6 +6656,8 @@ describe('Suggestions Controller', () => {
         data: {
           suggestionIds: [SUGGESTION_IDS[0]],
         },
+        // ASO exercises the auto_fix subService gate (LLMO-6553 scopes it to ASO)
+        pathInfo: { headers: { 'x-product': 'ASO' } },
       });
 
       expect(response.status).to.equal(403);
@@ -6686,6 +6714,8 @@ describe('Suggestions Controller', () => {
           suggestionIds: [SUGGESTION_IDS[0]],
         },
         ...context,
+        // ASO exercises the auto_fix subService gate (LLMO-6553 scopes it to ASO)
+        pathInfo: { headers: { 'x-product': 'ASO' } },
       });
 
       // Should proceed to next checks (not forbidden)
@@ -8247,7 +8277,7 @@ describe('Suggestions Controller', () => {
     });
 
     it('returns 207 success and logs warning when marking suggestion as EXPERIMENT_IN_PROGRESS fails', async () => {
-      edgeSuggestions[0].save.rejects(new Error('suggestion persist failed'));
+      mockSuggestion.saveMany.rejects(new Error('suggestion persist failed'));
 
       const response = await suggestionsController.deploySuggestionToEdge({
         ...context,
@@ -8317,9 +8347,11 @@ describe('Suggestions Controller', () => {
       expect(dataArg.edgeOptimizeStatus).to.equal('EXPERIMENT_IN_PROGRESS');
       expect(dataArg.geoExperimentId).to.be.undefined;
 
-      expect(edgeSuggestions[0].save).to.have.been.calledOnce;
       expect(edgeSuggestions[1].setData).to.have.been.calledOnce;
-      expect(edgeSuggestions[1].save).to.have.been.calledOnce;
+      expect(mockSuggestion.saveMany).to.have.been.calledOnce;
+      expect(mockSuggestion.saveMany.firstCall.args[0]).to.deep.equal([
+        edgeSuggestions[0], edgeSuggestions[1],
+      ]);
     });
 
     it('uses profile email as updatedBy in async deploy flow', async () => {

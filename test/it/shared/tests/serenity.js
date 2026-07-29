@@ -152,12 +152,19 @@ export default function serenityTests(
     // 404 tests above never reach.
     const base = `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity`;
 
-    it('GET /serenity/models returns the workspace AI model catalog', async () => {
+    it('GET /serenity/models returns the union of models across the brand\'s markets', async () => {
+      // No-param brand-scoped models now returns the union of models enabled
+      // across the brand's projects (not the global catalog — that lives on the
+      // org-scoped endpoint asserted above). This seed ships no market slice for
+      // the workspace, so the union is empty — but a 200 with an `items` array
+      // proves the full read chain (relaxed auth → brand resolution →
+      // sub-workspace transport → resolveProjects → mock).
       const res = await getHttpClient().admin.get(`${base}/models`);
       expect(res.status).to.equal(200);
-      expect(res.body.items).to.be.an('array').that.is.not.empty;
-      // Every model carries the id/key/name the UI renders; assert the shape so a
-      // contract drift (renamed field / error body as 200) fails loudly.
+      expect(res.body.items).to.be.an('array');
+      // If any model comes back, it carries the id/key/name the UI renders;
+      // assert the shape so a contract drift (renamed field / error body as 200)
+      // fails loudly.
       res.body.items.forEach((m) => {
         expect(m).to.include.keys('id', 'key', 'name');
         expect(m.id).to.be.a('string');
@@ -855,6 +862,7 @@ export default function serenityTests(
 
     afterEach(() => {
       delete process.env.SERENITY_DYNAMIC_ALLOCATION;
+      delete process.env.SERENITY_BRAND_AI_CEILING_PROMPTS;
     });
 
     it('tops up the sub-workspace via a live /resources transfer when a metered write needs headroom', async () => {
@@ -880,6 +888,24 @@ export default function serenityTests(
         prompts: [{ text: 'best trail running shoes?', geoTargetId: US_GEO, languageCode: 'en' }],
       });
       expect(post.status).to.equal(200);
+    });
+
+    it('a binding per-brand ceiling (LLMO-6190 gate) rejects a prompt write that would top up past the cap', async () => {
+      // A low prompts ceiling set in the env (Vault, in prod). The market create tops up PROJECTS
+      // only (the ceiling caps prompts, unset for projects) and publishes empty, so it still
+      // succeeds; the later prompt write needs a PROMPTS top-up from the seeded 0, which rounds to
+      // a whole block (100) and exceeds the cap (50) → brandAiLimit (409), over the wire.
+      process.env.SERENITY_BRAND_AI_CEILING_PROMPTS = '50';
+
+      const created = await getHttpClient().admin.post(`${base}/markets`, {
+        market: 'US', languageCode: 'en', brandDomain: 'example.com', brandNames: ['Test Brand'],
+      });
+      expect(created.status).to.equal(201);
+
+      const post = await getHttpClient().admin.post(`${base}/prompts`, {
+        prompts: [{ text: 'capped by the ceiling', geoTargetId: US_GEO, languageCode: 'en' }],
+      });
+      expect(post.status).to.equal(409);
     });
   });
 }

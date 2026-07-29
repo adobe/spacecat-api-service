@@ -706,8 +706,8 @@ describe('AuditPolicyController — E3 listRevisions', () => {
       updated_by: 'b',
       reason: 'r',
       note: null,
-      effective_at: 'e',
-      superseded_at: 's',
+      effective_at: '2026-01-01T00:00:00.000000+00:00',
+      superseded_at: '2026-01-02T00:00:00.000000+00:00',
     }));
     // Real PostgREST client chaining: select/eq/order are synchronous and chainable
     // (returnsThis); only the terminal limit() call resolves { data, error } — see

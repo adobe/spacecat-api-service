@@ -13,7 +13,7 @@
 // @ts-check
 
 import {
-  createResponse, forbidden, internalServerError, noContent, notFound,
+  createResponse, forbidden, internalServerError, noContent, notFound, accepted,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isNonEmptyObject, isValidUUID } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
@@ -29,7 +29,11 @@ import {
   handleCreatePrompts,
   handleUpdatePrompt,
   handleBulkDeletePrompts,
+  validateDeferPublish,
+  BULK_PROMPTS_MAX_ITEMS,
 } from '../support/serenity/handlers/prompts.js';
+import { createAndEnqueueJob } from '../support/serenity/async-job-runner.js';
+import { CLASSIFY_PROMPTS_JOB_TYPE } from '../support/serenity/handlers/classify-prompts-job.js';
 import {
   handleListMarkets,
   handleGetMarket,
@@ -64,8 +68,9 @@ import {
 } from '../support/serenity/handlers/tags.js';
 import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
 import { isSerenityActiveForOrg } from '../support/serenity/serenity-active.js';
-import { isDynamicAllocationEnabled } from '../support/serenity/dynamic-allocation-active.js';
+import { isDynamicAllocationEnabled, resolveBrandAiCeiling } from '../support/serenity/dynamic-allocation-active.js';
 import { MAX_TOPICS_ON_CREATE } from '../support/serenity/brand-provisioning.js';
+import { resolveDefaultModelIds } from '../support/serenity/default-models.js';
 import { marketForGeoTargetId } from '../support/serenity/locations.js';
 import { brandNeedles, classifyBrandedTag } from '../support/serenity/branded-classifier.js';
 import { computeWriteDeadline } from '../support/serenity/intent-classification.js';
@@ -448,6 +453,12 @@ function SerenityController(context, log, env) {
   // handlers front through a no-op guard (byte-for-byte pre-PR behavior).
   const dynamicAllocationEnabled = (ctx) => isDynamicAllocationEnabled(ctx?.env || env);
 
+  // Global per-brand AI ceiling (LLMO-6190 flag-flip gate) — a runaway backstop, the SAME value
+  // for every brand, resolved from Vault off the same per-request env as the kill-switch above.
+  // `undefined` when unset → the guard keeps its non-binding default (byte-for-byte today). Passed
+  // as a plain object alongside `dynamicAllocation` at each guard-building handler call site.
+  const brandAiCeiling = (ctx) => resolveBrandAiCeiling(ctx?.env || env, log);
+
   /** Loads the Brand model instance (for subworkspace-mode write/lifecycle flows). */
   async function loadBrand(ctx, brandUuid) {
     const Brand = ctx?.dataAccess?.Brand;
@@ -520,6 +531,40 @@ function SerenityController(context, log, env) {
       if (auth.error) {
         return auth.error;
       }
+      // serenity-docs#33: CSV import is the ONLY bulk write path that routes to
+      // the async job runner — every other write path (single create, single
+      // edit, UI multi-add) stays synchronous. Routing is by SOURCE, not array
+      // length: `deferPublish` is the exact flag CSV-chunking already sets
+      // (see handleCreatePrompts' docstring) precisely because a UI multi-add
+      // never sets it, so a three-prompt UI add never pays queue+worker+publish
+      // latency. Flat-mode brands only for now — see this PR's report for why
+      // subworkspace-mode CSV import stays on the synchronous path.
+      const body = ctx.data || {};
+      if (auth.mode !== 'subworkspace' && validateDeferPublish(body)) {
+        const prompts = Array.isArray(body.prompts) ? body.prompts : [];
+        if (prompts.length === 0) {
+          return createResponse(
+            { error: 'invalidRequest', message: 'Body must include a non-empty prompts array' },
+            400,
+          );
+        }
+        if (prompts.length > BULK_PROMPTS_MAX_ITEMS) {
+          return createResponse(
+            { error: 'invalidRequest', message: `prompts array exceeds maxItems=${BULK_PROMPTS_MAX_ITEMS}` },
+            400,
+          );
+        }
+        const job = await createAndEnqueueJob(ctx, {
+          jobType: CLASSIFY_PROMPTS_JOB_TYPE,
+          metadata: {
+            mode: 'create',
+            brandId: auth.brandUuid,
+            semrushWorkspaceId: auth.workspaceId,
+            prompts,
+          },
+        });
+        return accepted({ jobId: job.getId(), status: job.getStatus() });
+      }
       const transport = buildTransport(ctx, imsToken);
       const classifyPromptType = await buildPromptTypeClassifier(ctx, auth.brandUuid);
       // serenity-docs#32: one shared write-budget deadline for classify + create
@@ -528,7 +573,7 @@ function SerenityController(context, log, env) {
       const result = auth.mode === 'subworkspace'
         ? await handleCreatePromptsSubworkspace(
           transport,
-          auth.workspaceId,
+          /** @type {string} */ (auth.workspaceId),
           ctx.data || {},
           log,
           classifyPromptType,
@@ -537,18 +582,24 @@ function SerenityController(context, log, env) {
           {
             dynamicAllocation: dynamicAllocationEnabled(ctx),
             parentWorkspaceId: auth.parentWorkspaceId ?? '',
+            ceiling: brandAiCeiling(ctx),
+            // serenity-docs#72 §5: feeds the quota-rejection Slack alert (opt-in via
+            // SERENITY_QUOTA_ALERTS_ENABLED) — never required, a no-op when unset.
+            orgId: ctx?.params?.spaceCatId,
+            brandId: auth.brandUuid,
           },
         )
         : await handleCreatePrompts(
           transport,
           ctx.dataAccess,
           auth.brandUuid,
-          auth.workspaceId,
+          /** @type {string} */ (auth.workspaceId),
           ctx.data || {},
           log,
           classifyPromptType,
           ctx.env,
           writeDeadline,
+          { orgId: ctx?.params?.spaceCatId },
         );
       return createResponse(result, 200);
     } catch (e) {
@@ -610,17 +661,19 @@ function SerenityController(context, log, env) {
       const result = auth.mode === 'subworkspace'
         ? await handleBulkDeletePromptsSubworkspace(
           transport,
-          auth.workspaceId,
+          /** @type {string} */ (auth.workspaceId),
           ctx.data || {},
           log,
+          { orgId: ctx?.params?.spaceCatId, brandId: auth.brandUuid, env: ctx.env || env },
         )
         : await handleBulkDeletePrompts(
           transport,
           ctx.dataAccess,
           auth.brandUuid,
-          auth.workspaceId,
+          /** @type {string} */ (auth.workspaceId),
           ctx.data || {},
           log,
+          { orgId: ctx?.params?.spaceCatId, env: ctx.env || env },
         );
       return createResponse(result, 200);
     } catch (e) {
@@ -746,6 +799,18 @@ function SerenityController(context, log, env) {
         // Optional prompt/topic generation for this market, defaulting to off so
         // the endpoint's behavior is unchanged unless the caller opts in.
         const genMarketTopics = effectiveBody.generatePrompts === true;
+        // LLMO-6554: this brand is already active, so its sub-workspace (and
+        // likely other markets) already exists — mirror whichever models those
+        // markets already track, falling back to the canonical net-new default
+        // only if none of them has any (see resolveDefaultModelIds). Without
+        // this, "Add Market" on an active brand attached zero models and the
+        // subsequent publish 405'd as a disguised empty-units quota rejection.
+        const newMarketModelIds = await resolveDefaultModelIds(
+          transport,
+          /** @type {string} */ (auth.workspaceId),
+          auth.brandUuid,
+          log,
+        );
         result = await handleCreateMarketSubworkspace(
           transport,
           brand,
@@ -755,6 +820,7 @@ function SerenityController(context, log, env) {
           null,
           brandPointerReloader(ctx, auth.brandUuid),
           {
+            modelIds: newMarketModelIds,
             generateTopics: genMarketTopics,
             topicCap: genMarketTopics ? MAX_TOPICS_ON_CREATE : 0,
             brandAliases,
@@ -772,6 +838,14 @@ function SerenityController(context, log, env) {
             // Dynamic-allocation kill-switch. The JIT top-up units pool is the org parent passed
             // positionally above (auth.parentWorkspaceId) — not duplicated in this options bag.
             dynamicAllocation: dynamicAllocationEnabled(ctx),
+            ceiling: brandAiCeiling(ctx),
+            // Sub-workspace titles are bare brand names, so ensureSubworkspace needs the Brand
+            // collection to tell this brand's own interrupted create from a same-named sibling
+            // brand's workspace. Only consulted when this brand has no sub-workspace yet.
+            brandCollection: ctx.dataAccess.Brand,
+            // serenity-docs#72 §5: feeds the quota-rejection Slack alert (opt-in via
+            // SERENITY_QUOTA_ALERTS_ENABLED) — never required, a no-op when unset.
+            orgId: ctx?.params?.spaceCatId,
           },
         );
         // Mirror this market as a SpaceCat Site (+ brand_sites link), once its
@@ -1117,15 +1191,20 @@ function SerenityController(context, log, env) {
           {
             dynamicAllocation: dynamicAllocationEnabled(ctx),
             parentWorkspaceId: auth.parentWorkspaceId ?? '',
+            ceiling: brandAiCeiling(ctx),
+            env: ctx.env || env,
+            orgId: ctx?.params?.spaceCatId,
+            brandId: auth.brandUuid,
           },
         )
         : await handleUpdateModels(
           transport,
           ctx.dataAccess,
           auth.brandUuid,
-          auth.workspaceId,
+          /** @type {string} */ (auth.workspaceId),
           ctx.data || {},
           log,
+          { orgId: ctx?.params?.spaceCatId, env: ctx.env || env },
         );
       return createResponse(result, 200);
     } catch (e) {
@@ -1201,12 +1280,17 @@ function SerenityController(context, log, env) {
           transport,
           brand,
           auth.parentWorkspaceId ?? '',
-          1,
           log,
           {},
           brandPointerReloader(ctx, auth.brandUuid),
           {
-            dynamicAllocation: dynamicAllocationEnabled(ctx),
+            // createReadiness 'skip' (LLMO-6569): pending→active is sub-workspace-only — no project
+            // or prompts are created here — so skip the up-to-30s settle poll. This is the path
+            // where a poll timeout otherwise leaves the brand row present but its sub-workspace
+            // pointer unwritten (the "created upstream, never linked" orphan); persisting the
+            // pointer immediately closes that window. Self-heals on retry, but the user ate a 504.
+            createReadiness: 'skip',
+            brandCollection: ctx?.dataAccess?.Brand,
           },
         );
         let pendingActivateSucceeded = true;
@@ -1269,12 +1353,15 @@ function SerenityController(context, log, env) {
           transport,
           brand,
           auth.parentWorkspaceId ?? '',
-          1,
           log,
           {},
           brandPointerReloader(ctx, auth.brandUuid),
           {
-            dynamicAllocation: dynamicAllocationEnabled(ctx),
+            // createReadiness 'skip' (LLMO-6569): bare reactivation of an already-active brand is
+            // sub-workspace-only (no project/prompts), so skip the settle poll — same safety and
+            // orphan-window rationale as the pending→active branch above.
+            createReadiness: 'skip',
+            brandCollection: ctx?.dataAccess?.Brand,
           },
         );
         let bareSucceeded = true;
@@ -1334,22 +1421,29 @@ function SerenityController(context, log, env) {
         ctx.dataAccess.services.postgrestClient,
       );
 
-      // Ensure the sub-workspace ONCE for the whole batch, sized to the real
-      // market count, then create each market against the resolved workspace.
-      // (Calling ensureSubworkspace per market would re-grant + double-poll N
-      // times — seconds of redundant settling that risks the Lambda timeout —
-      // and size the allocation as if there were a single market.)
+      // Ensure the sub-workspace ONCE for the whole batch, then create each market against the
+      // resolved workspace. (Calling ensureSubworkspace per market would re-poll N times —
+      // seconds of redundant settling that risks the Lambda timeout.)
       const workspaceId = await ensureSubworkspace(
         transport,
         brand,
         auth.parentWorkspaceId ?? '',
-        markets.length,
         log,
         {},
         brandPointerReloader(ctx, auth.brandUuid),
-        {
-          dynamicAllocation: dynamicAllocationEnabled(ctx),
-        },
+        { brandCollection: ctx?.dataAccess?.Brand },
+      );
+      // LLMO-6554: resolved ONCE for the whole batch (same brand, so every market
+      // in this request gets the same default) — mirrors whichever models the
+      // brand's existing markets already track, falling back to the canonical
+      // net-new default set when none do. A per-market `modelIds` in the body
+      // still wins when supplied (see marketModelIds below), preserving the
+      // override for any API-driven caller.
+      const defaultModelIds = await resolveDefaultModelIds(
+        transport,
+        workspaceId,
+        brandUuid,
+        log,
       );
       const results = [];
       for (const m of markets) {
@@ -1364,8 +1458,10 @@ function SerenityController(context, log, env) {
         // AI models (LLMs) the draft staged for this market (or that the activate
         // request supplied). handleCreateMarketSubworkspace reads them from its
         // OPTIONS arg (NOT the body) and attaches them to the project before
-        // publish; omitted/empty → none attached.
-        const marketModelIds = Array.isArray(m.modelIds) ? m.modelIds : [];
+        // publish; omitted/empty → the resolved default (LLMO-6554) applies.
+        const marketModelIds = Array.isArray(m.modelIds) && m.modelIds.length > 0
+          ? m.modelIds
+          : defaultModelIds;
         let r;
         try {
           // eslint-disable-next-line no-await-in-loop
@@ -1402,6 +1498,10 @@ function SerenityController(context, log, env) {
               dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
               // JIT units pool = the org parent passed positionally above; not duplicated here.
               dynamicAllocation: dynamicAllocationEnabled(ctx),
+              ceiling: brandAiCeiling(ctx),
+              // serenity-docs#72 §5: feeds the quota-rejection Slack alert (opt-in via
+              // SERENITY_QUOTA_ALERTS_ENABLED) — never required, a no-op when unset.
+              orgId: ctx?.params?.spaceCatId,
             },
           );
         } catch (e) {
@@ -1576,12 +1676,11 @@ function SerenityController(context, log, env) {
 
   /**
    * POST /serenity/deactivate — decommissions the brand's sub-workspace
-   * (design flow 6): delete every project and lower the allocation to a small non-zero floor,
-   * returning the surplus to the parent pool, then DISCONNECT the brand by clearing its
+   * (design flow 6): delete every project, then DISCONNECT the brand by clearing its
    * semrush_sub_workspace_id pointer. The sub-workspace itself is never deleted — production never
-   * deletes a sub-workspace (upstream deprovisioning is Semrush CS's act) — it is left empty,
-   * unowned, and minimally resourced (LLMO-6189 — a to-zero transfer is a silent gateway no-op, so
-   * lowering to a non-zero floor is the only reliable way to actually reclaim the surplus).
+   * deletes a sub-workspace (upstream deprovisioning is Semrush CS's act) — it is left empty and
+   * unowned. There is no allocation to reclaim: a sub-workspace is created without a `resources`
+   * payload and nothing ever transfers units onto it (see docs/serenity.md).
    * Clearing the pointer flips the brand back to flat mode, so a future
    * activate allocates a fresh sub-workspace. Sets brands.status = 'pending'.
    * No-op decommission (still 200) for a brand with no sub-workspace.

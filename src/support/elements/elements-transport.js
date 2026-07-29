@@ -252,10 +252,26 @@ export function createElementsTransport({
   return {
     /**
      * POST /enterprise/pages/api/v3/workspaces/{workspaceId}/products/ai/elements/{elementId}/data
+     *
+     * @param {string} workspaceId
+     * @param {string} elementId
+     * @param {object} payload
+     * @param {object} [callOpts] - Per-call override of this transport's own
+     *   `timeoutMs`/`maxRetries` defaults — for callers that chain multiple
+     *   sequential `fetchElement` calls and need each one tightened so the
+     *   chain's worst case stays under a hard downstream timeout ceiling (e.g.
+     *   an API Gateway integration timeout) regardless of the transport's
+     *   general-purpose defaults. Omit for the normal single-call case.
+     * @param {number} [callOpts.timeoutMs]
+     * @param {number} [callOpts.maxRetries]
      */
-    async fetchElement(workspaceId, elementId, payload) {
+    async fetchElement(workspaceId, elementId, payload, callOpts = {}) {
       const url = `${root}${ELEMENTS_API_PATH}/${enc(workspaceId)}/products/ai/elements/${enc(elementId)}/data`;
-      return request(url, imsToken, payload, { maxRetries, retryBaseDelayMs });
+      return request(url, imsToken, payload, {
+        maxRetries: callOpts.maxRetries ?? maxRetries,
+        retryBaseDelayMs,
+        timeoutMs: callOpts.timeoutMs,
+      });
     },
   };
 }

@@ -81,8 +81,32 @@ describe('sentiment-overview definitions', () => {
       expect(findProjectFilterVal(buildSentimentOverviewPayload())).to.be.undefined;
     });
 
-    it('pushes a namespaced category tag onto CBF_tags when category is provided', () => {
-      const payload = buildSentimentOverviewPayload({ category: 'travel' });
+    it('ORs multiple projectIds together into a single CBF_project filter', () => {
+      const payload = buildSentimentOverviewPayload({ projectIds: ['proj-a', 'proj-b'] });
+      const projectBlock = payload.filters.advanced.filters.find(
+        (f) => Array.isArray(f.filters) && f.filters.some((inner) => inner.col === 'CBF_project'),
+      );
+      expect(projectBlock).to.deep.equal({
+        op: 'or',
+        filters: [
+          { op: 'eq', val: 'proj-a', col: 'CBF_project' },
+          { op: 'eq', val: 'proj-b', col: 'CBF_project' },
+        ],
+      });
+    });
+
+    it('omits CBF_project when projectIds is an empty array (falls back to projectId)', () => {
+      const payload = buildSentimentOverviewPayload({ projectIds: [] });
+      expect(findProjectFilterVal(payload)).to.be.undefined;
+    });
+
+    it('prefers projectIds over projectId when both are given', () => {
+      const payload = buildSentimentOverviewPayload({ projectId: 'ignored', projectIds: ['proj-a'] });
+      expect(findProjectFilterVal(payload)).to.equal('proj-a');
+    });
+
+    it('pushes the category tag onto CBF_tags as-is when category is provided', () => {
+      const payload = buildSentimentOverviewPayload({ category: 'category__travel' });
       const tagFilter = payload.filters.advanced.filters
         .find((f) => f.col === 'CBF_tags');
       expect(tagFilter).to.deep.include({ op: 'eq', val: 'category__travel', col: 'CBF_tags' });

@@ -17,9 +17,15 @@
  * One-time rightsizing sweep (LLMO-6191, rollout-hardening item 1).
  *
  * JIT top-up (`ensureAiHeadroom`, gated behind SERENITY_DYNAMIC_ALLOCATION) only ever GROWS a
- * sub-workspace's AI resource `total` from the request path. Sub-workspaces carved BEFORE that
- * feature shipped (PR #2764) keep their pre-carve `total`, typically far larger than actual
+ * sub-workspace's AI resource `total` from the request path. Sub-workspaces provisioned while the
+ * lifecycle still carved a flat allocation keep that `total`, typically far larger than actual
  * `used` — the shared parent org pool stays drained for every existing brand until rightsized once.
+ *
+ * SCOPE: this is every child provisioned before the flat carve was removed entirely (issue #2922)
+ * — NOT merely those predating the JIT allocator (PR #2764). SERENITY_DYNAMIC_ALLOCATION was OFF
+ * in every environment for the whole window between the two, so children created after #2764 and
+ * before #2922 carry a flat carve too. Scoping a recovery sweep to pre-#2764 children under-counts.
+ * Nothing carves any more, so the affected set is closed and will not grow.
  * This script does that one-time backfill, using the already-built reclaim primitive
  * `releaseAiSurplus` (src/support/serenity/resource-manager.js) as the reclaim mechanism — no new
  * top-up/release logic lives in this file, only enumeration, rate-limiting, and reporting.
