@@ -1,3 +1,17 @@
+# [1.703.0](https://github.com/adobe/spacecat-api-service/compare/v1.702.0...v1.703.0) (2026-07-29)
+
+
+### Bug Fixes
+
+* **deps:** bump @adobe/spacecat-shared-data-access to 4.15.1 ([#2943](https://github.com/adobe/spacecat-api-service/issues/2943)) ([88466f4](https://github.com/adobe/spacecat-api-service/commit/88466f43c29225dcb6117f6a6ce3ba2bb39708f2)), closes [#2937](https://github.com/adobe/spacecat-api-service/issues/2937) [adobe/spacecat-shared#1850](https://github.com/adobe/spacecat-shared/issues/1850) [spacecat-shared#1851](https://github.com/spacecat-shared/issues/1851)
+* **sites:** map config ValidationError to 400 on PATCH /sites ([#2944](https://github.com/adobe/spacecat-api-service/issues/2944)) ([b5aee3b](https://github.com/adobe/spacecat-api-service/commit/b5aee3bea4a20d020770752b3097d7af96e05e4d)), closes [adobe/spacecat-shared#1852](https://github.com/adobe/spacecat-shared/issues/1852) [2937/#2943](https://github.com/adobe/spacecat-api-service/issues/2943) [spacecat-shared#1852](https://github.com/spacecat-shared/issues/1852)
+
+
+### Features
+
+* **llmo:** log client attribution on brand-presence source fetches ([#2945](https://github.com/adobe/spacecat-api-service/issues/2945)) ([9f239da](https://github.com/adobe/spacecat-api-service/commit/9f239daf10f16af7d77ccc37f76840e3e572bb23))
+* **serenity:** stamp prompt authorship metadata + DTO + sort/order (LLMO-6289) ([#2877](https://github.com/adobe/spacecat-api-service/issues/2877)) ([2d2b9f7](https://github.com/adobe/spacecat-api-service/commit/2d2b9f7d8e0d2da22ff83329f65638e6bd451eb6))
+
 # [1.702.0](https://github.com/adobe/spacecat-api-service/compare/v1.701.1...v1.702.0) (2026-07-29)
 
 
