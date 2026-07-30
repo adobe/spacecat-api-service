@@ -120,6 +120,47 @@ export default function featureFlagsTests(
         );
         expect(res.status).to.equal(400);
       });
+
+      // LLMO-6565. The brand-edit Semrush error allowance is gated on
+      // `LLMO/serenity_ui` (see isSerenityUiActiveForOrg), so that flag name must
+      // actually be storable. `feature_flags` carries
+      // CHECK (flag_name ~ '^[a-z][a-z0-9_]*$') and isValidFeatureFlagName mirrors
+      // it, and NOTHING on the read path validates the name — a hyphenated variant
+      // resolves to `false` forever with no error surfaced anywhere, which is
+      // indistinguishable from "the flag is simply off". Only a write against real
+      // Postgres proves the spelling, which is why this is an IT and not a unit test.
+      it('accepts serenity_ui and rejects the hyphenated serenity-ui (LLMO-6565)', async () => {
+        const { baseUrl, adminToken } = getServerInfo();
+
+        const ok = await putFlag(
+          baseUrl,
+          adminToken,
+          `/organizations/${ORG_1_ID}/feature-flags/llmo/serenity_ui`,
+          { value: true },
+        );
+        expect(ok.status).to.be.oneOf([200, 201]);
+        expect(ok.body.flagName).to.equal('serenity_ui');
+        expect(ok.body.flagValue).to.equal(true);
+
+        // Read it back through the same storage helper isSerenityUiActiveForOrg
+        // uses, so the controller's gate is reading a row that genuinely persisted.
+        const dbValue = await readFeatureFlag({
+          organizationId: ORG_1_ID,
+          product: 'LLMO',
+          flagName: 'serenity_ui',
+          postgrestClient: getPostgrestClient(),
+        });
+        expect(dbValue).to.equal(true);
+
+        // The hyphenated spelling is refused outright — it can never become a row.
+        const hyphenated = await putFlag(
+          baseUrl,
+          adminToken,
+          `/organizations/${ORG_1_ID}/feature-flags/llmo/serenity-ui`,
+          { value: true },
+        );
+        expect(hyphenated.status).to.equal(400);
+      });
     });
 
     // ── GET /organizations/:orgId/feature-flags?product=LLMO ──

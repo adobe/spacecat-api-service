@@ -31,6 +31,8 @@ import {
 import { ORIGIN_VALUE } from '../prompt-tags.js';
 import { resolveIntentValueInjection } from '../tag-tree.js';
 
+/** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
+
 /**
  * Job type dispatched to {@link classifyPromptsHandler} by the runner
  * (`src/serenity-prompt-classification/index.js`).
@@ -127,7 +129,7 @@ async function requeuePending(context, job, semrushWorkspaceId, items) {
  * @param {object} context
  * @param {object} job - the current `AsyncJob` (for the self-requeue's promise
  *   token and depth guard).
- * @param {object} transport - Serenity transport built from the exchanged
+ * @param {SerenityTransport} transport - Serenity transport built from the exchanged
  *   access token.
  * @param {object} metadata - the job's metadata (`brandId`, `semrushWorkspaceId`,
  *   `prompts`).
@@ -137,7 +139,10 @@ async function createAndClassify(context, job, transport, metadata) {
   const {
     dataAccess, env, log,
   } = context;
-  const { brandId, semrushWorkspaceId } = metadata;
+  // Authorship (LLMO-6289): the caller id captured at enqueue time in the create
+  // controller, carried through the async job so classified-on-create prompts are
+  // stamped with the human/service that submitted them, not the job runner.
+  const { brandId, semrushWorkspaceId, callerId = 'unknown' } = metadata;
   const inputs = Array.isArray(metadata.prompts) ? metadata.prompts : [];
 
   const projects = await dataAccess.BrandSemrushProject.allByBrandId(brandId);
@@ -186,6 +191,7 @@ async function createAndClassify(context, job, transport, metadata) {
         semrushWorkspaceId,
         projectId,
         typed,
+        callerId,
       );
       const intentPending = intentByText.get(input.text) === null;
       return {
@@ -273,7 +279,7 @@ async function createAndClassify(context, job, transport, metadata) {
  * @param {object} context
  * @param {object} job - the current `AsyncJob` (for the self-requeue's promise
  *   token and depth guard).
- * @param {object} transport
+ * @param {SerenityTransport} transport
  * @param {object} metadata - `{ semrushWorkspaceId, items: [{ projectId,
  *   promptId, text, tagIds }] }` — `tagIds` is the FULL desired tag set minus
  *   `intent` (caller tags + server type/origin), matching the edit handlers'

@@ -267,6 +267,7 @@ export default function getRouteHandlers(
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics/:topicId/prompts': elementsController.listTopicPrompts,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls': elementsController.listOwnedUrls,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/domain-urls': elementsController.listDomainUrls,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/url-prompts': elementsController.listUrlPrompts,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/market-tracking-trends': elementsController.getMarketTrackingTrends,
     // eslint-disable-next-line max-len
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/stats': elementsController.getStats,
@@ -376,6 +377,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/latest-metrics': sitesController.getLatestSiteMetrics,
     'GET /sites/by-base-url/:baseURL': sitesController.getByBaseURL,
     'GET /sites/by-delivery-type/:deliveryType': sitesController.getAllByDeliveryType,
+    'GET /sites/by-tier/:tier': sitesController.getAllByEnrollmentAndTier,
     'GET /sites/with-latest-audit/:auditType': sitesController.getAllWithLatestAudit,
     'GET /sites/:siteId/opportunities': opportunitiesController.getAllForSite,
     'GET /sites/:siteId/opportunities/top-paid': topPaidOpportunitiesController.getTopPaidOpportunities,

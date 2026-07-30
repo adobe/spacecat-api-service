@@ -19,6 +19,7 @@ import {
   handleListMarkets,
   handleGetMarket,
   handleCreateMarket,
+  defaultMarketName,
   handleDeleteMarket,
   handleListTags,
   handleListModels,
@@ -550,7 +551,31 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     expect(transport.publishProject).to.have.callCount(0);
   });
 
-  it('defaults the upstream display name to "<brandDisplayName>-<6hex>" when omitted', async () => {
+  it('defaults the upstream display name to "<REGION>-<languageCode>" when omitted', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-de', name: 'German' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-x' }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    // Mixed-case market + language: the default name normalizes both, so the
+    // result matches the migration's `{REGION}-{language}` convention exactly.
+    await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'ch',
+      languageCode: 'DE',
+      brandDomain: 'adobe.com',
+      brandNames: ['Adobe'],
+      brandDisplayName: 'Adobe',
+    }, fakeLog());
+
+    const [, body] = transport.createProject.firstCall.args;
+    expect(body.name).to.equal('CH-de');
+  });
+
+  it('honors an explicit name over the market default', async () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
@@ -561,15 +586,37 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     };
 
     await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      name: 'US East',
       market: 'US',
       languageCode: 'en',
       brandDomain: 'adobe.com',
       brandNames: ['Adobe'],
-      brandDisplayName: 'Adobe',
     }, fakeLog());
 
     const [, body] = transport.createProject.firstCall.args;
-    expect(body.name).to.match(/^Adobe-[0-9a-f]{6}$/);
+    expect(body.name).to.equal('US East');
+  });
+});
+
+describe('handlers/markets.js — defaultMarketName', () => {
+  it('formats "<REGION>-<language>", matching the migration convention', () => {
+    expect(defaultMarketName('us', 'en')).to.equal('US-en');
+    expect(defaultMarketName('CH', 'DE')).to.equal('CH-de');
+  });
+
+  it('keeps a regional language subtag so same-language variants stay distinct', () => {
+    expect(defaultMarketName('br', 'pt-br')).to.equal('BR-pt-br');
+  });
+
+  // The name reaches the customer in the Semrush navigation, so a half-formed
+  // `-en` / `US-` must never be produced. Unreachable through either create
+  // handler (both 400 first) — this pins the exported contract for any future
+  // caller that skips that validation.
+  it('throws rather than naming a market from a missing market or language', () => {
+    expect(() => defaultMarketName(null, 'en')).to.throw(ErrorWithStatusCode)
+      .with.property('status', 400);
+    expect(() => defaultMarketName('us', '')).to.throw(ErrorWithStatusCode)
+      .with.property('status', 400);
   });
 });
 
@@ -1435,6 +1482,37 @@ describe('handlers/markets.js — handleUpdateModels', () => {
     expect(transport.deleteAiModelsByIds).not.to.have.been.called;
     expect(result.items).to.have.length(1);
     expect(result.items[0].id).to.equal('cat-gpt');
+  });
+
+  // LLMO-5492 — deferred publish: with { publish: false } the model-set diff is
+  // still applied upstream, but publishProject is NOT called, so finalize can
+  // batch a single populate-then-publish across prompts + models.
+  it('applies the model diff but does NOT publish when { publish: false }', async () => {
+    const project = makeProject({ semrushProjectId: 'proj-1', geoTargetId: 2840, languageCode: 'en' });
+    const da = makeDataAccess([]);
+    da.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = makeTransport({ currentItems: [] });
+    transport.listAiModels.onSecondCall().resolves({
+      items: [{
+        id: 'assign-1',
+        model: {
+          id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null,
+        },
+      }],
+    });
+
+    await handleUpdateModels(
+      transport,
+      da,
+      BRAND,
+      WORKSPACE,
+      { geoTargetId: 2840, languageCode: 'en', modelIds: ['cat-gpt'] },
+      fakeLog(),
+      { publish: false },
+    );
+
+    expect(transport.addAiModel).to.have.been.calledOnceWith(WORKSPACE, 'proj-1', 'cat-gpt');
+    expect(transport.publishProject).to.not.have.been.called;
   });
 
   it('removes models absent from the desired set', async () => {

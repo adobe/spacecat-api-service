@@ -1461,6 +1461,9 @@ describe('SerenityController', () => {
           ceiling: undefined,
           // serenity-docs#72 §5: threaded through for the (opt-in) quota-rejection Slack alert.
           orgId: ORG,
+          // Caller identity for the created_* stamp (LLMO-6289); the test context
+          // has no auth profile, so it resolves to the `unknown` sentinel.
+          callerId: 'unknown',
         });
       // The org parent (JIT units pool) is threaded POSITIONALLY (arg index 2), not in the
       // options bag — the same id given to ensureSubworkspace.
@@ -1646,9 +1649,9 @@ describe('SerenityController', () => {
         data: { prompts: [] },
         env: { SERENITY_BRAND_AI_CEILING_PROMPTS: '5000' },
       }));
-      // options bag is the 8th positional arg (transport, workspaceId, data, log,
-      // classifyPromptType, env, writeDeadline, options).
-      const opts = handlers.handleCreatePromptsSubworkspace.firstCall.args[7];
+      // options bag is the 9th positional arg (transport, workspaceId, data, log,
+      // classifyPromptType, env, writeDeadline, callerId, options).
+      const opts = handlers.handleCreatePromptsSubworkspace.firstCall.args[8];
       expect(opts.ceiling).to.deep.equal({ prompts: 5000 });
     });
 
@@ -1656,7 +1659,7 @@ describe('SerenityController', () => {
       handlers.handleCreatePromptsSubworkspace.resolves({ created: [], skipped: [], failed: [] });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       await controller.createPrompts(fakeContext({ data: { prompts: [] } }));
-      const opts = handlers.handleCreatePromptsSubworkspace.firstCall.args[7];
+      const opts = handlers.handleCreatePromptsSubworkspace.firstCall.args[8];
       expect(opts.ceiling).to.equal(undefined);
     });
 
@@ -1668,7 +1671,7 @@ describe('SerenityController', () => {
         env: { SERENITY_BRAND_AI_CEILING_PROMPTS: 'not-a-number' },
       }));
       expect(response.status).to.equal(200);
-      const opts = handlers.handleCreatePromptsSubworkspace.firstCall.args[7];
+      const opts = handlers.handleCreatePromptsSubworkspace.firstCall.args[8];
       expect(opts.ceiling).to.equal(undefined);
     });
 
@@ -2214,6 +2217,9 @@ describe('SerenityController', () => {
         ceiling: undefined,
         // serenity-docs#72 §5: threaded through for the (opt-in) quota-rejection Slack alert.
         orgId: ORG,
+        // Caller id resolved once for the batch; no auth profile in the test
+        // context → the `unknown` sentinel (LLMO-6289).
+        callerId: 'unknown',
       };
       const { firstCall, secondCall } = handlers.handleCreateMarketSubworkspace;
       // writeDeadline is computed ONCE at activate entry, so every market in the
@@ -2829,7 +2835,9 @@ describe('SerenityController', () => {
         const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
         expect(enqueueArgs.jobType).to.equal('serenity-classify-prompts');
         expect(enqueueArgs.metadata).to.deep.equal({
-          mode: 'create', brandId: BRAND, semrushWorkspaceId: WORKSPACE, prompts,
+          // callerId captured at enqueue time (LLMO-6289) — no auth profile on the
+          // test context, so it resolves to the `unknown` sentinel.
+          mode: 'create', brandId: BRAND, semrushWorkspaceId: WORKSPACE, prompts, callerId: 'unknown',
         });
         // The synchronous path never runs.
         expect(handlers.handleCreatePrompts).to.not.have.been.called;

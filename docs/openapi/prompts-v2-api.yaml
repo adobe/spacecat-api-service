@@ -84,17 +84,22 @@ v2-prompts-by-brand:
       schema:
         type: string
       description: >-
-        Filter by prompt source (exact match), e.g. `gsc`, `semrush`,
-        `base_url`, `config`. Free-form string — sources are open-ended and
-        added by upstream producers (e.g. DRS) without API changes, so no enum
-        is enforced.
+        Filter by prompt source (the producing system), e.g. `gsc`, `semrush`,
+        `base-url`, `config`. Matched on the canonical form, so `citation-attempt`
+        also finds rows stored as `citation_attempt` (drift spellings fold
+        together, case-insensitive). Free-form string — sources are open-ended and
+        added by upstream producers (e.g. DRS) without API changes, so no enum is
+        enforced.
     - name: sort
       in: query
       required: false
       schema:
         type: string
-        enum: [topic, prompt, category, origin, status, updatedAt]
-      description: Sort column. Default is updatedAt descending
+        enum: [topic, prompt, category, origin, source, status, updatedAt]
+      description: >-
+        Sort column. Default is updatedAt descending. `source` sorts on the
+        canonical form, so a producer's drift spellings (`citation_attempt` /
+        `citation-attempt`) order together.
     - name: order
       in: query
       required: false

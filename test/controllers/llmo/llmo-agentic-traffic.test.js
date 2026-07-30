@@ -181,25 +181,26 @@ function makeExportContext(overrides = {}) {
   });
 }
 
-// Resolves with the same shape as the real getSiteAndValidateAccess so that
-// withAgenticTrafficAuth forwards { site, organization } to handlerFn as siteContext.
-const stubbedValidateAccess = sinon.stub().resolves({
-  site: { getOrganizationId: () => 'org-1' },
-  organization: { getId: () => 'org-1' },
-});
+let sandbox;
+let stubbedValidateAccess;
+
+// Fresh sandbox per test, so neither call history nor a per-test behaviour
+// override can reach the next test. `stubbedValidateAccess` resolves with the
+// same shape as the real getSiteAndValidateAccess, so withAgenticTrafficAuth
+// forwards { site, organization } to handlerFn as siteContext.
+function setUpAuthStubs() {
+  sandbox = sinon.createSandbox();
+  stubbedValidateAccess = sandbox.stub().resolves({
+    site: { getOrganizationId: () => 'org-1' },
+    organization: { getId: () => 'org-1' },
+  });
+}
 
 describe('llmo-agentic-traffic', () => {
-  const sandbox = sinon.createSandbox();
+  beforeEach(setUpAuthStubs);
 
   afterEach(() => {
     sandbox.restore();
-    // reset() clears call history AND any per-test behaviour overrides;
-    // then re-apply the default so subsequent tests get the site context.
-    stubbedValidateAccess.reset();
-    stubbedValidateAccess.resolves({
-      site: { getOrganizationId: () => 'org-1' },
-      organization: { getId: () => 'org-1' },
-    });
   });
 
   // ── Shared: PostgREST availability ──────────────────────────────────────────
@@ -2361,9 +2362,12 @@ describe('llmo-agentic-traffic — rotation (demo sites)', () => {
 
   let clock;
   beforeEach(() => {
-    clock = sinon.useFakeTimers({ now: Date.UTC(2026, 6, 6), toFake: ['Date'] });
+    setUpAuthStubs();
+    clock = sandbox.useFakeTimers({ now: Date.UTC(2026, 6, 6), toFake: ['Date'] });
   });
-  afterEach(() => clock.restore());
+  afterEach(() => {
+    sandbox.restore();
+  });
 
   const assertCannedDates = (client) => {
     expect(client.rpc).to.have.been.called;
@@ -2435,7 +2439,7 @@ describe('llmo-agentic-traffic — rotation (demo sites)', () => {
     // now=2026-07-13 (phase 1) ⇒ P0=Jun 15, window Jun 15–Jul 12. The last two slots
     // (j2,j3 = Jun 29–Jul 12) map to frozen weeks {3,0} → 2 non-contiguous segments.
     clock.restore();
-    clock = sinon.useFakeTimers({ now: Date.UTC(2026, 6, 13), toFake: ['Date'] });
+    clock = sandbox.useFakeTimers({ now: Date.UTC(2026, 6, 13), toFake: ['Date'] });
     const client = createMockClient({
       rpc_agentic_traffic_by_region: { data: [{ region: 'US', total_hits: 10 }], error: null },
     });
