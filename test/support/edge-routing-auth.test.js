@@ -238,6 +238,8 @@ describe('edge-routing-auth', () => {
           org, imsOrgId: 'x@AdobeOrg', imsUserToken: 't', siteId: 's1',
         }, log),
       ).to.be.rejectedWith('Site not found');
+      // Distinct warn line so operators can tell this apart from a capability denial.
+      expect(log.warn).to.have.been.calledWithMatch(/Site s1 not found/);
     });
 
     it('rejects when entitlement lookup throws (treated as no tier)', async () => {

@@ -119,6 +119,9 @@ export async function authorizeEdgeCdnRouting(context, {
     if (context.attributes?.facs?.enabled) {
       const site = await context.dataAccess.Site.findById(siteId);
       if (!site) {
+        // Data-integrity condition, not a capability rejection — log distinctly
+        // at warn so operators can tell it apart from a genuine authz denial.
+        log.warn(`[edge-routing-auth] Site ${siteId} not found during FACS capability check`);
         const err = new Error('Site not found');
         err.status = 403;
         throw err;
