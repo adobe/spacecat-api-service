@@ -226,9 +226,18 @@ function dedupeNames(names) {
     });
 }
 
-/** @returns {ProjectCreateBody} */
-function buildCreateProjectBody(body, location, languageId, brandAliases = []) {
-  const name = hasText(body?.name) ? String(body.name) : defaultMarketName(body.brandDisplayName);
+/**
+ * @param {object} body - the validated create body.
+ * @param {{ geoTargetId: number, locationName: string|undefined }} location - resolved market.
+ * @param {string} languageId - upstream language UUID.
+ * @param {string|null} languageCode - the normalized language code, for the default name.
+ * @param {string[]} [brandAliases]
+ * @returns {ProjectCreateBody}
+ */
+function buildCreateProjectBody(body, location, languageId, languageCode, brandAliases = []) {
+  const name = hasText(body?.name)
+    ? String(body.name)
+    : defaultMarketName(body.market, languageCode);
   // A Semrush project's brand is described by a display name plus the full set
   // of names it is known by (`brand_names`). Brand aliases are brand-level, so
   // every project/market in the brand carries them alongside the primary name.
@@ -669,7 +678,7 @@ export async function handleCreateMarketSubworkspace(
     const createResp = await headroom.retryOnQuota(
       () => transport.createProject(
         workspaceId,
-        buildCreateProjectBody(body, location, languageId, aliasNames),
+        buildCreateProjectBody(body, location, languageId, languageCode, aliasNames),
       ),
       { callSite: 'createProject' },
     );
