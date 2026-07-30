@@ -206,10 +206,17 @@ v2-brand-for-org:
         description: Organization or brand not found
       '409':
         description: |
-          Conflict. The PATCH would demote an **active** brand to `pending` via the
-          generic update path (`code: brand_status_demotion_not_allowed`). Use
-          `PATCH /v2/orgs/{spaceCatId}/brands/{brandId}/status` for intentional
-          status transitions.
+          Conflict. One of (disambiguated by the `code` field in the response body):
+          - The PATCH would demote an **active** brand to `pending` via the
+            generic update path (`code: brand_status_demotion_not_allowed`). Use
+            `PATCH /v2/orgs/{spaceCatId}/brands/{brandId}/status` for intentional
+            status transitions.
+          - `expectedUpdatedAt` was supplied and no longer matches the brand's
+            persisted `updatedAt` — another write landed after this client last
+            loaded the brand (`code: brand_stale_write`). Reload the brand and
+            reapply the edit rather than retrying with the same body.
+          - The brand's primary URL is already the primary URL (base site) of
+            another brand in this organization.
         headers:
           X-Error:
             $ref: './headers.yaml#/xError'

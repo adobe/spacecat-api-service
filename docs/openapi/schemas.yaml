@@ -7969,6 +7969,14 @@ V2BrandUpdateInput:
         Deferred Semrush provisioning data. Honored only while the brand is (and
         stays) pending — the draft Markets tab appends a market / edits a
         market's LLMs; silently ignored on a non-pending brand.
+    expectedUpdatedAt:
+      type: string
+      format: date-time
+      description: >-
+        Optimistic concurrency token. Pass the `updatedAt` value from the brand
+        you loaded before editing; if the brand has been modified since then,
+        the request is rejected with a 409 (code `brand_stale_write`) instead
+        of overwriting the newer write. Omit to skip this check.
 
 V2BrandListResponse:
   type: object
