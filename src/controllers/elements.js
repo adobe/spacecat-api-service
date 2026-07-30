@@ -978,9 +978,13 @@ export default function ElementsController(context, log, env) {
    * see url-prompts.js). Pagination is client-side; `totalCount` is the full count.
    *
    * Query params: `url` (required, the cited URL), `startDate`/`endDate` (required,
-   * YYYY-MM-DD), `model`/`platform` (optional, default search-gpt). `siteId` is accepted
-   * but ignored (the sub-workspace authorization already scopes to the brand). Returns the
-   * full prompt list in one `{ prompts }` envelope, matching the PG url-prompts endpoint.
+   * YYYY-MM-DD), `model`/`platform` (optional, default search-gpt), `projectId`
+   * (optional, CSV of Semrush project ids — the market filter; each must be owned by the
+   * brand, and the payload fans out per project, see {@link buildUrlPromptsPayload}) and
+   * `category`/`categoryId` (optional, full `category__<label>` tag → `CBF_tags`). `siteId`
+   * is accepted but ignored (the sub-workspace authorization already scopes to the brand).
+   * Returns the full prompt list in one `{ prompts }` envelope, matching the PG
+   * url-prompts endpoint.
    */
   /* c8 ignore start -- LLMO-6620 POC endpoint; unit tests deferred (see url-prompts.js tests) */
   const listUrlPrompts = async (ctx) => {
