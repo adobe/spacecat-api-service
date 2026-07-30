@@ -5017,6 +5017,97 @@ describe('Sites Controller', () => {
     });
   });
 
+  it('preserves the stored llmo cdnlogsFilter when a non-privileged caller patches config', async () => {
+    const site = sites[0];
+    const existingConfig = Config({
+      llmo: {
+        dataFolder: '/data',
+        brand: 'Test',
+        cdnlogsFilter: [{ key: 'url', value: ['/keep'], type: 'include' }],
+      },
+    });
+    site.getConfig = sandbox.stub().returns(existingConfig);
+    site.setConfig = sandbox.stub();
+    site.save = sandbox.stub().resolves(site);
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+    sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: {
+          llmo: {
+            dataFolder: '/data',
+            brand: 'Test',
+            cdnlogsFilter: [{ key: 'url', value: ['/other'], type: 'exclude' }],
+          },
+        },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(200);
+    const mergedConfig = site.setConfig.firstCall.args[0];
+    // Incoming value is ignored; the stored value remains in place.
+    expect(mergedConfig.llmo.cdnlogsFilter).to.deep.equal([{ key: 'url', value: ['/keep'], type: 'include' }]);
+  });
+
+  it('drops an llmo cdnlogsFilter a non-privileged caller adds when none is stored', async () => {
+    const site = sites[0];
+    const existingConfig = Config({ llmo: { dataFolder: '/data', brand: 'Test' } });
+    site.getConfig = sandbox.stub().returns(existingConfig);
+    site.setConfig = sandbox.stub();
+    site.save = sandbox.stub().resolves(site);
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+    sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: {
+          llmo: {
+            dataFolder: '/data',
+            brand: 'Test',
+            cdnlogsFilter: [{ key: 'url', value: ['/new'], type: 'include' }],
+          },
+        },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(200);
+    const mergedConfig = site.setConfig.firstCall.args[0];
+    expect(mergedConfig.llmo).to.not.have.property('cdnlogsFilter');
+    expect(mergedConfig.llmo.brand).to.equal('Test');
+  });
+
+  it('allows a privileged caller to set the llmo cdnlogsFilter', async () => {
+    const site = sites[0];
+    const existingConfig = Config({ llmo: { dataFolder: '/data', brand: 'Test' } });
+    site.getConfig = sandbox.stub().returns(existingConfig);
+    site.setConfig = sandbox.stub();
+    site.save = sandbox.stub().resolves(site);
+    // defaultAuthAttributes carries an admin JWT, so hasAdminAccess() is true.
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: {
+          llmo: {
+            dataFolder: '/data',
+            brand: 'Test',
+            cdnlogsFilter: [{ key: 'url', value: ['/admin'], type: 'include' }],
+          },
+        },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(200);
+    const mergedConfig = site.setConfig.firstCall.args[0];
+    expect(mergedConfig.llmo.cdnlogsFilter).to.deep.equal([{ key: 'url', value: ['/admin'], type: 'include' }]);
+  });
+
   describe('auditTargetURLs validation', () => {
     it('returns bad request when manual URL hostname does not match site base URL', async () => {
       const site = sites[0];
