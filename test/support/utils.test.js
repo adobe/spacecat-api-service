@@ -35,6 +35,7 @@ import {
   sendAutofixMessage,
   isViewAsTrialRequest,
   getImsUserTokenStrict,
+  resolveCallerImsUserId,
   sendGlobalImportRunMessage,
   triggerGlobalImportRun,
 } from '../../src/support/utils.js';
@@ -1562,6 +1563,39 @@ describe('utils', () => {
       expect(payload.relationshipContext).to.deep.equal({ fixTargetPageId: 'page-123' });
       expect(payload).to.have.property('customData');
       expect(payload.customData).to.deep.equal({ key: 'value' });
+    });
+  });
+
+  describe('resolveCallerImsUserId', () => {
+    const withProfile = (profile) => ({
+      attributes: { authInfo: { getProfile: () => profile } },
+    });
+
+    it('prefers the user_id claim over sub', () => {
+      expect(resolveCallerImsUserId(withProfile({ user_id: 'user-123', sub: 'sub-x' })))
+        .to.equal('user-123');
+    });
+
+    it('falls back to sub — the claim a SpaceCat JWT session token carries', () => {
+      expect(resolveCallerImsUserId(withProfile({ sub: 'sub-x' }))).to.equal('sub-x');
+    });
+
+    it('ignores the email claim, which carries the IMS user id rather than an address', () => {
+      expect(resolveCallerImsUserId(withProfile({ email: 'someone@example.com' }))).to.equal(null);
+    });
+
+    it('returns null for an empty claim', () => {
+      expect(resolveCallerImsUserId(withProfile({ user_id: '', sub: '' }))).to.equal(null);
+    });
+
+    it('returns null when there is no profile, authInfo, or context', () => {
+      expect(resolveCallerImsUserId(withProfile(undefined))).to.equal(null);
+      expect(resolveCallerImsUserId({ attributes: {} })).to.equal(null);
+      expect(resolveCallerImsUserId(undefined)).to.equal(null);
+    });
+
+    it('returns null for a non-string claim', () => {
+      expect(resolveCallerImsUserId(withProfile({ user_id: 12345 }))).to.equal(null);
     });
   });
 

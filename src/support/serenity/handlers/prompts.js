@@ -14,7 +14,7 @@
 
 import { hasText } from '@adobe/spacecat-shared-utils';
 
-import { ErrorWithStatusCode } from '../../utils.js';
+import { ErrorWithStatusCode, resolveCallerImsUserId } from '../../utils.js';
 import { redactUpstreamMessage } from '../rest-transport.js';
 import { ERROR_CODES, isMeteredQuota, isUpstreamGone } from '../errors.js';
 import { alertQuotaRejection, alertRollbackFailure } from '../quota-alerts.js';
@@ -77,9 +77,11 @@ export const CALLER_ID_MAX_LENGTH = 100;
  * from `authInfo.getProfile()` — NEVER from the bearer forwarded upstream, whose
  * principal can differ from the caller after the promise-token exchange.
  *
- * `user_id` is preferred; `sub` is the fallback (both IMS profile claims). A
- * missing/blank identity becomes the literal `unknown` (the spec's NULL-author
- * sentinel, resolved to a display name downstream). Capped at
+ * The id itself comes from {@link resolveCallerImsUserId} — shared with the
+ * `/organizations/{id}/userDetails` read path, so the id stamped here is the id
+ * that path can resolve back to a name. A missing/blank identity becomes the
+ * literal `unknown` (the spec's NULL-author sentinel, resolved to a display name
+ * downstream). Capped at
  * {@link CALLER_ID_MAX_LENGTH} so a pathological claim can never trip the
  * upstream length CHECK (which would 400 the write / roll a batch back).
  *
@@ -95,9 +97,7 @@ export const CALLER_ID_MAX_LENGTH = 100;
  * @returns {string} the caller id, `unknown` when unresolved, ≤100 chars.
  */
 export function resolveCallerId(ctx) {
-  const profile = ctx?.attributes?.authInfo?.getProfile?.();
-  const raw = profile?.user_id ?? profile?.sub;
-  const id = hasText(raw) ? String(raw) : 'unknown';
+  const id = resolveCallerImsUserId(ctx) ?? 'unknown';
   return id.slice(0, CALLER_ID_MAX_LENGTH);
 }
 

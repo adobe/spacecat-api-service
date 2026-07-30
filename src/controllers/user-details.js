@@ -24,6 +24,7 @@ import {
 } from '@adobe/spacecat-shared-utils';
 
 import AccessControlUtil from '../support/access-control-util.js';
+import { resolveCallerImsUserId } from '../support/utils.js';
 
 // IMS GUID format: <hex>@<alphanumeric-with-dots>
 const IMS_USER_ID_RE = /^[A-Za-z0-9]+@[A-Za-z0-9.]+$/;
@@ -57,12 +58,61 @@ function UserDetailsController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
-   * Helper function to fetch user details from IMS if user is admin.
-   * @param {string} externalUserId - The external user ID to fetch from IMS.
+   * Resolves the CALLER'S OWN details from their auth profile, bypassing both the
+   * TrialUser lookup and the admin-gated IMS fallback. The id is resolved with
+   * {@link resolveCallerImsUserId} — the same helper the server-owned authorship
+   * stamp uses to decide what to write — so an id this service stamped is exactly
+   * the id it can resolve back here.
+   *
+   * Without this, a non-admin caller who is not a TrialUser row cannot see their
+   * own name — not even against records they authored themselves, whose
+   * server-stamped `createdBy`/`updatedBy` is exactly this id. They get the
+   * `system` placeholder below, which the UI renders as an unresolved member.
+   * Returning the caller's own claims discloses nothing new: it is the identity
+   * they authenticated with. Other users' details stay admin-gated.
+   *
+   * `profile.email` is deliberately NOT a source for the email field — on both
+   * the JWT and the IMS profile that claim carries the IMS user GUID rather than
+   * an RFC-5322 address (same reason llmo-akamai.js `getCallerEmail` prefers
+   * `trial_email` / `preferred_username`), and a GUID in an email column is worse
+   * than an empty one.
+   *
+   * @param {string} externalUserId - The requested external user ID.
+   * @param {string} organizationId - The organization ID the request addresses.
+   * @returns {Object|null} the caller's own details, or null when the requested
+   *   id is not the caller's own.
+   */
+  const resolveCallerOwnDetails = (externalUserId, organizationId) => {
+    const callerUserId = resolveCallerImsUserId(ctx);
+    if (callerUserId === null || callerUserId !== externalUserId) {
+      return null;
+    }
+
+    const profile = ctx.attributes.authInfo.getProfile();
+    const email = [profile.trial_email, profile.preferred_username].find((v) => hasText(v));
+    return {
+      firstName: profile.first_name || profile.given_name || '-',
+      lastName: profile.last_name || profile.family_name || '-',
+      email: email ?? '',
+      organizationId,
+    };
+  };
+
+  /**
+   * Resolves the details of a user who has no TrialUser row: the caller's own
+   * identity comes from their auth profile, anyone else's from IMS and only for
+   * an admin requestor.
+   * @param {string} externalUserId - The external user ID to resolve.
    * @param {string} organizationId - The organization ID for fallback.
    * @returns {Promise<Object>} User details object.
    */
-  const fetchFromImsIfAdmin = async (externalUserId, organizationId) => {
+  const fetchNonTrialUserDetails = async (externalUserId, organizationId) => {
+    const own = resolveCallerOwnDetails(externalUserId, organizationId);
+    if (own) {
+      log.debug(`Resolved the caller's own details from the auth profile for ${externalUserId}`);
+      return own;
+    }
+
     // Check if requestor has admin access
     if (!accessControlUtil.hasAdminReadAccess()) {
       log.debug(`User is not admin, returning system defaults for ${externalUserId}`);
@@ -135,8 +185,8 @@ function UserDetailsController(ctx) {
           organizationId: trialUser.getOrganizationId(),
         };
       } else {
-        // User not found in trial users - try IMS if admin
-        userDetails = await fetchFromImsIfAdmin(externalUserId, organizationId);
+        // User not found in trial users - own profile, else IMS if admin
+        userDetails = await fetchNonTrialUserDetails(externalUserId, organizationId);
       }
 
       return ok(userDetails);
@@ -194,10 +244,10 @@ function UserDetailsController(ctx) {
             organizationId: trialUser.getOrganizationId(),
           };
         } else {
-          // User not found in trial users - try IMS if admin
+          // User not found in trial users - own profile, else IMS if admin
           imsCallCount += 1;
           // eslint-disable-next-line no-await-in-loop
-          const details = await fetchFromImsIfAdmin(externalUserId, organizationId);
+          const details = await fetchNonTrialUserDetails(externalUserId, organizationId);
           userDetailsMap[externalUserId] = details;
         }
       }
