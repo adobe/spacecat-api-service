@@ -61,3 +61,20 @@ export function resolveElementModel(value) {
   return ELEMENT_MODELS.includes(mapped) ? mapped : DEFAULT_ELEMENT_MODEL;
 }
 /* c8 ignore stop */
+
+/**
+ * Normalizes a `channel`/content-type value for comparison against the Elements
+ * API's `domain_type` (e.g. `Other`, `Social`, `Owned`, `Earned`,
+ * `Benchmark Competitors`). Callers (UI, S2S) send snake_case (`benchmark_competitors`);
+ * Semrush returns Title Case with spaces. Trims, lowercases, and folds `_`/`-`/whitespace
+ * runs into a single space so both sides collapse to the same canonical form
+ * (`"benchmark_competitors"` and `"Benchmark Competitors"` both → `"benchmark competitors"`).
+ *
+ * @param {string} [value] - Raw channel value from a query param or element field.
+ * @returns {string} Canonical lowercase, space-separated form; `''` if not a string.
+ */
+export function normalizeChannel(value) {
+  return typeof value === 'string'
+    ? value.trim().toLowerCase().replace(/[\s_-]+/g, ' ')
+    : '';
+}

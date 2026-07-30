@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { resolveElementModel } from '../constants.js';
+import { resolveElementModel, normalizeChannel } from '../constants.js';
 
 // Legacy default window is a rolling 28 days (see defaultDateRange in
 // llmo-brand-presence.js). Kept inline here so this definition stays pure and does
@@ -185,13 +185,12 @@ function mergeDomainRows(rowsByProject) {
  */
 function paginateDomains(domainsIn, params = {}) {
   const { page, pageSize } = parsePagination(params);
-  const channel = typeof params.channel === 'string' ? params.channel.trim() : '';
+  const wanted = normalizeChannel(params.channel);
 
   let domains = domainsIn;
   // `channel` = content-type filter, applied client-side (element ignores it server-side).
-  if (channel) {
-    const wanted = channel.toLowerCase();
-    domains = domains.filter((d) => d.contentType.toLowerCase() === wanted);
+  if (wanted) {
+    domains = domains.filter((d) => normalizeChannel(d.contentType) === wanted);
   }
 
   domains = [...domains].sort((a, b) => b.totalCitations - a.totalCitations);

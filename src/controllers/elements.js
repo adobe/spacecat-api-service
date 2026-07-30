@@ -1044,6 +1044,10 @@ export default function ElementsController(context, log, env) {
         projects = await service.getOwnedUrlProjects(workspaceId, { brandSemrushProjects });
       }
 
+      // channel is intentionally NOT read/forwarded here — owned-urls always
+      // returns domain_type='Owned' rows by design, regardless of any channel
+      // param a caller sends (unlike cited-domains/domain-urls, which do filter
+      // by channel).
       const allUrls = await service.getOwnedUrls(workspaceId, {
         projects,
         model: query.model || query.platform,

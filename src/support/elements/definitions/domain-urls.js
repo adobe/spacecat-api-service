@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { resolveElementModel } from '../constants.js';
+import { resolveElementModel, normalizeChannel } from '../constants.js';
 
 /* c8 ignore start -- LLMO-6160 POC endpoint; unit tests intentionally deferred */
 
@@ -128,7 +128,7 @@ function parsePagination({ page, pageSize } = {}) {
 export function transformDomainUrlsResponse(projectResults = [], params = {}) {
   const { page, pageSize } = parsePagination(params);
   const hostname = String(params.hostname ?? '').replace(/^www\./, '').toLowerCase();
-  const channel = typeof params.channel === 'string' ? params.channel.trim() : '';
+  const channel = normalizeChannel(params.channel);
   const byUrl = new Map();
 
   for (const { region, stats } of projectResults) {
@@ -177,8 +177,7 @@ export function transformDomainUrlsResponse(projectResults = [], params = {}) {
   // `channel` = content-type filter, applied client-side (element ignores it
   // server-side), mirroring cited-domains + the legacy RPC's `p_channel`.
   if (channel) {
-    const wanted = channel.toLowerCase();
-    urls = urls.filter((u) => u.contentType.toLowerCase() === wanted);
+    urls = urls.filter((u) => normalizeChannel(u.contentType) === channel);
   }
 
   urls.sort((a, b) => b.citations - a.citations);
