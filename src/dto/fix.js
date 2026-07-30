@@ -33,6 +33,7 @@ export const FixDto = {
    *  updatedAt: string
    *  executedBy: string
    *  executedAt: string
+   *  deployedAt: string
    *  publishedAt: string
    *  changeDetails: object
    *  status: string
@@ -48,6 +49,7 @@ export const FixDto = {
       updatedAt: fix.getUpdatedAt(),
       executedBy: fix.getExecutedBy(),
       executedAt: fix.getExecutedAt(),
+      deployedAt: fix.getDeployedAt(),
       publishedAt: fix.getPublishedAt(),
       changeDetails: fix.getChangeDetails(),
       status: fix.getStatus(),
