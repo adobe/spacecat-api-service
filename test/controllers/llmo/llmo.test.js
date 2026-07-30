@@ -5011,7 +5011,7 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(403);
       const responseBody = await result.json();
-      expect(responseBody.message).to.include('Adobe LLM Optimizer Users\' IMS Product Profile access');
+      expect(responseBody.message).to.include('You don\'t have permission to configure CDN routing');
     });
 
     // Note: Slack notification functionality uses postLlmoAlert() from llmo-onboarding.js
@@ -5381,7 +5381,7 @@ describe('LlmoController', () => {
       const controllerNoAdmin = LlmoControllerNoAdmin(ctx);
       const result = await controllerNoAdmin.createOrUpdateEdgeConfig(ctx);
       expect(result.status).to.equal(403);
-      expect((await result.json()).message).to.include("'LLMO Admin' IMS Group members");
+      expect((await result.json()).message).to.include("You don't have permission to configure CDN routing");
     });
 
     it('returns 403 when trial user has no matching IMS org in organization list', async () => {
@@ -5452,7 +5452,7 @@ describe('LlmoController', () => {
       const controllerNoAdmin = LlmoControllerNoAdmin(ctx);
       const result = await controllerNoAdmin.createOrUpdateEdgeConfig(ctx);
       expect(result.status).to.equal(403);
-      expect((await result.json()).message).to.include("'LLMO Admin' IMS Group members");
+      expect((await result.json()).message).to.include("You don't have permission to configure CDN routing");
     });
 
     it('returns 403 when getImsUserOrganizations throws (trial admin path)', async () => {
