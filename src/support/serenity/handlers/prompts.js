@@ -820,7 +820,10 @@ export function makePromptTagInjector(
     // on both means UPDATE — leave the producer alone (fixed at creation). Cache
     // is keyed on (projectId, source) so a mixed-surface batch resolves each
     // producer's tag independently. Stripped by resolved id, never by name.
-    const itemSource = input.source || sourceValue;
+    // `??` not `||` (MysticatBot nit): `normalizePromptInput` yields a valid slug
+    // or `undefined`, so "absent means use the batch default" is exactly the
+    // nullish-coalesce contract.
+    const itemSource = input.source ?? sourceValue;
     if (itemSource) {
       const key = `${projectId} ${itemSource}`;
       let pending = sourceCache.get(key);
