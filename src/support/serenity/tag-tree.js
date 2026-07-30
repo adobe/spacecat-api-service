@@ -264,7 +264,9 @@ export async function ensureDimensionRoots(transport, semrushWorkspaceId, projec
   // missed this project (see the deploy-ordering note above) — surface it rather than
   // orphan the `source` values silently. The re-read is on the rare origin-create path
   // only, never the common all-roots-exist path, so steady state costs nothing.
-  if (createdNames.includes(DIMENSION.ORIGIN)) {
+  // Exception: if `source` was also freshly minted in the same batch, it is the new
+  // producing-system root (WP-S2) — not a legacy authorship root — so no warning.
+  if (createdNames.includes(DIMENSION.ORIGIN) && !createdNames.includes(DIMENSION.SOURCE)) {
     const level = await indexLevelByName(transport, semrushWorkspaceId, projectId, '', log);
     if (level.has(LEGACY_SOURCE_ROOT_NAME)) {
       log?.warn?.(

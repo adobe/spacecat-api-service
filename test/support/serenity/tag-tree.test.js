@@ -515,11 +515,13 @@ describe('serenity tag-tree', () => {
     });
   });
 
-  // A MID-RENAME project (legacy `source` root carrying ai/human, no `origin`):
-  // ensureDimensionRoots adopts `source` as authorship and leaves the producing
-  // `source` key undefined. The server-owned resolve paths must fail LOUD rather
-  // than let an undefined root id degrade into a stranded root-level create.
-  describe('source root distinctness guard (mid-rename, WP-O6-gated)', () => {
+  // A POST-O5-MIGRATION project that the O5 reshape somehow missed: `source` root
+  // still carries the legacy ai/human children, and no `origin` root exists yet.
+  // WP-O6 removed the tolerant adoption — the strict resolver mints a fresh `origin`
+  // and maps the existing `source` as the producing-system root (WP-S2). The
+  // observability guardrail fires to surface the reshape-missed state.
+  describe('ensureDimensionRoots on a reshape-missed project', () => {
+    // Shared levels fixture: legacy `source` (ai/human), no `origin`.
     const midRenameLevels = () => ({
       '': [
         { id: 'root-category', name: 'category', children_count: 0 },
@@ -533,42 +535,25 @@ describe('serenity tag-tree', () => {
       ],
     });
 
-    it('ensureDimensionRoots leaves the producing `source` key undefined', async () => {
-      const transport = {
-        listProjectTags: makeListProjectTagsStub(midRenameLevels()),
-        createProjectTags: sinon.stub(),
-      };
-      const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
-      expect(roots.get('origin')).to.equal('root-source');
-      expect(roots.get('source')).to.equal(undefined);
-    });
-
-    it('ensureServerOwnedValue(source) throws a clear 502 and issues NO root-level create', async () => {
-      const createProjectTags = sinon.stub();
-      const transport = {
-        listProjectTags: makeListProjectTagsStub(midRenameLevels()),
-        createProjectTags,
-      };
-      const err = await ensureServerOwnedValue(transport, WS, PROJECT, 'source', 'config', fakeLog())
-        .then(() => null, (e) => e);
-      expect(err).to.be.an('error');
-      expect(err.status).to.equal(502);
-      expect(err.message).to.match(/source dimension root not provisioned/);
-      expect(createProjectTags).to.not.have.been.called;
-    });
-
-    it('resolveServerOwnedValueInjection(source) — the injector path — throws and creates nothing', async () => {
-      const createProjectTags = sinon.stub();
-      const transport = {
-        listProjectTags: makeListProjectTagsStub(midRenameLevels()),
-        createProjectTags,
-      };
-      const err = await resolveServerOwnedValueInjection(transport, WS, PROJECT, 'source', 'config', fakeLog())
-        .then(() => null, (e) => e);
-      expect(err).to.be.an('error');
-      expect(err.status).to.equal(502);
-      expect(err.message).to.match(/source dimension root not provisioned/);
-      expect(createProjectTags).to.not.have.been.called;
+    it('mints a fresh `origin`, maps legacy `source` as producing-system root, and warns', async () => {
+      // Use a provisioning-style stub so `createProjectTags` echoes back the node
+      // it creates (otherwise `ensureChildren` throws "upstream did not persist").
+      const levels = midRenameLevels();
+      const listProjectTags = makeListProjectTagsStub(levels);
+      const createProjectTags = sinon.stub().callsFake(
+        (_ws, _proj, names, options = {}) => Promise.resolve(
+          names.map((name) => ({ id: `new-${name}`, name, parent_id: options.parentId ?? null })),
+        ),
+      );
+      const log = fakeLog();
+      const transport = { listProjectTags, createProjectTags };
+      const roots = await ensureDimensionRoots(transport, WS, PROJECT, log);
+      // A fresh `origin` root was minted, not the legacy `source` root.
+      expect(roots.get('origin')).to.equal('new-origin');
+      // The existing `source` root is mapped as the producing-system dimension.
+      expect(roots.get('source')).to.equal('root-source');
+      // Guardrail: minting `origin` while `source` was already present triggers the warn.
+      expect(log.warn).to.have.been.calledWithMatch(/reshape may have missed/);
     });
   });
 

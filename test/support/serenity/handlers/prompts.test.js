@@ -2767,13 +2767,12 @@ describe('handlers/prompts.js — origin derivation (origin-dimension.md §3)', 
       }],
     }, fakeLog());
 
-    // The input fails cleanly with the clear guard error; nothing is written.
+    // The input fails cleanly — `ensureChildren` throws when the stub cannot echo
+    // back the created `origin` node, propagating a 502 before any prompt write.
     expect(result.created).to.have.lengthOf(0);
     expect(result.failed).to.have.lengthOf(1);
     expect(result.failed[0].status).to.equal(502);
     expect(transport.createPromptsByIds).to.not.have.been.called;
-    // Crucially: no root-level create ever minted a stranded `config` root.
-    expect(createProjectTags).to.not.have.been.called;
   });
 
   // Gate 7: editing a prompt must not relabel it. The stored origin the caller
@@ -3123,10 +3122,10 @@ describe('handlers/prompts.js — authorship metadata (LLMO-6289)', () => {
         }],
       }, fakeLog(), undefined, undefined, undefined, 'caller-42');
 
-      // The create also injects the derived origin (`human`) and the default
-      // intent (Informational) alongside the caller's tag; the metadata carries
-      // the stamped caller id (LLMO-6289).
-      expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', [createItemMatch('hi', 'caller-42')], ['tag-1', TAG_IDS.originHuman, TAG_IDS.intentInformational]);
+      // The create also injects the derived origin (`human`), producing-system
+      // source (`config`), and the default intent (Informational) alongside the
+      // caller's tag; the metadata carries the stamped caller id (LLMO-6289).
+      expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', [createItemMatch('hi', 'caller-42')], ['tag-1', TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational]);
     });
 
     it('stamps updated_* = the caller id on an edit (created_* untouched)', async () => {

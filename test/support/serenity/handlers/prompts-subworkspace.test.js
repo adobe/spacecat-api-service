@@ -289,9 +289,10 @@ describe('prompts-subworkspace handlers', () => {
           text: 'p', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
         }],
       }, log, undefined, undefined, undefined, 'caller-42');
-      // The create also injects the derived origin + default intent alongside the
-      // caller's tag; the metadata carries the resolved caller id (LLMO-6289).
-      expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(WS, 'p-us-en', [createItemMatch('p', 'caller-42')], ['tag-1', TAG_IDS.originHuman, TAG_IDS.intentInformational]);
+      // The create also injects the derived origin, producing-system source, and
+      // default intent alongside the caller's tag; the metadata carries the resolved
+      // caller id (LLMO-6289).
+      expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(WS, 'p-us-en', [createItemMatch('p', 'caller-42')], ['tag-1', TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational]);
     });
 
     it('dynamic-allocation ON: fronts headroom sized on the batch BEFORE the write, not just before publish (LLMO-6190, live-verified)', async () => {
