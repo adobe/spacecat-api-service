@@ -25,6 +25,7 @@ import {
   deriveProjectName,
   autoResolveAuthorUrl,
   updateCodeConfig,
+  deriveCodeFromHlxConfig,
   getIsSummitPlgEnabled,
   getAsoEntitlement,
   getAsoTier,
@@ -525,6 +526,64 @@ describe('utils', () => {
 
       expect(site.setCode).not.to.have.been.called;
       expect(log.debug).to.have.been.calledWithMatch(/does not match a supported pattern/);
+    });
+  });
+
+  describe('deriveCodeFromHlxConfig', () => {
+    it('derives from hlxConfig.code (owner/repo/type/url) + rso.ref', () => {
+      const code = deriveCodeFromHlxConfig({
+        rso: {
+          ref: 'main', tld: 'aem.live', site: 'externalweb-ibrd', owner: 'wbgextapp',
+        },
+        code: {
+          repo: 'externalweb-ibrd',
+          owner: 'wbgextapp',
+          source: { url: 'https://github.com/wbgextapp/externalweb-ibrd', type: 'github' },
+        },
+      });
+
+      expect(code).to.eql({
+        type: 'github',
+        owner: 'wbgextapp',
+        repo: 'externalweb-ibrd',
+        ref: 'main',
+        url: 'https://github.com/wbgextapp/externalweb-ibrd',
+      });
+    });
+
+    it('falls back to hlxConfig.rso when hlxConfig.code is absent (repo from rso.site)', () => {
+      const code = deriveCodeFromHlxConfig({
+        rso: {
+          ref: 'dev', tld: 'aem.live', site: 'my-repo', owner: 'my-owner',
+        },
+      });
+
+      expect(code).to.eql({
+        type: 'github',
+        owner: 'my-owner',
+        repo: 'my-repo',
+        ref: 'dev',
+        url: 'https://github.com/my-owner/my-repo',
+      });
+    });
+
+    it('defaults ref to main and type to github when rso.ref / code.source.type are missing', () => {
+      const code = deriveCodeFromHlxConfig({
+        code: { owner: 'o', repo: 'r' },
+      });
+
+      expect(code).to.include({ ref: 'main', type: 'github' });
+    });
+
+    it('returns null when owner/repo cannot be resolved', () => {
+      expect(deriveCodeFromHlxConfig({ rso: {}, code: {} })).to.be.null;
+    });
+
+    it('returns null for a non-object / empty hlxConfig', () => {
+      expect(deriveCodeFromHlxConfig(null)).to.be.null;
+      expect(deriveCodeFromHlxConfig(undefined)).to.be.null;
+      expect(deriveCodeFromHlxConfig('nope')).to.be.null;
+      expect(deriveCodeFromHlxConfig({})).to.be.null;
     });
   });
 
