@@ -800,31 +800,37 @@ export async function exchangePromiseToken(context, promiseToken) {
 /**
  * The authenticated caller's own IMS user id, read from their auth profile.
  *
- * `user_id` (raw-IMS profiles) is preferred, `sub` (SpaceCat JWT session token)
- * is the fallback. This is the SINGLE definition of "who is calling" for
- * identity that is written into data and later read back for display:
- * server-owned authorship stamps (`createdBy` / `updatedBy`) resolve the id to
- * write through here, and `/organizations/{id}/userDetails` resolves the caller's
- * own id through here as well. Both sides moving together is what keeps a stamped
- * id resolvable — reading a different claim on either side silently degrades
- * authorship to an unresolved author.
+ * `user_id`, then `sub`, then `email` — three carriers of the SAME value, in
+ * decreasing directness. All three matter, because which ones are populated
+ * depends on the auth handler: a SpaceCat JWT carries the id on `sub` AND
+ * `email` (the auth service deliberately puts the IMS user id, not the real
+ * address, in the `email` claim), while `AdobeImsHandler` deletes `user_id` from
+ * the profile it builds and leaves the id only on `email`. `email` therefore is
+ * NOT a human address here — it is the platform's user-id alias, which is why
+ * the pre-existing writers of `prompts.updated_by` (`brands.js`) and the api-key
+ * surface read it directly (see the ASO-607 rationale in
+ * `support/api-key-ims-handler.js`). For the caller's human address use
+ * `trial_email` / `preferred_username` instead — never this id.
+ *
+ * This is the SINGLE definition of "who is calling" for identity that is written
+ * into data and later read back for display: server-owned authorship stamps
+ * (`createdBy` / `updatedBy`) resolve the id to write through here, and
+ * `/organizations/{id}/userDetails` resolves the caller's own id through here as
+ * well. Both sides moving together is what keeps a stamped id resolvable —
+ * reading a different claim on either side silently degrades authorship to an
+ * unresolved author.
  *
  * NOT the identity to forward upstream (that is a token, see
  * {@link resolveSemrushImsToken}) and NOT an authorization signal — a caller is
  * already authenticated by the time this runs; an unresolvable identity is a
  * display concern, never an access decision.
  *
- * `profile.email` is deliberately not a source: on both the JWT and the IMS
- * profile that claim carries the IMS user id, so it adds nothing here, while on
- * other profile shapes it carries a human address and would put an email address
- * where an opaque id belongs.
- *
  * @param {object} context - The request context.
  * @returns {string|null} The caller's IMS user id, or null when unresolvable.
  */
 export function resolveCallerImsUserId(context) {
   const profile = context?.attributes?.authInfo?.getProfile?.();
-  const raw = profile?.user_id ?? profile?.sub;
+  const raw = profile?.user_id ?? profile?.sub ?? profile?.email;
   return hasText(raw) ? String(raw) : null;
 }
 

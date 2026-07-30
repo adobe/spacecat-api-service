@@ -1580,12 +1580,22 @@ describe('utils', () => {
       expect(resolveCallerImsUserId(withProfile({ sub: 'sub-x' }))).to.equal('sub-x');
     });
 
-    it('ignores the email claim, which carries the IMS user id rather than an address', () => {
-      expect(resolveCallerImsUserId(withProfile({ email: 'someone@example.com' }))).to.equal(null);
+    // The IMS handler deletes user_id from the profile it builds and leaves the
+    // id only on `email`, so this is the sole carrier for an IMS-authenticated
+    // caller — and it is an id, not a human address.
+    it('falls back to the email claim, the platform user-id alias', () => {
+      expect(resolveCallerImsUserId(withProfile({ email: 'ims-user-9@AdobeID' })))
+        .to.equal('ims-user-9@AdobeID');
+    });
+
+    it('prefers sub over email when both are present', () => {
+      expect(resolveCallerImsUserId(withProfile({ sub: 'sub-x', email: 'sub-x' })))
+        .to.equal('sub-x');
     });
 
     it('returns null for an empty claim', () => {
-      expect(resolveCallerImsUserId(withProfile({ user_id: '', sub: '' }))).to.equal(null);
+      expect(resolveCallerImsUserId(withProfile({ user_id: '', sub: '', email: '' })))
+        .to.equal(null);
     });
 
     it('returns null when there is no profile, authInfo, or context', () => {

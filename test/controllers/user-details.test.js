@@ -402,9 +402,8 @@ describe('User Details Controller', () => {
 
       expect(result.status).to.equal(200);
       expect(mockImsClient.getImsAdminProfile).to.not.have.been.called;
-      expect(mockLog.info).to.have.been.calledWith(
-        'Fetched user details from IMS 1 times for organization 123e4567-e89b-12d3-a456-426614174000',
-      );
+      // No IMS call was made, so the IMS-volume log must stay silent.
+      expect(mockLog.info).to.not.have.been.called;
       const body = await result.json();
       expect(body['not-found-user@AdobeOrg']).to.deep.equal({
         firstName: 'system',
@@ -547,6 +546,34 @@ describe('User Details Controller', () => {
       });
     });
 
+    // The IMS-call counter feeds the "Fetched user details from IMS N times" log,
+    // which is the operational signal for IMS volume — a path that never leaves
+    // the process must not inflate it.
+    it('does not count self-resolved or placeholder answers as IMS calls', async () => {
+      mockAccessControlUtil.hasAdminReadAccess.returns(false);
+      const selfController = controllerWithCallerProfile(jwtProfile);
+      context.params = { organizationId };
+      context.data = { userIds: [callerUserId, 'someone-else@AdobeOrg'] };
+
+      await selfController.getUserDetailsInBulk(context);
+
+      expect(mockLog.info).to.not.have.been.called;
+    });
+
+    it('counts only the answers that actually called IMS', async () => {
+      mockAccessControlUtil.hasAdminReadAccess.returns(true);
+      const selfController = controllerWithCallerProfile(jwtProfile);
+      context.params = { organizationId };
+      context.data = { userIds: [callerUserId, 'someone-else@AdobeOrg'] };
+
+      await selfController.getUserDetailsInBulk(context);
+
+      expect(mockImsClient.getImsAdminProfile).to.have.been.calledOnceWith('someone-else@AdobeOrg');
+      expect(mockLog.info).to.have.been.calledWith(
+        `Fetched user details from IMS 1 times for organization ${organizationId}`,
+      );
+    });
+
     it('resolves the caller own id from the user_id claim of an IMS profile', async () => {
       mockAccessControlUtil.hasAdminReadAccess.returns(false);
       const selfController = controllerWithCallerProfile({
@@ -637,7 +664,7 @@ describe('User Details Controller', () => {
 
     it('falls back to the admin IMS lookup when the caller has no resolvable identity', async () => {
       mockAccessControlUtil.hasAdminReadAccess.returns(true);
-      const selfController = controllerWithCallerProfile({ email: 'ignored@example.com' });
+      const selfController = controllerWithCallerProfile({});
       context.params = { organizationId, externalUserId: 'someone-else@AdobeOrg' };
 
       const result = await selfController.getUserDetailsByExternalUserId(context);
