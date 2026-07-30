@@ -73,7 +73,7 @@ describe('topics definitions', () => {
 
     it('accepts the platform alias and translates it', () => {
       const payload = buildTopicsPayload({ platform: 'openai' });
-      expect(payload.filters.advanced.filters[0].val).to.equal('gpt-5');
+      expect(payload.filters.advanced.filters[0].val).to.equal('chatgpt-paid');
     });
 
     it('sets comparison_data_formatting to union', () => {
@@ -81,19 +81,46 @@ describe('topics definitions', () => {
       expect(payload.comparison_data_formatting).to.equal('union');
     });
 
-    it('does not include project_id when projectId is not provided', () => {
+    it('never includes a top-level project_id (this element is scoped via CBF_project instead)', () => {
+      const payload = buildTopicsPayload({ projectId: 'proj-uuid-123', projectIds: ['a', 'b'] });
+      expect(payload).to.not.have.property('project_id');
+    });
+
+    it('does not add a CBF_project filter when no projectId/projectIds is provided', () => {
       const payload = buildTopicsPayload();
-      expect(payload).to.not.have.property('project_id');
+      expect(payload.filters.advanced.filters).to.have.length(1);
     });
 
-    it('includes project_id when projectId is provided', () => {
+    it('adds a single-value CBF_project OR filter when projectId is provided', () => {
       const payload = buildTopicsPayload({ projectId: 'proj-uuid-123' });
-      expect(payload.project_id).to.equal('proj-uuid-123');
+      const projectFilter = payload.filters.advanced.filters[1];
+      expect(projectFilter).to.deep.equal({
+        op: 'or',
+        filters: [{ op: 'eq', val: 'proj-uuid-123', col: 'CBF_project' }],
+      });
     });
 
-    it('does not include project_id when projectId is an empty string', () => {
+    it('does not add a CBF_project filter when projectId is an empty string', () => {
       const payload = buildTopicsPayload({ projectId: '' });
-      expect(payload).to.not.have.property('project_id');
+      expect(payload.filters.advanced.filters).to.have.length(1);
+    });
+
+    it('ORs multiple projectIds together into one CBF_project filter', () => {
+      const payload = buildTopicsPayload({ projectIds: ['proj-a', 'proj-b'] });
+      const projectFilter = payload.filters.advanced.filters[1];
+      expect(projectFilter).to.deep.equal({
+        op: 'or',
+        filters: [
+          { op: 'eq', val: 'proj-a', col: 'CBF_project' },
+          { op: 'eq', val: 'proj-b', col: 'CBF_project' },
+        ],
+      });
+    });
+
+    it('prefers projectIds over projectId when both are given', () => {
+      const payload = buildTopicsPayload({ projectId: 'ignored', projectIds: ['proj-a'] });
+      const projectFilter = payload.filters.advanced.filters[1];
+      expect(projectFilter.filters).to.deep.equal([{ op: 'eq', val: 'proj-a', col: 'CBF_project' }]);
     });
 
     it('uses AND operator in the advanced filter', () => {

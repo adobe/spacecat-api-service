@@ -30,6 +30,7 @@ import {
   isMissingIntentColumnError,
   findPromptsBlockingRegionRemoval,
   getIntentsByPromptIds,
+  deriveV2PromptOrigin,
 } from '../../src/support/prompts-storage.js';
 
 use(chaiAsPromised);
@@ -65,6 +66,36 @@ describe('prompts-storage', () => {
   }
 
   afterEach(() => sandbox.restore());
+
+  describe('deriveV2PromptOrigin (origin-dimension.md §3)', () => {
+    // `origin` is derived from the request PRINCIPAL, never trusted from the body
+    // where a user can reach it. This is the correctness-critical asymmetry: a
+    // user write is always `human`; only a service principal (e.g. DRS) may assert.
+    it('always returns `human` for a USER principal, ignoring the body value', () => {
+      expect(deriveV2PromptOrigin('ai', true)).to.equal('human');
+      expect(deriveV2PromptOrigin('human', true)).to.equal('human');
+      expect(deriveV2PromptOrigin(undefined, true)).to.equal('human');
+      // A user cannot smuggle an out-of-vocabulary value in either — never rejected.
+      expect(deriveV2PromptOrigin('robot', true)).to.equal('human');
+    });
+
+    it('honours a SERVICE principal\'s asserted `ai` — the DRS contract (item 6 guard)', () => {
+      expect(deriveV2PromptOrigin('ai', false)).to.equal('ai');
+    });
+
+    it('honours a SERVICE principal\'s asserted `human`', () => {
+      expect(deriveV2PromptOrigin('human', false)).to.equal('human');
+    });
+
+    it('defaults a SERVICE principal to `human` when the body value is absent', () => {
+      expect(deriveV2PromptOrigin(undefined, false)).to.equal('human');
+    });
+
+    it('defaults a SERVICE principal to `human` when the body value is out-of-vocabulary', () => {
+      expect(deriveV2PromptOrigin('robot', false)).to.equal('human');
+      expect(deriveV2PromptOrigin('', false)).to.equal('human');
+    });
+  });
 
   describe('normalizeIntent', () => {
     it('returns null for absent, empty, or whitespace values', () => {
@@ -407,7 +438,10 @@ describe('prompts-storage', () => {
           or: () => chain,
           contains: () => chain,
           overlaps: () => chain,
-          in: () => chain,
+          in: (column, values) => {
+            eqCalls.push({ column, values });
+            return chain;
+          },
           range: () => thenable(result),
           maybeSingle: () => thenable(result),
           single: () => thenable(result),
@@ -422,7 +456,7 @@ describe('prompts-storage', () => {
       };
     }
 
-    it('applies the source filter as an exact match when source is provided', async () => {
+    it('filters source on the source_canonical generated column', async () => {
       const eqCalls = [];
       await listPrompts({
         organizationId: ORG_ID,
@@ -430,7 +464,24 @@ describe('prompts-storage', () => {
         source: 'gsc',
         postgrestClient: makeEqRecordingClient(eqCalls),
       });
-      expect(eqCalls).to.deep.include({ column: 'source', value: 'gsc' });
+      // Single equality on the DB-canonicalized column — no app-side variant expansion.
+      expect(eqCalls).to.deep.include({ column: 'source_canonical', value: 'gsc' });
+    });
+
+    it('folds the incoming filter value to canonical before matching source_canonical', async () => {
+      const eqCalls = [];
+      await listPrompts({
+        organizationId: ORG_ID,
+        brandId: BRAND_UUID,
+        source: 'CITATION_ATTEMPT',
+        postgrestClient: makeEqRecordingClient(eqCalls),
+      });
+      // The query-param value is folded (trim→lower→`_`→`-`) so it aligns with the
+      // generated column, which already stores the canonical form — one value, and
+      // a request for `citation_attempt`/`CITATION_ATTEMPT` finds `citation-attempt`.
+      expect(eqCalls).to.deep.include({
+        column: 'source_canonical', value: 'citation-attempt',
+      });
     });
 
     it('does not apply a source filter when source is omitted', async () => {
@@ -440,7 +491,7 @@ describe('prompts-storage', () => {
         brandId: BRAND_UUID,
         postgrestClient: makeEqRecordingClient(eqCalls),
       });
-      expect(eqCalls.some((c) => c.column === 'source')).to.equal(false);
+      expect(eqCalls.some((c) => c.column.includes('source'))).to.equal(false);
     });
 
     it('uses explicit limit and page values', async () => {
@@ -899,7 +950,11 @@ describe('prompts-storage', () => {
       expect(result).to.not.be.null;
       expect(result.regions).to.deep.equal([]);
       expect(result.status).to.equal('active');
-      expect(result.origin).to.equal('human');
+      // `origin` is returned verbatim, with no `|| 'human'` fallback
+      // (origin-dimension.md §2.3 / §3 item 4): origin is NOT NULL in production,
+      // and a fallback would silently mislabel a model-written prompt as human.
+      // A row carrying no origin therefore passes through as `undefined`.
+      expect(result.origin).to.be.undefined;
       expect(result.source).to.equal('config');
       expect(result.category).to.be.null;
       expect(result.topic).to.be.null;
@@ -1103,6 +1158,80 @@ describe('prompts-storage', () => {
       expect(insertStub.called).to.equal(false);
       expect(updateStub.firstCall.args[0].source).to.equal('gsc');
       expect(result.prompts[0].source).to.equal('gsc');
+    });
+
+    // origin-dimension.md §3: like `source`, `origin` is immutable on an update —
+    // it is fixed by the writer that created the row. A match-update must preserve
+    // the stored value, so a controller-derived `human` (e.g. a user editing) can
+    // never relabel an existing `ai` prompt.
+    it('preserves the stored origin on an id-match update (never relabels ai -> human)', async () => {
+      const existing = [{
+        id: 'u1', prompt_id: 'p1', text: 'Kept', regions: ['us'], status: 'active', source: 'gsc', origin: 'ai',
+      }];
+      const insertStub = sinon.stub().returns({
+        select: () => thenable({ data: [], error: null }),
+      });
+      const updateStub = sinon.stub().returns({ eq: () => thenable({ error: null }) });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: existing, error: null }),
+                    in: () => thenable({ data: existing, error: null }),
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: updateStub,
+            };
+          }
+          return makeChain({});
+        },
+      };
+      // Incoming matches by prompt_id but carries the derived `human`; the stored
+      // `ai` must NOT be overwritten.
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{
+          id: 'p1', prompt: 'Kept', regions: ['us'], source: 'gsc', origin: 'human',
+        }],
+        postgrestClient: client,
+      });
+      expect(result.updated).to.equal(1);
+      expect(insertStub.called).to.equal(false);
+      expect(updateStub.firstCall.args[0].origin).to.equal('ai');
+      expect(result.prompts[0].origin).to.equal('ai');
+    });
+
+    // New inserts DO carry the (controller-derived) origin the caller passed.
+    it('writes the provided origin on a fresh insert', async () => {
+      const insertStub = sinon.stub().returns({
+        select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }),
+      });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'brand new', regions: ['us'], origin: 'ai' }],
+        postgrestClient: client,
+      });
+      expect(insertStub.firstCall.args[0][0].origin).to.equal('ai');
+      expect(result.prompts[0].origin).to.equal('ai');
     });
 
     it('keeps two new same-text/different-source prompts as separate inserts (dedup by source)', async () => {
@@ -1474,6 +1603,48 @@ describe('prompts-storage', () => {
       expect(result.updated).to.equal(1);
       expect(updateStub.firstCall.args[0].source).to.equal('gsc');
       expect(result.prompts[0].source).to.equal('gsc');
+    });
+
+    it('reactivating a deleted `ai` prompt preserves the stored origin, not the incoming `human` (origin-dimension.md §3 item 3)', async () => {
+      // The reactivation (deleted-match) branch must NOT re-derive origin: a
+      // deleted `ai`-authored row reactivated by a USER-principal write (which
+      // carries the derived `human`) must keep its stored `ai`. Re-deriving would
+      // silently relabel every reactivated model-written prompt as human.
+      const deletedRow = {
+        id: 'row-uuid', prompt_id: 'del-1o', text: 'Reactivate me', regions: ['us'], status: 'deleted', source: 'gsc', origin: 'ai',
+      };
+      const existingData = { data: [deletedRow], error: null };
+      const updateStub = sinon.stub().returns({ eq: () => thenable({ error: null }) });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable(existingData),
+                    in: () => thenable(existingData),
+                  }),
+                }),
+              }),
+              insert: () => ({ select: () => thenable({ data: [], error: null }) }),
+              update: updateStub,
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{
+          id: 'del-1o', prompt: 'Reactivate me', regions: ['us'], source: 'semrush', origin: 'human',
+        }],
+        postgrestClient: client,
+      });
+      expect(result.updated).to.equal(1);
+      expect(updateStub.firstCall.args[0].origin).to.equal('ai');
+      expect(result.prompts[0].origin).to.equal('ai');
     });
 
     it('reactivates a deleted prompt matched by text+regions without inserting', async () => {
@@ -2698,6 +2869,49 @@ describe('prompts-storage', () => {
       expect(result.intent).to.equal('transactional');
     });
 
+    // origin-dimension.md §3 item 3 / §1 item 5: `origin` is never patched on
+    // update — it is fixed by the writer that created the row. A body `origin` is
+    // ignored, so the PATCH sent to the store must NOT carry an `origin` key, and
+    // the stored value (here `ai`) is left untouched.
+    it('never patches origin on update, even when the body carries one', async () => {
+      const row = {
+        prompt_id: PROMPT_ID,
+        name: 'Test',
+        text: 'Text',
+        regions: [],
+        status: 'active',
+        origin: 'ai',
+        brands: { id: BRAND_UUID, name: 'Brand' },
+        categories: null,
+        topics: null,
+      };
+      const updateStub = sinon.stub().returns({
+        eq: () => ({
+          eq: () => ({
+            eq: () => ({
+              select: () => ({ maybeSingle: () => thenable({ data: row, error: null }) }),
+            }),
+          }),
+        }),
+      });
+      const client = {
+        from: () => ({
+          update: updateStub,
+          select: () => makeChain({ data: row, error: null }).select(),
+        }),
+      };
+      const result = await updatePromptById({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        promptId: PROMPT_ID,
+        // A caller tries to relabel an `ai` prompt to `human` on edit.
+        updates: { prompt: 'edited', origin: 'human' },
+        postgrestClient: client,
+      });
+      expect(updateStub.firstCall.args[0]).to.not.have.property('origin');
+      expect(result.origin).to.equal('ai');
+    });
+
     it('sets intent to null on update when value is empty or invalid', async () => {
       const row = {
         prompt_id: PROMPT_ID,
@@ -3131,6 +3345,87 @@ describe('prompts-storage', () => {
         postgrestClient: client,
       });
       expect(result.items[0].source).to.equal('sheet');
+    });
+
+    it('canonicalizes source on read (2nd derivation boundary — agentic_traffic → agentic-traffic)', async () => {
+      const rowWithSource = { ...sampleRow, source: 'agentic_traffic' };
+      const client = {
+        from: (table) => (table === 'brands'
+          ? makeChain({ data: { id: BRAND_UUID }, error: null })
+          : makeChain({ data: [rowWithSource], error: null, count: 1 })),
+      };
+      const result = await listPrompts({
+        organizationId: ORG_ID, brandId: BRAND_UUID, postgrestClient: client,
+      });
+      expect(result.items[0].source).to.equal('agentic-traffic');
+    });
+
+    it('returns the RAW stored value when it fails the canonical guard (grid still shows it)', async () => {
+      const rowWithSource = { ...sampleRow, source: 'has:colon' };
+      const client = {
+        from: (table) => (table === 'brands'
+          ? makeChain({ data: { id: BRAND_UUID }, error: null })
+          : makeChain({ data: [rowWithSource], error: null, count: 1 })),
+      };
+      const result = await listPrompts({
+        organizationId: ORG_ID, brandId: BRAND_UUID, postgrestClient: client,
+      });
+      expect(result.items[0].source).to.equal('has:colon');
+    });
+
+    it('returns the RAW value for the dimension-root shadow `source` (root-name guard — not null, not `config`)', async () => {
+      // `source` is a dimension-root name, so `canonicalizeSource` fails the guard
+      // and `mapRowToPrompt` returns the raw stored value — the grid still shows it,
+      // and it is NOT coerced to `null` or to the `config` proxy-create default.
+      const rowWithSource = { ...sampleRow, source: 'source' };
+      const client = {
+        from: (table) => (table === 'brands'
+          ? makeChain({ data: { id: BRAND_UUID }, error: null })
+          : makeChain({ data: [rowWithSource], error: null, count: 1 })),
+      };
+      const result = await listPrompts({
+        organizationId: ORG_ID, brandId: BRAND_UUID, postgrestClient: client,
+      });
+      expect(result.items[0].source).to.equal('source');
+    });
+
+    it('sorts source on the source_canonical generated column', async () => {
+      const orderCalls = [];
+      const recordingChain = (result) => {
+        const chain = {
+          select: () => chain,
+          eq: () => chain,
+          neq: () => chain,
+          or: () => chain,
+          contains: () => chain,
+          overlaps: () => chain,
+          in: () => chain,
+          order: (column, opts) => {
+            orderCalls.push({ column, opts });
+            return chain;
+          },
+          range: () => thenable(result),
+          maybeSingle: () => thenable(result),
+          single: () => thenable(result),
+          then: (resolve) => resolve(result),
+        };
+        return chain;
+      };
+      const client = {
+        from: (table) => (table === 'brands'
+          ? recordingChain({ data: { id: BRAND_UUID }, error: null })
+          : recordingChain({ data: [], error: null, count: 0 })),
+      };
+      await listPrompts({
+        organizationId: ORG_ID,
+        brandId: BRAND_UUID,
+        sort: 'source',
+        order: 'asc',
+        postgrestClient: client,
+      });
+      expect(orderCalls[0]).to.deep.equal({
+        column: 'source_canonical', opts: { ascending: true },
+      });
     });
   });
 

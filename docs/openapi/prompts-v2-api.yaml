@@ -84,17 +84,22 @@ v2-prompts-by-brand:
       schema:
         type: string
       description: >-
-        Filter by prompt source (exact match), e.g. `gsc`, `semrush`,
-        `base_url`, `config`. Free-form string — sources are open-ended and
-        added by upstream producers (e.g. DRS) without API changes, so no enum
-        is enforced.
+        Filter by prompt source (the producing system), e.g. `gsc`, `semrush`,
+        `base-url`, `config`. Matched on the canonical form, so `citation-attempt`
+        also finds rows stored as `citation_attempt` (drift spellings fold
+        together, case-insensitive). Free-form string — sources are open-ended and
+        added by upstream producers (e.g. DRS) without API changes, so no enum is
+        enforced.
     - name: sort
       in: query
       required: false
       schema:
         type: string
-        enum: [topic, prompt, category, origin, status, updatedAt]
-      description: Sort column. Default is updatedAt descending
+        enum: [topic, prompt, category, origin, source, status, updatedAt]
+      description: >-
+        Sort column. Default is updatedAt descending. `source` sorts on the
+        canonical form, so a producer's drift spellings (`citation_attempt` /
+        `citation-attempt`) order together.
     - name: order
       in: query
       required: false
@@ -254,6 +259,11 @@ v2-prompts-by-brand-and-id:
     tags:
       - customer-config
     summary: Update a single prompt
+    description: >-
+      Updates a single prompt. `origin` is NOT patchable — it is fixed by the
+      writer that created the row and is never re-derived on update
+      (origin-dimension.md §3 item 3); an `origin` in the body is ignored,
+      leaving the stored value untouched.
     operationId: updatePromptByBrandAndId
     security:
       - ims_key: [ ]

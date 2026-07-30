@@ -14,8 +14,10 @@
 
 import { hasText } from '@adobe/spacecat-shared-utils';
 
-import { SerenityTransportError } from './rest-transport.js';
+import { isSemrushTransportError } from './errors.js';
 import { resolveProjects } from './resolve-projects.js';
+
+/** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */
 
 /**
  * Brand-level URLs (the brand's own sites, social accounts, and earned-content
@@ -187,7 +189,7 @@ export function collectBrandUrlEntries(sources, market, primaryDomains) {
  * `null` only when there is no benchmark to reuse AND no usable domain to create
  * one with — callers then skip the URL attach (never a hard failure).
  *
- * @param {object} transport - Semrush transport (lists/creates benchmarks).
+ * @param {SerenityTransport} transport
  * @param {string} workspaceId - the brand's sub-workspace id.
  * @param {string} projectId - the market/project to ensure the benchmark on.
  * @param {object} brand - { name, domain, aliases? } identity of the own brand.
@@ -231,7 +233,7 @@ export async function ensureOwnBrandBenchmark(transport, workspaceId, projectId,
   } catch (e) {
     // 409 = the benchmark already exists (race / duplicate brand name). Fall
     // through to re-list + match rather than failing the URL attach.
-    if (!(e instanceof SerenityTransportError && e.status === 409)) {
+    if (!(isSemrushTransportError(e) && e.status === 409)) {
       throw e;
     }
   }
@@ -251,7 +253,7 @@ export async function ensureOwnBrandBenchmark(transport, workspaceId, projectId,
  * propagates; the upstream silently skips URLs already present, so a re-attach
  * is idempotent.
  *
- * @param {object} transport - Semrush transport (ensures the benchmark, creates URLs).
+ * @param {SerenityTransport} transport
  * @param {string} workspaceId - the brand's sub-workspace id.
  * @param {string} projectId - the market/project to attach the URLs to.
  * @param {Array<{url: string, type: string}>} entries - the brand-URL entries to
@@ -296,11 +298,12 @@ export async function attachBrandUrlsToProject(
 // quota rejection — same convention as the market-create path); any other
 // failure propagates so the edit hard-fails. Shared by the brand-URL and
 // CI-competitor edit re-syncs.
+/** @param {SerenityTransport} transport */
 export async function republishBestEffort(transport, workspaceId, projectId, log) {
   try {
     await transport.publishProject(workspaceId, projectId);
   } catch (e) {
-    if (e instanceof SerenityTransportError && e.status === 405) {
+    if (isSemrushTransportError(e) && e.status === 405) {
       log?.warn?.('brand-urls: republish skipped — quota 405, project left as draft', {
         workspaceId, projectId,
       });
@@ -327,7 +330,7 @@ export function marketOf(project) {
  * Create/delete errors propagate so the edit hard-fails; a quota 405 on the
  * republish alone is tolerated.
  *
- * @param {object} transport - Semrush transport.
+ * @param {SerenityTransport} transport
  * @param {object} sources - the brand's URL sources ({ urls?, socialAccounts?,
  *   earnedContent? }), region-filtered per market by {@link collectBrandUrlEntries}.
  * @param {string} workspaceId - the brand's sub-workspace id.

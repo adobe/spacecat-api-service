@@ -14,6 +14,7 @@ import { expect, use } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
+import esmock from 'esmock';
 import { SerenityTransportError } from '../../../src/support/serenity/rest-transport.js';
 import { ErrorWithStatusCode } from '../../../src/support/utils.js';
 import {
@@ -185,6 +186,89 @@ describe('resource-manager — ensureAiHeadroom', () => {
     expect(e.code).to.equal('orgPoolExhausted');
   });
 
+  describe('serenity-docs#72 §5: hard-exhaustion Slack alerting (case 2/3)', () => {
+    const ENABLED_ENV = {
+      SERENITY_QUOTA_ALERTS_ENABLED: 'true',
+      SERENITY_QUOTA_ALERTS_SLACK_CHANNEL_ID: 'C123',
+      SLACK_BOT_TOKEN: 'xoxb-test',
+    };
+    let alertQuotaRejection;
+    let alertPoolFreeThreshold;
+    let mocked;
+
+    beforeEach(async () => {
+      // esmock does not transitively override two hops deep (resource-manager → quota-alerts →
+      // slack/base) — mock at the ONE-HOP entry (quota-alerts.js's own exports) instead, same
+      // workaround used for PR #2854's toQuotaExceededError coverage.
+      alertQuotaRejection = sinon.stub().resolves();
+      alertPoolFreeThreshold = sinon.stub().resolves();
+      mocked = await esmock('../../../src/support/serenity/resource-manager.js', {
+        '../../../src/support/serenity/quota-alerts.js': {
+          alertQuotaRejection, alertPoolFreeThreshold,
+        },
+      });
+    });
+
+    it('alerts brandAiLimit when the top-up would exceed the per-brand ceiling and env is threaded', async () => {
+      const t = makeTransport({ child: resources(dim(2, 0, 2), dim(0, 0, 100)) });
+      const e = await mocked.ensureAiHeadroom(t, {
+        subWorkspaceId: CHILD,
+        parentWorkspaceId: MASTER,
+        need: { projects: 3 },
+        ceiling: { projects: 3 },
+        poll,
+        env: ENABLED_ENV,
+        orgId: 'org-1',
+        brandId: 'brand-1',
+      }, log).catch((x) => x);
+      expect(e.code).to.equal('brandAiLimit');
+      expect(alertQuotaRejection).to.have.been.calledOnce;
+      const [payload, env] = alertQuotaRejection.firstCall.args;
+      expect(payload.caseType).to.equal('brandAiLimit');
+      expect(payload.orgId).to.equal('org-1');
+      expect(payload.brandId).to.equal('brand-1');
+      expect(env).to.equal(ENABLED_ENV);
+    });
+
+    it('does NOT alert brandAiLimit when env is not threaded (no-op, backward compatible)', async () => {
+      const t = makeTransport({ child: resources(dim(2, 0, 2), dim(0, 0, 100)) });
+      const e = await mocked.ensureAiHeadroom(t, {
+        subWorkspaceId: CHILD,
+        parentWorkspaceId: MASTER,
+        need: { projects: 3 },
+        ceiling: { projects: 3 },
+        poll,
+      }, log).catch((x) => x);
+      expect(e.code).to.equal('brandAiLimit');
+      expect(alertQuotaRejection).to.not.have.been.called;
+    });
+
+    it('alerts orgPoolExhausted on a terminal 422 "insufficient units" when env is threaded', async () => {
+      const t = makeTransport({
+        child: resources(dim(2, 0, 2), dim(0, 0, 0)),
+        master: resources(dim(0, 0, 100), dim(0, 0, 800)),
+        transfer: sinon.stub().rejects(poolFull()),
+      });
+      const e = await mocked.ensureAiHeadroom(t, {
+        subWorkspaceId: CHILD,
+        parentWorkspaceId: MASTER,
+        need: { prompts: 10 },
+        poll,
+        env: ENABLED_ENV,
+        orgId: 'org-1',
+        brandId: 'brand-1',
+      }, log).catch((x) => x);
+      expect(e.code).to.equal('orgPoolExhausted');
+      // alertPoolFreeThreshold is the distinct EARLY-warning advisory alert (fires before the
+      // transfer even runs); assert on the hard-exhaustion alert specifically.
+      expect(alertQuotaRejection).to.have.been.calledOnce;
+      const [payload] = alertQuotaRejection.firstCall.args;
+      expect(payload.caseType).to.equal('orgPoolExhausted');
+      expect(payload.orgId).to.equal('org-1');
+      expect(payload.brandId).to.equal('brand-1');
+    });
+  });
+
   it('FAIL-FAST: a transient "workspace not ready" 422 → immediate 503 workspaceBusy, ONE transfer, NO poll', async () => {
     const transfer = sinon.stub().rejects(notReady());
     const t = makeTransport({
@@ -311,7 +395,10 @@ describe('resource-manager — releaseAiSurplus', () => {
     const t = makeTransport({ child: resources(dim(0, 0, 5), dim(0, 0, 500)) });
     t.getWorkspaceResources.withArgs(CHILD).rejects(new SerenityTransportError(503, 'transport boom'));
     const r = await releaseAiSurplus(t, { subWorkspaceId: CHILD, poll }, { ...log, warn });
-    expect(r).to.deep.equal({ released: false, reason: 'error' });
+    expect(r.released).to.equal(false);
+    expect(r.reason).to.equal('error');
+    expect(r.errorMessage).to.equal('transport boom');
+    expect(r.errorCode).to.equal(undefined); // a bare transport error carries no typed ERROR_CODES
     expect(warn).to.have.been.called;
   });
 
@@ -348,8 +435,11 @@ describe('resource-manager — releaseAiSurplus', () => {
     const transfer = sinon.stub().rejects(notReady());
     const t = makeTransport({ child: resources(dim(1, 0, 5), dim(50, 0, 400)), transfer });
     const r = await releaseAiSurplus(t, { subWorkspaceId: CHILD, poll }, log);
-    // Best-effort: the ErrorWithStatusCode(503) is swallowed and reported as released:false.
-    expect(r).to.deep.equal({ released: false, reason: 'error' });
+    // Best-effort: the ErrorWithStatusCode(503) is swallowed and reported as released:false, with
+    // the typed code surfaced so a batch caller can tell this apart from an unexpected failure.
+    expect(r.released).to.equal(false);
+    expect(r.reason).to.equal('error');
+    expect(r.errorCode).to.equal('workspaceBusy');
     expect(transfer).to.have.callCount(4); // 1 initial + NOT_READY_RETRIES(3)
   });
 
@@ -361,7 +451,9 @@ describe('resource-manager — releaseAiSurplus', () => {
     const transfer = sinon.stub().rejects(poolFull());
     const t = makeTransport({ child: resources(dim(1, 0, 5), dim(50, 0, 400)), transfer });
     const r = await releaseAiSurplus(t, { subWorkspaceId: CHILD, poll }, { ...log, warn });
-    expect(r).to.deep.equal({ released: false, reason: 'error' });
+    expect(r.released).to.equal(false);
+    expect(r.reason).to.equal('error');
+    expect(r.errorCode).to.equal('orgPoolExhausted');
     expect(warn).to.have.been.calledWithMatch('SERENITY_ALLOC org pool exhausted on transfer');
   });
 
@@ -371,7 +463,9 @@ describe('resource-manager — releaseAiSurplus', () => {
     const r = await releaseAiSurplus(t, {
       subWorkspaceId: CHILD, poll: { attempts: 2, intervalMs: 0, sleep: () => Promise.resolve() },
     }, log);
-    expect(r).to.deep.equal({ released: false, reason: 'error' });
+    expect(r.released).to.equal(false);
+    expect(r.reason).to.equal('error');
+    expect(r.errorMessage).to.match(/did not settle/);
   });
 
   it('failFast: lowers total with ONE transfer and NO settle poll (synchronous request-path release)', async () => {
@@ -388,8 +482,39 @@ describe('resource-manager — releaseAiSurplus', () => {
     const transfer = sinon.stub().rejects(notReady());
     const t = makeTransport({ child: resources(dim(1, 0, 5), dim(50, 0, 400)), transfer });
     const r = await releaseAiSurplus(t, { subWorkspaceId: CHILD, failFast: true }, log);
-    expect(r).to.deep.equal({ released: false, reason: 'error' });
+    expect(r.released).to.equal(false);
+    expect(r.reason).to.equal('error');
+    expect(r.errorCode).to.equal('workspaceBusy');
     expect(transfer).to.have.callCount(1); // one attempt, no retry loop
+  });
+
+  describe('dryRun', () => {
+    it('computes the real target and reports it WITHOUT issuing a transfer', async () => {
+      const t = makeTransport({ child: resources(dim(1, 0, 5), dim(50, 0, 400)) });
+      const r = await releaseAiSurplus(t, { subWorkspaceId: CHILD, dryRun: true }, log);
+      expect(r).to.deep.equal({ released: false, reason: 'dry-run', target: { projects: 1, prompts: 100 } });
+      expect(t.transferWorkspaceResources).to.not.have.been.called;
+    });
+
+    it('still reports nothing-to-release when there is no surplus (same math as a live call)', async () => {
+      const t = makeTransport({ child: resources(dim(2, 0, 2), dim(90, 0, 100)) });
+      const r = await releaseAiSurplus(t, { subWorkspaceId: CHILD, dryRun: true }, log);
+      expect(r).to.deep.equal({ released: false, reason: 'nothing-to-release' });
+      expect(t.transferWorkspaceResources).to.not.have.been.called;
+    });
+
+    it('still reports requires-decommission when the target would floor to 0 (same math as a live call)', async () => {
+      const t = makeTransport({ child: resources(dim(0, 0, 1), dim(0, 0, 100)) });
+      const r = await releaseAiSurplus(t, { subWorkspaceId: CHILD, dryRun: true }, log);
+      expect(r).to.deep.equal({ released: false, reason: 'requires-decommission' });
+      expect(t.transferWorkspaceResources).to.not.have.been.called;
+    });
+
+    it('the read (getWorkspaceResources) still happens under dryRun — a preview exercises real auth/scope', async () => {
+      const t = makeTransport({ child: resources(dim(1, 0, 5), dim(50, 0, 400)) });
+      await releaseAiSurplus(t, { subWorkspaceId: CHILD, dryRun: true }, log);
+      expect(t.getWorkspaceResources).to.have.been.calledWith(CHILD);
+    });
   });
 
   it('exports the default blocks', () => {

@@ -20,6 +20,7 @@ export const ELEMENT_IDS = Object.freeze({
   BRANDS: 'b178ce4e-6471-4430-9a32-8228ce72b2e6',
   MARKETS: '478968a7-8851-4daf-83f7-2e8fb6185ddc',
   TOPICS: 'ba3b19c1-22d4-460a-8dc3-1ff05c360852',
+  CONTENT_TYPES: 'd1f9e6ec-9128-4b1b-b767-d86f93f54237',
   // Superseded by a new element with the same semantics but a shape aligned to
   // Mentions/Visibility/Citations (CBF_ws_brand + CBF_model + optional
   // CBF_project OR-list, all wrapped in their own `or` blocks) — see
@@ -56,6 +57,15 @@ export const ELEMENT_IDS = Object.freeze({
   TRENDS_MV: 'b5281393-ee98-4c38-9ed5-3437b0c450c3',
   // Shared UUID: powers both rows 10 and 12 (Citation Trends).
   TRENDS_CITATIONS: 'b81af644-a8db-462b-a001-ecc1eedc0552',
+  // Market Tracking Trends — Citations, the element behind the Brand Presence MFE's
+  // "Citations" tab. Distinct
+  // from TRENDS_CITATIONS (b81af644, the wiki's domain-level citation trend): this one
+  // is a `line` element returning one series per market participant, keyed by
+  // `legend` = brand/competitor NAME. Its primary numeric field is `y__mentions`, but
+  // in this element that value is the CITATION count (not mentions) — Semrush reuses
+  // the generic key. Scoped by `CBF_projects` (plural, unlike TRENDS_MV's `CBF_project`).
+  // Backs the competitor-comparison chart's Citations view (see market-tracking-trends).
+  MARKET_CITATIONS_TREND: '2e5a6f4e-f287-4951-a7e2-7e29981c86d8',
   // Shared UUID: powers rows 13 (daily) and 14 (weekly) Sentiment.
   SENTIMENT: 'f4153af8-6ce9-4058-8872-8a3cf11b9907',
 
@@ -91,4 +101,18 @@ export const ELEMENT_IDS = Object.freeze({
   PROMPT_AI_ANSWERS: '45d6251f-15cd-4b33-a7f6-de97925e900e',
   PROMPT_SOURCES: '7db0df5c-6679-4495-8ea8-ef2dfd7e5251',
   PROMPT_VISIBILITY: 'f5230e00-b14f-4a52-bf89-2952ef7fe39b',
+
+  // KPI Headlines (Overview-SR exact-parity cards, LLMO-6515 follow-up). Verified
+  // live against the Brand Presence MFE — each is a per-brand `kpiLineChart`
+  // element carrying a Semrush-computed `mainValue`/`secondaryValue` period
+  // comparison, distinct from the multi-brand weekly series `TRENDS_MV`/
+  // `MARKET_CITATIONS_TREND` already provide (see kpi-headlines.js).
+  KPI_SHARE_OF_VOICE: '69a4befb-268e-42ff-b949-fdb9609c8f52',
+  KPI_BRAND_VISIBILITY: '6db33cf0-f4bc-4ab9-8bd0-f10ac4623562',
+  // Scoped by CBF_brand_urls (the brand's own URL list from BRAND_URLS below),
+  // NOT CBF_ws_brand — source visibility is domain-cited, not brand-name-mentioned.
+  KPI_SOURCE_VISIBILITY: 'a6e7e811-4274-4f69-a2b3-35c5d639124d',
+  // Filter element: the brand's own URL list (main domain + tracked social
+  // profiles), scoped by CBF_brand. Feeds KPI_SOURCE_VISIBILITY's CBF_brand_urls.
+  BRAND_URLS: 'c8bea9ec-dca4-4121-9353-4189c0edd4b5',
 });

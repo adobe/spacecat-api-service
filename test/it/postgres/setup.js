@@ -174,17 +174,43 @@ export async function setUmMockQuota(workspaceId, dims) {
 }
 
 /**
- * Reads the User Manager mock's full store snapshot (`GET /__dump`) — to assert mock-side state
- * (e.g. a workspace's resource `total` did/didn't change) after a flag-ON request.
+ * Reads one vendor mock's full store snapshot from its `GET /__dump` control route. Each mock is
+ * dumped on its own — unlike reset/readiness, which act on both at once (`MOCK_RESET_PATHS` /
+ * `MOCK_DUMP_PATHS`), a test only ever inspects the mock it wrote through.
+ *
+ * @param {string} mockBase - the mock's API base URL
+ * @param {string} label - short mock name, for the failure message
  * @returns {Promise<any>}
  */
-export async function dumpUmMock() {
-  const res = await fetch(`${UM_MOCK_BASE}/__dump`);
+async function dumpMock(mockBase, label) {
+  const res = await fetch(`${mockBase}/__dump`);
   if (!res.ok) {
-    throw new Error(`UM mock __dump failed (${res.status})`);
+    throw new Error(`${label} mock __dump failed (${res.status})`);
   }
   return res.json();
 }
+
+/**
+ * Reads the User Manager mock's full store snapshot — to assert mock-side state (e.g. a
+ * workspace's resource `total` did/didn't change) after a flag-ON request.
+ * @returns {Promise<any>}
+ */
+export const dumpUmMock = () => dumpMock(UM_MOCK_BASE, 'UM');
+
+/**
+ * Reads the Project Engine mock's full store snapshot — the store as the vendor actually holds it,
+ * keyed by collection (`prompts:{workspaceId}:{projectId}`, `tags:...`, ...).
+ *
+ * This is the ONLY way to assert what a write actually PERSISTED upstream, independently of what
+ * the service's own read path chooses to ask for: the `by_tags` list gates `metadata` behind an
+ * `include_metadata=true` query param, so a consumer that does not opt in reads back no metadata
+ * at all even for a fully stamped prompt. Asserting authorship stamping through the list read
+ * would therefore conflate "the write did not stamp" with "the read did not ask" — the dump
+ * separates them.
+ *
+ * @returns {Promise<any>}
+ */
+export const dumpPeMock = () => dumpMock(PE_MOCK_BASE, 'PE');
 
 /**
  * Creates the MinIO bucket used by IT tests if it does not already exist.

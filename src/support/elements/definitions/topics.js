@@ -20,19 +20,28 @@ import { resolveElementModel } from '../constants.js';
  * @param {string} [params.model] - AI model (Semrush engine name or SpaceCat/UI platform code).
  *   Translated to a Semrush model + validated via {@link resolveElementModel} (default search-gpt).
  * @param {string} [params.platform] - Legacy alias for `model`; `model` takes precedence.
- * @param {string} [params.projectId] - Semrush project UUID to scope tags to a specific market.
+ * @param {string} [params.projectId] - Single Semrush project UUID to scope tags to a
+ *   specific market (as a `CBF_project` filter, NOT top-level `project_id`).
+ * @param {string[]} [params.projectIds] - Multiple Semrush project UUIDs to OR together
+ *   (`CBF_project`); takes precedence over `projectId` when both are given.
  */
-export function buildTopicsPayload({ model, platform, projectId } = {}) {
+export function buildTopicsPayload({
+  model, platform, projectId, projectIds,
+} = {}) {
   const resolvedModel = resolveElementModel(model || platform);
+  const filters = [{ op: 'eq', val: resolvedModel, col: 'CBF_model' }];
+  const ids = Array.isArray(projectIds) && projectIds.length > 0
+    ? projectIds
+    : [projectId].filter(Boolean);
+  if (ids.length > 0) {
+    filters.push({
+      op: 'or',
+      filters: ids.map((id) => ({ op: 'eq', val: id, col: 'CBF_project' })),
+    });
+  }
   return {
-    ...(projectId && { project_id: projectId }),
     comparison_data_formatting: 'union',
-    filters: {
-      advanced: {
-        op: 'and',
-        filters: [{ op: 'eq', val: resolvedModel, col: 'CBF_model' }],
-      },
-    },
+    filters: { advanced: { op: 'and', filters } },
   };
 }
 

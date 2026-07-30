@@ -1,0 +1,342 @@
+# Audit Policy CRUD + scope reconciliation stubs.
+# `audit-policy` / `audit-policy-revisions` are fully implemented (SITES-47301
+# write-seam + SITES-47306 contract). The `audit-scope-*` paths are 501 stubs
+# pending B4 (SITES-46351, page list) and B7 (SITES-47089, reconciliation
+# counts + section aggregation).
+
+audit-policy:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - site
+      - audit policy
+    summary: Get the current audit policy for a site (synthetic version 0 default when unset)
+    operationId: getAuditPolicy
+    responses:
+      '200':
+        description: Current audit policy
+        content:
+          application/json:
+            schema:
+              $ref: '#/AuditPolicy'
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '404': { $ref: './responses.yaml#/404-site-not-found-with-id' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+audit-policy-exclusions:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
+    tags:
+      - site
+      - audit policy
+    summary: Add one or more exclusion globs (set-union; already-present values are a no-op)
+    operationId: addAuditPolicyExclusions
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/AuditPolicyMutateRequest'
+    responses:
+      '200':
+        description: Updated audit policy
+        content:
+          application/json:
+            schema:
+              $ref: '#/AuditPolicy'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '404': { $ref: './responses.yaml#/404-site-not-found-with-id' }
+      '409':
+        description: Version conflict after exhausting internal retries
+        content:
+          application/json:
+            schema:
+              $ref: '#/AuditPolicyConflict'
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+
+audit-policy-exclusions-delete:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
+    tags:
+      - site
+      - audit policy
+    summary: >-
+      Remove one or more exclusion globs (set-difference; absent values are a no-op). POST, not
+      DELETE with a body — this repo's body-parsing middleware does not parse DELETE bodies
+      (ADR-001).
+    operationId: removeAuditPolicyExclusions
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/AuditPolicyMutateRequest'
+    responses:
+      '200':
+        description: Updated audit policy
+        content:
+          application/json:
+            schema:
+              $ref: '#/AuditPolicy'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '404': { $ref: './responses.yaml#/404-site-not-found-with-id' }
+      '409':
+        description: Version conflict after exhausting internal retries
+        content:
+          application/json:
+            schema:
+              $ref: '#/AuditPolicyConflict'
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+
+audit-policy-inclusions:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
+    tags:
+      - site
+      - audit policy
+    summary: Add one or more manually-declared URLs (set-union; already-present values are a no-op)
+    operationId: addAuditPolicyInclusions
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/AuditPolicyMutateRequest'
+    responses:
+      '200':
+        description: Updated audit policy
+        content:
+          application/json:
+            schema:
+              $ref: '#/AuditPolicy'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '404': { $ref: './responses.yaml#/404-site-not-found-with-id' }
+      '409':
+        description: Version conflict after exhausting internal retries
+        content:
+          application/json:
+            schema:
+              $ref: '#/AuditPolicyConflict'
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+
+audit-policy-inclusions-delete:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
+    tags:
+      - site
+      - audit policy
+    summary: >-
+      Remove one or more manually-declared URLs (set-difference; absent values are a no-op). POST,
+      not DELETE with a body (ADR-001).
+    operationId: removeAuditPolicyInclusions
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/AuditPolicyMutateRequest'
+    responses:
+      '200':
+        description: Updated audit policy
+        content:
+          application/json:
+            schema:
+              $ref: '#/AuditPolicy'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '404': { $ref: './responses.yaml#/404-site-not-found-with-id' }
+      '409':
+        description: Version conflict after exhausting internal retries
+        content:
+          application/json:
+            schema:
+              $ref: '#/AuditPolicyConflict'
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+
+audit-policy-revisions:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: limit
+      in: query
+      required: false
+      description: Maximum number of revisions to return. Default 50, clamped to a maximum of 200.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    - name: cursor
+      in: query
+      required: false
+      description: >-
+        Opaque pagination cursor from a previous response's `cursor` field. Omit to fetch the
+        first page. Cursors encode a revision version number and are not valid indefinitely across
+        a very long revision history.
+      schema:
+        type: string
+  get:
+    tags:
+      - site
+      - audit policy
+    summary: List audit policy revisions, newest-first, cursor-paginated
+    operationId: listAuditPolicyRevisions
+    responses:
+      '200':
+        description: Revision history
+        content:
+          application/json:
+            schema:
+              $ref: '#/AuditPolicyRevisionList'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '404': { $ref: './responses.yaml#/404-site-not-found-with-id' }
+      '500': { $ref: './responses.yaml#/500' }
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+
+audit-scope-pages:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - site
+      - audit policy
+    summary: |
+      Not implemented yet. In-scope page list (B4 / SITES-46351).
+    operationId: getAuditScopePages
+    responses:
+      '501':
+        description: Not implemented yet.
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+
+audit-scope-summary:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - site
+      - audit policy
+    summary: |
+      Not implemented yet. R8 reconciliation counts (B7 / SITES-47089).
+    operationId: getAuditScopeSummary
+    responses:
+      '501':
+        description: Not implemented yet.
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+
+audit-scope-sections:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - site
+      - audit policy
+    summary: |
+      Not implemented yet. R14 section aggregation (B7 / SITES-47089).
+    operationId: getAuditScopeSections
+    responses:
+      '501':
+        description: Not implemented yet.
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+
+# ─────────────────────────────── schemas ──────────────────────────────
+
+AuditPolicy:
+  type: object
+  properties:
+    siteId: { type: string, format: uuid }
+    version: { type: integer }
+    budget: { type: integer, minimum: 1, maximum: 500000 }
+    strategyName: { type: string, enum: [tiered] }
+    exclusionGlobs: { type: array, items: { type: string, maxLength: 2048 }, maxItems: 200 }
+    manualUrls: { type: array, items: { type: string, maxLength: 2048 }, maxItems: 2000 }
+    scopeConfig: { type: object }
+    lifecycleOverrides: { type: object }
+    createdBy: { type: [string, 'null'] }
+    updatedBy: { type: [string, 'null'] }
+    reason: { type: [string, 'null'] }
+    note: { type: [string, 'null'] }
+    createdAt: { type: [string, 'null'], format: date-time }
+    updatedAt: { type: [string, 'null'], format: date-time }
+
+AuditPolicyMutateRequest:
+  type: object
+  required: [values, reason]
+  properties:
+    values:
+      type: array
+      minItems: 1
+      items: { type: string, maxLength: 2048 }
+      description: >-
+        Exclusion globs or manually-declared URLs to add or remove, one call may carry many.
+        The maximum array length is resource-dependent and enforced server-side (not
+        expressible as a single `maxItems` here, since this schema is shared by both
+        resources): up to 200 entries per request against the `exclusions`/`exclusions/delete`
+        endpoints, and up to 2000 against the `inclusions`/`inclusions/delete` endpoints,
+        matching the `exclusionGlobs`/`manualUrls` caps on the `AuditPolicy` resource itself.
+        A request exceeding the applicable cap returns `400`.
+    reason: { type: string, minLength: 1, maxLength: 2000 }
+    note: { type: [string, 'null'], maxLength: 2000 }
+
+AuditPolicyConflict:
+  type: object
+  properties:
+    message: { type: string }
+    currentVersion: { type: integer }
+
+AuditPolicyRevision:
+  type: object
+  properties:
+    version: { type: integer }
+    budget: { type: integer }
+    strategyName: { type: string, enum: [tiered] }
+    exclusionGlobs: { type: array, items: { type: string } }
+    manualUrls: { type: array, items: { type: string } }
+    scopeConfig: { type: object }
+    lifecycleOverrides: { type: object }
+    updatedBy: { type: [string, 'null'] }
+    reason: { type: [string, 'null'] }
+    note: { type: [string, 'null'] }
+    effectiveAt: { type: [string, 'null'], format: date-time }
+    supersededAt: { type: [string, 'null'], format: date-time }
+
+AuditPolicyRevisionList:
+  type: object
+  properties:
+    items: { type: array, items: { $ref: '#/AuditPolicyRevision' } }
+    cursor: { type: string }

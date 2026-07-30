@@ -199,6 +199,7 @@ sites:
           type: integer
           minimum: 0
           example: 0
+      - $ref: './parameters.yaml#/fields'
     responses:
       '200':
         description: |
@@ -244,6 +245,7 @@ sites:
 sites-by-delivery-type:
   parameters:
     - $ref: './parameters.yaml#/deliveryType'
+    - $ref: './parameters.yaml#/fields'
   get:
     tags:
       - site
@@ -266,9 +268,42 @@ sites-by-delivery-type:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
+sites-by-tier:
+  parameters:
+    - $ref: './parameters.yaml#/tier'
+    - $ref: './parameters.yaml#/productCodeQuery'
+  get:
+    tags:
+      - site
+    summary: Retrieve all sites enrolled at a given entitlement tier
+    description: |
+      Returns sites whose organization has an entitlement at the requested tier
+      (PAID, FREE_TRIAL, or PLG) and that are enrolled into that entitlement.
+      Optionally restrict to a single product via the `productCode` query
+      parameter (e.g. LLMO). Results are ordered by site ID. Not paginated -
+      admin-only, bounded use case. Admin-only.
+    operationId: getSitesByEnrollmentAndTier
+    responses:
+      '200':
+        description: A list of sites
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SiteEnrollmentList'
+      '400':
+        $ref: './responses.yaml#/400-no-tier'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
 sites-with-latest-audit:
   parameters:
     - $ref: './parameters.yaml#/auditType'
+    - $ref: './parameters.yaml#/fields'
   get:
     tags:
       - site
@@ -296,6 +331,7 @@ sites-with-latest-audit:
 sites-for-organization:
   parameters:
     - $ref: './parameters.yaml#/organizationId'
+    - $ref: './parameters.yaml#/fields'
   get:
     tags:
       - organization
@@ -432,6 +468,12 @@ sites-resolve:
                     isSummitPlgEnabled:
                       type: boolean
                       description: Whether the summit-plg audit is enabled for the resolved site
+                    asoTier:
+                      type: ['string', 'null']
+                      description: >-
+                        The resolved site's organization's ASO entitlement tier
+                        (FREE_TRIAL, PAID, PLG, PRE_ONBOARD), or null if no ASO
+                        entitlement exists.
               example:
                 data:
                   organization:
@@ -446,6 +488,7 @@ sites-resolve:
                     deliveryType: 'aem_edge'
                     isLive: true
                   isSummitPlgEnabled: true
+                  asoTier: 'PAID'
       '400':
         description: Bad request - missing required parameters or invalid input
         headers:
@@ -489,6 +532,10 @@ sites-resolve:
 
           Generic 404s (e.g. site / org not found) omit `resolveStatus` and
           `details`.
+
+          `asoTier` is always present, on every 404 (as on 200s) — it reflects
+          the org's raw ASO entitlement tier (or `null` if none exists) so the
+          UI can gate behavior off it even when resolution itself failed.
         headers:
           X-Error:
             $ref: './headers.yaml#/xError'
@@ -523,6 +570,12 @@ sites-resolve:
                       $ref: './schemas.yaml#/Id'
                     organizationId:
                       $ref: './schemas.yaml#/Id'
+                asoTier:
+                  type: ['string', 'null']
+                  description: >-
+                    The org's ASO entitlement tier (FREE_TRIAL, PAID, PLG,
+                    PRE_ONBOARD), or null if no ASO entitlement exists.
+                    Always present, regardless of resolveStatus.
             examples:
               no-entitlement-for-product:
                 summary: Org has no entitlement for the resolved product
@@ -533,6 +586,7 @@ sites-resolve:
                     productCode: 'ASO'
                     siteId: '0b4dcf79-fe5f-410b-b11f-641f0bf56da3'
                     organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28'
+                  asoTier: null
               aso-pre-onboard:
                 summary: Entitlement tier is not in CUSTOMER_VISIBLE_TIERS
                 value:
@@ -542,6 +596,7 @@ sites-resolve:
                     productCode: 'ASO'
                     siteId: '0b4dcf79-fe5f-410b-b11f-641f0bf56da3'
                     organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28'
+                  asoTier: 'PRE_ONBOARD'
               site-not-enrolled:
                 summary: Visible entitlement but site has no enrollment
                 value:
@@ -551,10 +606,12 @@ sites-resolve:
                     productCode: 'ASO'
                     siteId: '0b4dcf79-fe5f-410b-b11f-641f0bf56da3'
                     organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28'
+                  asoTier: 'PAID'
               generic-not-found:
                 summary: Generic 404 (no resolveStatus discriminator)
                 value:
                   message: 'No site found for the provided parameters'
+                  asoTier: null
       '500':
         description: Internal server error
         headers:

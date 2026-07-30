@@ -175,3 +175,80 @@ describe('isSerenityActiveForOrg', () => {
     });
   });
 });
+
+describe('isSerenityUiActiveForOrg', () => {
+  let readFeatureFlagStub;
+  let isSerenityActiveForOrg;
+  let isSerenityUiActiveForOrg;
+  let clearSerenityFlagCache;
+  let SERENITY_UI_FEATURE_FLAG_NAME;
+
+  beforeEach(async () => {
+    readFeatureFlagStub = sinon.stub();
+    const mod = await esmock('../../../src/support/serenity/serenity-active.js', {
+      '../../../src/support/feature-flags-storage.js': {
+        readFeatureFlag: readFeatureFlagStub,
+      },
+    });
+    ({
+      isSerenityActiveForOrg,
+      isSerenityUiActiveForOrg,
+      clearSerenityFlagCache,
+      SERENITY_UI_FEATURE_FLAG_NAME,
+    } = mod);
+    clearSerenityFlagCache();
+  });
+
+  afterEach(() => sinon.restore());
+
+  it('exposes the org-wide LLMO/serenity_ui flag identity', () => {
+    expect(SERENITY_UI_FEATURE_FLAG_NAME).to.equal('serenity_ui');
+  });
+
+  it('returns true when the flag is true and reads it with the right key', async () => {
+    readFeatureFlagStub.resolves(true);
+    expect(await isSerenityUiActiveForOrg(fakeCtx(), ORG, fakeLog())).to.equal(true);
+    expect(readFeatureFlagStub.firstCall.args[0]).to.include({
+      organizationId: ORG,
+      product: 'LLMO',
+      flagName: 'serenity_ui',
+    });
+  });
+
+  it('defaults OFF for an absent row, a false row, a blank org and a read error', async () => {
+    const log = fakeLog();
+    readFeatureFlagStub.resolves(null);
+    expect(await isSerenityUiActiveForOrg(fakeCtx(), ORG, log)).to.equal(false);
+    clearSerenityFlagCache();
+    readFeatureFlagStub.resolves(false);
+    expect(await isSerenityUiActiveForOrg(fakeCtx(), ORG, log)).to.equal(false);
+    expect(await isSerenityUiActiveForOrg(fakeCtx(), '', log)).to.equal(false);
+    clearSerenityFlagCache();
+    readFeatureFlagStub.rejects(new Error('boom'));
+    expect(await isSerenityUiActiveForOrg(fakeCtx(), ORG, log)).to.equal(false);
+  });
+
+  it('returns false and warns when the PostgREST client is unavailable', async () => {
+    const log = fakeLog();
+    expect(await isSerenityUiActiveForOrg({ dataAccess: { services: {} } }, ORG, log))
+      .to.equal(false);
+    expect(readFeatureFlagStub).to.not.have.been.called;
+    expect(log.warn).to.have.been.calledOnce;
+  });
+
+  it('caches per flag, so one flag never reads the other cached value', async () => {
+    // Same org, different flag: the composite cache key must keep them apart —
+    // otherwise an org that is serenity-active would read as serenity_ui too.
+    readFeatureFlagStub.withArgs(sinon.match({ flagName: 'serenity' })).resolves(true);
+    readFeatureFlagStub.withArgs(sinon.match({ flagName: 'serenity_ui' })).resolves(false);
+
+    expect(await isSerenityActiveForOrg(fakeCtx(), ORG, fakeLog())).to.equal(true);
+    expect(await isSerenityUiActiveForOrg(fakeCtx(), ORG, fakeLog())).to.equal(false);
+    expect(readFeatureFlagStub).to.have.been.calledTwice;
+
+    // Both are now cached independently — no further reads, same answers.
+    expect(await isSerenityActiveForOrg(fakeCtx(), ORG, fakeLog())).to.equal(true);
+    expect(await isSerenityUiActiveForOrg(fakeCtx(), ORG, fakeLog())).to.equal(false);
+    expect(readFeatureFlagStub).to.have.been.calledTwice;
+  });
+});

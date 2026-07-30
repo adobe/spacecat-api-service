@@ -5221,8 +5221,8 @@ llmo-referral-traffic-filter-dimensions:
     summary: Distinct referral traffic filter values
     description: |
       Returns the distinct filter values (platforms, regions, devices, page
-      intents) and available sources for the selected site and date range.
-      Queries `rpc_referral_traffic_filter_dimensions`.
+      intents, categories) and available sources for the selected site and date
+      range. Queries `rpc_referral_traffic_filter_dimensions`.
     operationId: getReferralTrafficFilterDimensions
     parameters:
       - name: source
@@ -5269,6 +5269,7 @@ llmo-referral-traffic-kpis:
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
+      - { name: categoryName, in: query, description: 'Snake alias: category_name', schema: { type: string } }
     responses:
       '200':
         description: Aggregated KPI metrics
@@ -5308,6 +5309,7 @@ llmo-referral-traffic-trend:
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
+      - { name: categoryName, in: query, description: 'Snake alias: category_name', schema: { type: string } }
     responses:
       '200':
         description: Referral traffic KPI time series
@@ -5346,6 +5348,7 @@ llmo-referral-traffic-by-platform:
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
+      - { name: categoryName, in: query, description: 'Snake alias: category_name', schema: { type: string } }
     responses:
       '200':
         description: Traffic by platform
@@ -5381,6 +5384,7 @@ llmo-referral-traffic-by-region:
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
+      - { name: categoryName, in: query, description: 'Snake alias: category_name', schema: { type: string } }
     responses:
       '200':
         description: Traffic by region
@@ -5416,6 +5420,7 @@ llmo-referral-traffic-by-page-intent:
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
+      - { name: categoryName, in: query, description: 'Snake alias: category_name', schema: { type: string } }
     responses:
       '200':
         description: Traffic by page intent
@@ -5465,6 +5470,7 @@ llmo-referral-traffic-by-url:
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
+      - { name: categoryName, in: query, description: 'Snake alias: category_name', schema: { type: string } }
       - name: pageSize
         in: query
         description: 'Number of rows per page (default 50, max 500). Aliases: page_size, limit'
@@ -5540,6 +5546,7 @@ llmo-referral-traffic-by-url-trend:
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
+      - { name: categoryName, in: query, description: 'Snake alias: category_name', schema: { type: string } }
       - name: urlPath
         in: query
         required: true
@@ -5583,6 +5590,7 @@ llmo-referral-traffic-by-device:
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
+      - { name: categoryName, in: query, description: 'Snake alias: category_name', schema: { type: string } }
     responses:
       '200':
         description: Traffic by device
@@ -5634,6 +5642,7 @@ llmo-referral-traffic-business-impact:
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
+      - { name: categoryName, in: query, description: 'Snake alias: category_name', schema: { type: string } }
     responses:
       '200':
         description: Business impact metrics
@@ -6293,8 +6302,10 @@ site-llmo-akamai-deploy:
     operationId: deployLlmoAkamai
     summary: Create a new property version with the Edge Optimize rules
     description: |
-      Creates a NEW property version from the latest, merges the managed Edge Optimize rules into
-      it, and PUTs the rule tree with Akamai-side validation. Does NOT activate — activation is a
+      Creates a NEW property version from `baseVersion` (default: latest), merges the managed Edge
+      Optimize rules into it, and PUTs the rule tree with Akamai-side validation. Only supported for
+      properties whose default origin uses "Choose Your Own" (CUSTOM) SSL verification; a property on
+      "Use Platform Settings" is rejected with `400`. Does NOT activate — activation is a
       separate, explicit step. Guarded so the target property must serve the site's own domain on an
       active hostname. Idempotent by rule name: the merge replaces any previously-managed rules
       rather than duplicating them.
@@ -6337,6 +6348,15 @@ site-llmo-akamai-deploy:
                   items:
                     type: object
                     additionalProperties: true
+                fetcherKey:
+                  type: string
+                  description: >-
+                    The fetcher key minted server-side and baked into the deployed rule as the
+                    `x-edgeoptimize-fetcher-key` incoming request header. Show it to the customer so
+                    they can allowlist Optimize-at-Edge (with the `AdobeEdgeOptimize/1.0` user agent)
+                    in their Bot Manager / WAF. A fresh key is minted on every deploy, so
+                    re-deploying rotates it. Returned only here — never persisted server-side.
+                  example: '3b1e...'
       '400':
         $ref: './responses.yaml#/400'
       '401':
@@ -6576,7 +6596,15 @@ akamai-property-ref:
       minimum: 0
       description: >-
         Optional position among the existing (non-managed) top-level rules to insert the managed
-        wrapper at. Defaults to 0 (before everything); clamped to the number of existing children.
+        wrapper at. Defaults to appending AFTER all existing children (so the Optimize-at-Edge
+        origin/cacheId win, since Akamai is last-match-wins); an explicit value is clamped to the
+        number of existing children.
+    baseVersion:
+      type: integer
+      minimum: 1
+      description: >-
+        (deploy only) Optional property version to copy the new version from. Defaults to the
+        property's latest version.
 
 akamai-property:
   type: object

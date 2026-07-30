@@ -24,7 +24,13 @@ import {
 // the controller's own validation (RedirectsController SERVICE_RE), so only
 // well-formed overlay requests are even considered for this credential.
 // Tolerates the suffix with or without a leading slash (prod sets it with one).
-const OVERLAY_ROUTE = /^\/?config\/cm-p\d{1,10}-e\d{1,10}\/redirects\.txt$/;
+// The optional `-prev` accepts the AEM CS preview-tier AEM_SERVICE shape
+// (see RedirectsController SERVICE_RE for the full rationale) — must be kept
+// in lockstep with the controller, otherwise preview requests would fall
+// through the auth chain and 401 before the controller could strip the
+// suffix. The controller does the canonical lookup; this handler only
+// authenticates.
+const OVERLAY_ROUTE = /^\/?config\/cm-p\d{1,10}-e\d{1,10}(?:-prev)?\/redirects\.txt$/;
 
 // Constant-time compare that does not leak input length: both inputs are HMAC'd
 // to a fixed 32-byte digest before timingSafeEqual. The HMAC key is not a secret
