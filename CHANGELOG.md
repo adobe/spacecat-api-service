@@ -1,3 +1,10 @@
+# [1.708.0](https://github.com/adobe/spacecat-api-service/compare/v1.707.0...v1.708.0) (2026-07-30)
+
+
+### Features
+
+* **llmo:** FACS-capability auth for edge CDN routing; edge-optimize-config under can_configure ([#2947](https://github.com/adobe/spacecat-api-service/issues/2947)) ([b4e6c32](https://github.com/adobe/spacecat-api-service/commit/b4e6c329d27743b52f628345bf3018a7261511fc))
+
 # [1.707.0](https://github.com/adobe/spacecat-api-service/compare/v1.706.0...v1.707.0) (2026-07-30)
 
 
