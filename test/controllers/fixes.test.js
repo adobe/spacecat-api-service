@@ -100,6 +100,7 @@ describe('Fixes Controller', () => {
     sandbox.stub(suggestionCollection, 'bulkUpdateStatus');
     sandbox.stub(suggestionCollection, 'allByIndexKeys');
     sandbox.stub(suggestionCollection, 'findById');
+    sandbox.stub(suggestionCollection, 'getFixEntitiesBySuggestionId').resolves([]);
     sandbox.stub(fixEntitySuggestionCollection, 'createMany');
     sandbox.stub(fixEntitySuggestionCollection, 'allByIndexKeys');
     sandbox.stub(fixEntitySuggestionCollection, 'removeByIndexKeys');
@@ -1662,6 +1663,149 @@ describe('Fixes Controller', () => {
 
       // Verify that setSuggestionsForFixEntity was called
       expect(fixEntityCollection.setSuggestionsForFixEntity).to.have.been.calledOnce;
+    });
+
+    it('returns the existing fix (200) instead of creating a duplicate when the '
+      + 'suggestion already has an active (DEPLOYED) fix (SITES-48951)', async () => {
+      const suggestion = await createSuggestion({ type: 'CONTENT_UPDATE' });
+      const existingFix = await fixEntityCollection.create({
+        type: 'CONTENT_UPDATE',
+        opportunityId,
+        status: FixEntity.STATUSES.DEPLOYED,
+        changeDetails: {
+          documentPath: 'https://author-p1-e1.adobeaemcloud.com/editor.html/x.html',
+        },
+      });
+      suggestionCollection.getFixEntitiesBySuggestionId
+        .withArgs(suggestion.getId())
+        .resolves([existingFix]);
+
+      requestContext.data = [{
+        type: 'CONTENT_UPDATE',
+        opportunityId,
+        origin: FixEntity.ORIGINS.ASO,
+        suggestionIds: [suggestion.getId()],
+      }];
+
+      const response = await fixesController.createFixes(requestContext);
+      expect(response).includes({ status: 207 });
+
+      const { fixes, metadata } = await response.json();
+      expect(metadata).deep.equals({ total: 1, success: 1, failed: 0 });
+      expect(fixes[0]).includes({ index: 0, statusCode: 200 });
+      expect(fixes[0].fix.id).to.equal(existingFix.getId());
+      expect(fixes[0].fix.changeDetails).to.have.property('documentPath');
+      // No duplicate fix was created / linked.
+      expect(fixEntityCollection.setSuggestionsForFixEntity).to.not.have.been.called;
+    });
+
+    it('still creates a fix when the suggestion has only terminal '
+      + '(ROLLED_BACK) fixes', async () => {
+      const suggestion = await createSuggestion({ type: 'CONTENT_UPDATE' });
+      const rolledBack = await fixEntityCollection.create({
+        type: 'CONTENT_UPDATE',
+        opportunityId,
+        status: FixEntity.STATUSES.ROLLED_BACK,
+      });
+      suggestionCollection.getFixEntitiesBySuggestionId
+        .withArgs(suggestion.getId())
+        .resolves([rolledBack]);
+
+      requestContext.data = [{
+        type: 'CONTENT_UPDATE',
+        opportunityId,
+        origin: FixEntity.ORIGINS.ASO,
+        suggestionIds: [suggestion.getId()],
+      }];
+
+      const response = await fixesController.createFixes(requestContext);
+      const { fixes, metadata } = await response.json();
+      expect(metadata).deep.equals({ total: 1, success: 1, failed: 0 });
+      expect(fixes[0]).includes({ index: 0, statusCode: 201 });
+    });
+
+    it('does NOT dedupe a non-aso (worker) fix even when an active fix exists — '
+      + 'so the Mystique SQS worker still gets a 201 (SITES-48951)', async () => {
+      const suggestion = await createSuggestion({ type: 'CONTENT_UPDATE' });
+      const existingFix = await fixEntityCollection.create({
+        type: 'CONTENT_UPDATE',
+        opportunityId,
+        status: FixEntity.STATUSES.DEPLOYED,
+      });
+      suggestionCollection.getFixEntitiesBySuggestionId
+        .withArgs(suggestion.getId())
+        .resolves([existingFix]);
+
+      // origin defaults to 'spacecat' (the Mystique worker path) — not 'aso'.
+      requestContext.data = [{
+        type: 'CONTENT_UPDATE',
+        opportunityId,
+        suggestionIds: [suggestion.getId()],
+      }];
+
+      const response = await fixesController.createFixes(requestContext);
+      const { fixes, metadata } = await response.json();
+      expect(metadata).deep.equals({ total: 1, success: 1, failed: 0 });
+      expect(fixes[0]).includes({ index: 0, statusCode: 201 });
+      // The dedupe lookup is not even consulted for non-aso origin.
+      expect(
+        suggestionCollection.getFixEntitiesBySuggestionId,
+      ).to.not.have.been.called;
+    });
+
+    it('does NOT dedupe when the suggestion\'s active fix belongs to a different '
+      + 'opportunity — no cross-tenant leak (SITES-48951)', async () => {
+      const suggestion = await createSuggestion({ type: 'CONTENT_UPDATE' });
+      const foreignFix = await fixEntityCollection.create({
+        type: 'CONTENT_UPDATE',
+        opportunityId: 'a1111111-1111-4111-8111-111111111111',
+        status: FixEntity.STATUSES.DEPLOYED,
+        changeDetails: {
+          documentPath: 'https://author-other.adobeaemcloud.com/editor.html/secret.html',
+        },
+      });
+      suggestionCollection.getFixEntitiesBySuggestionId
+        .withArgs(suggestion.getId())
+        .resolves([foreignFix]);
+
+      requestContext.data = [{
+        type: 'CONTENT_UPDATE',
+        opportunityId,
+        origin: FixEntity.ORIGINS.ASO,
+        suggestionIds: [suggestion.getId()],
+      }];
+
+      const response = await fixesController.createFixes(requestContext);
+      const { fixes, metadata } = await response.json();
+      expect(metadata).deep.equals({ total: 1, success: 1, failed: 0 });
+      // Foreign-opportunity fix is not echoed back; a new fix is created instead.
+      expect(fixes[0]).includes({ index: 0, statusCode: 201 });
+      expect(fixes[0].fix.id).to.not.equal(foreignFix.getId());
+    });
+
+    it('does not dedupe against a non-active (PENDING) fix — the aso create '
+      + 'still proceeds (SITES-48951)', async () => {
+      const suggestion = await createSuggestion({ type: 'CONTENT_UPDATE' });
+      const pendingFix = await fixEntityCollection.create({
+        type: 'CONTENT_UPDATE',
+        opportunityId,
+        status: FixEntity.STATUSES.PENDING,
+      });
+      suggestionCollection.getFixEntitiesBySuggestionId
+        .withArgs(suggestion.getId())
+        .resolves([pendingFix]);
+
+      requestContext.data = [{
+        type: 'CONTENT_UPDATE',
+        opportunityId,
+        origin: FixEntity.ORIGINS.ASO,
+        suggestionIds: [suggestion.getId()],
+      }];
+
+      const response = await fixesController.createFixes(requestContext);
+      const { fixes, metadata } = await response.json();
+      expect(metadata).deep.equals({ total: 1, success: 1, failed: 0 });
+      expect(fixes[0]).includes({ index: 0, statusCode: 201 });
     });
 
     it('can create multiple fixes with different suggestion IDs', async () => {

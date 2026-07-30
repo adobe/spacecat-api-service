@@ -57,6 +57,12 @@ const IMS_ENRICH_BATCH_SIZE = 5;
 const DEFAULT_SITE_FIXES_LIMIT = 200;
 const MAX_SITE_FIXES_LIMIT = 1000;
 
+// Fix statuses that count as an already-live deployment for dedupe purposes.
+const ACTIVE_FIX_STATUSES = [
+  FixEntityModel.STATUSES.DEPLOYED,
+  FixEntityModel.STATUSES.PUBLISHED,
+];
+
 /**
  * @typedef {Object} DataAccess
  * @property {FixEntityCollection} FixEntity
@@ -401,6 +407,13 @@ export class FixesController {
     const FixEntity = this.#FixEntity;
     const fixes = await Promise.all(context.data.map(async (fixData, index) => {
       try {
+        // Dedupe (SITES-48951): for the ASO-UI "mark as deployed" path, return the
+        // existing active fix instead of creating a duplicate. See #dedupeAsoFix.
+        const dedupedResult = await this.#dedupeAsoFix(opportunityId, fixData, index, log);
+        if (dedupedResult) {
+          return dedupedResult;
+        }
+
         const enrichedFixData = await FixesController.#enrichWithDocumentPath(
           fixData,
           enrichmentCtx,
@@ -445,6 +458,59 @@ export class FixesController {
         failed: fixes.length - succeeded,
       },
     }, 207);
+  }
+
+  /**
+   * Dedupe for the ASO-UI "mark as deployed" path (SITES-48951): a duplicate
+   * fix_entity is only ever created via origin 'aso'. If a target suggestion already
+   * has an active (DEPLOYED/PUBLISHED) fix in this opportunity — e.g. a Mystique apply
+   * fix that raced it — return that existing fix as a 200 result instead of creating a
+   * duplicate. Scoped to 'aso' so the Mystique SQS worker's create_fixes (origin
+   * 'spacecat', which relies on a 201) is untouched; preserves the manual-deploy case
+   * (no active fix => create). Returns the short-circuit result object, or null to
+   * proceed with creation.
+   *
+   * @returns {Promise<{index: number, fix: object, statusCode: number}|null>}
+   */
+  async #dedupeAsoFix(opportunityId, fixData, index, log) {
+    if (
+      fixData.origin !== FixEntityModel.ORIGINS.ASO
+      || !isArray(fixData.suggestionIds)
+      || fixData.suggestionIds.length === 0
+    ) {
+      return null;
+    }
+    const existingFix = await this.#findExistingActiveFix(opportunityId, fixData.suggestionIds);
+    if (!existingFix) {
+      return null;
+    }
+    log.info(`[createFixes] active fix ${existingFix.getId()} already exists for suggestion(s) ${fixData.suggestionIds.join(', ')}; skipping duplicate create`);
+    return { index, fix: FixDto.toJSON(existingFix), statusCode: 200 };
+  }
+
+  /**
+   * Finds an existing active (DEPLOYED/PUBLISHED) fix in the given opportunity linked
+   * to any of the given suggestions, or null. The `opportunityId` filter keeps a
+   * caller from probing (and having echoed back) another tenant's fix by passing a
+   * foreign `suggestionId`, and matches the intent (duplicates are within-opportunity).
+   *
+   * @param {string} opportunityId
+   * @param {string[]} suggestionIds
+   * @returns {Promise<FixEntity|null>}
+   */
+  async #findExistingActiveFix(opportunityId, suggestionIds) {
+    for (const suggestionId of suggestionIds) {
+      // eslint-disable-next-line no-await-in-loop -- short-circuits on first active fix
+      const linkedFixes = await this.#Suggestion.getFixEntitiesBySuggestionId(suggestionId);
+      const activeFix = linkedFixes.find(
+        (fix) => ACTIVE_FIX_STATUSES.includes(fix.getStatus())
+          && fix.getOpportunityId() === opportunityId,
+      );
+      if (activeFix) {
+        return activeFix;
+      }
+    }
+    return null;
   }
 
   /**
