@@ -449,7 +449,7 @@ Happy-path walkthrough:
 curl -s -H "Authorization: Bearer ${IMS}" \
   "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/serenity/markets" | jq .
 
-# 2) Onboard a (US, en) slice. `name` is optional; default is `<brand>-<6 hex>`.
+# 2) Onboard a (US, en) slice. `name` is optional; default is `<REGION>-<language>` (e.g. `US-en`).
 curl -s -H "Authorization: Bearer ${IMS}" -H 'Content-Type: application/json' \
   -X POST "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/serenity/markets" \
   -d '{ "market": "US", "languageCode": "en", "brandDomain": "adobe.com", "brandNames": ["Adobe"] }' | jq .

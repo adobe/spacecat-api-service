@@ -11537,11 +11537,14 @@ SerenityCreateMarketRequest:
       type: string
       description: |
         Display name of the new market. Optional — defaults server-side to
-        `<brandDisplayName>-<6 hex>` to disambiguate re-create-after-delete
-        and avoid collisions in shared workspaces.
+        `<REGION>-<languageCode>` (e.g. `US-en`), the market's own identity,
+        which is what the customer sees in the Semrush navigation. Supply this
+        field to choose the name instead.
     brandDisplayName:
       type: string
-      description: Used as the prefix for the default name when `name` is omitted.
+      description: |
+        Brand display name for the market's `brand_name_display` and its
+        own-brand benchmark.
     market:
       type: string
       description: ISO 3166-1 alpha-2 country code; resolved server-side to a Geo Target ID.

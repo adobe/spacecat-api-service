@@ -1486,11 +1486,10 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     expect(result.initialized).to.equal(null);
   });
 
-  // Line 115: `hasText(body?.name)?String(body.name):defaultMarketName(body.brandDisplayName)` else
-  // — body without a `name` field so defaultMarketName is called.
-  // Note: the existing test "defaults the project brand_names to just the primary brand name when
-  // no aliases" already passes a body without `name`, but does not assert the generated name
-  // pattern. This test locks the else branch explicitly by asserting the random-suffix shape.
+  // `hasText(body?.name) ? String(body.name) : defaultMarketName(body.market, languageCode)` else
+  // branch — body without a `name` field, so the market's own name is generated. The name is the
+  // customer-visible one in the Semrush navigation and must match what the migration writes
+  // (`{REGION}-{language}`), so this asserts the exact string, not a shape.
   it('buildCreateProjectBody: uses defaultMarketName when body has no name field', async () => {
     const transport = makeTransport();
     const brand = makeBrand();
@@ -1504,8 +1503,7 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     const res = await handleCreateMarketSubworkspace(transport, brand, PARENT, bodyNoName, log);
     expect(res.status).to.equal(201);
     const projectBody = transport.createProject.firstCall.args[1];
-    // defaultMarketName produces "<brandDisplayName>-<6hex>".
-    expect(projectBody.name).to.match(/^MyBrand-[0-9a-f]{6}$/);
+    expect(projectBody.name).to.equal('US-en');
   });
 
   // brand_name_display honors an explicit brandDisplayName when it differs from

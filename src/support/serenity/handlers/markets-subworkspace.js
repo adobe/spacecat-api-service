@@ -226,9 +226,23 @@ function dedupeNames(names) {
     });
 }
 
-/** @returns {ProjectCreateBody} */
+/**
+ * The default name is derived from `body` rather than taking the caller's
+ * already-normalized language code as a parameter: `normalizeLanguageCode` is
+ * pure, so it yields the identical value, and threading it in would sit a
+ * `languageCode` argument next to `languageId` — two strings a call site can
+ * transpose silently, producing a project named after a UUID.
+ *
+ * @param {object} body - the validated create body.
+ * @param {{ geoTargetId: number, locationName: string|undefined }} location - resolved market.
+ * @param {string} languageId - upstream language UUID.
+ * @param {string[]} [brandAliases]
+ * @returns {ProjectCreateBody}
+ */
 function buildCreateProjectBody(body, location, languageId, brandAliases = []) {
-  const name = hasText(body?.name) ? String(body.name) : defaultMarketName(body.brandDisplayName);
+  const name = hasText(body?.name)
+    ? String(body.name)
+    : defaultMarketName(body.market, normalizeLanguageCode(body.languageCode));
   // A Semrush project's brand is described by a display name plus the full set
   // of names it is known by (`brand_names`). Brand aliases are brand-level, so
   // every project/market in the brand carries them alongside the primary name.
