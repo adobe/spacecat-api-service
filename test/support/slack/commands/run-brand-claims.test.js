@@ -19,7 +19,6 @@ use(sinonChai);
 
 const SITE_ID = '9033554c-de8a-44ac-a356-09b51af8cc28';
 const ORG_ID = '5f3b3626-029c-476e-924b-0c1bba2e871f';
-const IMS_ORG_ID = 'ABC123@AdobeOrg';
 const BRAND_ID = 'a1b2c3d4-5678-90ab-cdef-1234567890ab';
 const QUEUE_URL = 'https://sqs.us-east-1.amazonaws.com/640168421876/mysticat-bp-sheet-ready';
 
@@ -27,7 +26,6 @@ describe('RunBrandClaimsCommand', () => {
   let context;
   let slackContext;
   let mockSite;
-  let mockOrganization;
   let getBrandBySiteStub;
   let s3SendStub;
   let sqsSendMessageStub;
@@ -53,7 +51,6 @@ describe('RunBrandClaimsCommand', () => {
       getBaseURL: () => 'https://example.com',
       getOrganizationId: () => ORG_ID,
     };
-    mockOrganization = { getImsOrgId: () => IMS_ORG_ID };
     s3SendStub = sinon.stub();
     sqsSendMessageStub = sinon.stub().resolves();
 
@@ -62,9 +59,6 @@ describe('RunBrandClaimsCommand', () => {
         Site: {
           findById: sinon.stub().resolves(mockSite),
           findByBaseURL: sinon.stub().resolves(mockSite),
-        },
-        Organization: {
-          findById: sinon.stub().resolves(mockOrganization),
         },
         services: { postgrestClient: { from: sinon.stub() } },
       },
@@ -128,7 +122,7 @@ describe('RunBrandClaimsCommand', () => {
       expect(event).to.deep.equal({
         event_type: 'BRAND_PRESENCE_SHEET_WRITTEN',
         schema_version: 1,
-        organization_id: IMS_ORG_ID,
+        organization_id: ORG_ID,
         brand_id: BRAND_ID,
         brand: 'acme',
         site_id: SITE_ID,
@@ -278,16 +272,6 @@ describe('RunBrandClaimsCommand', () => {
       await command.handleExecution(['https://unknown.example'], slackContext);
 
       expect(slackContext.say.calledWithMatch(/Site not found/)).to.equal(true);
-      expect(sqsSendMessageStub).to.not.have.been.called;
-    });
-
-    it('errors when the org has no IMS org id', async () => {
-      context.dataAccess.Organization.findById.resolves({ getImsOrgId: () => undefined });
-
-      const command = RunBrandClaimsCommand(context);
-      await command.handleExecution(['https://example.com'], slackContext);
-
-      expect(slackContext.say.calledWithMatch(/Could not resolve an IMS org/)).to.equal(true);
       expect(sqsSendMessageStub).to.not.have.been.called;
     });
 
