@@ -1,3 +1,10 @@
+## [1.708.2](https://github.com/adobe/spacecat-api-service/compare/v1.708.1...v1.708.2) (2026-07-30)
+
+
+### Bug Fixes
+
+* **sites:** restrict provisioning-managed LLMO config fields on site update ([#2961](https://github.com/adobe/spacecat-api-service/issues/2961)) ([be57915](https://github.com/adobe/spacecat-api-service/commit/be57915e37e9c7152315906be72cf1181c7de7cb))
+
 ## [1.708.1](https://github.com/adobe/spacecat-api-service/compare/v1.708.0...v1.708.1) (2026-07-30)
 
 
