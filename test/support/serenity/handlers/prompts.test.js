@@ -22,6 +22,7 @@ import {
   handleUpdatePrompt,
   handleBulkDeletePrompts,
   makePromptTagInjector,
+  normalizePromptInput,
   makeIntentInjector,
   validateDeferPublish,
   reconcilePublishErrors,
@@ -2860,6 +2861,86 @@ describe('handlers/prompts.js — origin derivation (origin-dimension.md §3)', 
       // Same project => served from the per-project origin cache, no new reads.
       expect(transport.listProjectTags.callCount).to.equal(readsAfterFirst);
       expect(transport.createProjectTags).to.not.have.been.called;
+    });
+  });
+});
+
+// Per-item `source` override for the SR Track flow (LLMO-6556): a card may name
+// its real producing surface, validated against the closed SOURCE_VALUES.
+describe('handlers/prompts.js — per-item source override (LLMO-6556)', () => {
+  const base = {
+    text: 'hi', languageCode: 'en', geoTargetId: 2840, tagIds: ['t1'],
+  };
+
+  describe('normalizePromptInput source validation', () => {
+    it('passes a valid source through, canonicalized', () => {
+      const { value, reason } = normalizePromptInput({ ...base, source: 'Semrush' });
+      expect(reason).to.equal(null);
+      expect(value.source).to.equal('semrush');
+    });
+
+    it('rejects an unknown source (closed vocabulary — select, never invent)', () => {
+      const { value, reason } = normalizePromptInput({ ...base, source: 'not-a-producer' });
+      expect(value).to.equal(null);
+      expect(reason).to.match(/^source must be one of /);
+    });
+
+    it('treats an absent source as no override (no source key on the value)', () => {
+      const { value, reason } = normalizePromptInput({ ...base });
+      expect(reason).to.equal(null);
+      expect(value).to.not.have.property('source');
+    });
+
+    it('treats an explicit null source as absent, not a 400 (review Should-Fix #1)', () => {
+      const { value, reason } = normalizePromptInput({ ...base, source: null });
+      expect(reason).to.equal(null);
+      expect(value).to.not.have.property('source');
+    });
+  });
+
+  describe('makePromptTagInjector per-item source', () => {
+    const injectorWithDefault = () => makePromptTagInjector(
+      { listProjectTags: makeListProjectTagsStub() },
+      WORKSPACE,
+      undefined,
+      fakeLog(),
+      { sourceValue: 'config' },
+    );
+
+    it('per-item source overrides the batch default', async () => {
+      const out = await injectorWithDefault()('proj-1', {
+        text: 'x', geoTargetId: 2840, tagIds: [], source: 'semrush',
+      });
+      expect(out.tagIds).to.include(TAG_IDS.sourceSemrush);
+      expect(out.tagIds).to.not.include(TAG_IDS.sourceConfig);
+    });
+
+    it('falls back to the batch default when no per-item source', async () => {
+      const out = await injectorWithDefault()('proj-1', {
+        text: 'x', geoTargetId: 2840, tagIds: [],
+      });
+      expect(out.tagIds).to.include(TAG_IDS.sourceConfig);
+      expect(out.tagIds).to.not.include(TAG_IDS.sourceSemrush);
+    });
+
+    it('resolves each producer independently in a mixed-surface batch', async () => {
+      const inject = injectorWithDefault();
+      const tracked = await inject('proj-1', {
+        text: 'a', geoTargetId: 2840, tagIds: [], source: 'semrush',
+      });
+      const dflt = await inject('proj-1', { text: 'b', geoTargetId: 2840, tagIds: [] });
+      expect(tracked.tagIds).to.include(TAG_IDS.sourceSemrush);
+      expect(dflt.tagIds).to.include(TAG_IDS.sourceConfig);
+    });
+
+    it('leaves source untouched on UPDATE (no batch default, no per-item source)', async () => {
+      const transport = { listProjectTags: makeListProjectTagsStub() };
+      const inject = makePromptTagInjector(transport, WORKSPACE, undefined, fakeLog());
+      const out = await inject('proj-1', {
+        text: 'x', geoTargetId: 2840, tagIds: [TAG_IDS.sourceSemrush],
+      });
+      expect(out.tagIds).to.deep.equal([TAG_IDS.sourceSemrush]);
+      expect(transport.listProjectTags).to.not.have.been.called;
     });
   });
 });

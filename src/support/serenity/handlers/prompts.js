@@ -645,8 +645,12 @@ export function normalizePromptInput(input) {
   // default (`config` for the human dialog) applies downstream. Present ⇒ must be
   // a known producer from SOURCE_VALUES; unknown slugs are rejected 400 so a caller
   // can only SELECT from the server's vocabulary, never invent one.
+  // FIX (review Should-Fix #1): gate on nullish, not `!== undefined`. An explicit
+  // JSON `source: null` means "no override" (a client serializing an optional
+  // field), so it must fall through to the batch default — not 400 with a
+  // misleading "must be one of …". Only a non-nullish value is validated.
   let source;
-  if (input?.source !== undefined) {
+  if (input?.source != null) {
     const canon = canonicalizeSource(input.source);
     if (!canon || !SOURCE_VALUES.includes(canon)) {
       return { value: null, reason: `source must be one of ${SOURCE_VALUES.join(', ')}` };
