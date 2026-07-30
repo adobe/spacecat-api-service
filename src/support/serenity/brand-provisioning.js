@@ -61,17 +61,6 @@ async function emptyWorkspaceBestEffort(transport, workspaceId, parentWorkspaceI
 }
 
 /**
- * Initial-market project name convention: "REGION - LANG" — uppercase ISO-2
- * country code + uppercase primary language subtag (e.g. "US - EN", "CH - DE").
- * Matches the names existing sub-workspace projects already carry.
- */
-export function initialMarketProjectName(market, languageCode) {
-  const region = String(market || '').toUpperCase();
-  const lang = String(languageCode || '').split('-')[0].toUpperCase();
-  return `${region} - ${lang}`;
-}
-
-/**
  * Serenity-first provisioning for a brand created in Semrush-prompts mode
  * (serenity dual-mode). Creates the brand's Semrush sub-workspace (named after
  * the brand) and one DRAFT AIO project for the (market, languageCode) slice
@@ -263,7 +252,10 @@ export async function provisionBrandSubworkspace(context, {
         brandDomain,
         brandNames: [brandName],
         brandDisplayName: brandName,
-        name: initialMarketProjectName(resolvedMarket, resolvedLanguageCode),
+        // `name` is deliberately omitted: the create handler defaults it to the
+        // market's own `<REGION>-<language>` name (see `defaultMarketName`), so
+        // the brand's first market is named exactly like every market added
+        // later from the Markets tab and like every migrated one.
       },
       log,
       // preResolvedWorkspaceId / reloadPointer: defaults (single-create path).

@@ -49,6 +49,16 @@ export const ELEMENT_IDS = Object.freeze({
   STATS_PER_URL: '9af5ed83-049b-493a-85d7-99c7d4deddba',
   URL_TRENDS: 'afb2e5d3-3955-4e0d-aeb1-7e28cdecd9f9',
 
+  // URL Inspector — URL Prompts (details drill-down: the prompts that cited a
+  // specific URL). `table` envelope, one row per distinct prompt:
+  //   { prompt, source(=url), source_title, brand_mentioned, brands_string,
+  //     closest_date, url_cbf }.
+  // Scoped by `CBF_source` = the full URL string (placed in BOTH simple and
+  // advanced — unique to this element) + date (`CBF_date__start`/`__end`) +
+  // `CBF_model`. Brand scoping is via the sub-workspace (no CBF_brand filter).
+  // Does NOT return category/topic/region. Verified live 2026-07-29.
+  URL_PROMPTS: 'b4f1ead7-4aea-41ea-b1ce-311004715d63',
+
   MENTIONS: 'e1a6811b-d0c9-4d6f-8a29-290a32db863f',
   VISIBILITY: '2724878e-e0e9-4217-ad21-d6bcb7887a09',
   CITATIONS_KPI: '588054fe-b987-40f6-9360-b5673738bdfa',

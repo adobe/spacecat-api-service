@@ -15,7 +15,6 @@ import sinon from 'sinon';
 import esmock from 'esmock';
 
 import {
-  initialMarketProjectName,
   MAX_TOPICS_ON_CREATE,
 } from '../../../src/support/serenity/brand-provisioning.js';
 import { SerenityTransportError } from '../../../src/support/serenity/rest-transport.js';
@@ -77,17 +76,6 @@ const baseParams = {
   brandDomain: 'acme.com',
   modelIds: ['m-1', 'm-2'],
 };
-
-describe('initialMarketProjectName', () => {
-  it('formats "REGION - LANG" upper-cased', () => {
-    expect(initialMarketProjectName('us', 'en')).to.equal('US - EN');
-    expect(initialMarketProjectName('ch', 'de')).to.equal('CH - DE');
-  });
-
-  it('uses only the primary language subtag', () => {
-    expect(initialMarketProjectName('us', 'en-US')).to.equal('US - EN');
-  });
-});
 
 describe('provisionBrandSubworkspace', () => {
   let resolveWorkspaceId;
@@ -206,7 +194,7 @@ describe('provisionBrandSubworkspace', () => {
     });
   });
 
-  it('passes the "REGION - LANG" project name and brand identity to the handler', async () => {
+  it('passes the brand identity to the handler and leaves the market name to it', async () => {
     const { provisionBrandSubworkspace } = await loadModule({
       resolveWorkspaceId, handleCreateMarketSubworkspace,
     });
@@ -214,7 +202,9 @@ describe('provisionBrandSubworkspace', () => {
     const { args } = handleCreateMarketSubworkspace.firstCall;
     const [, brandStub, parentWs, body, , , , options] = args;
     expect(parentWs).to.equal(PARENT_WS);
-    expect(body.name).to.equal('US - EN');
+    // No `name`: the handler names the market `<REGION>-<language>` from the
+    // slice, so the brand's first market matches every later-added one.
+    expect(body.name).to.equal(undefined);
     expect(body.market).to.equal('us');
     expect(body.languageCode).to.equal('en');
     expect(body.brandDomain).to.equal('acme.com');
@@ -324,7 +314,7 @@ describe('provisionBrandSubworkspace', () => {
     // No market/language supplied → US/EN default slice.
     expect(body.market).to.equal('US');
     expect(body.languageCode).to.equal('en');
-    expect(body.name).to.equal('US - EN');
+    expect(body.name).to.equal(undefined);
     // No prompts + no models → empty units → best-effort publish (leaves a draft).
     expect(options.generateTopics).to.equal(false);
     expect(options.topicCap).to.equal(0);
@@ -847,26 +837,6 @@ describe('emptyProvisionedWorkspace', () => {
 });
 
 describe('defensive branch coverage', () => {
-  describe('initialMarketProjectName - falsy market and languageCode', () => {
-    it('returns " - " when market is null (String(null || "") = "")', () => {
-      // Line 38: String(market || '') right branch fires.
-      expect(initialMarketProjectName(null, 'en')).to.equal(' - EN');
-    });
-
-    it('returns " - " when market is empty string (String("" || "") = "")', () => {
-      expect(initialMarketProjectName('', 'en')).to.equal(' - EN');
-    });
-
-    it('returns "US - " when languageCode is null (String(null || "") = "")', () => {
-      // Line 39: String(languageCode || '') right branch fires (split('')[0] = '').
-      expect(initialMarketProjectName('us', null)).to.equal('US - ');
-    });
-
-    it('returns "US - " when languageCode is empty string', () => {
-      expect(initialMarketProjectName('us', '')).to.equal('US - ');
-    });
-  });
-
   describe('emptyCapturedOnFailure catch block', () => {
     it('logs error when provisioning fails after workspace creation AND the cleanup itself throws', async () => {
       // The catch fires when: handleCreateMarketSubworkspace captures a workspaceId (via

@@ -317,6 +317,7 @@ const routeRequiredCapabilities = {
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics/:topicId/prompts': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/domain-urls': 'brand:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/url-prompts': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/market-tracking-trends': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/stats': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/stats': 'brand:read',

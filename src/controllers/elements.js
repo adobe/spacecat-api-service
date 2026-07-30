@@ -968,6 +968,76 @@ export default function ElementsController(context, log, env) {
   /* c8 ignore stop */
 
   /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/url-prompts
+   * URL Inspector details drill-down: the prompts that cited a specific URL. Backed by the
+   * URL_PROMPTS element (b4f1ead7), scoped by `CBF_source` = the URL string (verified live).
+   *
+   * Brand-scoped via the brand's Semrush **sub-workspace** (like {@link listTopicPrompts});
+   * the brand is NOT sent as a filter (`CBF_brand` is redundant with sub-workspace scoping —
+   * see url-prompts.js). Pagination is client-side; `totalCount` is the full count.
+   *
+   * Query params: `url` (required, the cited URL), `startDate`/`endDate` (required,
+   * YYYY-MM-DD), `model`/`platform` (optional, default search-gpt). `siteId` is accepted
+   * but ignored (the sub-workspace authorization already scopes to the brand). Returns the
+   * full prompt list in one `{ prompts }` envelope, matching the PG url-prompts endpoint.
+   */
+  /* c8 ignore start -- LLMO-6620 POC endpoint; unit tests deferred (see url-prompts.js tests) */
+  const listUrlPrompts = async (ctx) => {
+    try {
+      const auth = await authorizeBrandSubWorkspace(ctx, log);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { workspaceId } = auth;
+
+      const query = extractQuery(ctx);
+
+      // `url` is the cited URL to drill into (CBF_source). Query params are already
+      // percent-decoded by the framework, so use as-is.
+      const { url } = query;
+      if (!hasText(url)) {
+        return badRequest('url is required');
+      }
+
+      // Date range is required (mirrors listOwnedUrls): a valid, ordered, bounded pair.
+      const startDate = query.startDate || query.start_date;
+      const endDate = query.endDate || query.end_date;
+      if (!hasText(startDate) || !hasText(endDate)) {
+        return badRequest('startDate and endDate are required (YYYY-MM-DD)');
+      }
+      if (!isYmdDate(startDate) || !isYmdDate(endDate)) {
+        return badRequest('startDate and endDate must be valid YYYY-MM-DD dates');
+      }
+      if (startDate > endDate) {
+        return badRequest('startDate must not be after endDate');
+      }
+      // Bound the span (mirrors listOwnedUrls/listDomainUrls): a multi-year window would buffer
+      // an unbounded result set into `allPrompts` before pagination slices it.
+      const MAX_RANGE_DAYS = 366;
+      const spanDays = (Date.parse(`${endDate}T00:00:00Z`)
+        - Date.parse(`${startDate}T00:00:00Z`)) / 86400000;
+      if (spanDays > MAX_RANGE_DAYS) {
+        return badRequest(`Date range must not exceed ${MAX_RANGE_DAYS} days`);
+      }
+
+      const service = await buildService(ctx);
+      const prompts = await service.getUrlPrompts(workspaceId, {
+        url,
+        model: query.model || query.platform,
+        startDate,
+        endDate,
+      });
+
+      // Match the PG url-prompts envelope this endpoint will replace: a bare `{ prompts }`
+      // with no server-side pagination (the element returns the full list in one call).
+      return cachedOk({ prompts });
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+  /* c8 ignore stop */
+
+  /**
    * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence
    *     /url-inspector/owned-urls
    * The URL Inspector "Your cited URLs" table. Hybrid: per-URL citations +
@@ -1798,6 +1868,7 @@ export default function ElementsController(context, log, env) {
     listSentimentOverview,
     listTopics,
     listTopicPrompts,
+    listUrlPrompts,
     listOwnedUrls,
     listDomainUrls,
     getMarketTrackingTrends,
