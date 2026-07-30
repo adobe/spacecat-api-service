@@ -7241,6 +7241,62 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(400);
     });
 
+    it('returns 409 with a code: brand_stale_write body when expectedUpdatedAt does not match (LLMO-6591)', async () => {
+      // beforeEach's mock resolves updated_at: '2026-01-02T00:00:00Z' for every
+      // read; a caller echoing a different (stale) timestamp must be rejected.
+      // The `code` field lets elmo-ui distinguish this from any other 409
+      // without regex-matching the message text.
+      const response = await brandsController.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { name: 'Updated Brand', expectedUpdatedAt: '2026-01-01T00:00:00Z' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+      expect(response.status).to.equal(409);
+      const body = await response.json();
+      expect(body.code).to.equal('brand_stale_write');
+    });
+
+    it('emits the BrandStaleWriteRejected metric on a rejected stale write (LLMO-6591)', async () => {
+      const logSpy = sinon.stub(console, 'log');
+      try {
+        const response = await brandsController.updateBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: { name: 'Updated Brand', expectedUpdatedAt: '2026-01-01T00:00:00Z' },
+          dataAccess: mockDataAccess,
+          pathInfo: { headers: { 'x-product': 'llmo' } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(409);
+        const emfLine = logSpy.getCalls()
+          .map((c) => c.args[0])
+          .find((l) => typeof l === 'string' && l.includes('BrandStaleWriteRejected'));
+        expect(emfLine, 'expected a BrandStaleWriteRejected EMF line').to.be.a('string');
+        const envelope = JSON.parse(emfLine);
+        expect(envelope.BrandStaleWriteRejected).to.equal(1);
+        expect(envelope.Operation).to.equal('updateBrand');
+        expect(envelope.Product).to.equal('llmo');
+        // eslint-disable-next-line no-underscore-dangle
+        expect(envelope._aws.CloudWatchMetrics[0].Namespace).to.equal('Mysticat/Brands');
+      } finally {
+        logSpy.restore();
+      }
+    });
+
+    it('succeeds when expectedUpdatedAt matches the persisted row (LLMO-6591)', async () => {
+      const response = await brandsController.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { name: 'Updated Brand', expectedUpdatedAt: '2026-01-02T00:00:00Z' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+      expect(response.status).to.equal(200);
+    });
+
     it('returns 400 when params is undefined', async () => {
       const response = await brandsController.updateBrandForOrg({
         ...context,

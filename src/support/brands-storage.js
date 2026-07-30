@@ -462,9 +462,18 @@ async function syncBrandUrls(organizationId, brandId, urls, postgrestClient, upd
 
 /**
  * Syncs social accounts for a brand to the brand_social_accounts table.
+ *
+ * `socialAccounts === undefined` (the field was omitted, not sent as an empty
+ * array) means the caller never touched this collection — skip the sync
+ * entirely rather than let `replaceChildRows` wipe existing rows (LLMO-6591).
+ * A caller that DOES want to clear the collection sends `[]` explicitly, which
+ * still reaches `replaceChildRows` and deletes as before.
  */
 // eslint-disable-next-line max-len
 async function syncSocialAccounts(brandId, organizationId, socialAccounts, postgrestClient, updatedBy) {
+  if (socialAccounts === undefined) {
+    return;
+  }
   const rows = (socialAccounts || [])
     .filter((s) => hasText(s?.url))
     .map((s) => ({
@@ -479,9 +488,15 @@ async function syncSocialAccounts(brandId, organizationId, socialAccounts, postg
 
 /**
  * Syncs earned content sources for a brand to the brand_earned_sources table.
+ *
+ * `earnedContent === undefined` means the caller never touched this
+ * collection — skip the sync entirely (LLMO-6591; see syncSocialAccounts).
  */
 // eslint-disable-next-line max-len
 async function syncEarnedSources(brandId, organizationId, earnedContent, postgrestClient, updatedBy) {
+  if (earnedContent === undefined) {
+    return;
+  }
   const rows = (earnedContent || [])
     .filter((e) => hasText(e?.url) && hasText(e?.name))
     .map((e) => ({
@@ -497,8 +512,14 @@ async function syncEarnedSources(brandId, organizationId, earnedContent, postgre
 
 /**
  * Syncs aliases for a brand to the brand_aliases table.
+ *
+ * `brandAliases === undefined` means the caller never touched this
+ * collection — skip the sync entirely (LLMO-6591; see syncSocialAccounts).
  */
 async function syncAliases(brandId, organizationId, brandAliases, postgrestClient, updatedBy) {
+  if (brandAliases === undefined) {
+    return;
+  }
   const seen = new Set();
   const rows = (brandAliases || [])
     .map((a) => ({ alias: typeof a === 'string' ? a : a?.name, regions: a?.regions || [] }))
@@ -515,8 +536,14 @@ async function syncAliases(brandId, organizationId, brandAliases, postgrestClien
 
 /**
  * Syncs competitors for a brand to the competitors table.
+ *
+ * `competitors === undefined` means the caller never touched this
+ * collection — skip the sync entirely (LLMO-6591; see syncSocialAccounts).
  */
 async function syncCompetitors(brandId, organizationId, competitors, postgrestClient, updatedBy) {
+  if (competitors === undefined) {
+    return;
+  }
   const seen = new Set();
   const rows = (competitors || [])
     .map((c) => ({
@@ -1227,12 +1254,13 @@ export async function updateBrand({
   const wantsClearBaseSite = updates.baseSiteId === null;
   const needsExistingFetch = hasText(updates.baseSiteId)
     || wantsClearBaseSite
-    || updates.status !== undefined;
+    || updates.status !== undefined
+    || updates.expectedUpdatedAt !== undefined;
   let existing = null;
   if (needsExistingFetch) {
     const { data: current, error: currentError } = await postgrestClient
       .from('brands')
-      .select('site_id, status')
+      .select('site_id, status, updated_at')
       .eq('id', brandId)
       .maybeSingle();
     // Fail closed: a swallowed read error leaves `current` null, so the guard
@@ -1243,6 +1271,27 @@ export async function updateBrand({
       throw new Error(`Failed to read current baseSiteId for brand: ${currentError.message}`);
     }
     existing = current;
+  }
+
+  // LLMO-6591: optimistic concurrency. A caller that read the brand and echoes
+  // that read's `updatedAt` back on save is telling us what it thinks the
+  // current state is; if the row moved since then (another tab/request wrote
+  // in between), a routine save must not blindly overwrite fields — including
+  // collections it never touched but whose stale, empty local copy would
+  // otherwise wipe real data on the very next PATCH. Opt-in and backward
+  // compatible: omitting `expectedUpdatedAt` skips this check entirely, so
+  // existing callers are unaffected until they start sending it.
+  if (updates.expectedUpdatedAt !== undefined && existing) {
+    const expected = new Date(updates.expectedUpdatedAt).getTime();
+    const actual = new Date(existing.updated_at).getTime();
+    if (Number.isNaN(expected) || expected !== actual) {
+      const err = new Error(
+        'This brand was changed since it was loaded - reload and reapply your edit.',
+      );
+      err.status = 409;
+      err.code = 'brand_stale_write';
+      throw err;
+    }
   }
 
   // baseSiteId mutation rules (LLMO-5870):
@@ -1336,31 +1385,15 @@ export async function updateBrand({
     return null;
   }
 
-  const childSyncs = [];
-
-  if (updates.brandAliases !== undefined) {
-    childSyncs.push(
-      syncAliases(brandId, organizationId, updates.brandAliases, postgrestClient, updatedBy),
-    );
-  }
-  if (updates.competitors !== undefined) {
-    childSyncs.push(
-      syncCompetitors(brandId, organizationId, updates.competitors, postgrestClient, updatedBy),
-    );
-  }
-  if (updates.socialAccounts !== undefined) {
-    // eslint-disable-next-line max-len
-    childSyncs.push(syncSocialAccounts(brandId, organizationId, updates.socialAccounts, postgrestClient, updatedBy));
-  }
-  if (updates.earnedContent !== undefined) {
-    childSyncs.push(
-      syncEarnedSources(brandId, organizationId, updates.earnedContent, postgrestClient, updatedBy),
-    );
-  }
-
-  if (childSyncs.length > 0) {
-    await Promise.all(childSyncs);
-  }
+  // Each sync function now skips itself when its collection is `undefined`
+  // (LLMO-6591), so the per-field `!== undefined` guards that used to live
+  // here are redundant — call unconditionally and let the shared guard decide.
+  await Promise.all([
+    syncAliases(brandId, organizationId, updates.brandAliases, postgrestClient, updatedBy),
+    syncCompetitors(brandId, organizationId, updates.competitors, postgrestClient, updatedBy),
+    syncSocialAccounts(brandId, organizationId, updates.socialAccounts, postgrestClient, updatedBy),
+    syncEarnedSources(brandId, organizationId, updates.earnedContent, postgrestClient, updatedBy),
+  ]);
 
   if (updates.urls !== undefined) {
     await Promise.all([

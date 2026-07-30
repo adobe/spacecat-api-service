@@ -166,6 +166,57 @@ function BrandsController(ctx, log, env) {
     }
   };
 
+  // Best-effort observability signal (LLMO-6591): a PATCH carried an
+  // `expectedUpdatedAt` that no longer matches the persisted row and was
+  // rejected — the caller's view was stale (another tab/request wrote in
+  // between). Alarm on the count (Mysticat/Brands -> BrandStaleWriteRejected)
+  // to see how often this actually fires. Never affects the response.
+  const emitBrandStaleWriteRejected = (context, operation) => {
+    try {
+      emitMetric(
+        {
+          name: 'BrandStaleWriteRejected',
+          dimensions: {
+            Operation: operation,
+            Product: context?.pathInfo?.headers?.['x-product'],
+          },
+        },
+        { environment: resolveEnvironment(env), namespace: BRAND_METRICS_NAMESPACE },
+      );
+      log.warn(`BrandStaleWriteRejected: ${operation} rejected a stale write `
+        + `(org=${context?.params?.spaceCatId}, brand=${context?.params?.brandId}, `
+        + `updatedBy=${context?.attributes?.authInfo?.profile?.sub || 'system'}) — `
+        + 'expectedUpdatedAt did not match the persisted row.');
+    } catch {
+      // best-effort: metric/log emission must never affect the request path
+    }
+  };
+
+  // Best-effort observability signal (LLMO-6591): a successful write took one
+  // of the full-replace child collections from non-empty to empty. Often
+  // legitimate (deleting the last alias/competitor), so this is a detection
+  // signal for retroactive review, not a rejection — never blocks the write.
+  const emitBrandCollectionWiped = (context, operation, collection) => {
+    try {
+      emitMetric(
+        {
+          name: 'BrandCollectionWiped',
+          dimensions: {
+            Operation: operation,
+            Collection: collection,
+            Product: context?.pathInfo?.headers?.['x-product'],
+          },
+        },
+        { environment: resolveEnvironment(env), namespace: BRAND_METRICS_NAMESPACE },
+      );
+      log.warn(`BrandCollectionWiped: ${operation} took "${collection}" from non-empty to empty `
+        + `(org=${context?.params?.spaceCatId}, brand=${context?.params?.brandId}, `
+        + `updatedBy=${context?.attributes?.authInfo?.profile?.sub || 'system'}).`);
+    } catch {
+      // best-effort: metric/log emission must never affect the request path
+    }
+  };
+
   // Best-effort intent classifier for prompts that arrive without an intent
   // (human-added). Returns null when disabled by config or Azure OpenAI is not
   // configured, in which case intent is simply left null. Built once per
@@ -243,11 +294,21 @@ function BrandsController(ctx, log, env) {
     // Not a Semrush transport error: an app-level ErrorWithStatusCode (has `.status`), or a bare
     // Error whose safe message passes through. `err` is unwrapTransportCause's `unknown` return;
     // mirror the original any-typed access to `.status`/`.message` on the (unwrapped) error.
-    const appErr = /** @type {{ status?: number; message?: string }} */ (err);
+    const appErr = /** @type {{ status?: number; message?: string; code?: string }} */ (err);
     if (appErr.status) {
-      return createResponse({ message: appErr.message }, appErr.status, {
-        [HEADER_ERROR]: appErr.message,
-      });
+      // Every `.code` set anywhere in this controller/storage layer is an
+      // intentional, human-readable token meant for exactly this (e.g.
+      // `brand_status_demotion_not_allowed`, `brand_stale_write`) — never a raw
+      // DB error code (rethrowCheckViolation always constructs a fresh Error, so
+      // a Postgres code like '23514' never survives to here). Exposing it lets a
+      // client distinguish error cases without regex-matching the message text
+      // (LLMO-6591; see the `uq_brand_name_per_org` TODO this same pattern
+      // predates in elmo-ui's getBrandSaveErrorDescriptor).
+      return createResponse(
+        { message: appErr.message, ...(appErr.code ? { code: appErr.code } : {}) },
+        appErr.status,
+        { [HEADER_ERROR]: appErr.message },
+      );
     }
     return internalServerError(appErr.message);
   }
@@ -2043,6 +2104,16 @@ function BrandsController(ctx, log, env) {
         }
       }
 
+      // LLMO-6591: best-effort detection when this write takes a collection
+      // from non-empty to empty. Only pays for the pre-write read when at
+      // least one collection is being explicitly emptied — the common edit
+      // touches none of them, or replaces them with real values.
+      const emptiedCollections = ['brandAliases', 'competitors', 'socialAccounts', 'earnedContent']
+        .filter((field) => Array.isArray(updates[field]) && updates[field].length === 0);
+      const beforeForWipeCheck = emptiedCollections.length > 0
+        ? await getBrandById(spaceCatId, brandUuid, postgrestClient)
+        : null;
+
       const updated = await updateBrand({
         organizationId: spaceCatId,
         brandId: brandUuid,
@@ -2053,6 +2124,14 @@ function BrandsController(ctx, log, env) {
 
       if (!updated) {
         return notFound(`Brand not found: ${brandId}`);
+      }
+
+      if (beforeForWipeCheck) {
+        for (const field of emptiedCollections) {
+          if (Array.isArray(beforeForWipeCheck[field]) && beforeForWipeCheck[field].length > 0) {
+            emitBrandCollectionWiped(context, 'updateBrand', field);
+          }
+        }
       }
 
       // Brand-level Semrush re-sync: when an edit changes URL sources, competitors
@@ -2197,6 +2276,9 @@ function BrandsController(ctx, log, env) {
     } catch (error) {
       if (error.code === 'brand_status_demotion_not_allowed') {
         emitBrandDemotionBlocked(context, 'updateBrand');
+      }
+      if (error.code === 'brand_stale_write') {
+        emitBrandStaleWriteRejected(context, 'updateBrand');
       }
       log.error(`Error updating brand ${brandId} for organization ${spaceCatId}:`, error);
       return createErrorResponse(error);
