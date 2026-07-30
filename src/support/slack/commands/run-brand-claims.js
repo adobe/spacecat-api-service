@@ -211,11 +211,6 @@ function RunBrandClaimsCommand(context) {
       const event = {
         event_type: 'BRAND_PRESENCE_SHEET_WRITTEN',
         schema_version: 1,
-        // The Brand Claims consumer resolves the brand via
-        // `GET /v2/orgs/{spaceCatId}/sites/{siteId}/brand`, whose path param is the
-        // SpaceCat org UUID (validated `isValidUUID`) — NOT the IMS org id. Sending
-        // `getImsOrgId()` (…@AdobeOrg) 400s there and the event is silently
-        // enablement-dropped. Use the spacecat org UUID. (LLMO-6143)
         organization_id: site.getOrganizationId(),
         brand_id: brand.id,
         brand: brandSlug,
