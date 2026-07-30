@@ -2942,6 +2942,37 @@ describe('handlers/prompts.js — per-item source override (LLMO-6556)', () => {
       expect(out.tagIds).to.deep.equal([TAG_IDS.sourceSemrush]);
       expect(transport.listProjectTags).to.not.have.been.called;
     });
+
+    // ADDED (MysticatBot suggestion): the cache-HIT path — the stated purpose of
+    // the (projectId, source) re-key. Two cards with the SAME producer resolve it
+    // ONCE (no new reads on the repeat), while a DIFFERENT producer re-keys and
+    // does resolve again — proving the key includes `source`, not just the project.
+    it('serves a repeat (projectId, source) from the cache and re-keys a new source', async () => {
+      const transport = { listProjectTags: makeListProjectTagsStub() };
+      const inject = makePromptTagInjector(transport, WORKSPACE, undefined, fakeLog(), {
+        sourceValue: 'config',
+      });
+
+      await inject('proj-1', {
+        text: 'a', geoTargetId: 2840, tagIds: [], source: 'semrush',
+      });
+      const readsAfterFirst = transport.listProjectTags.callCount;
+      expect(readsAfterFirst).to.be.greaterThan(0);
+
+      // Same (project, source) => cache hit, no additional reads.
+      await inject('proj-1', {
+        text: 'b', geoTargetId: 2840, tagIds: [], source: 'semrush',
+      });
+      expect(transport.listProjectTags.callCount).to.equal(readsAfterFirst);
+
+      // Different source (`config`, also pre-minted) => cache miss because the key
+      // is re-keyed on source, so it resolves again: more reads than the semrush-only
+      // count. Proves the cache distinguishes producers within one project.
+      await inject('proj-1', {
+        text: 'c', geoTargetId: 2840, tagIds: [], source: 'config',
+      });
+      expect(transport.listProjectTags.callCount).to.be.greaterThan(readsAfterFirst);
+    });
   });
 });
 
