@@ -1,3 +1,10 @@
+# [1.711.0](https://github.com/adobe/spacecat-api-service/compare/v1.710.1...v1.711.0) (2026-07-30)
+
+
+### Features
+
+* URL-Prompts serenity endpoint for URL Inspector | LLMO-6620 ([#2942](https://github.com/adobe/spacecat-api-service/issues/2942)) ([0483eb3](https://github.com/adobe/spacecat-api-service/commit/0483eb308e8af3c77ed57890c668d9f1abb11b90))
+
 ## [1.710.1](https://github.com/adobe/spacecat-api-service/compare/v1.710.0...v1.710.1) (2026-07-30)
 
 
