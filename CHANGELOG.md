@@ -1,3 +1,10 @@
+## [1.711.1](https://github.com/adobe/spacecat-api-service/compare/v1.711.0...v1.711.1) (2026-07-30)
+
+
+### Bug Fixes
+
+* **brands:** guard full-replace child syncs against silent wipes (LLMO-6591) ([#2966](https://github.com/adobe/spacecat-api-service/issues/2966)) ([3ef29ee](https://github.com/adobe/spacecat-api-service/commit/3ef29eeccc89564260b534561889924c90b27a9d))
+
 # [1.711.0](https://github.com/adobe/spacecat-api-service/compare/v1.710.1...v1.711.0) (2026-07-30)
 
 
