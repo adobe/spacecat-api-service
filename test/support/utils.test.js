@@ -35,6 +35,7 @@ import {
   sendAutofixMessage,
   isViewAsTrialRequest,
   getImsUserTokenStrict,
+  resolveCallerImsUserId,
   sendGlobalImportRunMessage,
   triggerGlobalImportRun,
 } from '../../src/support/utils.js';
@@ -1562,6 +1563,49 @@ describe('utils', () => {
       expect(payload.relationshipContext).to.deep.equal({ fixTargetPageId: 'page-123' });
       expect(payload).to.have.property('customData');
       expect(payload.customData).to.deep.equal({ key: 'value' });
+    });
+  });
+
+  describe('resolveCallerImsUserId', () => {
+    const withProfile = (profile) => ({
+      attributes: { authInfo: { getProfile: () => profile } },
+    });
+
+    it('prefers the user_id claim over sub', () => {
+      expect(resolveCallerImsUserId(withProfile({ user_id: 'user-123', sub: 'sub-x' })))
+        .to.equal('user-123');
+    });
+
+    it('falls back to sub — the claim a SpaceCat JWT session token carries', () => {
+      expect(resolveCallerImsUserId(withProfile({ sub: 'sub-x' }))).to.equal('sub-x');
+    });
+
+    // The IMS handler deletes user_id from the profile it builds and leaves the
+    // id only on `email`, so this is the sole carrier for an IMS-authenticated
+    // caller — and it is an id, not a human address.
+    it('falls back to the email claim, the platform user-id alias', () => {
+      expect(resolveCallerImsUserId(withProfile({ email: 'ims-user-9@AdobeID' })))
+        .to.equal('ims-user-9@AdobeID');
+    });
+
+    it('prefers sub over email when both are present', () => {
+      expect(resolveCallerImsUserId(withProfile({ sub: 'sub-x', email: 'sub-x' })))
+        .to.equal('sub-x');
+    });
+
+    it('returns null for an empty claim', () => {
+      expect(resolveCallerImsUserId(withProfile({ user_id: '', sub: '', email: '' })))
+        .to.equal(null);
+    });
+
+    it('returns null when there is no profile, authInfo, or context', () => {
+      expect(resolveCallerImsUserId(withProfile(undefined))).to.equal(null);
+      expect(resolveCallerImsUserId({ attributes: {} })).to.equal(null);
+      expect(resolveCallerImsUserId(undefined)).to.equal(null);
+    });
+
+    it('returns null for a non-string claim', () => {
+      expect(resolveCallerImsUserId(withProfile({ user_id: 12345 }))).to.equal(null);
     });
   });
 

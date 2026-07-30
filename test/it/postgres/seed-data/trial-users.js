@@ -19,9 +19,13 @@ import {
 } from '../../shared/seed-ids.js';
 
 export const trialUsers = [
+  // `external_user_id` is what the userDetails lookup matches on; without it the
+  // trial branch can never resolve this row and every request falls through to the
+  // non-trial path.
   {
     id: TRIAL_USER_1_ID,
     email_id: TRIAL_USER_1_EMAIL,
+    external_user_id: TRIAL_USER_1_EMAIL,
     organization_id: ORG_1_ID,
     status: 'INVITED',
   },
