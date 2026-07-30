@@ -331,7 +331,7 @@ export default function AuditPolicyController() {
     if (hasText(rawCursor)) {
       cursor = decodePageCursor(rawCursor);
       if (cursor === null) {
-        return badRequest('cursor is invalid');
+        return badRequest('cursor is invalid or out of range');
       }
     }
 

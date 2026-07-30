@@ -866,7 +866,7 @@ describe('AuditPolicyController — E4 getScopePages', () => {
   const buildRow = (url, path) => ({
     url,
     url_path: path,
-    discovery_source: 'sitemap',
+    discovery_source: ['sitemap'],
     last_modified: '2026-01-01T00:00:00.000000+00:00',
     lifecycle_state: 'active',
   });
@@ -898,7 +898,7 @@ describe('AuditPolicyController — E4 getScopePages', () => {
     expect(body.items).to.deep.equal([{
       url: 'https://example.com/a',
       urlPath: '/a',
-      discoverySource: 'sitemap',
+      discoverySource: ['sitemap'],
       lastModified: '2026-01-01T00:00:00.000Z',
       lifecycleState: 'active',
     }]);

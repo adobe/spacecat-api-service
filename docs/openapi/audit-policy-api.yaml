@@ -369,6 +369,7 @@ AuditPolicyRevisionList:
 
 AuditScopePage:
   type: object
+  required: [url, urlPath, discoverySource, lifecycleState]
   properties:
     url: { type: string }
     urlPath: { type: string }
