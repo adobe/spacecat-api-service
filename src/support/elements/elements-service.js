@@ -48,6 +48,7 @@ import {
   transformDomainUrlsResponse,
   buildUrlPromptsPayload,
   transformUrlPromptsResponse,
+  mergeUrlPromptsResponses,
   buildMarketMentionsTrendPayload,
   buildMarketCitationsTrendPayload,
   transformMarketTrackingTrends,
@@ -350,14 +351,10 @@ export function createElementsService(transport, log) {
      * Market scope: the element takes ONE top-level `project_id` per call (a `CBF_project`
      * advanced filter is a no-op — verified live LLMO-6674). So when the caller selects
      * markets, this fans out one call per project id (bounded concurrency, mirroring
-     * owned-urls) and UNIONS the results, deduped by prompt text — the same prompt cited in
-     * two markets is one row. No `projectIds` → one unscoped call across the whole
-     * sub-workspace (unchanged behavior). Category is a `CBF_tags` filter applied on every
-     * per-project call.
-     *
-     * On dedupe the first occurrence wins for scalar fields, `brands` are unioned, and the
-     * latest `closestDate` is kept — so the SR dialog's Brands mentioned / Last cited
-     * columns reflect all selected markets, not just the first.
+     * owned-urls) and UNIONS the results, deduped by prompt text via
+     * {@link mergeUrlPromptsResponses} (which documents the dedupe/collision rules). No
+     * `projectIds` → one unscoped call across the whole sub-workspace (unchanged behavior).
+     * Category is a `CBF_tags` filter applied on every per-project call.
      *
      * @param {string} workspaceId - Semrush sub-workspace UUID (projects/prompts live here).
      * @param {object} params - Query params (url, model/platform, startDate, endDate,
@@ -393,27 +390,12 @@ export function createElementsService(transport, log) {
         },
       );
 
-      // Single scope → nothing to merge; return as-is.
+      // Single scope → nothing to merge; return the transformed rows as-is.
       if (scopes.length === 1) {
         return perProject[0];
       }
-
-      // Union across markets, deduped by prompt text.
-      const byPrompt = new Map();
-      for (const row of perProject.flat()) {
-        const existing = byPrompt.get(row.prompt);
-        if (!existing) {
-          byPrompt.set(row.prompt, { ...row, brands: [...row.brands] });
-          // eslint-disable-next-line no-continue
-          continue;
-        }
-        // Union brands (dedupe), keep the latest closestDate.
-        existing.brands = [...new Set([...existing.brands, ...row.brands])];
-        if (row.closestDate && (!existing.closestDate || row.closestDate > existing.closestDate)) {
-          existing.closestDate = row.closestDate;
-        }
-      }
-      return [...byPrompt.values()];
+      // Multi-market: union + dedupe by prompt text (see mergeUrlPromptsResponses).
+      return mergeUrlPromptsResponses(perProject);
     },
     /* c8 ignore stop */
 

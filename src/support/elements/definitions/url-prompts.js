@@ -114,3 +114,52 @@ export function transformUrlPromptsResponse(raw) {
     closestDate: typeof row?.closest_date === 'string' ? row.closest_date : null,
   }));
 }
+
+/**
+ * Merges the per-market URL_PROMPTS responses (each already run through
+ * {@link transformUrlPromptsResponse}) into one deduped list. The element takes ONE
+ * top-level `project_id` per call, so a multi-market selection fans out one call per
+ * project (see `getUrlPrompts`) and this unions the transformed results. Extracted here
+ * (rather than inlined in the service) to match the sibling merge helpers in
+ * `owned-urls.js` / `cited-domains.js` and to keep the merge unit-testable.
+ *
+ * Dedupe is EXACT-STRING on `prompt` — NO case/whitespace normalization. Distinct
+ * markets are distinct geo+language slices, so a case- or space-differing prompt is a
+ * genuinely different prompt, not a variant to fold together. Rows with an empty
+ * `prompt` are malformed (the element returns one row per real prompt) and are DROPPED,
+ * not collapsed into a single bogus `''` entry that would hide a market's data.
+ *
+ * On collision the FIRST occurrence wins for scalar fields (`sourceTitle`,
+ * `brandMentioned`, ...). This is non-deterministic across markets by design: a URL's
+ * prompt text is the same everywhere, only per-market citation metadata differs, and the
+ * SR dialog shows a single row per prompt. `brands` are unioned and the latest
+ * `closestDate` is kept so "Brands mentioned" / "Last cited" reflect ALL selected markets.
+ *
+ * @param {Array<Array<object>>} perProjectRows - Transformed rows, one array per market.
+ * @returns {Array<object>} Deduped union, in first-seen order.
+ */
+export function mergeUrlPromptsResponses(perProjectRows = []) {
+  const byPrompt = new Map();
+  for (const rows of (Array.isArray(perProjectRows) ? perProjectRows : [])) {
+    for (const row of (Array.isArray(rows) ? rows : [])) {
+      // Drop malformed/blank-prompt rows so multiple markets' blanks don't collapse
+      // into one bogus '' entry (see docstring).
+      if (!row?.prompt) {
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+      const existing = byPrompt.get(row.prompt);
+      if (!existing) {
+        byPrompt.set(row.prompt, { ...row, brands: [...(row.brands ?? [])] });
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+      // Union brands (dedupe); keep the latest closestDate across markets.
+      existing.brands = [...new Set([...existing.brands, ...(row.brands ?? [])])];
+      if (row.closestDate && (!existing.closestDate || row.closestDate > existing.closestDate)) {
+        existing.closestDate = row.closestDate;
+      }
+    }
+  }
+  return [...byPrompt.values()];
+}
