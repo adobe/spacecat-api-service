@@ -31,7 +31,9 @@ export const SLACK_API = 'https://slack.com/api/chat.postMessage';
 export const FALLBACK_SLACK_CHANNEL = 'C060T2PPF8V';
 export const PROFILE_CONFIG_PATH = path.resolve(process.cwd(), 'static/onboard/profiles.json');
 
-const SLACK_URL_FORMAT_REGEX = /(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9.-]+)\.([a-zA-Z]{2,})([/\w.-]*\/?)/;
+// Path segment allows '*' so wildcard base URLs (e.g. https://example.com/en-ge/*) survive
+// intact instead of being silently truncated right before the asterisk.
+const SLACK_URL_FORMAT_REGEX = /(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9.-]+)\.([a-zA-Z]{2,})([/\w.*-]*\/?)/;
 const MAX_TEXT_CHUNK_SIZE = 3000;
 const MAX_CHUNK_SIZE = 25;
 

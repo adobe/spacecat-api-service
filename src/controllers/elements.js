@@ -65,6 +65,35 @@ async function fetchBrandSemrushProjects(BrandSemrushProject, brands) {
   return perBrand.flat().map(toPlainProject);
 }
 
+/**
+ * Authorization check for caller-supplied `projectId`(s): every id must be one
+ * this brand actually owns (per its `BrandSemrushProject` rows — the same
+ * source the aggregate "all projects" view already uses), or a caller who
+ * knows another brand's Semrush project UUID could scope a query to that
+ * brand's data. This is the invariant `resolveRegionProjectId` used to
+ * enforce implicitly (a region only ever resolved to a project the Markets
+ * element tied back to the caller's own brand); a raw caller-supplied id has
+ * no such lookup, so it must be checked explicitly here instead.
+ *
+ * @param {string[]} requestedProjectIds - Parsed `projectId` query value.
+ * @param {object[]} brandSemrushProjects - This brand's `BrandSemrushProject`
+ *   rows (plain objects with `semrushProjectId`).
+ * @returns {Response|null} A 403 `Response` if any id isn't owned by the
+ *   brand; `null` when the aggregate view was requested (no ids) or every id
+ *   checks out.
+ */
+function checkProjectIdsOwnership(requestedProjectIds, brandSemrushProjects) {
+  if (requestedProjectIds.length === 0) {
+    return null;
+  }
+  const owned = new Set(brandSemrushProjects.map((p) => p.semrushProjectId));
+  const unauthorized = requestedProjectIds.filter((id) => !owned.has(id));
+  if (unauthorized.length > 0) {
+    return forbidden(`projectId not owned by this brand: ${unauthorized.join(', ')}`);
+  }
+  return null;
+}
+
 function safeError(msg) {
   return cleanupHeaderValue(String(msg || '')).slice(0, MAX_ERR_MSG_LEN);
 }
@@ -158,6 +187,60 @@ function splitCsv(value) {
   return value.split(',').map((v) => v.trim()).filter((v) => v.length > 0);
 }
 
+// Upper bound on how many project ids a caller can pass in one `projectId` CSV
+// value. Unlike the old `region` param — where the Markets-element lookup
+// implicitly rejected anything that wasn't a real market — a caller-supplied
+// project id is used as-is with no lookup, so nothing else caps the fan-out
+// (CITED_DOMAINS/STATS_PER_URL/URL_TRENDS issue one upstream call per id) or
+// the size of the CBF_project/CBF_projects OR-filter sent to every other
+// element. This cap bounds both.
+const MAX_PROJECT_IDS = 8;
+
+/**
+ * Extracts caller-supplied Semrush project ids from the `projectId`/`project_id`
+ * query param (CSV, e.g. `projectId=uuid1,uuid2`). Replaces the old single-value
+ * `region`/`regionCode` param — the caller now supplies the Semrush project id(s)
+ * to scope to directly, instead of a market/region code that had to be resolved
+ * via the Markets element. Absent/empty → caller wants the aggregate view across
+ * every project the brand owns.
+ *
+ * Deduplicates (order-preserving) before validating: a repeated id is harmless
+ * for the `CBF_project`/`CBF_projects` OR-filter builders (a duplicated `eq`
+ * term is a no-op), but the CITED_DOMAINS/STATS_PER_URL/URL_TRENDS per-project
+ * fan-out issues one upstream call per id and sums the results — an
+ * undeduplicated `projectId=X,X` would double-count that project's citations.
+ * Dedup happens before the count cap so a caller repeating the same id many
+ * times isn't rejected for exceeding {@link MAX_PROJECT_IDS}.
+ *
+ * Validates each id is a UUID and caps the (deduplicated) count at
+ * {@link MAX_PROJECT_IDS} — with no Markets-element lookup in this path
+ * anymore, nothing else rejects a malformed or excessively long id list before
+ * it reaches the upstream calls.
+ *
+ * @param {object} query - Parsed query params (from `extractQuery`).
+ * @returns {string[]} Deduplicated, requested project ids, or [] for the
+ *   aggregate view.
+ * @throws {ErrorWithStatusCode} 400 if more than {@link MAX_PROJECT_IDS}
+ *   (deduplicated) ids are given, or any id is not a valid UUID.
+ */
+function extractProjectIds(query) {
+  const ids = [...new Set(splitCsv(query.projectId || query.project_id))];
+  if (ids.length > MAX_PROJECT_IDS) {
+    throw new ErrorWithStatusCode(
+      `projectId supports at most ${MAX_PROJECT_IDS} comma-separated ids (received ${ids.length})`,
+      400,
+    );
+  }
+  const invalidIds = ids.filter((id) => !isValidUUID(id));
+  if (invalidIds.length > 0) {
+    throw new ErrorWithStatusCode(
+      `projectId must be a comma-separated list of UUIDs (invalid: ${invalidIds.join(', ')})`,
+      400,
+    );
+  }
+  return ids;
+}
+
 /**
  * True when the `showTrends`/`show_trends` query param requests trend data,
  * mirroring `llmo-brand-presence.js#parseShowTrends`.
@@ -169,6 +252,24 @@ function splitCsv(value) {
  */
 export function parseShowTrends(q) {
   const v = q?.showTrends ?? q?.show_trends;
+  if (v === true || v === 1) {
+    return true;
+  }
+  if (typeof v === 'string') {
+    const s = v.toLowerCase().trim();
+    return s === 'true' || s === '1';
+  }
+  return false;
+}
+
+/**
+ * True when the `userIntent`/`user_intent` query param opts into per-prompt
+ * intent enrichment on the brand-presence prompts endpoint. Same boolean
+ * parsing as {@link parseShowTrends} (the HTTP path only ever yields strings;
+ * the boolean/number branch is unit-test-only).
+ */
+export function parseUserIntent(q) {
+  const v = q?.userIntent ?? q?.user_intent;
   if (v === true || v === 1) {
     return true;
   }
@@ -373,15 +474,92 @@ export default function ElementsController(context, log, env) {
 
   async function buildService(ctx) {
     const imsToken = await resolveElementsImsToken(ctx);
-    return createElementsService(createElementsTransport({ env, imsToken }));
+    return createElementsService(createElementsTransport({ env, imsToken }), log);
+  }
+
+  /**
+   * Shared scaffolding for the two URL Inspector KPI endpoints
+   * (`getUrlInspectorStats`, `getUrlInspectorPromptsCount`): org/brand auth,
+   * the optional `siteId` -> brand ownership cross-check, and projectId ->
+   * project(s) scoping (including the empty-scope 404 guard). Both
+   * endpoints need the exact same security-relevant checks (siteId
+   * ownership, cross-brand project scoping) — keeping them in one place
+   * means a fix to one can't silently miss the other (PR #2861 review: the
+   * `/prompts/count` copy had already drifted to skip test coverage the
+   * `/stats` copy had).
+   *
+   * @param {object} ctx - Request context.
+   * @returns {Promise<{error: Response}|{workspaceId: string, brand: object,
+   *   brandId: string, query: object, service: object, projects: object[],
+   *   projectIds: string[]}>} `projects` carries `{ region, projectId }`
+   *   entries (only populated for the aggregate view); `projectIds`
+   *   is always the flat, `hasText`-filtered list of Semrush project ids.
+   */
+  async function resolveUrlInspectorScope(ctx) {
+    const auth = await authorizeOrg(ctx);
+    if (auth.error) {
+      return { error: auth.error };
+    }
+    const { spaceCatId, brandId } = ctx?.params ?? {};
+    const { workspaceId, brand } = auth;
+    const query = extractQuery(ctx);
+
+    const siteId = query.siteId || query.site_id;
+    if (hasText(siteId)) {
+      const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
+      const resolved = await getBrandBySite(spaceCatId, siteId, postgrestClient, log);
+      if (!resolved || resolved.id !== brand.id) {
+        return { error: badRequest('siteId does not belong to the specified brand') };
+      }
+    }
+
+    const service = await buildService(ctx);
+    const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+    const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
+
+    // Scope per project: caller-supplied projectId(s) → those projects; otherwise
+    // all the brand's markets — mirrors listOwnedUrls/listDomainUrls.
+    let projects;
+    let projectIds;
+    const requestedProjectIds = extractProjectIds(query);
+    const ownershipError = checkProjectIdsOwnership(requestedProjectIds, brandSemrushProjects);
+    if (ownershipError) {
+      return { error: ownershipError };
+    }
+    if (requestedProjectIds.length > 0) {
+      projects = requestedProjectIds.map((projectId) => ({ projectId }));
+      projectIds = requestedProjectIds;
+    } else {
+      projects = await service.getOwnedUrlProjects(workspaceId, { brandSemrushProjects });
+      // Derived from the SAME resolved `projects` array (not re-filtered from
+      // brandSemrushProjects) — a project can exist in the DB rows but not
+      // resolve via the Markets element (or vice versa), and using two
+      // different sources here would scope the two KPI endpoints to
+      // different project sets.
+      projectIds = projects.map((p) => p.projectId).filter(hasText);
+      // An empty list here must not silently fall through to an unscoped
+      // (workspace-wide) Semrush query (mirrors getStats's Decision 4.1) —
+      // if this brand has no sub-workspace of its own yet, `workspaceId`
+      // resolves to the org's shared parent, so an unscoped call would
+      // return every brand/project in that parent, not just this one.
+      if (projectIds.length === 0) {
+        return { error: notFound(`No Semrush projects configured for brand: ${brandId}`) };
+      }
+    }
+
+    return {
+      workspaceId, brand, brandId, query, service, projects, projectIds,
+    };
   }
 
   /**
    * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence
    *     /url-inspector/filter-dimensions
    * Returns filter dimensions for the URL Inspector dashboard
-   * (brands, regions, topics, categories, page_intents, origins), scoped to
-   * that single brand.
+   * (brands, regions, topics, categories, page_intents, origins, content_types), scoped to
+   * that single brand. `projectId`/`project_id` (CSV of Semrush project UUIDs, optional)
+   * scopes the topics/categories/page_intents/origins/tags dimensions (backed by the
+   * TOPICS element) to those projects via a `CBF_project` OR filter; absent → unscoped.
    */
   const listUrlInspectorFilterDimensions = async (ctx) => {
     try {
@@ -398,10 +576,18 @@ export default function ElementsController(context, log, env) {
         spacecatBrands,
       );
 
+      const query = extractQuery(ctx);
+      // Any caller-supplied id must belong to this brand — otherwise it could scope the
+      // Topics element to another brand's data.
+      const projectIds = extractProjectIds(query);
+      const ownershipError = checkProjectIdsOwnership(projectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
       const service = await buildService(ctx);
       const result = await service.getUrlInspectorFilterDimensions(
         auth.workspaceId,
-        extractQuery(ctx),
+        { ...query, projectIds },
         spacecatBrands,
         brandSemrushProjects,
       );
@@ -477,6 +663,7 @@ export default function ElementsController(context, log, env) {
         platform: query.platform,
         tags: splitCsv(query.tag),
         projectIds: splitCsv(query.projectId || query.project_id),
+        enrichUserIntent: parseUserIntent(query),
       });
       return ok(result);
     } catch (e) {
@@ -499,7 +686,6 @@ export default function ElementsController(context, log, env) {
       // resolved the brand's Semrush **sub-workspace** — every element is scoped by that
       // workspace, not the org's (LLMO-5990/6029). The URL Inspector UI has no brand picker,
       // so it cross-maps its selected site → brandId before calling.
-      const { brandId } = ctx?.params ?? {};
       const { workspaceId, brand } = auth;
       const query = extractQuery(ctx);
 
@@ -522,35 +708,23 @@ export default function ElementsController(context, log, env) {
       // (falling back to Authorization IMS) before constructing the transport (LLMO-5990).
       const service = await buildService(ctx);
 
-      // Region scoping: a Semrush project == one (brand, market). Resolve the UI's region
-      // code to that project's id (via the Markets element) and pass it as top-level
-      // `project_id`. region=all/absent → all of the brand's markets.
-      let projectId;
-      const { region } = query;
-      if (hasText(region) && region.toLowerCase() !== 'all') {
-        const { BrandSemrushProject } = ctx?.dataAccess ?? {};
-        const brandSemrushProjects = await fetchBrandSemrushProjects(
-          BrandSemrushProject,
-          [brand],
-        );
-        projectId = await service.resolveRegionProjectId(workspaceId, {
-          brandId, region, brandSemrushProjects,
-        });
-        // Don't silently fall back to all-region data when the caller asked for a specific
-        // region we can't resolve to a market — that would return a superset of what was
-        // requested. Fail explicitly, mirroring the brandId/workspaceId guards above.
-        if (!hasText(projectId)) {
-          return notFound(`No Semrush market found for region: ${region}`);
-        }
+      // Project scoping: caller-supplied projectId(s) (CSV) scope directly to those
+      // Semrush projects; absent → all of the brand's markets. Any caller-supplied id
+      // must belong to this brand — otherwise it could scope to another brand's data.
+      const projectIds = extractProjectIds(query);
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
+      const ownershipError = checkProjectIdsOwnership(projectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
       }
 
       // Explicitly pick the params the service needs (normalizing the aliases the UI may send
       // under either casing/key) rather than spreading all raw query keys through. `category`
       // (sent as `categoryId`) becomes a Semrush tag; `channel` is a client-side content-type
-      // filter in the transform; `region` was resolved to `projectId` above; page/pageSize
-      // drive the client-side slice.
+      // filter in the transform; page/pageSize drive the client-side slice.
       const params = {
-        projectId,
+        projectIds,
         model: query.model || query.platform,
         startDate,
         endDate,
@@ -573,7 +747,7 @@ export default function ElementsController(context, log, env) {
    * Returns per-week brand sentiment (positive/neutral/negative percentages) sourced from
    * the Semrush Sentiment element, in the legacy `{ weeklyTrends: [...] }` contract so the
    * existing brand-presence sentiment chart consumes it drop-in. Single upstream call
-   * (aggregate, no fan-out); region → top-level project_id like cited-domains.
+   * (aggregate, no fan-out); projectId(s) → `CBF_project` filter.
    */
   /* c8 ignore start -- LLMO-6300 POC endpoint; unit tests intentionally deferred */
   const listSentimentOverview = async (ctx) => {
@@ -582,7 +756,6 @@ export default function ElementsController(context, log, env) {
       if (auth.error) {
         return auth.error;
       }
-      const { brandId } = ctx?.params ?? {};
       const { workspaceId, brand } = auth;
       const query = extractQuery(ctx);
 
@@ -610,27 +783,19 @@ export default function ElementsController(context, log, env) {
 
       const service = await buildService(ctx);
 
-      // Region scoping: a Semrush project == one (brand, market). Resolve the UI's region
-      // code to that project's id (via the Markets element) and pass it as top-level
-      // `project_id`. region=all/absent → aggregate across all the brand's markets.
-      let projectId;
-      const { region } = query;
-      if (hasText(region) && region.toLowerCase() !== 'all') {
-        const { BrandSemrushProject } = ctx?.dataAccess ?? {};
-        const brandSemrushProjects = await fetchBrandSemrushProjects(
-          BrandSemrushProject,
-          [brand],
-        );
-        projectId = await service.resolveRegionProjectId(workspaceId, {
-          brandId, region, brandSemrushProjects,
-        });
-        if (!hasText(projectId)) {
-          return notFound(`No Semrush market found for region: ${region}`);
-        }
+      // Project scoping: caller-supplied projectId(s) (CSV) → `CBF_project` filter;
+      // absent → aggregate across all the brand's markets. Any caller-supplied id
+      // must belong to this brand — otherwise it could scope to another brand's data.
+      const projectIds = extractProjectIds(query);
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
+      const ownershipError = checkProjectIdsOwnership(projectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
       }
 
       const params = {
-        projectId,
+        projectIds,
         model: query.model || query.platform,
         startDate,
         endDate,
@@ -639,6 +804,163 @@ export default function ElementsController(context, log, env) {
 
       const result = await service.getSentimentOverview(workspaceId, params);
       return cachedOk(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+  /* c8 ignore stop */
+
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics
+   * Data Insights per-topic table. Backed by the rich PROMPTS_BY_TOPIC element
+   * (78864493) fetched across ALL topics, grouped by topic and aggregated
+   * server-side (promptCount, brandMentions/citations, avg visibility/position/sentiment).
+   *
+   * Brand-scoped via the brand's Semrush **sub-workspace** (like {@link listTopicPrompts}).
+   * Caller-supplied projectId(s) (optional) scope to `CBF_project`; absent → all of the
+   * brand's markets.
+   * Returns the full topic list (`{ topics, totalCount }`); the table paginates client-side.
+   *
+   * Query params (all optional): `model`/`platform` (default search-gpt), `projectId`
+   * (CSV of Semrush project UUIDs), `startDate`/`endDate` (YYYY-MM-DD).
+   */
+  /* c8 ignore start -- LLMO-6418 POC endpoint; unit tests intentionally deferred */
+  const listTopics = async (ctx) => {
+    try {
+      const auth = await authorizeBrandSubWorkspace(ctx, log);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { brandId } = ctx?.params ?? {};
+      const { workspaceId } = auth;
+      const query = extractQuery(ctx);
+
+      // Date range is optional; when present it must be a valid, ordered YYYY-MM-DD pair.
+      const startDate = query.startDate || query.start_date;
+      const endDate = query.endDate || query.end_date;
+      if (hasText(startDate) || hasText(endDate)) {
+        if (!isYmdDate(startDate) || !isYmdDate(endDate)) {
+          return badRequest('startDate and endDate must be valid YYYY-MM-DD dates');
+        }
+        if (startDate > endDate) {
+          return badRequest('startDate must not be after endDate');
+        }
+      }
+
+      const service = await buildService(ctx);
+
+      // Project scoping: caller-supplied projectId(s) (CSV) → CBF_project; absent → all markets.
+      // Any caller-supplied id must belong to this brand — otherwise it could scope to
+      // another brand's data.
+      const projectIds = extractProjectIds(query);
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const brandSemrushProjects = await fetchBrandSemrushProjects(
+        BrandSemrushProject,
+        [{ id: brandId }],
+      );
+      const ownershipError = checkProjectIdsOwnership(projectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
+
+      const topics = await service.getTopics(workspaceId, {
+        model: query.model || query.platform,
+        startDate: hasText(startDate) ? startDate : undefined,
+        endDate: hasText(endDate) ? endDate : undefined,
+        projectIds,
+      });
+
+      return cachedOk({ topics, totalCount: topics.length });
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+  /* c8 ignore stop */
+
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics/:topicId/prompts
+   * Data Insights per-prompt drill-down for a single topic. Backed by the rich
+   * PROMPTS_BY_TOPIC element (78864493), scoped by `CBF_topic` = the topic NAME
+   * (`:topicId` is the URL-encoded topic name, not a UUID — Semrush topics have no id).
+   *
+   * Brand-scoped via the brand's Semrush **sub-workspace** (like {@link listPrompts} —
+   * projects/prompts live only there). Caller-supplied projectId(s) (optional) scope
+   * to `CBF_project`; absent → all of the brand's markets. Pagination is
+   * client-side (Semrush has no server-side paging); `totalCount` is the full count.
+   *
+   * Query params (all optional): `model`/`platform` (default search-gpt), `projectId`
+   * (CSV of Semrush project UUIDs), `startDate`/`endDate` (YYYY-MM-DD), `page` (0-based),
+   * `pageSize` (1..1000, default 50).
+   */
+  /* c8 ignore start -- LLMO-6418 POC endpoint; unit tests intentionally deferred */
+  const listTopicPrompts = async (ctx) => {
+    try {
+      const auth = await authorizeBrandSubWorkspace(ctx, log);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { brandId, topicId } = ctx?.params ?? {};
+      const { workspaceId } = auth;
+
+      // :topicId is the URL-encoded topic NAME. enrichPathInfo already decodes path
+      // params, but decode defensively in case a caller double-encodes.
+      let topic = topicId;
+      try {
+        topic = decodeURIComponent(topicId);
+      } catch { /* keep raw when not a valid encoding */ }
+      if (!hasText(topic)) {
+        return badRequest('topicId (topic name) is required');
+      }
+
+      const query = extractQuery(ctx);
+
+      // Date range is optional here (unlike the aggregate endpoints); when present it
+      // must be a valid, ordered YYYY-MM-DD pair — never forward a malformed date.
+      const startDate = query.startDate || query.start_date;
+      const endDate = query.endDate || query.end_date;
+      if (hasText(startDate) || hasText(endDate)) {
+        if (!isYmdDate(startDate) || !isYmdDate(endDate)) {
+          return badRequest('startDate and endDate must be valid YYYY-MM-DD dates');
+        }
+        if (startDate > endDate) {
+          return badRequest('startDate must not be after endDate');
+        }
+      }
+
+      const service = await buildService(ctx);
+
+      // Project scoping: caller-supplied projectId(s) (CSV) → CBF_project; absent → all markets.
+      // Any caller-supplied id must belong to this brand — otherwise it could scope to
+      // another brand's data.
+      const projectIds = extractProjectIds(query);
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const brandSemrushProjects = await fetchBrandSemrushProjects(
+        BrandSemrushProject,
+        [{ id: brandId }],
+      );
+      const ownershipError = checkProjectIdsOwnership(projectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
+
+      const allPrompts = await service.getTopicPrompts(workspaceId, {
+        topic,
+        model: query.model || query.platform,
+        startDate: hasText(startDate) ? startDate : undefined,
+        endDate: hasText(endDate) ? endDate : undefined,
+        projectIds,
+      });
+
+      // Client-side pagination (mirrors listOwnedUrls); totalCount is the full count.
+      const page = Math.max(0, Number.parseInt(query.page, 10) || 0);
+      const pageSize = Math.min(Math.max(1, Number.parseInt(query.pageSize, 10) || 50), 1000);
+      const totalCount = allPrompts.length;
+      const offset = page * pageSize;
+      const prompts = allPrompts.slice(offset, offset + pageSize);
+
+      return cachedOk({
+        topicId: topic, prompts, totalCount, page, pageSize,
+      });
     } catch (e) {
       return mapError(e, log);
     }
@@ -659,7 +981,7 @@ export default function ElementsController(context, log, env) {
       if (auth.error) {
         return auth.error;
       }
-      const { spaceCatId, brandId } = ctx?.params ?? {};
+      const { spaceCatId } = ctx?.params ?? {};
       const { workspaceId, brand } = auth;
       const query = extractQuery(ctx);
 
@@ -705,21 +1027,19 @@ export default function ElementsController(context, log, env) {
       const { BrandSemrushProject } = ctx?.dataAccess ?? {};
       const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
 
-      // Scope per project (region): a specific region → that one project; otherwise
+      // Scope per project: caller-supplied projectId(s) → those projects; otherwise
       // all the brand's markets. Per-project keeps each element call under the
-      // Semrush 50k-row cap and lets the transform tag each URL with its region.
+      // Semrush 50k-row cap and lets the transform tag each URL with its project.
+      // Any caller-supplied id must belong to this brand — otherwise it could scope to
+      // another brand's data.
       let projects;
-      let regionFilter;
-      const { region } = query;
-      if (hasText(region) && region.toLowerCase() !== 'all') {
-        const projectId = await service.resolveRegionProjectId(workspaceId, {
-          brandId, region, brandSemrushProjects,
-        });
-        if (!hasText(projectId)) {
-          return notFound(`No Semrush market found for region: ${region}`);
-        }
-        projects = [{ region, projectId }];
-        regionFilter = region;
+      const requestedProjectIds = extractProjectIds(query);
+      const ownershipError = checkProjectIdsOwnership(requestedProjectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
+      if (requestedProjectIds.length > 0) {
+        projects = requestedProjectIds.map((projectId) => ({ projectId }));
       } else {
         projects = await service.getOwnedUrlProjects(workspaceId, { brandSemrushProjects });
       }
@@ -741,13 +1061,14 @@ export default function ElementsController(context, log, env) {
       const pageUrls = allUrls.slice(offset, offset + pageSize);
 
       // Hybrid: join agentic/referral from Postgres for JUST this page's URLs
-      // (keeps p_urls small). Best-effort — degrades to 0/[] on any failure.
+      // (keeps p_urls small). Best-effort — degrades to 0/[] on any failure. No
+      // region filter is passed to the RPC (the old `region` UI code has no
+      // equivalent now that projects are selected by Semrush project id).
       const trafficMap = await fetchOwnedUrlsTraffic(ctx?.dataAccess?.Site?.postgrestService, {
         siteId: resolvedSiteId,
         startDate,
         endDate,
         urls: pageUrls.map((u) => u.url),
-        region: regionFilter,
         referralSource: query.referralSource || query.referral_source,
         log,
       });
@@ -775,7 +1096,6 @@ export default function ElementsController(context, log, env) {
       if (auth.error) {
         return auth.error;
       }
-      const { brandId } = ctx?.params ?? {};
       const { workspaceId, brand } = auth;
       const query = extractQuery(ctx);
 
@@ -813,19 +1133,19 @@ export default function ElementsController(context, log, env) {
       const { BrandSemrushProject } = ctx?.dataAccess ?? {};
       const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
 
-      // Scope per project (region): a specific region → that one project; otherwise
+      // Scope per project: caller-supplied projectId(s) → those projects; otherwise
       // all the brand's markets. Per-project keeps each element call under the
-      // Semrush 50k-row cap and lets the transform tag each URL with its region.
+      // Semrush 50k-row cap and lets the transform tag each URL with its project.
+      // Any caller-supplied id must belong to this brand — otherwise it could scope to
+      // another brand's data.
       let projects;
-      const { region } = query;
-      if (hasText(region) && region.toLowerCase() !== 'all') {
-        const projectId = await service.resolveRegionProjectId(workspaceId, {
-          brandId, region, brandSemrushProjects,
-        });
-        if (!hasText(projectId)) {
-          return notFound(`No Semrush market found for region: ${region}`);
-        }
-        projects = [{ region, projectId }];
+      const requestedProjectIds = extractProjectIds(query);
+      const ownershipError = checkProjectIdsOwnership(requestedProjectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
+      if (requestedProjectIds.length > 0) {
+        projects = requestedProjectIds.map((projectId) => ({ projectId }));
       } else {
         projects = await service.getOwnedUrlProjects(workspaceId, { brandSemrushProjects });
       }
@@ -861,8 +1181,8 @@ export default function ElementsController(context, log, env) {
    *
    * Query params (all optional): `startDate`/`start_date` + `endDate`/`end_date`
    * (default: 28-day trailing window), `model`/`platform` (default search-gpt),
-   * `regionCode`/`region_code`/`region` (a single region → its one Semrush project;
-   * `all`/absent → aggregate across every project the brand owns), `siteId`/`site_id`
+   * `projectId`/`project_id` (CSV of Semrush project UUIDs to scope to;
+   * absent → aggregate across every project the brand owns), `siteId`/`site_id`
    * (cross-check only — must belong to `:brandId`).
    */
   /* c8 ignore start -- market-tracking-trends POC endpoint; unit tests intentionally deferred */
@@ -872,7 +1192,7 @@ export default function ElementsController(context, log, env) {
       if (auth.error) {
         return auth.error;
       }
-      const { spaceCatId, brandId } = ctx?.params ?? {};
+      const { spaceCatId } = ctx?.params ?? {};
       const { workspaceId, brand } = auth;
       const query = extractQuery(ctx);
 
@@ -923,20 +1243,17 @@ export default function ElementsController(context, log, env) {
       const { BrandSemrushProject } = ctx?.dataAccess ?? {};
       const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
 
-      // A single selected region+language → its one Semrush projectId. region=all/absent
+      // Caller-supplied projectId(s) scope directly to those Semrush projects; absent
       // → every project the brand owns (the payload builder ORs them into one call, so
-      // neither path fans out).
-      let projectId;
-      let projectIds;
-      const region = query.regionCode || query.region_code || query.region;
-      if (hasText(region) && region.toLowerCase() !== 'all') {
-        projectId = await service.resolveRegionProjectId(workspaceId, {
-          brandId, region, brandSemrushProjects,
-        });
-        if (!hasText(projectId)) {
-          return notFound(`No Semrush market found for region: ${region}`);
-        }
-      } else {
+      // neither path fans out). Any caller-supplied id must belong to this brand —
+      // otherwise it could scope to another brand's data.
+      const requestedProjectIds = extractProjectIds(query);
+      const ownershipError = checkProjectIdsOwnership(requestedProjectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
+      let projectIds = requestedProjectIds;
+      if (projectIds.length === 0) {
         projectIds = brandSemrushProjects
           .map((p) => p.semrushProjectId)
           .filter(hasText);
@@ -955,7 +1272,6 @@ export default function ElementsController(context, log, env) {
         platform: query.platform,
         startDate,
         endDate,
-        projectId,
         projectIds,
         brandName: brand.name,
       });
@@ -1026,20 +1342,17 @@ export default function ElementsController(context, log, env) {
       const { BrandSemrushProject } = ctx?.dataAccess ?? {};
       const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
 
-      // A single selected region+language maps 1:1 to a Semrush projectId — the
-      // common case, needing no fan-out. Absent → aggregate "all regions" view,
-      // scoped to every project this brand owns.
-      let projectId;
-      let projectIds;
-      const regionCode = query.regionCode || query.region_code || query.region;
-      if (hasText(regionCode)) {
-        projectId = await service.resolveRegionProjectId(workspaceId, {
-          brandId, region: regionCode, brandSemrushProjects,
-        });
-        if (!hasText(projectId)) {
-          return notFound(`No Semrush market found for region: ${regionCode}`);
-        }
-      } else {
+      // Caller-supplied projectId(s) map directly to Semrush project ids — the
+      // common case, needing no fan-out. Absent → aggregate "all projects" view,
+      // scoped to every project this brand owns. Any caller-supplied id must
+      // belong to this brand — otherwise it could scope to another brand's data.
+      const requestedProjectIds = extractProjectIds(query);
+      const ownershipError = checkProjectIdsOwnership(requestedProjectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
+      let projectIds = requestedProjectIds;
+      if (projectIds.length === 0) {
         projectIds = brandSemrushProjects
           .map((p) => p.semrushProjectId)
           .filter(hasText);
@@ -1056,7 +1369,6 @@ export default function ElementsController(context, log, env) {
         platform: query.platform,
         startDate: effectiveStartDate,
         endDate: effectiveEndDate,
-        projectId,
         projectIds,
         brandName: brand.name,
         showTrends: parseShowTrends(query),
@@ -1068,15 +1380,432 @@ export default function ElementsController(context, log, env) {
     }
   };
 
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence
+   *     /url-inspector/stats
+   * 3 of the 4 URL Inspector stats KPI cards (totalPromptsCited, uniqueUrls,
+   * totalCitations) plus a per-week sparkline breakdown, matching the response
+   * shape of the Aurora/Postgres reference endpoint
+   * (docs/llmo-brandalf-apis/url-inspector-stats-api.md) minus its
+   * `totalPrompts` field. The 4th card (`totalPrompts`) is served by
+   * {@link getUrlInspectorPromptsCount} on its own endpoint — split out
+   * because this endpoint's per-project Stats-per-URL fan-out (up to 8 weeks x
+   * N projects) is what was timing out, while `totalPrompts` is a single,
+   * unscoped Semrush call that always completes fast; bundling it here just
+   * made it wait on the slow cards. Known approximation gap:
+   * `totalPromptsCited` sums a per-URL count (Semrush exposes no distinct
+   * prompts-cited element, so a prompt citing multiple owned URLs is
+   * overcounted).
+   */
+  const getUrlInspectorStats = async (ctx) => {
+    try {
+      const scope = await resolveUrlInspectorScope(ctx);
+      if (scope.error) {
+        return scope.error;
+      }
+      const {
+        workspaceId, query, service, projects,
+      } = scope;
+
+      // Date range is optional (defaults to a 28-day trailing window) — matches
+      // every other *stats* endpoint (getStats, both Aurora stats endpoints),
+      // not the required-date convention of the table endpoints
+      // (listCitedDomains/listOwnedUrls/listDomainUrls) this file's other
+      // url-inspector routes use.
+      let startDate = query.startDate || query.start_date;
+      let endDate = query.endDate || query.end_date;
+      if (hasText(startDate) && !isYmdDate(startDate)) {
+        return badRequest('startDate must be a valid YYYY-MM-DD date');
+      }
+      if (hasText(endDate) && !isYmdDate(endDate)) {
+        return badRequest('endDate must be a valid YYYY-MM-DD date');
+      }
+      if (hasText(startDate) && hasText(endDate) && startDate > endDate) {
+        return badRequest('startDate must not be after endDate');
+      }
+      // Default each side independently — a caller supplying only one of the
+      // two (e.g. startDate with no endDate) must not have their explicit
+      // value silently discarded by overwriting both with the default range.
+      if (!hasText(startDate) || !hasText(endDate)) {
+        const defaultRange = defaultStatsDateRange();
+        if (!hasText(startDate)) {
+          startDate = defaultRange.startDate;
+        }
+        if (!hasText(endDate)) {
+          endDate = defaultRange.endDate;
+        }
+      }
+      // Bound the span at 56 days (8 weeks) — matches getStats (brand-presence).
+      // `weeklyTrends` may cover a NARROWER window than this on a multi-project
+      // aggregate view (its per-week cap adapts to project count so the
+      // service's fan-out fits one gateway-safe round-trip — see
+      // getUrlInspectorStats in elements-service.js); `stats` always covers the
+      // full requested range regardless.
+      const MAX_RANGE_DAYS = 56;
+      const spanDays = (Date.parse(`${endDate}T00:00:00Z`)
+        - Date.parse(`${startDate}T00:00:00Z`)) / 86400000;
+      if (spanDays > MAX_RANGE_DAYS) {
+        return badRequest(`Date range must not exceed ${MAX_RANGE_DAYS} days`);
+      }
+
+      const result = await service.getUrlInspectorStats(workspaceId, {
+        projects,
+        model: query.model,
+        platform: query.platform,
+        startDate,
+        endDate,
+        category: query.categoryId || query.category,
+      });
+
+      return cachedOk(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence
+   *     /url-inspector/prompts/count
+   * The 4th URL Inspector stats KPI card (`totalPrompts`), split out of
+   * `/url-inspector/stats` (see that handler's docstring for why) — a single
+   * Semrush PROMPTS element call, scoped to the brand's project(s) the same
+   * way `getUrlInspectorStats` scopes Stats-per-URL. No date range: the
+   * PROMPTS element has no date filter, so there is nothing to default/cap and
+   * no weekly breakdown to return.
+   *
+   * **Known, PERMANENT limitation: no weekly trend for `totalPrompts`.** The
+   * Aurora/Postgres reference endpoint
+   * (`docs/llmo-brandalf-apis/url-inspector-stats-api.md`) returns
+   * `totalPrompts` WITH a per-week trend, via `rpc_url_inspector_total_prompts`
+   * — a time-windowed count of distinct active prompts that ran each week.
+   * The Semrush PROMPTS element has no equivalent: it is a static, currently-
+   * configured-prompt roster (filterable by model/tag/project, but not by
+   * date), not an execution log, so there is no upstream data to bucket by
+   * week. This is not a gap to close later with more work — it's a ceiling of
+   * the Semrush data model. (An earlier version tried to route around this by
+   * repeating the all-time total in every `weeklyTrends` entry; that was
+   * flagged in review as misleading — a caller would read
+   * `weeklyTrends[i].totalPrompts` as "prompts that week" — so it was split
+   * into this dedicated, trend-less endpoint instead of fabricating a
+   * per-week series.) The consuming UI (project-elmo-ui#2479) renders this
+   * KPI card as a static number with no sparkline, unlike its 3 siblings.
+   */
+  const getUrlInspectorPromptsCount = async (ctx) => {
+    try {
+      const scope = await resolveUrlInspectorScope(ctx);
+      if (scope.error) {
+        return scope.error;
+      }
+      const {
+        workspaceId, query, service, projectIds,
+      } = scope;
+
+      // category already carries the `category__<label>` prefix from the caller;
+      // sent through as-is, not re-prefixed.
+      const category = query.categoryId || query.category;
+      const { count: totalPrompts } = await service.getPrompts(workspaceId, {
+        model: query.model,
+        platform: query.platform,
+        tags: category ? [category] : [],
+        projectIds,
+      });
+
+      return cachedOk({ totalPrompts });
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/competitor-summary
+   * Elements-backed equivalent of the Postgres-RPC `/competitor-summary` endpoint
+   * (see llmo-brand-presence.js#createCompetitorSummaryHandler): aggregate per-competitor
+   * mentions/citations totals (no weekly breakdown) for the Overview Competitor
+   * Comparison bar chart. Param resolution mirrors getMarketTrackingTrends — same two
+   * upstream elements, just summed instead of week-bucketed.
+   */
+  /* c8 ignore start -- competitor-summary POC endpoint; unit tests intentionally deferred */
+  const getCompetitorSummary = async (ctx) => {
+    try {
+      const auth = await authorizeOrg(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { spaceCatId } = ctx?.params ?? {};
+      const { workspaceId, brand } = auth;
+      const query = extractQuery(ctx);
+
+      const siteId = query.siteId || query.site_id;
+      if (hasText(siteId)) {
+        const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
+        const resolved = await getBrandBySite(spaceCatId, siteId, postgrestClient, log);
+        if (!resolved || resolved.id !== brand.id) {
+          return badRequest('siteId does not belong to the specified brand');
+        }
+      }
+
+      let startDate = query.startDate || query.start_date;
+      let endDate = query.endDate || query.end_date;
+      if (hasText(startDate) && !isYmdDate(startDate)) {
+        return badRequest('startDate must be a valid YYYY-MM-DD date');
+      }
+      if (hasText(endDate) && !isYmdDate(endDate)) {
+        return badRequest('endDate must be a valid YYYY-MM-DD date');
+      }
+      if (!hasText(startDate) || !hasText(endDate)) {
+        const defaultRange = defaultStatsDateRange();
+        startDate = defaultRange.startDate;
+        endDate = defaultRange.endDate;
+      }
+      if (startDate > endDate) {
+        return badRequest('startDate must not be after endDate');
+      }
+      const MAX_RANGE_DAYS = 366;
+      const spanDays = (Date.parse(`${endDate}T00:00:00Z`)
+        - Date.parse(`${startDate}T00:00:00Z`)) / 86400000;
+      if (spanDays > MAX_RANGE_DAYS) {
+        return badRequest(`Date range must not exceed ${MAX_RANGE_DAYS} days`);
+      }
+
+      const service = await buildService(ctx);
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
+
+      // Any caller-supplied id must belong to this brand — otherwise it could scope to
+      // another brand's data.
+      const requestedProjectIds = extractProjectIds(query);
+      const ownershipError = checkProjectIdsOwnership(requestedProjectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
+      let projectIds = requestedProjectIds;
+      if (projectIds.length === 0) {
+        projectIds = brandSemrushProjects
+          .map((p) => p.semrushProjectId)
+          .filter(hasText);
+        // A brand with zero Semrush projects has no competitor data — return empty
+        // rather than falling through to an unscoped query, which (mirrors
+        // getMarketTrackingTrends) would return the entire workspace, including
+        // other brands' data on the org-parent-workspace fallback.
+        if (projectIds.length === 0) {
+          return cachedOk({ competitors: [] });
+        }
+      }
+
+      const result = await service.getCompetitorSummary(workspaceId, {
+        model: query.model,
+        platform: query.platform,
+        startDate,
+        endDate,
+        projectIds,
+        brandName: brand.name,
+      });
+      return cachedOk(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+  /* c8 ignore stop */
+
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/kpi-headlines
+   * Overview-SR Share of Voice + Brand Visibility KPI headline cards — the exact
+   * numbers the Brand Presence MFE itself shows (its own per-brand `kpiLineChart`
+   * elements), not derived from market-tracking-trends's weekly series (LLMO-6515
+   * follow-up, exact MFE parity). Param resolution mirrors getMarketTrackingTrends/
+   * getCompetitorSummary.
+   */
+  /* c8 ignore start -- kpi-headlines POC endpoint; unit tests intentionally deferred */
+  const getKpiHeadlines = async (ctx) => {
+    try {
+      const auth = await authorizeOrg(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { spaceCatId } = ctx?.params ?? {};
+      const { workspaceId, brand } = auth;
+      const query = extractQuery(ctx);
+
+      const siteId = query.siteId || query.site_id;
+      if (hasText(siteId)) {
+        const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
+        const resolved = await getBrandBySite(spaceCatId, siteId, postgrestClient, log);
+        if (!resolved || resolved.id !== brand.id) {
+          return badRequest('siteId does not belong to the specified brand');
+        }
+      }
+
+      let startDate = query.startDate || query.start_date;
+      let endDate = query.endDate || query.end_date;
+      if (hasText(startDate) && !isYmdDate(startDate)) {
+        return badRequest('startDate must be a valid YYYY-MM-DD date');
+      }
+      if (hasText(endDate) && !isYmdDate(endDate)) {
+        return badRequest('endDate must be a valid YYYY-MM-DD date');
+      }
+      if (!hasText(startDate) || !hasText(endDate)) {
+        const defaultRange = defaultStatsDateRange();
+        startDate = defaultRange.startDate;
+        endDate = defaultRange.endDate;
+      }
+      if (startDate > endDate) {
+        return badRequest('startDate must not be after endDate');
+      }
+      const MAX_RANGE_DAYS = 366;
+      const spanDays = (Date.parse(`${endDate}T00:00:00Z`)
+        - Date.parse(`${startDate}T00:00:00Z`)) / 86400000;
+      if (spanDays > MAX_RANGE_DAYS) {
+        return badRequest(`Date range must not exceed ${MAX_RANGE_DAYS} days`);
+      }
+
+      const service = await buildService(ctx);
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
+
+      // Any caller-supplied id must belong to this brand — otherwise it could scope to
+      // another brand's data.
+      const requestedProjectIds = extractProjectIds(query);
+      const ownershipError = checkProjectIdsOwnership(requestedProjectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
+      let projectIds = requestedProjectIds;
+      if (projectIds.length === 0) {
+        projectIds = brandSemrushProjects
+          .map((p) => p.semrushProjectId)
+          .filter(hasText);
+        if (projectIds.length === 0) {
+          return cachedOk({
+            shareOfVoice: { value: 0, comparisonValue: null },
+            brandVisibility: { value: 0, comparisonValue: null },
+          });
+        }
+      }
+
+      const result = await service.getKpiHeadlines(workspaceId, {
+        model: query.model,
+        platform: query.platform,
+        startDate,
+        endDate,
+        projectIds,
+        brandName: brand.name,
+        // Already carries the `category__<label>` prefix from the caller; sent
+        // through as-is, not re-prefixed (see PR #2912).
+        category: query.categoryId || query.category,
+      });
+      return cachedOk(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+  /* c8 ignore stop */
+
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/source-visibility-headline
+   * Overview-SR Source Visibility KPI headline card. Split from `getKpiHeadlines`
+   * because it needs a SEQUENTIAL brand-URL-list lookup before the KPI element
+   * itself can be scoped — see {@link getSourceVisibilityHeadline} in
+   * elements-service.js for the timeout-budget rationale. Param resolution
+   * otherwise mirrors getKpiHeadlines.
+   */
+  /* c8 ignore start -- kpi-headlines POC endpoint; unit tests intentionally deferred */
+  const getSourceVisibilityHeadline = async (ctx) => {
+    try {
+      const auth = await authorizeOrg(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { spaceCatId } = ctx?.params ?? {};
+      const { workspaceId, brand } = auth;
+      const query = extractQuery(ctx);
+
+      const siteId = query.siteId || query.site_id;
+      if (hasText(siteId)) {
+        const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
+        const resolved = await getBrandBySite(spaceCatId, siteId, postgrestClient, log);
+        if (!resolved || resolved.id !== brand.id) {
+          return badRequest('siteId does not belong to the specified brand');
+        }
+      }
+
+      let startDate = query.startDate || query.start_date;
+      let endDate = query.endDate || query.end_date;
+      if (hasText(startDate) && !isYmdDate(startDate)) {
+        return badRequest('startDate must be a valid YYYY-MM-DD date');
+      }
+      if (hasText(endDate) && !isYmdDate(endDate)) {
+        return badRequest('endDate must be a valid YYYY-MM-DD date');
+      }
+      if (!hasText(startDate) || !hasText(endDate)) {
+        const defaultRange = defaultStatsDateRange();
+        startDate = defaultRange.startDate;
+        endDate = defaultRange.endDate;
+      }
+      if (startDate > endDate) {
+        return badRequest('startDate must not be after endDate');
+      }
+      const MAX_RANGE_DAYS = 366;
+      const spanDays = (Date.parse(`${endDate}T00:00:00Z`)
+        - Date.parse(`${startDate}T00:00:00Z`)) / 86400000;
+      if (spanDays > MAX_RANGE_DAYS) {
+        return badRequest(`Date range must not exceed ${MAX_RANGE_DAYS} days`);
+      }
+
+      const service = await buildService(ctx);
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
+
+      // Any caller-supplied id must belong to this brand — otherwise it could scope to
+      // another brand's data.
+      const requestedProjectIds = extractProjectIds(query);
+      const ownershipError = checkProjectIdsOwnership(requestedProjectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
+      let projectIds = requestedProjectIds;
+      if (projectIds.length === 0) {
+        projectIds = brandSemrushProjects
+          .map((p) => p.semrushProjectId)
+          .filter(hasText);
+        if (projectIds.length === 0) {
+          return cachedOk({ value: 0, comparisonValue: null });
+        }
+      }
+
+      const result = await service.getSourceVisibilityHeadline(workspaceId, {
+        model: query.model,
+        platform: query.platform,
+        startDate,
+        endDate,
+        projectIds,
+        brandName: brand.name,
+        // Already carries the `category__<label>` prefix from the caller; sent
+        // through as-is, not re-prefixed (see PR #2912).
+        category: query.categoryId || query.category,
+      });
+      return cachedOk(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+  /* c8 ignore stop */
+
   return {
     listUrlInspectorFilterDimensions,
     listWeeks,
     listPrompts,
     listCitedDomains,
     listSentimentOverview,
+    listTopics,
+    listTopicPrompts,
     listOwnedUrls,
     listDomainUrls,
     getMarketTrackingTrends,
     getStats,
+    getUrlInspectorStats,
+    getUrlInspectorPromptsCount,
+    getCompetitorSummary,
+    getKpiHeadlines,
+    getSourceVisibilityHeadline,
   };
 }

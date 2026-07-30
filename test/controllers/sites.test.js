@@ -123,6 +123,7 @@ describe('Sites Controller', () => {
     'createSite',
     'getAll',
     'getAllByDeliveryType',
+    'getAllByEnrollmentAndTier',
     'getAllWithLatestAudit',
     'getLatestSiteMetrics',
     'getAllAsCSV',
@@ -196,6 +197,7 @@ describe('Sites Controller', () => {
       Site: {
         all: sandbox.stub().resolves(sites),
         allByDeliveryType: sandbox.stub().resolves(sites),
+        allByEnrollmentAndTier: sandbox.stub().resolves(sites),
         allWithLatestAudit: sandbox.stub().resolves(sites),
         allByOrganizationId: sandbox.stub().resolves(sites),
         create: sandbox.stub().resolves(sites[0]),
@@ -296,6 +298,38 @@ describe('Sites Controller', () => {
     const site = await response.json();
     expect(site).to.have.property('id', SITE_IDS[0]);
     expect(site).to.have.property('baseURL', 'https://site1.com');
+  });
+
+  it('returns bad request when creating a site with an unsafe pageTypes pattern', async () => {
+    mockDataAccess.Site.findByBaseURL.resolves(null);
+
+    const response = await sitesController.createSite({
+      data: {
+        baseURL: 'https://site1.com',
+        pageTypes: [
+          { name: 'Schema probe', pattern: "x' || CAST(CAST(current_schema AS INTEGER) AS VARCHAR) || 'x" },
+        ],
+      },
+    });
+
+    expect(mockDataAccess.Site.create).to.have.not.been.called;
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'pageTypes[0] pattern must not contain a single quote character');
+  });
+
+  it('creates a site with valid pageTypes', async () => {
+    mockDataAccess.Site.findByBaseURL.resolves(null);
+
+    const response = await sitesController.createSite({
+      data: {
+        baseURL: 'https://site1.com',
+        pageTypes: [{ name: 'homepage', pattern: '^/$' }],
+      },
+    });
+
+    expect(mockDataAccess.Site.create).to.have.been.calledOnce;
+    expect(response.status).to.equal(201);
   });
 
   it('returns 201 even when RUM config update fails after site creation', async () => {
@@ -951,6 +985,39 @@ describe('Sites Controller', () => {
     expect(resultSites[0]).to.not.have.any.keys('hlxConfig', 'authoringType', 'deliveryConfig', 'pageTypes', 'projectId', 'isPrimaryLocale', 'language', 'code', 'audits', 'updatedBy', 'isLiveToggledAt');
   });
 
+  it('projects sites to the requested fields when ?fields= is passed (legacy shape)', async () => {
+    mockDataAccess.Site.all.resolves(sites);
+
+    const result = await sitesController.getAll({ ...context, data: { fields: 'baseURL' } });
+    const resultSites = await result.json();
+
+    expect(result.status).to.equal(200);
+    expect(resultSites).to.be.an('array').with.lengthOf(2);
+    expect(Object.keys(resultSites[0]).sort()).to.deep.equal(['baseURL', 'id']);
+    expect(resultSites[0]).to.not.have.any.keys('config', 'deliveryType', 'name');
+  });
+
+  it('projects the sites array inside the paginated shape when ?fields= is passed', async () => {
+    mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
+
+    const result = await sitesController.getAll({ ...context, data: { limit: '10', fields: 'baseURL' } });
+    const body = await result.json();
+
+    expect(result.status).to.equal(200);
+    expect(body).to.have.property('pagination');
+    expect(body.sites).to.be.an('array').with.lengthOf(2);
+    expect(Object.keys(body.sites[0]).sort()).to.deep.equal(['baseURL', 'id']);
+  });
+
+  it('returns 400 when ?fields= matches no known site field', async () => {
+    mockDataAccess.Site.all.resolves(sites);
+
+    const result = await sitesController.getAll({ ...context, data: { fields: 'nope' } });
+    expect(result.status).to.equal(400);
+    const error = await result.json();
+    expect(error).to.have.property('message', 'Invalid fields: nope');
+  });
+
   it('emits [sites][legacy-shape] log on every legacy-path hit', async () => {
     // The [sites][legacy-shape] marker is the sunset gate for removing the legacy
     // branch — Coralogix must show zero hits before removal. Pin the format here so
@@ -1192,6 +1259,32 @@ describe('Sites Controller', () => {
   });
 
   describe('GET /sites - baseUrlContains substring search', () => {
+    it('projects the search results when ?fields= is passed', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+
+      const result = await sitesController.getAll({
+        ...context,
+        data: { baseUrlContains: 'site', limit: '10', fields: 'baseURL' },
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.sites).to.be.an('array').with.lengthOf(2);
+      expect(Object.keys(body.sites[0]).sort()).to.deep.equal(['baseURL', 'id']);
+    });
+
+    it('returns 400 when ?fields= matches no known field', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+
+      const result = await sitesController.getAll({
+        ...context,
+        data: { baseUrlContains: 'site', fields: 'nope' },
+      });
+      expect(result.status).to.equal(400);
+      const error = await result.json();
+      expect(error).to.have.property('message', 'Invalid fields: nope');
+    });
+
     it('queries Site.all with an ilike where clause, order asc, and limit N+1', async () => {
       mockDataAccess.Site.all.resolves(sites);
 
@@ -1649,6 +1742,31 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Only admins can view all sites');
   });
 
+  it('projects sites by delivery type when ?fields= is passed', async () => {
+    mockDataAccess.Site.allByDeliveryType.resolves(sites);
+
+    const result = await sitesController.getAllByDeliveryType({
+      params: { deliveryType: 'aem_edge' },
+      data: { fields: 'baseURL' },
+    });
+    const resultSites = await result.json();
+
+    expect(result.status).to.equal(200);
+    expect(Object.keys(resultSites[0]).sort()).to.deep.equal(['baseURL', 'id']);
+  });
+
+  it('returns 400 when ?fields= matches no known field on getAllByDeliveryType', async () => {
+    mockDataAccess.Site.allByDeliveryType.resolves(sites);
+
+    const result = await sitesController.getAllByDeliveryType({
+      params: { deliveryType: 'aem_edge' },
+      data: { fields: 'nope' },
+    });
+    expect(result.status).to.equal(400);
+    const error = await result.json();
+    expect(error).to.have.property('message', 'Invalid fields: nope');
+  });
+
   it('gets all sites with latest audit', async () => {
     const audit = {
       getAuditedAt: () => '2021-01-01T00:00:00.000Z',
@@ -1705,6 +1823,20 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Only admins can view all sites');
   });
 
+  it('returns 400 when ?fields= matches no known field on getAllWithLatestAudit', async () => {
+    sites.forEach((site) => {
+      // eslint-disable-next-line no-param-reassign
+      site.getLatestAuditByAuditType = sandbox.stub().resolves(null);
+    });
+    const result = await sitesController.getAllWithLatestAudit({
+      params: { auditType: 'lhs-mobile' },
+      data: { fields: 'nope' },
+    });
+    expect(result.status).to.equal(400);
+    const error = await result.json();
+    expect(error).to.have.property('message', 'Invalid fields: nope');
+  });
+
   it('gets all sites with latest audit with ascending false', async () => {
     const audit = {
       getAuditedAt: () => '2021-01-01T00:00:00.000Z',
@@ -1731,6 +1863,86 @@ describe('Sites Controller', () => {
 
     expect(result.status).to.equal(400);
     expect(error).to.have.property('message', 'Delivery type required');
+  });
+
+  it('gets all sites by enrollment tier', async () => {
+    mockDataAccess.Site.allByEnrollmentAndTier.resolves(sites);
+
+    const result = await sitesController.getAllByEnrollmentAndTier({
+      params: { tier: 'PAID' },
+    });
+    const body = await result.json();
+
+    expect(mockDataAccess.Site.allByEnrollmentAndTier)
+      .to.have.been.calledOnceWithExactly('PAID', undefined);
+    expect(body.sites).to.be.an('array').with.lengthOf(2);
+    expect(body.sites[0]).to.have.property('id', SITE_IDS[0]);
+  });
+
+  it('returns an empty list when no sites match the tier', async () => {
+    mockDataAccess.Site.allByEnrollmentAndTier.resolves([]);
+
+    const result = await sitesController.getAllByEnrollmentAndTier({
+      params: { tier: 'PAID' },
+    });
+    const body = await result.json();
+
+    expect(body.sites).to.be.an('array').with.lengthOf(0);
+  });
+
+  it('forwards productCode to allByEnrollmentAndTier when supplied', async () => {
+    mockDataAccess.Site.allByEnrollmentAndTier.resolves(sites);
+
+    await sitesController.getAllByEnrollmentAndTier({
+      params: { tier: 'FREE_TRIAL' },
+      data: { productCode: 'LLMO' },
+    });
+
+    expect(mockDataAccess.Site.allByEnrollmentAndTier)
+      .to.have.been.calledOnceWithExactly('FREE_TRIAL', 'LLMO');
+  });
+
+  it('returns 403 for non-admin users on getAllByEnrollmentAndTier', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+
+    const result = await sitesController.getAllByEnrollmentAndTier({
+      params: { tier: 'PAID' },
+    });
+    const error = await result.json();
+
+    expect(mockDataAccess.Site.allByEnrollmentAndTier).to.have.not.been.called;
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only admins can view all sites');
+  });
+
+  it('returns bad request when tier is missing on getAllByEnrollmentAndTier', async () => {
+    const result = await sitesController.getAllByEnrollmentAndTier({ params: {} });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'Tier required');
+  });
+
+  it('returns bad request when tier is not customer-visible on getAllByEnrollmentAndTier', async () => {
+    const result = await sitesController.getAllByEnrollmentAndTier({
+      params: { tier: 'PRE_ONBOARD' },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error.message).to.match(/^Tier must be one of:/);
+  });
+
+  it('returns bad request when productCode is invalid on getAllByEnrollmentAndTier', async () => {
+    const result = await sitesController.getAllByEnrollmentAndTier({
+      params: { tier: 'PAID' },
+      data: { productCode: 'NOT_A_PRODUCT' },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error.message).to.match(/^productCode must be one of:/);
+    expect(mockDataAccess.Site.allByEnrollmentAndTier).to.have.not.been.called;
   });
 
   it('returns bad request if audit type is not provided', async () => {
@@ -4654,6 +4866,65 @@ describe('Sites Controller', () => {
     expect(mergedConfig).to.deep.equal({ slack: { channel: '#new' } });
   });
 
+  it('returns 400 when site.setConfig throws a ValidationError', async () => {
+    const site = sites[0];
+    site.getConfig = sandbox.stub().returns(null);
+    const validationError = new Error('Invalid config for Site: "llmo.showWww" must be a boolean');
+    validationError.name = 'ValidationError';
+    site.setConfig = sandbox.stub().throws(validationError);
+    site.save = sandbox.stub().resolves(site);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: { llmo: { showWww: 'not-a-boolean' } },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(400);
+    const body = await response.json();
+    expect(body.message).to.equal(validationError.message);
+    expect(site.save).to.have.not.been.called;
+  });
+
+  it('sanitizes control characters in the ValidationError message before returning it', async () => {
+    const site = sites[0];
+    site.getConfig = sandbox.stub().returns(null);
+    const validationError = new Error('Invalid config for Site: bad value\r\nX-Injected: true');
+    validationError.name = 'ValidationError';
+    site.setConfig = sandbox.stub().throws(validationError);
+    site.save = sandbox.stub().resolves(site);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: { llmo: { showWww: 'not-a-boolean' } },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(400);
+    const body = await response.json();
+    expect(body.message).to.not.contain('\r');
+    expect(body.message).to.not.contain('\n');
+  });
+
+  it('rethrows a non-ValidationError from site.setConfig', async () => {
+    const site = sites[0];
+    site.getConfig = sandbox.stub().returns(null);
+    site.setConfig = sandbox.stub().throws(new Error('unexpected boom'));
+    site.save = sandbox.stub().resolves(site);
+
+    await expect(sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: { slack: { channel: '#new' } },
+      },
+      ...defaultAuthAttributes,
+    })).to.be.rejectedWith('unexpected boom');
+  });
+
   it('sets config when toDynamoItem returns null for existing config', async () => {
     const site = sites[0];
     site.getConfig = sandbox.stub().returns({ something: true });
@@ -4744,6 +5015,97 @@ describe('Sites Controller', () => {
       bucketName: 'tui-cdn-logs',
       region: 'us-east-1',
     });
+  });
+
+  it('preserves the stored llmo cdnlogsFilter when a non-privileged caller patches config', async () => {
+    const site = sites[0];
+    const existingConfig = Config({
+      llmo: {
+        dataFolder: '/data',
+        brand: 'Test',
+        cdnlogsFilter: [{ key: 'url', value: ['/keep'], type: 'include' }],
+      },
+    });
+    site.getConfig = sandbox.stub().returns(existingConfig);
+    site.setConfig = sandbox.stub();
+    site.save = sandbox.stub().resolves(site);
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+    sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: {
+          llmo: {
+            dataFolder: '/data',
+            brand: 'Test',
+            cdnlogsFilter: [{ key: 'url', value: ['/other'], type: 'exclude' }],
+          },
+        },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(200);
+    const mergedConfig = site.setConfig.firstCall.args[0];
+    // Incoming value is ignored; the stored value remains in place.
+    expect(mergedConfig.llmo.cdnlogsFilter).to.deep.equal([{ key: 'url', value: ['/keep'], type: 'include' }]);
+  });
+
+  it('drops an llmo cdnlogsFilter a non-privileged caller adds when none is stored', async () => {
+    const site = sites[0];
+    const existingConfig = Config({ llmo: { dataFolder: '/data', brand: 'Test' } });
+    site.getConfig = sandbox.stub().returns(existingConfig);
+    site.setConfig = sandbox.stub();
+    site.save = sandbox.stub().resolves(site);
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+    sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: {
+          llmo: {
+            dataFolder: '/data',
+            brand: 'Test',
+            cdnlogsFilter: [{ key: 'url', value: ['/new'], type: 'include' }],
+          },
+        },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(200);
+    const mergedConfig = site.setConfig.firstCall.args[0];
+    expect(mergedConfig.llmo).to.not.have.property('cdnlogsFilter');
+    expect(mergedConfig.llmo.brand).to.equal('Test');
+  });
+
+  it('allows a privileged caller to set the llmo cdnlogsFilter', async () => {
+    const site = sites[0];
+    const existingConfig = Config({ llmo: { dataFolder: '/data', brand: 'Test' } });
+    site.getConfig = sandbox.stub().returns(existingConfig);
+    site.setConfig = sandbox.stub();
+    site.save = sandbox.stub().resolves(site);
+    // defaultAuthAttributes carries an admin JWT, so hasAdminAccess() is true.
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: {
+          llmo: {
+            dataFolder: '/data',
+            brand: 'Test',
+            cdnlogsFilter: [{ key: 'url', value: ['/admin'], type: 'include' }],
+          },
+        },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(200);
+    const mergedConfig = site.setConfig.firstCall.args[0];
+    expect(mergedConfig.llmo.cdnlogsFilter).to.deep.equal([{ key: 'url', value: ['/admin'], type: 'include' }]);
   });
 
   describe('auditTargetURLs validation', () => {
@@ -5172,6 +5534,54 @@ describe('Sites Controller', () => {
       expect(response.status).to.equal(400);
       const error = await response.json();
       expect(error.message).to.include('pageTypes[0] has invalid regex pattern:');
+    });
+
+    it('returns bad request when pageType pattern contains a single quote', async () => {
+      const invalidPageTypes = [
+        { name: 'Schema probe', pattern: "x' || CAST(CAST(current_schema AS INTEGER) AS VARCHAR) || 'x" },
+      ];
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { pageTypes: invalidPageTypes },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'pageTypes[0] pattern must not contain a single quote character');
+    });
+
+    it('returns bad request when pageType pattern is only a single quote', async () => {
+      const invalidPageTypes = [
+        { name: 'quote-only', pattern: "'" },
+      ];
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { pageTypes: invalidPageTypes },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'pageTypes[0] pattern must not contain a single quote character');
+    });
+
+    it('returns bad request when pageType pattern contains a quote mid-string', async () => {
+      const invalidPageTypes = [
+        { name: 'mid-string-quote', pattern: "foo'bar" },
+      ];
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { pageTypes: invalidPageTypes },
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'pageTypes[0] pattern must not contain a single quote character');
     });
 
     it('does not update site when pageTypes are the same', async () => {

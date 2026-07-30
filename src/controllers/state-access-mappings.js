@@ -25,6 +25,7 @@ import routeFacsCapabilities, { PRODUCTS_CAPABILITIES } from '../routes/facs-cap
 import {
   createFacsAccessMappings,
   getFacsAccessMappingById,
+  getResourceImsOrgId,
   insertFacsAccessMappingAuditEvent,
   listFacsAccessMappings,
   listFacsAccessMappingHistory,
@@ -454,6 +455,47 @@ function StateAccessMappingsController(context) {
   }
 
   /**
+   * Constrains an internal admin CREATE to resources that belong to the
+   * caller's own org. An internal admin is a platform-operator bypass
+   * (`callerHasFacsManageUsers` treats `isAdmin()` as org-wide authority), so
+   * without this an admin could author a binding on ANY org's resource — the
+   * mapping row is stamped with the caller's org, but `resourceId` is
+   * caller-supplied and otherwise unchecked. We resolve the resource's owning
+   * org and require it to equal the caller's.
+   *
+   * Non-admin callers return `null` here — their scope is enforced by
+   * `gateManager` (they must hold `can_manage_users`). PATCH / DELETE need no
+   * equivalent: those operate on an existing row fetched scoped to the caller's
+   * `imsOrgId` (the RPC filters on `ims_org_id`), so an admin can only mutate
+   * rows already in their own org.
+   *
+   * Fail-closed: an unknown resource or an unresolvable owning org is denied.
+   *
+   * @param {object} ctx
+   * @param {object} args
+   * @param {string} args.imsOrgId      Caller's canonical org id.
+   * @param {string} args.resourceType  'site' | 'brand'.
+   * @param {string} args.resourceId
+   * @returns {Promise<Response|null>} `forbidden` when an admin targets a
+   *   resource outside their org; `null` when allowed.
+   */
+  async function requireAdminResourceInOrg(ctx, { imsOrgId, resourceType, resourceId }) {
+    if (!ctx.attributes?.authInfo?.isAdmin?.()) {
+      return null;
+    }
+    const { postgrestClient } = ctx.dataAccess.services;
+    const resourceImsOrgId = normalizeImsOrgId(
+      await getResourceImsOrgId(postgrestClient, { resourceType, resourceId }),
+    );
+    if (!resourceImsOrgId || resourceImsOrgId !== imsOrgId) {
+      return forbidden(
+        'Internal admins may only manage access mappings for resources in their own organization',
+      );
+    }
+    return null;
+  }
+
+  /**
    * Read-scope rule for list / history (hybrid-model §3, mac-state-layer):
    * **org-wide reads admit FACS-layer `can_manage_users` only**. An org-wide
    * manager reads anything in the org; a state-layer manager must scope the read
@@ -695,6 +737,11 @@ function StateAccessMappingsController(context) {
         `Caller may only manage resources where they hold ${product.toLowerCase()}/can_manage_users`,
       );
     }
+    // Internal admins may only create bindings for resources in their own org.
+    const adminScope = await requireAdminResourceInOrg(ctx, { imsOrgId, resourceType, resourceId });
+    if (adminScope) {
+      return adminScope;
+    }
 
     const capErr = validateGrantedCapabilities(grantedCapabilities, product);
     if (capErr) {
@@ -724,8 +771,10 @@ function StateAccessMappingsController(context) {
         createdBy,
       });
       if (result.created.length === 0 && result.skipped.length > 0) {
-        // Active duplicate already exists. Surface the existing row id for
-        // idempotent client handling — look it up by the natural key.
+        // Active duplicate already exists — upsert semantics: overwrite the
+        // existing binding's capabilities with the request's set rather than
+        // rejecting the call. Look the row up by its natural key, then replace
+        // its capabilities via the same capability-edit RPC PATCH uses.
         const existing = await listFacsAccessMappings(postgrestClient, {
           imsOrgId,
           product,
@@ -736,13 +785,49 @@ function StateAccessMappingsController(context) {
           limit: 1,
         });
         const conflictId = existing[0]?.id ?? null;
-        return createResponse(
-          {
-            message: 'Active access mapping already exists for this subject and resource',
-            id: conflictId,
-          },
-          409,
-        );
+        // Defensive: the active row vanished (revoked) between the insert
+        // conflict and this read. Nothing to update — surface the conflict.
+        if (!conflictId) {
+          return createResponse(
+            {
+              message: 'Active access mapping already exists for this subject and resource',
+              id: null,
+            },
+            409,
+          );
+        }
+        const updated = await updateFacsAccessMappingCapabilities(postgrestClient, {
+          id: conflictId,
+          imsOrgId,
+          product,
+          grantedCapabilities: capabilitiesToStore,
+          updatedBy: createdBy,
+        });
+        if (!updated) {
+          // Same race as above, observed one layer down (the RPC filters on
+          // `revoked_at IS NULL`). Surface the conflict rather than a 500.
+          return createResponse(
+            {
+              message: 'Active access mapping already exists for this subject and resource',
+              id: conflictId,
+            },
+            409,
+          );
+        }
+        await emitAuditEvent(ctx, {
+          imsOrgId,
+          product,
+          operation: 'update_capabilities',
+          outcome: 'allow',
+          statusCode: 200,
+          mappingId: updated.id,
+          bindingSubjectType: updated.subject_type,
+          bindingSubjectId: updated.subject_id,
+          resourceType: updated.resource_type,
+          resourceId: updated.resource_id,
+          grantedCapabilities: capabilitiesToStore,
+        });
+        return ok(toMappingDto(updated));
       }
       const createdRow = result.created[0];
       await emitAuditEvent(ctx, {

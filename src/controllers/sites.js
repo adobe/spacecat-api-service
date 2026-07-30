@@ -20,6 +20,7 @@ import {
   notFound,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
+import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import {
   hasText,
   isBoolean,
@@ -35,6 +36,7 @@ import {
 } from '@adobe/spacecat-shared-utils';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
 import TierClient from '@adobe/spacecat-shared-tier-client';
@@ -43,6 +45,7 @@ import { SiteIdentityDto } from '../dto/site-identity.js';
 import { OrganizationDto } from '../dto/organization.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
+import { applyFieldProjection } from '../utils/field-projection.js';
 import {
   wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled, CUSTOMER_VISIBLE_TIERS, isInternalOrg,
 } from '../support/utils.js';
@@ -62,6 +65,9 @@ import { listViewableResourceIds } from '../support/state-access-mapping-utils.j
 import { requirePostgrestForFacsMappings } from '../support/postgrest-availability.js';
 import { isFacsRebacResource } from '../routes/facs-capabilities.js';
 import { ASO_PRODUCT_CODE, STATUSES as PLG_STATUSES } from './plg/plg-onboarding/constants.js';
+import { guardProvisioningLlmoFields } from '../support/llmo-config-guards.js';
+
+const VALIDATION_ERROR_NAME = 'ValidationError';
 
 /**
  * Builds the standard resolve-site success payload.
@@ -305,6 +311,13 @@ const applyTopOrganicPagesFilter = async (metricsData, limit, options) => {
   return result;
 };
 
+// pageTypes[].pattern is later spliced, unescaped, into an Athena SQL string literal
+// (REGEXP_LIKE(column, '<pattern>')) by @adobe/spacecat-shared-athena-client. Trino/Presto
+// string literals have no backslash-escape mode, so a bare single quote is the only
+// character that can terminate the literal early and inject SQL - reject it outright
+// rather than trying to escape/re-quote a value we don't control the eventual sink for.
+const SQL_UNSAFE_PATTERN_CHAR = /'/;
+
 /**
  * Validates that pageTypes array contains valid regex patterns
  * @param {Array} pageTypes - Array of page type objects with name and pattern
@@ -322,6 +335,13 @@ const validatePageTypes = (pageTypes) => {
 
     if (!hasText(pageType.pattern)) {
       return { isValid: false, error: `pageTypes[${index}] must have a pattern` };
+    }
+
+    if (SQL_UNSAFE_PATTERN_CHAR.test(pageType.pattern)) {
+      return {
+        isValid: false,
+        error: `pageTypes[${index}] pattern must not contain a single quote character`,
+      };
     }
 
     try {
@@ -393,6 +413,12 @@ function SitesController(ctx, log, env) {
     const { productCode, error: productCodeError } = resolveProductCode(context);
     if (productCodeError) {
       return badRequest(productCodeError);
+    }
+    if (isArray(context.data?.pageTypes)) {
+      const validation = validatePageTypes(context.data.pageTypes);
+      if (!validation.isValid) {
+        return badRequest(validation.error);
+      }
     }
     let site;
     let status;
@@ -536,12 +562,20 @@ function SitesController(ctx, log, env) {
       // query value (URLs may be sensitive) — only its length and result counts.
       log.info(`[sites][baseUrlContains] qlen=${q.length} count=${sites.length} hasMore=${hasMore} requestId=${requestId}`);
 
+      const { list: projectedSites, error: fieldsError } = applyFieldProjection(
+        sites,
+        context?.data?.fields,
+      );
+      if (fieldsError) {
+        return badRequest(fieldsError);
+      }
+
       // Echo the trimmed query in the pagination so a new client can confirm its
       // search was actually applied. An older deployment that ignores `baseUrlContains`
       // but still honors `limit` would return the cursor envelope with unfiltered
       // sites and no `baseUrlContains` echo — letting clients detect the version skew.
       return ok({
-        sites,
+        sites: projectedSites,
         pagination: {
           limit: effectiveLimit, offset, hasMore, baseUrlContains: q,
         },
@@ -612,6 +646,12 @@ function SitesController(ctx, log, env) {
       log.info(`[s2s-readall] GET /sites granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_SITE_READ_ALL} count=${sites.length} requestId=${requestId}`);
     }
 
+    const { list, error } = applyFieldProjection(sites, context?.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+    responseBody = Array.isArray(responseBody) ? list : { ...responseBody, sites: list };
+
     return ok(responseBody);
   };
 
@@ -632,7 +672,48 @@ function SitesController(ctx, log, env) {
 
     const sites = (await Site.allByDeliveryType(deliveryType))
       .map((site) => SiteDto.toJSON(site));
-    return ok(sites);
+    const { list, error } = applyFieldProjection(sites, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+    return ok(list);
+  };
+
+  /**
+   * Gets all sites enrolled at a given entitlement tier (e.g. 'PAID',
+   * 'FREE_TRIAL', 'PLG'). Optionally narrows the result to a single product
+   * code via the `productCode` query parameter (e.g. 'LLMO').
+   *
+   * Returns the full result set (no pagination) - acceptable for a
+   * bounded admin-only use case. Sites are ordered by ID.
+   *
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Sites response.
+   */
+  const getAllByEnrollmentAndTier = async (context) => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can view all sites');
+    }
+    const tier = context.params?.tier;
+    const productCode = context.data?.productCode;
+
+    if (!hasText(tier)) {
+      return badRequest('Tier required');
+    }
+    if (!CUSTOMER_VISIBLE_TIERS.includes(tier)) {
+      return badRequest(`Tier must be one of: ${CUSTOMER_VISIBLE_TIERS.join(', ')}`);
+    }
+    const validProductCodes = Object.values(EntitlementModel.PRODUCT_CODES);
+    if (productCode !== undefined && !validProductCodes.includes(productCode)) {
+      return badRequest(`productCode must be one of: ${validProductCodes.join(', ')}`);
+    }
+
+    const all = (await Site.allByEnrollmentAndTier(tier, productCode))
+      .sort((a, b) => a.getId().localeCompare(b.getId()));
+
+    return ok({
+      sites: all.map((site) => SiteDto.toJSON(site)),
+    });
   };
 
   /**
@@ -663,7 +744,11 @@ function SitesController(ctx, log, env) {
         const audit = await site.getLatestAuditByAuditType(auditType);
         return SiteDto.toJSON(site, audit);
       }));
-    return ok(result);
+    const { list, error } = applyFieldProjection(result, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+    return ok(list);
   };
 
   /**
@@ -1047,6 +1132,13 @@ function SitesController(ctx, log, env) {
           ...requestBody.config.llmo,
         };
       }
+      if (merged.llmo) {
+        merged.llmo = guardProvisioningLlmoFields(
+          merged.llmo,
+          existingConfig?.llmo,
+          accessControlUtil.hasAdminAccess(),
+        );
+      }
       // Reject malformed `llmo.detectedCdn` (array, stringified array, display name) before
       // persisting. `Config()` would otherwise swallow the schema error and store the raw value,
       // which then re-fails validation on every read.
@@ -1069,7 +1161,17 @@ function SitesController(ctx, log, env) {
       if (auditTargetURLsResult?.normalized !== undefined) {
         merged.auditTargetURLs = auditTargetURLsResult.normalized;
       }
-      site.setConfig(merged);
+      try {
+        site.setConfig(merged);
+      } catch (error) {
+        if (error?.name === VALIDATION_ERROR_NAME) {
+          // cleanupHeaderValue strips chars HTTP headers can't carry (CR/LF and
+          // non-ASCII that would otherwise throw ERR_INVALID_CHAR); the Joi error
+          // message can echo back arbitrary request input.
+          return badRequest(cleanupHeaderValue(error.message || 'Invalid config').slice(0, 500));
+        }
+        throw error;
+      }
       updates = true;
     }
 
@@ -2068,6 +2170,7 @@ function SitesController(ctx, log, env) {
     getAuditForSite,
     getByBaseURL,
     getAllByDeliveryType,
+    getAllByEnrollmentAndTier,
     getByID,
     getIdentity,
     removeSite,

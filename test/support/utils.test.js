@@ -35,6 +35,9 @@ import {
   sendAutofixMessage,
   isViewAsTrialRequest,
   getImsUserTokenStrict,
+  resolveCallerImsUserId,
+  sendGlobalImportRunMessage,
+  triggerGlobalImportRun,
 } from '../../src/support/utils.js';
 
 use(chaiAsPromised);
@@ -1563,6 +1566,49 @@ describe('utils', () => {
     });
   });
 
+  describe('resolveCallerImsUserId', () => {
+    const withProfile = (profile) => ({
+      attributes: { authInfo: { getProfile: () => profile } },
+    });
+
+    it('prefers the user_id claim over sub', () => {
+      expect(resolveCallerImsUserId(withProfile({ user_id: 'user-123', sub: 'sub-x' })))
+        .to.equal('user-123');
+    });
+
+    it('falls back to sub — the claim a SpaceCat JWT session token carries', () => {
+      expect(resolveCallerImsUserId(withProfile({ sub: 'sub-x' }))).to.equal('sub-x');
+    });
+
+    // The IMS handler deletes user_id from the profile it builds and leaves the
+    // id only on `email`, so this is the sole carrier for an IMS-authenticated
+    // caller — and it is an id, not a human address.
+    it('falls back to the email claim, the platform user-id alias', () => {
+      expect(resolveCallerImsUserId(withProfile({ email: 'ims-user-9@AdobeID' })))
+        .to.equal('ims-user-9@AdobeID');
+    });
+
+    it('prefers sub over email when both are present', () => {
+      expect(resolveCallerImsUserId(withProfile({ sub: 'sub-x', email: 'sub-x' })))
+        .to.equal('sub-x');
+    });
+
+    it('returns null for an empty claim', () => {
+      expect(resolveCallerImsUserId(withProfile({ user_id: '', sub: '', email: '' })))
+        .to.equal(null);
+    });
+
+    it('returns null when there is no profile, authInfo, or context', () => {
+      expect(resolveCallerImsUserId(withProfile(undefined))).to.equal(null);
+      expect(resolveCallerImsUserId({ attributes: {} })).to.equal(null);
+      expect(resolveCallerImsUserId(undefined)).to.equal(null);
+    });
+
+    it('returns null for a non-string claim', () => {
+      expect(resolveCallerImsUserId(withProfile({ user_id: 12345 }))).to.equal(null);
+    });
+  });
+
   describe('getImsUserTokenStrict', () => {
     function buildContext(authInfo) {
       return {
@@ -1720,6 +1766,158 @@ describe('utils', () => {
       const token = await resolveSemrushImsToken(context, { error: sinon.stub() }, 'label');
 
       expect(token).to.equal('ims-token');
+    });
+  });
+
+  describe('sendGlobalImportRunMessage', () => {
+    it('sends a message without a siteId when none is provided', async () => {
+      const sqs = { sendMessage: sinon.stub().resolves() };
+      const slackContext = { channelId: 'C1', threadTs: '123' };
+
+      await sendGlobalImportRunMessage(sqs, 'queue-url', 'stale-suggestions-cleanup', slackContext);
+
+      expect(sqs.sendMessage).to.have.been.calledWith('queue-url', {
+        type: 'stale-suggestions-cleanup',
+        slackContext,
+      });
+    });
+
+    it('includes the siteId in the message when provided', async () => {
+      const sqs = { sendMessage: sinon.stub().resolves() };
+      const slackContext = { channelId: 'C1', threadTs: '123' };
+
+      await sendGlobalImportRunMessage(
+        sqs,
+        'queue-url',
+        'optimize-at-edge-enabled-marking',
+        slackContext,
+        { siteId: 'site-1' },
+      );
+
+      expect(sqs.sendMessage).to.have.been.calledWith('queue-url', {
+        type: 'optimize-at-edge-enabled-marking',
+        slackContext,
+        siteId: 'site-1',
+      });
+    });
+
+    it('includes force and forcedBy in the message when provided', async () => {
+      const sqs = { sendMessage: sinon.stub().resolves() };
+      const slackContext = { channelId: 'C1', threadTs: '123' };
+
+      await sendGlobalImportRunMessage(
+        sqs,
+        'queue-url',
+        'optimize-at-edge-enabled-marking',
+        slackContext,
+        { siteId: 'site-1', force: true, forcedBy: 'jdoe' },
+      );
+
+      expect(sqs.sendMessage).to.have.been.calledWith('queue-url', {
+        type: 'optimize-at-edge-enabled-marking',
+        slackContext,
+        siteId: 'site-1',
+        force: true,
+        forcedBy: 'jdoe',
+      });
+    });
+
+    it('omits force and forcedBy when falsy/absent', async () => {
+      const sqs = { sendMessage: sinon.stub().resolves() };
+      const slackContext = { channelId: 'C1', threadTs: '123' };
+
+      await sendGlobalImportRunMessage(
+        sqs,
+        'queue-url',
+        'optimize-at-edge-enabled-marking',
+        slackContext,
+        { siteId: 'site-1', force: false },
+      );
+
+      expect(sqs.sendMessage).to.have.been.calledWith('queue-url', {
+        type: 'optimize-at-edge-enabled-marking',
+        slackContext,
+        siteId: 'site-1',
+      });
+    });
+
+    it('includes validateOnly and forcedBy in the message when provided', async () => {
+      const sqs = { sendMessage: sinon.stub().resolves() };
+      const slackContext = { channelId: 'C1', threadTs: '123' };
+
+      await sendGlobalImportRunMessage(
+        sqs,
+        'queue-url',
+        'optimize-at-edge-enabled-marking',
+        slackContext,
+        { siteId: 'site-1', validateOnly: true, forcedBy: 'jdoe' },
+      );
+
+      expect(sqs.sendMessage).to.have.been.calledWith('queue-url', {
+        type: 'optimize-at-edge-enabled-marking',
+        slackContext,
+        siteId: 'site-1',
+        validateOnly: true,
+        forcedBy: 'jdoe',
+      });
+    });
+
+    it('omits validateOnly when falsy/absent', async () => {
+      const sqs = { sendMessage: sinon.stub().resolves() };
+      const slackContext = { channelId: 'C1', threadTs: '123' };
+
+      await sendGlobalImportRunMessage(
+        sqs,
+        'queue-url',
+        'optimize-at-edge-enabled-marking',
+        slackContext,
+        { siteId: 'site-1', validateOnly: false },
+      );
+
+      expect(sqs.sendMessage).to.have.been.calledWith('queue-url', {
+        type: 'optimize-at-edge-enabled-marking',
+        slackContext,
+        siteId: 'site-1',
+      });
+    });
+  });
+
+  describe('triggerGlobalImportRun', () => {
+    it('passes siteId/force/forcedBy through to sendGlobalImportRunMessage when provided', async () => {
+      const sqs = { sendMessage: sinon.stub().resolves() };
+      const config = { getQueues: () => ({ imports: 'queue-url' }) };
+      const slackContext = { channelId: 'C1', threadTs: '123' };
+      const lambdaContext = { sqs };
+
+      await triggerGlobalImportRun(
+        config,
+        'optimize-at-edge-enabled-marking',
+        slackContext,
+        lambdaContext,
+        { siteId: 'site-1', force: true, forcedBy: 'jdoe' },
+      );
+
+      expect(sqs.sendMessage).to.have.been.calledWith('queue-url', {
+        type: 'optimize-at-edge-enabled-marking',
+        slackContext: { channelId: 'C1', threadTs: '123' },
+        siteId: 'site-1',
+        force: true,
+        forcedBy: 'jdoe',
+      });
+    });
+
+    it('omits siteId/force/forcedBy when no options are provided', async () => {
+      const sqs = { sendMessage: sinon.stub().resolves() };
+      const config = { getQueues: () => ({ imports: 'queue-url' }) };
+      const slackContext = { channelId: 'C1', threadTs: '123' };
+      const lambdaContext = { sqs };
+
+      await triggerGlobalImportRun(config, 'stale-suggestions-cleanup', slackContext, lambdaContext);
+
+      expect(sqs.sendMessage).to.have.been.calledWith('queue-url', {
+        type: 'stale-suggestions-cleanup',
+        slackContext: { channelId: 'C1', threadTs: '123' },
+      });
     });
   });
 });

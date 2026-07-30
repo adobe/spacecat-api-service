@@ -18,11 +18,51 @@ import { classifyIntents } from './intent-classifier.js';
 import { throwOnPgConstraintViolation } from './errors.js';
 import { assertPermittedSource } from './prompt-sources.js';
 import { INTENT_VALUES, normalizeIntent } from './intent.js';
+import { canonicalizeSource, foldSourceValue } from './serenity/prompt-tags.js';
 
 // Re-exported for backward compatibility — `normalizeIntent`/`INTENT_VALUES` now
 // live in `./intent.js` so the LLM intent classifier can reuse them without an
 // import cycle. Existing importers of these from `prompts-storage.js` keep working.
 export { INTENT_VALUES, normalizeIntent };
+
+/**
+ * The closed `origin` vocabulary — who authored the prompt's text
+ * (origin-dimension.md §1). Matches the `category_origin` enum on `prompts.origin`.
+ */
+export const V2_PROMPT_ORIGINS = Object.freeze(['ai', 'human']);
+const DEFAULT_ORIGIN = 'human';
+
+/**
+ * Derives the `origin` to store for a v2-prompts write, as a function of the
+ * request PRINCIPAL, never of the caller-supplied body value (origin-dimension.md
+ * §3). `origin` records who authored the prompt's text and is read-only wherever a
+ * user can reach it:
+ *
+ *   - a USER-authenticated principal (IMS / JWT) always writes `human`; any
+ *     `origin` in the body is IGNORED (never rejected — the derived value is
+ *     authoritative, so the caller loses nothing);
+ *   - a SERVICE principal (e.g. DRS via admin `x-api-key`) is believed: its body
+ *     value is honoured, validated against {@link V2_PROMPT_ORIGINS}, defaulting
+ *     to `human` only when absent or out-of-vocabulary. This is the DRS contract
+ *     (`origin: 'ai'`); dropping it would relabel every generated prompt `human`
+ *     on its next upsert (origin-dimension.md §3 consequence 1).
+ *
+ * This governs CREATE only — `origin` is never patched on update (it is fixed by
+ * the writer that created the row), which the update path enforces by not writing
+ * the column at all.
+ *
+ * @param {unknown} bodyOrigin - the caller-supplied `origin`, or undefined.
+ * @param {boolean} isUserPrincipal - true for an IMS/JWT user request.
+ * @returns {string} the origin to store (`ai` or `human`).
+ */
+export function deriveV2PromptOrigin(bodyOrigin, isUserPrincipal) {
+  if (isUserPrincipal) {
+    return DEFAULT_ORIGIN;
+  }
+  return V2_PROMPT_ORIGINS.includes(/** @type {string} */ (bodyOrigin))
+    ? /** @type {string} */ (bodyOrigin)
+    : DEFAULT_ORIGIN;
+}
 
 /**
  * Per-client cache of whether `prompts.intent` is selectable/writable. Keyed by
@@ -388,6 +428,11 @@ const SORT_COLUMN_MAP = {
   origin: 'origin',
   status: 'status',
   updatedAt: 'updated_at',
+  // Sort on the `source_canonical` generated column (WP-S4:
+  // `GENERATED ALWAYS AS (lower(replace(source,'_','-'))) STORED`, btree-indexed),
+  // so the two drift spellings of a producer order together and the label — which
+  // lives in elmo, never on the server — plays no part (source-dimension.md §3.1).
+  source: 'source_canonical',
 };
 
 function mapRowToPrompt(row) {
@@ -406,8 +451,23 @@ function mapRowToPrompt(row) {
     name: row.name,
     regions: row.regions || [],
     status: row.status || 'active',
-    origin: row.origin || 'human',
-    source: row.source || 'config',
+    // Return the stored `origin` verbatim — deliberately NO `|| 'human'` AND no
+    // `?? 'human'` fallback (origin-dimension.md §WP-O2b item 4 / §2.3).
+    // INVARIANT: `prompts.origin` is NOT NULL in production (zero NULLs in
+    // 265,980 rows, §2.3). Any fallback — including nullish-coalescing, which
+    // masks NULL exactly as `||` masks it for a NULL — would silently mislabel a
+    // model-written (`ai`) prompt as `human` were a NULL ever present, the exact
+    // corruption this dimension exists to prevent. Surfacing the raw value is the
+    // fail-loud choice over a fabricated `human`; unlike `source`/`status`, whose
+    // fallbacks are cosmetic, an origin fallback is a correctness hazard.
+    origin: row.origin,
+    // Second derivation boundary (source-dimension.md §3.1): the v2 read surface
+    // returns the CANONICAL slug, so elmo's badge — which keys on the API's value —
+    // resolves (`agentic_traffic` → `agentic-traffic`). A value that fails the guard
+    // (empty, `:`, over-long, root-shadowing) returns the RAW string rather than
+    // null: the grid must still show the operator what is stored. `?? 'config'` only
+    // guards a nullish column (in-memory/test rows); the DB column is NOT NULL.
+    source: canonicalizeSource(row.source) ?? row.source ?? 'config',
     intent: row.intent ?? null,
     createdAt: row.created_at,
     createdBy: row.created_by,
@@ -454,9 +514,11 @@ function mapRowToPrompt(row) {
  * topic name, category name
  * @param {string} [params.region] - Filter by region (array containment)
  * @param {string} [params.origin] - Filter by origin (ai, human)
- * @param {string} [params.source] - Filter by source (e.g. gsc, semrush, base_url, config)
+ * @param {string} [params.source] - Filter by source, matched on the
+ * `source_canonical` generated column: `citation-attempt` also matches rows
+ * stored as `citation_attempt` (drift spellings fold together, case-insensitive).
  * @param {string} [params.sort] - Sort column (topic, prompt, category, origin,
- * status, updatedAt)
+ * source, status, updatedAt)
  * @param {string} [params.order] - Sort direction (asc, desc). Default desc
  * @param {number} [params.limit] - Page size (default 100, max 5000)
  * @param {number} [params.page] - Page number, 1-based (default 1)
@@ -585,7 +647,13 @@ export async function listPrompts({
     }
 
     if (hasText(source)) {
-      baseQuery = baseQuery.eq('source', source);
+      // Match on the `source_canonical` generated column (WP-S4) — the DB
+      // canonicalizes `lower(replace(source,'_','-'))` at write time, so a single
+      // equality on the folded incoming value catches every drift spelling AND is
+      // case-insensitive (`citation-attempt` finds rows stored `citation_attempt`
+      // or `Citation_Attempt`). Fold the query-param value with the same transform
+      // (`foldSourceValue` — the single definition) so the two sides align.
+      baseQuery = baseQuery.eq('source_canonical', foldSourceValue(source));
     }
 
     if (hasText(region)) {
@@ -850,6 +918,12 @@ export async function upsertPrompts({
           status: 'active',
           intent: row.intent ?? match.intent,
           source: match.source ?? source,
+          // `origin` is fixed by the writer that created the row and is never
+          // re-derived on a later write (origin-dimension.md §3): preserve the
+          // stored value across a reactivation. `?? row.origin` is a defensive
+          // fallback for an in-memory/test match without an origin, mirroring
+          // `source` above — not a backfill path (prod has zero NULL origins).
+          origin: match.origin ?? row.origin,
         };
         toUpdate.push(reactivated);
         processed.push({ ...reactivated, prompt_id: promptId });
@@ -859,7 +933,18 @@ export async function upsertPrompts({
     }
 
     if (match) {
-      const updated = { ...row, id: match.id, source: match.source ?? source };
+      // `source` AND `origin` are both immutable on an UPDATE: source names the
+      // producing system, origin names the writer that created the row, and
+      // neither is re-derived on a later write (origin-dimension.md §3). Preserve
+      // the stored values so a user-principal derive of `human` cannot relabel an
+      // existing `ai` prompt. `?? row.*` is the same defensive in-memory/test
+      // fallback used for `source` — not a backfill.
+      const updated = {
+        ...row,
+        id: match.id,
+        source: match.source ?? source,
+        origin: match.origin ?? row.origin,
+      };
       toUpdate.push(updated);
       processed.push({ ...updated, prompt_id: promptId });
     } else {
@@ -1038,6 +1123,9 @@ export async function updatePromptById({
   }
 
   const patch = { updated_by: updatedBy };
+  // `source` is deliberately NOT patchable (source-dimension.md §1 item 6): a
+  // prompt's producer is fixed at creation, and the dimension has no write surface.
+  // A caller-supplied `updates.source` is ignored rather than written.
   if (updates.prompt !== undefined) {
     patch.text = updates.prompt;
   }
@@ -1050,9 +1138,10 @@ export async function updatePromptById({
   if (updates.status !== undefined) {
     patch.status = updates.status;
   }
-  if (updates.origin !== undefined) {
-    patch.origin = updates.origin;
-  }
+  // `origin` is deliberately NOT patchable: it is fixed by the writer that
+  // created the row and is never re-derived on update (origin-dimension.md §3
+  // item 3 / §1 item 5). A caller-supplied `origin` in the PATCH body is ignored,
+  // leaving the stored value — including an `ai` prompt's — untouched.
   if (updates.intent !== undefined) {
     // The shared fallback strips intent when the column is known-absent.
     patch.intent = normalizeIntent(updates.intent);

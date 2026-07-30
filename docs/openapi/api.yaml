@@ -82,6 +82,8 @@ tags:
   - name: state-access-mappings
     description: |
       Hybrid permission model — state-layer access mappings + capability views.
+  - name: semrush-onboarding
+    description: Semrush onboarding notification operations
 
 paths:
   /audits/latest/{auditType}:
@@ -94,6 +96,8 @@ paths:
     $ref: './auth-api.yaml#/login'
   /configurations/latest:
     $ref: './configuration-api.yaml#/latest-configuration'
+  /configurations/versions:
+    $ref: './configuration-api.yaml#/configuration-versions'
   /configurations/latest/queues:
     $ref: './configuration-api.yaml#/configuration-queues'
   /configurations/latest/jobs/{jobType}:
@@ -178,10 +182,24 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-url-inspector-filter-dimensions'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/market-tracking-trends:
     $ref: './serenity-api.yaml#/v2-serenity-market-tracking-trends'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/competitor-summary:
+    $ref: './serenity-api.yaml#/v2-serenity-competitor-summary'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/kpi-headlines:
+    $ref: './serenity-api.yaml#/v2-serenity-kpi-headlines'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/source-visibility-headline:
+    $ref: './serenity-api.yaml#/v2-serenity-source-visibility-headline'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/sentiment-overview:
     $ref: './serenity-api.yaml#/v2-serenity-brand-presence-sentiment-overview'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/topics:
+    $ref: './serenity-api.yaml#/v2-serenity-brand-presence-topics'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/topics/{topicId}/prompts:
+    $ref: './serenity-api.yaml#/v2-serenity-brand-presence-topic-prompts'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/stats:
     $ref: './serenity-api.yaml#/v2-serenity-brand-presence-stats'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/stats:
+    $ref: './serenity-api.yaml#/v2-serenity-url-inspector-stats'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/prompts/count:
+    $ref: './serenity-api.yaml#/v2-serenity-url-inspector-prompts-count'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/{organizationId}/entitlements:
@@ -265,6 +283,8 @@ paths:
     $ref: './sites-api.yaml#/sites-resolve'
   /sites/by-delivery-type/{deliveryType}:
     $ref: './sites-api.yaml#/sites-by-delivery-type'
+  /sites/by-tier/{tier}:
+    $ref: './sites-api.yaml#/sites-by-tier'
   /sites/by-base-url/{base64BaseUrl}:
     $ref: './site-api.yaml#/site-by-base-url'
   /sites/with-latest-audit/{auditType}:
@@ -367,6 +387,24 @@ paths:
     $ref: './agentic-rules-api.yaml#/agentic-page-types-list'
   /sites/{siteId}/agentic-page-types/{name}:
     $ref: './agentic-rules-api.yaml#/agentic-page-types-one'
+  /sites/{siteId}/audit-policy:
+    $ref: './audit-policy-api.yaml#/audit-policy'
+  /sites/{siteId}/audit-policy/exclusions:
+    $ref: './audit-policy-api.yaml#/audit-policy-exclusions'
+  /sites/{siteId}/audit-policy/exclusions/delete:
+    $ref: './audit-policy-api.yaml#/audit-policy-exclusions-delete'
+  /sites/{siteId}/audit-policy/inclusions:
+    $ref: './audit-policy-api.yaml#/audit-policy-inclusions'
+  /sites/{siteId}/audit-policy/inclusions/delete:
+    $ref: './audit-policy-api.yaml#/audit-policy-inclusions-delete'
+  /sites/{siteId}/audit-policy/revisions:
+    $ref: './audit-policy-api.yaml#/audit-policy-revisions'
+  /sites/{siteId}/audit-scope/pages:
+    $ref: './audit-policy-api.yaml#/audit-scope-pages'
+  /sites/{siteId}/audit-scope/summary:
+    $ref: './audit-policy-api.yaml#/audit-scope-summary'
+  /sites/{siteId}/audit-scope/sections:
+    $ref: './audit-policy-api.yaml#/audit-scope-sections'
   /sites/{siteId}/traffic/paid:
     $ref: './site-paid.yaml#/site-traffic-paid-top-pages'
   /sites/{siteId}/traffic/paid/url-page-type:
@@ -652,6 +690,8 @@ paths:
     $ref: './llmo-api.yaml#/llmo-onboard'
   /v2/orgs/{spaceCatId}/llmo/onboard-site:
     $ref: './llmo-api.yaml#/llmo-onboard-site'
+  /v2/orgs/{spaceCatId}/semrush-onboarding:
+    $ref: './onboarding-api.yaml#/trigger-onboarding'
   /sites/{siteId}/llmo/offboard:
     $ref: './llmo-api.yaml#/llmo-offboard'
   /sites/{siteId}/llmo/opportunities-reviewed:

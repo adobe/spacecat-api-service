@@ -251,21 +251,38 @@ export const sendInternalReportRunMessage = async (
 
 /**
  * Sends a message to run a global import job to the provided SQS queue.
- * Global imports don't require a siteId - they run across all data.
+ * Global imports don't require a siteId - they run across all data - but an optional siteId
+ * scopes the run to just that one site (e.g. for an ad hoc re-check), and optional force /
+ * validateOnly flags (only meaningful alongside a siteId) tell the target handler to skip, or
+ * run only, whatever gating check it normally requires, when it supports them.
  *
  * @param {Object} sqs - The SQS service object.
  * @param {string} queueUrl - The SQS queue URL.
  * @param {string} importType - The type of global import to run.
  * @param {Object} slackContext - The Slack context for notifications.
+ * @param {Object} [options] - Optional single-site scoping.
+ * @param {string} [options.siteId] - Site ID to scope the run to a single site.
+ * @param {boolean} [options.force] - Skip the handler's normal gating check for that site.
+ * @param {boolean} [options.validateOnly] - Run only the handler's validation check for that
+ *   site, without applying whatever result it normally gates.
+ * @param {string} [options.forcedBy] - Slack user who requested the force/validateOnly run
+ *   (log context).
  */
 export const sendGlobalImportRunMessage = async (
   sqs,
   queueUrl,
   importType,
   slackContext,
+  {
+    siteId, force, forcedBy, validateOnly,
+  } = {},
 ) => sqs.sendMessage(queueUrl, {
   type: importType,
   slackContext,
+  ...(siteId && { siteId }),
+  ...(force && { force }),
+  ...(validateOnly && { validateOnly }),
+  ...(forcedBy && { forcedBy }),
 });
 
 export const sendReportTriggerMessage = async (
@@ -458,18 +475,22 @@ export const triggerInternalReportRun = async (
 );
 
 /**
- * Triggers a global import run (imports that don't require a siteId).
+ * Triggers a global import run (imports that don't require a siteId, though an optional
+ * siteId can scope the run to a single site, and force/forcedBy can ask the handler to skip
+ * its normal gating check for that site, for handlers that support both).
  *
  * @param {Object} config - The configuration object.
  * @param {string} importType - The type of global import to run.
  * @param {Object} slackContext - The Slack context for notifications.
  * @param {Object} lambdaContext - The Lambda context with SQS service.
+ * @param {Object} [options] - Optional single-site scoping — see sendGlobalImportRunMessage.
  */
 export const triggerGlobalImportRun = async (
   config,
   importType,
   slackContext,
   lambdaContext,
+  options,
 ) => sendGlobalImportRunMessage(
   lambdaContext.sqs,
   config.getQueues().imports,
@@ -478,6 +499,7 @@ export const triggerGlobalImportRun = async (
     channelId: slackContext.channelId,
     threadTs: slackContext.threadTs,
   },
+  options,
 );
 
 /**
@@ -773,6 +795,43 @@ export async function exchangePromiseToken(context, promiseToken) {
     !!context.env?.AUTOFIX_CRYPT_SECRET && !!context.env?.AUTOFIX_CRYPT_SALT,
   )).access_token;
   return accessToken;
+}
+
+/**
+ * The authenticated caller's own IMS user id, read from their auth profile.
+ *
+ * `user_id`, then `sub`, then `email` — three carriers of the SAME value, in
+ * decreasing directness. All three matter, because which ones are populated
+ * depends on the auth handler: a SpaceCat JWT carries the id on `sub` AND
+ * `email` (the auth service deliberately puts the IMS user id, not the real
+ * address, in the `email` claim), while `AdobeImsHandler` deletes `user_id` from
+ * the profile it builds and leaves the id only on `email`. `email` therefore is
+ * NOT a human address here — it is the platform's user-id alias, which is why
+ * the pre-existing writers of `prompts.updated_by` (`brands.js`) and the api-key
+ * surface read it directly (see the ASO-607 rationale in
+ * `support/api-key-ims-handler.js`). For the caller's human address use
+ * `trial_email` / `preferred_username` instead — never this id.
+ *
+ * This is the SINGLE definition of "who is calling" for identity that is written
+ * into data and later read back for display: server-owned authorship stamps
+ * (`createdBy` / `updatedBy`) resolve the id to write through here, and
+ * `/organizations/{id}/userDetails` resolves the caller's own id through here as
+ * well. Both sides moving together is what keeps a stamped id resolvable —
+ * reading a different claim on either side silently degrades authorship to an
+ * unresolved author.
+ *
+ * NOT the identity to forward upstream (that is a token, see
+ * {@link resolveSemrushImsToken}) and NOT an authorization signal — a caller is
+ * already authenticated by the time this runs; an unresolvable identity is a
+ * display concern, never an access decision.
+ *
+ * @param {object} context - The request context.
+ * @returns {string|null} The caller's IMS user id, or null when unresolvable.
+ */
+export function resolveCallerImsUserId(context) {
+  const profile = context?.attributes?.authInfo?.getProfile?.();
+  const raw = profile?.user_id ?? profile?.sub ?? profile?.email;
+  return hasText(raw) ? String(raw) : null;
 }
 
 /**
@@ -1792,14 +1851,14 @@ export const onboardSingleSite = async (
     reportLine.imports = importTypes.join(', ');
     const siteConfig = site.getConfig();
 
-    // Enabled imports only if there are not already enabled
+    // Enable imports that are not already enabled. Enabling here only writes the
+    // entry to site config; imports are not scheduled from site config, so there's
+    // no disable step required later — the initial triggerImportRun below fires
+    // each import exactly once regardless of enable state.
     const imports = siteConfig.getImports();
-    const importsEnabled = [];
     for (const importType of importTypes) {
-      const isEnabled = isImportEnabled(importType, imports);
-      if (!isEnabled) {
+      if (!isImportEnabled(importType, imports)) {
         siteConfig.enableImport(importType);
-        importsEnabled.push(importType);
       }
     }
 
@@ -1888,45 +1947,63 @@ export const onboardSingleSite = async (
 
     const auditTypes = Object.keys(profile.audits);
 
-    // Determine scheduledRun early so we only enable audits in config for paid profiles
+    // Determine scheduledRun early so we only enable audits in config for paid/scheduled profiles
     const scheduledRun = additionalParams.scheduledRun !== undefined
       ? additionalParams.scheduledRun
       : (profile.config?.scheduledRun || false);
 
+    // Sync audits in the site's configuration to this run's intent — done fully
+    // in-process, so the workflow no longer posts a message to the task processor
+    // for audits (nor for imports, which don't need disabling per the block above).
+    //   - Scheduled or protected (paid) profiles: enable any audit that isn't yet
+    //     enabled, so the shared scheduler picks them up on recurring runs.
+    //   - Free-trial, non-scheduled runs: disable any audit that IS currently
+    //     enabled, so a prior scheduled/paid enablement can't leak this run's audit
+    //     set into the scheduler. The direct triggerAuditForSite calls below still
+    //     fire once — enable status only gates scheduling, not triggering.
     const latestConfiguration = await Configuration.findLatest();
-
-    // Only enable audits in configuration when scheduledRun is true (paid profiles)
-    const auditsEnabled = [];
-    if (scheduledRun) {
-      for (const auditType of auditTypes) {
-        /* eslint-disable no-await-in-loop */
-        const isEnabled = latestConfiguration.isHandlerEnabledForSite(auditType, site);
-        if (!isEnabled) {
-          latestConfiguration.enableHandlerForSite(auditType, site);
-          auditsEnabled.push(auditType);
-        }
+    const wantEnabled = scheduledRun || profile.protected;
+    const auditsChanged = [];
+    for (const auditType of auditTypes) {
+      /* eslint-disable no-await-in-loop */
+      const isEnabled = latestConfiguration.isHandlerEnabledForSite(auditType, site);
+      if (wantEnabled && !isEnabled) {
+        latestConfiguration.enableHandlerForSite(auditType, site);
+        auditsChanged.push(auditType);
+      } else if (!wantEnabled && isEnabled) {
+        latestConfiguration.disableHandlerForSite(auditType, site);
+        auditsChanged.push(auditType);
       }
     }
 
-    if (auditsEnabled.length > 0) {
+    if (auditsChanged.length > 0) {
       try {
         await latestConfiguration.save();
-        log.debug(`Enabled the following audits for site ${siteID}: ${auditsEnabled.join(', ')}`);
-        await say(
-          `:calendar: *Scheduled onboarding:* These audits were enabled in site configuration for recurring runs: ${auditsEnabled.join(', ')}`,
-        );
+        if (wantEnabled) {
+          log.debug(`Enabled the following audits for site ${siteID}: ${auditsChanged.join(', ')}`);
+          if (scheduledRun) {
+            await say(
+              `:calendar: *Scheduled onboarding:* These audits were enabled in site configuration for recurring runs: ${auditsChanged.join(', ')}`,
+            );
+          }
+        } else {
+          log.debug(`Disabled the following previously-enabled audits for site ${siteID}: ${auditsChanged.join(', ')}`);
+        }
       } catch (error) {
         log.error(`Failed to save configuration for site ${siteID}:`, error);
         throw error;
       }
     } else {
-      log.debug(`All the required audits for the given profile are already enabled for site ${siteID}`);
+      log.debug(`Audit configuration already matches the desired state (${wantEnabled ? 'enabled' : 'disabled'}) for site ${siteID}`);
     }
 
     reportLine.audits = auditTypes.join(', ');
     const auditsMessage = reportLine.audits || 'None';
     const importsMessage = reportLine.imports || 'None';
-    await say(`:white_check_mark: *For site ${baseURL}*: Enabled imports: ${importsMessage} and audits: ${auditsMessage}`);
+    const statusMessage = scheduledRun
+      ? `:white_check_mark: *For site ${baseURL}*: Adding imports: ${importsMessage} and audits: ${auditsMessage} to scheduled run`
+      : `:white_check_mark: *For site ${baseURL}*: Enabled imports: ${importsMessage}; triggered (not scheduled) audits: ${auditsMessage}`;
+    await say(statusMessage);
 
     // trigger audit runs
     if (auditTypes.length > 0) {
@@ -1995,28 +2072,14 @@ export const onboardSingleSite = async (
     };
 
     // Prepare and start step function workflow with the necessary parameters.
-    // Always send disableImportAndAuditJob so imports can be disabled (avoid exhausting Ahrefs).
-    // auditsEnabled is not sent to the task handler; only log/Slack the info here.
+    // No disableImportAndAuditJob: imports don't need to be disabled (their enable
+    // status does not schedule them), and audits have already been enabled or disabled
+    // in-process above based on scheduledRun / profile.protected. The
+    // disable-import-audit-processor handler is therefore no longer invoked from this
+    // path — its step in the onboarding state machine and the handler itself can be
+    // removed in a follow-up.
     const workflowInput = {
       opportunityStatusJob,
-      disableImportAndAuditJob: {
-        type: 'disable-import-audit-processor',
-        siteId: siteID,
-        siteUrl: baseURL,
-        imsOrgId: imsOrgID,
-        organizationId,
-        taskContext: {
-          importTypes: importsEnabled || [],
-          // Not sent to task handler; audits are enabled in config only when scheduledRun is true,
-          // so no separate audit-disable list is needed here.
-          auditTypes: [],
-          scheduledRun,
-          slackContext: {
-            channelId: slackContext.channelId,
-            threadTs: slackContext.threadTs,
-          },
-        },
-      },
       demoURLJob,
       cwvDemoSuggestionsJob,
       workflowWaitTime: workflowWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS,
