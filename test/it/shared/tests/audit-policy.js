@@ -134,14 +134,20 @@ export default function auditPolicyTests(getHttpClient, resetData, seedAuditScop
         const firstPage = await http.admin.get(`/sites/${SITE_1_ID}/audit-scope/pages?limit=1`);
         expect(firstPage.status).to.equal(200);
         expect(firstPage.body.items.map((i) => i.url)).to.deep.equal([pageA.url]);
-        expect(firstPage.body.cursor).to.be.a('string');
+        expect(firstPage.body.cursor).to.be.a('string').and.not.empty;
 
+        // A full page (items.length === limit) always emits a cursor, even when it's the
+        // last page - getScopePages accepts one harmless extra request rather than doing a
+        // second query to check for more rows (same tradeoff listRevisions makes), so don't
+        // assert cursor absence here. Assert the second page advances with no overlap instead,
+        // mirroring test/it/shared/tests/sites.js's cursor-pagination convention.
         const secondPage = await http.admin.get(
           `/sites/${SITE_1_ID}/audit-scope/pages?limit=1&cursor=${firstPage.body.cursor}`,
         );
         expect(secondPage.status).to.equal(200);
         expect(secondPage.body.items.map((i) => i.url)).to.deep.equal([pageB.url]);
-        expect(secondPage.body.cursor).to.be.undefined;
+        const firstPageUrls = new Set(firstPage.body.items.map((i) => i.url));
+        secondPage.body.items.forEach((i) => expect(firstPageUrls.has(i.url)).to.be.false);
       });
 
       it('user: denied for a cross-org site', async () => {
