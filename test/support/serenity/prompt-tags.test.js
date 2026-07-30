@@ -45,6 +45,10 @@ describe('serenity prompt-tags taxonomy', () => {
       expect(isDimensionRootName('category')).to.equal(true);
       expect(isDimensionRootName('type')).to.equal(true);
       expect(isDimensionRootName('Running Shoes')).to.equal(false);
+      // The legacy authorship name is no longer reserved — the tolerant `source`
+      // fallback was removed in WP-O6 (the name is freed for the producing-system
+      // `source` dimension WP-S2 introduces).
+      expect(isDimensionRootName('source')).to.equal(false);
     });
 
     it('is frozen (immutable single source of truth)', () => {
