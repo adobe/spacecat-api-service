@@ -13,7 +13,6 @@
 // @ts-check
 
 import { hasText } from '@adobe/spacecat-shared-utils';
-import crypto from 'node:crypto';
 
 import { ErrorWithStatusCode } from '../../utils.js';
 import {
@@ -236,14 +235,43 @@ function validateCreateBody(body) {
 }
 
 /**
- * Default market display name. Format: `<brandDisplayName>-<6-hex>`.
- * The random suffix prevents collisions in shared workspaces and
- * disambiguates re-create-after-delete.
+ * Default market display name. Format: `<REGION>-<language>` — uppercase ISO-2
+ * country code + the normalized language code (`US-en`, `CH-de`).
+ *
+ * LLMO-managed sub-workspaces are locked but still VISIBLE to the customer in
+ * the Semrush navigation, so a project's name has to read as the market it is.
+ * This is the same convention the Semrush migration writes (adobe/
+ * mysticat-data-service `scripts/serenity_migration/planner.py`), so a market
+ * added from the Markets tab is indistinguishable from a migrated one — and a
+ * later migration pass, which adopts a project by matching its exact name
+ * within the sub-workspace, adopts it instead of creating a duplicate beside it.
+ *
+ * The name carries no identity: a market is addressed by its
+ * (geoTargetId, languageCode) slice, which is unique per brand, so the whole
+ * set of names within a sub-workspace is collision-free.
+ *
+ * Both parts are required, and an empty one throws rather than yielding a
+ * half-formed `-en` / `US-` name: the result is customer-visible in the Semrush
+ * navigation, so there is no value in a degenerate name reaching a workspace.
+ * Every caller today validates the slice first (both create handlers 400 on an
+ * unparseable market or language before naming anything), so this guards the
+ * exported contract against a future caller that skips that gauntlet.
+ *
+ * @param {string} market - ISO-2 country code (any case).
+ * @param {string|null} languageCode - normalized BCP-47 language code.
+ * @returns {string}
+ * @throws {ErrorWithStatusCode} 400 when either part is missing/empty.
  */
-export function defaultMarketName(brandDisplayName) {
-  const base = hasText(brandDisplayName) ? String(brandDisplayName) : 'brand';
-  const suffix = crypto.randomBytes(3).toString('hex');
-  return `${base}-${suffix}`;
+export function defaultMarketName(market, languageCode) {
+  const region = String(market || '').toUpperCase();
+  const lang = String(languageCode || '').toLowerCase();
+  if (!hasText(region) || !hasText(lang)) {
+    throw new ErrorWithStatusCode(
+      'market and languageCode are both required to name a market',
+      400,
+    );
+  }
+  return `${region}-${lang}`;
 }
 
 /**
@@ -343,7 +371,9 @@ export async function handleCreateMarket(
     };
   }
 
-  const name = hasText(body?.name) ? String(body.name) : defaultMarketName(body.brandDisplayName);
+  const name = hasText(body?.name)
+    ? String(body.name)
+    : defaultMarketName(body.market, languageCode);
 
   // brandDomain OR siteId (LLMO-6405 Phase 2): when the caller supplied a Site
   // UUID instead of a raw domain, derive the Semrush project domain from it. The
@@ -392,11 +422,12 @@ export async function handleCreateMarket(
     await transport.publishProject(semrushWorkspaceId, semrushProjectId);
   } catch (e) {
     // Best-effort upstream cleanup so the documented retry contract holds.
-    // Without this, every retry generates a fresh `defaultMarketName` (random
-    // hex suffix) and the upstream `createProject` body has no idempotency
-    // key — a retry after a `publishProject` failure would create a SECOND
-    // upstream project, not recover the first. The 409 gate only fires when
-    // a DB row exists; it never sees orphan upstream projects.
+    // A retry now sends a byte-identical `createProject` body (the name is
+    // derived from the slice, not freshly randomized), but Semrush accepts no
+    // idempotency key, so an identical body still creates a SECOND project
+    // rather than resolving to the first. The 409 gate can't catch it either —
+    // it only fires when a DB row exists, and never sees orphan upstream
+    // projects. Hence deleting the orphan here.
     //
     // Swallow the delete's own errors: the publishProject error is what we
     // need to propagate to the caller, and we don't want a follow-on cleanup

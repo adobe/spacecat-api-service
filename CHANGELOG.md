@@ -1,3 +1,10 @@
+## [1.710.1](https://github.com/adobe/spacecat-api-service/compare/v1.710.0...v1.710.1) (2026-07-30)
+
+
+### Bug Fixes
+
+* **serenity:** name a new market after its market, not the brand plus a random hash ([#2965](https://github.com/adobe/spacecat-api-service/issues/2965)) ([8f580ac](https://github.com/adobe/spacecat-api-service/commit/8f580ac75120f2c2093cea5f3f4b8f27d955f49e)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 # [1.710.0](https://github.com/adobe/spacecat-api-service/compare/v1.709.0...v1.710.0) (2026-07-30)
 
 
