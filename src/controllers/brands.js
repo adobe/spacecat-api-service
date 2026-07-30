@@ -84,7 +84,6 @@ import {
   LLMO_ONBOARDING_MODE_V2,
 } from '../support/llmo-onboarding-mode.js';
 import { postLlmoAlert } from './llmo/llmo-onboarding.js';
-import { hasPaidLlmoEntitlement } from '../support/llmo-paid-gate.js';
 import { createIntentClassifier } from '../support/intent-classifier.js';
 import { emitMetric, resolveEnvironment } from '../support/metrics-emf.js';
 import {
@@ -2290,16 +2289,19 @@ function BrandsController(ctx, log, env) {
         return organization;
       }
 
-      // Auth — same gate as Piece 1: membership + explicit PAID. PAID is stricter
-      // than the platform's any-tier "LLMO-enabled" bar; entitlements have no status
-      // column (getStatus() is an unbacked stub; revocation = row delete), so a PAID
-      // row is the "paying" signal. No separate admin requirement — mirrors Piece 1,
-      // which omits it so paying non-admin members aren't 403'd.
+      // Auth — org membership only. Activation is intentionally NOT paywalled
+      // (LLMO-6634): a brand that already resolves to a valid onboarded primary site
+      // (step 1 below) may be promoted pending -> active regardless of the org's LLMO
+      // tier — there is no reason to gate activation of an existing, URL-backed brand
+      // behind a paywall. The paid gate stays on NEW-URL onboarding ("Piece 1" of
+      // LLMO-3749, onboardSiteOnly in llmo.js): because activation only ever anchors an
+      // ALREADY-onboarded site (a pending brand with no resolvable primary site 400s
+      // below), a free org can never onboard a new site through this path.
+      // History: the PAID gate here was added intentionally alongside this endpoint
+      // (LLMO-5605, commit 5155192d), not as a regression — it is relaxed here per the
+      // product decision recorded on LLMO-6634. See the PR for the human sign-off note.
       if (!await accessControlUtil.hasAccess(organization)) {
         return forbidden('User does not have access to this organization');
-      }
-      if (!await hasPaidLlmoEntitlement(context, organization)) {
-        return forbidden('A paid LLMO entitlement is required to activate a brand');
       }
 
       const unavailable = requirePostgrestForV2Config(context);

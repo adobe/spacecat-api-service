@@ -280,6 +280,9 @@ v2-brand-for-org-activate:
 
       Activation requires the brand to already have an onboarded primary site —
       a request against a brand with no onboarded primary site returns 400.
+      Activation itself is not paywalled (LLMO-6634): any org member may activate a
+      brand that already has a valid onboarded primary site, regardless of LLMO tier.
+      Onboarding a NEW URL remains a paid capability (separate endpoint).
 
       Set `generatePrompts` to `true` to trigger asynchronous AI prompt
       generation; the response then includes a `promptGenerationJobId`. When a
@@ -305,9 +308,7 @@ v2-brand-for-org-activate:
       '400':
         description: Brand has no onboarded primary site
       '403':
-        description: |
-          User is not a member of the organization, or the organization is not on a
-          PAID tier.
+        description: User does not have access to this organization
       '404':
         description: Organization or brand not found
       '409':
