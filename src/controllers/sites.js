@@ -65,6 +65,7 @@ import { listViewableResourceIds } from '../support/state-access-mapping-utils.j
 import { requirePostgrestForFacsMappings } from '../support/postgrest-availability.js';
 import { isFacsRebacResource } from '../routes/facs-capabilities.js';
 import { ASO_PRODUCT_CODE, STATUSES as PLG_STATUSES } from './plg/plg-onboarding/constants.js';
+import { guardProvisioningLlmoFields } from '../support/llmo-config-guards.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
 
@@ -1130,6 +1131,13 @@ function SitesController(ctx, log, env) {
           ...existingConfig.llmo,
           ...requestBody.config.llmo,
         };
+      }
+      if (merged.llmo) {
+        merged.llmo = guardProvisioningLlmoFields(
+          merged.llmo,
+          existingConfig?.llmo,
+          accessControlUtil.hasAdminAccess(),
+        );
       }
       // Reject malformed `llmo.detectedCdn` (array, stringified array, display name) before
       // persisting. `Config()` would otherwise swallow the schema error and store the raw value,
