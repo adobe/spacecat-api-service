@@ -13,6 +13,18 @@
 import { GeoExperiment } from '@adobe/spacecat-shared-data-access';
 
 /**
+ * Supported opportunity types for EXPERIMENT_SCHEDULE_CONFIG.
+ * Each key must match the opportunity type string lowercased
+ * (e.g. 'recover-content-visibility', 'table-of-contents').
+ * The geo-experiment flow is fully generic — any opportunity type works at runtime —
+ * but types listed here have documented, tested schedule-config support.
+ */
+export const SUPPORTED_GEO_EXPERIMENT_OPPORTUNITY_TYPES = [
+  'recover-content-visibility',
+  'table-of-contents',
+];
+
+/**
  * Validates a single phase config block.
  * All fields are optional — only present fields are validated.
  *
@@ -48,6 +60,18 @@ function validatePhaseConfig(phaseConfig, path) {
  *   "<strategyType>": {
  *     "default": { "pre": { ... }, "post": { ... } },
  *     "<opportunityType>": { "pre": { ... }, "post": { ... } }
+ *   }
+ * }
+ *
+ * Example with known opportunity types:
+ * {
+ *   "onsite_opportunity_deployment": {
+ *     "default": { "pre": { ... }, "post": { ... } },
+ *     "recover-content-visibility": { "pre": { ... }, "post": { ... } },
+ *     "table-of-contents": {
+ *       "pre": { "cronExpression": "0 0/6 * * *", "expiryMs": 259200000 },
+ *       "post": { "cronExpression": "0 0 * * 1", "expiryMs": 1209600000 }
+ *     }
  *   }
  * }
  *
@@ -111,7 +135,7 @@ export function parseScheduleConfig(env, log) {
  *
  * @param {object} env
  * @param {string} strategyType - e.g. GeoExperiment.TYPES.ONSITE_OPPORTUNITY_DEPLOYMENT
- * @param {string} opportunityType - e.g. "recover-content-visibility"
+ * @param {string} opportunityType - e.g. "recover-content-visibility" or "table-of-contents"
  * @param {'pre'|'post'} phase
  * @returns {object}
  */
