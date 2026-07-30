@@ -1183,6 +1183,54 @@ export const updateCodeConfig = async (site, host, slackContext, log) => {
 };
 
 /**
+ * Derives a top-level `code` config object from a site's `hlxConfig`, for EDS
+ * sites discovered/onboarded via the Franklin aggregated config API. The
+ * repo coordinates are already resolved into `hlxConfig` at discovery time
+ * (`hlxConfig.code` from the aggregated config, `hlxConfig.rso` from the EDS
+ * hostname), but only the top-level `code` attribute is read by downstream
+ * consumers (the import-worker's code import and the autofix-worker's code-PR
+ * flow). This bridges the two so those consumers work without depending on
+ * `hlxConfig`, and lets `hlxConfig.code` be retired later.
+ *
+ * `hlxConfig` shape:
+ *   - hlxConfig.rso  = { ref, tld, site, owner }   (repo name is `rso.site`)
+ *   - hlxConfig.code = { owner, repo, source: { url, type } }
+ *
+ * owner/repo are sourced from `hlxConfig.code` first, falling back to
+ * `hlxConfig.rso`; `ref` comes from `rso` (default `main`); `type` defaults to
+ * `github`. Produces the top-level `code` shape the import-worker and
+ * autofix-worker consume via `site.getCode()` (they read `code`, not hlxConfig).
+ *
+ * @param {Object} hlxConfig - The site's hlxConfig object.
+ * @returns {Object|null} A `code`-shaped object ({ type, owner, repo, ref, url }),
+ *   or null when owner/repo cannot be resolved.
+ */
+export const deriveCodeFromHlxConfig = (hlxConfig) => {
+  if (!isObject(hlxConfig)) {
+    return null;
+  }
+
+  const hlxCode = isObject(hlxConfig.code) ? hlxConfig.code : {};
+  const rso = isObject(hlxConfig.rso) ? hlxConfig.rso : {};
+
+  const owner = hlxCode.owner || rso.owner;
+  // In the RSO the repository name is carried as `site`.
+  const repo = hlxCode.repo || rso.site;
+
+  if (!hasText(owner) || !hasText(repo)) {
+    return null;
+  }
+
+  return {
+    type: hlxCode.source?.type || 'github',
+    owner,
+    repo,
+    ref: rso.ref || 'main',
+    url: hlxCode.source?.url || `https://github.com/${owner}/${repo}`,
+  };
+};
+
+/**
  * Creates or retrieves a site and its associated organization.
  *
  * @param {string} baseURL - The site base URL.
