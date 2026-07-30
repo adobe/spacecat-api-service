@@ -884,6 +884,198 @@ describe('Suggestions Controller', () => {
     expect(mockSuggestionGrant.splitSuggestionsByGrantStatus).to.have.been.calledOnce;
   });
 
+  describe('filterByExcludedPaths', () => {
+    const EXCLUDED_PREFIX = '/jp/ja';
+    const jpSugg = {
+      id: SUGGESTION_IDS[0],
+      opportunityId: OPPORTUNITY_ID,
+      type: 'FIX_LINK',
+      status: 'NEW',
+      rank: 1,
+      data: { url: 'https://www.pwc.com/jp/ja/services/consulting.html' },
+      updatedAt: new Date(),
+    };
+    const globalSugg = {
+      id: SUGGESTION_IDS[1],
+      opportunityId: OPPORTUNITY_ID,
+      type: 'FIX_LINK',
+      status: 'NEW',
+      rank: 2,
+      data: { url: 'https://www.pwc.com/gx/en/issues.html' },
+      updatedAt: new Date(),
+    };
+    const noUrlSugg = {
+      id: SUGGESTION_IDS[2],
+      opportunityId: OPPORTUNITY_ID,
+      type: 'FIX_LINK',
+      status: 'NEW',
+      rank: 3,
+      data: {},
+      updatedAt: new Date(),
+    };
+    const invalidUrlSugg = {
+      id: SUGGESTION_IDS[0],
+      opportunityId: OPPORTUNITY_ID,
+      type: 'FIX_LINK',
+      status: 'NEW',
+      rank: 1,
+      data: { url: 'not-a-valid-url' },
+      updatedAt: new Date(),
+    };
+
+    it('filters out suggestions whose URL starts with an excluded path prefix (getAllForOpportunity)', async () => {
+      mockSuggestion.allByOpportunityId.resolves([
+        mockSuggestionEntity(jpSugg),
+        mockSuggestionEntity(globalSugg),
+      ]);
+      site.getConfig = sandbox.stub().returns({
+        getHandlerConfig: () => ({ excludedPathPrefixes: [EXCLUDED_PREFIX] }),
+      });
+      const response = await suggestionsController.getAllForOpportunity({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        ...context,
+      });
+      expect(response.status).to.equal(200);
+      const suggestions = await response.json();
+      expect(suggestions).to.be.an('array').with.lengthOf(1);
+      expect(suggestions[0].opportunityId).to.equal(OPPORTUNITY_ID);
+    });
+
+    it('keeps all suggestions when excludedPathPrefixes is empty', async () => {
+      mockSuggestion.allByOpportunityId.resolves([
+        mockSuggestionEntity(jpSugg),
+        mockSuggestionEntity(globalSugg),
+      ]);
+      site.getConfig = sandbox.stub().returns({
+        getHandlerConfig: () => ({ excludedPathPrefixes: [] }),
+      });
+      const response = await suggestionsController.getAllForOpportunity({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        ...context,
+      });
+      expect(response.status).to.equal(200);
+      const suggestions = await response.json();
+      expect(suggestions).to.be.an('array').with.lengthOf(2);
+    });
+
+    it('keeps all suggestions when getConfig returns null', async () => {
+      mockSuggestion.allByOpportunityId.resolves([
+        mockSuggestionEntity(jpSugg),
+        mockSuggestionEntity(globalSugg),
+      ]);
+      site.getConfig = sandbox.stub().returns(null);
+      const response = await suggestionsController.getAllForOpportunity({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        ...context,
+      });
+      expect(response.status).to.equal(200);
+      const suggestions = await response.json();
+      expect(suggestions).to.be.an('array').with.lengthOf(2);
+    });
+
+    it('keeps suggestions with no URL when prefix filter is active', async () => {
+      const noUrlSuggEntity = {
+        ...mockSuggestionEntity(noUrlSugg),
+        getOpportunity: () => ({
+          getSiteId: () => SITE_ID,
+          getType: () => 'test-opportunity-type',
+          getData: () => ({}),
+        }),
+      };
+      mockSuggestion.allByOpportunityId.resolves([noUrlSuggEntity]);
+      site.getConfig = sandbox.stub().returns({
+        getHandlerConfig: () => ({ excludedPathPrefixes: [EXCLUDED_PREFIX] }),
+      });
+      const response = await suggestionsController.getAllForOpportunity({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        ...context,
+      });
+      expect(response.status).to.equal(200);
+      const suggestions = await response.json();
+      expect(suggestions).to.be.an('array').with.lengthOf(1);
+    });
+
+    it('keeps suggestions with invalid URL when prefix filter is active', async () => {
+      mockSuggestion.allByOpportunityId.resolves([
+        mockSuggestionEntity(invalidUrlSugg),
+      ]);
+      site.getConfig = sandbox.stub().returns({
+        getHandlerConfig: () => ({ excludedPathPrefixes: [EXCLUDED_PREFIX] }),
+      });
+      const response = await suggestionsController.getAllForOpportunity({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        ...context,
+      });
+      expect(response.status).to.equal(200);
+      const suggestions = await response.json();
+      expect(suggestions).to.be.an('array').with.lengthOf(1);
+    });
+
+    it('filters out suggestions matching excluded prefix in getByStatus', async () => {
+      const jpSuggWithStatus = { ...jpSugg, status: 'NEW' };
+      const globalSuggWithStatus = { ...globalSugg, status: 'NEW' };
+      mockSuggestion.allByOpportunityIdAndStatus.resolves([
+        mockSuggestionEntity(jpSuggWithStatus),
+        mockSuggestionEntity(globalSuggWithStatus),
+      ]);
+      site.getConfig = sandbox.stub().returns({
+        getHandlerConfig: () => ({ excludedPathPrefixes: [EXCLUDED_PREFIX] }),
+      });
+      const response = await suggestionsController.getByStatus({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, status: 'NEW' },
+        ...context,
+      });
+      expect(response.status).to.equal(200);
+      const suggestions = await response.json();
+      expect(suggestions).to.be.an('array').with.lengthOf(1);
+    });
+
+    it('filters out suggestions matching excluded prefix in getAllForOpportunityPaged', async () => {
+      mockSuggestionResults = {
+        data: [mockSuggestionEntity(jpSugg), mockSuggestionEntity(globalSugg)],
+        cursor: undefined,
+      };
+      mockSuggestion.allByOpportunityId.callsFake((opptyId, options) => {
+        if (options) return Promise.resolve(mockSuggestionResults);
+        return Promise.resolve([mockSuggestionEntity(suggs[0])]);
+      });
+      site.getConfig = sandbox.stub().returns({
+        getHandlerConfig: () => ({ excludedPathPrefixes: [EXCLUDED_PREFIX] }),
+      });
+      const response = await suggestionsController.getAllForOpportunityPaged({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, limit: '10' },
+        ...context,
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.suggestions).to.be.an('array').with.lengthOf(1);
+    });
+
+    it('filters out suggestions matching excluded prefix in getByStatusPaged', async () => {
+      mockSuggestion.allByOpportunityIdAndStatus.callsFake((opptyId, status, options) => {
+        if (options) {
+          return Promise.resolve({
+            data: [mockSuggestionEntity(jpSugg), mockSuggestionEntity(globalSugg)],
+            cursor: undefined,
+          });
+        }
+        return Promise.resolve([mockSuggestionEntity(jpSugg)]);
+      });
+      site.getConfig = sandbox.stub().returns({
+        getHandlerConfig: () => ({ excludedPathPrefixes: [EXCLUDED_PREFIX] }),
+      });
+      const response = await suggestionsController.getByStatusPaged({
+        params: {
+          siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, status: 'NEW', limit: '10',
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.suggestions).to.be.an('array').with.lengthOf(1);
+    });
+  });
+
   it('does not call grantSuggestionsForOpportunity when no suggestions exist', async () => {
     const grantStub = sandbox.stub().resolves();
     mockSuggestion.allByOpportunityId.resolves([]);
