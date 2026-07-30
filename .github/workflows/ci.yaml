@@ -55,6 +55,41 @@ jobs:
       - name: Type-check
         run: npm run type-check
 
+  # TEMPORARY probe (chore/sr-sdk-artifactory) - do NOT merge.
+  # Settled already: the corp host artifactory.corp.adobe.com is behind Adobe's
+  # Banyan ZTNA gateway (interactive SSO) and is unusable from a public runner.
+  # Open question this job answers: is the MACHINE host artifactory-uw2.adobeitc.com
+  # (public TLS cert, token auth, used by mystique CI) reachable from a public
+  # GitHub-hosted runner? We expect HTTP 401 (reachable, needs a token, which we
+  # don't have yet). A timeout / http_code=000 / DNS failure means it is
+  # internal-only and GH-hosted CI can't use it either. No auth, no secret.
+  sr-artifactory-probe:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Probe machine host reachability (no auth)
+        run: |
+          set +e
+          HOST=artifactory-uw2.adobeitc.com
+          PKG="https://$HOST/artifactory/api/npm/npm-quazar-gar-tf-remote/@semrush%2fai-seo-ts"
+          echo "== DNS resolution on the runner =="
+          getent ahosts "$HOST" || echo "(DNS resolution FAILED)"
+          echo "== TLS verify (public cert expected -> return code 0) =="
+          echo | openssl s_client -connect "$HOST:443" -servername "$HOST" 2>/dev/null \
+            | grep -E "Verify return code" || echo "(no TLS handshake)"
+          echo "== HTTP status hitting the npm repo, no auth =="
+          code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 30 "$PKG")
+          echo "http_code=$code"
+          case "$code" in
+            401|403) echo "RESULT: REACHABLE (auth required, as expected). GH-hosted CI can use this host once we have a scoped token." ;;
+            000)     echo "RESULT: NOT REACHABLE (connection failed/timeout). Likely internal-only; GH-hosted CI can't use it." ;;
+            2*|3*)   echo "RESULT: reachable, unexpected open access (http $code) - inspect above." ;;
+            *)       echo "RESULT: got http $code - inspect above." ;;
+          esac
+
   # Manually-triggered deploy for the serenity job runner worker (adobe/serenity-docs#186),
   # a second Lambda built from a distinct hedy --entryFile
   # (src/serenity-prompt-classification/index.js, deployed as
