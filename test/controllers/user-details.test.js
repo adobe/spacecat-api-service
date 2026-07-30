@@ -482,7 +482,7 @@ describe('User Details Controller', () => {
   describe('caller self-resolution', () => {
     // The caller's own IMS user id: enterprise-org shaped, the same shape the
     // authorship stamp writes and the UI sends back for resolution.
-    const callerUserId = 'EB1C272069C3BA930A495FB6@62f93e086160d306495eb8.e';
+    const callerUserId = 'C0FFEE0011223344AABBCCDD@1122334455667788990011.e';
 
     const controllerWithCallerProfile = (profile) => UserDetailsController({
       dataAccess: mockDataAccess,
