@@ -7383,6 +7383,60 @@ describe('Brands Controller', () => {
       }
     });
 
+    it('still returns 200 (does not 500) when the best-effort wipe-check pre-read throws (LLMO-6591)', async () => {
+      // getBrandById is also called earlier (touchesSemrushSync check) with the
+      // exact same wide join select -- that occurrence must succeed; only the
+      // SECOND wide-select call (the wipe-check's own getBrandById) must throw.
+      let wideSelectCalls = 0;
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake((table) => ({
+          select: sandbox.stub().callsFake((cols) => {
+            if (table !== 'brands' || cols === 'id') {
+              return {
+                eq: sandbox.stub().returnsThis(),
+                maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+              };
+            }
+            wideSelectCalls += 1;
+            // Only the SECOND wide-select call is the wipe-check's own getBrandById --
+            // the first (touchesSemrushSync check) and any later ones (updateBrand's
+            // own final getBrandById) must succeed.
+            if (wideSelectCalls === 2) {
+              return {
+                eq: sandbox.stub().returnsThis(),
+                maybeSingle: sandbox.stub().rejects(new Error('wipe-check read boom')),
+              };
+            }
+            return {
+              eq: sandbox.stub().returnsThis(),
+              maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+            };
+          }),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          in: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          upsert: sandbox.stub().returnsThis(),
+          delete: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+        })),
+      };
+      const controller = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { brandAliases: [] },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(loggerStub.warn).to.have.been.calledWithMatch('wipe-check pre-read failed');
+    });
+
     it('swallows a logging failure emitting BrandCollectionWiped and still returns 200 (LLMO-6591, best-effort)', async () => {
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({

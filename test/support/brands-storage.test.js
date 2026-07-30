@@ -3372,6 +3372,27 @@ describe('brands-storage', () => {
       expect(err.code).to.equal('brand_stale_write');
     });
 
+    it('updateBrand rejects (fails closed) rather than skips when expectedUpdatedAt is not a valid date', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [
+          {
+            data: { site_id: 'site-1', status: 'active', updated_at: '2026-01-01T00:00:00.000Z' },
+            error: null,
+          },
+        ],
+      });
+
+      const err = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { name: 'Renamed', expectedUpdatedAt: 'not-a-date' },
+        postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(409);
+      expect(err.code).to.equal('brand_stale_write');
+    });
+
     it('updateBrand allows an intentional empty-collection write when expectedUpdatedAt matches', async () => {
       const postgrestClient = createTableMockClient({
         brands: [

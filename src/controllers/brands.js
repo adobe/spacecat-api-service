@@ -2119,12 +2119,19 @@ function BrandsController(ctx, log, env) {
       // LLMO-6591: best-effort detection when this write takes a collection
       // from non-empty to empty. Only pays for the pre-write read when at
       // least one collection is being explicitly emptied — the common edit
-      // touches none of them, or replaces them with real values.
+      // touches none of them, or replaces them with real values. A failure here
+      // must not turn this detection-only read into a request-blocking 500 — the
+      // write itself would still succeed — so a failed read just skips detection.
       const emptiedCollections = ['brandAliases', 'competitors', 'socialAccounts', 'earnedContent']
         .filter((field) => Array.isArray(updates[field]) && updates[field].length === 0);
-      const beforeForWipeCheck = emptiedCollections.length > 0
-        ? await getBrandById(spaceCatId, brandUuid, postgrestClient)
-        : null;
+      let beforeForWipeCheck = null;
+      if (emptiedCollections.length > 0) {
+        try {
+          beforeForWipeCheck = await getBrandById(spaceCatId, brandUuid, postgrestClient);
+        } catch (wipeCheckError) {
+          log.warn(`brands: wipe-check pre-read failed for brand ${brandUuid}, skipping detection: ${wipeCheckError.message}`);
+        }
+      }
 
       const updated = await updateBrand({
         organizationId: spaceCatId,
