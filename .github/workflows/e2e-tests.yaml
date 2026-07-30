@@ -5,6 +5,9 @@ on:
     - cron: "0 14 * * *" # Runs daily at 14:00 UTC
   workflow_dispatch: # Allows us to manually trigger the workflow if needed
 
+permissions:
+  contents: read
+
 jobs:
   e2e-tests:
     runs-on: ubuntu-latest
