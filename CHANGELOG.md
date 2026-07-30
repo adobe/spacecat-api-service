@@ -1,3 +1,10 @@
+# [1.710.0](https://github.com/adobe/spacecat-api-service/compare/v1.709.0...v1.710.0) (2026-07-30)
+
+
+### Features
+
+* expose ASO entitlement tier on sites-resolve | SITES-48838 ([#2949](https://github.com/adobe/spacecat-api-service/issues/2949)) ([c212aea](https://github.com/adobe/spacecat-api-service/commit/c212aeae4e5e9b0fbcbd26b1585215bf09060717))
+
 # [1.709.0](https://github.com/adobe/spacecat-api-service/compare/v1.708.2...v1.709.0) (2026-07-30)
 
 
