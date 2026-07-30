@@ -18,6 +18,7 @@ import { classifyIntents } from './intent-classifier.js';
 import { throwOnPgConstraintViolation } from './errors.js';
 import { assertPermittedSource } from './prompt-sources.js';
 import { INTENT_VALUES, normalizeIntent } from './intent.js';
+import { canonicalizeSource, foldSourceValue } from './serenity/prompt-tags.js';
 
 // Re-exported for backward compatibility — `normalizeIntent`/`INTENT_VALUES` now
 // live in `./intent.js` so the LLM intent classifier can reuse them without an
@@ -427,6 +428,11 @@ const SORT_COLUMN_MAP = {
   origin: 'origin',
   status: 'status',
   updatedAt: 'updated_at',
+  // Sort on the `source_canonical` generated column (WP-S4:
+  // `GENERATED ALWAYS AS (lower(replace(source,'_','-'))) STORED`, btree-indexed),
+  // so the two drift spellings of a producer order together and the label — which
+  // lives in elmo, never on the server — plays no part (source-dimension.md §3.1).
+  source: 'source_canonical',
 };
 
 function mapRowToPrompt(row) {
@@ -455,7 +461,13 @@ function mapRowToPrompt(row) {
     // fail-loud choice over a fabricated `human`; unlike `source`/`status`, whose
     // fallbacks are cosmetic, an origin fallback is a correctness hazard.
     origin: row.origin,
-    source: row.source || 'config',
+    // Second derivation boundary (source-dimension.md §3.1): the v2 read surface
+    // returns the CANONICAL slug, so elmo's badge — which keys on the API's value —
+    // resolves (`agentic_traffic` → `agentic-traffic`). A value that fails the guard
+    // (empty, `:`, over-long, root-shadowing) returns the RAW string rather than
+    // null: the grid must still show the operator what is stored. `?? 'config'` only
+    // guards a nullish column (in-memory/test rows); the DB column is NOT NULL.
+    source: canonicalizeSource(row.source) ?? row.source ?? 'config',
     intent: row.intent ?? null,
     createdAt: row.created_at,
     createdBy: row.created_by,
@@ -502,9 +514,11 @@ function mapRowToPrompt(row) {
  * topic name, category name
  * @param {string} [params.region] - Filter by region (array containment)
  * @param {string} [params.origin] - Filter by origin (ai, human)
- * @param {string} [params.source] - Filter by source (e.g. gsc, semrush, base_url, config)
+ * @param {string} [params.source] - Filter by source, matched on the
+ * `source_canonical` generated column: `citation-attempt` also matches rows
+ * stored as `citation_attempt` (drift spellings fold together, case-insensitive).
  * @param {string} [params.sort] - Sort column (topic, prompt, category, origin,
- * status, updatedAt)
+ * source, status, updatedAt)
  * @param {string} [params.order] - Sort direction (asc, desc). Default desc
  * @param {number} [params.limit] - Page size (default 100, max 5000)
  * @param {number} [params.page] - Page number, 1-based (default 1)
@@ -633,7 +647,13 @@ export async function listPrompts({
     }
 
     if (hasText(source)) {
-      baseQuery = baseQuery.eq('source', source);
+      // Match on the `source_canonical` generated column (WP-S4) — the DB
+      // canonicalizes `lower(replace(source,'_','-'))` at write time, so a single
+      // equality on the folded incoming value catches every drift spelling AND is
+      // case-insensitive (`citation-attempt` finds rows stored `citation_attempt`
+      // or `Citation_Attempt`). Fold the query-param value with the same transform
+      // (`foldSourceValue` — the single definition) so the two sides align.
+      baseQuery = baseQuery.eq('source_canonical', foldSourceValue(source));
     }
 
     if (hasText(region)) {
@@ -1103,6 +1123,9 @@ export async function updatePromptById({
   }
 
   const patch = { updated_by: updatedBy };
+  // `source` is deliberately NOT patchable (source-dimension.md §1 item 6): a
+  // prompt's producer is fixed at creation, and the dimension has no write surface.
+  // A caller-supplied `updates.source` is ignored rather than written.
   if (updates.prompt !== undefined) {
     patch.text = updates.prompt;
   }

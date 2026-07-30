@@ -106,18 +106,24 @@ describe('Semrush REST transport — v3 metadata write surface (LLMO-6289)', () 
     });
   });
 
-  it('patchPromptsMetadataBatch PATCHes /metadata with { items:[{id,metadata}] }', async () => {
+  it('patchPromptsMetadataBatch PATCHes /metadata with { items:[{prompt_id,metadata}] }', async () => {
     const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
-    const items = [
-      { id: 'p1', metadata: { updated_by: 'u1' } },
-      { id: 'p2', metadata: { updated_by: 'u2' } },
-    ];
 
-    await transport.patchPromptsMetadataBatch(WS, PID, items);
+    await transport.patchPromptsMetadataBatch(WS, PID, [
+      { promptId: 'p1', metadata: { updated_by: 'u1' } },
+      { promptId: 'p2', metadata: { updated_by: 'u2' } },
+    ]);
 
+    // The upstream id key is `prompt_id` (model.PatchAIOPromptsBatchItem); an
+    // item keyed `id` carries no prompt reference upstream at all.
     expect(facade.patchPromptsMetadataBatch).to.have.been.calledOnceWithExactly({
       params: { path: { id: WS, project_id: PID } },
-      body: { items },
+      body: {
+        items: [
+          { prompt_id: 'p1', metadata: { updated_by: 'u1' } },
+          { prompt_id: 'p2', metadata: { updated_by: 'u2' } },
+        ],
+      },
     });
   });
 });
