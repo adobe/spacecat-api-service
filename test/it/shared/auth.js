@@ -19,6 +19,10 @@ import {
   CONSUMER_2_CLIENT_ID,
   CONSUMER_2_IMS_ORG_ID,
   BRAND_MANAGER_SUBJECT,
+  ENTERPRISE_USER_ID,
+  ENTERPRISE_USER_EMAIL,
+  ENTERPRISE_USER_FIRST_NAME,
+  ENTERPRISE_USER_LAST_NAME,
 } from './seed-ids.js';
 
 const ISSUER = 'https://spacecat.experiencecloud.live';
@@ -142,6 +146,34 @@ export async function createFacsManagerToken() {
     is_admin: false,
     is_llmo_administrator: false,
     facs_permissions: ['llmo/can_manage_users', 'aso/can_manage_users'],
+    tenants: [{
+      id: IMS_ORG_IDENT,
+      subServices: [],
+      entitlement: {},
+    }],
+  });
+}
+
+/**
+ * Enterprise (non-trial) ORG_1 member. Claim shape is copied from what
+ * spacecat-auth-service actually mints for an enterprise login: no `user_id` at
+ * all, the IMS user id duplicated across `sub` and `email`, the real address in
+ * `preferred_username` / `trial_email`, and both the snake_case and OIDC name
+ * claims populated. The other personas here use an address as `sub`, which cannot
+ * exercise the id-vs-address distinction this persona exists to prove.
+ */
+export async function createEnterpriseUserToken() {
+  return signToken({
+    sub: ENTERPRISE_USER_ID,
+    email: ENTERPRISE_USER_ID,
+    preferred_username: ENTERPRISE_USER_EMAIL,
+    trial_email: ENTERPRISE_USER_EMAIL,
+    first_name: ENTERPRISE_USER_FIRST_NAME,
+    given_name: ENTERPRISE_USER_FIRST_NAME,
+    last_name: ENTERPRISE_USER_LAST_NAME,
+    family_name: ENTERPRISE_USER_LAST_NAME,
+    is_admin: false,
+    is_llmo_administrator: false,
     tenants: [{
       id: IMS_ORG_IDENT,
       subServices: [],
@@ -306,7 +338,7 @@ export async function createS2SConsumerReadAllToken() {
 
 export async function createAllTokens() {
   const [
-    admin, user, trialUser, llmoAdmin,
+    admin, user, trialUser, llmoAdmin, enterpriseUser,
     delegatedUser, delegatedUserTruncated, delegatedUserNoSource,
     readOnlyAdmin, brandManager, facsManager,
     s2sConsumerReadOnly, s2sConsumerReadAll, s2sConsumerUnknown,
@@ -315,6 +347,7 @@ export async function createAllTokens() {
     createUserToken(),
     createTrialUserToken(),
     createLlmoAdminToken(),
+    createEnterpriseUserToken(),
     createDelegatedUserToken(),
     createDelegatedUserTruncatedToken(),
     createDelegatedUserNoSourceToken(),
@@ -330,6 +363,7 @@ export async function createAllTokens() {
     user,
     trialUser,
     llmoAdmin,
+    enterpriseUser,
     delegatedUser,
     delegatedUserTruncated,
     delegatedUserNoSource,
