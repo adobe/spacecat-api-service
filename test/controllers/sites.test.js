@@ -6726,6 +6726,44 @@ describe('Sites Controller', () => {
       expect(body.message).to.include('Product code required');
     });
 
+    it('defaults a missing x-product to ASO under SKIP_AUTH (local dev) so resolution proceeds', async () => {
+      // Local-dev-only affordance: with auth skipped, a missing x-product header
+      // must NOT short-circuit with "Product code required" - it defaults to ASO
+      // and resolution continues (failing here at the next guard instead).
+      const localController = SitesControllerMocked(
+        context,
+        loggerStub,
+        { ...context.env, SKIP_AUTH: 'true' },
+      );
+      context.pathInfo.headers = {};
+      context.data = {};
+
+      const response = await localController.resolveSite(context);
+
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.not.include('Product code required');
+      expect(body.message).to.include('Either organizationId or imsOrg must be provided');
+    });
+
+    it('still requires x-product when SKIP_AUTH is not exactly "true"', async () => {
+      // The default is strictly gated on SKIP_AUTH === 'true'; any other value
+      // (i.e. every deployed env) keeps enforcing the header contract.
+      const nonLocalController = SitesControllerMocked(
+        context,
+        loggerStub,
+        { ...context.env, SKIP_AUTH: 'false' },
+      );
+      context.pathInfo.headers = {};
+      context.data = {};
+
+      const response = await nonLocalController.resolveSite(context);
+
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.include('Product code required');
+    });
+
     it('should return bad request if no query parameters provided', async () => {
       context.data = {};
       const response = await sitesController.resolveSite(context);
