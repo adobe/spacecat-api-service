@@ -1,3 +1,10 @@
+# [1.707.0](https://github.com/adobe/spacecat-api-service/compare/v1.706.0...v1.707.0) (2026-07-30)
+
+
+### Features
+
+* **serenity:** server-owned source dimension + canonicalizeSource (LLMO-6282) [WP-S2] ([#2867](https://github.com/adobe/spacecat-api-service/issues/2867)) ([7a58e4f](https://github.com/adobe/spacecat-api-service/commit/7a58e4f101c132c332cd22ac92667fd5c52a828b))
+
 # [1.706.0](https://github.com/adobe/spacecat-api-service/compare/v1.705.1...v1.706.0) (2026-07-30)
 
 
