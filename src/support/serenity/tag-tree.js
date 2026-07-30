@@ -227,7 +227,7 @@ export async function ensureChildren(
 const LEGACY_SOURCE_ROOT_NAME = 'source';
 
 /**
- * Resolves the four dimension roots, creating any that a project is missing.
+ * Resolves the five dimension roots, creating any that a project is missing.
  * Older projects predate this taxonomy entirely, so this is the seam that brings
  * them forward on first touch.
  *
@@ -264,7 +264,9 @@ export async function ensureDimensionRoots(transport, semrushWorkspaceId, projec
   // missed this project (see the deploy-ordering note above) — surface it rather than
   // orphan the `source` values silently. The re-read is on the rare origin-create path
   // only, never the common all-roots-exist path, so steady state costs nothing.
-  if (createdNames.includes(DIMENSION.ORIGIN)) {
+  // Exception: if `source` was also freshly minted in the same batch, it is the new
+  // producing-system root (WP-S2) — not a legacy authorship root — so no warning.
+  if (createdNames.includes(DIMENSION.ORIGIN) && !createdNames.includes(DIMENSION.SOURCE)) {
     const level = await indexLevelByName(transport, semrushWorkspaceId, projectId, '', log);
     if (level.has(LEGACY_SOURCE_ROOT_NAME)) {
       log?.warn?.(
@@ -287,15 +289,45 @@ export async function ensureDimensionRoots(transport, semrushWorkspaceId, projec
  * The id of one dimension root out of an {@link ensureDimensionRoots} result.
  *
  * `ensureChildren` fails closed, so a map it returned carries every name that was
- * asked for — all four roots. The assertion records that invariant for the type
- * checker instead of re-testing it at runtime.
+ * asked for. Used only for roots that are always resolved (the closed dimensions
+ * and `category`); the `source` root can be `undefined` on a mid-rename project,
+ * so callers that need it read `roots.get(DIMENSION.SOURCE)` directly instead.
  *
- * @param {Map<string, string>} roots - the resolved root name → id map.
- * @param {string} dimension - one of the four dimension root names.
+ * @param {Map<string, string | undefined>} roots - the resolved root name → id map.
+ * @param {string} dimension - one of the always-resolved dimension root names.
  * @returns {string}
  */
 function rootIdOf(roots, dimension) {
   return /** @type {string} */ (roots.get(dimension));
+}
+
+/**
+ * The id of a SERVER-OWNED dimension root, failing LOUD when it is unresolved.
+ *
+ * The only dimension whose root can come back `undefined` is `source` on a
+ * mid-rename project — {@link ensureDimensionRoots} deliberately leaves the
+ * `source` key unset while that project's `source` root still means authorship
+ * (WP-O6-gated). Without this guard an `undefined` root id flows into
+ * {@link ensureChildren}, whose `createProjectTags(missing, parentId ? {parentId}
+ * : {})` degrades to a ROOT-LEVEL create, silently minting a stranded value as a
+ * bogus new dimension root. The external deploy gate should keep this state out of
+ * production, but a gate bypass must fail visibly, not corrupt the tree — so refuse
+ * rather than proceed. A no-op for the always-provisioned dimensions.
+ *
+ * @param {Map<string, string | undefined>} roots - the resolved root name → id map.
+ * @param {string} dimension - a server-owned dimension root name.
+ * @returns {string}
+ */
+function requireServerOwnedRootId(roots, dimension) {
+  const rootId = roots.get(dimension);
+  if (!rootId) {
+    throw new ErrorWithStatusCode(
+      `${dimension} dimension root not provisioned (source-dimension.md is WP-O6-gated); `
+      + 'refusing to create a stranded root-level tag',
+      502,
+    );
+  }
+  return rootId;
 }
 
 /**
@@ -475,19 +507,21 @@ export async function assertParentWithinDimension(
 }
 
 /**
- * Resolves (provisioning as needed) the full fixed taxonomy: the four roots plus
- * every closed dimension's child vocabulary. The open `category` root is created
- * but left empty — its children are customer content.
+ * Resolves (provisioning as needed) the fixed taxonomy: the roots plus every
+ * closed dimension's child vocabulary. The open `category` and `source` roots are
+ * created but left empty — a `category`'s children are customer content, and a
+ * `source`'s children are minted on first use (it has no enum to pre-provision).
  *
  * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
  * @param {object} [log] - logger.
  * @returns {Promise<{
- *   roots: Map<string, string>,
+ *   roots: Map<string, string | undefined>,
  *   values: Map<string, Map<string, string>>,
- * }>} `roots` maps a root name to its id; `values` maps a closed dimension name
- *   to that dimension's bare value → id map.
+ * }>} `roots` maps a root name to its id (the `source` key is `undefined` on a
+ *   mid-rename project — see {@link ensureDimensionRoots}); `values` maps a closed
+ *   dimension name to that dimension's bare value → id map.
  */
 export async function provisionDimensionTree(transport, semrushWorkspaceId, projectId, log) {
   const roots = await ensureDimensionRoots(transport, semrushWorkspaceId, projectId, log);
@@ -508,21 +542,33 @@ export async function provisionDimensionTree(transport, semrushWorkspaceId, proj
 }
 
 /**
- * Resolves one closed-dimension value to its upstream id, creating it (and its
- * root) only if absent. Idempotent: many independent callers legitimately need
- * the id of a small, project-wide-shared value.
+ * Resolves one SERVER-OWNED value to its upstream id, creating it (and its root)
+ * only if absent. Idempotent: many independent callers legitimately need the id
+ * of a small, project-wide-shared value.
+ *
+ * This is the resolve-or-create primitive (source-dimension.md §1 item 4). It is
+ * vocabulary-agnostic on purpose — the caller enforces a CLOSED dimension's enum
+ * BEFORE calling (the create-tag handler's `parseCreateTagBody`), and an OPEN
+ * server-owned dimension (`source`) has no enum to check. Lifting the enum check
+ * to the caller is exactly what generalizes this from the former `ensureClosedValue`
+ * to every server-owned dimension without changing its resolve-or-create body:
+ * `ensureChildren` reads the level, creates the missing name, and on an upstream
+ * failure re-reads and adopts the id a concurrent writer minted, so a duplicate
+ * `(parent, name)` — reported upstream as an indistinguishable 500 — is absorbed
+ * rather than surfaced.
  *
  * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
- * @param {string} dimension - a closed dimension (`intent` / `origin` / `type`).
- * @param {string} value - a bare value from that dimension's fixed vocabulary.
+ * @param {string} dimension - a server-owned dimension (`intent` / `origin` /
+ *   `type` / `source`).
+ * @param {string} value - the bare value to resolve under that dimension's root.
  * @param {object} [log] - logger.
  * @returns {Promise<{ id: string, rootId: string, created: boolean }>} `created`
  *   is true only when THIS call minted the value. Both ids are always resolved —
  *   {@link ensureChildren} throws rather than leave a hole.
  */
-export async function ensureClosedValue(
+export async function ensureServerOwnedValue(
   transport,
   semrushWorkspaceId,
   projectId,
@@ -531,7 +577,7 @@ export async function ensureClosedValue(
   log,
 ) {
   const roots = await ensureDimensionRoots(transport, semrushWorkspaceId, projectId, log);
-  const rootId = rootIdOf(roots, dimension);
+  const rootId = requireServerOwnedRootId(roots, dimension);
   const { byName, createdNames } = await ensureChildren(
     transport,
     semrushWorkspaceId,
@@ -549,7 +595,7 @@ export async function ensureClosedValue(
 
 /**
  * Resolves the id-based injection of a server-computed value into a prompt write,
- * for any CLOSED dimension (`type`, `origin`, `intent`). Returns the wanted value's
+ * for any SERVER-OWNED dimension (`type`, `origin`, `intent`, `source`). Returns the wanted value's
  * id plus EVERY id under that dimension's root, so the caller can strip any
  * caller-supplied tag id beneath the SAME root before injecting the resolved one.
  *
@@ -563,16 +609,16 @@ export async function ensureClosedValue(
  * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
- * @param {string} dimension - a CLOSED dimension (`type` / `origin` / `intent`).
- * @param {string} wantValue - the bare value to inject (must be in that dimension's
- *   fixed vocabulary).
+ * @param {string} dimension - a SERVER-OWNED dimension (`type` / `origin` / `intent` / `source`).
+ * @param {string} wantValue - the bare value to inject (in the dimension's fixed
+ *   vocabulary for the closed dims; resolved-or-created on demand for the open `source`).
  * @param {object} [log] - logger.
  * @returns {Promise<{ computedId: string, valueTagIds: string[] }>} `computedId` is
  *   always resolved — {@link ensureChildren} throws rather than leave a hole, so a
  *   prompt can never be written with the server-computed tag missing. `valueTagIds`
  *   is every id under the dimension's root (the strip set).
  */
-export async function resolveClosedValueInjection(
+export async function resolveServerOwnedValueInjection(
   transport,
   semrushWorkspaceId,
   projectId,
@@ -581,7 +627,7 @@ export async function resolveClosedValueInjection(
   log,
 ) {
   const roots = await ensureDimensionRoots(transport, semrushWorkspaceId, projectId, log);
-  const rootId = rootIdOf(roots, dimension);
+  const rootId = requireServerOwnedRootId(roots, dimension);
   const { byName } = await ensureChildren(
     transport,
     semrushWorkspaceId,
@@ -598,7 +644,7 @@ export async function resolveClosedValueInjection(
 
 /**
  * Resolves the id-based injection of a server-computed `type` value into a
- * prompt write. Thin wrapper over {@link resolveClosedValueInjection} preserving
+ * prompt write. Thin wrapper over {@link resolveServerOwnedValueInjection} preserving
  * the `type`-specific return key. Returns the wanted value's id plus EVERY id
  * under the `type` root, so the caller can strip any caller-supplied `type` tag
  * id (the client must never set the value itself).
@@ -619,7 +665,7 @@ export async function resolveTypeValueInjection(
   wantValue,
   log,
 ) {
-  const { computedId, valueTagIds } = await resolveClosedValueInjection(
+  const { computedId, valueTagIds } = await resolveServerOwnedValueInjection(
     transport,
     semrushWorkspaceId,
     projectId,
@@ -680,7 +726,7 @@ export async function resolveIntentValueInjection(
     return { computedId: null, intentTagIds: [...byName.values()] };
   }
 
-  const { computedId, valueTagIds } = await resolveClosedValueInjection(
+  const { computedId, valueTagIds } = await resolveServerOwnedValueInjection(
     transport,
     semrushWorkspaceId,
     projectId,
