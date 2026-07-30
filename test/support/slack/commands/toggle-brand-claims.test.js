@@ -27,8 +27,8 @@ describe('BrandClaimsCommand', () => {
 
   const BRAND_ID = 'a1b2c3d4-5678-90ab-cdef-1234567890ab';
   const BRAND = { id: BRAND_ID, name: 'Acme' };
-  const SITE_ID = '9033554c-de8a-44ac-a356-09b51af8cc28';
-  const ORG_ID = '5f3b3626-029c-476e-924b-0c1bba2e871f';
+  const SITE_ID = '11111111-1111-4111-8111-111111111111';
+  const ORG_ID = '22222222-2222-4222-8222-222222222222';
 
   before(async () => {
     setBrandClaimsEnabledStub = sinon.stub();
