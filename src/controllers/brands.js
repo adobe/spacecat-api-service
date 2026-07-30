@@ -2100,6 +2100,18 @@ function BrandsController(ctx, log, env) {
             brandId,
             dropped: dropped.map((c) => c?.url).filter(Boolean),
           });
+          // LLMO-6591: the caller submitted a non-empty replace, but every entry
+          // was self-referential and got stripped — persisting `kept` (`[]`) here
+          // would silently wipe the brand's existing competitors even though the
+          // caller never asked to clear the collection. Reject instead of writing
+          // an empty list the caller didn't actually request.
+          if (kept.length === 0) {
+            return badRequest(
+              'All submitted competitors reference this brand\'s own domains and were '
+              + 'rejected; none were saved. Remove the self-referencing entries, or omit '
+              + 'the competitors field to leave existing competitors unchanged.',
+            );
+          }
           updates.competitors = kept;
         }
       }

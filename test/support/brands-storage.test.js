@@ -3411,6 +3411,102 @@ describe('brands-storage', () => {
 
       expect(result).to.not.be.null;
     });
+
+    it('updateBrand rejects with 409 (not a silent 404/no-op) when a concurrent write races the update', async () => {
+      // Pre-read finds the row with a matching updated_at, so the fast-fail
+      // check passes -- but the atomic UPDATE itself matches zero rows because
+      // another write landed between the read and the write (TOCTOU).
+      const postgrestClient = createTableMockClient({
+        brands: [
+          {
+            data: { site_id: 'site-1', status: 'active', updated_at: '2026-01-01T00:00:00.000Z' },
+            error: null,
+          },
+          { data: null, error: null }, // UPDATE ... WHERE updated_at = <expected> matched nothing
+        ],
+      });
+
+      const err = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { name: 'Renamed', expectedUpdatedAt: '2026-01-01T00:00:00.000Z' },
+        postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(409);
+      expect(err.code).to.equal('brand_stale_write');
+    });
+
+    it('updateBrand returns null (404 path) when the brand truly does not exist and no concurrency token was supplied', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: null, error: null }, // UPDATE matched nothing, no prior existence check was made
+        ],
+      });
+
+      const result = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { name: 'Renamed' },
+        postgrestClient,
+      });
+
+      expect(result).to.be.null;
+    });
+  });
+
+  describe('null vs undefined collection guards (LLMO-6591)', () => {
+    it('updateBrand does not touch child tables when a collection field is explicitly null', async () => {
+      const postgrestClient = createCapturingClient({
+        brands: [
+          { data: { id: BRAND_ID }, error: null }, // update
+          { data: makeBrandRow({ name: 'Renamed' }), error: null }, // getBrandById
+        ],
+      });
+
+      await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: {
+          name: 'Renamed',
+          brandAliases: null,
+          competitors: null,
+          socialAccounts: null,
+          earnedContent: null,
+        },
+        postgrestClient,
+      });
+
+      const touchedTables = postgrestClient.capturedCalls.delete.map((c) => c.table);
+      expect(touchedTables).to.not.include('brand_aliases');
+      expect(touchedTables).to.not.include('competitors');
+      expect(touchedTables).to.not.include('brand_social_accounts');
+      expect(touchedTables).to.not.include('brand_earned_sources');
+    });
+
+    it('upsertBrand does not touch child tables when a collection field is explicitly null', async () => {
+      const postgrestClient = createCapturingClient({
+        brands: [
+          { data: null, error: null }, // existing lookup (new brand)
+          { data: { id: BRAND_ID, name: 'Test' }, error: null }, // upsert result
+          { data: makeBrandRow({ name: 'Test' }), error: null }, // getBrandById
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: {
+          name: 'Test', brandAliases: null, competitors: null, socialAccounts: null, earnedContent: null,
+        },
+        postgrestClient,
+      });
+
+      const touchedTables = postgrestClient.capturedCalls.delete.map((c) => c.table);
+      expect(touchedTables).to.not.include('brand_aliases');
+      expect(touchedTables).to.not.include('competitors');
+      expect(touchedTables).to.not.include('brand_social_accounts');
+      expect(touchedTables).to.not.include('brand_earned_sources');
+    });
   });
 
   describe('setBrandStatus', () => {

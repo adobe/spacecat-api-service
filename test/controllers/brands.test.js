@@ -7634,6 +7634,40 @@ describe('Brands Controller', () => {
         );
       });
 
+      it('rejects (400) rather than silently wiping competitors when EVERY submitted competitor is self-referential (LLMO-6591)', async () => {
+        // If all submitted competitors get stripped by the guard, persisting the
+        // resulting [] would wipe the brand's existing competitors even though
+        // the caller never asked to clear the collection -- must reject instead.
+        const updateBrandStub = sinon.stub().resolves({ id: BRAND_UUID, name: 'Flat Brand' });
+        const getBrandByIdStub = sinon.stub().resolves({
+          id: BRAND_UUID,
+          baseUrl: 'https://acme.com',
+          urls: [{ value: 'https://shop.acme.com' }],
+          semrushSubWorkspaceId: undefined,
+        });
+        const controller = await buildUpdateController({
+          updateBrand: updateBrandStub,
+          getBrandById: getBrandByIdStub,
+        });
+
+        const response = await controller.updateBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: {
+            competitors: [
+              { name: 'Self', url: 'https://acme.com' },
+              { name: 'Shop', url: 'https://shop.acme.com' },
+            ],
+          },
+          dataAccess: mockDataAccess,
+          pathInfo: { headers: { authorization: 'Bearer tok' } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(400);
+        expect(updateBrandStub).to.not.have.been.called;
+      });
+
       it('strips a self-referential competitor on a SEMRUSH brand update (a market/project domain)', async () => {
         // Semrush brand: reserved domains come from the project listing (every
         // market domain) plus the brand's own URLs. A competitor on a market

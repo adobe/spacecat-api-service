@@ -463,15 +463,16 @@ async function syncBrandUrls(organizationId, brandId, urls, postgrestClient, upd
 /**
  * Syncs social accounts for a brand to the brand_social_accounts table.
  *
- * `socialAccounts === undefined` (the field was omitted, not sent as an empty
- * array) means the caller never touched this collection — skip the sync
+ * `socialAccounts` being `undefined` (the field was omitted) or `null`
+ * (explicitly nulled, e.g. by a JSON.stringify round-trip of an unset field)
+ * means the caller never touched this collection — skip the sync
  * entirely rather than let `replaceChildRows` wipe existing rows (LLMO-6591).
  * A caller that DOES want to clear the collection sends `[]` explicitly, which
  * still reaches `replaceChildRows` and deletes as before.
  */
 // eslint-disable-next-line max-len
 async function syncSocialAccounts(brandId, organizationId, socialAccounts, postgrestClient, updatedBy) {
-  if (socialAccounts === undefined) {
+  if (socialAccounts === undefined || socialAccounts === null) {
     return;
   }
   const rows = (socialAccounts || [])
@@ -489,12 +490,12 @@ async function syncSocialAccounts(brandId, organizationId, socialAccounts, postg
 /**
  * Syncs earned content sources for a brand to the brand_earned_sources table.
  *
- * `earnedContent === undefined` means the caller never touched this
- * collection — skip the sync entirely (LLMO-6591; see syncSocialAccounts).
+ * `earnedContent` being `undefined` or `null` means the caller never touched
+ * this collection — skip the sync entirely (LLMO-6591; see syncSocialAccounts).
  */
 // eslint-disable-next-line max-len
 async function syncEarnedSources(brandId, organizationId, earnedContent, postgrestClient, updatedBy) {
-  if (earnedContent === undefined) {
+  if (earnedContent === undefined || earnedContent === null) {
     return;
   }
   const rows = (earnedContent || [])
@@ -513,11 +514,11 @@ async function syncEarnedSources(brandId, organizationId, earnedContent, postgre
 /**
  * Syncs aliases for a brand to the brand_aliases table.
  *
- * `brandAliases === undefined` means the caller never touched this
- * collection — skip the sync entirely (LLMO-6591; see syncSocialAccounts).
+ * `brandAliases` being `undefined` or `null` means the caller never touched
+ * this collection — skip the sync entirely (LLMO-6591; see syncSocialAccounts).
  */
 async function syncAliases(brandId, organizationId, brandAliases, postgrestClient, updatedBy) {
-  if (brandAliases === undefined) {
+  if (brandAliases === undefined || brandAliases === null) {
     return;
   }
   const seen = new Set();
@@ -537,11 +538,11 @@ async function syncAliases(brandId, organizationId, brandAliases, postgrestClien
 /**
  * Syncs competitors for a brand to the competitors table.
  *
- * `competitors === undefined` means the caller never touched this
- * collection — skip the sync entirely (LLMO-6591; see syncSocialAccounts).
+ * `competitors` being `undefined` or `null` means the caller never touched
+ * this collection — skip the sync entirely (LLMO-6591; see syncSocialAccounts).
  */
 async function syncCompetitors(brandId, organizationId, competitors, postgrestClient, updatedBy) {
-  if (competitors === undefined) {
+  if (competitors === undefined || competitors === null) {
     return;
   }
   const seen = new Set();
@@ -1281,7 +1282,21 @@ export async function updateBrand({
   // otherwise wipe real data on the very next PATCH. Opt-in and backward
   // compatible: omitting `expectedUpdatedAt` skips this check entirely, so
   // existing callers are unaffected until they start sending it.
+  //
+  // This early check is a FAST-FAIL for the common case (an obviously-stale
+  // read), not the actual concurrency guarantee — it is a plain read-then-compare
+  // and is itself racy: two requests reading the same `updated_at` within this
+  // window would both pass it. The real guarantee is the `.eq('updated_at', ...)`
+  // predicate added to the UPDATE statement below, which Postgres evaluates
+  // atomically against the row as it exists at write time. `brands` has an
+  // unconditional `BEFORE UPDATE ... update_updated_at()` trigger (every write
+  // bumps it), so that predicate reliably fails when — and only when — another
+  // write landed in between. `expectedUpdatedAtChecked` (below) lets the
+  // post-update branch tell "predicate failed because of a race" apart from
+  // "row doesn't exist", since both otherwise look identical (`data` is null).
+  let expectedUpdatedAtChecked = false;
   if (updates.expectedUpdatedAt !== undefined && existing) {
+    expectedUpdatedAtChecked = true;
     const expected = new Date(updates.expectedUpdatedAt).getTime();
     const actual = new Date(existing.updated_at).getTime();
     if (Number.isNaN(expected) || expected !== actual) {
@@ -1365,13 +1380,24 @@ export async function updateBrand({
   patch.social = [];
   patch.earned_sources = [];
 
-  const { data, error } = await postgrestClient
+  // LLMO-6591: the actual compare-and-swap. Adding the predicate directly on
+  // the UPDATE (rather than trusting the earlier read-then-compare) means
+  // Postgres evaluates it atomically against the row as it exists at write
+  // time — a concurrent write that lands between our read and this statement
+  // changes `updated_at` (the unconditional BEFORE UPDATE trigger guarantees
+  // that), so this predicate then matches zero rows instead of silently
+  // succeeding. Equality is Postgres's own timestamptz comparison, not a JS
+  // string compare, so it isn't sensitive to textual formatting differences
+  // between what the client echoes back and what's stored.
+  let updateQuery = postgrestClient
     .from('brands')
     .update(patch)
     .eq('organization_id', organizationId)
-    .eq('id', brandId)
-    .select('id')
-    .maybeSingle();
+    .eq('id', brandId);
+  if (updates.expectedUpdatedAt !== undefined) {
+    updateQuery = updateQuery.eq('updated_at', updates.expectedUpdatedAt);
+  }
+  const { data, error } = await updateQuery.select('id').maybeSingle();
 
   if (error) {
     if (error.code === '23505' && error.message?.includes('brands_base_site_unique')) {
@@ -1382,6 +1408,19 @@ export async function updateBrand({
     rethrowCheckViolation(error, `Failed to update brand: ${error.message}`);
   }
   if (!data) {
+    // The UPDATE matched zero rows. If we already confirmed via the pre-read
+    // that the row existed with a matching `updated_at`, the row must have
+    // changed between that read and this write — a genuine race the fast-fail
+    // check above could not catch on its own. Anything else (no expectedUpdatedAt,
+    // or the row never existed) is the pre-existing not-found case.
+    if (expectedUpdatedAtChecked) {
+      const err = new Error(
+        'This brand was changed since it was loaded - reload and reapply your edit.',
+      );
+      err.status = 409;
+      err.code = 'brand_stale_write';
+      throw err;
+    }
     return null;
   }
 
