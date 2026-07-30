@@ -1,3 +1,11 @@
+## [1.711.2](https://github.com/adobe/spacecat-api-service/compare/v1.711.1...v1.711.2) (2026-07-30)
+
+
+### Bug Fixes
+
+* **deps:** bump @adobe/spacecat-shared-data-access to 4.15.3 ([#2971](https://github.com/adobe/spacecat-api-service/issues/2971)) ([e3f25ab](https://github.com/adobe/spacecat-api-service/commit/e3f25abe612a13914bd6e197a913f4da8a9fcd3a))
+* **sites:** expose config.llmo.showWww in slim sites-list DTO | LLMO-6673 ([#2970](https://github.com/adobe/spacecat-api-service/issues/2970)) ([339729e](https://github.com/adobe/spacecat-api-service/commit/339729e68a25db3e7b030488f284b20fc100265f))
+
 ## [1.711.1](https://github.com/adobe/spacecat-api-service/compare/v1.711.0...v1.711.1) (2026-07-30)
 
 
