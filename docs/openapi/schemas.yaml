@@ -11538,7 +11538,8 @@ SerenityCreateMarketRequest:
       description: |
         Display name of the new market. Optional — defaults server-side to
         `<REGION>-<languageCode>` (e.g. `US-en`), the market's own identity,
-        which is what the customer sees in the Semrush navigation.
+        which is what the customer sees in the Semrush navigation. Supply this
+        field to choose the name instead.
     brandDisplayName:
       type: string
       description: |

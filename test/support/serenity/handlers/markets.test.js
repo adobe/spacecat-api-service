@@ -608,9 +608,15 @@ describe('handlers/markets.js — defaultMarketName', () => {
     expect(defaultMarketName('br', 'pt-br')).to.equal('BR-pt-br');
   });
 
-  it('tolerates a missing market or language', () => {
-    expect(defaultMarketName(null, 'en')).to.equal('-en');
-    expect(defaultMarketName('us', '')).to.equal('US-');
+  // The name reaches the customer in the Semrush navigation, so a half-formed
+  // `-en` / `US-` must never be produced. Unreachable through either create
+  // handler (both 400 first) — this pins the exported contract for any future
+  // caller that skips that validation.
+  it('throws rather than naming a market from a missing market or language', () => {
+    expect(() => defaultMarketName(null, 'en')).to.throw(ErrorWithStatusCode)
+      .with.property('status', 400);
+    expect(() => defaultMarketName('us', '')).to.throw(ErrorWithStatusCode)
+      .with.property('status', 400);
   });
 });
 
