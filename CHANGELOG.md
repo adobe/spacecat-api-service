@@ -1,3 +1,10 @@
+# [1.706.0](https://github.com/adobe/spacecat-api-service/compare/v1.705.1...v1.706.0) (2026-07-30)
+
+
+### Features
+
+* **serenity:** strict `origin` root resolution — drop tolerant `source` fallback (LLMO-6280) [WP-O6] ([#2917](https://github.com/adobe/spacecat-api-service/issues/2917)) ([5bdb7b0](https://github.com/adobe/spacecat-api-service/commit/5bdb7b0e740fd382e3f8a998e78937c1095e727f)), closes [#2867](https://github.com/adobe/spacecat-api-service/issues/2867) [#2867](https://github.com/adobe/spacecat-api-service/issues/2867)
+
 ## [1.705.1](https://github.com/adobe/spacecat-api-service/compare/v1.705.0...v1.705.1) (2026-07-29)
 
 
