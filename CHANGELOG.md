@@ -1,3 +1,16 @@
+# [1.709.0](https://github.com/adobe/spacecat-api-service/compare/v1.708.2...v1.709.0) (2026-07-30)
+
+
+### Bug Fixes
+
+* Allow non-paying brands with a valid primary URL to activate from pending to active | LLMO-6634 ([#2952](https://github.com/adobe/spacecat-api-service/issues/2952)) ([d6a58df](https://github.com/adobe/spacecat-api-service/commit/d6a58df8f3a894f8da20ccdbe559989ac84ba759))
+* **claims:** run-brand-claims sends the spacecat org UUID, not the IMS org (LLMO-6143) ([#2962](https://github.com/adobe/spacecat-api-service/issues/2962)) ([f459b31](https://github.com/adobe/spacecat-api-service/commit/f459b31aaded9b01f9d37e35e6eac75bc3ee0ebc)), closes [#2924](https://github.com/adobe/spacecat-api-service/issues/2924)
+
+
+### Features
+
+* **serenity:** per-item source passthrough for SR Track flow (LLMO-6556) ([#2959](https://github.com/adobe/spacecat-api-service/issues/2959)) ([b9baa0b](https://github.com/adobe/spacecat-api-service/commit/b9baa0b908c24d1081db754328bcca19596eca47)), closes [project-elmo-ui#TBD](https://github.com/project-elmo-ui/issues/TBD)
+
 ## [1.708.2](https://github.com/adobe/spacecat-api-service/compare/v1.708.1...v1.708.2) (2026-07-30)
 
 
