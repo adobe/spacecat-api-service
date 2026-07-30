@@ -376,7 +376,10 @@ function HooksController(lambdaContext) {
           // Backfill the top-level `code` attribute (source of truth for the
           // import-worker / autofix-worker) from the resolved hlxConfig when it
           // is not already set, so re-discovered EDS sites get a working code
-          // config without clobbering an explicit one.
+          // config without clobbering an explicit one. Note: this sits inside the
+          // `hlxConfigChanged` branch, so a site whose hlxConfig is unchanged does
+          // not self-heal here — new sites get code via the approve path, and
+          // pre-existing sites were backfilled separately (forward-fix scope).
           const existingCode = site.getCode() || {};
           if (Object.keys(existingCode).length === 0) {
             const derivedCode = deriveCodeFromHlxConfig(updatedHlxConfig);

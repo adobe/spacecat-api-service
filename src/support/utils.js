@@ -1198,8 +1198,8 @@ export const updateCodeConfig = async (site, host, slackContext, log) => {
  *
  * owner/repo are sourced from `hlxConfig.code` first, falling back to
  * `hlxConfig.rso`; `ref` comes from `rso` (default `main`); `type` defaults to
- * `github`. Mirrors the same derivation in the import-worker
- * (src/handler/code-handler.js).
+ * `github`. Produces the top-level `code` shape the import-worker and
+ * autofix-worker consume via `site.getCode()` (they read `code`, not hlxConfig).
  *
  * @param {Object} hlxConfig - The site's hlxConfig object.
  * @returns {Object|null} A `code`-shaped object ({ type, owner, repo, ref, url }),
