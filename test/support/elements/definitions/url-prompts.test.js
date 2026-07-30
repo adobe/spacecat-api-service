@@ -69,6 +69,36 @@ describe('url-prompts definitions', () => {
       expect(payload.filters.simple).to.not.have.property('CBF_brand');
       expect(advancedVal(payload, 'CBF_brand')).to.be.undefined;
     });
+
+    it('scopes the market via a TOP-LEVEL project_id when projectId is given', () => {
+      const payload = buildUrlPromptsPayload({ url: URL, projectId: 'US-en' });
+      expect(payload.project_id).to.equal('US-en');
+    });
+
+    it('omits project_id when no projectId is given (aggregate across the sub-workspace)', () => {
+      expect(buildUrlPromptsPayload({ url: URL })).to.not.have.property('project_id');
+    });
+
+    it('never scopes the market via a CBF_project advanced filter (verified no-op)', () => {
+      const payload = buildUrlPromptsPayload({ url: URL, projectId: 'US-en' });
+      expect(advancedVal(payload, 'CBF_project')).to.be.undefined;
+    });
+
+    it('scopes the category via CBF_tags (eq) in advanced, sent as-is', () => {
+      const payload = buildUrlPromptsPayload({ url: URL, category: 'category__Brand' });
+      const tagFilter = payload.filters.advanced.filters.find((f) => f.col === 'CBF_tags');
+      expect(tagFilter).to.deep.equal({ op: 'eq', val: 'category__Brand', col: 'CBF_tags' });
+    });
+
+    it('never puts CBF_tags in the simple block (verified no-op)', () => {
+      const payload = buildUrlPromptsPayload({ url: URL, category: 'category__Brand' });
+      expect(payload.filters.simple).to.not.have.property('CBF_tags');
+    });
+
+    it('omits CBF_tags when no category is given', () => {
+      const payload = buildUrlPromptsPayload({ url: URL });
+      expect(advancedVal(payload, 'CBF_tags')).to.be.undefined;
+    });
   });
 
   describe('transformUrlPromptsResponse', () => {

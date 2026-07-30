@@ -30,6 +30,13 @@ import { resolveElementModel } from '../constants.js';
  *    controller). The live MFE also sends `CBF_brand`, but the url-inspector sibling
  *    definitions (owned-urls / domain-urls / cited-domains) do not duplicate it —
  *    the sub-workspace already scopes the brand — so it is omitted here too.
+ *  - Market scope → the element's TOP-LEVEL `project_id` (like owned-urls), NOT a
+ *    `CBF_project` advanced filter (verified live 2026-07-30: `CBF_project` is a silent
+ *    no-op; a bogus top-level `project_id` → HTTP 422). The element takes ONE project id
+ *    per call, so the service fans out per selected market and unions the results.
+ *  - Category scope → `CBF_tags` (op eq) in the `advanced` block (NOT `simple`, which is a
+ *    no-op), value = the full `category__<label>` tag — same mechanism as owned-urls
+ *    ({@link buildOwnedUrlsStatsPayload}).
  */
 
 /**
@@ -42,23 +49,31 @@ import { resolveElementModel } from '../constants.js';
  * @param {string} [params.platform] - Legacy alias for `model`; `model` takes precedence.
  * @param {string} params.startDate - ISO date (YYYY-MM-DD).
  * @param {string} params.endDate - ISO date (YYYY-MM-DD).
+ * @param {string} [params.category] - Full `category__<label>` tag value, sent as-is as a
+ *   `CBF_tags` eq in `advanced` (callers already include the `category__` prefix).
+ * @param {string} [params.projectId] - Semrush project id (market scope, top-level).
  * @returns {object} Semrush element request payload.
  */
 export function buildUrlPromptsPayload({
-  url, model, platform, startDate, endDate,
+  url, model, platform, startDate, endDate, category, projectId,
 } = {}) {
   const resolvedModel = resolveElementModel(model || platform);
+  const advancedFilters = [
+    { op: 'eq', val: resolvedModel, col: 'CBF_model' },
+    { op: 'eq', val: url, col: 'CBF_source' },
+    { op: 'gte', val: startDate, col: 'CBF_date__start' },
+    { op: 'lte', val: endDate, col: 'CBF_date__end' },
+  ];
+  if (category) {
+    advancedFilters.push({ op: 'eq', val: category, col: 'CBF_tags' });
+  }
   return {
+    ...(projectId && { project_id: projectId }),
     filters: {
       simple: { CBF_source: url },
       advanced: {
         op: 'and',
-        filters: [
-          { op: 'eq', val: resolvedModel, col: 'CBF_model' },
-          { op: 'eq', val: url, col: 'CBF_source' },
-          { op: 'gte', val: startDate, col: 'CBF_date__start' },
-          { op: 'lte', val: endDate, col: 'CBF_date__end' },
-        ],
+        filters: advancedFilters,
       },
     },
   };
