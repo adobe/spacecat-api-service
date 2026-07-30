@@ -325,10 +325,12 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/audit-policy/inclusions': 'llmo/can_configure',
       'POST /sites/:siteId/audit-policy/inclusions/delete': 'llmo/can_configure',
 
-      // ---- Deploy --------------------------------------------------------
-      // Edge-source optimization writes. Read-side endpoints stay under can_view.
-      'POST /sites/:siteId/llmo/edge-optimize-config': 'llmo/can_deploy',
-      'POST /sites/:siteId/llmo/edge-optimize-config/stage': 'llmo/can_deploy',
+      // ---- Configure -----------------------------------------------------
+      // Edge-optimize configuration writes (opt-in + CDN routing setup). These
+      // are site-configuration changes, not deploys of a specific fix, so they
+      // sit under can_configure. Read-side endpoints stay under can_view.
+      'POST /sites/:siteId/llmo/edge-optimize-config': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/edge-optimize-config/stage': 'llmo/can_configure',
 
       // ---- View (read-only) ----------------------------------------------
       // Top-level LLMO surfaces
