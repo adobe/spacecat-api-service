@@ -133,7 +133,7 @@ function RunBrandClaimsCommand(context) {
   });
 
   const { dataAccess, log, sqs } = context;
-  const { Site, Organization } = dataAccess;
+  const { Site } = dataAccess;
 
   const handleExecution = async (args, slackContext) => {
     const { say } = slackContext;
@@ -169,13 +169,6 @@ function RunBrandClaimsCommand(context) {
 
       if (!site) {
         await say(`:x: Site not found: \`${siteArg}\``);
-        return;
-      }
-
-      const organization = await Organization.findById(site.getOrganizationId());
-      const imsOrgId = organization?.getImsOrgId();
-      if (!imsOrgId) {
-        await say(`:x: Could not resolve an IMS org for site \`${siteArg}\`.`);
         return;
       }
 
@@ -218,7 +211,7 @@ function RunBrandClaimsCommand(context) {
       const event = {
         event_type: 'BRAND_PRESENCE_SHEET_WRITTEN',
         schema_version: 1,
-        organization_id: imsOrgId,
+        organization_id: site.getOrganizationId(),
         brand_id: brand.id,
         brand: brandSlug,
         site_id: site.getId(),

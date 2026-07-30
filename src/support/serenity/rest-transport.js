@@ -58,6 +58,9 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 /** @typedef {Parameters<PeTransport['updateCompetitors']>[0]['body']} CiCompetitorsBody */
 /** @typedef {CiCompetitorsBody['ci_competitors']} CiCompetitors */
 /** @typedef {Parameters<PeTransport['updatePromptTags']>[0]['body']['items']} PromptTagUpdates */
+/** @typedef {Parameters<PeTransport['listPromptsByTagIds']>[0]['body']} PromptsListBody */
+/** @typedef {Parameters<PeTransport['patchPromptsMetadataBatch']>[0]['body']} MetadataBatchBody */
+/** @typedef {MetadataBatchBody['items'][number]['metadata']} PromptMetadataPatch */
 
 /**
  * The `resources` allocation object shared by the v2 child-create and the v2 resources
@@ -95,29 +98,6 @@ const DEFAULT_TIMEOUT_MS = 15_000;
  * argument count and argument types on every call made through it.
  *
  * @typedef {ReturnType<typeof createSerenityTransport>} SerenityTransport
- */
-
-/**
- * The Project Engine facade EXTENDED with the v3 prompt-authorship-metadata
- * write surface (LLMO-6289). WP2 re-vendors the client so the generated
- * `SerenityProjectEngineTransport` carries these operations natively; until that
- * release lands (this WP's merge gate — the dependency is bumped to the
- * WP2-released version before merge), they are declared here as a local
- * intersection so the single transport boundary type-checks under `// @ts-check`
- * against the currently-installed client. Method names/shapes track the routes
- * the revised ADR pins (spec §13 item 1):
- *   - createPromptsWithMetadata → POST  /v3 prompts        { items:[{name,metadata}], tag_ids }
- *   - patchPrompt               → PATCH /v3 prompts/{id}          { name?, metadata? }
- *   - patchPromptMetadata       → PATCH /v3 prompts/{id}/metadata { <merge-patch> }
- *   - patchPromptsMetadataBatch → PATCH /v3 prompts/metadata      { items:[{id,metadata}] }
- * WP2's generated types supersede this typedef verbatim on the dep bump.
- *
- * @typedef {ReturnType<typeof createSerenityProjectEngineTransport> & {
- *   createPromptsWithMetadata: (init: any) => Promise<any>,
- *   patchPrompt: (init: any) => Promise<any>,
- *   patchPromptMetadata: (init: any) => Promise<any>,
- *   patchPromptsMetadataBatch: (init: any) => Promise<any>,
- * }} ProjectEngineTransportWithMetadata
  */
 
 /**
@@ -392,9 +372,7 @@ export function createSerenityTransport({ env, imsToken }) {
   // client's internal.js (library defaults: maxRetries 2, retryBaseDelayMs 200;
   // per-attempt timeout via the injected `createTimeoutFetch`, since the retry
   // layer wraps it and calls it once per attempt).
-  const projects = /** @type {ProjectEngineTransportWithMetadata} */ (
-    createSerenityProjectEngineTransport(projectEngineOptions)
-  );
+  const projects = createSerenityProjectEngineTransport(projectEngineOptions);
 
   // Raw Project Engine client, ONLY for GET /v1/workspaces/{id}/brand-topics: the
   // facade does not expose a brand-topics method yet (it is in-spec — the future
@@ -434,13 +412,23 @@ export function createSerenityTransport({ env, imsToken }) {
      * that an unpublished draft reads as 0 prompts), never treat empty as missing.
      *
      * METADATA (LLMO-6289): WP0 added an Adobe-owned `metadata` column carried
-     * INLINE on each item of this read (`AIOPromptWithStatus.metadata`), and made
-     * this the sortable list path — the legacy "Semrush rejects sort_field /
-     * sort_dir here" note no longer holds for `sort` / `order`. `sort` is
-     * allow-listed to `metadata.created_at` / `metadata.updated_at` by the
-     * caller (handlers/prompts.js `resolveSort`) BEFORE it reaches here. Both are
-     * sent ONLY when a sort is requested, so an unsorted read is byte-for-byte the
-     * legacy call. Every other field stays restricted to what upstream documents.
+     * INLINE on each item of this read (`AIOPromptWithStatus.metadata`), but it is
+     * OPT-IN and the switch is the `include_metadata` QUERY parameter — NOT a body
+     * field. Without it upstream omits the `metadata` key from every item and
+     * answers 200, which a consumer cannot tell apart from "every prompt is
+     * genuinely unstamped". It is therefore sent UNCONDITIONALLY here rather than
+     * exposed as a per-call option — a caller that forgets to opt in gets data that
+     * is indistinguishable from unstamped, and the cost of always asking is four
+     * short strings per item.
+     *
+     * SORT: the wire keys are `sort_field` / `sort_dir` in the request BODY
+     * (`model.AIOPromptsListRequest`). Unknown body keys are ignored with a 200, so
+     * a wrong name is a silent no-op, not an error. `sort` is allow-listed to
+     * `metadata.created_at` / `metadata.updated_at` by the caller
+     * (handlers/prompts.js `resolveSort`) BEFORE it reaches here and is mapped onto
+     * `sort_field` at this boundary. Both are sent ONLY when a sort is requested,
+     * so an unsorted read carries neither key. Every other field stays restricted
+     * to what upstream documents.
      *
      * @param {string} semrushWorkspaceId
      * @param {string} projectId
@@ -450,11 +438,19 @@ export function createSerenityTransport({ env, imsToken }) {
      * @param {number} [body.limit]
      * @param {string} [body.search]
      * @param {boolean} [body.unassigned]
-     * @param {string} [body.sort] - allow-listed metadata sort field (LLMO-6289).
-     * @param {string} [body.order] - `asc` / `desc`; sent only with `sort`.
+     * @param {string} [body.sort] - allow-listed metadata sort field (LLMO-6289),
+     *   sent upstream as `sort_field`.
+     * @param {string} [body.order] - `asc` / `desc`, sent upstream as `sort_dir`;
+     *   sent only alongside `sort`.
      */
     async listPromptsByTags(semrushWorkspaceId, projectId, body) {
-      /** @type {Record<string, unknown>} */
+      // Annotated with the GENERATED body type, and built without an object
+      // spread, so both halves of the wire contract are enforced by tsc: a
+      // misspelled key is TS2353 on the literal / TS2339 on the assignment below,
+      // and a wrong value type is TS2322. Keep it spread-free — a spread disables
+      // excess-property checking, which is what lets a misspelled key reach the
+      // wire, where upstream ignores it with a 200 rather than refusing it.
+      /** @type {PromptsListBody} */
       const requestBody = {
         tag_ids: body?.tag_ids ?? [],
         page: body?.page ?? 1,
@@ -463,16 +459,16 @@ export function createSerenityTransport({ env, imsToken }) {
         unassigned: body?.unassigned,
       };
       if (body?.sort) {
-        requestBody.sort = body.sort;
-        requestBody.order = body.order;
+        requestBody.sort_field = body.sort;
+        requestBody.sort_dir = body.order;
       }
       return projects.listPromptsByTagIds(
         {
-          params: { path: { id: semrushWorkspaceId, project_id: projectId } },
-          // WP2's regenerated by_tags body carries sort/order + returns metadata;
-          // cast at this one boundary until the dep bump (see the file-level
-          // ProjectEngineTransportWithMetadata typedef).
-          body: /** @type {any} */ (requestBody),
+          params: {
+            path: { id: semrushWorkspaceId, project_id: projectId },
+            query: { include_metadata: true },
+          },
+          body: requestBody,
         },
       );
     },
@@ -585,23 +581,30 @@ export function createSerenityTransport({ env, imsToken }) {
 
     /**
      * PATCH /v3/.../aio/prompts/metadata — BATCH metadata merge-patch across many
-     * prompts in ONE upstream transaction (LLMO-6289). Body: `{ items: [{ id,
-     * metadata }] }`, each `metadata` an independent RFC 7396 merge. The batch is
-     * ATOMIC upstream: a CHECK violation on ANY item (e.g. a `created_by` /
-     * `updated_by` longer than 100 chars) rolls the WHOLE batch back and answers
+     * prompts in ONE upstream transaction (LLMO-6289). Body: `{ items: [{
+     * prompt_id, metadata }] }` (`model.PatchAIOPromptsBatchItem` — the id key is
+     * `prompt_id`, NOT `id`), each `metadata` an independent RFC 7396 merge. The
+     * batch is ATOMIC upstream: a CHECK violation on ANY item (e.g. a `created_by`
+     * / `updated_by` longer than 100 chars) rolls the WHOLE batch back and answers
      * 400 — so callers must isolate a deterministic offender rather than retry the
-     * batch whole. Nothing else in this WP calls it; it exposes the batch write
-     * surface the ADR pins for bulk stampers.
+     * batch whole. No caller yet; it exposes the batch write surface the ADR pins
+     * for bulk stampers.
      *
      * @param {string} semrushWorkspaceId
      * @param {string} projectId
-     * @param {Array<{ id: string, metadata: object }>} items
+     * @param {Array<{ promptId: string, metadata: PromptMetadataPatch }>} items -
+     *   camelCase in, mapped onto the upstream `prompt_id` key here.
      */
     async patchPromptsMetadataBatch(semrushWorkspaceId, projectId, items) {
       return projects.patchPromptsMetadataBatch(
         {
           params: { path: { id: semrushWorkspaceId, project_id: projectId } },
-          body: { items },
+          body: {
+            items: items.map(({ promptId, metadata }) => ({
+              prompt_id: promptId,
+              metadata,
+            })),
+          },
         },
       );
     },

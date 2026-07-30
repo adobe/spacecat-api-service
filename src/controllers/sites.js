@@ -36,6 +36,7 @@ import {
 } from '@adobe/spacecat-shared-utils';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
 import TierClient from '@adobe/spacecat-shared-tier-client';
@@ -64,6 +65,7 @@ import { listViewableResourceIds } from '../support/state-access-mapping-utils.j
 import { requirePostgrestForFacsMappings } from '../support/postgrest-availability.js';
 import { isFacsRebacResource } from '../routes/facs-capabilities.js';
 import { ASO_PRODUCT_CODE, STATUSES as PLG_STATUSES } from './plg/plg-onboarding/constants.js';
+import { guardProvisioningLlmoFields } from '../support/llmo-config-guards.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
 
@@ -678,6 +680,43 @@ function SitesController(ctx, log, env) {
   };
 
   /**
+   * Gets all sites enrolled at a given entitlement tier (e.g. 'PAID',
+   * 'FREE_TRIAL', 'PLG'). Optionally narrows the result to a single product
+   * code via the `productCode` query parameter (e.g. 'LLMO').
+   *
+   * Returns the full result set (no pagination) - acceptable for a
+   * bounded admin-only use case. Sites are ordered by ID.
+   *
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Sites response.
+   */
+  const getAllByEnrollmentAndTier = async (context) => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can view all sites');
+    }
+    const tier = context.params?.tier;
+    const productCode = context.data?.productCode;
+
+    if (!hasText(tier)) {
+      return badRequest('Tier required');
+    }
+    if (!CUSTOMER_VISIBLE_TIERS.includes(tier)) {
+      return badRequest(`Tier must be one of: ${CUSTOMER_VISIBLE_TIERS.join(', ')}`);
+    }
+    const validProductCodes = Object.values(EntitlementModel.PRODUCT_CODES);
+    if (productCode !== undefined && !validProductCodes.includes(productCode)) {
+      return badRequest(`productCode must be one of: ${validProductCodes.join(', ')}`);
+    }
+
+    const all = (await Site.allByEnrollmentAndTier(tier, productCode))
+      .sort((a, b) => a.getId().localeCompare(b.getId()));
+
+    return ok({
+      sites: all.map((site) => SiteDto.toJSON(site)),
+    });
+  };
+
+  /**
    * Gets all sites with their latest audit. Sites without a latest audit will be included
    * in the result, but will have an empty audits array. The sites are sorted by their latest
    * audit scores in ascending order by default. The sortAuditsAscending parameter can be used
@@ -1092,6 +1131,13 @@ function SitesController(ctx, log, env) {
           ...existingConfig.llmo,
           ...requestBody.config.llmo,
         };
+      }
+      if (merged.llmo) {
+        merged.llmo = guardProvisioningLlmoFields(
+          merged.llmo,
+          existingConfig?.llmo,
+          accessControlUtil.hasAdminAccess(),
+        );
       }
       // Reject malformed `llmo.detectedCdn` (array, stringified array, display name) before
       // persisting. `Config()` would otherwise swallow the schema error and store the raw value,
@@ -2124,6 +2170,7 @@ function SitesController(ctx, log, env) {
     getAuditForSite,
     getByBaseURL,
     getAllByDeliveryType,
+    getAllByEnrollmentAndTier,
     getByID,
     getIdentity,
     removeSite,
