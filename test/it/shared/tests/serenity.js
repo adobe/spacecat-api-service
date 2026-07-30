@@ -911,22 +911,316 @@ export default function serenityTests(
       expect(post.status).to.equal(409);
     });
   });
+  // Prompt authorship metadata (LLMO-6289): every native prompt write stamps the four-key
+  // `metadata` block — `created_at`/`created_by` on the create, `updated_at`/`updated_by` on the
+  // create AND on every subsequent edit — upstream on the Semrush prompt row.
+  //
+  // These assert against the PE mock's OWN store (`GET /__dump`), not the service's list read.
+  // That is deliberate, and it is what makes the coverage meaningful: the upstream `by_tags` list
+  // gates `metadata` behind an `include_metadata=true` QUERY param, so a consumer that does not
+  // opt in reads back no metadata at all even for a fully stamped prompt. Asserting the stamp
+  // through the list DTO would conflate "the write did not stamp" with "the read did not ask".
+  // The dump separates the two, so this block pins the WRITE contract only; the read side is
+  // pinned on its own by the list-read block that follows.
+  describe('Serenity API — prompt authorship metadata (live mock)', () => {
+    const { dumpPeMock } = mockControls;
+    const base = `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity`;
+    const US_GEO = 2840;
+
+    // Skip cleanly if a wiring didn't inject the mock control routes (only the postgres harness has
+    // the live containers); mirrors the dynamic-allocation block above.
+    before(function skipWithoutMockControls() {
+      if (typeof dumpPeMock !== 'function') {
+        this.skip();
+      }
+    });
+
+    beforeEach(async () => {
+      await resetData();
+      await resetMocks();
+    });
+
+    // Setup, not subject: every test here needs a live US market, and none asserts on the market
+    // response itself. Checking the status inside the helper means a refused create (a 422 on
+    // insufficient units, say) fails here, rather than surfacing later as a confusing failure on
+    // the tag or prompt call that depended on it.
+    const createUsMarket = async () => {
+      const res = await getHttpClient().admin.post(`${base}/markets`, {
+        market: 'US', languageCode: 'en', brandDomain: 'example.com', brandNames: ['Test Brand'],
+      });
+      expect(res.status).to.equal(201);
+    };
+
+    const createCategory = async (name) => {
+      const res = await getHttpClient().admin.post(`${base}/tags`, {
+        type: 'category', name, geoTargetId: US_GEO, languageCode: 'en',
+      });
+      expect(res.status).to.equal(201);
+      return res.body.id;
+    };
+
+    // The mock stores prompts per project under `prompts:{workspaceId}:{projectId}`. Flattening
+    // every such collection keeps the helper independent of which project a slice resolved to.
+    const storedPrompts = async () => {
+      const dump = await dumpPeMock();
+      return Object.entries(dump)
+        .filter(([collection]) => collection.startsWith('prompts:'))
+        .flatMap(([, rows]) => (Array.isArray(rows) ? rows : []));
+    };
+
+    const storedPromptById = async (semrushPromptId) => {
+      const row = (await storedPrompts()).find((p) => p.id === semrushPromptId);
+      // A missing row means the write never reached the mock (or the id shape drifted) — fail with
+      // an actionable message here rather than as "cannot read property of undefined" downstream.
+      expect(row, `expected the PE mock to hold a prompt row with id ${semrushPromptId}`).to.exist;
+      return row;
+    };
+
+    // Returns the stored `metadata` block, having asserted it is actually populated. The
+    // preservation tests below compare metadata before/after a refused write with `deep.equal`,
+    // which would pass VACUOUSLY if both sides were `undefined` (the shape a never-stamped prompt
+    // has upstream, where `JSON.stringify` drops the key). Asserting presence here means those
+    // tests cannot silently degrade into "no metadata either time, so nothing changed".
+    const storedMetadataById = async (semrushPromptId) => {
+      const { metadata } = await storedPromptById(semrushPromptId);
+      expect(metadata, `prompt ${semrushPromptId} should carry a stamped metadata block`)
+        .to.be.an('object');
+      expect(metadata.created_at, 'created_at is stamped').to.be.a('string');
+      expect(metadata.updated_at, 'updated_at is stamped').to.be.a('string');
+      return metadata;
+    };
+
+    const createPrompt = async (persona, text, tagIds) => {
+      const res = await getHttpClient()[persona].post(`${base}/prompts`, {
+        prompts: [{
+          text, tagIds, geoTargetId: US_GEO, languageCode: 'en',
+        }],
+      });
+      expect(res.status).to.equal(200);
+      expect(res.body.created, `create by ${persona} should not be skipped/failed`)
+        .to.have.lengthOf(1);
+      return res.body.created[0].semrushPromptId;
+    };
+
+    // The four keys are the closed set the upstream CHECK allows; `created_* === updated_*` on a
+    // create because a create is its own first edit. Timestamps are RFC 3339 UTC.
+    it('POST /serenity/prompts stamps all four authorship keys upstream', async () => {
+      await createUsMarket();
+      const tagId = await createCategory('Running');
+      const promptId = await createPrompt('admin', 'What are the best trail shoes?', [tagId]);
+
+      const { metadata } = await storedPromptById(promptId);
+      expect(metadata, 'the created prompt carries a metadata block').to.be.an('object');
+      expect(Object.keys(metadata).sort())
+        .to.deep.equal(['created_at', 'created_by', 'updated_at', 'updated_by']);
+      // A create is its own first edit: both pairs carry the SAME instant and the same caller.
+      expect(metadata.created_at).to.equal(metadata.updated_at);
+      expect(metadata.created_by).to.equal(metadata.updated_by);
+      // RFC 3339 UTC — the shape the upstream metadata column accepts.
+      expect(metadata.created_at).to.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/);
+    });
+
+    // The caller id is resolved from the REQUEST's own token (`user_id ?? sub`), never from the
+    // bearer forwarded upstream — post promise-token exchange that principal can differ from the
+    // caller. Two personas writing to the same slice must therefore stamp two different authors.
+    it('stamps the requesting caller as the author, per persona', async () => {
+      await createUsMarket();
+      const tagId = await createCategory('Cameras');
+
+      const byAdmin = await createPrompt('admin', 'Which DSLR suits a beginner?', [tagId]);
+      const byUser = await createPrompt('user', 'Which mirrorless camera is best?', [tagId]);
+
+      // The IT tokens carry no `user_id` claim, so `resolveCallerId` falls through to `sub`.
+      expect((await storedMetadataById(byAdmin)).created_by).to.equal('test-admin@adobe.com');
+      expect((await storedMetadataById(byUser)).created_by).to.equal('test-user@example.com');
+    });
+
+    // An edit bumps ONLY the updated pair. Asserted across two personas rather than by comparing
+    // timestamps: the stamp is millisecond-precision, so a same-caller assertion would rest on the
+    // two writes landing in different milliseconds.
+    it('PATCH /serenity/prompts/:id bumps the updated pair and preserves the created pair', async () => {
+      await createUsMarket();
+      const tagId = await createCategory('Footwear');
+      const promptId = await createPrompt('admin', 'What are the best running shoes?', [tagId]);
+      const before = await storedMetadataById(promptId);
+
+      const patched = await getHttpClient().user.patch(`${base}/prompts/${promptId}`, {
+        text: 'What are the best trail running shoes?',
+        tagIds: [tagId],
+        geoTargetId: US_GEO,
+        languageCode: 'en',
+      });
+      expect(patched.status).to.equal(200);
+
+      const after = await storedMetadataById(promptId);
+      // The create pair is immutable across the edit — authorship of the original write survives.
+      expect(after.created_by).to.equal('test-admin@adobe.com');
+      expect(after.created_at).to.equal(before.created_at);
+      // The update pair now names the EDITOR, not the original author.
+      expect(after.updated_by).to.equal('test-user@example.com');
+      expect(Date.parse(after.updated_at)).to.be.at.least(Date.parse(before.updated_at));
+    });
+
+    // Re-categorising a prompt still bumps the updated pair: the PATCH body is the full NEXT state
+    // (text is required), so the combined upstream write always carries both the name and the
+    // metadata — there is no tag-only edit that leaves authorship untouched.
+    it('PATCH /serenity/prompts/:id bumps the updated pair when only the tags change', async () => {
+      await createUsMarket();
+      const firstTag = await createCategory('Laptops');
+      const secondTag = await createCategory('Ultrabooks');
+      const text = 'Which laptop has the best battery life?';
+      const promptId = await createPrompt('admin', text, [firstTag]);
+      const before = await storedMetadataById(promptId);
+
+      const patched = await getHttpClient().user.patch(`${base}/prompts/${promptId}`, {
+        text, // unchanged
+        tagIds: [secondTag],
+        geoTargetId: US_GEO,
+        languageCode: 'en',
+      });
+      expect(patched.status).to.equal(200);
+
+      const after = await storedMetadataById(promptId);
+      expect(after.created_at).to.equal(before.created_at);
+      expect(after.created_by).to.equal('test-admin@adobe.com');
+      expect(after.updated_by).to.equal('test-user@example.com');
+      // Asserted on the VALUE, not just its presence: a future change that skipped the metadata
+      // merge-patch when the text is unchanged would leave a stale-but-valid `updated_at` string,
+      // which a presence check alone would accept.
+      expect(Date.parse(after.updated_at)).to.be.at.least(Date.parse(before.updated_at));
+    });
+
+    // Re-posting an existing text folds into `existing_count` upstream instead of creating a
+    // second row, and the stored stamp is PRESERVED — a dedupe hit must not re-attribute an
+    // existing prompt to whoever re-submitted it.
+    it('POST /serenity/prompts preserves the original stamp when a repeated text dedups', async () => {
+      await createUsMarket();
+      const tagId = await createCategory('Headphones');
+      const text = 'Which noise-cancelling headphones are best?';
+      const promptId = await createPrompt('admin', text, [tagId]);
+      const before = await storedMetadataById(promptId);
+
+      const second = await getHttpClient().user.post(`${base}/prompts`, {
+        prompts: [{
+          text, tagIds: [tagId], geoTargetId: US_GEO, languageCode: 'en',
+        }],
+      });
+      expect(second.status).to.equal(200);
+
+      expect(await storedMetadataById(promptId)).to.deep.equal(before);
+    });
+
+    // Gate G2 refusal: a rename onto a sibling's exact text is a 409 and the combined upstream
+    // write is refused whole — so the target prompt's authorship must be untouched too, not just
+    // its text.
+    it('a 409 text collision leaves both prompts\' metadata untouched', async () => {
+      await createUsMarket();
+      const tagId = await createCategory('Phones');
+      const firstText = 'Which phone has the best camera?';
+      const secondText = 'Which phone has the longest battery life?';
+      const firstId = await createPrompt('admin', firstText, [tagId]);
+      const secondId = await createPrompt('admin', secondText, [tagId]);
+      const beforeFirst = await storedMetadataById(firstId);
+      const beforeSecond = await storedMetadataById(secondId);
+
+      const res = await getHttpClient().user.patch(`${base}/prompts/${secondId}`, {
+        text: firstText, // the FIRST prompt's exact text
+        tagIds: [tagId],
+        geoTargetId: US_GEO,
+        languageCode: 'en',
+      });
+      expect(res.status).to.equal(409);
+
+      expect(await storedMetadataById(firstId)).to.deep.equal(beforeFirst);
+      expect(await storedMetadataById(secondId)).to.deep.equal(beforeSecond);
+    });
+
+    // A 404 refusal must not touch any sibling's authorship either — the write is rejected
+    // upstream before the metadata lands anywhere.
+    it('a 404 on an unknown prompt id stamps nothing', async () => {
+      await createUsMarket();
+      const tagId = await createCategory('Ghosts');
+      const promptId = await createPrompt('admin', 'Which prompt survives?', [tagId]);
+      const before = await storedMetadataById(promptId);
+
+      const res = await getHttpClient().user.patch(
+        `${base}/prompts/00000000-0000-4000-8000-00000000dead`,
+        {
+          text: 'x', tagIds: [tagId], geoTargetId: US_GEO, languageCode: 'en',
+        },
+      );
+      expect(res.status).to.equal(404);
+
+      expect(await storedMetadataById(promptId)).to.deep.equal(before);
+    });
+
+    // A bulk delete removes rows; it stamps nothing, so a surviving sibling keeps its authorship.
+    it('POST /serenity/prompts/bulk-delete leaves a surviving sibling\'s metadata untouched', async () => {
+      await createUsMarket();
+      const tagId = await createCategory('Tablets');
+      const doomedId = await createPrompt('admin', 'Which tablet is best for drawing?', [tagId]);
+      const survivorId = await createPrompt('admin', 'Which tablet has the best screen?', [tagId]);
+      const before = await storedMetadataById(survivorId);
+
+      const res = await getHttpClient().admin.post(`${base}/prompts/bulk-delete`, {
+        prompts: [{ semrushPromptId: doomedId, geoTargetId: US_GEO, languageCode: 'en' }],
+      });
+      expect(res.status).to.equal(200);
+
+      const remaining = await storedPrompts();
+      expect(remaining.some((p) => p.id === doomedId), 'the deleted prompt is gone upstream')
+        .to.equal(false);
+      expect(await storedMetadataById(survivorId)).to.deep.equal(before);
+    });
+
+    // The sort allow-list is validated in this service and never reaches the vendor, so its
+    // refusals are assertable independently of the mock. `order` is only validated once a `sort`
+    // is present — a bare `order` on an unsorted read is ignored, not rejected.
+    it('GET /serenity/prompts validates the sort/order query params', async () => {
+      await createUsMarket();
+      const list = (qs) => getHttpClient().admin.get(
+        `${base}/prompts?geoTargetId=${US_GEO}&languageCode=en&${qs}`,
+      );
+
+      const badSort = await list('sort=bogus');
+      expect(badSort.status).to.equal(400);
+      expect(badSort.body.error).to.equal('invalidRequest');
+
+      const badOrder = await list('sort=metadata.created_at&order=sideways');
+      expect(badOrder.status).to.equal(400);
+      expect(badOrder.body.error).to.equal('invalidRequest');
+
+      // Both allow-listed fields are accepted, in both directions.
+      for (const qs of [
+        'sort=metadata.created_at',
+        'sort=metadata.created_at&order=asc',
+        'sort=metadata.updated_at&order=desc',
+      ]) {
+        // eslint-disable-next-line no-await-in-loop
+        expect((await list(qs)).status, `${qs} should be accepted`).to.equal(200);
+      }
+
+      // An `order` without a `sort` is the legacy unsorted read — ignored, not a 400.
+      expect((await list('order=sideways')).status).to.equal(200);
+    });
+  });
 
   // Prompt authorship metadata on the LIST READ (LLMO-6289).
   //
-  // The stamping itself happens on the write; these cases prove the four values come back out
-  // again through `GET /serenity/prompts`. That round trip is not automatic: upstream omits the
-  // `metadata` block from every item unless the read opts in with the `include_metadata=true`
-  // QUERY parameter, and `buildPromptDto` maps a missing block to four nulls. So a read that
-  // fails to opt in returns a 200 whose authorship fields are all null for prompts that ARE
-  // stamped — no error anywhere, just silently empty values in the UI. These tests fail exactly
-  // that way if the opt-in regresses.
+  // The stamping itself happens on the write and is pinned by the block above; these cases prove
+  // the four values come back out again through `GET /serenity/prompts`. That round trip is not
+  // automatic: upstream omits the `metadata` block from every item unless the read opts in with
+  // the `include_metadata=true` QUERY parameter, and `buildPromptDto` maps a missing block to four
+  // nulls. So a read that fails to opt in returns a 200 whose authorship fields are all null for
+  // prompts that ARE stamped — no error anywhere, just silently empty values in the UI. These
+  // tests fail exactly that way if the opt-in regresses.
   //
   // The mock gates the block on the same query parameter (and omits the key entirely without it),
   // so this is a real end-to-end assertion of the flag, not a mock convenience.
   describe('Serenity API — prompt authorship metadata on the list read (live mock)', () => {
     const base = `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity`;
     const US_GEO = 2840; // US resolves to Google geoTargetId 2840.
+
     beforeEach(async () => {
       await resetData();
       await resetMocks();
@@ -976,7 +1270,8 @@ export default function serenityTests(
         }],
       });
       expect(res.status).to.equal(200);
-      expect(res.body.created).to.have.lengthOf(1);
+      expect(res.body.created, `create by ${persona} should not be skipped/failed`)
+        .to.have.lengthOf(1);
       return res.body.created[0].semrushPromptId;
     };
 
