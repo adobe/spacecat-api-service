@@ -23,6 +23,7 @@ import { invalidateTagCacheForProject } from './markets.js';
 import { resolveTypeValueInjection, resolveIntentValueInjection, resolveServerOwnedValueInjection } from '../tag-tree.js';
 import {
   DIMENSION, ORIGIN_VALUE, INTENT_VALUE, PROXY_CREATE_SOURCE_VALUE,
+  canonicalizeSource, SOURCE_VALUES,
 } from '../prompt-tags.js';
 import { classifyPromptIntents } from '../intent-classification.js';
 
@@ -640,9 +641,25 @@ export function normalizePromptInput(input) {
       reason: 'tagIds must be a non-empty array of upstream tag ids',
     };
   }
+  // source — per-item override for the Track flow (LLMO-6556). Absent ⇒ the batch
+  // default (`config` for the human dialog) applies downstream. Present ⇒ must be
+  // a known producer from SOURCE_VALUES; unknown slugs are rejected 400 so a caller
+  // can only SELECT from the server's vocabulary, never invent one.
+  // FIX (review Should-Fix #1): gate on nullish, not `!== undefined`. An explicit
+  // JSON `source: null` means "no override" (a client serializing an optional
+  // field), so it must fall through to the batch default — not 400 with a
+  // misleading "must be one of …". Only a non-nullish value is validated.
+  let source;
+  if (input?.source != null) {
+    const canon = canonicalizeSource(input.source);
+    if (!canon || !SOURCE_VALUES.includes(canon)) {
+      return { value: null, reason: `source must be one of ${SOURCE_VALUES.join(', ')}` };
+    }
+    source = canon;
+  }
   return {
     value: {
-      text, languageCode, geoTargetId, tagIds,
+      text, languageCode, geoTargetId, tagIds, ...(source !== undefined && { source }),
     },
     reason: null,
   };
@@ -740,7 +757,7 @@ export async function createOnePrompt(transport, semrushWorkspaceId, projectId, 
  *   / `sourceValue` are the derived `origin` / `source` to inject on CREATE; omit
  *   each on UPDATE so that dimension is left untouched.
  * @returns {(projectId: string, input: { text: string, geoTargetId: number,
- *   tagIds: string[] }) =>
+ *   tagIds: string[], source?: string }) =>
  *   Promise<{ text: string, geoTargetId: number, tagIds: string[] }>}
  */
 export function makePromptTagInjector(
@@ -798,21 +815,28 @@ export function makePromptTagInjector(
       tagIds = [...tagIds.filter((id) => !valueTagIds.includes(id)), computedId];
     }
 
-    // source — CREATE only, same asymmetry as origin. `sourceValue` unset means
-    // UPDATE: leave the producer alone (fixed at creation). Stripped by resolved id
-    // beneath the `source` root, never by name (a category may be `gsc`).
-    if (sourceValue) {
-      let pending = sourceCache.get(projectId);
+    // source — CREATE only, same asymmetry as origin. Per-item `input.source`
+    // (Track flow, LLMO-6556) overrides the batch default (`sourceValue`); absent
+    // on both means UPDATE — leave the producer alone (fixed at creation). Cache
+    // is keyed on (projectId, source) so a mixed-surface batch resolves each
+    // producer's tag independently. Stripped by resolved id, never by name.
+    // `??` not `||` (MysticatBot nit): `normalizePromptInput` yields a valid slug
+    // or `undefined`, so "absent means use the batch default" is exactly the
+    // nullish-coalesce contract.
+    const itemSource = input.source ?? sourceValue;
+    if (itemSource) {
+      const key = `${projectId} ${itemSource}`;
+      let pending = sourceCache.get(key);
       if (!pending) {
         pending = resolveServerOwnedValueInjection(
           transport,
           semrushWorkspaceId,
           projectId,
           DIMENSION.SOURCE,
-          sourceValue,
+          itemSource,
           log,
         );
-        sourceCache.set(projectId, pending);
+        sourceCache.set(key, pending);
       }
       const { computedId, valueTagIds } = await pending;
       tagIds = [...tagIds.filter((id) => !valueTagIds.includes(id)), computedId];
