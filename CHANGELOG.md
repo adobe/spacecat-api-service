@@ -1,3 +1,32 @@
+# [1.712.0](https://github.com/adobe/spacecat-api-service/compare/v1.711.4...v1.712.0) (2026-07-31)
+
+
+### Features
+
+* **geo-experiment:** presign insights rawDataUrl for UI download ([#2844](https://github.com/adobe/spacecat-api-service/issues/2844)) ([cd7412c](https://github.com/adobe/spacecat-api-service/commit/cd7412c9f96e283c1cbfdbd468576360dd80b8dc))
+
+## [1.711.4](https://github.com/adobe/spacecat-api-service/compare/v1.711.3...v1.711.4) (2026-07-31)
+
+
+### Bug Fixes
+
+* URL-prompts honors market & category filters | LLMO-6674 ([#2969](https://github.com/adobe/spacecat-api-service/issues/2969)) ([c36a130](https://github.com/adobe/spacecat-api-service/commit/c36a130a70045ef893d669705eebcde73d03b5a1))
+
+## [1.711.3](https://github.com/adobe/spacecat-api-service/compare/v1.711.2...v1.711.3) (2026-07-30)
+
+
+### Bug Fixes
+
+* **sites:** populate top-level code from hlxConfig on EDS site discovery/approval ([#2973](https://github.com/adobe/spacecat-api-service/issues/2973)) ([46973e2](https://github.com/adobe/spacecat-api-service/commit/46973e24b6398edf8f3b7a14b3a4a96f62c57a76))
+
+## [1.711.2](https://github.com/adobe/spacecat-api-service/compare/v1.711.1...v1.711.2) (2026-07-30)
+
+
+### Bug Fixes
+
+* **deps:** bump @adobe/spacecat-shared-data-access to 4.15.3 ([#2971](https://github.com/adobe/spacecat-api-service/issues/2971)) ([e3f25ab](https://github.com/adobe/spacecat-api-service/commit/e3f25abe612a13914bd6e197a913f4da8a9fcd3a))
+* **sites:** expose config.llmo.showWww in slim sites-list DTO | LLMO-6673 ([#2970](https://github.com/adobe/spacecat-api-service/issues/2970)) ([339729e](https://github.com/adobe/spacecat-api-service/commit/339729e68a25db3e7b030488f284b20fc100265f))
+
 ## [1.711.1](https://github.com/adobe/spacecat-api-service/compare/v1.711.0...v1.711.1) (2026-07-30)
 
 

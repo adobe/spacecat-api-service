@@ -30,6 +30,13 @@ import { resolveElementModel } from '../constants.js';
  *    controller). The live MFE also sends `CBF_brand`, but the url-inspector sibling
  *    definitions (owned-urls / domain-urls / cited-domains) do not duplicate it —
  *    the sub-workspace already scopes the brand — so it is omitted here too.
+ *  - Market scope → the element's TOP-LEVEL `project_id` (like owned-urls), NOT a
+ *    `CBF_project` advanced filter (verified live 2026-07-30: `CBF_project` is a silent
+ *    no-op; a bogus top-level `project_id` → HTTP 422). The element takes ONE project id
+ *    per call, so the service fans out per selected market and unions the results.
+ *  - Category scope → `CBF_tags` (op eq) in the `advanced` block (NOT `simple`, which is a
+ *    no-op), value = the full `category__<label>` tag — same mechanism as owned-urls
+ *    ({@link buildOwnedUrlsStatsPayload}).
  */
 
 /**
@@ -42,23 +49,31 @@ import { resolveElementModel } from '../constants.js';
  * @param {string} [params.platform] - Legacy alias for `model`; `model` takes precedence.
  * @param {string} params.startDate - ISO date (YYYY-MM-DD).
  * @param {string} params.endDate - ISO date (YYYY-MM-DD).
+ * @param {string} [params.category] - Full `category__<label>` tag value, sent as-is as a
+ *   `CBF_tags` eq in `advanced` (callers already include the `category__` prefix).
+ * @param {string} [params.projectId] - Semrush project id (market scope, top-level).
  * @returns {object} Semrush element request payload.
  */
 export function buildUrlPromptsPayload({
-  url, model, platform, startDate, endDate,
+  url, model, platform, startDate, endDate, category, projectId,
 } = {}) {
   const resolvedModel = resolveElementModel(model || platform);
+  const advancedFilters = [
+    { op: 'eq', val: resolvedModel, col: 'CBF_model' },
+    { op: 'eq', val: url, col: 'CBF_source' },
+    { op: 'gte', val: startDate, col: 'CBF_date__start' },
+    { op: 'lte', val: endDate, col: 'CBF_date__end' },
+  ];
+  if (category) {
+    advancedFilters.push({ op: 'eq', val: category, col: 'CBF_tags' });
+  }
   return {
+    ...(projectId && { project_id: projectId }),
     filters: {
       simple: { CBF_source: url },
       advanced: {
         op: 'and',
-        filters: [
-          { op: 'eq', val: resolvedModel, col: 'CBF_model' },
-          { op: 'eq', val: url, col: 'CBF_source' },
-          { op: 'gte', val: startDate, col: 'CBF_date__start' },
-          { op: 'lte', val: endDate, col: 'CBF_date__end' },
-        ],
+        filters: advancedFilters,
       },
     },
   };
@@ -98,4 +113,53 @@ export function transformUrlPromptsResponse(raw) {
       : [],
     closestDate: typeof row?.closest_date === 'string' ? row.closest_date : null,
   }));
+}
+
+/**
+ * Merges the per-market URL_PROMPTS responses (each already run through
+ * {@link transformUrlPromptsResponse}) into one deduped list. The element takes ONE
+ * top-level `project_id` per call, so a multi-market selection fans out one call per
+ * project (see `getUrlPrompts`) and this unions the transformed results. Extracted here
+ * (rather than inlined in the service) to match the sibling merge helpers in
+ * `owned-urls.js` / `cited-domains.js` and to keep the merge unit-testable.
+ *
+ * Dedupe is EXACT-STRING on `prompt` — NO case/whitespace normalization. Distinct
+ * markets are distinct geo+language slices, so a case- or space-differing prompt is a
+ * genuinely different prompt, not a variant to fold together. Rows with an empty
+ * `prompt` are malformed (the element returns one row per real prompt) and are DROPPED,
+ * not collapsed into a single bogus `''` entry that would hide a market's data.
+ *
+ * On collision the FIRST occurrence wins for scalar fields (`sourceTitle`,
+ * `brandMentioned`, ...). This is non-deterministic across markets by design: a URL's
+ * prompt text is the same everywhere, only per-market citation metadata differs, and the
+ * SR dialog shows a single row per prompt. `brands` are unioned and the latest
+ * `closestDate` is kept so "Brands mentioned" / "Last cited" reflect ALL selected markets.
+ *
+ * @param {Array<Array<object>>} perProjectRows - Transformed rows, one array per market.
+ * @returns {Array<object>} Deduped union, in first-seen order.
+ */
+export function mergeUrlPromptsResponses(perProjectRows = []) {
+  const byPrompt = new Map();
+  for (const rows of (Array.isArray(perProjectRows) ? perProjectRows : [])) {
+    for (const row of (Array.isArray(rows) ? rows : [])) {
+      // Drop malformed/blank-prompt rows so multiple markets' blanks don't collapse
+      // into one bogus '' entry (see docstring).
+      if (!row?.prompt) {
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+      const existing = byPrompt.get(row.prompt);
+      if (!existing) {
+        byPrompt.set(row.prompt, { ...row, brands: [...(row.brands ?? [])] });
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+      // Union brands (dedupe); keep the latest closestDate across markets.
+      existing.brands = [...new Set([...existing.brands, ...(row.brands ?? [])])];
+      if (row.closestDate && (!existing.closestDate || row.closestDate > existing.closestDate)) {
+        existing.closestDate = row.closestDate;
+      }
+    }
+  }
+  return [...byPrompt.values()];
 }

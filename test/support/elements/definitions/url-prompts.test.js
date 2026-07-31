@@ -14,6 +14,7 @@ import { expect } from 'chai';
 import {
   buildUrlPromptsPayload,
   transformUrlPromptsResponse,
+  mergeUrlPromptsResponses,
 } from '../../../../src/support/elements/definitions/url-prompts.js';
 import { DEFAULT_ELEMENT_MODEL } from '../../../../src/support/elements/constants.js';
 
@@ -69,6 +70,36 @@ describe('url-prompts definitions', () => {
       expect(payload.filters.simple).to.not.have.property('CBF_brand');
       expect(advancedVal(payload, 'CBF_brand')).to.be.undefined;
     });
+
+    it('scopes the market via a TOP-LEVEL project_id when projectId is given', () => {
+      const payload = buildUrlPromptsPayload({ url: URL, projectId: 'US-en' });
+      expect(payload.project_id).to.equal('US-en');
+    });
+
+    it('omits project_id when no projectId is given (aggregate across the sub-workspace)', () => {
+      expect(buildUrlPromptsPayload({ url: URL })).to.not.have.property('project_id');
+    });
+
+    it('never scopes the market via a CBF_project advanced filter (verified no-op)', () => {
+      const payload = buildUrlPromptsPayload({ url: URL, projectId: 'US-en' });
+      expect(advancedVal(payload, 'CBF_project')).to.be.undefined;
+    });
+
+    it('scopes the category via CBF_tags (eq) in advanced, sent as-is', () => {
+      const payload = buildUrlPromptsPayload({ url: URL, category: 'category__Brand' });
+      const tagFilter = payload.filters.advanced.filters.find((f) => f.col === 'CBF_tags');
+      expect(tagFilter).to.deep.equal({ op: 'eq', val: 'category__Brand', col: 'CBF_tags' });
+    });
+
+    it('never puts CBF_tags in the simple block (verified no-op)', () => {
+      const payload = buildUrlPromptsPayload({ url: URL, category: 'category__Brand' });
+      expect(payload.filters.simple).to.not.have.property('CBF_tags');
+    });
+
+    it('omits CBF_tags when no category is given', () => {
+      const payload = buildUrlPromptsPayload({ url: URL });
+      expect(advancedVal(payload, 'CBF_tags')).to.be.undefined;
+    });
   });
 
   describe('transformUrlPromptsResponse', () => {
@@ -121,6 +152,74 @@ describe('url-prompts definitions', () => {
       expect(row.sourceTitle).to.equal('');
       expect(row.brandMentioned).to.equal('');
       expect(row.closestDate).to.equal(null);
+    });
+  });
+
+  describe('mergeUrlPromptsResponses', () => {
+    // Minimal transformed-row factory (the shape transformUrlPromptsResponse emits).
+    const row = (prompt, over = {}) => ({
+      prompt,
+      category: '',
+      region: '',
+      topics: '',
+      citations: 0,
+      sourceTitle: '',
+      brandMentioned: '',
+      brands: [],
+      closestDate: null,
+      ...over,
+    });
+
+    it('returns an empty array for empty / non-array input', () => {
+      expect(mergeUrlPromptsResponses()).to.deep.equal([]);
+      expect(mergeUrlPromptsResponses([])).to.deep.equal([]);
+      expect(mergeUrlPromptsResponses([null, undefined])).to.deep.equal([]);
+    });
+
+    it('unions distinct prompts across markets in first-seen order', () => {
+      const merged = mergeUrlPromptsResponses([[row('a')], [row('b')], [row('a')]]);
+      expect(merged.map((r) => r.prompt)).to.deep.equal(['a', 'b']);
+    });
+
+    it('dedupes the same prompt across markets: unions brands, keeps latest closestDate', () => {
+      const merged = mergeUrlPromptsResponses([
+        [row('p', { brands: ['Lovesac'], closestDate: '2026-07-01T00:00:00Z' })],
+        [row('p', { brands: ['Lovesac', 'Figma'], closestDate: '2026-07-26T00:00:00Z' })],
+      ]);
+      expect(merged).to.have.length(1);
+      expect(merged[0].brands).to.deep.equal(['Lovesac', 'Figma']);
+      expect(merged[0].closestDate).to.equal('2026-07-26T00:00:00Z');
+    });
+
+    it('keeps the EARLIER closestDate when a later market has an older one', () => {
+      const merged = mergeUrlPromptsResponses([
+        [row('p', { closestDate: '2026-07-26T00:00:00Z' })],
+        [row('p', { closestDate: '2026-07-01T00:00:00Z' })],
+      ]);
+      expect(merged[0].closestDate).to.equal('2026-07-26T00:00:00Z');
+    });
+
+    it('first occurrence wins for scalar fields (sourceTitle/brandMentioned)', () => {
+      const merged = mergeUrlPromptsResponses([
+        [row('p', { sourceTitle: 'first', brandMentioned: 'mentioned' })],
+        [row('p', { sourceTitle: 'second', brandMentioned: 'not_mentioned' })],
+      ]);
+      expect(merged[0].sourceTitle).to.equal('first');
+      expect(merged[0].brandMentioned).to.equal('mentioned');
+    });
+
+    it('drops malformed blank-prompt rows instead of collapsing them into one entry', () => {
+      const merged = mergeUrlPromptsResponses([
+        [row(''), row('real')],
+        [row('')],
+      ]);
+      expect(merged.map((r) => r.prompt)).to.deep.equal(['real']);
+    });
+
+    it('does not mutate the input rows (brands array is copied)', () => {
+      const input = [[row('p', { brands: ['A'] })], [row('p', { brands: ['B'] })]];
+      mergeUrlPromptsResponses(input);
+      expect(input[0][0].brands).to.deep.equal(['A']);
     });
   });
 });
