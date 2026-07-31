@@ -47,6 +47,7 @@ import { applyFieldProjection } from '../utils/field-projection.js';
 import {
   getScheduleParams,
   buildExperimentMetadata,
+  presignInsightsRawData,
 } from '../support/geo-experiment-helper.js';
 import { FixDto } from '../dto/fix.js';
 import { GeoExperimentDto } from '../dto/geo-experiment.js';
@@ -2456,6 +2457,8 @@ function SuggestionsController(ctx, sqs, env) {
           );
           const body = await response.Body.transformToString();
           insights = JSON.parse(body);
+          // Presign each analysis's rawDataUrl so the UI can download the S3 detail blobs directly.
+          insights = await presignInsightsRawData(insights, context.s3, context.log);
         } catch (s3Error) {
           // Insights may not exist yet (e.g. impact measurement not yet complete)
           context.log.info(`[geo-experiment] Could not fetch insights for ${geoExperimentId}: ${s3Error.message}`);
