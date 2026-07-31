@@ -21,15 +21,17 @@ export const DEFAULT_ELEMENT_MODEL = 'search-gpt';
 export const ALL_PLATFORMS = 'all';
 
 /**
- * True when `value` is the {@link ALL_PLATFORMS} sentinel (case-insensitive). Callers
- * MUST check this BEFORE {@link resolveElementModel}, which would otherwise coerce
- * `'all'` to {@link DEFAULT_ELEMENT_MODEL} (it is not a valid Semrush model).
+ * True when `value` is the {@link ALL_PLATFORMS} sentinel (case-insensitive, whitespace
+ * trimmed — matching the sibling `'all'`-sentinel helpers `SKIP_VALUES` in
+ * `llmo-brand-presence.js` and `normalizeEngineFromQuery`). Callers MUST check this
+ * BEFORE {@link resolveElementModel}, which would otherwise coerce `'all'` to
+ * {@link DEFAULT_ELEMENT_MODEL} (it is not a valid Semrush model).
  *
  * @param {string} [value] - Raw value from the `model` or `platform` query param.
  * @returns {boolean}
  */
 export function isAllPlatforms(value) {
-  return typeof value === 'string' && value.toLowerCase() === ALL_PLATFORMS;
+  return typeof value === 'string' && value.trim().toLowerCase() === ALL_PLATFORMS;
 }
 
 export const ELEMENT_MODELS = Object.freeze([
