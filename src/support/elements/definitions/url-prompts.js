@@ -26,6 +26,11 @@ import { resolveElementModel, isAllPlatforms } from '../constants.js';
  *  - Date range → `advanced` `CBF_date__start` (gte) / `CBF_date__end` (lte)
  *    (NOT `simple.start_date`, which is what the topic-prompts element uses).
  *  - `CBF_model` (resolved via resolveElementModel) sits in `advanced` as a bare `eq`.
+ *    The `all` sentinel omits `CBF_model` entirely. VERIFIED live 2026-07-31 (same
+ *    sub-workspace, `/sactionals`, 4-week window): the filter-omitted response is a
+ *    deduped cross-model UNION — 715 distinct prompt rows (one row per distinct prompt,
+ *    no per-model grain), vs 508 for search-gpt alone. So a single-market `model=all`
+ *    call needs no extra dedupe beyond what the element already does server-side.
  *  - Brand scoping comes from targeting the brand's sub-workspace (resolved in the
  *    controller). The live MFE also sends `CBF_brand`, but the url-inspector sibling
  *    definitions (owned-urls / domain-urls / cited-domains) do not duplicate it —
@@ -66,7 +71,8 @@ export function buildUrlPromptsPayload({
   ];
   // `all` sentinel → omit CBF_model entirely (deduped cross-model union). Checked BEFORE
   // resolveElementModel, which would otherwise coerce 'all' to DEFAULT_ELEMENT_MODEL.
-  // Kept as the FIRST advanced filter for the single-model case (unchanged payload shape).
+  // The AND conjunction is order-independent; unshift (rather than push) only keeps the
+  // single-model payload byte-identical to before this change, to minimize the diff.
   if (!isAllPlatforms(requestedModel)) {
     advancedFilters.unshift({ op: 'eq', val: resolveElementModel(requestedModel), col: 'CBF_model' });
   }
