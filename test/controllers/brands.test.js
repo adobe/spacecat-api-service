@@ -7241,6 +7241,251 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(400);
     });
 
+    it('returns 409 with a code: brand_stale_write body when expectedUpdatedAt does not match (LLMO-6591)', async () => {
+      // beforeEach's mock resolves updated_at: '2026-01-02T00:00:00Z' for every
+      // read; a caller echoing a different (stale) timestamp must be rejected.
+      // The `code` field lets elmo-ui distinguish this from any other 409
+      // without regex-matching the message text.
+      const response = await brandsController.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { name: 'Updated Brand', expectedUpdatedAt: '2026-01-01T00:00:00Z' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+      expect(response.status).to.equal(409);
+      const body = await response.json();
+      expect(body.code).to.equal('brand_stale_write');
+    });
+
+    it('emits the BrandStaleWriteRejected metric on a rejected stale write (LLMO-6591)', async () => {
+      const logSpy = sinon.stub(console, 'log');
+      try {
+        const response = await brandsController.updateBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: { name: 'Updated Brand', expectedUpdatedAt: '2026-01-01T00:00:00Z' },
+          dataAccess: mockDataAccess,
+          pathInfo: { headers: { 'x-product': 'llmo' } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(409);
+        const emfLine = logSpy.getCalls()
+          .map((c) => c.args[0])
+          .find((l) => typeof l === 'string' && l.includes('BrandStaleWriteRejected'));
+        expect(emfLine, 'expected a BrandStaleWriteRejected EMF line').to.be.a('string');
+        const envelope = JSON.parse(emfLine);
+        expect(envelope.BrandStaleWriteRejected).to.equal(1);
+        expect(envelope.Operation).to.equal('updateBrand');
+        expect(envelope.Product).to.equal('llmo');
+        // eslint-disable-next-line no-underscore-dangle
+        expect(envelope._aws.CloudWatchMetrics[0].Namespace).to.equal('Mysticat/Brands');
+      } finally {
+        logSpy.restore();
+      }
+    });
+
+    it('succeeds when expectedUpdatedAt matches the persisted row (LLMO-6591)', async () => {
+      const response = await brandsController.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { name: 'Updated Brand', expectedUpdatedAt: '2026-01-02T00:00:00Z' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+      expect(response.status).to.equal(200);
+    });
+
+    it('swallows a logging failure emitting BrandStaleWriteRejected and still returns 409 (LLMO-6591, best-effort)', async () => {
+      // Mirrors the LLMO-5587 demotion-guard test of the same shape: proves
+      // emitBrandStaleWriteRejected's own catch keeps a logger failure from
+      // breaking the request path (covers the catch).
+      const logSpy = sinon.stub(console, 'log');
+      const throwingLogger = {
+        info: sandbox.stub(),
+        error: sandbox.stub(),
+        warn: sandbox.stub().throws(new Error('log boom')),
+        debug: sandbox.stub(),
+      };
+      const controller = BrandsController(context, throwingLogger, mockEnv);
+      try {
+        const response = await controller.updateBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: { name: 'Updated Brand', expectedUpdatedAt: '2026-01-01T00:00:00Z' },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(409);
+        expect(throwingLogger.warn).to.have.been.called;
+      } finally {
+        logSpy.restore();
+      }
+    });
+
+    it('emits BrandCollectionWiped when a successful write empties a previously non-empty collection (LLMO-6591)', async () => {
+      // Override the default fixture with a non-empty brand_aliases so the
+      // pre-write wipe-check read has something to detect as wiped.
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          in: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          upsert: sandbox.stub().returnsThis(),
+          delete: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({
+            data: {
+              id: BRAND_UUID,
+              name: 'Updated Brand',
+              status: 'active',
+              origin: 'human',
+              updated_at: '2026-01-02T00:00:00Z',
+              updated_by: 'user@test.com',
+              brand_aliases: [{ alias: 'Existing Alias', regions: [] }],
+              brand_social_accounts: [],
+              brand_earned_sources: [],
+              competitors: [],
+              brand_sites: [],
+            },
+            error: null,
+          }),
+        })),
+      };
+      const controller = BrandsController(context, loggerStub, mockEnv);
+      const logSpy = sinon.stub(console, 'log');
+      try {
+        const response = await controller.updateBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: { brandAliases: [] },
+          dataAccess: mockDataAccess,
+          pathInfo: { headers: { 'x-product': 'llmo' } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(200);
+        const emfLine = logSpy.getCalls()
+          .map((c) => c.args[0])
+          .find((l) => typeof l === 'string' && l.includes('BrandCollectionWiped'));
+        expect(emfLine, 'expected a BrandCollectionWiped EMF line').to.be.a('string');
+        const envelope = JSON.parse(emfLine);
+        expect(envelope.BrandCollectionWiped).to.equal(1);
+        expect(envelope.Operation).to.equal('updateBrand');
+        expect(envelope.Collection).to.equal('brandAliases');
+      } finally {
+        logSpy.restore();
+      }
+    });
+
+    it('still returns 200 (does not 500) when the best-effort wipe-check pre-read throws (LLMO-6591)', async () => {
+      // getBrandById is also called earlier (touchesSemrushSync check) with the
+      // exact same wide join select -- that occurrence must succeed; only the
+      // SECOND wide-select call (the wipe-check's own getBrandById) must throw.
+      let wideSelectCalls = 0;
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake((table) => ({
+          select: sandbox.stub().callsFake((cols) => {
+            if (table !== 'brands' || cols === 'id') {
+              return {
+                eq: sandbox.stub().returnsThis(),
+                maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+              };
+            }
+            wideSelectCalls += 1;
+            // Only the SECOND wide-select call is the wipe-check's own getBrandById --
+            // the first (touchesSemrushSync check) and any later ones (updateBrand's
+            // own final getBrandById) must succeed.
+            if (wideSelectCalls === 2) {
+              return {
+                eq: sandbox.stub().returnsThis(),
+                maybeSingle: sandbox.stub().rejects(new Error('wipe-check read boom')),
+              };
+            }
+            return {
+              eq: sandbox.stub().returnsThis(),
+              maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+            };
+          }),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          in: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          upsert: sandbox.stub().returnsThis(),
+          delete: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+        })),
+      };
+      const controller = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { brandAliases: [] },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(loggerStub.warn).to.have.been.calledWithMatch('wipe-check pre-read failed');
+    });
+
+    it('swallows a logging failure emitting BrandCollectionWiped and still returns 200 (LLMO-6591, best-effort)', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          in: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          upsert: sandbox.stub().returnsThis(),
+          delete: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({
+            data: {
+              id: BRAND_UUID,
+              name: 'Updated Brand',
+              status: 'active',
+              origin: 'human',
+              updated_at: '2026-01-02T00:00:00Z',
+              updated_by: 'user@test.com',
+              brand_aliases: [{ alias: 'Existing Alias', regions: [] }],
+              brand_social_accounts: [],
+              brand_earned_sources: [],
+              competitors: [],
+              brand_sites: [],
+            },
+            error: null,
+          }),
+        })),
+      };
+      const throwingLogger = {
+        info: sandbox.stub(),
+        error: sandbox.stub(),
+        warn: sandbox.stub().throws(new Error('log boom')),
+        debug: sandbox.stub(),
+      };
+      const controller = BrandsController(context, throwingLogger, mockEnv);
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { brandAliases: [] },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(throwingLogger.warn).to.have.been.called;
+    });
+
     it('returns 400 when params is undefined', async () => {
       const response = await brandsController.updateBrandForOrg({
         ...context,
@@ -7441,6 +7686,40 @@ describe('Brands Controller', () => {
         expect(loggerStub.info).to.have.been.calledWithMatch(
           'brands: dropped self-referential competitor(s) on update',
         );
+      });
+
+      it('rejects (400) rather than silently wiping competitors when EVERY submitted competitor is self-referential (LLMO-6591)', async () => {
+        // If all submitted competitors get stripped by the guard, persisting the
+        // resulting [] would wipe the brand's existing competitors even though
+        // the caller never asked to clear the collection -- must reject instead.
+        const updateBrandStub = sinon.stub().resolves({ id: BRAND_UUID, name: 'Flat Brand' });
+        const getBrandByIdStub = sinon.stub().resolves({
+          id: BRAND_UUID,
+          baseUrl: 'https://acme.com',
+          urls: [{ value: 'https://shop.acme.com' }],
+          semrushSubWorkspaceId: undefined,
+        });
+        const controller = await buildUpdateController({
+          updateBrand: updateBrandStub,
+          getBrandById: getBrandByIdStub,
+        });
+
+        const response = await controller.updateBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: {
+            competitors: [
+              { name: 'Self', url: 'https://acme.com' },
+              { name: 'Shop', url: 'https://shop.acme.com' },
+            ],
+          },
+          dataAccess: mockDataAccess,
+          pathInfo: { headers: { authorization: 'Bearer tok' } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(400);
+        expect(updateBrandStub).to.not.have.been.called;
       });
 
       it('strips a self-referential competitor on a SEMRUSH brand update (a market/project domain)', async () => {

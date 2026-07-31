@@ -47,7 +47,8 @@ import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
 import { applyFieldProjection } from '../utils/field-projection.js';
 import {
-  wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled, CUSTOMER_VISIBLE_TIERS, isInternalOrg,
+  wwwUrlResolver, resolveWwwUrl, getAsoEntitlement, getAsoTier, CUSTOMER_VISIBLE_TIERS,
+  isInternalOrg,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { CAP_SITE_READ_ALL, CAP_SITE_CREATE } from '../routes/capability-constants.js';
@@ -70,14 +71,30 @@ import { guardProvisioningLlmoFields } from '../support/llmo-config-guards.js';
 const VALIDATION_ERROR_NAME = 'ValidationError';
 
 /**
- * Builds the standard resolve-site success payload.
+ * Builds the standard resolve-site success payload. Fetches the org's ASO entitlement at
+ * most once — both `isSummitPlgEnabled` and `asoTier` are derived from that single result
+ * (or from `asoEntitlement`, when the caller already fetched it) to avoid a duplicate
+ * Entitlement lookup.
+ * @param {object} org - Organization model instance.
+ * @param {object} site - Site model instance.
+ * @param {object} context - Request context.
+ * @param {object} [asoEntitlement] - The org's ASO entitlement, if the caller already fetched
+ *   it (i.e. the request's x-product header is ASO) — pass it to avoid a redundant lookup.
+ *   Omit (leave undefined) when the caller doesn't already have the ASO entitlement in hand;
+ *   it is then resolved with its own lookup. `null` is a valid value (no entitlement).
+ * @returns {Promise<object>} Resolve-site response payload.
  */
-async function buildResolveData(org, site, context) {
-  const isSummitPlgEnabled = await getIsSummitPlgEnabled(site, context);
+async function buildResolveData(org, site, context, asoEntitlement) {
+  const entitlement = asoEntitlement !== undefined
+    ? asoEntitlement
+    : await getAsoEntitlement(site.getOrganizationId(), context);
+  const isSummitPlgEnabled = entitlement?.getTier() === EntitlementModel.TIERS.PLG;
+  const asoTier = entitlement?.getTier() ?? null;
   return {
     organization: OrganizationDto.toJSON(org),
     site: SiteDto.toJSON(site),
     isSummitPlgEnabled,
+    asoTier,
   };
 }
 
@@ -127,7 +144,12 @@ export async function resolveOrgDefaultSite(org, productCode, context, ctx, acce
       return null;
     }
 
-    return buildResolveData(org, defaultSite, context);
+    return buildResolveData(
+      org,
+      defaultSite,
+      context,
+      productCode === ASO_PRODUCT_CODE ? entitlement : undefined,
+    );
   } catch (e) {
     log.warn(
       `[resolveSite] resolveOrgDefaultSite failed for org ${org.getId()} product ${productCode} — falling back`,
@@ -1808,7 +1830,9 @@ function SitesController(ctx, log, env) {
    * Tries siteId first, then checks either organizationId or imsOrg (mutually exclusive).
    *
    * On failure, returns HTTP 404 with a structured body:
-   *   { message, resolveStatus, details? }
+   *   { message, resolveStatus, details?, asoTier }
+   * `asoTier` is included on every response (success and failure) so the UI can gate
+   * behavior off the org's raw ASO entitlement tier even when resolution fails.
    * where `resolveStatus` is one of:
    *   - 'no_entitlement_for_product' — org has no entitlement for the requested x-product.
    *   - 'aso_pre_onboard' — entitlement tier is not in CUSTOMER_VISIBLE_TIERS (e.g. PRE_ONBOARD).
@@ -1835,10 +1859,26 @@ function SitesController(ctx, log, env) {
       return badRequest('Either organizationId or imsOrg must be provided');
     }
 
-    const resolveFailure = (message, resolveStatus, details) => createResponse(
-      { message, resolveStatus, details },
+    const resolveFailure = (message, resolveStatus, details, asoTier = null) => createResponse(
+      {
+        message, resolveStatus, details, asoTier,
+      },
       404,
       { 'x-error': message },
+    );
+
+    // Resolves the org's ASO tier for a failure response. Reuses the entitlement already
+    // fetched by the caller only when it's both the ASO entitlement (x-product: ASO) AND
+    // truthy — TierClient.getFirstEnrollment() nulls out `entitlement` whenever no site is
+    // enrolled, even when a real Entitlement row exists (unlike getAllEnrollment(), which
+    // keeps it), so a falsy entitlement here is not a reliable "no ASO entitlement" signal.
+    // Falls back to an independent lookup (unambiguous — queries Entitlement directly)
+    // whenever we can't trust the passed-in value, so asoTier is always populated correctly
+    // regardless of which product was resolved or which TierClient method fetched it.
+    const resolveAsoTier = async (orgId, entitlement) => (
+      productCode === ASO_PRODUCT_CODE && entitlement
+        ? entitlement.getTier()
+        : getAsoTier(orgId, context)
     );
 
     const isOrgWaitingForIpAllowlisting = async (org) => {
@@ -1889,7 +1929,7 @@ function SitesController(ctx, log, env) {
 
     // Shared org-level tier + enrollment check used by both organizationId and imsOrg paths.
     // Captures: resolveFailure, callerIsInternal, callerImsOrg, accessControlUtil, context,
-    //           productCode, CUSTOMER_VISIBLE_TIERS, TierClient, getIsSummitPlgEnabled, log, ok,
+    //           productCode, CUSTOMER_VISIBLE_TIERS, TierClient, resolveAsoTier, log, ok,
     //           OrganizationDto, SiteDto, facs, facsSiteFilterActive — all in enclosing scope.
     const resolveByOrg = async (org, failureDetails) => {
       const args = [org, productCode, context, ctx, accessControlUtil];
@@ -1926,25 +1966,48 @@ function SitesController(ctx, log, env) {
             'No site found for the provided parameters',
             callerIsInternal ? 'site_not_enrolled' : 'no_entitlement_for_product',
             failureDetails,
+            await resolveAsoTier(org.getId(), entitlement),
           );
         }
 
         if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
           if (!callerIsInternal && !accessControlUtil.hasAdminAccess()) {
-            return resolveFailure('No site found for the provided parameters', 'aso_pre_onboard', failureDetails);
+            return resolveFailure(
+              'No site found for the provided parameters',
+              'aso_pre_onboard',
+              failureDetails,
+              await resolveAsoTier(org.getId(), entitlement),
+            );
           }
           log.info(`[resolveSite] Internal or admin caller (callerImsOrg=${callerImsOrg}): skipping tier check (tier=${entitlement.getTier()})`, failureDetails);
         }
 
         const firstViewableEnrollment = enrollments?.find((e) => viewable.has(e.getSiteId()));
         if (!firstViewableEnrollment) {
-          return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+          return resolveFailure(
+            'No site found for the provided parameters',
+            'site_not_enrolled',
+            failureDetails,
+            await resolveAsoTier(org.getId(), entitlement),
+          );
         }
         const firstViewableSite = await Site.findById(firstViewableEnrollment.getSiteId());
         if (!firstViewableSite) {
-          return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+          return resolveFailure(
+            'No site found for the provided parameters',
+            'site_not_enrolled',
+            failureDetails,
+            await resolveAsoTier(org.getId(), entitlement),
+          );
         }
-        return ok({ data: await buildResolveData(org, firstViewableSite, context) });
+        return ok({
+          data: await buildResolveData(
+            org,
+            firstViewableSite,
+            context,
+            productCode === ASO_PRODUCT_CODE ? entitlement : undefined,
+          ),
+        });
       }
 
       // Non-FACS path (admin / internal / JWT federal grant / LD-off): existing logic.
@@ -1964,29 +2027,54 @@ function SitesController(ctx, log, env) {
       if (callerIsInternal && !hasCustomerVisibleEntitlement
         && await isOrgWaitingForIpAllowlisting(org)) {
         log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): WAITING_FOR_IP_ALLOWLISTING detected, preserving no_entitlement_for_product for org=${org.getId()}`);
-        return resolveFailure('No site found for the provided parameters', 'no_entitlement_for_product', failureDetails);
+        return resolveFailure(
+          'No site found for the provided parameters',
+          'no_entitlement_for_product',
+          failureDetails,
+          await resolveAsoTier(org.getId(), entitlement),
+        );
       }
 
       if (!entitlement) {
-        if (callerIsInternal) {
-          return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
-        }
-        return resolveFailure('No site found for the provided parameters', 'no_entitlement_for_product', failureDetails);
+        const resolveStatus = callerIsInternal ? 'site_not_enrolled' : 'no_entitlement_for_product';
+        return resolveFailure(
+          'No site found for the provided parameters',
+          resolveStatus,
+          failureDetails,
+          await resolveAsoTier(org.getId(), entitlement),
+        );
       }
 
       if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
         if (!callerIsInternal && !accessControlUtil.hasAdminAccess()) {
-          return resolveFailure('No site found for the provided parameters', 'aso_pre_onboard', failureDetails);
+          return resolveFailure(
+            'No site found for the provided parameters',
+            'aso_pre_onboard',
+            failureDetails,
+            await resolveAsoTier(org.getId(), entitlement),
+          );
         }
         log.info(`[resolveSite] Internal or admin caller (callerImsOrg=${callerImsOrg}): skipping tier check (tier=${entitlement.getTier()})`, failureDetails);
       }
 
       if (enrolledSite && (accessControlUtil.hasAdminAccess()
         || CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier()))) {
-        return ok({ data: await buildResolveData(org, enrolledSite, context) });
+        return ok({
+          data: await buildResolveData(
+            org,
+            enrolledSite,
+            context,
+            productCode === ASO_PRODUCT_CODE ? entitlement : undefined,
+          ),
+        });
       }
 
-      return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+      return resolveFailure(
+        'No site found for the provided parameters',
+        'site_not_enrolled',
+        failureDetails,
+        await resolveAsoTier(org.getId(), entitlement),
+      );
     };
 
     let organization;
@@ -2024,26 +2112,46 @@ function SitesController(ctx, log, env) {
               if (callerIsInternal && !hasCustomerVisibleEntitlement
                 && await isOrgWaitingForIpAllowlisting(organization)) {
                 log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): WAITING_FOR_IP_ALLOWLISTING detected, preserving no_entitlement_for_product for siteId=${siteId}`);
-                return resolveFailure('No site found for the provided parameters', 'no_entitlement_for_product', failureDetails);
+                return resolveFailure(
+                  'No site found for the provided parameters',
+                  'no_entitlement_for_product',
+                  failureDetails,
+                  await resolveAsoTier(orgId, entitlement),
+                );
               }
 
               if (!entitlement) {
+                const resolveStatus = callerIsInternal ? 'site_not_enrolled' : 'no_entitlement_for_product';
                 if (callerIsInternal) {
                   log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): remapping no_entitlement_for_product → site_not_enrolled for siteId=${siteId}`);
-                  return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
                 }
-                return resolveFailure('No site found for the provided parameters', 'no_entitlement_for_product', failureDetails);
+                return resolveFailure(
+                  'No site found for the provided parameters',
+                  resolveStatus,
+                  failureDetails,
+                  await resolveAsoTier(orgId, entitlement),
+                );
               }
 
               if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
                 if (!callerIsInternal) {
-                  return resolveFailure('No site found for the provided parameters', 'aso_pre_onboard', failureDetails);
+                  return resolveFailure(
+                    'No site found for the provided parameters',
+                    'aso_pre_onboard',
+                    failureDetails,
+                    await resolveAsoTier(orgId, entitlement),
+                  );
                 }
                 log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): skipping tier check (tier=${entitlement.getTier()}), letting enrollment decide for siteId=${siteId}`);
               }
 
               if (!enrollments?.length) {
-                return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+                return resolveFailure(
+                  'No site found for the provided parameters',
+                  'site_not_enrolled',
+                  failureDetails,
+                  await resolveAsoTier(orgId, entitlement),
+                );
               }
 
               if (facsSiteFilterActive) {
@@ -2061,11 +2169,23 @@ function SitesController(ctx, log, env) {
                   },
                 );
                 if (!viewable.has(site.getId())) {
-                  return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+                  return resolveFailure(
+                    'No site found for the provided parameters',
+                    'site_not_enrolled',
+                    failureDetails,
+                    await resolveAsoTier(orgId, entitlement),
+                  );
                 }
               }
 
-              return ok({ data: await buildResolveData(organization, site, context) });
+              return ok({
+                data: await buildResolveData(
+                  organization,
+                  site,
+                  context,
+                  productCode === ASO_PRODUCT_CODE ? entitlement : undefined,
+                ),
+              });
             }
           }
         }
@@ -2097,7 +2217,10 @@ function SitesController(ctx, log, env) {
         }
       }
 
-      return notFound('No site found for the provided parameters');
+      // Reached only when `organization` resolved but accessControlUtil.hasAccess()
+      // denied the caller — asoTier intentionally stays null (the default) rather than
+      // resolving it for an org the caller isn't authorized to see any data about.
+      return resolveFailure('No site found for the provided parameters');
     } catch (error) {
       log.error(`Error resolving site: ${error.message}`);
       return badRequest('Failed to resolve site');

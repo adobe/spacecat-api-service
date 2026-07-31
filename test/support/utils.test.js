@@ -25,7 +25,10 @@ import {
   deriveProjectName,
   autoResolveAuthorUrl,
   updateCodeConfig,
+  deriveCodeFromHlxConfig,
   getIsSummitPlgEnabled,
+  getAsoEntitlement,
+  getAsoTier,
   getCookieValue,
   filterSitesForProductCode,
   getEntitledProductCodes,
@@ -526,6 +529,64 @@ describe('utils', () => {
     });
   });
 
+  describe('deriveCodeFromHlxConfig', () => {
+    it('derives from hlxConfig.code (owner/repo/type/url) + rso.ref', () => {
+      const code = deriveCodeFromHlxConfig({
+        rso: {
+          ref: 'main', tld: 'aem.live', site: 'externalweb-ibrd', owner: 'wbgextapp',
+        },
+        code: {
+          repo: 'externalweb-ibrd',
+          owner: 'wbgextapp',
+          source: { url: 'https://github.com/wbgextapp/externalweb-ibrd', type: 'github' },
+        },
+      });
+
+      expect(code).to.eql({
+        type: 'github',
+        owner: 'wbgextapp',
+        repo: 'externalweb-ibrd',
+        ref: 'main',
+        url: 'https://github.com/wbgextapp/externalweb-ibrd',
+      });
+    });
+
+    it('falls back to hlxConfig.rso when hlxConfig.code is absent (repo from rso.site)', () => {
+      const code = deriveCodeFromHlxConfig({
+        rso: {
+          ref: 'dev', tld: 'aem.live', site: 'my-repo', owner: 'my-owner',
+        },
+      });
+
+      expect(code).to.eql({
+        type: 'github',
+        owner: 'my-owner',
+        repo: 'my-repo',
+        ref: 'dev',
+        url: 'https://github.com/my-owner/my-repo',
+      });
+    });
+
+    it('defaults ref to main and type to github when rso.ref / code.source.type are missing', () => {
+      const code = deriveCodeFromHlxConfig({
+        code: { owner: 'o', repo: 'r' },
+      });
+
+      expect(code).to.include({ ref: 'main', type: 'github' });
+    });
+
+    it('returns null when owner/repo cannot be resolved', () => {
+      expect(deriveCodeFromHlxConfig({ rso: {}, code: {} })).to.be.null;
+    });
+
+    it('returns null for a non-object / empty hlxConfig', () => {
+      expect(deriveCodeFromHlxConfig(null)).to.be.null;
+      expect(deriveCodeFromHlxConfig(undefined)).to.be.null;
+      expect(deriveCodeFromHlxConfig('nope')).to.be.null;
+      expect(deriveCodeFromHlxConfig({})).to.be.null;
+    });
+  });
+
   describe('getIsSummitPlgEnabled', () => {
     let sandbox;
     let context;
@@ -680,6 +741,106 @@ describe('utils', () => {
       const result = await getIsSummitPlgEnabled(site, context, requestContext);
 
       expect(result).to.be.false;
+    });
+  });
+
+  describe('getAsoEntitlement / getAsoTier', () => {
+    let sandbox;
+    let context;
+
+    beforeEach(() => {
+      sandbox = sinon.createSandbox();
+      context = {
+        log: { error: sandbox.stub() },
+        dataAccess: {},
+      };
+    });
+
+    afterEach(() => {
+      sandbox.restore();
+    });
+
+    it('getAsoEntitlement returns the entitlement for the org', async () => {
+      const entitlement = { getTier: () => 'PAID' };
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub()
+          .withArgs('org-456', 'ASO')
+          .resolves(entitlement),
+      };
+
+      const result = await getAsoEntitlement('org-456', context);
+
+      expect(result).to.equal(entitlement);
+      expect(context.dataAccess.Entitlement.findByOrganizationIdAndProductCode)
+        .to.have.been.calledWith('org-456', 'ASO');
+    });
+
+    it('getAsoEntitlement returns null when organizationId is missing', async () => {
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub(),
+      };
+
+      const result = await getAsoEntitlement(undefined, context);
+
+      expect(result).to.be.null;
+      expect(context.dataAccess.Entitlement.findByOrganizationIdAndProductCode)
+        .to.not.have.been.called;
+    });
+
+    it('getAsoEntitlement returns null when context.dataAccess has no Entitlement', async () => {
+      context.dataAccess = {};
+
+      const result = await getAsoEntitlement('org-456', context);
+
+      expect(result).to.be.null;
+    });
+
+    it('getAsoEntitlement returns null and logs error when the lookup throws', async () => {
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub().rejects(new Error('Entitlement DB error')),
+      };
+
+      const result = await getAsoEntitlement('org-456', context);
+
+      expect(result).to.be.null;
+      expect(context.log.error).to.have.been.calledWithMatch(/Error resolving ASO entitlement/, sinon.match.instanceOf(Error));
+    });
+
+    it('getAsoTier returns the tier when an entitlement exists', async () => {
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub().resolves({ getTier: () => 'PAID' }),
+      };
+
+      const result = await getAsoTier('org-456', context);
+
+      expect(result).to.equal('PAID');
+    });
+
+    it('getAsoTier returns null when no ASO entitlement exists', async () => {
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub().resolves(null),
+      };
+
+      const result = await getAsoTier('org-456', context);
+
+      expect(result).to.be.null;
+    });
+
+    it('getAsoTier returns null when organizationId is missing', async () => {
+      const result = await getAsoTier(undefined, context);
+
+      expect(result).to.be.null;
+    });
+
+    it('getAsoTier returns null and logs error when the lookup throws', async () => {
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub().rejects(new Error('Entitlement DB error')),
+      };
+
+      const result = await getAsoTier('org-456', context);
+
+      expect(result).to.be.null;
+      expect(context.log.error).to.have.been.calledWithMatch(/Error resolving ASO entitlement/, sinon.match.instanceOf(Error));
     });
   });
 

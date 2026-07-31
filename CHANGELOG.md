@@ -1,3 +1,46 @@
+## [1.711.3](https://github.com/adobe/spacecat-api-service/compare/v1.711.2...v1.711.3) (2026-07-30)
+
+
+### Bug Fixes
+
+* **sites:** populate top-level code from hlxConfig on EDS site discovery/approval ([#2973](https://github.com/adobe/spacecat-api-service/issues/2973)) ([46973e2](https://github.com/adobe/spacecat-api-service/commit/46973e24b6398edf8f3b7a14b3a4a96f62c57a76))
+
+## [1.711.2](https://github.com/adobe/spacecat-api-service/compare/v1.711.1...v1.711.2) (2026-07-30)
+
+
+### Bug Fixes
+
+* **deps:** bump @adobe/spacecat-shared-data-access to 4.15.3 ([#2971](https://github.com/adobe/spacecat-api-service/issues/2971)) ([e3f25ab](https://github.com/adobe/spacecat-api-service/commit/e3f25abe612a13914bd6e197a913f4da8a9fcd3a))
+* **sites:** expose config.llmo.showWww in slim sites-list DTO | LLMO-6673 ([#2970](https://github.com/adobe/spacecat-api-service/issues/2970)) ([339729e](https://github.com/adobe/spacecat-api-service/commit/339729e68a25db3e7b030488f284b20fc100265f))
+
+## [1.711.1](https://github.com/adobe/spacecat-api-service/compare/v1.711.0...v1.711.1) (2026-07-30)
+
+
+### Bug Fixes
+
+* **brands:** guard full-replace child syncs against silent wipes (LLMO-6591) ([#2966](https://github.com/adobe/spacecat-api-service/issues/2966)) ([3ef29ee](https://github.com/adobe/spacecat-api-service/commit/3ef29eeccc89564260b534561889924c90b27a9d))
+
+# [1.711.0](https://github.com/adobe/spacecat-api-service/compare/v1.710.1...v1.711.0) (2026-07-30)
+
+
+### Features
+
+* URL-Prompts serenity endpoint for URL Inspector | LLMO-6620 ([#2942](https://github.com/adobe/spacecat-api-service/issues/2942)) ([0483eb3](https://github.com/adobe/spacecat-api-service/commit/0483eb308e8af3c77ed57890c668d9f1abb11b90))
+
+## [1.710.1](https://github.com/adobe/spacecat-api-service/compare/v1.710.0...v1.710.1) (2026-07-30)
+
+
+### Bug Fixes
+
+* **serenity:** name a new market after its market, not the brand plus a random hash ([#2965](https://github.com/adobe/spacecat-api-service/issues/2965)) ([8f580ac](https://github.com/adobe/spacecat-api-service/commit/8f580ac75120f2c2093cea5f3f4b8f27d955f49e)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+# [1.710.0](https://github.com/adobe/spacecat-api-service/compare/v1.709.0...v1.710.0) (2026-07-30)
+
+
+### Features
+
+* expose ASO entitlement tier on sites-resolve | SITES-48838 ([#2949](https://github.com/adobe/spacecat-api-service/issues/2949)) ([c212aea](https://github.com/adobe/spacecat-api-service/commit/c212aeae4e5e9b0fbcbd26b1585215bf09060717))
+
 # [1.709.0](https://github.com/adobe/spacecat-api-service/compare/v1.708.2...v1.709.0) (2026-07-30)
 
 

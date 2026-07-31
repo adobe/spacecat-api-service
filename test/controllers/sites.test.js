@@ -6966,6 +6966,77 @@ describe('Sites Controller', () => {
       expect(body.data).to.have.property('isSummitPlgEnabled', false);
     });
 
+    it('should include asoTier in response reflecting the org ASO entitlement tier', async () => {
+      mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves({
+        getTier: () => 'PAID',
+      });
+
+      context.data = { organizationId: testOrganizations[0].getId() };
+      mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+      mockDataAccess.Site.findById.resolves(testSites[0]);
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: { getId: () => 'entitlement-123', getTier: () => 'FREE_TRIAL' },
+        enrollment: { getId: () => 'enrollment-1', getSiteId: () => SITE_IDS[0] },
+        site: testSites[0],
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.data).to.have.property('asoTier', 'PAID');
+    });
+
+    it('should set asoTier to null when no ASO entitlement exists', async () => {
+      mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves(null);
+
+      context.data = { organizationId: testOrganizations[0].getId() };
+      mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+      mockDataAccess.Site.findById.resolves(testSites[0]);
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: { getId: () => 'entitlement-123', getTier: () => 'FREE_TRIAL' },
+        enrollment: { getId: () => 'enrollment-1', getSiteId: () => SITE_IDS[0] },
+        site: testSites[0],
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.data).to.have.property('asoTier', null);
+    });
+
+    it('should reuse the already-fetched ASO entitlement for asoTier instead of an independent lookup when x-product is ASO', async () => {
+      // Independent-lookup stub deliberately returns a different tier than the
+      // TierClient entitlement below, so the assertion proves which one won.
+      mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves({
+        getTier: () => 'PLG',
+      });
+
+      context.data = { organizationId: testOrganizations[0].getId() };
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
+      mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+      mockDataAccess.Site.findById.resolves(testSites[0]);
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: { getId: () => 'entitlement-123', getTier: () => 'PAID' },
+        enrollment: { getId: () => 'enrollment-1', getSiteId: () => SITE_IDS[0] },
+        site: testSites[0],
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.data).to.have.property('asoTier', 'PAID');
+      // isSummitPlgEnabled is also derived from the reused entitlement (tier PAID, not
+      // PLG) rather than the independent stub's tier ('PLG'), which would have made this
+      // true had a second lookup happened.
+      expect(body.data).to.have.property('isSummitPlgEnabled', false);
+      // No independent Entitlement lookup at all — both isSummitPlgEnabled and asoTier
+      // are derived from the single already-fetched TierClient entitlement.
+      expect(mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.callCount).to.equal(0);
+    });
+
     it('should return 404 with no_entitlement_for_product resolveStatus for non-existent imsOrg (external caller)', async () => {
       context.data = { imsOrg: 'nonexistent@AdobeOrg' };
       mockDataAccess.Organization.findByImsOrgId.resolves(null);
@@ -7256,6 +7327,8 @@ describe('Sites Controller', () => {
       expect(body.resolveStatus).to.equal('aso_pre_onboard');
       expect(body.details).to.deep.include({ productCode: 'ASO' });
       expect(body.details).to.not.have.property('tier');
+      // Reused from the already-fetched TierClient entitlement (x-product: ASO).
+      expect(body.asoTier).to.equal('PRE_ONBOARD');
     });
 
     it('should return 404 with no_entitlement_for_product resolveStatus when product has no entitlement', async () => {
@@ -7278,6 +7351,13 @@ describe('Sites Controller', () => {
       const body = await response.json();
       expect(body.resolveStatus).to.equal('no_entitlement_for_product');
       expect(body.details).to.deep.include({ productCode: 'ASO' });
+      // A falsy entitlement from TierClient is never trusted as an authoritative "no ASO
+      // entitlement" signal on its own (getFirstEnrollment() nulls it out merely when
+      // there's no enrolled site, even if a real Entitlement row exists — SITES-48838) —
+      // asoTier always falls back to an independent, unambiguous lookup in that case.
+      expect(body.asoTier).to.equal('PLG');
+      expect(mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.calledOnce)
+        .to.equal(true);
     });
 
     it('should return 404 with site_not_enrolled resolveStatus when entitlement is visible but site has no enrollment', async () => {
@@ -7304,6 +7384,11 @@ describe('Sites Controller', () => {
       const body = await response.json();
       expect(body.resolveStatus).to.equal('site_not_enrolled');
       expect(body.details).to.deep.include({ productCode: 'ASO' });
+      // asoTier is read straight off the already-fetched TierClient entitlement
+      // ('FREE_TRIAL'), not from an independent Entitlement lookup (which the
+      // default stub would have returned as 'PLG') — proves the reuse path.
+      expect(body.asoTier).to.equal('FREE_TRIAL');
+      expect(mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.called).to.equal(false);
     });
 
     it('should return 404 with aso_pre_onboard for PRE_ONBOARD-tier site via organizationId path for non-admin', async () => {
@@ -7326,6 +7411,9 @@ describe('Sites Controller', () => {
       const body = await response.json();
       expect(body.message).to.include('No site found for the provided parameters');
       expect(body.resolveStatus).to.equal('aso_pre_onboard');
+      // x-product here is not ASO, so asoTier comes from the independent lookup
+      // (the default beforeEach stub's tier), not the TierClient entitlement above.
+      expect(body.asoTier).to.equal('PLG');
     });
 
     it('should return 200 for PRE_ONBOARD-tier site via organizationId path for admin', async () => {
@@ -7404,6 +7492,7 @@ describe('Sites Controller', () => {
     it('should return 404 with no_entitlement_for_product for admin when organizationId path has no entitlement', async () => {
       sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
       context.data = { organizationId: testOrganizations[0].getId() };
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
       mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
 
       mockTierClientStub.getFirstEnrollment.resolves({
@@ -7418,6 +7507,12 @@ describe('Sites Controller', () => {
       const body = await response.json();
       expect(body.message).to.include('No site found for the provided parameters');
       expect(body.resolveStatus).to.equal('no_entitlement_for_product');
+      // getFirstEnrollment() nulls out `entitlement` whenever no site is enrolled, even
+      // when a real ASO Entitlement row exists (SITES-48838 regression) — asoTier must
+      // come from the independent lookup, not be trusted as null off that null entitlement.
+      expect(body.asoTier).to.equal('PLG');
+      expect(mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.calledOnce)
+        .to.equal(true);
     });
 
     it('should return 404 for admin when imsOrg path has no enrolled site', async () => {
