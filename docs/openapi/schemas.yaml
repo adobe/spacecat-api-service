@@ -9426,6 +9426,60 @@ UrlInspectorUrlPrompts:
         $ref: '#/UrlInspectorUrlPromptRow'
   required: [prompts]
 
+SerenityUrlInspectorUrlPromptRow:
+  type: object
+  description: |
+    One prompt that cited the inspected URL, from the Serenity URL_PROMPTS element.
+    `category`, `region`, `topics` and `citations` are always empty/0 — the element
+    does not expose them; they are kept for shape parity with the Postgres
+    `UrlInspectorUrlPromptRow` contract this endpoint replaces. `sourceTitle`,
+    `brandMentioned`, `brands` and `closestDate` are the Serenity-only extras that
+    power the URL details dialog.
+  properties:
+    prompt:
+      type: string
+      example: 'What size Lovesac sectional is best for a studio apartment?'
+    category:
+      type: string
+      description: Always empty (not exposed by the element); kept for PG-contract parity.
+      example: ''
+    region:
+      type: string
+      description: Always empty (not exposed by the element); kept for PG-contract parity.
+      example: ''
+    topics:
+      type: string
+      description: Always empty (not exposed by the element); kept for PG-contract parity.
+      example: ''
+    citations:
+      type: integer
+      description: Always 0 (one row per distinct prompt, no per-prompt count); kept for PG-contract parity.
+      example: 0
+    sourceTitle:
+      type: string
+      example: 'Modular Sectional Couches | Lovesac Sactionals'
+    brandMentioned:
+      type: string
+      example: 'mentioned'
+    brands:
+      type: array
+      items: { type: string }
+      example: ['Lovesac']
+    closestDate:
+      type: [string, 'null']
+      description: ISO timestamp of the most recent citation for this prompt, or null.
+      example: '2026-07-26T00:00:00Z'
+  required: [prompt]
+
+SerenityUrlInspectorUrlPrompts:
+  type: object
+  properties:
+    prompts:
+      type: array
+      items:
+        $ref: '#/SerenityUrlInspectorUrlPromptRow'
+  required: [prompts]
+
 UrlInspectorFilterDimensions:
   type: object
   description: |

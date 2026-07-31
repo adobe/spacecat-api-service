@@ -200,6 +200,8 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-url-inspector-stats'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/prompts/count:
     $ref: './serenity-api.yaml#/v2-serenity-url-inspector-prompts-count'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/url-prompts:
+    $ref: './serenity-api.yaml#/v2-serenity-url-inspector-url-prompts'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/{organizationId}/entitlements:
