@@ -1052,9 +1052,12 @@ export function createSerenityTransport({ env, imsToken }) {
      * forwarded, so the grant succeeds only if that caller holds member-management
      * rights on the workspace (Semrush is the auth boundary, not this proxy).
      *
-     * NOTE: `/v1/workspaces/{id}/members` must exist in the user-manager-client
-     * (1.5.0) generated spec for the typed `.POST` to type-check; verify on the
-     * branch (blocking tsc gate). If absent, bump the client or drop to a raw call.
+     * `/v1/workspaces/{id}/members` (op `workspace-add-members`) is present in the
+     * user-manager-client generated spec with body `{ members: string[]; role: string }`.
+     *
+     * @param {string} workspaceId
+     * @param {string[]} members - user identifiers (emails) to grant the role.
+     * @param {string} role - Semrush role, e.g. `role/workspace/viewer`.
      */
     async addWorkspaceMembers(workspaceId, members, role) {
       return unwrap('POST', await users.POST(
