@@ -78,6 +78,14 @@ describe('Fix DTO', () => {
       expect(json).to.not.have.property('suggestions');
     });
 
+    it('emits deployedAt as null for fixes predating the deployed_at column', () => {
+      const fix = createMockFix({ getDeployedAt: () => null });
+
+      const json = FixDto.toJSON(fix);
+
+      expect(json.deployedAt).to.equal(null);
+    });
+
     it('converts a fix entity with suggestions to JSON', () => {
       const suggestion1 = createMockSuggestion('suggestion-id-1');
       const suggestion2 = createMockSuggestion('suggestion-id-2');

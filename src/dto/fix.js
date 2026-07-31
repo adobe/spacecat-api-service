@@ -33,7 +33,7 @@ export const FixDto = {
    *  updatedAt: string
    *  executedBy: string
    *  executedAt: string
-   *  deployedAt: string
+   *  deployedAt: string|null
    *  publishedAt: string
    *  changeDetails: object
    *  status: string
