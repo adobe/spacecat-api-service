@@ -1,3 +1,10 @@
+# [1.712.0](https://github.com/adobe/spacecat-api-service/compare/v1.711.4...v1.712.0) (2026-07-31)
+
+
+### Features
+
+* **geo-experiment:** presign insights rawDataUrl for UI download ([#2844](https://github.com/adobe/spacecat-api-service/issues/2844)) ([cd7412c](https://github.com/adobe/spacecat-api-service/commit/cd7412c9f96e283c1cbfdbd468576360dd80b8dc))
+
 ## [1.711.4](https://github.com/adobe/spacecat-api-service/compare/v1.711.3...v1.711.4) (2026-07-31)
 
 
