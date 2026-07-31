@@ -386,10 +386,11 @@ async function authorizeOrg(ctx) {
  *
  * @param {object} ctx - Request context.
  * @param {object} log - Logger (for the misconfiguration alert).
- * @returns {Promise<{workspaceId: string} | {error: Response}>} the brand's
- *   sub-workspace id on success, or a Response on failure (400 non-UUID brandId,
- *   403 no access, 404 org/brand not found or brand has no sub-workspace,
- *   409 sub-workspace misconfigured as the parent).
+ * @returns {Promise<{workspaceId: string, brandUuid: string} | {error: Response}>}
+ *   the brand's sub-workspace id and resolved Postgres brand UUID on success, or a
+ *   Response on failure (400 non-UUID brandId, 403 no access, 404 org/brand not found
+ *   or brand has no sub-workspace, 409 sub-workspace misconfigured as the parent).
+ *   `brandUuid` lets callers run the project-ownership guard (see listUrlPrompts).
  */
 async function authorizeBrandSubWorkspace(ctx, log) {
   const spaceCatId = ctx?.params?.spaceCatId;
@@ -438,7 +439,7 @@ async function authorizeBrandSubWorkspace(ctx, log) {
       ),
     };
   }
-  return { workspaceId };
+  return { workspaceId, brandUuid };
 }
 
 export default function ElementsController(context, log, env) {
@@ -977,9 +978,13 @@ export default function ElementsController(context, log, env) {
    * see url-prompts.js). Pagination is client-side; `totalCount` is the full count.
    *
    * Query params: `url` (required, the cited URL), `startDate`/`endDate` (required,
-   * YYYY-MM-DD), `model`/`platform` (optional, default search-gpt). `siteId` is accepted
-   * but ignored (the sub-workspace authorization already scopes to the brand). Returns the
-   * full prompt list in one `{ prompts }` envelope, matching the PG url-prompts endpoint.
+   * YYYY-MM-DD), `model`/`platform` (optional, default search-gpt), `projectId`
+   * (optional, CSV of Semrush project ids — the market filter; each must be owned by the
+   * brand, and the payload fans out per project, see {@link buildUrlPromptsPayload}) and
+   * `category`/`categoryId` (optional, full `category__<label>` tag → `CBF_tags`). `siteId`
+   * is accepted but ignored (the sub-workspace authorization already scopes to the brand).
+   * Returns the full prompt list in one `{ prompts }` envelope, matching the PG
+   * url-prompts endpoint.
    */
   /* c8 ignore start -- LLMO-6620 POC endpoint; unit tests deferred (see url-prompts.js tests) */
   const listUrlPrompts = async (ctx) => {
@@ -988,7 +993,7 @@ export default function ElementsController(context, log, env) {
       if (auth.error) {
         return auth.error;
       }
-      const { workspaceId } = auth;
+      const { workspaceId, brandUuid } = auth;
 
       const query = extractQuery(ctx);
 
@@ -1020,12 +1025,30 @@ export default function ElementsController(context, log, env) {
         return badRequest(`Date range must not exceed ${MAX_RANGE_DAYS} days`);
       }
 
+      // Market scope: caller-supplied projectId(s) must belong to this brand — mirrors
+      // listOwnedUrls/listDomainUrls — or a caller could scope to another brand's data.
+      // Absent → the aggregate view across the brand's whole sub-workspace.
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const brandSemrushProjects = await fetchBrandSemrushProjects(
+        BrandSemrushProject,
+        [{ id: brandUuid }],
+      );
+      const requestedProjectIds = extractProjectIds(query);
+      const ownershipError = checkProjectIdsOwnership(requestedProjectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
+
       const service = await buildService(ctx);
       const prompts = await service.getUrlPrompts(workspaceId, {
         url,
         model: query.model || query.platform,
         startDate,
         endDate,
+        // Full `category__<label>` tag, sent as-is (CBF_tags in advanced).
+        category: query.categoryId || query.category,
+        // Fan out per market + union/dedupe by prompt text (element takes one project_id).
+        projectIds: requestedProjectIds,
       });
 
       // Match the PG url-prompts envelope this endpoint will replace: a bare `{ prompts }`
