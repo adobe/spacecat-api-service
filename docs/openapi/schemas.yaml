@@ -4177,6 +4177,11 @@ Fix:
     executedAt:
       type: string
       format: date-time
+    deployedAt:
+      type:
+        - string
+        - 'null'
+      format: date-time
     publishedAt:
       type: string
       format: date-time
