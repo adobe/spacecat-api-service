@@ -1,3 +1,10 @@
+## [1.711.4](https://github.com/adobe/spacecat-api-service/compare/v1.711.3...v1.711.4) (2026-07-31)
+
+
+### Bug Fixes
+
+* URL-prompts honors market & category filters | LLMO-6674 ([#2969](https://github.com/adobe/spacecat-api-service/issues/2969)) ([c36a130](https://github.com/adobe/spacecat-api-service/commit/c36a130a70045ef893d669705eebcde73d03b5a1))
+
 ## [1.711.3](https://github.com/adobe/spacecat-api-service/compare/v1.711.2...v1.711.3) (2026-07-30)
 
 
