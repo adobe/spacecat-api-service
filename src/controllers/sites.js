@@ -1833,6 +1833,10 @@ function SitesController(ctx, log, env) {
    *   { message, resolveStatus, details?, asoTier }
    * `asoTier` is included on every response (success and failure) so the UI can gate
    * behavior off the org's raw ASO entitlement tier even when resolution fails.
+   * When `callerImsOrg` is present and differs from the target org's imsOrgId (a cross-org
+   * caller — e.g. an AEC shell in org A viewing org B), `asoTier` reports the *caller* org's
+   * tier instead of the target org's, so the UI gates on the shell's own tier. This applies
+   * only when the caller org exists in the DB; otherwise the target org's tier is used.
    * where `resolveStatus` is one of:
    *   - 'no_entitlement_for_product' — org has no entitlement for the requested x-product.
    *   - 'aso_pre_onboard' — entitlement tier is not in CUSTOMER_VISIBLE_TIERS (e.g. PRE_ONBOARD).
@@ -1867,6 +1871,37 @@ function SitesController(ctx, log, env) {
       { 'x-error': message },
     );
 
+    // callerImsOrg identifies the *caller* (the org their AEC shell is currently in),
+    // independent of which org's data is being requested via organizationId/imsOrg. It is
+    // translated to a Spacecat UUID (callerOrgId) once, up front, in the block below.
+    let callerIsInternal = false;
+    let callerOrgId = null;
+
+    // Cross-org caller: when callerImsOrg identifies a *different* org than the one whose
+    // data is requested (organizationId/imsOrg/siteId), the UI gates on the caller's own
+    // ASO tier — the org their AEC shell is in — not the target org's. So every asoTier
+    // field (success and failure) reports the caller org's tier instead of the target's.
+    // Only applies when the caller org exists in the DB; otherwise its tier is unknowable
+    // and we fall back to the target org's tier (isCrossOrgCaller returns false).
+    let callerAsoTierResolved = false;
+    let callerAsoTierValue = null;
+    const getCallerAsoTier = async () => {
+      if (!callerAsoTierResolved) {
+        callerAsoTierValue = callerOrgId ? await getAsoTier(callerOrgId, context) : null;
+        callerAsoTierResolved = true;
+      }
+      return callerAsoTierValue;
+    };
+    const isCrossOrgCaller = (targetOrg) => Boolean(
+      callerOrgId && hasText(callerImsOrg) && targetOrg?.getImsOrgId?.() !== callerImsOrg,
+    );
+    // Applies the cross-org caller asoTier override to an already-built resolve payload.
+    const applyCallerAsoTier = async (data, targetOrg) => (
+      data && isCrossOrgCaller(targetOrg)
+        ? { ...data, asoTier: await getCallerAsoTier() }
+        : data
+    );
+
     // Resolves the org's ASO tier for a failure response. Reuses the entitlement already
     // fetched by the caller only when it's both the ASO entitlement (x-product: ASO) AND
     // truthy — TierClient.getFirstEnrollment() nulls out `entitlement` whenever no site is
@@ -1875,11 +1910,16 @@ function SitesController(ctx, log, env) {
     // Falls back to an independent lookup (unambiguous — queries Entitlement directly)
     // whenever we can't trust the passed-in value, so asoTier is always populated correctly
     // regardless of which product was resolved or which TierClient method fetched it.
-    const resolveAsoTier = async (orgId, entitlement) => (
-      productCode === ASO_PRODUCT_CODE && entitlement
+    const resolveAsoTier = async (targetOrg, entitlement) => {
+      // Cross-org caller: report the caller org's ASO tier instead of the target org's
+      // (see isCrossOrgCaller / getCallerAsoTier below).
+      if (isCrossOrgCaller(targetOrg)) {
+        return getCallerAsoTier();
+      }
+      return productCode === ASO_PRODUCT_CODE && entitlement
         ? entitlement.getTier()
-        : getAsoTier(orgId, context)
-    );
+        : getAsoTier(targetOrg.getId(), context);
+    };
 
     const isOrgWaitingForIpAllowlisting = async (org) => {
       if (productCode !== ASO_PRODUCT_CODE) {
@@ -1895,17 +1935,16 @@ function SitesController(ctx, log, env) {
       }
     };
 
-    // callerImsOrg identifies the *caller* (the org their AEC shell is currently in),
-    // independent of which org's data is being requested via organizationId/imsOrg.
-    // We translate it to a Spacecat UUID once, up front, so the per-path remap can
-    // decide whether the caller is an internal/demo org listed in ASO_PLG_EXCLUDED_ORGS.
-    let callerIsInternal = false;
+    // Translate callerImsOrg to a Spacecat UUID (callerOrgId) so the per-path remap can
+    // decide whether the caller is an internal/demo org listed in ASO_PLG_EXCLUDED_ORGS,
+    // and so cross-org asoTier override (above) can look up the caller org's tier.
     if (hasText(callerImsOrg)) {
       try {
         const callerOrg = await Organization.findByImsOrgId(callerImsOrg);
         if (callerOrg) {
-          callerIsInternal = isInternalOrg(callerOrg.getId(), context.env);
-          log.info(`[resolveSite] callerOrg UUID=${callerOrg.getId()} callerIsInternal=${callerIsInternal}`);
+          callerOrgId = callerOrg.getId();
+          callerIsInternal = isInternalOrg(callerOrgId, context.env);
+          log.info(`[resolveSite] callerOrg UUID=${callerOrgId} callerIsInternal=${callerIsInternal}`);
         } else {
           log.info(`[resolveSite] callerImsOrg=${callerImsOrg} not found in DB`);
         }
@@ -1954,7 +1993,7 @@ function SitesController(ctx, log, env) {
         // Check admin-configured default site first; only use it if the caller can view it.
         const defaultData = await resolveOrgDefaultSite(...args);
         if (defaultData && viewable.has(defaultData.site.id)) {
-          return ok({ data: defaultData });
+          return ok({ data: await applyCallerAsoTier(defaultData, org) });
         }
 
         // Scan all enrolled sites and return the first one the caller can view.
@@ -1966,7 +2005,7 @@ function SitesController(ctx, log, env) {
             'No site found for the provided parameters',
             callerIsInternal ? 'site_not_enrolled' : 'no_entitlement_for_product',
             failureDetails,
-            await resolveAsoTier(org.getId(), entitlement),
+            await resolveAsoTier(org, entitlement),
           );
         }
 
@@ -1976,7 +2015,7 @@ function SitesController(ctx, log, env) {
               'No site found for the provided parameters',
               'aso_pre_onboard',
               failureDetails,
-              await resolveAsoTier(org.getId(), entitlement),
+              await resolveAsoTier(org, entitlement),
             );
           }
           log.info(`[resolveSite] Internal or admin caller (callerImsOrg=${callerImsOrg}): skipping tier check (tier=${entitlement.getTier()})`, failureDetails);
@@ -1988,7 +2027,7 @@ function SitesController(ctx, log, env) {
             'No site found for the provided parameters',
             'site_not_enrolled',
             failureDetails,
-            await resolveAsoTier(org.getId(), entitlement),
+            await resolveAsoTier(org, entitlement),
           );
         }
         const firstViewableSite = await Site.findById(firstViewableEnrollment.getSiteId());
@@ -1997,15 +2036,18 @@ function SitesController(ctx, log, env) {
             'No site found for the provided parameters',
             'site_not_enrolled',
             failureDetails,
-            await resolveAsoTier(org.getId(), entitlement),
+            await resolveAsoTier(org, entitlement),
           );
         }
         return ok({
-          data: await buildResolveData(
+          data: await applyCallerAsoTier(
+            await buildResolveData(
+              org,
+              firstViewableSite,
+              context,
+              productCode === ASO_PRODUCT_CODE ? entitlement : undefined,
+            ),
             org,
-            firstViewableSite,
-            context,
-            productCode === ASO_PRODUCT_CODE ? entitlement : undefined,
           ),
         });
       }
@@ -2013,7 +2055,7 @@ function SitesController(ctx, log, env) {
       // Non-FACS path (admin / internal / JWT federal grant / LD-off): existing logic.
       const defaultData = await resolveOrgDefaultSite(...args);
       if (defaultData) {
-        return ok({ data: defaultData });
+        return ok({ data: await applyCallerAsoTier(defaultData, org) });
       }
 
       const tierClient = TierClient.createForOrg(context, org, productCode);
@@ -2031,7 +2073,7 @@ function SitesController(ctx, log, env) {
           'No site found for the provided parameters',
           'no_entitlement_for_product',
           failureDetails,
-          await resolveAsoTier(org.getId(), entitlement),
+          await resolveAsoTier(org, entitlement),
         );
       }
 
@@ -2041,7 +2083,7 @@ function SitesController(ctx, log, env) {
           'No site found for the provided parameters',
           resolveStatus,
           failureDetails,
-          await resolveAsoTier(org.getId(), entitlement),
+          await resolveAsoTier(org, entitlement),
         );
       }
 
@@ -2051,7 +2093,7 @@ function SitesController(ctx, log, env) {
             'No site found for the provided parameters',
             'aso_pre_onboard',
             failureDetails,
-            await resolveAsoTier(org.getId(), entitlement),
+            await resolveAsoTier(org, entitlement),
           );
         }
         log.info(`[resolveSite] Internal or admin caller (callerImsOrg=${callerImsOrg}): skipping tier check (tier=${entitlement.getTier()})`, failureDetails);
@@ -2060,11 +2102,14 @@ function SitesController(ctx, log, env) {
       if (enrolledSite && (accessControlUtil.hasAdminAccess()
         || CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier()))) {
         return ok({
-          data: await buildResolveData(
+          data: await applyCallerAsoTier(
+            await buildResolveData(
+              org,
+              enrolledSite,
+              context,
+              productCode === ASO_PRODUCT_CODE ? entitlement : undefined,
+            ),
             org,
-            enrolledSite,
-            context,
-            productCode === ASO_PRODUCT_CODE ? entitlement : undefined,
           ),
         });
       }
@@ -2073,7 +2118,7 @@ function SitesController(ctx, log, env) {
         'No site found for the provided parameters',
         'site_not_enrolled',
         failureDetails,
-        await resolveAsoTier(org.getId(), entitlement),
+        await resolveAsoTier(org, entitlement),
       );
     };
 
@@ -2116,7 +2161,7 @@ function SitesController(ctx, log, env) {
                   'No site found for the provided parameters',
                   'no_entitlement_for_product',
                   failureDetails,
-                  await resolveAsoTier(orgId, entitlement),
+                  await resolveAsoTier(organization, entitlement),
                 );
               }
 
@@ -2129,7 +2174,7 @@ function SitesController(ctx, log, env) {
                   'No site found for the provided parameters',
                   resolveStatus,
                   failureDetails,
-                  await resolveAsoTier(orgId, entitlement),
+                  await resolveAsoTier(organization, entitlement),
                 );
               }
 
@@ -2139,7 +2184,7 @@ function SitesController(ctx, log, env) {
                     'No site found for the provided parameters',
                     'aso_pre_onboard',
                     failureDetails,
-                    await resolveAsoTier(orgId, entitlement),
+                    await resolveAsoTier(organization, entitlement),
                   );
                 }
                 log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): skipping tier check (tier=${entitlement.getTier()}), letting enrollment decide for siteId=${siteId}`);
@@ -2150,7 +2195,7 @@ function SitesController(ctx, log, env) {
                   'No site found for the provided parameters',
                   'site_not_enrolled',
                   failureDetails,
-                  await resolveAsoTier(orgId, entitlement),
+                  await resolveAsoTier(organization, entitlement),
                 );
               }
 
@@ -2173,17 +2218,20 @@ function SitesController(ctx, log, env) {
                     'No site found for the provided parameters',
                     'site_not_enrolled',
                     failureDetails,
-                    await resolveAsoTier(orgId, entitlement),
+                    await resolveAsoTier(organization, entitlement),
                   );
                 }
               }
 
               return ok({
-                data: await buildResolveData(
+                data: await applyCallerAsoTier(
+                  await buildResolveData(
+                    organization,
+                    site,
+                    context,
+                    productCode === ASO_PRODUCT_CODE ? entitlement : undefined,
+                  ),
                   organization,
-                  site,
-                  context,
-                  productCode === ASO_PRODUCT_CODE ? entitlement : undefined,
                 ),
               });
             }

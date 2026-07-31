@@ -447,7 +447,11 @@ sites-resolve:
           internal callers, PLG-wizard-triggering resolveStatuses
           (`no_entitlement_for_product`, `aso_pre_onboard`) are remapped to
           `site_not_enrolled` so the UI shows "No site onboarded" instead of the PLG
-          onboarding wizard.
+          onboarding wizard. Additionally, when `callerImsOrg` differs from the target
+          org's imsOrgId (a cross-org caller), the `asoTier` field reports the *caller*
+          org's ASO tier instead of the target org's, so the UI gates on the shell's own
+          tier. This override applies only when the caller org exists; otherwise the
+          target org's tier is used.
         schema:
           $ref: './schemas.yaml#/ImsOrganizationId'
     responses:
@@ -473,7 +477,9 @@ sites-resolve:
                       description: >-
                         The resolved site's organization's ASO entitlement tier
                         (FREE_TRIAL, PAID, PLG, PRE_ONBOARD), or null if no ASO
-                        entitlement exists.
+                        entitlement exists. When `callerImsOrg` is supplied and differs
+                        from the target org's imsOrgId, this reports the caller org's ASO
+                        tier instead (see the callerImsOrg parameter).
               example:
                 data:
                   organization:

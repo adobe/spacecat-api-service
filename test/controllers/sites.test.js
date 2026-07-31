@@ -7049,6 +7049,93 @@ describe('Sites Controller', () => {
       expect(mockDataAccess.Organization.findByImsOrgId).to.have.been.calledWith('nonexistent@AdobeOrg');
     });
 
+    describe('cross-org callerImsOrg asoTier override', () => {
+      // target = testOrganizations[0] (ims 1234...); caller = testOrganizations[1] (ims 2234...)
+      const targetId = '9033554c-de8a-44ac-a356-09b51af8cc28';
+      const callerId = '5f3b3626-029c-476e-924b-0c1bba2e871f';
+      const callerIms = '2234567890ABCDEF12345678@AdobeOrg';
+
+      it('reports the caller org ASO tier on success when callerImsOrg differs from the target org', async () => {
+        context.data = { organizationId: targetId, callerImsOrg: callerIms };
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockDataAccess.Organization.findByImsOrgId
+          .withArgs(callerIms).resolves(testOrganizations[1]);
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockTierClientStub.getFirstEnrollment.resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          site: testSites[0],
+        });
+        // target tier PLG, caller tier FREE_TRIAL — asoTier must reflect the caller.
+        mockDataAccess.Entitlement.findByOrganizationIdAndProductCode
+          .withArgs(targetId).resolves({ getTier: () => 'PLG' });
+        mockDataAccess.Entitlement.findByOrganizationIdAndProductCode
+          .withArgs(callerId).resolves({ getTier: () => 'FREE_TRIAL' });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(200);
+        const body = await response.json();
+        expect(body.data).to.have.property('asoTier', 'FREE_TRIAL');
+        // isSummitPlgEnabled stays derived from the *target* org (PLG), only asoTier is overridden.
+        expect(body.data).to.have.property('isSummitPlgEnabled', true);
+      });
+
+      it('reports the caller org ASO tier on a failure response', async () => {
+        context.data = { organizationId: targetId, callerImsOrg: callerIms };
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockDataAccess.Organization.findByImsOrgId
+          .withArgs(callerIms).resolves(testOrganizations[1]);
+        mockTierClientStub.getFirstEnrollment.resolves({ entitlement: null, site: null });
+        mockDataAccess.Entitlement.findByOrganizationIdAndProductCode
+          .withArgs(callerId).resolves({ getTier: () => 'PAID' });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(404);
+        const body = await response.json();
+        expect(body.asoTier).to.equal('PAID');
+      });
+
+      it('falls back to the target org ASO tier when the caller org is not in the DB', async () => {
+        context.data = { organizationId: targetId, callerImsOrg: 'ghost@AdobeOrg' };
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockDataAccess.Organization.findByImsOrgId.withArgs('ghost@AdobeOrg').resolves(null);
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockTierClientStub.getFirstEnrollment.resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          site: testSites[0],
+        });
+        mockDataAccess.Entitlement.findByOrganizationIdAndProductCode
+          .withArgs(targetId).resolves({ getTier: () => 'PLG' });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(200);
+        const body = await response.json();
+        expect(body.data).to.have.property('asoTier', 'PLG');
+      });
+
+      it('does not override when callerImsOrg matches the target org imsOrgId', async () => {
+        const sameIms = testOrganizations[0].getImsOrgId();
+        context.data = { organizationId: targetId, callerImsOrg: sameIms };
+        mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+        mockDataAccess.Organization.findByImsOrgId.withArgs(sameIms).resolves(testOrganizations[0]);
+        mockDataAccess.Site.findById.resolves(testSites[0]);
+        mockTierClientStub.getFirstEnrollment.resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          site: testSites[0],
+        });
+        mockDataAccess.Entitlement.findByOrganizationIdAndProductCode
+          .withArgs(targetId).resolves({ getTier: () => 'PLG' });
+
+        const response = await sitesController.resolveSite(context);
+
+        expect(response.status).to.equal(200);
+        const body = await response.json();
+        expect(body.data).to.have.property('asoTier', 'PLG');
+      });
+    });
+
     it('should return 404 with site_not_enrolled when imsOrg not in DB and caller is internal', async () => {
       const internalUuid = '9033554c-de8a-44ac-a356-09b51af8cc28';
       const internalIms = '1234567890ABCDEF12345678@AdobeOrg';
