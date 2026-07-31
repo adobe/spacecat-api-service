@@ -1767,6 +1767,100 @@ describe('SerenityController', () => {
     });
   });
 
+  describe('addMembers (RBAC workspace member grant — ADR-draft-2 spike)', () => {
+    let addWorkspaceMembersStub;
+
+    beforeEach(() => {
+      // Default transport stub returns { name: 'transport' } with no member method;
+      // override it so buildTransport yields a transport exposing addWorkspaceMembers.
+      addWorkspaceMembersStub = sinon.stub().resolves({ consumedUnits: -1 });
+      createTransportStub.returns({ addWorkspaceMembers: addWorkspaceMembersStub });
+    });
+
+    it('grants the given members the requested role on the brand workspace', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.addMembers(fakeContext({
+        data: { members: ['ppatwal@adobe.com'], role: 'role/workspace/viewer' },
+      }));
+      expect(response.status).to.equal(200);
+      expect(addWorkspaceMembersStub).to.have.been.calledOnceWithExactly(
+        WORKSPACE,
+        ['ppatwal@adobe.com'],
+        'role/workspace/viewer',
+      );
+      expect(await readBody(response)).to.deep.equal({ consumedUnits: -1 });
+    });
+
+    it('defaults the role to role/workspace/viewer when none is supplied', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.addMembers(fakeContext({
+        data: { members: ['a@adobe.com'] },
+      }));
+      expect(response.status).to.equal(200);
+      expect(addWorkspaceMembersStub.firstCall.args[2]).to.equal('role/workspace/viewer');
+    });
+
+    it('targets the brand sub-workspace id when the brand is in subworkspace mode', async () => {
+      resolveBrandWorkspaceStub.resolves({
+        mode: 'subworkspace', workspaceId: SUBWS, parentWorkspaceId: WORKSPACE,
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      await controller.addMembers(fakeContext({
+        data: { members: ['a@adobe.com'], role: 'role/workspace/viewer' },
+      }));
+      expect(addWorkspaceMembersStub.firstCall.args[0]).to.equal(SUBWS);
+    });
+
+    it('echoes { members, role } when the upstream returns an empty body', async () => {
+      addWorkspaceMembersStub.resolves(null);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.addMembers(fakeContext({
+        data: { members: ['a@adobe.com'], role: 'role/workspace/editor' },
+      }));
+      expect(response.status).to.equal(200);
+      expect(await readBody(response)).to.deep.equal({
+        members: ['a@adobe.com'], role: 'role/workspace/editor',
+      });
+    });
+
+    it('rejects a missing members array with 400 and never calls upstream', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.addMembers(fakeContext({
+        data: { role: 'role/workspace/viewer' },
+      }));
+      expect(response.status).to.equal(400);
+      expect(addWorkspaceMembersStub).to.not.have.been.called;
+    });
+
+    it('drops empty-string members and 400s when none remain', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.addMembers(fakeContext({
+        data: { members: ['', ''] },
+      }));
+      expect(response.status).to.equal(400);
+      expect(addWorkspaceMembersStub).to.not.have.been.called;
+    });
+
+    it('propagates an authorize failure (no org access) as 403 without calling upstream', async () => {
+      accessControlHasAccessStub.resolves(false);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.addMembers(fakeContext({
+        data: { members: ['a@adobe.com'] },
+      }));
+      expect(response.status).to.equal(403);
+      expect(addWorkspaceMembersStub).to.not.have.been.called;
+    });
+
+    it('routes an upstream Semrush error through mapError (403 → 403)', async () => {
+      addWorkspaceMembersStub.rejects(new MockTransportError(403, 'forbidden by semrush'));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.addMembers(fakeContext({
+        data: { members: ['a@adobe.com'] },
+      }));
+      expect(response.status).to.equal(403);
+    });
+  });
+
   describe('activate / deactivate', () => {
     it('activate 401s (IMS-only) before any provisioning when the caller is not IMS-authenticated', async () => {
       const controller = SerenityController({ env: {} }, fakeLog(), {});

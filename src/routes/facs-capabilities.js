@@ -617,6 +617,10 @@ const routeFacsCapabilities = {
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId': 'llmo/can_configure',
       'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'llmo/can_configure',
+      // SPIKE (ADR-draft-2): RBAC member grant. Mirrors sibling write ops as
+      // can_configure; the correct level (can_configure vs can_manage_users) is
+      // an OPEN design question tied to the add-member auth decision.
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/members': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate': 'llmo/can_configure',
       // Prompt suitability check — body-based mutation against the brand

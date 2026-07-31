@@ -742,6 +742,26 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
+     * POST /v1/workspaces/{ws}/members — grant one or more users a role on the
+     * workspace (Semrush RBAC). Body: `{ members: string[], role: string }`
+     * (e.g. role `role/workspace/viewer`). SPIKE (ADR-draft-2): first RBAC write
+     * slice — reuses the already-wired User Manager client + IMS-bearer auth; no
+     * new secret/config. Auth model is unchanged: the CALLER'S IMS token is
+     * forwarded, so the grant succeeds only if that caller holds member-management
+     * rights on the workspace (Semrush is the auth boundary, not this proxy).
+     *
+     * NOTE: `/v1/workspaces/{id}/members` must exist in the user-manager-client
+     * (1.5.0) generated spec for the typed `.POST` to type-check; verify on the
+     * branch (blocking tsc gate). If absent, bump the client or drop to a raw call.
+     */
+    async addWorkspaceMembers(workspaceId, members, role) {
+      return unwrap('POST', await users.POST(
+        '/v1/workspaces/{id}/members',
+        { params: { path: { id: workspaceId } }, body: { members, role } },
+      ));
+    },
+
+    /**
      * GET /v1/workspaces/{ws}/status — poll until `created` after a subworkspace
      * create (creating projects against `not ready` can 500).
      */

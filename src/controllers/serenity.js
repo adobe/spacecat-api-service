@@ -1157,6 +1157,46 @@ function SerenityController(context, log, env) {
   };
 
   /**
+   * POST /serenity/members — grant one or more users a Semrush workspace role
+   * (RBAC write slice; ADR-draft-2 spike). Resolves the brand's workspace via
+   * `authorize` (the brand's sub-workspace in subworkspace mode, else the org's
+   * flat parent workspace) and forwards the caller's IMS token to Semrush's User
+   * Manager `POST /v1/workspaces/{ws}/members`. Body: `{ members: string[],
+   * role?: string }`; `role` defaults to `role/workspace/viewer`.
+   *
+   * Auth: unchanged pass-through — Semrush authorizes the forwarded token, so the
+   * grant only lands if the caller holds member-management rights on the workspace.
+   */
+  const addMembers = async (ctx) => {
+    try {
+      const imsToken = await resolveSemrushImsToken(ctx);
+      const auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const body = ctx.data || {};
+      const members = Array.isArray(body.members)
+        ? body.members.filter((m) => hasText(m))
+        : [];
+      if (members.length === 0) {
+        throw new ErrorWithStatusCode('members must be a non-empty array of user identifiers', 400);
+      }
+      const role = hasText(body.role) ? body.role : 'role/workspace/viewer';
+      const transport = buildTransport(ctx, imsToken);
+      const result = await transport.addWorkspaceMembers(
+        /** @type {string} */ (auth.workspaceId),
+        members,
+        role,
+      );
+      // Semrush may answer 2xx with an empty body; echo the grant so the spike
+      // caller sees what landed.
+      return createResponse(isNonEmptyObject(result) ? result : { members, role }, 200);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
+  /**
    * POST /serenity/activate — flips a brand into subworkspace mode (design flow 5):
    * ensure the subworkspace, then per caller-supplied market create a draft,
    * publish once, and confirm. Sets brands.status = 'active' once ≥1 market is
@@ -1710,6 +1750,7 @@ function SerenityController(context, log, env) {
     listOrgModels,
     listOrgLanguages,
     updateModels,
+    addMembers,
     activate,
     deactivate,
   };
