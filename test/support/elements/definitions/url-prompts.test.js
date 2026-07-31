@@ -55,6 +55,13 @@ describe('url-prompts definitions', () => {
       )).to.equal('chatgpt-paid');
     });
 
+    it('lets an explicit model win over platform=all (single model, not the union)', () => {
+      expect(advancedVal(
+        buildUrlPromptsPayload({ url: URL, model: 'search-gpt', platform: 'all' }),
+        'CBF_model',
+      )).to.equal('search-gpt');
+    });
+
     it('OMITS the CBF_model filter for the `all` sentinel (deduped cross-model union)', () => {
       const payload = buildUrlPromptsPayload({ url: URL, model: 'all' });
       expect(payload.filters.advanced.filters.some((f) => f.col === 'CBF_model')).to.equal(false);
