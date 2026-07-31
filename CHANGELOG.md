@@ -1,3 +1,10 @@
+## [1.712.1](https://github.com/adobe/spacecat-api-service/compare/v1.712.0...v1.712.1) (2026-07-31)
+
+
+### Bug Fixes
+
+* read geo-experiment insights from the Mystique bucket (S3_MYSTIQUE_BUCKET) ([#2977](https://github.com/adobe/spacecat-api-service/issues/2977)) ([fecabdd](https://github.com/adobe/spacecat-api-service/commit/fecabdd50c6514e2393f8834d01f3c9538105203))
+
 # [1.712.0](https://github.com/adobe/spacecat-api-service/compare/v1.711.4...v1.712.0) (2026-07-31)
 
 
