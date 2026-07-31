@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { resolveElementModel } from '../constants.js';
+import { resolveElementModel, isAllPlatforms } from '../constants.js';
 
 /**
  * Definitions for the URL Inspector "URL Prompts" element
@@ -45,7 +45,8 @@ import { resolveElementModel } from '../constants.js';
  * @param {object} params
  * @param {string} params.url - The cited URL to drill into (`CBF_source`).
  * @param {string} [params.model] - AI model filter (Semrush engine name or UI platform
- *   code). Translated + validated via {@link resolveElementModel}.
+ *   code). Translated + validated via {@link resolveElementModel}. The `all` sentinel
+ *   ({@link isAllPlatforms}) OMITS the `CBF_model` filter → deduped cross-model union.
  * @param {string} [params.platform] - Legacy alias for `model`; `model` takes precedence.
  * @param {string} params.startDate - ISO date (YYYY-MM-DD).
  * @param {string} params.endDate - ISO date (YYYY-MM-DD).
@@ -57,13 +58,18 @@ import { resolveElementModel } from '../constants.js';
 export function buildUrlPromptsPayload({
   url, model, platform, startDate, endDate, category, projectId,
 } = {}) {
-  const resolvedModel = resolveElementModel(model || platform);
+  const requestedModel = model || platform;
   const advancedFilters = [
-    { op: 'eq', val: resolvedModel, col: 'CBF_model' },
     { op: 'eq', val: url, col: 'CBF_source' },
     { op: 'gte', val: startDate, col: 'CBF_date__start' },
     { op: 'lte', val: endDate, col: 'CBF_date__end' },
   ];
+  // `all` sentinel → omit CBF_model entirely (deduped cross-model union). Checked BEFORE
+  // resolveElementModel, which would otherwise coerce 'all' to DEFAULT_ELEMENT_MODEL.
+  // Kept as the FIRST advanced filter for the single-model case (unchanged payload shape).
+  if (!isAllPlatforms(requestedModel)) {
+    advancedFilters.unshift({ op: 'eq', val: resolveElementModel(requestedModel), col: 'CBF_model' });
+  }
   if (category) {
     advancedFilters.push({ op: 'eq', val: category, col: 'CBF_tags' });
   }
