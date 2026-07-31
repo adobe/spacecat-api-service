@@ -1205,6 +1205,7 @@ function LlmoController(ctx) {
         organizationId: result.organizationId,
         baseURL: result.baseURL,
         dataFolder: result.dataFolder,
+        detectedCdn: result.detectedCdn,
         status: 'processing',
       });
     } catch (error) {
