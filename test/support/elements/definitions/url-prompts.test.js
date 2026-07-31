@@ -72,6 +72,11 @@ describe('url-prompts definitions', () => {
       expect(advancedVal(payload, 'CBF_model')).to.be.undefined;
     });
 
+    it('trims surrounding whitespace before matching the `all` sentinel', () => {
+      const payload = buildUrlPromptsPayload({ url: URL, model: '  all  ' });
+      expect(advancedVal(payload, 'CBF_model')).to.be.undefined;
+    });
+
     it('recognises `all` via platform as well as model', () => {
       expect(advancedVal(buildUrlPromptsPayload({ url: URL, platform: 'all' }), 'CBF_model'))
         .to.be.undefined;
