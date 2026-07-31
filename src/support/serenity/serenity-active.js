@@ -30,13 +30,30 @@ export const SERENITY_FEATURE_FLAG_PRODUCT = 'LLMO';
 export const SERENITY_FEATURE_FLAG_NAME = 'serenity';
 
 /**
- * Module-scoped TTL+size-bounded cache for the org-wide serenity flag value,
- * mirroring the workspace-resolver cache (warm Lambda containers reuse module
- * state, so a Map here amortises the PostgREST flag read over the container's
- * lifetime). A `true` value caches for the positive TTL; a `false`/absent value
- * caches for the shorter negative TTL so flipping an org ON during rollout
- * takes effect within ~NEG_TTL_MS instead of the full positive window. Reuses
- * the resolver's TTL/size constants to stay in lockstep with it.
+ * The org-wide switch that pins the org's UI to the Serenity experience, set by
+ * the same `feature_flags` table row shape as `serenity` above and read by the
+ * frontend from `GET /organizations/:id/feature-flags/llmo` (LLMO-6565).
+ *
+ * On the backend it marks an org as past the migration window: its users are
+ * provisioned in Semrush, so a Semrush failure on a brand edit is a real error
+ * to surface rather than expected migration noise to absorb. See
+ * `isSerenityUiActiveForOrg`.
+ *
+ * snake_case is mandatory, not stylistic: `feature_flags` carries a CHECK
+ * constraint `flag_name ~ '^[a-z][a-z0-9_]*$'` (and `isValidFeatureFlagName`
+ * mirrors it), so a hyphenated name cannot be stored at all. Clients matching on
+ * this flag must use the same spelling.
+ */
+export const SERENITY_UI_FEATURE_FLAG_NAME = 'serenity_ui';
+
+/**
+ * Module-scoped TTL+size-bounded cache for the org-wide flag values, mirroring
+ * the workspace-resolver cache (warm Lambda containers reuse module state, so a
+ * Map here amortises the PostgREST flag read over the container's lifetime). A
+ * `true` value caches for the positive TTL; a `false`/absent value caches for
+ * the shorter negative TTL so flipping an org ON during rollout takes effect
+ * within ~NEG_TTL_MS instead of the full positive window. Reuses the resolver's
+ * TTL/size constants to stay in lockstep with it.
  *
  * Exported clear is for unit tests; production code should not call it.
  */
@@ -44,16 +61,15 @@ const flagCache = new Map();
 
 /**
  * Composite cache key (org + product + flag), not the bare `spaceCatId`, so the
- * Map is collision-proof if this same shape is ever reused to cache a second
- * flag. Today this module reads exactly one flag (`LLMO/serenity`), so the
- * product/flag segments are constant — but keying on the full identity keeps the
- * cache correct-by-construction rather than relying on "only one consumer".
+ * Map stays collision-proof now that this module caches more than one flag per
+ * organization.
  *
  * @param {string} spaceCatId - SpaceCat organization UUID.
+ * @param {string} flagName - Feature-flag name within the LLMO product.
  * @returns {string} The cache key.
  */
-function flagCacheKey(spaceCatId) {
-  return `${spaceCatId}::${SERENITY_FEATURE_FLAG_PRODUCT}::${SERENITY_FEATURE_FLAG_NAME}`;
+function flagCacheKey(spaceCatId, flagName) {
+  return `${spaceCatId}::${SERENITY_FEATURE_FLAG_PRODUCT}::${flagName}`;
 }
 
 export function clearSerenityFlagCache() {
@@ -74,37 +90,31 @@ function evictIfNeeded() {
 }
 
 /**
- * Central predicate: is the Semrush-backed "serenity" experience active for an
- * organization? Reads the org-wide `LLMO/serenity` feature flag (cached).
- *
- * This is the org-level rollout half of serenity activation. The serenity
- * controller composes it with the per-brand workspace resolution
- * (`resolveBrandWorkspace`), so a route is served only when BOTH this flag is
- * ON *and* a Semrush workspace resolves for the brand — i.e. "flag AND
- * workspace". A missing flag row, a `false` row, an unavailable PostgREST
- * client, or a transient read error all resolve to `false` (default OFF), so an
- * org is never silently activated.
+ * Reads one cached org-wide `LLMO/<flagName>` feature flag. A missing flag row, a
+ * `false` row, an unavailable PostgREST client, or a transient read error all
+ * resolve to `false` (default OFF), so a flag is never silently on.
  *
  * @param {object} ctx - Request context (uses
  *   `ctx.dataAccess.services.postgrestClient`).
  * @param {string} spaceCatId - SpaceCat organization UUID.
+ * @param {string} flagName - Feature-flag name within the LLMO product.
  * @param {object} [log] - Optional logger (used to surface a missing client /
  *   a read error without throwing on this hot path).
- * @returns {Promise<boolean>} `true` only when the org-wide serenity flag is on.
+ * @returns {Promise<boolean>} `true` only when the flag row exists and is `true`.
  */
-export async function isSerenityActiveForOrg(ctx, spaceCatId, log) {
+async function readCachedOrgFlag(ctx, spaceCatId, flagName, log) {
   if (!hasText(spaceCatId)) {
     return false;
   }
 
   const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
   if (!postgrestClient?.from) {
-    log?.warn?.('[serenity] isSerenityActiveForOrg: PostgREST client unavailable — treating serenity as inactive');
+    log?.warn?.(`[serenity] readCachedOrgFlag: PostgREST client unavailable — treating ${flagName} as off`);
     return false;
   }
 
   const now = Date.now();
-  const cacheKey = flagCacheKey(spaceCatId);
+  const cacheKey = flagCacheKey(spaceCatId, flagName);
   const cached = flagCache.get(cacheKey);
   if (cached && cached.expiresAt > now) {
     return cached.value;
@@ -115,13 +125,13 @@ export async function isSerenityActiveForOrg(ctx, spaceCatId, log) {
     raw = await readFeatureFlag({
       organizationId: spaceCatId,
       product: SERENITY_FEATURE_FLAG_PRODUCT,
-      flagName: SERENITY_FEATURE_FLAG_NAME,
+      flagName,
       postgrestClient,
     });
   } catch (e) {
-    // Fail safe (inactive) on a transient read error, and do NOT cache it so a
+    // Fail safe (off) on a transient read error, and do NOT cache it so a
     // recovered DB takes effect on the very next call rather than after a TTL.
-    log?.error?.(`[serenity] isSerenityActiveForOrg: failed to read serenity flag for org ${spaceCatId}: ${e?.message}`);
+    log?.error?.(`[serenity] readCachedOrgFlag: failed to read ${flagName} flag for org ${spaceCatId}: ${e?.message}`);
     return false;
   }
 
@@ -131,4 +141,51 @@ export async function isSerenityActiveForOrg(ctx, spaceCatId, log) {
   evictIfNeeded();
   flagCache.set(cacheKey, { value, expiresAt: now + (value ? CACHE_TTL_MS : NEG_TTL_MS) });
   return value;
+}
+
+/**
+ * Central predicate: is the Semrush-backed "serenity" experience active for an
+ * organization? Reads the org-wide `LLMO/serenity` feature flag (cached).
+ *
+ * This is the org-level rollout half of serenity activation. The serenity
+ * controller composes it with the per-brand workspace resolution
+ * (`resolveBrandWorkspace`), so a route is served only when BOTH this flag is
+ * ON *and* a Semrush workspace resolves for the brand — i.e. "flag AND
+ * workspace". Anything short of an explicit `true` resolves to `false`, so an
+ * org is never silently activated.
+ *
+ * @param {object} ctx - Request context (uses
+ *   `ctx.dataAccess.services.postgrestClient`).
+ * @param {string} spaceCatId - SpaceCat organization UUID.
+ * @param {object} [log] - Optional logger (used to surface a missing client /
+ *   a read error without throwing on this hot path).
+ * @returns {Promise<boolean>} `true` only when the org-wide serenity flag is on.
+ */
+export async function isSerenityActiveForOrg(ctx, spaceCatId, log) {
+  return readCachedOrgFlag(ctx, spaceCatId, SERENITY_FEATURE_FLAG_NAME, log);
+}
+
+/**
+ * Is the organization pinned to the Serenity UI? Reads the org-wide
+ * `LLMO/serenity_ui` feature flag (cached).
+ *
+ * Backend meaning: the org is past the Semrush migration window. During the
+ * migration an org's LLMO users may have no Semrush user record at all, so
+ * Semrush answers 4xx on every call made on their behalf and brand edits absorb
+ * that failure rather than reporting a write that did persist as broken. Once
+ * this flag is on, that allowance ends and Semrush failures surface to the
+ * caller — see the re-sync block in `src/controllers/brands.js`.
+ *
+ * Reads `false` unless the flag row is explicitly `true`, so the absorbing
+ * behaviour stays the default for every org still mid-migration.
+ *
+ * @param {object} ctx - Request context (uses
+ *   `ctx.dataAccess.services.postgrestClient`).
+ * @param {string} spaceCatId - SpaceCat organization UUID.
+ * @param {object} [log] - Optional logger (used to surface a missing client /
+ *   a read error without throwing on this hot path).
+ * @returns {Promise<boolean>} `true` only when the org-wide serenity_ui flag is on.
+ */
+export async function isSerenityUiActiveForOrg(ctx, spaceCatId, log) {
+  return readCachedOrgFlag(ctx, spaceCatId, SERENITY_UI_FEATURE_FLAG_NAME, log);
 }

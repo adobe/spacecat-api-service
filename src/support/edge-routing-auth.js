@@ -13,6 +13,7 @@
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { exchangePromiseToken, getCookieValue } from './utils.js';
+import AccessControlUtil from './access-control-util.js';
 
 // IMS service codes that represent the LLMO/Elmo product in the user's productContexts.
 // TODO: replace placeholder with the real IMS service code once confirmed.
@@ -81,8 +82,7 @@ export function hasPaidLlmoProductContext(imsUserProfile) {
  * @param {object} params.org - The site's organization entity.
  * @param {string} params.imsOrgId - The IMS org ID.
  * @param {string} params.imsUserToken - The IMS user access token (from promiseToken exchange).
- * @param {string} params.userEmail - The authenticated user's email.
- * @param {string} params.siteId - Site ID (for log context).
+ * @param {string} params.siteId - Site ID (log context + FACS capability lookup).
  * @param {object} log - Logger.
  * @returns {Promise<void>} Resolves if authorized.
  * @throws {Error} With a `status` property (403 or 500) if not authorized or on unexpected error.
@@ -109,7 +109,33 @@ export async function authorizeEdgeCdnRouting(context, {
   log.info(`[edge-routing-auth] Site ${siteId} has entitlement tier '${tier}'`);
 
   if (isPaid) {
-    // Paid: validate LLMO product context in the user's IMS profile
+    // FACS-enrolled + deferred to the controller: the hybrid model is the
+    // source of truth for this org, so authorize via the state-layer capability
+    // on the site's brand (derived from the route — POST edge-optimize-config →
+    // llmo/can_configure) rather than the legacy IMS product-context profile.
+    // The wrapper only defers when the org is FACS-enrolled, so
+    // hasLlmoCapabilityForSite never falls back to the legacy isLLMOAdministrator
+    // claim here.
+    if (context.attributes?.facs?.enabled) {
+      const site = await context.dataAccess.Site.findById(siteId);
+      if (!site) {
+        // Data-integrity condition, not a capability rejection — log distinctly
+        // at warn so operators can tell it apart from a genuine authz denial.
+        log.warn(`[edge-routing-auth] Site ${siteId} not found during FACS capability check`);
+        const err = new Error('Site not found');
+        err.status = 403;
+        throw err;
+      }
+      const accessControlUtil = AccessControlUtil.fromContext(context);
+      if (!(await accessControlUtil.hasLlmoCapabilityForSite(site))) {
+        const err = new Error('User does not hold the required LLMO capability to configure CDN routing for this site');
+        err.status = 403;
+        throw err;
+      }
+      return;
+    }
+
+    // Paid (non-FACS): validate LLMO product context in the user's IMS profile
     let imsUserProfile;
     try {
       imsUserProfile = await context.imsClient.getImsUserProfile(imsUserToken);

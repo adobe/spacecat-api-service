@@ -263,6 +263,24 @@ describe('Semrush REST transport', () => {
         .to.match(/^https:\/\/shared\.semrush\.test\/enterprise\/users\/api\//);
     });
 
+    it('falls back to SEMRUSH_PROJECTS_BASE_URL when SEMRUSH_USERS_BASE_URL is empty', async () => {
+      fetchStub.resolves(fetchOk(null));
+      const transport = createSerenityTransport({
+        env: {
+          SEMRUSH_PROJECTS_BASE_URL: 'https://shared.semrush.test',
+          SEMRUSH_USERS_BASE_URL: '',
+        },
+        imsToken: IMS,
+      });
+
+      await transport.getWorkspaceStatus(WORKSPACE_ID);
+
+      // An empty value is "unset", not an origin — it must not name the USERS var in
+      // an error, and must not be treated as an explicit override.
+      expect((await callOf(fetchStub)).url)
+        .to.match(/^https:\/\/shared\.semrush\.test\/enterprise\/users\/api\//);
+    });
+
     it('rejects a non-https SEMRUSH_USERS_BASE_URL naming the USERS var (503)', () => {
       try {
         createSerenityTransport({
@@ -411,8 +429,7 @@ describe('Semrush REST transport', () => {
       fetchStub.onCall(1).resolves(fetchOk({ id: 'subworkspace-ws-1', status: 'not ready' }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
-      const resources = { ai: { projects: 3, prompts: 1500 } };
-      const promise = transport.createSubworkspace(PARENT_WS, 'Adobe Express', resources);
+      const promise = transport.createSubworkspace(PARENT_WS, 'Adobe Express');
       await clock.tickAsync(60_000);
       const result = await promise;
 
@@ -420,7 +437,7 @@ describe('Semrush REST transport', () => {
       expect(fetchStub.callCount).to.equal(2);
       const retryCall = await callOf(fetchStub, 1);
       expect(retryCall.method).to.equal('POST');
-      expect(JSON.parse(retryCall.body)).to.deep.equal({ title: 'Adobe Express', resources });
+      expect(JSON.parse(retryCall.body)).to.deep.equal({ title: 'Adobe Express', resources: {} });
     }));
 
     it('does NOT retry a 500 on a POST create (createSubworkspace) -- avoids double-provisioning', withFakeTimers(async (clock) => {
@@ -431,8 +448,7 @@ describe('Semrush REST transport', () => {
       fetchStub.resolves(fetchFail(500, { code: 'internal_error' }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
-      const resources = { ai: { projects: 3, prompts: 1500 } };
-      const promise = transport.createSubworkspace(PARENT_WS, 'Adobe Express', resources)
+      const promise = transport.createSubworkspace(PARENT_WS, 'Adobe Express')
         .catch((e) => e);
       await clock.tickAsync(60_000);
       const err = await promise;
@@ -704,7 +720,20 @@ describe('Semrush REST transport', () => {
       expect(body.limit).to.equal(200);
     });
 
-    it('does not forward sort_field / sort_dir — Semrush rejects them on this endpoint', async () => {
+    it('opts into metadata via the include_metadata QUERY parameter on every call', async () => {
+      fetchStub.resolves(fetchOk({ items: [] }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.listPromptsByTags(WORKSPACE_ID, PROJECT_ID, { page: 1 });
+
+      const call = await callOf(fetchStub);
+      // Upstream reads the flag off the query string only: in the body it is
+      // ignored with a 200 and every item comes back without its `metadata` key.
+      expect(new URL(call.url).searchParams.get('include_metadata')).to.equal('true');
+      expect(JSON.parse(call.body)).to.not.have.property('include_metadata');
+    });
+
+    it('does not forward caller-supplied sort_field / sort_dir — only `sort` maps to them', async () => {
       fetchStub.resolves(fetchOk({ items: [] }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
@@ -719,6 +748,37 @@ describe('Semrush REST transport', () => {
       expect(body).to.not.have.property('sort_field');
       expect(body).to.not.have.property('sort_dir');
       expect(body.search).to.equal('photoshop');
+    });
+
+    it('maps sort/order onto the sort_field/sort_dir wire keys (LLMO-6289)', async () => {
+      fetchStub.resolves(fetchOk({ items: [] }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.listPromptsByTags(WORKSPACE_ID, PROJECT_ID, {
+        sort: 'metadata.updated_at',
+        order: 'desc',
+      });
+
+      const call = await callOf(fetchStub);
+      const body = JSON.parse(call.body);
+      expect(body.sort_field).to.equal('metadata.updated_at');
+      expect(body.sort_dir).to.equal('desc');
+      // `sort` / `order` are this transport's own param names, never wire keys —
+      // upstream ignores them silently, so sending them sorts nothing.
+      expect(body).to.not.have.property('sort');
+      expect(body).to.not.have.property('order');
+    });
+
+    it('omits both sort keys entirely when no sort is requested', async () => {
+      fetchStub.resolves(fetchOk({ items: [] }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.listPromptsByTags(WORKSPACE_ID, PROJECT_ID, { page: 1 });
+
+      const call = await callOf(fetchStub);
+      const body = JSON.parse(call.body);
+      expect(body).to.not.have.property('sort_field');
+      expect(body).to.not.have.property('sort_dir');
     });
   });
 
@@ -982,6 +1042,27 @@ describe('Semrush REST transport', () => {
         new RegExp(`/v1/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/publish$`),
       );
       expect(call.body).to.equal(undefined);
+    });
+  });
+
+  describe('getProjectStatus', () => {
+    // LLMO-5492 / AC3 — the publish-completion read. Uses the draft view
+    // (draft=true) so a never-published project's `publish_status` is echoed
+    // faithfully (the live view empties a never-published draft, serenity-docs #12 §10).
+    it('GETs /v1/workspaces/{ws}/projects/{pid} with draft=true and no body', async () => {
+      fetchStub.resolves(fetchOk({ id: PROJECT_ID, publish_status: 'live' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const out = await transport.getProjectStatus(WORKSPACE_ID, PROJECT_ID);
+
+      const call = await callOf(fetchStub);
+      expect(call.method).to.equal('GET');
+      expect(call.url).to.match(
+        new RegExp(`/v1/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}\\?`),
+      );
+      expect(call.url).to.include('draft=true');
+      expect(call.body).to.equal(undefined);
+      expect(out.publish_status).to.equal('live');
     });
   });
 
@@ -1291,15 +1372,16 @@ describe('Semrush REST transport', () => {
       fetchStub.resolves(fetchOk({ id: 'subworkspace-ws-1', status: 'not ready' }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
-      const resources = { ai: { projects: 3, prompts: 1500 } };
-      const result = await transport.createSubworkspace(PARENT_WS, 'Adobe Express', resources);
+      const result = await transport.createSubworkspace(PARENT_WS, 'Adobe Express');
 
       const call = await callOf(fetchStub);
       expect(call.method).to.equal('POST');
       expect(call.url).to.equal(
         `https://adobe-hackathon.semrush.com/enterprise/users/api/v2/workspaces/${PARENT_WS}/child`,
       );
-      expect(JSON.parse(call.body)).to.deep.equal({ title: 'Adobe Express', resources });
+      // `resources` is REQUIRED by createWorkspaceV2Form; `{}` is the schema-valid "no
+      // allocation" body. Omitting the key is contract-violating even though live tolerates it.
+      expect(JSON.parse(call.body)).to.deep.equal({ title: 'Adobe Express', resources: {} });
       expect(call.header('X-Upload-Receipt')).to.equal(null);
       expect(result.id).to.equal('subworkspace-ws-1');
     });

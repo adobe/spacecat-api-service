@@ -173,7 +173,9 @@ v2-brand-for-org:
         description: |
           Brand updated successfully. For a sub-workspace brand the body may include:
           - `semrushSyncPending: true` when the row persisted but the Semrush re-sync
-            failed (Semrush unavailable or user not provisioned).
+            failed (Semrush unavailable or user not provisioned). Only for an org
+            still inside the Semrush migration window — with the `LLMO/serenity_ui`
+            feature flag on, that same failure is reported as 401/403/502 instead.
           - `semrushRejectedAliases` listing per-market aliases Semrush refused during
             an otherwise successful re-sync.
         content:
@@ -182,27 +184,50 @@ v2-brand-for-org:
               $ref: './schemas.yaml#/V2BrandUpdateResponse'
       '400':
         $ref: './responses.yaml#/400'
+      '401':
+        description: |
+          Upstream authorization failed. The org carries the `LLMO/serenity_ui`
+          feature flag and the caller could not be authenticated to the upstream
+          provider for the re-sync — the request carried no usable IMS user token,
+          or the token had expired. The brand row may already be committed; the
+          re-sync did not run.
       '403':
         description: |
-          Forbidden. Either the user does not have access to this organization, OR
-          the edit would re-sync a sub-workspace brand to Semrush (a URL, competitor,
-          or alias change on a brand carrying a `semrushWorkspaceId`) while the
-          org-wide serenity feature flag (`LLMO/serenity`) is inactive — the edit is
-          refused rather than left to drift (body message: "Serenity is not active
-          for this organization").
+          Forbidden. One of:
+          - the user does not have access to this organization;
+          - the edit would re-sync a sub-workspace brand to Semrush (a URL,
+            competitor, or alias change on a brand carrying a `semrushWorkspaceId`)
+            while the org-wide serenity feature flag (`LLMO/serenity`) is inactive —
+            the edit is refused rather than left to drift (body message: "Serenity is
+            not active for this organization");
+          - the org carries the `LLMO/serenity_ui` feature flag and Semrush refused
+            the re-sync for the calling user (not provisioned in Semrush).
       '404':
         description: Organization or brand not found
       '409':
         description: |
-          Conflict. The PATCH would demote an **active** brand to `pending` via the
-          generic update path (`code: brand_status_demotion_not_allowed`). Use
-          `PATCH /v2/orgs/{spaceCatId}/brands/{brandId}/status` for intentional
-          status transitions.
+          Conflict. One of (disambiguated by the `code` field in the response body):
+          - The PATCH would demote an **active** brand to `pending` via the
+            generic update path (`code: brand_status_demotion_not_allowed`). Use
+            `PATCH /v2/orgs/{spaceCatId}/brands/{brandId}/status` for intentional
+            status transitions.
+          - `expectedUpdatedAt` was supplied and no longer matches the brand's
+            persisted `updatedAt` — another write landed after this client last
+            loaded the brand (`code: brand_stale_write`). Reload the brand and
+            reapply the edit rather than retrying with the same body.
+          - The brand's primary URL is already the primary URL (base site) of
+            another brand in this organization.
         headers:
           X-Error:
             $ref: './headers.yaml#/xError'
       '500':
         $ref: './responses.yaml#/500'
+      '502':
+        description: |
+          Upstream request failed. The org carries the `LLMO/serenity_ui` feature
+          flag and the Semrush re-sync failed for a reason other than authorization
+          (timeout, network, upstream error). The brand row may already be committed;
+          the Semrush side does not reflect the edit.
       '503':
         description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)
   delete:
@@ -262,6 +287,9 @@ v2-brand-for-org-activate:
 
       Activation requires the brand to already have an onboarded primary site —
       a request against a brand with no onboarded primary site returns 400.
+      Activation itself is not paywalled (LLMO-6634): any org member may activate a
+      brand that already has a valid onboarded primary site, regardless of LLMO tier.
+      Onboarding a NEW URL remains a paid capability (separate endpoint).
 
       Set `generatePrompts` to `true` to trigger asynchronous AI prompt
       generation; the response then includes a `promptGenerationJobId`. When a
@@ -287,9 +315,7 @@ v2-brand-for-org-activate:
       '400':
         description: Brand has no onboarded primary site
       '403':
-        description: |
-          User is not a member of the organization, or the organization is not on a
-          PAID tier.
+        description: User does not have access to this organization
       '404':
         description: Organization or brand not found
       '409':

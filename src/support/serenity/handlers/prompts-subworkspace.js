@@ -15,7 +15,7 @@
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from '../../utils.js';
-import { ERROR_CODES, isUpstreamGone } from '../errors.js';
+import { ERROR_CODES, isMeteredQuota, isUpstreamGone } from '../errors.js';
 import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
 import { invalidateTagCacheForProject } from './markets.js';
 import {
@@ -28,19 +28,24 @@ import {
   parseUpdatePromptBody,
   mapLimit,
   publishAffected,
+  reconcilePublishErrors,
+  resolveSort,
+  buildUpdateMetadata,
   DEFAULT_PAGE_LIMIT,
   MAX_PAGE_LIMIT,
   MAX_TAG_IDS,
   BULK_CREATE_CONCURRENCY,
   BULK_PROMPTS_MAX_ITEMS,
 } from './prompts.js';
-import { ORIGIN_VALUE } from '../prompt-tags.js';
+import { ORIGIN_VALUE, PROXY_CREATE_SOURCE_VALUE } from '../prompt-tags.js';
 import { resolveProject, buildSliceProjectMap, sliceKey } from '../subworkspace-projects.js';
 import { redactUpstreamMessage } from '../rest-transport.js';
 import { createHeadroomGuard } from '../dynamic-allocation-active.js';
 import { classifyPromptIntents } from '../intent-classification.js';
+import { alertQuotaRejection } from '../quota-alerts.js';
 
 /** @typedef {import('../resource-manager.js').Blocks} Blocks */
+/** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
 
 /**
  * Subworkspace-mode prompt handlers (serenity dual-mode, subworkspace path). Behaviourally
@@ -66,6 +71,7 @@ import { classifyPromptIntents } from '../intent-classification.js';
  * to a project via the live listing; a missing project is a hard 404
  * marketNotFound (same contract as the flat-mode single-slice list — "no such
  * slice" must not masquerade as "slice exists but empty").
+ * @param {SerenityTransport} transport
  */
 export async function handleListPromptsSubworkspace(transport, workspaceId, query, log) {
   const geoTargetId = normalizeGeoTargetId(query?.geoTargetId);
@@ -85,6 +91,9 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
   const tagIds = Array.isArray(query?.tagIds)
     ? query.tagIds.slice(0, MAX_TAG_IDS).map(String).filter(Boolean)
     : [];
+  // sort/order (LLMO-6289): validated against the metadata allow-list and
+  // forwarded upstream — kept in lockstep with the flat-mode twin.
+  const { sort, order } = resolveSort(query);
 
   const project = await resolveProject(transport, workspaceId, geoTargetId, languageCode, log);
   if (!project) {
@@ -103,6 +112,8 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
     page,
     limit,
     search,
+    // Omit sort/order keys when unsorted (lockstep with twin file prompts.js).
+    ...(sort ? { sort, order } : {}),
   });
   const items = Array.isArray(resp?.items) ? resp.items : [];
   let total;
@@ -125,6 +136,22 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
  * POST /serenity/prompts (subworkspace) — bulk create. Resolves every input's owning
  * project from ONE live listing (buildSliceProjectMap) instead of the DB
  * mapping, then reuses the shared per-slice create + publish-once fan-out.
+ * @param {SerenityTransport} transport
+ * @param {string} workspaceId
+ * @param {any} body
+ * @param {any} log
+ * @param {any} classifyPromptType
+ * @param {object | null} env - environment (Azure OpenAI creds), threaded into intent
+ *   classification; ALSO used directly to fire the quota-rejection Slack alert (serenity-docs#72
+ *   §5). Optional — omitted, alerting is a no-op.
+ * @param {number} writeDeadline - shared request-write deadline for intent classification.
+ * @param {string} callerId - resolved caller id (LLMO-6289) stamped as the created/updated author.
+ * @param {object} [options]
+ * @param {boolean} [options.dynamicAllocation]
+ * @param {string} [options.parentWorkspaceId]
+ * @param {Partial<Blocks>} [options.ceiling] - per-brand AI ceiling (LLMO-6190 flag-flip gate).
+ * @param {string | null} [options.orgId] - serenity-docs#72 §5 alert payload only.
+ * @param {string | null} [options.brandId] - serenity-docs#72 §5 alert payload only.
  */
 export async function handleCreatePromptsSubworkspace(
   transport,
@@ -134,10 +161,13 @@ export async function handleCreatePromptsSubworkspace(
   classifyPromptType,
   env,
   writeDeadline,
+  callerId,
   {
     dynamicAllocation = false,
     parentWorkspaceId = '',
     ceiling = /** @type {Partial<Blocks> | undefined} */ (undefined),
+    orgId = null,
+    brandId = null,
   } = {},
 ) {
   const inputs = Array.isArray(body?.prompts) ? body.prompts : [];
@@ -153,14 +183,15 @@ export async function handleCreatePromptsSubworkspace(
   const deferPublish = validateDeferPublish(body);
 
   const projectsBySlice = await buildSliceProjectMap(transport, workspaceId, log);
-  // CREATE: user-authenticated write → derived `origin` is `human` (see the
-  // flat-mode twin handleCreatePrompts and origin-dimension.md §3).
+  // CREATE: user-authenticated write → derived `origin` is `human` and producing
+  // `source` is the constant `config` (see the flat-mode twin handleCreatePrompts,
+  // origin-dimension.md §3, source-dimension.md §1).
   const injectComputedTags = makePromptTagInjector(
     transport,
     workspaceId,
     classifyPromptType,
     log,
-    { originValue: ORIGIN_VALUE.HUMAN },
+    { originValue: ORIGIN_VALUE.HUMAN, sourceValue: PROXY_CREATE_SOURCE_VALUE },
   );
   // Unified layer (serenity-docs#32): batch-classify every distinct text ONCE
   // under the shared request deadline, then thread the resolved map into each
@@ -183,7 +214,7 @@ export async function handleCreatePromptsSubworkspace(
   const injectComputedIntent = makeIntentInjector(transport, workspaceId, intentByText, log);
 
   // PROMPT metering seam (Rainer, live-verified LLMO-6190): the metered write is
-  // `createPromptsByIds` (inside `createOnePrompt` below), NOT publish — a disguised-quota 405
+  // `createPromptsWithMetadata` (inside `createOnePrompt` below), NOT publish — a disguised 405
   // fires there, before any publish, if `used + drafted + batch > total`. Front headroom BEFORE
   // this loop, sized on the whole incoming batch (`inputs.length` — a safe upper bound; some
   // inputs may still skip on validation/missing-project, so this can over-provision slightly, never
@@ -191,7 +222,13 @@ export async function handleCreatePromptsSubworkspace(
   const headroom = createHeadroomGuard(
     transport,
     {
-      enabled: dynamicAllocation, subWorkspaceId: workspaceId, parentWorkspaceId, ceiling,
+      enabled: dynamicAllocation,
+      subWorkspaceId: workspaceId,
+      parentWorkspaceId,
+      ceiling,
+      env,
+      orgId,
+      brandId,
     },
     log,
   );
@@ -228,8 +265,15 @@ export async function handleCreatePromptsSubworkspace(
       // write-enforcement lag after a JIT top-up) — route it through `headroom.retryOnQuota` (a
       // no-op passthrough when the flag is OFF) so each item recovers independently; `mapLimit`'s
       // own per-item try/catch below still isolates a surviving failure to this one item.
+      // Intentional (not an inconsistency to fix): each item stamps its OWN
+      // creation instant here — `buildCreateMetadata` runs per prompt inside
+      // `createOnePrompt`, so a bulk batch gets slightly staggered `created_at`
+      // values, each the true moment that item was written. This differs from
+      // `generateAndAttachPrompts` (markets-subworkspace.js), which shares ONE
+      // metadata object (a single batch instant) across its whole group. Both
+      // are defensible; per-item precision is preferred on the direct create path.
       const semrushPromptId = await headroom.retryOnQuota(
-        () => createOnePrompt(transport, workspaceId, projectId, typed),
+        () => createOnePrompt(transport, workspaceId, projectId, typed, callerId),
         { callSite: 'createOnePrompt' },
       );
       return {
@@ -243,12 +287,22 @@ export async function handleCreatePromptsSubworkspace(
         affectedProjectId: projectId,
       };
     } catch (e) {
+      // serenity-docs#72 §4.1: a residual disguised-405 quota rejection on the metered write
+      // itself (not just its later publish) must surface as the stable 409 quotaExceeded token —
+      // never the raw upstream status (405) or a generic 500.
+      const quota = isMeteredQuota(e);
+      if (quota) {
+        await alertQuotaRejection({
+          orgId, brandId, workspaceId, caseType: 'brandCarveExhausted', dimension: 'prompts',
+        }, env, log);
+      }
       return {
         failed: {
           text: input.text,
           geoTargetId: input.geoTargetId,
           languageCode: input.languageCode,
-          status: e.status || 500,
+          status: quota ? 409 : (e.status || 500),
+          ...(quota ? { error: ERROR_CODES.QUOTA_EXCEEDED } : {}),
           message: redactUpstreamMessage(e),
         },
       };
@@ -261,7 +315,9 @@ export async function handleCreatePromptsSubworkspace(
   const affectedProjectIds = [];
   for (const r of results) {
     if (r.created) {
-      created.push(r.created);
+      // `rollbackProjectId` is internal bookkeeping for reconcilePublishErrors' rollback below;
+      // stripped before the response is returned.
+      created.push({ ...r.created, rollbackProjectId: r.affectedProjectId });
       affectedProjectIds.push(r.affectedProjectId);
     } else if (r.skipped) {
       skipped.push(r.skipped);
@@ -279,28 +335,45 @@ export async function handleCreatePromptsSubworkspace(
       workspaceId, created: created.length, skipped: skipped.length, failed: failed.length,
     });
     return {
-      created, skipped, failed, published: false,
+      // eslint-disable-next-line no-unused-vars -- omit the bookkeeping field
+      created: created.map(({ rollbackProjectId, ...rest }) => rest),
+      skipped,
+      failed,
+      published: false,
     };
   }
 
   // Route each project's publish through the headroom guard's retryOnQuota (LLMO-6190 item 4):
   // a disguised metered-405 gets ONE bounded top-up+retry per project before being recorded as a
   // failure. No-op passthrough when the flag is OFF (the guard's retryOnQuota is a plain call).
+  const alertContext = { orgId, brandId, env };
   const publishErrors = await publishAffected(
     transport,
     workspaceId,
     affectedProjectIds,
     log,
     (fn) => headroom.retryOnQuota(fn, { callSite: 'publishAffected' }),
+    alertContext,
   );
-  // publishAffected returns { projectId, message } records whose message is
-  // ALREADY redacted (redactUpstreamMessage) — pubErr is a record, not a raw error.
-  for (const pubErr of publishErrors) {
-    failed.push({ text: '', status: 502, message: `publish: ${pubErr.message}` });
-  }
+  // serenity-docs#72 §4.1 atomicity: a quota-rejected publish rolls back (deletes) the prompts
+  // this request staged in that project and moves them into `failed` — never left as unpublished
+  // drafts. A non-quota publish failure is untouched (existing generic `publish:` 502 record).
+  await reconcilePublishErrors(
+    transport,
+    workspaceId,
+    publishErrors,
+    created,
+    failed,
+    log,
+    alertContext,
+  );
 
   return {
-    created, skipped, failed, published: true,
+    // eslint-disable-next-line no-unused-vars -- destructuring-omit to strip the bookkeeping field
+    created: created.map(({ rollbackProjectId, ...rest }) => rest),
+    skipped,
+    failed,
+    published: true,
   };
 }
 
@@ -308,10 +381,13 @@ export async function handleCreatePromptsSubworkspace(
  * PATCH /serenity/prompts/:semrushPromptId (subworkspace) — in-place edit.
  * Resolves the slice's project from the live listing, then edits the prompt IN
  * PLACE exactly like the flat-mode twin (see handleUpdatePrompt's contract):
- * `rename` first (the one op that can refuse — upstream 404 → promptNotFound,
- * 409 text collision → thrown for the controller's `conflict` mapping), then
- * the replace-mode batch tag write. The prompt id is preserved end to end and
- * echoed unchanged in the response; nothing is deleted on this path.
+ * the combined v3 `PATCH .../{id}` first (text `name` + `updated_*` metadata
+ * stamp in one request — the one op that can refuse: upstream 404 →
+ * promptNotFound, 409 text collision → thrown for the controller's `conflict`
+ * mapping), then the replace-mode batch tag write (v2, metadata-free). The
+ * prompt id is preserved end to end and echoed unchanged in the response;
+ * nothing is deleted on this path.
+ * @param {SerenityTransport} transport
  */
 export async function handleUpdatePromptSubworkspace(
   transport,
@@ -322,6 +398,7 @@ export async function handleUpdatePromptSubworkspace(
   classifyPromptType,
   env,
   writeDeadline,
+  callerId,
 ) {
   const parsedBody = parseUpdatePromptBody(body);
   if (!parsedBody.ok) {
@@ -372,7 +449,13 @@ export async function handleUpdatePromptSubworkspace(
   typed = await injectComputedIntent(projectId, typed);
 
   try {
-    await transport.renamePrompt(workspaceId, projectId, semrushPromptId, nextText);
+    // Combined v3 write: text (`name`) + `updated_*` stamp in one request
+    // (replaces the v2 `rename`). Same refusal contract — 404 → promptNotFound,
+    // 409 (sibling text collision) → thrown for the controller's `conflict`.
+    await transport.patchPrompt(workspaceId, projectId, semrushPromptId, {
+      name: nextText,
+      metadata: buildUpdateMetadata(callerId),
+    });
   } catch (e) {
     if (isUpstreamGone(e)) {
       return {
@@ -401,7 +484,7 @@ export async function handleUpdatePromptSubworkspace(
     // The rename above already landed: the prompt's text has moved while its
     // tags are stale. Record the partial mutation before propagating, so the
     // generic upstream error the caller sees is attributable on-call.
-    log?.warn?.('updatePromptTagsByIds failed after a successful rename — text updated, tags stale', {
+    log?.warn?.('updatePromptTagsByIds failed after a successful text/metadata PATCH — text updated, tags stale', {
       semrushPromptId, projectId, error: e.message,
     });
     throw e;
@@ -427,8 +510,22 @@ export async function handleUpdatePromptSubworkspace(
  * POST /serenity/prompts/bulk-delete (subworkspace) — resolve each target's project
  * from ONE live listing, batch deletes per project, publish affected. Upstream
  * 404 == idempotent success.
+ * @param {SerenityTransport} transport
+ * @param {string} workspaceId
+ * @param {any} body
+ * @param {any} log
+ * @param {object} [options]
+ * @param {string | null} [options.orgId] - serenity-docs#72 §5 alert payload only.
+ * @param {string | null} [options.brandId] - serenity-docs#72 §5 alert payload only.
+ * @param {object | null} [options.env] - serenity-docs#72 §5 alert kill-switch/config only.
  */
-export async function handleBulkDeletePromptsSubworkspace(transport, workspaceId, body, log) {
+export async function handleBulkDeletePromptsSubworkspace(
+  transport,
+  workspaceId,
+  body,
+  log,
+  { orgId = null, brandId = null, env = null } = {},
+) {
   const targets = Array.isArray(body?.prompts) ? body.prompts : [];
   if (targets.length === 0) {
     throw new ErrorWithStatusCode('Body must include a non-empty prompts array', 400);
@@ -511,10 +608,18 @@ export async function handleBulkDeletePromptsSubworkspace(transport, workspaceId
     workspaceId,
     Array.from(projectsToPublish),
     log,
+    undefined,
+    { orgId, brandId, env },
   );
-  // pubErr is an already-redacted { projectId, message } record (see above).
+  // pubErr is an already-redacted { projectId, message, code? } record (see above).
   publishErrors.forEach((pubErr) => {
-    failed.push({ semrushPromptId: '', status: 502, message: `publish: ${pubErr.message}` });
+    if (pubErr.code === ERROR_CODES.QUOTA_EXCEEDED) {
+      failed.push({
+        semrushPromptId: '', status: 409, error: ERROR_CODES.QUOTA_EXCEEDED, message: pubErr.message,
+      });
+    } else {
+      failed.push({ semrushPromptId: '', status: 502, message: `publish: ${pubErr.message}` });
+    }
   });
 
   return { deleted, failed };

@@ -2796,9 +2796,9 @@ describe('LlmoController', () => {
       },
     );
 
-    it('should return 403 when user is not LLMO administrator', async () => {
+    it('should return 403 when user is not an administrator', async () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
-        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, false, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
         '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
@@ -2809,7 +2809,7 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(403);
       const responseBody = await result.json();
-      expect(responseBody.message).to.equal('Only LLMO administrators can update the CDN logs filter');
+      expect(responseBody.message).to.equal('Only administrators can update the CDN logs filter');
     });
 
     describe('patchLlmoCdnBucketConfig', () => {
@@ -2864,9 +2864,9 @@ describe('LlmoController', () => {
         },
       );
 
-      it('should return 403 when user is not LLMO administrator', async () => {
+      it('should return 403 when user is not an administrator', async () => {
         const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
-          '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+          '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, false, false),
           '@adobe/spacecat-shared-http-utils': mockHttpUtils,
           '../../../src/support/cached-response.js': mockCachedResponse,
           ...getCommonMocks(),
@@ -2877,7 +2877,7 @@ describe('LlmoController', () => {
 
         expect(result.status).to.equal(403);
         const responseBody = await result.json();
-        expect(responseBody.message).to.equal('Only LLMO administrators can update the CDN bucket config');
+        expect(responseBody.message).to.equal('Only administrators can update the CDN bucket config');
       });
     });
   });
@@ -5772,7 +5772,7 @@ describe('LlmoController', () => {
         expect(mockConfig.updateEdgeOptimizeConfig.firstCall.args[0]).to.not.have.property('enabled');
         expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
           mockEnv.IMPORT_WORKER_QUEUE_URL,
-          { type: 'optimize-at-edge-enabled-marking' },
+          { type: 'optimize-at-edge-enabled-marking', siteId: TEST_SITE_ID },
           undefined,
           { delaySeconds: 300 },
         );

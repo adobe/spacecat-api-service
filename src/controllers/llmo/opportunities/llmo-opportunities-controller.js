@@ -27,7 +27,10 @@ const VALID_STATUSES = new Set(['NEW', 'IN_PROGRESS']);
  * Matches the filtering logic used in get-llmo-opportunity-usage.js.
  */
 function isLlmoOpportunity(opportunity) {
-  const tags = [...(opportunity.getTags())];
+  // getTags() can be null/undefined when the DynamoDB set attribute is unset
+  // (e.g. a freshly created meta-tags opportunity). Spreading null throws and
+  // used to wipe the entire site's aggregate via the surrounding try/catch.
+  const tags = [...(opportunity.getTags() ?? [])];
   const type = opportunity.getType() ?? '';
   return tags.includes('isElmo') || type === 'prerender' || type === 'llm-blocked';
 }

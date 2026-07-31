@@ -27,8 +27,8 @@ import {
  * (POST /v2/orgs/:spaceCatId/brands/:brandId/activate — LLMO-5605).
  *
  * Covers, against the real PostgREST DB:
- *  - request validation + the auth gate (org lookup → membership → explicit PAID
- *    entitlement) + the org-scoped brand lookup;
+ *  - request validation + the auth gate (org lookup → membership; activation is NOT
+ *    paid-gated as of LLMO-6634) + the org-scoped brand lookup;
  *  - the real promotion path (pending → active with baseSiteId written), its
  *    idempotent re-activation no-op, and the brands_base_site_unique → 409 — all
  *    pure Postgres, so testable here.
@@ -69,24 +69,26 @@ export default function activateBrandForOrgTests(getHttpClient, resetData) {
       expect(res.status).to.equal(403);
     });
 
-    it('returns 403 when the organization has no LLMO entitlement', async () => {
+    // LLMO-6634: activation is NOT paid-gated. A member of a non-paying org passes the
+    // auth check and reaches the brand lookup, so a missing brand surfaces as a 404 —
+    // NOT the 403 the old PAID-entitlement gate used to return. Both a no-entitlement
+    // org (ORG_2) and a FREE_TRIAL org (ORG_1) prove the gate is gone.
+    it('reaches the brand lookup (404) for a non-paying org with no LLMO entitlement (not paid-gated — LLMO-6634)', async () => {
       const http = getHttpClient();
       const res = await http.admin.post(activatePath(ORG_2_ID, MISSING_BRAND_ID), validBody);
-      expect(res.status).to.equal(403);
+      expect(res.status).to.equal(404);
     });
 
-    it("returns 403 when the organization's LLMO entitlement is FREE_TRIAL (not PAID)", async () => {
-      // ORG_1 has a FREE_TRIAL LLMO entitlement. PAID is stricter than the
-      // platform's any-tier "LLMO-enabled" bar, so this must be rejected.
+    it('reaches the brand lookup (404) for a FREE_TRIAL org (not paid-gated — LLMO-6634)', async () => {
+      // ORG_1 has a FREE_TRIAL LLMO entitlement — no longer rejected at the auth gate.
       const http = getHttpClient();
       const res = await http.admin.post(activatePath(ORG_1_ID, MISSING_BRAND_ID), validBody);
-      expect(res.status).to.equal(403);
+      expect(res.status).to.equal(404);
     });
 
-    it('passes the PAID gate and reaches the brand lookup (404 for a missing brand)', async () => {
-      // ORG_3 has a PAID LLMO entitlement. With admin auth, membership + PAID both
-      // pass, so a non-existent brand surfaces as a 404 from getBrandById rather than
-      // a 403 — proving the gate opens for a paying org.
+    it('reaches the brand lookup (404 for a missing brand) for a paying org', async () => {
+      // ORG_3 has a PAID LLMO entitlement; a paying org still activates unchanged, so a
+      // non-existent brand surfaces as a 404 from getBrandById.
       const http = getHttpClient();
       const res = await http.admin.post(activatePath(ORG_3_ID, MISSING_BRAND_ID), validBody);
       expect(res.status).to.equal(404);

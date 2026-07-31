@@ -81,6 +81,27 @@ v2-serenity-prompts:
           Maximum 50 ids; excess values are silently truncated (same pattern
           as the `limit` cap). This matches the server-side `MAX_TAG_IDS`
           constant in `handlers/prompts.js`.
+      - name: sort
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [metadata.created_at, metadata.updated_at]
+        description: |
+          Sort the page by a server-owned authorship timestamp. Restricted to
+          `metadata.created_at` (Created) or `metadata.updated_at` (Last
+          modified) — any other value is a 400. Omitted leaves the upstream
+          default (unsorted) ordering. Requires the with-metadata list path.
+      - name: order
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [asc, desc]
+          default: desc
+        description: |
+          Sort direction for `sort`; defaults to `desc` (newest first). Ignored
+          when `sort` is omitted.
     responses:
       '200':
         description: Prompts retrieved successfully.
@@ -478,28 +499,30 @@ v2-serenity-tags:
     description: |
       Registers a BARE-NAMED prompt tag on the market addressed by the
       `(geoTargetId, languageCode)` slice. Every tag is a descendant of one of
-      the four dimension roots (`category`, `intent`, `source`, `type`); a tag's
-      dimension is that root ancestor, never a prefix on its name. `type` names
-      the dimension the value belongs to, and `name` must not contain `:` nor
-      shadow a dimension root's name.
+      the five dimension roots (`category`, `intent`, `origin`, `type`,
+      `source`); a tag's dimension is that root ancestor, never a prefix on its
+      name. `type` names the dimension the value belongs to, and `name` must not
+      contain `:` nor shadow a dimension root's name.
 
-      `category` is the one OPEN dimension: its values are customer-authored. A
-      duplicate name under the same parent is a hard upstream error, so
-      resolve-before-create is the CALLER's job. Omit `parentId` to hang the new
+      `category` is the one CUSTOMER-AUTHORED open dimension: its values are the
+      customer's. A duplicate name under the same parent is a hard upstream error,
+      so resolve-before-create is the CALLER's job. Omit `parentId` to hang the new
       value directly under the `category` root; pass an upstream tag id (from a
       prior tags list) to nest it under an existing category as a sub-category.
       The "Categories" view is the `category` root's subtree across a brand's
       markets.
 
-      `intent` / `source` / `type` are CLOSED dimensions with a fixed value enum:
-      `name` must be one of that enum's values, and `parentId` is not accepted
-      because their values are always direct children of the dimension root. A
-      closed-dimension create is resolve-OR-create (idempotent): if the project
-      already carries that value its existing id is returned (200,
-      `created: false`) instead of attempting another create.
+      `intent` / `origin` / `type` / `source` are SERVER-OWNED: `parentId` is not
+      accepted (their values are always direct children of the dimension root),
+      and the create is resolve-OR-create (idempotent) — if the project already
+      carries that value its existing id is returned (200, `created: false`)
+      instead of attempting another create. `intent` / `origin` / `type` are
+      additionally CLOSED (their `name` must be one of a fixed value enum);
+      `source` is OPEN (the producing system — source-dimension.md), so any bare
+      `name` resolves-or-creates with no enum.
 
-      The four dimension roots are provisioned on demand, so a project that
-      predates this taxonomy is brought forward by the first write to it.
+      The dimension roots are provisioned on demand, so a project that predates
+      this taxonomy is brought forward by the first write to it.
     operationId: createSerenityTag
     security:
       - ims_key: []
@@ -514,8 +537,8 @@ v2-serenity-tags:
             properties:
               type:
                 type: string
-                enum: [category, intent, source, type]
-                description: The tag's dimension. `category` is open (customer-authored); `intent`/`source`/`type` are closed (fixed enum).
+                enum: [category, intent, origin, type, source]
+                description: The tag's dimension. `category` is customer-authored (open); `intent`/`origin`/`type`/`source` are server-owned — the first three closed (fixed enum), `source` open (producing system, resolve-or-create).
               name:
                 type: string
                 minLength: 1
@@ -901,11 +924,12 @@ v2-serenity-models:
       AI models configured for that slice's upstream project. `key` is the
       value the Reporting API expects as `CBF_model`.
 
-      **Catalog mode** (neither param present): returns the global catalog of
-      ALL AI models available for tracking via `GET /v1/ai_models` (not
-      workspace-scoped). Falls back to an empty list if the upstream endpoint
-      is unavailable. Use this to populate "available models" selectors in the
-      UI before a market is configured.
+      **Union mode** (neither param present): returns the union of AI models
+      enabled across all the brand's projects — i.e. only the models the brand
+      has data for, deduplicated. Returns an empty list if the brand has no
+      projects. Use this to populate "available models" selectors in the UI.
+      For the brand-independent global catalog, use the org-level
+      `GET /v2/orgs/{spaceCatId}/serenity/models` instead.
 
       Providing exactly one of the two params returns 400.
     operationId: listSerenityModels
@@ -1116,8 +1140,16 @@ v2-serenity-url-inspector-filter-dimensions:
       - name: projectId
         in: query
         required: false
-        description: Semrush project UUID to scope the Topics element to a specific market.
-        schema: { type: string, format: uuid }
+        description: |
+          Comma-separated Semrush project UUIDs to scope the Topics element to
+          (e.g. `projectId=<uuid1>,<uuid2>`). Alias `project_id`. Omitted →
+          the Topics element is unscoped. Maximum 8 ids; each must be a valid UUID (400 otherwise).
+        schema: { type: string, pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}){0,7}$' }
+      - name: project_id
+        in: query
+        required: false
+        description: Snake_case alias for `projectId`.
+        schema: { type: string }
       - name: startDate
         in: query
         required: false
@@ -1183,9 +1215,10 @@ v2-serenity-brand-presence-sentiment-overview:
       `sentiment[]` ordering/colors are identical.
 
       Brand-scoped via the brand's Semrush sub-workspace (resolved from `:brandId`);
-      `region` (when not `all`) is resolved to a Semrush `project_id` server-side,
-      `category` becomes a `category__<label>` tag, and `model`/`platform` are
-      translated to a Semrush model server-side.
+      `projectId` (CSV of Semrush project UUIDs) scopes directly to those
+      projects via a `CBF_project` filter, `category` becomes a
+      `category__<label>` tag, and `model`/`platform` are translated to a
+      Semrush model server-side.
     operationId: listSerenityBrandPresenceSentimentOverview
     security:
       - ims_key: []
@@ -1231,12 +1264,18 @@ v2-serenity-brand-presence-sentiment-overview:
         required: false
         description: Legacy alias for `model`; `model` takes precedence when both are given.
         schema: { type: string }
-      - name: region
+      - name: projectId
         in: query
         required: false
         description: |
-          UI region code (e.g. `US`) resolved server-side to a Semrush
-          `project_id`. `all` or omitted → aggregate across the brand's markets.
+          Comma-separated Semrush project UUIDs to scope to (e.g.
+          `projectId=<uuid1>,<uuid2>`). Alias `project_id`. Omitted →
+          aggregate across the brand's markets. Maximum 8 ids; each must be a valid UUID (400 otherwise).
+        schema: { type: string, pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}){0,7}$' }
+      - name: project_id
+        in: query
+        required: false
+        description: Snake_case alias for `projectId`.
         schema: { type: string }
       - name: categoryId
         in: query
@@ -1255,7 +1294,7 @@ v2-serenity-brand-presence-sentiment-overview:
       '403':
         description: Caller lacks access to the organization.
       '404':
-        description: Organization not found, brand not found for this organization, the brand has no resolvable Semrush workspace, or no Semrush market resolves for the requested region.
+        description: Organization not found, brand not found for this organization, or the brand has no resolvable Semrush workspace.
       '502':
         description: Upstream returned a non-2xx response.
         content:
@@ -1294,9 +1333,10 @@ v2-serenity-brand-presence-topics:
       server-side — the same element that backs the per-prompt drill-down.
 
       Brand-scoped via the brand's Semrush sub-workspace (resolved from `:brandId`);
-      `region` (when not `all`) resolves to a Semrush `project_id` server-side, and
-      `model`/`platform` translate to a Semrush model server-side. Returns the full
-      topic list (no server-side pagination); the table paginates client-side.
+      `projectId` (CSV of Semrush project UUIDs) scopes directly to those
+      projects via a `CBF_project` filter, and `model`/`platform` translate to
+      a Semrush model server-side. Returns the full topic list (no
+      server-side pagination); the table paginates client-side.
     operationId: listSerenityBrandPresenceTopics
     security:
       - ims_key: []
@@ -1323,12 +1363,18 @@ v2-serenity-brand-presence-topics:
         required: false
         description: Legacy alias for `model`; `model` takes precedence when both are given.
         schema: { type: string }
-      - name: region
+      - name: projectId
         in: query
         required: false
         description: |
-          UI region code (e.g. `US`) resolved server-side to a Semrush `project_id`.
-          `all` or omitted → across the brand's markets.
+          Comma-separated Semrush project UUIDs to scope to (e.g.
+          `projectId=<uuid1>,<uuid2>`). Alias `project_id`. Omitted →
+          across the brand's markets. Maximum 8 ids; each must be a valid UUID (400 otherwise).
+        schema: { type: string, pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}){0,7}$' }
+      - name: project_id
+        in: query
+        required: false
+        description: Snake_case alias for `projectId`.
         schema: { type: string }
     responses:
       '200':
@@ -1340,7 +1386,7 @@ v2-serenity-brand-presence-topics:
       '403':
         description: Caller lacks access to the organization.
       '404':
-        description: Organization not found, brand not found for this organization, the brand has no Semrush sub-workspace, or no Semrush market resolves for the requested region.
+        description: Organization not found, brand not found for this organization, or the brand has no Semrush sub-workspace.
       '502':
         description: Upstream returned a non-2xx response.
         content:
@@ -1386,9 +1432,10 @@ v2-serenity-brand-presence-topic-prompts:
       element that backs the topic table — scoped by `CBF_topic` (the topic name).
 
       Brand-scoped via the brand's Semrush sub-workspace (resolved from `:brandId`);
-      `region` (when not `all`) resolves to a Semrush `project_id` server-side, and
-      `model`/`platform` translate to a Semrush model server-side. Pagination is
-      applied server-side over the full result (Semrush has no native paging).
+      `projectId` (CSV of Semrush project UUIDs) scopes directly to those
+      projects via a `CBF_project` filter, and `model`/`platform` translate to
+      a Semrush model server-side. Pagination is applied server-side over the
+      full result (Semrush has no native paging).
     operationId: listSerenityBrandPresenceTopicPrompts
     security:
       - ims_key: []
@@ -1415,12 +1462,18 @@ v2-serenity-brand-presence-topic-prompts:
         required: false
         description: Legacy alias for `model`; `model` takes precedence when both are given.
         schema: { type: string }
-      - name: region
+      - name: projectId
         in: query
         required: false
         description: |
-          UI region code (e.g. `US`) resolved server-side to a Semrush `project_id`.
-          `all` or omitted → across the brand's markets.
+          Comma-separated Semrush project UUIDs to scope to (e.g.
+          `projectId=<uuid1>,<uuid2>`). Alias `project_id`. Omitted →
+          across the brand's markets. Maximum 8 ids; each must be a valid UUID (400 otherwise).
+        schema: { type: string, pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}){0,7}$' }
+      - name: project_id
+        in: query
+        required: false
+        description: Snake_case alias for `projectId`.
         schema: { type: string }
       - name: page
         in: query
@@ -1442,7 +1495,7 @@ v2-serenity-brand-presence-topic-prompts:
       '403':
         description: Caller lacks access to the organization.
       '404':
-        description: Organization not found, brand not found for this organization, the brand has no Semrush sub-workspace, or no Semrush market resolves for the requested region.
+        description: Organization not found, brand not found for this organization, or the brand has no Semrush sub-workspace.
       '502':
         description: Upstream returned a non-2xx response.
         content:
@@ -1556,24 +1609,18 @@ v2-serenity-brand-presence-stats:
         required: false
         description: Snake_case alias for `siteId`.
         schema: { type: string, format: uuid }
-      - name: regionCode
+      - name: projectId
         in: query
         required: false
         description: |
-          One region+language code (e.g. `US`). Resolves to a single Semrush
-          project via the Markets element; 404 if it doesn't match any of the
-          brand's markets. When omitted, aggregates across every project the
-          brand owns.
-        schema: { type: string }
-      - name: region_code
+          Comma-separated Semrush project UUIDs to scope to (e.g.
+          `projectId=<uuid1>,<uuid2>`). Alias `project_id`. When omitted,
+          aggregates across every project the brand owns. Maximum 8 ids; each must be a valid UUID (400 otherwise).
+        schema: { type: string, pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}){0,7}$' }
+      - name: project_id
         in: query
         required: false
-        description: Snake_case alias for `regionCode`.
-        schema: { type: string }
-      - name: region
-        in: query
-        required: false
-        description: Alias for `regionCode`.
+        description: Snake_case alias for `projectId`.
         schema: { type: string }
       - name: showTrends
         in: query
@@ -1595,7 +1642,7 @@ v2-serenity-brand-presence-stats:
       '403':
         description: Caller lacks access to the organization.
       '404':
-        description: Organization not found, brand not found for this organization, the brand has no resolvable Semrush workspace, `regionCode` doesn't match any Semrush market, or (when no `regionCode` is given) the brand has no Semrush projects configured at all.
+        description: Organization not found, brand not found for this organization, the brand has no resolvable Semrush workspace, or (when no `projectId` is given) the brand has no Semrush projects configured at all.
       '502':
         description: Upstream returned a non-2xx response.
         content:
@@ -1714,14 +1761,18 @@ v2-serenity-url-inspector-stats:
         required: false
         description: Snake_case alias for `siteId`.
         schema: { type: string, format: uuid }
-      - name: region
+      - name: projectId
         in: query
         required: false
         description: |
-          A single region code (e.g. `US`). Resolves to a single Semrush
-          project via the Markets element; 404 if it doesn't match any of the
-          brand's markets. Omitted or `all` aggregates across every project
-          the brand owns.
+          Comma-separated Semrush project UUIDs to scope to (e.g.
+          `projectId=<uuid1>,<uuid2>`). Alias `project_id`. Omitted
+          aggregates across every project the brand owns. Maximum 8 ids; each must be a valid UUID (400 otherwise).
+        schema: { type: string, pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}){0,7}$' }
+      - name: project_id
+        in: query
+        required: false
+        description: Snake_case alias for `projectId`.
         schema: { type: string }
       - name: categoryId
         in: query
@@ -1743,7 +1794,7 @@ v2-serenity-url-inspector-stats:
       '403':
         description: Caller lacks access to the organization.
       '404':
-        description: Organization not found, brand not found for this organization, the brand has no resolvable Semrush workspace, `region` doesn't match any Semrush market, or (when no `region` is given) the brand has no Semrush projects configured at all.
+        description: Organization not found, brand not found for this organization, the brand has no resolvable Semrush workspace, or (when no `projectId` is given) the brand has no Semrush projects configured at all.
       '502':
         description: Upstream returned a non-2xx response.
         content:
@@ -1827,14 +1878,18 @@ v2-serenity-url-inspector-prompts-count:
         required: false
         description: Snake_case alias for `siteId`.
         schema: { type: string, format: uuid }
-      - name: region
+      - name: projectId
         in: query
         required: false
         description: |
-          A single region code (e.g. `US`). Resolves to a single Semrush
-          project via the Markets element; 404 if it doesn't match any of the
-          brand's markets. Omitted or `all` aggregates across every project
-          the brand owns.
+          Comma-separated Semrush project UUIDs to scope to (e.g.
+          `projectId=<uuid1>,<uuid2>`). Alias `project_id`. Omitted
+          aggregates across every project the brand owns. Maximum 8 ids; each must be a valid UUID (400 otherwise).
+        schema: { type: string, pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}){0,7}$' }
+      - name: project_id
+        in: query
+        required: false
+        description: Snake_case alias for `projectId`.
         schema: { type: string }
       - name: categoryId
         in: query
@@ -1856,7 +1911,7 @@ v2-serenity-url-inspector-prompts-count:
       '403':
         description: Caller lacks access to the organization.
       '404':
-        description: Organization not found, brand not found for this organization, the brand has no resolvable Semrush workspace, `region` doesn't match any Semrush market, or (when no `region` is given) the brand has no Semrush projects configured at all.
+        description: Organization not found, brand not found for this organization, the brand has no resolvable Semrush workspace, or (when no `projectId` is given) the brand has no Semrush projects configured at all.
       '502':
         description: Upstream returned a non-2xx response.
         content:
@@ -1949,13 +2004,18 @@ v2-serenity-market-tracking-trends:
         required: false
         description: Legacy alias for `model`; `model` takes precedence when both are given.
         schema: { type: string }
-      - name: regionCode
+      - name: projectId
         in: query
         required: false
         description: |
-          One region+language code (e.g. `US`), resolved to a single Semrush
-          project. Aliases `region_code`, `region`. `all` or absent aggregates
-          across every project the brand owns.
+          Comma-separated Semrush project UUIDs to scope to (e.g.
+          `projectId=<uuid1>,<uuid2>`). Alias `project_id`. Absent
+          aggregates across every project the brand owns. Maximum 8 ids; each must be a valid UUID (400 otherwise).
+        schema: { type: string, pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}){0,7}$' }
+      - name: project_id
+        in: query
+        required: false
+        description: Snake_case alias for `projectId`.
         schema: { type: string }
       - name: siteId
         in: query
@@ -1974,7 +2034,7 @@ v2-serenity-market-tracking-trends:
       '403':
         description: Caller lacks access to the organization.
       '404':
-        description: Organization not found, brand not found for this organization, the brand has no resolvable Semrush workspace, or the requested region matches no market.
+        description: Organization not found, brand not found for this organization, or the brand has no resolvable Semrush workspace.
       '502':
         description: Upstream returned a non-2xx response.
         content:
@@ -2073,13 +2133,18 @@ v2-serenity-kpi-headlines:
         required: false
         description: Legacy alias for `model`; `model` takes precedence when both are given.
         schema: { type: string }
-      - name: regionCode
+      - name: projectId
         in: query
         required: false
         description: |
-          One region+language code (e.g. `US`), resolved to a single Semrush
-          project. Aliases `region_code`, `region`. `all` or absent aggregates
-          across every project the brand owns.
+          Comma-separated Semrush project UUIDs to scope to (e.g.
+          `projectId=<uuid1>,<uuid2>`). Alias `project_id`. Absent
+          aggregates across every project the brand owns. Maximum 8 ids; each must be a valid UUID (400 otherwise).
+        schema: { type: string, pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}){0,7}$' }
+      - name: project_id
+        in: query
+        required: false
+        description: Snake_case alias for `projectId`.
         schema: { type: string }
       - name: siteId
         in: query
@@ -2108,7 +2173,7 @@ v2-serenity-kpi-headlines:
       '403':
         description: Caller lacks access to the organization.
       '404':
-        description: Organization not found, brand not found for this organization, the brand has no resolvable Semrush workspace, or the requested region matches no market.
+        description: Organization not found, brand not found for this organization, or the brand has no resolvable Semrush workspace.
       '502':
         description: Upstream returned a non-2xx response.
         content:
@@ -2206,13 +2271,18 @@ v2-serenity-source-visibility-headline:
         required: false
         description: Legacy alias for `model`; `model` takes precedence when both are given.
         schema: { type: string }
-      - name: regionCode
+      - name: projectId
         in: query
         required: false
         description: |
-          One region+language code (e.g. `US`), resolved to a single Semrush
-          project. Aliases `region_code`, `region`. `all` or absent aggregates
-          across every project the brand owns.
+          Comma-separated Semrush project UUIDs to scope to (e.g.
+          `projectId=<uuid1>,<uuid2>`). Alias `project_id`. Absent
+          aggregates across every project the brand owns. Maximum 8 ids; each must be a valid UUID (400 otherwise).
+        schema: { type: string, pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}){0,7}$' }
+      - name: project_id
+        in: query
+        required: false
+        description: Snake_case alias for `projectId`.
         schema: { type: string }
       - name: siteId
         in: query
@@ -2241,7 +2311,7 @@ v2-serenity-source-visibility-headline:
       '403':
         description: Caller lacks access to the organization.
       '404':
-        description: Organization not found, brand not found for this organization, the brand has no resolvable Semrush workspace, or the requested region matches no market.
+        description: Organization not found, brand not found for this organization, or the brand has no resolvable Semrush workspace.
       '502':
         description: Upstream returned a non-2xx response.
         content:
@@ -2334,13 +2404,18 @@ v2-serenity-competitor-summary:
         required: false
         description: Legacy alias for `model`; `model` takes precedence when both are given.
         schema: { type: string }
-      - name: regionCode
+      - name: projectId
         in: query
         required: false
         description: |
-          One region+language code (e.g. `US`), resolved to a single Semrush
-          project. Aliases `region_code`, `region`. `all` or absent aggregates
-          across every project the brand owns.
+          Comma-separated Semrush project UUIDs to scope to (e.g.
+          `projectId=<uuid1>,<uuid2>`). Alias `project_id`. Absent
+          aggregates across every project the brand owns. Maximum 8 ids; each must be a valid UUID (400 otherwise).
+        schema: { type: string, pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}){0,7}$' }
+      - name: project_id
+        in: query
+        required: false
+        description: Snake_case alias for `projectId`.
         schema: { type: string }
       - name: siteId
         in: query
@@ -2359,7 +2434,7 @@ v2-serenity-competitor-summary:
       '403':
         description: Caller lacks access to the organization.
       '404':
-        description: Organization not found, brand not found for this organization, the brand has no resolvable Semrush workspace, or the requested region matches no market.
+        description: Organization not found, brand not found for this organization, or the brand has no resolvable Semrush workspace.
       '502':
         description: Upstream returned a non-2xx response.
         content:

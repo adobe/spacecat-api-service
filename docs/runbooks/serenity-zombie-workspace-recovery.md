@@ -6,6 +6,12 @@ How to recognize and recover a Semrush sub-workspace that is stuck "not ready" a
 partially-applied dynamic-allocation transfer, and how to read the paging signals for the JIT
 top-up allocator (`SERENITY_DYNAMIC_ALLOCATION`).
 
+> **Scope: only reachable with `SERENITY_DYNAMIC_ALLOCATION` on**, which is OFF in every deployed
+> environment today. The JIT allocator is the only thing that transfers resources onto a
+> sub-workspace — the lifecycle creates one with no allocation at all and never transfers — so with
+> the flag off no partially-applied transfer can occur and none of the recovery below applies. See
+> `docs/serenity.md` § Sub-workspace resource allocation.
+
 ---
 
 ## When to use this

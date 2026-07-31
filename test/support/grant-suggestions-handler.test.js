@@ -389,7 +389,7 @@ describe('grant-suggestions-handler', () => {
     const siteId = 'site-uuid';
     const opptyId = 'oppty-uuid';
     const site = { getId: () => siteId };
-    const opportunity = { getId: () => opptyId, getType: () => 'cwv' };
+    const opportunity = { getId: () => opptyId, getType: () => 'cwv', getStatus: () => 'NEW' };
 
     it('returns early when dataAccess is missing', async () => {
       const Token = sandbox.stub();
@@ -423,8 +423,22 @@ describe('grant-suggestions-handler', () => {
     it('returns early when opportunity type has no token type mapping', async () => {
       const Token = { findBySiteIdAndTokenType: sandbox.stub() };
       const dataAccess = { Suggestion: {}, SuggestionGrant: {}, Token };
-      const oppNoMapping = { getId: () => opptyId, getType: () => 'unknown-type' };
+      const oppNoMapping = {
+        getId: () => opptyId, getType: () => 'unknown-type', getStatus: () => 'NEW',
+      };
       await grantSuggestionsForOpportunity(dataAccess, site, oppNoMapping);
+      expect(Token.findBySiteIdAndTokenType).to.not.have.been.called;
+    });
+
+    it('returns early when opportunity status is not NEW', async () => {
+      const Suggestion = { allByOpportunityIdAndStatus: sandbox.stub() };
+      const Token = { findBySiteIdAndTokenType: sandbox.stub() };
+      const dataAccess = { Suggestion, SuggestionGrant: {}, Token };
+      const resolvedOppty = {
+        getId: () => opptyId, getType: () => 'cwv', getStatus: () => 'RESOLVED',
+      };
+      await grantSuggestionsForOpportunity(dataAccess, site, resolvedOppty);
+      expect(Suggestion.allByOpportunityIdAndStatus).to.not.have.been.called;
       expect(Token.findBySiteIdAndTokenType).to.not.have.been.called;
     });
 
