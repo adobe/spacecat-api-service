@@ -31,9 +31,25 @@ import {
   resolveCountry,
   engineToLlm,
   responseFromGrpcError,
+  escapeQlString,
   PROTO_FROM_JSON,
   PROTO_TO_JSON,
 } from '../../../grpc-utils.js';
+
+export function buildBrandPromptsDimensionFilterQl(sp) {
+  const filters = [];
+  const topicId = sp.get('topicId');
+  const targetUrl = sp.get('targetUrl');
+
+  if (topicId) {
+    filters.push(`topic_hash = ${topicId}`);
+  }
+  if (targetUrl) {
+    filters.push(`target_url = "${escapeQlString(targetUrl)}"`);
+  }
+
+  return filters.join(' AND ');
+}
 
 /* c8 ignore start */
 export async function handleBrandPrompts(sp, clients) {
@@ -42,9 +58,9 @@ export async function handleBrandPrompts(sp, clients) {
   const country = resolveCountry(sp) || COUNTRY_ENUM.US;
   const sortBy = sp.get('sortBy') || PROMPTS_REQUEST_ORDER_BY_ENUM.MENTIONED_BRANDS_COUNT;
   const sortDirection = sp.get('sortDirection') || ORDER_DIRECTION_ENUM.DESC;
-  const topicId = sp.get('topicId');
   const date = sp.get('date');
   const { limit, offset } = parseLimitOffset(sp);
+  const dimensionFilterQl = buildBrandPromptsDimensionFilterQl(sp);
 
   const categories = [
     PROMPT_CATEGORY_ENUM.MENTIONS_TARGET,
@@ -66,7 +82,7 @@ export async function handleBrandPrompts(sp, clients) {
         },
         range: { limit, offset },
         categories,
-        dimension_filter_ql: topicId ? `topic_hash = ${topicId}` : '',
+        dimension_filter_ql: dimensionFilterQl,
         target_date: date,
       },
       PROTO_FROM_JSON,
@@ -79,7 +95,7 @@ export async function handleBrandPrompts(sp, clients) {
         llm: engine,
         target: { domain, name: domain },
         categories,
-        dimension_filter_ql: topicId ? `topic_hash = ${topicId}` : '',
+        dimension_filter_ql: dimensionFilterQl,
         target_date: date,
       },
       PROTO_FROM_JSON,

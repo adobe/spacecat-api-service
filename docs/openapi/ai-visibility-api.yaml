@@ -152,6 +152,18 @@ x-ai-vis-topic-id-optional: &topicIdOptionalParam
     pattern: '^\d+$'
     example: '12345'
 
+x-ai-vis-target-url-optional: &targetUrlOptionalParam
+  name: targetUrl
+  in: query
+  required: false
+  description: |
+    When set, restricts brand prompts to this exact target URL (sent to Semrush as
+    `target_url = "<targetUrl>"`).
+  schema:
+    type: string
+    format: uri
+    example: 'https://www.semrush.com/siteaudit/'
+
 x-ai-vis-v1-brand-topics-sort-by: &v1BrandTopicsSortByParam
   name: sortBy
   in: query
@@ -1651,7 +1663,9 @@ ai-visibility-v1-prompt-brand-prompts:
       (camelCase) with `PROMPT_CATEGORY` in `categories`, and supports `sortBy` / `sortDirection` on
       `PROMPTS_REQUEST_ORDER_BY` (default `MENTIONED_BRANDS_COUNT` descending). Responds with
       `{ data, total }` plus `srFilters`; `offset` and `limit` are not echoed (use the query parameters).
-      Optional `topicId` applies a `topic_hash = <topicId>` dimension filter.
+      Optional `topicId` and `targetUrl` apply `topic_hash = <topicId>` and
+      `target_url = "<targetUrl>"` dimension filters, respectively. When both are present,
+      the filters are combined with `AND`.
     operationId: getAiVisibilityV1PromptBrandPrompts
     parameters:
       - *domainParam
@@ -1662,6 +1676,7 @@ ai-visibility-v1-prompt-brand-prompts:
       - *v1PromptsSortByParam
       - *sortDirectionParam
       - *topicIdOptionalParam
+      - *targetUrlOptionalParam
       - *limitParam
       - *offsetParam
     responses:
@@ -1683,8 +1698,8 @@ ai-visibility-v1-prompt-brand-prompts-export:
       Exports prompts for the target domain using Semrush `PromptService` v2 `PromptsExport`.
       The nested `PromptsRequest` uses the same filters and sorting as
       `/llmo/ai-visibility/v1/prompt/brand-prompts`: fixed prompt categories
-      `MENTIONS_TARGET` and `CITES_TARGET`, optional `topicId` as
-      `topic_hash = <topicId>`, `PROMPTS_REQUEST_ORDER_BY` sorting, and `limit` / `offset`.
+      `MENTIONS_TARGET` and `CITES_TARGET`, optional `topicId` and `targetUrl` dimension
+      filters, `PROMPTS_REQUEST_ORDER_BY` sorting, and `limit` / `offset`.
       The response is the native Semrush `ExportResponse` protobuf JSON with CSV
       `fileContent` base64-encoded, plus `fileName`, `contentType`, and `srFilters`.
     operationId: getAiVisibilityV1PromptBrandPromptsExport
@@ -1697,6 +1712,7 @@ ai-visibility-v1-prompt-brand-prompts-export:
       - *v1PromptsSortByParam
       - *sortDirectionParam
       - *topicIdOptionalParam
+      - *targetUrlOptionalParam
       - *limitParam
       - *offsetParam
     responses:
@@ -1943,7 +1959,7 @@ ai-visibility-v1-source-cited-pages:
     description: |
       Returns pages on the target domain that were cited in LLM responses using Semrush
       `SourceService` v2 `Sources`. Rows use native protobuf JSON (camelCase). `searchQuery`
-      is forwarded as a `url CONTAINS "<query>"` dimension filter. Sorting supports
+      is forwarded as a `source_url CONTAINS "<query>"` dimension filter. Sorting supports
       `URL` and `PROMPTS_COUNT` (default, descending). Pagination is offset-based through
       `limit` and `offset`; those values are not echoed in the response.
 

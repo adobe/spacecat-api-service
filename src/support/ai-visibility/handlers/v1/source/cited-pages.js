@@ -41,7 +41,7 @@ export function buildCitedPagesFilterQl(sp) {
   if (!query) {
     return '';
   }
-  return `url CONTAINS "${escapeQlString(query)}"`;
+  return `source_url CONTAINS "${escapeQlString(query)}"`;
 }
 
 export async function handleCitedPages(sp, clients) {
