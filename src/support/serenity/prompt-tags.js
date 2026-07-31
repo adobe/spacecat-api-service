@@ -33,10 +33,9 @@
  * `(project, parent)`. A sub-category named `human` and the `origin` value
  * `human` are two distinct tags. Never key a tag by name alone; key by id.
  *
- * The authorship root is being renamed `source` → `origin` in place across the
- * live projects (origin-dimension.md). Until that migration's contract phase
- * (WP-O6) lands, the tag-tree resolver tolerates BOTH names — see
- * {@link LEGACY_AUTHORSHIP_ROOT_NAME} and `tag-tree.js`.
+ * The authorship root is `origin` (renamed from `source` — origin-dimension.md).
+ * The rename is complete: the tag-tree resolver names `origin` strictly, with no
+ * fallback for the pre-rename `source` name.
  */
 
 /**
@@ -44,12 +43,7 @@
  *
  * `source` (source-dimension.md) is the producing-system dimension — the system
  * that produced a prompt (`config`, `gsc`, `drs`, …), read from `prompts.source`
- * and canonicalized ({@link canonicalizeSource}). It reuses the name the
- * authorship root vacates in the `source` → `origin` rename (origin-dimension.md):
- * while that rename's contract phase (WP-O6) is still in flight the identifier is
- * temporarily overloaded, so this dimension MUST NOT be provisioned on a project
- * whose `source` root still carries `ai` / `human` — see
- * {@link LEGACY_AUTHORSHIP_ROOT_NAME} and the distinctness guard in `tag-tree.js`.
+ * and canonicalized ({@link canonicalizeSource}).
  */
 export const DIMENSION = Object.freeze({
   CATEGORY: 'category',
@@ -60,24 +54,11 @@ export const DIMENSION = Object.freeze({
 });
 
 /**
- * The pre-rename name of the authorship root. Live projects provisioned before
- * the rename still carry a root named `source` (with `ai` / `human` beneath it);
- * the tolerant resolver accepts it in place of `origin` until WP-O6 drops this.
- *
- * NOTE it is the SAME string as {@link DIMENSION.SOURCE}: the producing-system
- * `source` root (this dimension) and the legacy authorship root are told apart by
- * their CHILDREN, never by name — see `tag-tree.js` `childrenAreAuthorship` and the
- * distinctness guard in `ensureDimensionRoots`.
- */
-export const LEGACY_AUTHORSHIP_ROOT_NAME = 'source';
-
-/**
  * The upstream tag-name length limit (Semrush `aio/tags`). Shared single source
  * of truth: the create-tag handler holds a create body to it, and
  * {@link canonicalizeSource} refuses a derived value longer than it.
  */
 export const MAX_TAG_NAME_LEN = 100;
-
 /** Root names, in the order they are provisioned on a project. */
 export const DIMENSION_ROOT_NAMES = Object.freeze([
   DIMENSION.CATEGORY,
@@ -275,18 +256,11 @@ export const STANDARD_PROMPT_TAG_VALUES = Object.freeze([
  * a customer category may not be called `category`, and a closed value may not
  * be minted at the root level.
  *
- * While the `source` → `origin` rename is in flight, the legacy authorship name
- * ({@link LEGACY_AUTHORSHIP_ROOT_NAME}) is ALSO reserved — a customer must not be
- * able to mint a tag named `source` during the migration window, or it could be
- * mistaken for (or collide with) the legacy authorship root the tolerant resolver
- * still adopts. Dropped with the rest of the fallback at WP-O6.
- *
  * @param {string} name - a bare tag name.
  * @returns {boolean}
  */
 export function isDimensionRootName(name) {
-  return name === LEGACY_AUTHORSHIP_ROOT_NAME
-    || (/** @type {readonly string[]} */ (DIMENSION_ROOT_NAMES)).includes(name);
+  return (/** @type {readonly string[]} */ (DIMENSION_ROOT_NAMES)).includes(name);
 }
 
 /**

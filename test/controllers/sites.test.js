@@ -123,6 +123,7 @@ describe('Sites Controller', () => {
     'createSite',
     'getAll',
     'getAllByDeliveryType',
+    'getAllByEnrollmentAndTier',
     'getAllWithLatestAudit',
     'getLatestSiteMetrics',
     'getAllAsCSV',
@@ -196,6 +197,7 @@ describe('Sites Controller', () => {
       Site: {
         all: sandbox.stub().resolves(sites),
         allByDeliveryType: sandbox.stub().resolves(sites),
+        allByEnrollmentAndTier: sandbox.stub().resolves(sites),
         allWithLatestAudit: sandbox.stub().resolves(sites),
         allByOrganizationId: sandbox.stub().resolves(sites),
         create: sandbox.stub().resolves(sites[0]),
@@ -1861,6 +1863,86 @@ describe('Sites Controller', () => {
 
     expect(result.status).to.equal(400);
     expect(error).to.have.property('message', 'Delivery type required');
+  });
+
+  it('gets all sites by enrollment tier', async () => {
+    mockDataAccess.Site.allByEnrollmentAndTier.resolves(sites);
+
+    const result = await sitesController.getAllByEnrollmentAndTier({
+      params: { tier: 'PAID' },
+    });
+    const body = await result.json();
+
+    expect(mockDataAccess.Site.allByEnrollmentAndTier)
+      .to.have.been.calledOnceWithExactly('PAID', undefined);
+    expect(body.sites).to.be.an('array').with.lengthOf(2);
+    expect(body.sites[0]).to.have.property('id', SITE_IDS[0]);
+  });
+
+  it('returns an empty list when no sites match the tier', async () => {
+    mockDataAccess.Site.allByEnrollmentAndTier.resolves([]);
+
+    const result = await sitesController.getAllByEnrollmentAndTier({
+      params: { tier: 'PAID' },
+    });
+    const body = await result.json();
+
+    expect(body.sites).to.be.an('array').with.lengthOf(0);
+  });
+
+  it('forwards productCode to allByEnrollmentAndTier when supplied', async () => {
+    mockDataAccess.Site.allByEnrollmentAndTier.resolves(sites);
+
+    await sitesController.getAllByEnrollmentAndTier({
+      params: { tier: 'FREE_TRIAL' },
+      data: { productCode: 'LLMO' },
+    });
+
+    expect(mockDataAccess.Site.allByEnrollmentAndTier)
+      .to.have.been.calledOnceWithExactly('FREE_TRIAL', 'LLMO');
+  });
+
+  it('returns 403 for non-admin users on getAllByEnrollmentAndTier', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+
+    const result = await sitesController.getAllByEnrollmentAndTier({
+      params: { tier: 'PAID' },
+    });
+    const error = await result.json();
+
+    expect(mockDataAccess.Site.allByEnrollmentAndTier).to.have.not.been.called;
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only admins can view all sites');
+  });
+
+  it('returns bad request when tier is missing on getAllByEnrollmentAndTier', async () => {
+    const result = await sitesController.getAllByEnrollmentAndTier({ params: {} });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'Tier required');
+  });
+
+  it('returns bad request when tier is not customer-visible on getAllByEnrollmentAndTier', async () => {
+    const result = await sitesController.getAllByEnrollmentAndTier({
+      params: { tier: 'PRE_ONBOARD' },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error.message).to.match(/^Tier must be one of:/);
+  });
+
+  it('returns bad request when productCode is invalid on getAllByEnrollmentAndTier', async () => {
+    const result = await sitesController.getAllByEnrollmentAndTier({
+      params: { tier: 'PAID' },
+      data: { productCode: 'NOT_A_PRODUCT' },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error.message).to.match(/^productCode must be one of:/);
+    expect(mockDataAccess.Site.allByEnrollmentAndTier).to.have.not.been.called;
   });
 
   it('returns bad request if audit type is not provided', async () => {
@@ -4784,6 +4866,65 @@ describe('Sites Controller', () => {
     expect(mergedConfig).to.deep.equal({ slack: { channel: '#new' } });
   });
 
+  it('returns 400 when site.setConfig throws a ValidationError', async () => {
+    const site = sites[0];
+    site.getConfig = sandbox.stub().returns(null);
+    const validationError = new Error('Invalid config for Site: "llmo.showWww" must be a boolean');
+    validationError.name = 'ValidationError';
+    site.setConfig = sandbox.stub().throws(validationError);
+    site.save = sandbox.stub().resolves(site);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: { llmo: { showWww: 'not-a-boolean' } },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(400);
+    const body = await response.json();
+    expect(body.message).to.equal(validationError.message);
+    expect(site.save).to.have.not.been.called;
+  });
+
+  it('sanitizes control characters in the ValidationError message before returning it', async () => {
+    const site = sites[0];
+    site.getConfig = sandbox.stub().returns(null);
+    const validationError = new Error('Invalid config for Site: bad value\r\nX-Injected: true');
+    validationError.name = 'ValidationError';
+    site.setConfig = sandbox.stub().throws(validationError);
+    site.save = sandbox.stub().resolves(site);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: { llmo: { showWww: 'not-a-boolean' } },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(400);
+    const body = await response.json();
+    expect(body.message).to.not.contain('\r');
+    expect(body.message).to.not.contain('\n');
+  });
+
+  it('rethrows a non-ValidationError from site.setConfig', async () => {
+    const site = sites[0];
+    site.getConfig = sandbox.stub().returns(null);
+    site.setConfig = sandbox.stub().throws(new Error('unexpected boom'));
+    site.save = sandbox.stub().resolves(site);
+
+    await expect(sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: { slack: { channel: '#new' } },
+      },
+      ...defaultAuthAttributes,
+    })).to.be.rejectedWith('unexpected boom');
+  });
+
   it('sets config when toDynamoItem returns null for existing config', async () => {
     const site = sites[0];
     site.getConfig = sandbox.stub().returns({ something: true });
@@ -4874,6 +5015,97 @@ describe('Sites Controller', () => {
       bucketName: 'tui-cdn-logs',
       region: 'us-east-1',
     });
+  });
+
+  it('preserves the stored llmo cdnlogsFilter when a non-privileged caller patches config', async () => {
+    const site = sites[0];
+    const existingConfig = Config({
+      llmo: {
+        dataFolder: '/data',
+        brand: 'Test',
+        cdnlogsFilter: [{ key: 'url', value: ['/keep'], type: 'include' }],
+      },
+    });
+    site.getConfig = sandbox.stub().returns(existingConfig);
+    site.setConfig = sandbox.stub();
+    site.save = sandbox.stub().resolves(site);
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+    sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: {
+          llmo: {
+            dataFolder: '/data',
+            brand: 'Test',
+            cdnlogsFilter: [{ key: 'url', value: ['/other'], type: 'exclude' }],
+          },
+        },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(200);
+    const mergedConfig = site.setConfig.firstCall.args[0];
+    // Incoming value is ignored; the stored value remains in place.
+    expect(mergedConfig.llmo.cdnlogsFilter).to.deep.equal([{ key: 'url', value: ['/keep'], type: 'include' }]);
+  });
+
+  it('drops an llmo cdnlogsFilter a non-privileged caller adds when none is stored', async () => {
+    const site = sites[0];
+    const existingConfig = Config({ llmo: { dataFolder: '/data', brand: 'Test' } });
+    site.getConfig = sandbox.stub().returns(existingConfig);
+    site.setConfig = sandbox.stub();
+    site.save = sandbox.stub().resolves(site);
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+    sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: {
+          llmo: {
+            dataFolder: '/data',
+            brand: 'Test',
+            cdnlogsFilter: [{ key: 'url', value: ['/new'], type: 'include' }],
+          },
+        },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(200);
+    const mergedConfig = site.setConfig.firstCall.args[0];
+    expect(mergedConfig.llmo).to.not.have.property('cdnlogsFilter');
+    expect(mergedConfig.llmo.brand).to.equal('Test');
+  });
+
+  it('allows a privileged caller to set the llmo cdnlogsFilter', async () => {
+    const site = sites[0];
+    const existingConfig = Config({ llmo: { dataFolder: '/data', brand: 'Test' } });
+    site.getConfig = sandbox.stub().returns(existingConfig);
+    site.setConfig = sandbox.stub();
+    site.save = sandbox.stub().resolves(site);
+    // defaultAuthAttributes carries an admin JWT, so hasAdminAccess() is true.
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        config: {
+          llmo: {
+            dataFolder: '/data',
+            brand: 'Test',
+            cdnlogsFilter: [{ key: 'url', value: ['/admin'], type: 'include' }],
+          },
+        },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(200);
+    const mergedConfig = site.setConfig.firstCall.args[0];
+    expect(mergedConfig.llmo.cdnlogsFilter).to.deep.equal([{ key: 'url', value: ['/admin'], type: 'include' }]);
   });
 
   describe('auditTargetURLs validation', () => {
@@ -6734,6 +6966,77 @@ describe('Sites Controller', () => {
       expect(body.data).to.have.property('isSummitPlgEnabled', false);
     });
 
+    it('should include asoTier in response reflecting the org ASO entitlement tier', async () => {
+      mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves({
+        getTier: () => 'PAID',
+      });
+
+      context.data = { organizationId: testOrganizations[0].getId() };
+      mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+      mockDataAccess.Site.findById.resolves(testSites[0]);
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: { getId: () => 'entitlement-123', getTier: () => 'FREE_TRIAL' },
+        enrollment: { getId: () => 'enrollment-1', getSiteId: () => SITE_IDS[0] },
+        site: testSites[0],
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.data).to.have.property('asoTier', 'PAID');
+    });
+
+    it('should set asoTier to null when no ASO entitlement exists', async () => {
+      mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves(null);
+
+      context.data = { organizationId: testOrganizations[0].getId() };
+      mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+      mockDataAccess.Site.findById.resolves(testSites[0]);
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: { getId: () => 'entitlement-123', getTier: () => 'FREE_TRIAL' },
+        enrollment: { getId: () => 'enrollment-1', getSiteId: () => SITE_IDS[0] },
+        site: testSites[0],
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.data).to.have.property('asoTier', null);
+    });
+
+    it('should reuse the already-fetched ASO entitlement for asoTier instead of an independent lookup when x-product is ASO', async () => {
+      // Independent-lookup stub deliberately returns a different tier than the
+      // TierClient entitlement below, so the assertion proves which one won.
+      mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves({
+        getTier: () => 'PLG',
+      });
+
+      context.data = { organizationId: testOrganizations[0].getId() };
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
+      mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+      mockDataAccess.Site.findById.resolves(testSites[0]);
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: { getId: () => 'entitlement-123', getTier: () => 'PAID' },
+        enrollment: { getId: () => 'enrollment-1', getSiteId: () => SITE_IDS[0] },
+        site: testSites[0],
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.data).to.have.property('asoTier', 'PAID');
+      // isSummitPlgEnabled is also derived from the reused entitlement (tier PAID, not
+      // PLG) rather than the independent stub's tier ('PLG'), which would have made this
+      // true had a second lookup happened.
+      expect(body.data).to.have.property('isSummitPlgEnabled', false);
+      // No independent Entitlement lookup at all — both isSummitPlgEnabled and asoTier
+      // are derived from the single already-fetched TierClient entitlement.
+      expect(mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.callCount).to.equal(0);
+    });
+
     it('should return 404 with no_entitlement_for_product resolveStatus for non-existent imsOrg (external caller)', async () => {
       context.data = { imsOrg: 'nonexistent@AdobeOrg' };
       mockDataAccess.Organization.findByImsOrgId.resolves(null);
@@ -7024,6 +7327,8 @@ describe('Sites Controller', () => {
       expect(body.resolveStatus).to.equal('aso_pre_onboard');
       expect(body.details).to.deep.include({ productCode: 'ASO' });
       expect(body.details).to.not.have.property('tier');
+      // Reused from the already-fetched TierClient entitlement (x-product: ASO).
+      expect(body.asoTier).to.equal('PRE_ONBOARD');
     });
 
     it('should return 404 with no_entitlement_for_product resolveStatus when product has no entitlement', async () => {
@@ -7046,6 +7351,13 @@ describe('Sites Controller', () => {
       const body = await response.json();
       expect(body.resolveStatus).to.equal('no_entitlement_for_product');
       expect(body.details).to.deep.include({ productCode: 'ASO' });
+      // A falsy entitlement from TierClient is never trusted as an authoritative "no ASO
+      // entitlement" signal on its own (getFirstEnrollment() nulls it out merely when
+      // there's no enrolled site, even if a real Entitlement row exists — SITES-48838) —
+      // asoTier always falls back to an independent, unambiguous lookup in that case.
+      expect(body.asoTier).to.equal('PLG');
+      expect(mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.calledOnce)
+        .to.equal(true);
     });
 
     it('should return 404 with site_not_enrolled resolveStatus when entitlement is visible but site has no enrollment', async () => {
@@ -7072,6 +7384,11 @@ describe('Sites Controller', () => {
       const body = await response.json();
       expect(body.resolveStatus).to.equal('site_not_enrolled');
       expect(body.details).to.deep.include({ productCode: 'ASO' });
+      // asoTier is read straight off the already-fetched TierClient entitlement
+      // ('FREE_TRIAL'), not from an independent Entitlement lookup (which the
+      // default stub would have returned as 'PLG') — proves the reuse path.
+      expect(body.asoTier).to.equal('FREE_TRIAL');
+      expect(mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.called).to.equal(false);
     });
 
     it('should return 404 with aso_pre_onboard for PRE_ONBOARD-tier site via organizationId path for non-admin', async () => {
@@ -7094,6 +7411,9 @@ describe('Sites Controller', () => {
       const body = await response.json();
       expect(body.message).to.include('No site found for the provided parameters');
       expect(body.resolveStatus).to.equal('aso_pre_onboard');
+      // x-product here is not ASO, so asoTier comes from the independent lookup
+      // (the default beforeEach stub's tier), not the TierClient entitlement above.
+      expect(body.asoTier).to.equal('PLG');
     });
 
     it('should return 200 for PRE_ONBOARD-tier site via organizationId path for admin', async () => {
@@ -7172,6 +7492,7 @@ describe('Sites Controller', () => {
     it('should return 404 with no_entitlement_for_product for admin when organizationId path has no entitlement', async () => {
       sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
       context.data = { organizationId: testOrganizations[0].getId() };
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
       mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
 
       mockTierClientStub.getFirstEnrollment.resolves({
@@ -7186,6 +7507,12 @@ describe('Sites Controller', () => {
       const body = await response.json();
       expect(body.message).to.include('No site found for the provided parameters');
       expect(body.resolveStatus).to.equal('no_entitlement_for_product');
+      // getFirstEnrollment() nulls out `entitlement` whenever no site is enrolled, even
+      // when a real ASO Entitlement row exists (SITES-48838 regression) — asoTier must
+      // come from the independent lookup, not be trusted as null off that null entitlement.
+      expect(body.asoTier).to.equal('PLG');
+      expect(mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.calledOnce)
+        .to.equal(true);
     });
 
     it('should return 404 for admin when imsOrg path has no enrolled site', async () => {

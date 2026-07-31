@@ -17,6 +17,8 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import { listGlobalModelCatalog, listSliceModels } from './handlers/markets.js';
 import { listMarkets } from './subworkspace-projects.js';
 
+/** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */
+
 /**
  * Net-new customer base package (LLMO-6338 / LLMO-6554): the AI models a
  * brand-new Serenity market gets out of the box, before a customer requests
@@ -48,7 +50,7 @@ export const NET_NEW_DEFAULT_MODEL_KEYS = Object.freeze([
  * live response is simply skipped (best-effort) rather than failing the
  * caller — a partial default is better than none.
  *
- * @param {any} transport - Serenity transport.
+ * @param {SerenityTransport} transport
  * @param {any} [log]
  * @returns {Promise<string[]>} catalog model ids (NOT keys) to attach.
  */
@@ -90,7 +92,7 @@ export async function resolveCanonicalDefaultModelIds(transport, log) {
  * existing empty-modelIds handling takes over), so a catalog/listing hiccup
  * can't fail an otherwise-successful market create.
  *
- * @param {any} transport - Serenity transport.
+ * @param {SerenityTransport} transport
  * @param {string} workspaceId - the brand's (already-existing) sub-workspace id.
  * @param {string} brandId - the brand UUID (threaded through to the slice DTO only).
  * @param {any} [log]

@@ -139,6 +139,10 @@ const routeFacsCapabilities = {
     'GET /config/:service/redirects.txt',
     // LLMO onboarding — internal/manual provisioning flow, not a customer FACS surface.
     'POST /v2/orgs/:spaceCatId/llmo/onboard-site',
+    // Semrush onboarding notification — org-membership gated only (hasAccess(org),
+    // no product capability check), fires a Slack webhook; not a product-scoped
+    // FACS surface today.
+    'POST /v2/orgs/:spaceCatId/semrush-onboarding',
     // LLMO CloudFront "Optimize at Edge" onboarding wizard — admin-only
     // (gateEdgeOptimizeWizard requires LLMO admin); cross-account control-plane, not a
     // customer FACS surface.
@@ -198,6 +202,7 @@ const routeFacsCapabilities = {
     'GET /sites.csv', // hasAdminReadAccess
     'GET /sites.xlsx', // hasAdminReadAccess
     'GET /sites/by-delivery-type/:deliveryType', // hasAdminReadAccess
+    'GET /sites/by-tier/:tier', // hasAdminAccess
     'GET /sites/with-latest-audit/:auditType', // hasAdminReadAccess
     'GET /projects', // hasAdminReadAccess
     'GET /audits/latest/:auditType', // hasAdminReadAccess
@@ -333,10 +338,12 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/audit-policy/inclusions': 'llmo/can_configure',
       'POST /sites/:siteId/audit-policy/inclusions/delete': 'llmo/can_configure',
 
-      // ---- Deploy --------------------------------------------------------
-      // Edge-source optimization writes. Read-side endpoints stay under can_view.
-      'POST /sites/:siteId/llmo/edge-optimize-config': 'llmo/can_deploy',
-      'POST /sites/:siteId/llmo/edge-optimize-config/stage': 'llmo/can_deploy',
+      // ---- Configure -----------------------------------------------------
+      // Edge-optimize configuration writes (opt-in + CDN routing setup). These
+      // are site-configuration changes, not deploys of a specific fix, so they
+      // sit under can_configure. Read-side endpoints stay under can_view.
+      'POST /sites/:siteId/llmo/edge-optimize-config': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/edge-optimize-config/stage': 'llmo/can_configure',
 
       // ---- View (read-only) ----------------------------------------------
       // Top-level LLMO surfaces
@@ -1269,7 +1276,7 @@ const routeFacsCapabilities = {
     'dataSource', 'deliveryType', 'endDate', 'eventType',
     'exportId', 'flagName', 'geo', 'handlerType', 'hookSecret', 'limit',
     'metric', 'processingType', 'product', 'projectName',
-    'sheetType', 'source', 'startDate', 'status', 'tokenType', 'type',
+    'sheetType', 'source', 'startDate', 'status', 'tier', 'tokenType', 'type',
     'url', 'version', 'week',
     // Single-row id used by the state-layer management endpoints
     // (`/state/access-mappings/:id` — the binding row's own UUID, never a

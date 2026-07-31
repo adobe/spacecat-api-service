@@ -246,27 +246,6 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       expect(transport.createProjectTags).to.not.have.been.called;
     });
 
-    it('400s the legacy `source` name too while the origin rename is in flight', async () => {
-      // Migration-window guard: until WP-O6, `source` is reserved alongside the four
-      // roots so a customer cannot mint a tag that collides with the legacy authorship
-      // root the tolerant resolver still adopts.
-      const transport = makeTransport();
-      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
-      await expect(handler.handleCreateTag(
-        transport,
-        dataAccess,
-        BRAND,
-        WORKSPACE,
-        { ...validBody, name: 'source' },
-        fakeLog(),
-      )).to.be.rejected.then((err) => {
-        expect(err.status).to.equal(400);
-        // The domain guard, not a generic schema rejection.
-        expect(err.message).to.match(/reserved dimension root name/);
-      });
-      expect(transport.createProjectTags).to.not.have.been.called;
-    });
-
     it('404s (marketNotFound) when no project backs the slice', async () => {
       const transport = makeTransport();
       const dataAccess = makeDataAccess(null);
@@ -988,26 +967,6 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
           fakeLog(),
         )).to.be.rejected.then((err) => expect(err.status).to.equal(400));
       }
-      expect(transport.updateProjectTag).to.not.have.been.called;
-    });
-
-    it('400s on a rename to the legacy `source` name during the migration window', async () => {
-      // Mirrors the create-path guard: `source` is reserved until WP-O6, so a tag
-      // cannot be renamed onto it any more than a fresh one can be minted with it.
-      const transport = makeTransport();
-      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
-      await expect(handler.handleUpdateTag(
-        transport,
-        dataAccess,
-        BRAND,
-        WORKSPACE,
-        TARGET,
-        { ...updateBody, name: 'source' },
-        fakeLog(),
-      )).to.be.rejected.then((err) => {
-        expect(err.status).to.equal(400);
-        expect(err.message).to.match(/reserved dimension root name/);
-      });
       expect(transport.updateProjectTag).to.not.have.been.called;
     });
 

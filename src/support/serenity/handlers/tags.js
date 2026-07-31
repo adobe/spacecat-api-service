@@ -34,6 +34,8 @@ import {
 } from '../tag-tree.js';
 import { republishBestEffort } from '../brand-urls.js';
 
+/** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
+
 /**
  * POST /serenity/tags — create a prompt TAG on a single market.
  *
@@ -294,7 +296,7 @@ function requireCreatedId(id) {
  * missing a root — so the lookup below always resolves. The assertion records
  * that invariant for the type checker instead of re-testing it at runtime.
  *
- * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
  * @param {string} dimension - an open dimension (`category`).
@@ -317,7 +319,7 @@ async function resolveOpenRootId(transport, semrushWorkspaceId, projectId, dimen
  * otherwise file a customer-authored value under `intent`, which is exactly what
  * the closed vocabularies exist to prevent.
  *
- * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
  * @param {string} dimension - the open dimension named by the request.
@@ -361,7 +363,7 @@ function marketNotFound() {
  * Flat mode — the market's project id comes from the persisted
  * `BrandSemrushProject` mapping (same resolution as handleListTags).
  *
- * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {SerenityTransport} transport
  * @param {object} dataAccess - data-access layer (BrandSemrushProject).
  * @param {string} brandId - brand UUID.
  * @param {string} semrushWorkspaceId - the org's (parent) workspace id.
@@ -461,7 +463,7 @@ export async function handleCreateTag(
  * Subworkspace mode — the market's project is resolved live from the brand's
  * own subworkspace listing (same resolution as handleListTagsSubworkspace).
  *
- * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {SerenityTransport} transport
  * @param {string} workspaceId - the brand's subworkspace id.
  * @param {object} body - request body ({ type, name, geoTargetId, languageCode, parentId? }).
  * @param {object} log - logger.
@@ -621,7 +623,7 @@ function parseUpdateTagBody(body) {
  * double the sequential upstream reads and let the parent move between the two
  * traversals, so the ancestry proved for it need not still hold.
  *
- * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
  * @param {string} tagId - the PATCH target's id.
@@ -711,7 +713,7 @@ function buildUpdatePayload(parsed, target, tagId) {
  * from the tree with a 404 `tagNotFound` rather than forwarded: without the
  * target's current parent there is no body that preserves it.
  *
- * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {SerenityTransport} transport
  * @param {object} dataAccess - data-access layer (BrandSemrushProject).
  * @param {string} brandId - brand UUID.
  * @param {string} semrushWorkspaceId - the org's (parent) workspace id.
@@ -781,7 +783,7 @@ export async function handleUpdateTag(
  * handleCreateTagSubworkspace). See {@link handleUpdateTag} for the
  * child-target resolution / bare-name / parent_id-echo rules this shares.
  *
- * @param {object} transport - Serenity transport (Semrush proxy client).
+ * @param {SerenityTransport} transport
  * @param {string} workspaceId - the brand's subworkspace id.
  * @param {string} tagId - upstream tag id to update.
  * @param {object} body - request body ({ name, parentId?, geoTargetId, languageCode }).

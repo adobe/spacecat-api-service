@@ -46,6 +46,7 @@ describe('getRouteHandlers', () => {
   const mockSitesController = {
     getAll: sinon.stub(),
     getAllByDeliveryType: sinon.stub(),
+    getAllByEnrollmentAndTier: sinon.stub(),
     getAllAsCsv: sinon.stub(),
     getAllAsExcel: sinon.stub(),
     getAllWithLatestAudit: sinon.stub(),
@@ -617,6 +618,10 @@ describe('getRouteHandlers', () => {
     listIssueTypes: sinon.stub(),
   };
 
+  const mockOnboardingController = {
+    triggerOnboarding: sinon.stub(),
+  };
+
   const mockRedirectsController = {
     getRedirects: sinon.stub(),
   };
@@ -699,6 +704,7 @@ describe('getRouteHandlers', () => {
       mockElementsController,
       mockProxyController,
       mockTaskManagementController,
+      mockOnboardingController,
       mockRedirectsController,
       mockAuditPolicyController,
     );
@@ -946,6 +952,7 @@ describe('getRouteHandlers', () => {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/source-visibility-headline',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate',
+      'POST /v2/orgs/:spaceCatId/semrush-onboarding',
       'GET /v2/orgs/:spaceCatId/sites/:siteId/brand',
       'GET /org/:spaceCatId/brands/:brandId/fanout-report',
       'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions',
@@ -1037,6 +1044,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/latest-metrics',
       'GET /sites/by-base-url/:baseURL',
       'GET /sites/by-delivery-type/:deliveryType',
+      'GET /sites/by-tier/:tier',
       'GET /sites/with-latest-audit/:auditType',
       'GET /sites/:siteId/opportunities',
       'GET /sites/:siteId/opportunities/top-paid',
@@ -1384,6 +1392,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/identity'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/by-delivery-type/:deliveryType'].handler).to.equal(mockSitesController.getAllByDeliveryType);
     expect(dynamicRoutes['GET /sites/by-delivery-type/:deliveryType'].paramNames).to.deep.equal(['deliveryType']);
+    expect(dynamicRoutes['GET /sites/by-tier/:tier'].handler).to.equal(mockSitesController.getAllByEnrollmentAndTier);
+    expect(dynamicRoutes['GET /sites/by-tier/:tier'].paramNames).to.deep.equal(['tier']);
     expect(dynamicRoutes['GET /sites/by-base-url/:baseURL'].handler).to.equal(mockSitesController.getByBaseURL);
     expect(dynamicRoutes['GET /sites/by-base-url/:baseURL'].paramNames).to.deep.equal(['baseURL']);
     expect(dynamicRoutes['GET /sites/with-latest-audit/:auditType'].handler).to.equal(mockSitesController.getAllWithLatestAudit);

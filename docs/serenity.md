@@ -135,6 +135,66 @@ The same helper gates the Semrush **side-effects** on the v2 brand endpoints
 - `DELETE` and status-transition have no Semrush side-effect, so they are
   ungated.
 
+## Migration-window flag (`LLMO/serenity_ui`)
+
+A second org-wide flag, `feature_flags` row keyed `(organization_id,
+product='LLMO', flag_name='serenity_ui')`, marks an org as **past** the Semrush
+migration. The name is snake_case because it has to be: `feature_flags` carries
+`CHECK (flag_name ~ '^[a-z][a-z0-9_]*$')`, so a hyphenated variant cannot be
+stored and any client matching on a hyphenated name never matches. The frontend
+reads it from `GET /organizations/:id/feature-flags/llmo` to pin the org to the
+Serenity UI and hide the classic/Serenity switcher; the backend reads it via
+`isSerenityUiActiveForOrg(ctx, spaceCatId, log)` in
+`src/support/serenity/serenity-active.js` (same cache and TTLs as the activation
+flag, default **OFF**).
+
+Backend meaning: **whether a Semrush failure on a brand edit is reported or
+absorbed.**
+
+During the migration an org's LLMO users may have no Semrush user record at all.
+Semrush binds the forwarded IMS token to a Semrush user before executing, so for
+those users it answers 4xx on every call, permanently — no retry the caller can
+make will clear it, and JIT provisioning from IMS claims was declined. Reporting
+that on a brand edit would tell the customer their edit failed when the row did
+persist. So `PATCH /v2/orgs/:org/brands/:brandId` absorbs it: the pre-write
+self-referential-competitor guard degrades to a brand-URL-only reserved set, and
+the post-commit re-sync returns `200 { semrushSyncPending: true }`.
+
+An org on the Serenity UI is past that window — its users are provisioned in
+Semrush — so a failure there is a real fault, not migration noise. With the flag
+on, both call sites propagate instead: the guard failure rejects the write before
+the row is touched, and a re-sync failure maps through `createErrorResponse` to
+401/403 (upstream authorization) or 502 (everything else). The row stays
+committed either way; the flag decides whether the divergence is reported.
+
+The combined contract, given the activation flag is on (it gates the route
+entirely — see above):
+
+| `LLMO/serenity` | `LLMO/serenity_ui` | Semrush failure on a brand edit |
+| --- | --- | --- |
+| on | off | absorbed — `200` with `semrushSyncPending: true` |
+| on | on | reported — `401` / `403` / `502` |
+
+Both classes are logged either way, at `warn` with `permanent: true` for 401/403
+and at `error` otherwise, under `serenity: brand-edit Semrush re-sync failed
+after row commit`. api-service prod logs are effectively absent from Splunk, so
+enumerate drifted brands from CloudWatch Logs Insights on the api-service prod
+Lambda log group.
+
+Flip it with the same admin endpoint as the activation flag:
+
+```bash
+# Stop absorbing Semrush failures for an org (org is fully migrated)
+curl -X PUT "${API_BASE}/organizations/${ORG_ID}/feature-flags/llmo/serenity_ui" \
+  -H "x-api-key: ${SPACECAT_ADMIN_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"value": true}'
+
+# Back to absorbing (org still has unprovisioned Semrush users)
+curl -X DELETE "${API_BASE}/organizations/${ORG_ID}/feature-flags/llmo/serenity_ui" \
+  -H "x-api-key: ${SPACECAT_ADMIN_KEY}"
+```
+
 ## Endpoint surface
 
 All endpoints require `Authorization: Bearer <ims_user_token>` and `organization:read` (GET) or `organization:write` (mutating) capability. The `:brandId` path param is UUID-only on this surface — name-based brand lookup is rejected with 400. The slice key for everything is `(brandId, geoTargetId, languageCode)`; the upstream workspace id and per-project upstream identifier are resolved server-side and never leak into request/response shapes.
@@ -265,15 +325,14 @@ linked Site per distinct market domain.)
 `POST /serenity/deactivate` moves a brand back to flat mode:
 
 ```
-1. decommission the sub-workspace: delete EVERY project + release the allocation
-   back to the parent pool
+1. decommission the sub-workspace: delete EVERY project
 2. clear brands.semrush_workspace_id (disconnect → flat mode)
 3. set brands.status = 'pending'
 ```
 
 **Caveats operators must know:**
 - **Deactivate is destructive, not a pause.** It deletes every project in the sub-workspace (all markets, prompts, benchmarks, competitors). There is **no stored market memory**: a later activate must re-supply the markets and rebuilds everything from scratch. Reactivation does NOT restore the prior data.
-- **The sub-workspace shell is never deleted.** Production never deletes a sub-workspace (Rainer, PR #2812 review — Semrush CS is the only party that ever deprovisions a workspace shell). Deactivate empties every project, then lowers the AI allocation down to a small non-zero floor (`{projects:1, prompts:1}` by default) via `releaseFullAllocation` — a transfer to a non-zero target resizes reliably (a transfer to exactly 0 is a silently-ignored no-op against the Semrush gateway, confirmed by a live probe; that is why the floor is non-zero and never 0). The surplus above the floor returns to the parent pool; the floor amount stays reserved on the (now-empty) shell so a future activate can reuse it immediately without a fresh create. `SERENITY_ALLOW_WORKSPACE_DELETE` (unset — off — in every deployed env) gates only the raw `deleteWorkspace` transport primitive, used solely for test/smoke-cleanup (e.g. the LLMO-6189 canary's own throwaway teardown) — no production lifecycle path calls it or branches on it.
+- **The sub-workspace shell is never deleted.** Production never deletes a sub-workspace (Rainer, PR #2812 review — Semrush CS is the only party that ever deprovisions a workspace shell). Deactivate empties every project and leaves the shell in place. There is no allocation to reclaim: a brand's sub-workspace is created without a `resources` payload and nothing transfers units onto it (see **Sub-workspace resource allocation** below). `SERENITY_ALLOW_WORKSPACE_DELETE` (unset — off — in every deployed env) gates only the raw `deleteWorkspace` transport primitive, used solely for test/smoke-cleanup — no production lifecycle path calls it or branches on it.
 - **`status = 'pending'` is overloaded.** A deactivated brand and a never-finished onboarding both read `pending`; downstream consumers cannot distinguish "off by choice" from "incomplete" on status alone.
 - **IMS-user only.** activate/deactivate (and all `/serenity/*`) require an IMS user token; a non-IMS S2S consumer is refused (401). There is no backend/automation path to activate a Semrush brand today.
 
@@ -308,6 +367,45 @@ Expected fields in the structured log payload:
 - outbound auth: `Authorization: Bearer ...` (the token itself is redacted by the platform)
 - the IMS sub of the caller in the `actor` field
 
+## Sub-workspace resource allocation
+
+The decision and its evidence are recorded in
+[ADR-008](./decisions/008-no-subworkspace-resource-carve.md).
+
+A brand's sub-workspace carries **no AI resource allocation of its own**. It is created with no
+`resources` body, and no lifecycle path transfers units onto or off it.
+
+Semrush provisions our parent workspaces with `limits_enabled: false` on the `ai` product, which
+disables product metering outright. Live-verified 2026-07-28 against the LLMO-Dev-2 parent: a child
+created with no `resources` body settled to `created`, reported `projects 0/0  prompts 0/0`, and
+then accepted `createProject`, prompt drafts and `publishProject`. It finished at
+`projects.used: 1` against `total: 0` — upstream let it exceed a zero total outright — and both
+published prompts read back in the LIVE (published) prompt view, so the publish landed rather than
+silently no-op'ing.
+
+Sizing a child up front is therefore not merely unnecessary but actively harmful. Allocation moves
+via `POST .../resources/transfer`, and that endpoint — unlike the product metering — *does* validate
+the requested totals against the subscription's units, terminally `422`-ing
+`insufficient available units in subscription`. A carve can never grant a child a capability it
+lacks; it can only fail a request that would otherwise have succeeded. In production it did exactly
+that: a brand's first market-add demanded the child's project total be raised to 3 against a parent
+pool that could not cover it, and the whole request died as a generic 502 before it ever reached
+project creation.
+
+Just-in-time allocation (below) remains wired as the fallback for a tenant that ever lands **with**
+limits enforced; it reads a child's real headroom and maps pool exhaustion to a typed
+409 `orgPoolExhausted` rather than an opaque 502.
+
+### When to turn the JIT allocator on
+
+`SERENITY_DYNAMIC_ALLOCATION` is OFF in every deployed environment, and nothing in the codebase
+detects `limits_enabled` — so the flip is an operator decision, not an automatic one. The signal to
+make it is **`quotaExceeded` (409) appearing for a tenant while the allocator is off**. With no
+allocation to exhaust, that error can only mean the upstream refused a metered write on its own
+terms, which is what a limits-enforcing parent looks like from our side. Confirm with
+`GET /enterprise/users/api/v1/workspaces/{parentId}` (check `limits_enabled` on the `ai` product),
+then set `SERENITY_DYNAMIC_ALLOCATION=true` at `dx_mysticat/{env}/api-service`.
+
 ## Dynamic AI resource allocation — operations (LLMO-6191)
 
 The JIT top-up allocator (`SERENITY_DYNAMIC_ALLOCATION`, default OFF — see
@@ -323,8 +421,9 @@ the request-path proxy documented above:
   for diagnosing and recovering a sub-workspace stuck `workspaceBusy` after a partially-applied
   transfer, and for the alerting/paging guidance.
 - **Rightsizing sweep:** `scripts/serenity-rightsizing-sweep.mjs` is a one-time backfill that
-  lowers already-carved sub-workspaces (brands onboarded before the JIT allocator shipped) down to
-  their actual usage, using `releaseAiSurplus` as the reclaim primitive. Run `--dry-run` first —
+  lowers sub-workspaces carved under the historical flat allocation down to their actual usage,
+  using `releaseAiSurplus` as the reclaim primitive. Nothing carves any more, so this only ever
+  applies to children provisioned before that stopped. Run `--dry-run` first —
   see the script's own header comment for full usage and the auth caveat (requires an operator
   IMS token; there is no service-account path to Semrush in this repo).
 - **Cross-container serialization:** `src/support/serenity/resource-lock.js` only serializes

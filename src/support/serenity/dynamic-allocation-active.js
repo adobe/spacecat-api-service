@@ -19,6 +19,8 @@ import { withResourceLock } from './resource-lock.js';
 import { isMeteredQuota } from './errors.js';
 import { recordQuotaRetryOutcome } from './allocation-metrics.js';
 
+/** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */
+
 /** Default poll-retry shape for {@link createHeadroomGuard}'s `retryOnQuota` (LLMO-6190 follow-up:
  * live-verified ~9s Semrush gateway write-enforcement lag after a JIT top-up — see the doc comment
  * on `retryOnQuota` below). Sized with margin over the observed lag; a caller may override via
@@ -131,21 +133,23 @@ export function resolveBrandAiCeiling(env, log) {
  * single enforcement choke point for JIT top-up. Handlers ALWAYS call `guard.ensure(need, opts)`
  * before a metered `createProject` / `publishProject` / model-add publish, regardless of the flag.
  *
- * - Flag OFF: `ensure` is a genuine no-op — it issues ZERO transport calls and returns immediately
- *   — so the OFF path is byte-for-byte the pre-PR behavior.
+ * - Flag OFF: `ensure` is a genuine no-op — it issues ZERO transport calls and returns immediately.
+ *   A sub-workspace carries no allocation of its own in either flag state (see
+ *   `workspace-lifecycle.js`), so OFF simply means nothing sizes the child at all — which is
+ *   correct while the parent pools run unmetered (`limits_enabled: false`).
  * - Flag ON with the child/master ids missing: FAILS LOUD (throws) rather than silently degrading
- *   to a no-op. A brand whose org has no parent workspace would otherwise get neither the
- *   (now-skipped) flat carve nor a JIT top-up — its sub-workspace sits at zero AI resources and the
- *   very next metered write fails at the Semrush gateway with an opaque error, instead of a clear
- *   500 at the moment the misconfiguration is knowable. "Flag ON but silently not metering" is
- *   exactly the failure mode a kill-switch rollout must not have.
+ *   to a no-op. Turning the flag ON is a statement that this tenant needs JIT sizing; a brand whose
+ *   org has no parent workspace would then get no top-up at all, and — if that tenant is one where
+ *   limits ARE enforced — the very next metered write fails at the Semrush gateway with an opaque
+ *   error, instead of a clear 500 at the moment the misconfiguration is knowable. "Flag ON but
+ *   silently not metering" is exactly the failure mode a kill-switch rollout must not have.
  * - Flag ON with both ids present: `ensure` serializes per child (see {@link withResourceLock}) and
  *   tops up just-in-time via the FAIL-FAST {@link ensureAiHeadroom} (one transfer, no poll; 503 if
  *   still settling). The per-brand `ceiling` defaults to {@link DEFAULT_BRAND_AI_CEILING} (a
  *   PLACEHOLDER, effectively non-enforcing — see its doc) when the caller doesn't pass one, so the
  *   ceiling-enforcement PATH is always in force even though no real product number exists yet.
  *
- * @param {any} transport - Serenity transport.
+ * @param {SerenityTransport} transport
  * @param {object} opts
  * @param {boolean} opts.enabled - the global kill-switch value for this request.
  * @param {string} [opts.subWorkspaceId] - the sub-workspace being written to (`auth.workspaceId`).
@@ -158,12 +162,18 @@ export function resolveBrandAiCeiling(env, log) {
  * @param {Partial<typeof DEFAULT_RETRY_ON_QUOTA>} [opts.retryOnQuota] - poll-retry shape override
  *   for `retryOnQuota` (tests inject a fake `sleep` + tiny `backoffMs`/`totalBudgetMs`; production
  *   uses {@link DEFAULT_RETRY_ON_QUOTA} unmodified).
+ * @param {object | null} [opts.env] - request env, passed through to `ensureAiHeadroom` to feed the
+ *   org-pool early-warning Slack alert (serenity-docs#72 §5) off its existing advisory pool-free
+ *   read. Optional — most call sites don't thread this yet (see quota-alerts.js).
+ * @param {string | null} [opts.orgId] - IMS org id, for the alert payload only.
+ * @param {string | null} [opts.brandId] - brand id, for the alert payload only (also gates the §5
+ *   hard-exhaustion alert on `brandAiLimit`/`orgPoolExhausted` alongside `env`).
  * @param {any} [log]
  * @returns {HeadroomGuard}
  */
 export function createHeadroomGuard(transport, {
   enabled, subWorkspaceId, parentWorkspaceId, ceiling = DEFAULT_BRAND_AI_CEILING, blocks,
-  retryOnQuota: retryOnQuotaOpts = {},
+  retryOnQuota: retryOnQuotaOpts = {}, env, orgId, brandId,
 }, log) {
   if (!enabled) {
     // Disabled path: a genuine no-op, byte-for-byte the pre-PR behavior. retryOnQuota is likewise a
@@ -184,7 +194,15 @@ export function createHeadroomGuard(transport, {
   const ensure = (need = {}, { includeDrafted = false } = {}) => withResourceLock(
     childId,
     () => ensureAiHeadroom(transport, {
-      subWorkspaceId: childId, parentWorkspaceId: parentId, need, ceiling, blocks, includeDrafted,
+      subWorkspaceId: childId,
+      parentWorkspaceId: parentId,
+      need,
+      ceiling,
+      blocks,
+      includeDrafted,
+      env,
+      orgId,
+      brandId,
     }, log),
   );
   const {
