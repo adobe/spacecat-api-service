@@ -48,6 +48,7 @@ import {
   transformDomainUrlsResponse,
   buildUrlPromptsPayload,
   transformUrlPromptsResponse,
+  mergeUrlPromptsResponses,
   buildMarketMentionsTrendPayload,
   buildMarketCitationsTrendPayload,
   transformMarketTrackingTrends,
@@ -344,21 +345,57 @@ export function createElementsService(transport, log) {
     /**
      * Fetches the URL Inspector details drill-down: the prompts that cited a specific
      * URL, from the URL_PROMPTS element (b4f1ead7), scoped by `CBF_source` (the URL).
-     * Single call (no fan-out); returns a flat array of per-prompt rows. Pagination is
-     * applied client-side by the controller (Semrush has no server-side paging).
+     * Returns a flat array of per-prompt rows. Pagination is applied client-side by the
+     * controller (Semrush has no server-side paging).
+     *
+     * Market scope: the element takes ONE top-level `project_id` per call (a `CBF_project`
+     * advanced filter is a no-op — verified live LLMO-6674). So when the caller selects
+     * markets, this fans out one call per project id (bounded concurrency, mirroring
+     * owned-urls) and UNIONS the results, deduped by prompt text via
+     * {@link mergeUrlPromptsResponses} (which documents the dedupe/collision rules). No
+     * `projectIds` → one unscoped call across the whole sub-workspace (unchanged behavior).
+     * Category is a `CBF_tags` filter applied on every per-project call.
      *
      * @param {string} workspaceId - Semrush sub-workspace UUID (projects/prompts live here).
-     * @param {object} params - Query params (url, model/platform, startDate, endDate).
+     * @param {object} params - Query params (url, model/platform, startDate, endDate,
+     *   category, projectIds).
+     * @param {string[]} [params.projectIds] - Semrush project ids to scope to. Empty → one
+     *   unscoped (sub-workspace-wide) fetch.
      * @returns {Promise<Array<object>>} Per-prompt rows (see transformUrlPromptsResponse).
      */
     /* c8 ignore start -- LLMO-6620 POC endpoint; unit tests deferred (see url-prompts.js tests) */
-    async getUrlPrompts(workspaceId, params) {
-      const raw = await transport.fetchElement(
-        workspaceId,
-        ELEMENT_IDS.URL_PROMPTS,
-        buildUrlPromptsPayload(params),
+    async getUrlPrompts(workspaceId, {
+      url, model, platform, startDate, endDate, category, projectIds = [],
+    }) {
+      const ids = Array.isArray(projectIds)
+        ? [...new Set(projectIds.filter(hasText))]
+        : [];
+      // One top-level project_id per call; `undefined` = the unscoped aggregate.
+      const scopes = ids.length > 0 ? ids : [undefined];
+      // Bound the per-market fan-out (mirrors owned-urls) so a brand with many markets
+      // can't spawn unbounded parallel Semrush requests (429 / pool risk).
+      const URL_PROMPTS_PROJECT_CONCURRENCY = 8;
+      const perProject = await mapWithConcurrency(
+        scopes,
+        URL_PROMPTS_PROJECT_CONCURRENCY,
+        async (projectId) => {
+          const raw = await transport.fetchElement(
+            workspaceId,
+            ELEMENT_IDS.URL_PROMPTS,
+            buildUrlPromptsPayload({
+              url, model, platform, startDate, endDate, category, projectId,
+            }),
+          );
+          return transformUrlPromptsResponse(raw);
+        },
       );
-      return transformUrlPromptsResponse(raw);
+
+      // Single scope → nothing to merge; return the transformed rows as-is.
+      if (scopes.length === 1) {
+        return perProject[0];
+      }
+      // Multi-market: union + dedupe by prompt text (see mergeUrlPromptsResponses).
+      return mergeUrlPromptsResponses(perProject);
     },
     /* c8 ignore stop */
 
