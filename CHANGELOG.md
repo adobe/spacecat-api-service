@@ -1,3 +1,10 @@
+# [1.714.0](https://github.com/adobe/spacecat-api-service/compare/v1.713.0...v1.714.0) (2026-07-31)
+
+
+### Features
+
+* support platform=all in url-prompts endpoint | LLMO-6697 ([#2978](https://github.com/adobe/spacecat-api-service/issues/2978)) ([408043c](https://github.com/adobe/spacecat-api-service/commit/408043c54be320283f1569756fb89687c762e6e2))
+
 # [1.713.0](https://github.com/adobe/spacecat-api-service/compare/v1.712.1...v1.713.0) (2026-07-31)
 
 
