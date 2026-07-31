@@ -10170,6 +10170,8 @@ describe('Suggestions Controller', () => {
 
   describe('getGeoExperiment', () => {
     const GEO_EXP_ID = 'b1b2c3d4-e5f6-7890-abcd-ef1234567890';
+    // Insights (and their detail blobs) live in the Mystique assets bucket, not the default one.
+    const MYSTIQUE_BUCKET = 'test-mystique-bucket';
 
     let mockGeoExperiment;
 
@@ -10185,6 +10187,7 @@ describe('Suggestions Controller', () => {
         GetObjectCommand: StubGetObjectCommand,
         getSignedUrl: sandbox.stub().resolves('https://presigned.example/blob'),
       };
+      context.env = { S3_MYSTIQUE_BUCKET: MYSTIQUE_BUCKET };
       sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
 
       mockGeoExperiment = {
@@ -10357,6 +10360,33 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(200);
       const body = await response.json();
       expect(body.insights).to.deep.equal(insightsPayload);
+      // Insights are read from the Mystique bucket; prompts from the default services bucket.
+      const insightsCall = context.s3.s3Client.send.getCalls()
+        .find((c) => c.args[0].Key === insightsKey);
+      expect(insightsCall.args[0].Bucket).to.equal(MYSTIQUE_BUCKET);
+      const promptsCall = context.s3.s3Client.send.getCalls()
+        .find((c) => c.args[0].Key.endsWith('-prompts.json'));
+      expect(promptsCall.args[0].Bucket).to.equal('test-bucket');
+    });
+
+    it('returns null insights when the Mystique bucket is not configured', async () => {
+      context.env = {};
+      mockGeoExperiment.getInsightsLocation = () => `geo-experiments/${SITE_ID}/${GEO_EXP_ID}-insights.json`;
+      context.s3.s3Client.send.resolves({
+        Body: { transformToString: sandbox.stub().resolves('[]') },
+      });
+      const response = await suggestionsController.getGeoExperiment({
+        ...context,
+        data: { includeInsights: 'true' },
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.insights).to.be.null;
+      // No insights GetObject attempted without a bucket (only the prompts fetch runs).
+      const insightsAttempted = context.s3.s3Client.send.getCalls()
+        .some((c) => c.args[0].Key.endsWith('-insights.json'));
+      expect(insightsAttempted).to.equal(false);
     });
 
     it('replaces each analysis rawDataUrl with a presigned URL when includeInsights=true', async () => {
