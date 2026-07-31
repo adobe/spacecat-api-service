@@ -862,3 +862,49 @@ AiVisibilityV1SourceCitedPagesExport:
       models: [chatgpt]
       marketsCatalog: [WW, AE, AR, US]
       modelsCatalog: [all, chatgpt, gemini, googleAiMode, googleAiOverview]
+
+AiVisibilityV1SourceCitedSources:
+  description: Native SourceService cited-source-domain rows with API search-result filters
+  value:
+    data:
+      - domain: example-source.com
+        mentions: '24'
+        sourcesCount: '8'
+        promptsCount: '42'
+        organicTraffic: '125000'
+        mentionedBrandsCount: '6'
+        country: US
+      - domain: industry-news.example
+        mentions: '11'
+        sourcesCount: '4'
+        promptsCount: '18'
+        organicTraffic: '48000'
+        mentionedBrandsCount: '3'
+        country: US
+    srFilters:
+      markets: [AE, AR, US, WW]
+      models: [chatgpt]
+      marketsCatalog: [WW, AE, AR, US]
+      modelsCatalog: [all, chatgpt, gemini, googleAiMode, googleAiOverview]
+
+AiVisibilityV1SourceCitedSourcesTotals:
+  description: Total cited source domains matching the same domain and market filters
+  value:
+    total: '137'
+    srFilters:
+      markets: [AE, AR, US, WW]
+      models: [chatgpt]
+      marketsCatalog: [WW, AE, AR, US]
+      modelsCatalog: [all, chatgpt, gemini, googleAiMode, googleAiOverview]
+
+AiVisibilityV1SourceCitedSourcesExport:
+  description: Cited source domains CSV export payload returned by SourceService
+  value:
+    fileContent: ZG9tYWluLG1lbnRpb25zLHNvdXJjZXNfY291bnQK
+    fileName: cited-sources.csv
+    contentType: text/csv
+    srFilters:
+      markets: [AE, AR, US, WW]
+      models: [chatgpt]
+      marketsCatalog: [WW, AE, AR, US]
+      modelsCatalog: [all, chatgpt, gemini, googleAiMode, googleAiOverview]

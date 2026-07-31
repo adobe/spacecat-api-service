@@ -62,6 +62,9 @@ describe('AiVisibilityController', () => {
   let mockHandleV1SourceCitedPages;
   let mockHandleV1SourceCitedPagesExport;
   let mockHandleV1SourceCitedPagesTotals;
+  let mockHandleV1SourceCitedSources;
+  let mockHandleV1SourceCitedSourcesExport;
+  let mockHandleV1SourceCitedSourcesTotals;
   let mockHandleV1BrandStatsByCountry;
   let mockHandleV1BrandStatsByLlm;
   let mockHandleV1MetaMeta;
@@ -193,6 +196,15 @@ describe('AiVisibilityController', () => {
     mockHandleV1SourceCitedPagesTotals = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
+    mockHandleV1SourceCitedSources = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
+    mockHandleV1SourceCitedSourcesExport = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
+    mockHandleV1SourceCitedSourcesTotals = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
     mockHandleV1BrandStatsByCountry = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
@@ -300,6 +312,16 @@ describe('AiVisibilityController', () => {
       },
       '../../src/support/ai-visibility/handlers/v1/source/cited-pages-totals.js': {
         handleCitedPagesTotals: mockHandleV1SourceCitedPagesTotals,
+      },
+      '../../src/support/ai-visibility/handlers/v1/source/cited-sources.js': {
+        handleCitedSources: mockHandleV1SourceCitedSources,
+        buildCitedSourcesDimensionFilterQl: sandbox.stub().returns(''),
+      },
+      '../../src/support/ai-visibility/handlers/v1/source/cited-sources-export.js': {
+        handleCitedSourcesExport: mockHandleV1SourceCitedSourcesExport,
+      },
+      '../../src/support/ai-visibility/handlers/v1/source/cited-sources-totals.js': {
+        handleCitedSourcesTotals: mockHandleV1SourceCitedSourcesTotals,
       },
       '../../src/support/ai-visibility/handlers/v1/brand/stats-by-country.js': {
         handleStatsByCountry: mockHandleV1BrandStatsByCountry,
@@ -629,6 +651,9 @@ describe('AiVisibilityController', () => {
       getV1SourceCitedPages: mockHandleV1SourceCitedPages,
       getV1SourceCitedPagesExport: mockHandleV1SourceCitedPagesExport,
       getV1SourceCitedPagesTotals: mockHandleV1SourceCitedPagesTotals,
+      getV1SourceCitedSources: mockHandleV1SourceCitedSources,
+      getV1SourceCitedSourcesExport: mockHandleV1SourceCitedSourcesExport,
+      getV1SourceCitedSourcesTotals: mockHandleV1SourceCitedSourcesTotals,
       getV1BrandStatsByCountry: mockHandleV1BrandStatsByCountry,
       getV1BrandStatsByLlm: mockHandleV1BrandStatsByLlm,
       getV1MetaMeta: mockHandleV1MetaMeta,

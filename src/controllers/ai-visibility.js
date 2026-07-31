@@ -64,6 +64,9 @@ import { handleGapSourceDomainsTotals as handleGapSourceDomainsTotalsV1 } from '
 import { handleCitedPages as handleCitedPagesV1 } from '../support/ai-visibility/handlers/v1/source/cited-pages.js';
 import { handleCitedPagesExport as handleCitedPagesExportV1 } from '../support/ai-visibility/handlers/v1/source/cited-pages-export.js';
 import { handleCitedPagesTotals as handleCitedPagesTotalsV1 } from '../support/ai-visibility/handlers/v1/source/cited-pages-totals.js';
+import { handleCitedSources as handleCitedSourcesV1 } from '../support/ai-visibility/handlers/v1/source/cited-sources.js';
+import { handleCitedSourcesExport as handleCitedSourcesExportV1 } from '../support/ai-visibility/handlers/v1/source/cited-sources-export.js';
+import { handleCitedSourcesTotals as handleCitedSourcesTotalsV1 } from '../support/ai-visibility/handlers/v1/source/cited-sources-totals.js';
 import { handleStatsByCountry as handleBrandStatsByCountryV1 } from '../support/ai-visibility/handlers/v1/brand/stats-by-country.js';
 import { handleStatsByLLM as handleBrandStatsByLLMV1 } from '../support/ai-visibility/handlers/v1/brand/stats-by-llm.js';
 import { handleMeta as handleMetaV1 } from '../support/ai-visibility/handlers/v1/meta/meta.js';
@@ -115,6 +118,9 @@ const ROUTE_MAP = [
   ['/v1/source/cited-pages', handleCitedPagesV1],
   ['/v1/source/cited-pages-export', handleCitedPagesExportV1],
   ['/v1/source/cited-pages-totals', handleCitedPagesTotalsV1],
+  ['/v1/source/cited-sources', handleCitedSourcesV1],
+  ['/v1/source/cited-sources-export', handleCitedSourcesExportV1],
+  ['/v1/source/cited-sources-totals', handleCitedSourcesTotalsV1],
   ['/v1/brand/stats-by-country', handleBrandStatsByCountryV1],
   ['/v1/brand/stats-by-llm', handleBrandStatsByLLMV1],
   ['/v1/meta/meta', handleMetaV1],

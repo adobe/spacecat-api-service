@@ -10878,6 +10878,112 @@ AiVisibilityV1SourceCitedPagesExportResponse:
       $ref: '#/AiVisibilitySrFilters'
   additionalProperties: true
 
+AiVisibilityV1SourceCitedSourceRow:
+  type: object
+  description: |
+    One cited source domain from Semrush `SourceDomainsResponse.Domain` as protobuf JSON
+    (camelCase). UInt64 fields may be serialized as JSON strings.
+  properties:
+    domain:
+      type: string
+      description: Source domain cited by an LLM response
+    mentions:
+      description: Brand mentions associated with the source domain (`uint64`)
+      oneOf:
+        - type: string
+          pattern: '^[0-9]+$'
+        - type: integer
+          minimum: 0
+    sourcesCount:
+      description: Number of cited URLs from the source domain (`uint64`)
+      oneOf:
+        - type: string
+          pattern: '^[0-9]+$'
+        - type: integer
+          minimum: 0
+    promptsCount:
+      description: Number of prompt responses citing the source domain (`uint64`)
+      oneOf:
+        - type: string
+          pattern: '^[0-9]+$'
+        - type: integer
+          minimum: 0
+    organicTraffic:
+      description: Estimated organic traffic to the source domain (`uint64`)
+      oneOf:
+        - type: string
+          pattern: '^[0-9]+$'
+        - type: integer
+          minimum: 0
+    mentionedBrandsCount:
+      description: Number of distinct brands mentioned with the source domain (`uint64`)
+      oneOf:
+        - type: string
+          pattern: '^[0-9]+$'
+        - type: integer
+          minimum: 0
+    country:
+      description: Market (COUNTRY enum name or integer)
+      oneOf:
+        - $ref: '#/AiVisibilitySemrushCountry'
+        - type: integer
+  additionalProperties: true
+
+AiVisibilityV1SourceCitedSourcesResponse:
+  type: object
+  description: |
+    Cited source domains list from `GET /llmo/ai-visibility/v1/source/cited-sources`.
+    Wraps Semrush v2 source `SourceDomains` JSON plus `srFilters` from the API layer.
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1SourceCitedSourceRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1SourceCitedSourcesTotalsResponse:
+  type: object
+  description: |
+    Cited source domains count from
+    `GET /llmo/ai-visibility/v1/source/cited-sources-totals`.
+    Returns only the count matching the request filters, without paginated data.
+  properties:
+    total:
+      description: Total cited source domains matching the request filters (`uint64`)
+      oneOf:
+        - type: string
+          pattern: '^[0-9]+$'
+        - type: integer
+          minimum: 0
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1SourceCitedSourcesExportResponse:
+  type: object
+  description: |
+    Cited source domains CSV export from
+    `GET /llmo/ai-visibility/v1/source/cited-sources-export`.
+    Native Semrush v2 `ExportResponse` protobuf JSON plus `srFilters` from the API layer.
+  properties:
+    fileContent:
+      type: string
+      format: byte
+      description: Base64-encoded CSV file content from `ExportResponse.file_content`.
+    fileName:
+      type: string
+      description: Suggested CSV file name from `ExportResponse.file_name`.
+      example: cited-sources.csv
+    contentType:
+      type: string
+      description: MIME type from `ExportResponse.content_type`.
+      example: text/csv
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
 AiVisibilityPromptResearchExportResponse:
   type: object
   description: |

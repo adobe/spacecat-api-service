@@ -470,6 +470,18 @@ x-ai-vis-v1-source-cited-pages-sort-by: &v1SourceCitedPagesSortByParam
     enum: [URL, PROMPTS_COUNT]
     default: PROMPTS_COUNT
 
+x-ai-vis-v1-source-cited-sources-sort-by: &v1SourceCitedSourcesSortByParam
+  name: sortBy
+  in: query
+  required: false
+  description: |
+    `DOMAINS_REQUEST_ORDER_BY` for Semrush v2 `SourceDomainsRequest.order.by`.
+    Default when omitted: `PROMPTS_COUNT`. Invalid values return `400 invalid_request`.
+  schema:
+    type: string
+    enum: [DOMAIN, MENTIONS, SOURCES_COUNT, PROMPTS_COUNT, ORGANIC_TRAFFIC]
+    default: PROMPTS_COUNT
+
 x-ai-vis-brands-top-brands-sort-by: &brandsTopBrandsSortByParam
   name: sortBy
   in: query
@@ -2025,6 +2037,108 @@ ai-visibility-v1-source-cited-pages-totals:
             examples:
               citedPagesTotals:
                 $ref: './examples.yaml#/AiVisibilityV1SourceCitedPagesTotals'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-source-cited-sources:
+  get:
+    tags: [ai-visibility]
+    summary: Get cited source domains (Source v2 JSON)
+    description: |
+      Returns source domains cited in LLM responses for the target domain using Semrush
+      `SourceService` v2 `SourceDomains`. Rows use native protobuf JSON (camelCase).
+      `searchQuery` is forwarded as a `domain CONTAINS "<query>"` dimension filter.
+      Sorting defaults to `PROMPTS_COUNT` descending. Pagination is offset-based through
+      `limit` and `offset`; those values are not echoed in the response.
+
+      This read-only endpoint exposes only documented upstream fields and domain filtering;
+      arbitrary or deeply nested filtering is not supported.
+    operationId: getAiVisibilityV1SourceCitedSources
+    parameters:
+      - *domainParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *v1SourceCitedSourcesSortByParam
+      - *sortDirectionParam
+      - *searchQueryParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Cited source domains retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1SourceCitedSourcesResponse'
+            examples:
+              citedSources:
+                $ref: './examples.yaml#/AiVisibilityV1SourceCitedSources'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-source-cited-sources-export:
+  get:
+    tags: [ai-visibility]
+    summary: Export cited source domains as CSV (Source v2 JSON)
+    description: |
+      Exports cited source domains using Semrush `SourceService` v2 `SourceDomainsExport`.
+      The nested `SourceDomainsRequest` uses the same engine, market, domain filter, sorting,
+      and offset/limit inputs as `/llmo/ai-visibility/v1/source/cited-sources`. The response
+      is the native Semrush `ExportResponse` protobuf JSON with base64-encoded CSV content.
+    operationId: getAiVisibilityV1SourceCitedSourcesExport
+    parameters:
+      - *domainParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *v1SourceCitedSourcesSortByParam
+      - *sortDirectionParam
+      - *searchQueryParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Cited source domains CSV export retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1SourceCitedSourcesExportResponse'
+            examples:
+              citedSourcesExport:
+                $ref: './examples.yaml#/AiVisibilityV1SourceCitedSourcesExport'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-source-cited-sources-totals:
+  get:
+    tags: [ai-visibility]
+    summary: Get cited source domains total (Source v2 JSON)
+    description: |
+      Returns the unpaginated count of cited source domains using Semrush `SourceService` v2
+      `SourceDomainsTotals`. Accepts the same target, engine, market, and `searchQuery` domain
+      filter as the data endpoint, but no sorting or pagination.
+      Because this is a read-only upstream query, concurrent-update coordination is not required.
+    operationId: getAiVisibilityV1SourceCitedSourcesTotals
+    parameters:
+      - *domainParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *searchQueryParam
+    responses:
+      '200':
+        description: Cited source domains total retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1SourceCitedSourcesTotalsResponse'
+            examples:
+              citedSourcesTotals:
+                $ref: './examples.yaml#/AiVisibilityV1SourceCitedSourcesTotals'
       <<: *errorResponses
     security:
       - api_key: []
