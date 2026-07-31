@@ -20,6 +20,7 @@ import {
 } from '../errors.js';
 import { alertQuotaRejection } from '../quota-alerts.js';
 import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
+import { buildCreateMetadata } from './prompts.js';
 import {
   resolveLocation,
   resolveLanguageId,
@@ -42,8 +43,10 @@ import { withResourceLock } from '../resource-lock.js';
 import {
   modelChangeUnits, releaseAiSurplus, PROJECT_BLOCK, PROMPT_BLOCK,
 } from '../resource-manager.js';
-import { DIMENSION, STANDARD_PROMPT_TAG_VALUES, INTENT_VALUE } from '../prompt-tags.js';
-import { provisionDimensionTree } from '../tag-tree.js';
+import {
+  DIMENSION, STANDARD_PROMPT_TAG_VALUES, INTENT_VALUE, GENERATED_PROMPT_SOURCE_VALUE,
+} from '../prompt-tags.js';
+import { provisionDimensionTree, ensureServerOwnedValue } from '../tag-tree.js';
 import { classifyBrandedTag, needlesFromNames } from '../branded-classifier.js';
 import { classifyPromptIntents, AI_GEN_CLASSIFY_MAX, computeWriteDeadline } from '../intent-classification.js';
 import { collectBrandUrlEntries, attachBrandUrlsToProject, primaryDomainSet } from '../brand-urls.js';
@@ -223,9 +226,23 @@ function dedupeNames(names) {
     });
 }
 
-/** @returns {ProjectCreateBody} */
+/**
+ * The default name is derived from `body` rather than taking the caller's
+ * already-normalized language code as a parameter: `normalizeLanguageCode` is
+ * pure, so it yields the identical value, and threading it in would sit a
+ * `languageCode` argument next to `languageId` — two strings a call site can
+ * transpose silently, producing a project named after a UUID.
+ *
+ * @param {object} body - the validated create body.
+ * @param {{ geoTargetId: number, locationName: string|undefined }} location - resolved market.
+ * @param {string} languageId - upstream language UUID.
+ * @param {string[]} [brandAliases]
+ * @returns {ProjectCreateBody}
+ */
 function buildCreateProjectBody(body, location, languageId, brandAliases = []) {
-  const name = hasText(body?.name) ? String(body.name) : defaultMarketName(body.brandDisplayName);
+  const name = hasText(body?.name)
+    ? String(body.name)
+    : defaultMarketName(body.market, normalizeLanguageCode(body.languageCode));
   // A Semrush project's brand is described by a display name plus the full set
   // of names it is known by (`brand_names`). Brand aliases are brand-level, so
   // every project/market in the brand carries them alongside the primary name.
@@ -279,11 +296,11 @@ function validateCreateBody(body) {
  * (transport.getBrandTopics) and attaches them to the project. Keeps the top
  * `topicCap` topics by search volume (0 = keep all) and tags every prompt with
  * the standard closed-dimension values ({@link STANDARD_PROMPT_TAG_VALUES}, minus
- * its seeded `intent` default), plus a branded / non-branded `type` value derived
- * from `brandNames` (brand name + aliases) and a per-prompt server-classified
- * `intent` value (serenity-docs#32, replacing the seeded `Informational`
- * default). Returns the topic/prompt counts. A generation that yields nothing is
- * a clean no-op (no upstream write).
+ * its seeded `intent` default), the producing `source/semrush` value, plus a
+ * branded / non-branded `type` value derived from `brandNames` (brand name +
+ * aliases) and a per-prompt server-classified `intent` value (serenity-docs#32,
+ * replacing the seeded `Informational` default). Returns the topic/prompt counts.
+ * A generation that yields nothing is a clean no-op (no upstream write).
  *
  * The generated topic name is NOT attached. Under the dimension-root model a
  * topic is a sub-category — a depth-3 descendant of a customer category — and
@@ -291,7 +308,7 @@ function validateCreateBody(body) {
  * there is no correct parent to create them below. Generated prompts therefore
  * arrive uncategorized and are categorized later (adobe/serenity-docs#44).
  *
- * Writes are id-based: `createPromptsByIds` takes ONE shared `tag_ids` array per
+ * Writes are id-based: `createPromptsWithMetadata` takes ONE shared `tag_ids` array per
  * call, so the texts are partitioned by their resolved tag-id set — the (type,
  * intent) pair, since topics are gone and everything else is constant. Identical
  * text collapses to one entry per group.
@@ -318,13 +335,15 @@ function validateCreateBody(body) {
  *   REQUIRED, not optional: a genuine no-op object when the flag is OFF, never `undefined`. Not
  *   optional-chained at the call site below (Rainer review) — a caller that forgets to thread it
  *   must fail loud, not silently skip metering. PROMPT metering seam (Rainer, live-verified
- *   LLMO-6190): the metered write is `createPromptsByIds` below, NOT publish — front it BEFORE the
- *   write loop, sized on the real prompt count now that it's known (`texts.size`), not an estimate.
+ *   LLMO-6190): the metered write is `createPromptsWithMetadata` below, NOT publish — front it
+ *   BEFORE the write loop, sized on the real prompt count now known (`texts.size`), not estimated.
+ * @param {string} callerId - resolved caller id (see `resolveCallerId`) stamped as
+ *   `created_by`/`updated_by` on every generated prompt (LLMO-6289).
  */
 async function generateAndAttachPrompts(transport, workspaceId, projectId, {
   domain, country, topicCap = 0, brandNames = [], provisioned, env,
   writeDeadline = computeWriteDeadline(),
-}, log, headroom) {
+}, log, headroom, callerId) {
   const raw = await transport.getBrandTopics(workspaceId, { domain, country });
   let topics = [];
   if (Array.isArray(raw)) {
@@ -360,7 +379,7 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
     return { topicCount: 0, promptCount: 0 };
   }
 
-  // Resolve every tag id we are about to attach. `createPromptsByIds` is ATOMIC on
+  // Resolve every tag id we are about to attach. `createPromptsWithMetadata` is ATOMIC on
   // an unresolvable id (live 500s and creates nothing), so ids are never guessed.
   // `provisionDimensionTree` resolved every closed value or threw a 502, so the
   // standard values and the whole `type`/`intent` vocabularies are present here by
@@ -372,6 +391,19 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
   const standardIdsNonIntent = STANDARD_PROMPT_TAG_VALUES
     .filter(({ dimension }) => dimension !== DIMENSION.INTENT)
     .map(({ dimension, name }) => /** @type {string} */ (values.get(dimension)?.get(name)));
+  // Stamp the producing system. This generator builds its prompts from Semrush's
+  // own `getBrandTopics`, so every generated prompt is `source/semrush` — the
+  // persisted SR-AI-Visibility key, a constant at THIS write site, NOT `config`
+  // (source-dimension.md §1 item 2). `source` is open, so the value is resolved-or-
+  // created on demand rather than pre-provisioned in `provisioned.values`.
+  const { id: sourceId } = await ensureServerOwnedValue(
+    transport,
+    workspaceId,
+    projectId,
+    DIMENSION.SOURCE,
+    GENERATED_PROMPT_SOURCE_VALUE,
+    log,
+  );
   const typeValues = /** @type {Map<string, string>} */ (values.get(DIMENSION.TYPE));
   const intentValues = /** @type {Map<string, string>} */ (values.get(DIMENSION.INTENT));
 
@@ -421,7 +453,9 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
       const intentId = /** @type {string} */ (intentValues.get(intentValue));
       byTagSet.set(key, {
         items: [text],
-        tagIds: [...standardIdsNonIntent, intentId, typeId],
+        // `sourceId` (source/semrush) is constant for every generated prompt, so
+        // it rides in every bucket alongside the per-(type, intent) ids.
+        tagIds: [...standardIdsNonIntent, intentId, sourceId, typeId],
       });
     }
   }
@@ -433,15 +467,24 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
   // forgets to thread the guard must fail loud.
   await headroom.ensure({ prompts: texts.size }, { includeDrafted: true });
 
+  // STAMP (LLMO-6289): AI-generated prompts are created through the v3
+  // metadata-carrying write, `created_* = updated_* = now / callerId`. One
+  // metadata object per batch (same instant for every text in the group).
+  const metadata = buildCreateMetadata(callerId);
   for (const { items, tagIds } of byTagSet.values()) {
     // LLMO-6190 follow-up: the metered write can still 405 as a disguised metered-quota rejection
     // despite the `ensure` above (live-verified ~9s gateway write-enforcement lag after a JIT
     // top-up) — route through `headroom.retryOnQuota` (no-op passthrough when the flag is OFF).
-    // `tagIds` is precomputed per (type, intent) bucket above (standard + intent + type).
+    // `tagIds` is precomputed per (type, intent) bucket above (standard + intent + source + type).
     // eslint-disable-next-line no-await-in-loop
     await headroom.retryOnQuota(
-      () => transport.createPromptsByIds(workspaceId, projectId, items, tagIds),
-      { callSite: 'createPromptsByIds' },
+      () => transport.createPromptsWithMetadata(
+        workspaceId,
+        projectId,
+        items.map((name) => ({ name, metadata })),
+        tagIds,
+      ),
+      { callSite: 'createPromptsWithMetadata' },
     );
   }
   return { topicCount: selected.length, promptCount: texts.size };
@@ -529,6 +572,10 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  * @param {number} [options.writeDeadline] - shared request-write deadline; defaults
  *   to a fresh {@link computeWriteDeadline} for direct/test callers.
  * @param {string | null} [options.orgId] - IMS org id, for the Slack alert payload only.
+ * @param {string} [options.callerId='unknown'] - resolved caller id (see
+ *   `resolveCallerId`) stamped as `created_by`/`updated_by` on any AI-generated
+ *   prompt this create attaches (LLMO-6289). Defaults to the `unknown` sentinel
+ *   so a caller that omits it never writes an empty author.
  */
 export async function handleCreateMarketSubworkspace(
   transport,
@@ -554,6 +601,7 @@ export async function handleCreateMarketSubworkspace(
     env = null,
     writeDeadline = computeWriteDeadline(),
     orgId = null,
+    callerId = 'unknown',
   } = {},
 ) {
   const errors = validateCreateBody(body);
@@ -694,6 +742,7 @@ export async function handleCreateMarketSubworkspace(
       },
       log,
       headroom,
+      callerId,
     );
   }
 

@@ -33,9 +33,28 @@ import { TAG_IDS, dimensionTreeLevels, makeListProjectTagsStub } from '../fixtur
 use(chaiAsPromised);
 use(sinonChai);
 
-// Every generated prompt carries the two standard values (source=ai,
-// intent=Informational); the third tag is the per-prompt computed `type`.
+// Every generated prompt carries the two standard values (origin=ai,
+// intent=Informational) plus the producing `source/semrush` value; the last tag
+// is the per-prompt computed `type`. Order matches the write site:
+// [...standardIds, sourceId, typeId].
 const STANDARD_IDS = [TAG_IDS.originAi, TAG_IDS.intentInformational];
+const GENERATED_IDS = [...STANDARD_IDS, TAG_IDS.sourceSemrush];
+
+// Matches one v3 create item `{ name, metadata }` (LLMO-6289). These handlers
+// default callerId to the `unknown` sentinel when a create omits it, so an
+// AI-generated prompt is stamped `created_by: unknown` unless a caller threads
+// a real id (the controller does).
+const genItemMatch = (name, by = 'unknown') => sinon.match({
+  name,
+  metadata: sinon.match({
+    created_at: sinon.match.string,
+    created_by: by,
+    updated_at: sinon.match.string,
+    updated_by: by,
+  }),
+});
+// Extracts prompt texts from a createPromptsWithMetadata call's items arg.
+const itemNames = (items) => items.map((i) => i.name);
 
 const BRAND = 'brand-1';
 const WS = 'subworkspace-ws-1';
@@ -71,7 +90,7 @@ function makeTransport(overrides = {}) {
     deleteAiModelsByIds: sinon.stub().resolves(null),
     createProjectTags: sinon.stub().resolves([]),
     listProjectTags: makeListProjectTagsStub(),
-    createPromptsByIds: sinon.stub().resolves({ page: 1, total: 0, items: [] }),
+    createPromptsWithMetadata: sinon.stub().resolves({ page: 1, total: 0, items: [] }),
     listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [{ id: 'bench-1', main_brand: true }] }),
     createBrandUrls: sinon.stub().resolves({ ids: [], existing_count: 0 }),
     createBenchmarks: sinon.stub().resolves({ ids: ['bm-new'], existing_count: 0 }),
@@ -728,10 +747,10 @@ describe('markets-subworkspace handlers', () => {
       // (needle 'trail'): the shared classifier matches on WORD boundaries, so
       // 'top trail shoes' is branded and 'best running shoes' is not. Prompts are
       // grouped by computed type, one upstream call per group, because
-      // createPromptsByIds carries ONE shared tag_ids array per call.
-      expect(transport.createPromptsByIds).to.have.been.calledTwice;
-      expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['best running shoes'], [...STANDARD_IDS, TAG_IDS.typeNonBranded]);
-      expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['top trail shoes'], [...STANDARD_IDS, TAG_IDS.typeBranded]);
+      // createPromptsWithMetadata carries ONE shared tag_ids array per call.
+      expect(transport.createPromptsWithMetadata).to.have.been.calledTwice;
+      expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('best running shoes')], [...GENERATED_IDS, TAG_IDS.typeNonBranded]);
+      expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('top trail shoes')], [...GENERATED_IDS, TAG_IDS.typeBranded]);
       expect(res.body).to.include({ topicCount: 1, promptCount: 2, published: true });
       // Models are STAGED (no inner publish) — only the single final publish runs,
       // so a quota 405 can never escape mid-flow from the model-set commit.
@@ -739,9 +758,9 @@ describe('markets-subworkspace handlers', () => {
     });
 
     it('dynamic-allocation ON: fronts prompt headroom sized on the generated batch BEFORE the write (LLMO-6190, live-verified)', async () => {
-      // The metered write is createPromptsByIds itself (Rainer, live-verified) — a disguised-quota
-      // 405 fires there, before any publish. getWorkspaceResources must be read before the first
-      // createPromptsByIds call for the generated batch, not only before the final publish.
+      // The metered write is createPromptsWithMetadata itself (Rainer, live-verified) — a
+      // disguised-quota 405 fires there, before any publish. getWorkspaceResources must be read
+      // before the first create call for the generated batch, not only before the final publish.
       const transport = makeTransport({
         getBrandTopics: sinon.stub().resolves([
           { topic: 'Running Shoes', volume: 900, prompts: ['best running shoes', 'top trail shoes'] },
@@ -769,7 +788,7 @@ describe('markets-subworkspace handlers', () => {
       expect(res.status).to.equal(201);
       expect(transport.getWorkspaceResources).to.have.been.called;
       expect(transport.getWorkspaceResources.firstCall)
-        .to.have.been.calledBefore(transport.createPromptsByIds.firstCall);
+        .to.have.been.calledBefore(transport.createPromptsWithMetadata.firstCall);
     });
 
     it('propagates a fatal model-attach failure (NOT best-effort like URL/competitor enrichment)', async () => {
@@ -840,17 +859,17 @@ describe('markets-subworkspace handlers', () => {
       );
       expect(res.status).to.equal(201);
       // Two branded prompts share one call; the single non-branded one gets its own.
-      expect(transport.createPromptsByIds).to.have.been.calledWithExactly(
+      expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(
         WS,
         'new-proj',
-        ['Best ACME running shoes', 'top trail sneakers from zoom'],
-        [...STANDARD_IDS, TAG_IDS.typeBranded],
+        [genItemMatch('Best ACME running shoes'), genItemMatch('top trail sneakers from zoom')],
+        [...GENERATED_IDS, TAG_IDS.typeBranded],
       );
-      expect(transport.createPromptsByIds).to.have.been.calledWithExactly(
+      expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(
         WS,
         'new-proj',
-        ['most comfortable sandals'],
-        [...STANDARD_IDS, TAG_IDS.typeNonBranded],
+        [genItemMatch('most comfortable sandals')],
+        [...GENERATED_IDS, TAG_IDS.typeNonBranded],
       );
     });
 
@@ -888,9 +907,9 @@ describe('markets-subworkspace handlers', () => {
         { generateTopics: true, publishMode: 'skip' },
       );
       expect(res.status).to.equal(201);
-      expect(transport.createPromptsByIds).to.have.been.calledOnce;
-      const [, , items] = transport.createPromptsByIds.firstCall.args;
-      expect(items).to.deep.equal(['best boots']);
+      expect(transport.createPromptsWithMetadata).to.have.been.calledOnce;
+      const [, , items] = transport.createPromptsWithMetadata.firstCall.args;
+      expect(itemNames(items)).to.deep.equal(['best boots']);
     });
 
     it('skips the prompt attach (topicCount/promptCount 0) when topics yield no prompts', async () => {
@@ -913,7 +932,7 @@ describe('markets-subworkspace handlers', () => {
       );
       expect(res.status).to.equal(201);
       expect(res.body).to.include({ topicCount: 0, promptCount: 0 });
-      expect(transport.createPromptsByIds).to.not.have.been.called;
+      expect(transport.createPromptsWithMetadata).to.not.have.been.called;
     });
 
     it('409s when a LIVE project already exists for the slice', async () => {
@@ -1467,11 +1486,10 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     expect(result.initialized).to.equal(null);
   });
 
-  // Line 115: `hasText(body?.name)?String(body.name):defaultMarketName(body.brandDisplayName)` else
-  // — body without a `name` field so defaultMarketName is called.
-  // Note: the existing test "defaults the project brand_names to just the primary brand name when
-  // no aliases" already passes a body without `name`, but does not assert the generated name
-  // pattern. This test locks the else branch explicitly by asserting the random-suffix shape.
+  // `hasText(body?.name) ? String(body.name) : defaultMarketName(body.market, languageCode)` else
+  // branch — body without a `name` field, so the market's own name is generated. The name is the
+  // customer-visible one in the Semrush navigation and must match what the migration writes
+  // (`{REGION}-{language}`), so this asserts the exact string, not a shape.
   it('buildCreateProjectBody: uses defaultMarketName when body has no name field', async () => {
     const transport = makeTransport();
     const brand = makeBrand();
@@ -1485,8 +1503,7 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     const res = await handleCreateMarketSubworkspace(transport, brand, PARENT, bodyNoName, log);
     expect(res.status).to.equal(201);
     const projectBody = transport.createProject.firstCall.args[1];
-    // defaultMarketName produces "<brandDisplayName>-<6hex>".
-    expect(projectBody.name).to.match(/^MyBrand-[0-9a-f]{6}$/);
+    expect(projectBody.name).to.equal('US-en');
   });
 
   // brand_name_display honors an explicit brandDisplayName when it differs from
@@ -1572,8 +1589,8 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     expect(res.status).to.equal(201);
     // Both prompts are attached (both non-branded, so one call) — no crash from
     // the sort comparator.
-    expect(transport.createPromptsByIds).to.have.been.calledOnce;
-    expect(transport.createPromptsByIds.firstCall.args[2])
+    expect(transport.createPromptsWithMetadata).to.have.been.calledOnce;
+    expect(itemNames(transport.createPromptsWithMetadata.firstCall.args[2]))
       .to.deep.equal(['alpha prompt', 'beta prompt']);
   });
 
@@ -1606,7 +1623,7 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     );
     expect(res.status).to.equal(201);
     // 'adobe shoes' contains 'adobe' → branded (null alias was dropped, not used).
-    expect(transport.createPromptsByIds).to.have.been.calledOnceWithExactly(WS, 'new-proj', ['adobe shoes'], [...STANDARD_IDS, TAG_IDS.typeBranded]);
+    expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(WS, 'new-proj', [genItemMatch('adobe shoes')], [...GENERATED_IDS, TAG_IDS.typeBranded]);
   });
 
   // Line 115 truthy branch: body.name is provided and valid — String(body.name) is used
@@ -1705,8 +1722,8 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     expect(res.status).to.equal(201);
     // Needles = ['b','real'] (the '' element was coerced + filtered out).
     // 'real deal' contains 'real' → branded; 'plain text' → non-branded.
-    expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['real deal'], [...STANDARD_IDS, TAG_IDS.typeBranded]);
-    expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['plain text'], [...STANDARD_IDS, TAG_IDS.typeNonBranded]);
+    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('real deal')], [...GENERATED_IDS, TAG_IDS.typeBranded]);
+    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('plain text')], [...GENERATED_IDS, TAG_IDS.typeNonBranded]);
   });
 
   // serenity-docs#32: a classified prompt gets its real intent id; a text absent
@@ -1743,8 +1760,8 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     );
     expect(res.status).to.equal(201);
     // Both are non-branded ('Trail' not mentioned); intent differs, so two calls.
-    expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['buy now'], [SOURCE_AI_ID, TAG_IDS.intentTransactional, TAG_IDS.typeNonBranded]);
-    expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['about it'], [SOURCE_AI_ID, TAG_IDS.intentInformational, TAG_IDS.typeNonBranded]);
+    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('buy now')], [SOURCE_AI_ID, TAG_IDS.intentTransactional, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
+    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('about it')], [SOURCE_AI_ID, TAG_IDS.intentInformational, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
   });
 
   // Boundary: at exactly AI_GEN_CLASSIFY_MAX + 1 texts, only the first MAX are
@@ -1784,8 +1801,8 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     expect(classifySpy).to.have.been.calledOnce;
     expect(classifySpy.firstCall.args[0]).to.deep.equal(['p1', 'p2']);
     // p1/p2 classified Transactional; p3 (beyond the cap) defaults Informational.
-    expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['p1', 'p2'], [...STANDARD_IDS.slice(0, 1), TAG_IDS.intentTransactional, TAG_IDS.typeNonBranded]);
-    expect(transport.createPromptsByIds).to.have.been.calledWithExactly(WS, 'new-proj', ['p3'], [...STANDARD_IDS.slice(0, 1), TAG_IDS.intentInformational, TAG_IDS.typeNonBranded]);
+    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('p1'), genItemMatch('p2')], [...STANDARD_IDS.slice(0, 1), TAG_IDS.intentTransactional, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
+    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('p3')], [...STANDARD_IDS.slice(0, 1), TAG_IDS.intentInformational, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
     // The cap-hit is observable, not silent.
     expect(capLog.info).to.have.been.calledWithMatch(
       'generateAndAttachPrompts: AI-gen classify cap hit — tail defaults to Informational',
@@ -1801,7 +1818,7 @@ describe('markets-subworkspace — defensive branch coverage', () => {
   // that stays empty is exactly that sequence.
   //
   // Attaching a prompt to a guessed id is the failure these prevent:
-  // `createPromptsByIds` is ATOMIC on an unresolvable id — it 500s and writes
+  // `createPromptsWithMetadata` is ATOMIC on an unresolvable id — it 500s and writes
   // nothing — so the handler must fail before it builds the call, not after.
   it('generateAndAttachPrompts: 502s when the standard prompt tag ids cannot be resolved', async () => {
     // The four roots exist; no closed value under any of them does, and the
@@ -1827,7 +1844,7 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     expect(err.status).to.equal(502);
     expect(err.message).to.match(/did not persist the tag\(s\)/);
     // Nothing was attached — the seam fails before any prompt write is built.
-    expect(transport.createPromptsByIds).to.have.not.been.called;
+    expect(transport.createPromptsWithMetadata).to.have.not.been.called;
   });
 
   it('generateAndAttachPrompts: 502s when the type vocabulary cannot be provisioned', async () => {
@@ -1855,6 +1872,6 @@ describe('markets-subworkspace — defensive branch coverage', () => {
 
     expect(err.status).to.equal(502);
     expect(err.message).to.match(/did not persist the tag\(s\): non-branded/);
-    expect(transport.createPromptsByIds).to.have.not.been.called;
+    expect(transport.createPromptsWithMetadata).to.have.not.been.called;
   });
 });

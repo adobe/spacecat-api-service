@@ -58,6 +58,9 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 /** @typedef {Parameters<PeTransport['updateCompetitors']>[0]['body']} CiCompetitorsBody */
 /** @typedef {CiCompetitorsBody['ci_competitors']} CiCompetitors */
 /** @typedef {Parameters<PeTransport['updatePromptTags']>[0]['body']['items']} PromptTagUpdates */
+/** @typedef {Parameters<PeTransport['listPromptsByTagIds']>[0]['body']} PromptsListBody */
+/** @typedef {Parameters<PeTransport['patchPromptsMetadataBatch']>[0]['body']} MetadataBatchBody */
+/** @typedef {MetadataBatchBody['items'][number]['metadata']} PromptMetadataPatch */
 
 /**
  * The `resources` allocation object shared by the v2 child-create and the v2 resources
@@ -408,9 +411,24 @@ export function createSerenityTransport({ env, imsToken }) {
      * Migration-verification "did it land?" checks must publish first (or accept
      * that an unpublished draft reads as 0 prompts), never treat empty as missing.
      *
-     * Note: Semrush rejects `sort_field` / `sort_dir` on this endpoint (see
-     * commit history on the prior `serenity` handler). Body is restricted to
-     * the fields the upstream documents as accepted.
+     * METADATA (LLMO-6289): WP0 added an Adobe-owned `metadata` column carried
+     * INLINE on each item of this read (`AIOPromptWithStatus.metadata`), but it is
+     * OPT-IN and the switch is the `include_metadata` QUERY parameter — NOT a body
+     * field. Without it upstream omits the `metadata` key from every item and
+     * answers 200, which a consumer cannot tell apart from "every prompt is
+     * genuinely unstamped". It is therefore sent UNCONDITIONALLY here rather than
+     * exposed as a per-call option — a caller that forgets to opt in gets data that
+     * is indistinguishable from unstamped, and the cost of always asking is four
+     * short strings per item.
+     *
+     * SORT: the wire keys are `sort_field` / `sort_dir` in the request BODY
+     * (`model.AIOPromptsListRequest`). Unknown body keys are ignored with a 200, so
+     * a wrong name is a silent no-op, not an error. `sort` is allow-listed to
+     * `metadata.created_at` / `metadata.updated_at` by the caller
+     * (handlers/prompts.js `resolveSort`) BEFORE it reaches here and is mapped onto
+     * `sort_field` at this boundary. Both are sent ONLY when a sort is requested,
+     * so an unsorted read carries neither key. Every other field stays restricted
+     * to what upstream documents.
      *
      * @param {string} semrushWorkspaceId
      * @param {string} projectId
@@ -420,18 +438,37 @@ export function createSerenityTransport({ env, imsToken }) {
      * @param {number} [body.limit]
      * @param {string} [body.search]
      * @param {boolean} [body.unassigned]
+     * @param {string} [body.sort] - allow-listed metadata sort field (LLMO-6289),
+     *   sent upstream as `sort_field`.
+     * @param {string} [body.order] - `asc` / `desc`, sent upstream as `sort_dir`;
+     *   sent only alongside `sort`.
      */
     async listPromptsByTags(semrushWorkspaceId, projectId, body) {
+      // Annotated with the GENERATED body type, and built without an object
+      // spread, so both halves of the wire contract are enforced by tsc: a
+      // misspelled key is TS2353 on the literal / TS2339 on the assignment below,
+      // and a wrong value type is TS2322. Keep it spread-free — a spread disables
+      // excess-property checking, which is what lets a misspelled key reach the
+      // wire, where upstream ignores it with a 200 rather than refusing it.
+      /** @type {PromptsListBody} */
+      const requestBody = {
+        tag_ids: body?.tag_ids ?? [],
+        page: body?.page ?? 1,
+        limit: body?.limit ?? 200,
+        search: body?.search,
+        unassigned: body?.unassigned,
+      };
+      if (body?.sort) {
+        requestBody.sort_field = body.sort;
+        requestBody.sort_dir = body.order;
+      }
       return projects.listPromptsByTagIds(
         {
-          params: { path: { id: semrushWorkspaceId, project_id: projectId } },
-          body: {
-            tag_ids: body?.tag_ids ?? [],
-            page: body?.page ?? 1,
-            limit: body?.limit ?? 200,
-            search: body?.search,
-            unassigned: body?.unassigned,
+          params: {
+            path: { id: semrushWorkspaceId, project_id: projectId },
+            query: { include_metadata: true },
           },
+          body: requestBody,
         },
       );
     },
@@ -466,6 +503,108 @@ export function createSerenityTransport({ env, imsToken }) {
         {
           params: { path: { id: semrushWorkspaceId, project_id: projectId } },
           body: { items, tag_ids: tagIds },
+        },
+      );
+    },
+
+    /**
+     * POST /v3/.../aio/prompts — the metadata-carrying create (LLMO-6289). Same
+     * ONE-shared-`tag_ids` model as {@link createPromptsByIds}, but each item is
+     * `{ name, metadata }` so the four authorship keys are stamped on the SAME
+     * write that creates the prompt (no read-before-write, nothing to sequence).
+     * The `metadata` object is built by the shared `buildCreateMetadata` helper
+     * (all four keys, `created_* = updated_*`). Response shape mirrors the v2
+     * create's paginated list wrapper (`{ items: [{ id, name }], ... }`). ATOMIC
+     * on an unresolvable tag id, exactly like the v2 create.
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {string} projectId
+     * @param {Array<{ name: string, metadata: object }>} items - texts + per-item metadata.
+     * @param {string[]} tagIds - upstream tag ids attached to EVERY item.
+     */
+    async createPromptsWithMetadata(semrushWorkspaceId, projectId, items, tagIds) {
+      return projects.createPromptsWithMetadata(
+        {
+          params: { path: { id: semrushWorkspaceId, project_id: projectId } },
+          body: { items, tag_ids: tagIds },
+        },
+      );
+    },
+
+    /**
+     * PATCH /v3/.../aio/prompts/{prompt_id} — combined in-place edit of a prompt's
+     * `name` (its text) AND its `metadata`, in ONE request (LLMO-6289). This is
+     * the text-edit write on the in-place edit path: it replaces the v2 `rename`
+     * so the `updated_*` metadata stamp rides the same mutation. Merge-patch
+     * semantics on `metadata` (RFC 7396): a key absent from the body is KEPT (so
+     * `created_*` are never touched by an edit), a string SETS, `null` DELETES.
+     * Preserves the prompt id. Same refusal contract as `rename` — 404 for an
+     * unknown id, 409 when `name` collides with a sibling prompt's exact text.
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {string} projectId
+     * @param {string} promptId - upstream prompt id to edit.
+     * @param {{ name?: string, metadata?: object }} body - next text and/or metadata merge.
+     */
+    async patchPrompt(semrushWorkspaceId, projectId, promptId, body) {
+      return projects.patchPrompt(
+        {
+          params: {
+            path: { id: semrushWorkspaceId, project_id: projectId, prompt_id: promptId },
+          },
+          body,
+        },
+      );
+    },
+
+    /**
+     * PATCH /v3/.../aio/prompts/{prompt_id}/metadata — metadata-only merge-patch
+     * of ONE prompt (LLMO-6289, RFC 7396). Touches only the keys the body carries
+     * (absent = keep, string = set, null = delete). The prompt's text and tags are
+     * untouched. Used to stamp authorship without a text edit.
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {string} projectId
+     * @param {string} promptId - upstream prompt id.
+     * @param {object} metadata - the merge-patch body.
+     */
+    async patchPromptMetadata(semrushWorkspaceId, projectId, promptId, metadata) {
+      return projects.patchPromptMetadata(
+        {
+          params: {
+            path: { id: semrushWorkspaceId, project_id: projectId, prompt_id: promptId },
+          },
+          body: metadata,
+        },
+      );
+    },
+
+    /**
+     * PATCH /v3/.../aio/prompts/metadata — BATCH metadata merge-patch across many
+     * prompts in ONE upstream transaction (LLMO-6289). Body: `{ items: [{
+     * prompt_id, metadata }] }` (`model.PatchAIOPromptsBatchItem` — the id key is
+     * `prompt_id`, NOT `id`), each `metadata` an independent RFC 7396 merge. The
+     * batch is ATOMIC upstream: a CHECK violation on ANY item (e.g. a `created_by`
+     * / `updated_by` longer than 100 chars) rolls the WHOLE batch back and answers
+     * 400 — so callers must isolate a deterministic offender rather than retry the
+     * batch whole. No caller yet; it exposes the batch write surface the ADR pins
+     * for bulk stampers.
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {string} projectId
+     * @param {Array<{ promptId: string, metadata: PromptMetadataPatch }>} items -
+     *   camelCase in, mapped onto the upstream `prompt_id` key here.
+     */
+    async patchPromptsMetadataBatch(semrushWorkspaceId, projectId, items) {
+      return projects.patchPromptsMetadataBatch(
+        {
+          params: { path: { id: semrushWorkspaceId, project_id: projectId } },
+          body: {
+            items: items.map(({ promptId, metadata }) => ({
+              prompt_id: promptId,
+              metadata,
+            })),
+          },
         },
       );
     },
@@ -549,6 +688,34 @@ export function createSerenityTransport({ env, imsToken }) {
     async publishProject(semrushWorkspaceId, projectId) {
       return projects.publishProject(
         { params: { path: { id: semrushWorkspaceId, project_id: projectId } } },
+      );
+    },
+
+    /**
+     * GET /v1/workspaces/{ws}/projects/{pid} — reads a single project for its
+     * `publish_status` (LLMO-5492 / AC3). Semrush publishes asynchronously with
+     * no completion webhook, so publish completion is observed by re-reading the
+     * project and inspecting `publish_status`
+     * (draft | publishing | initial_publish_failed | live |
+     * live_with_unpublished_updates — serenity-docs §6). The default view echoes
+     * `publish_status` faithfully (§10). Consumed by
+     * {@link module:handlers/publish-status.pollProjectPublished}.
+     * @param {string} semrushWorkspaceId
+     * @param {string} projectId
+     * @returns {Promise<object>} raw project JSON carrying `publish_status`.
+     */
+    async getProjectStatus(semrushWorkspaceId, projectId) {
+      // draft:'true' reads the draft view, which echoes `publish_status` for a
+      // never-published project; the live view (draft:'false') empties a
+      // never-published draft's config (serenity-docs #12 §10) so its status
+      // can't be read back. Matches getProject's default (draft:true).
+      return projects.getProject(
+        {
+          params: {
+            path: { id: semrushWorkspaceId, project_id: projectId },
+            query: { draft: 'true', type: 'ai' },
+          },
+        },
       );
     },
 

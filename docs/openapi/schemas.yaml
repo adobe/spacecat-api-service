@@ -773,6 +773,15 @@ SiteList:
   type: array
   items:
     $ref: './schemas.yaml#/Site'
+SiteEnrollmentList:
+  type: object
+  required:
+    - sites
+  properties:
+    sites:
+      type: array
+      items:
+        $ref: './schemas.yaml#/Site'
 SiteListItem:
   type: object
   description: |
@@ -4168,6 +4177,11 @@ Fix:
     executedAt:
       type: string
       format: date-time
+    deployedAt:
+      type:
+        - string
+        - 'null'
+      format: date-time
     publishedAt:
       type: string
       format: date-time
@@ -6553,9 +6567,13 @@ V2Prompt:
       default: human
     source:
       type: string
-      description: The source system or process that created the prompt
+      readOnly: true
+      description: >-
+        The producing system (source-dimension.md). READ-ONLY: server-owned, with
+        no write surface — a create/update body cannot set it. Returned in its
+        CANONICAL form (`lower(replace(source, '_', '-'))`), so `agentic_traffic`
+        reads as `agentic-traffic`.
       example: "config"
-      default: "config"
     intent:
       type: [string, 'null']
       description: >-
@@ -6656,10 +6674,6 @@ V2PromptInput:
         principal (e.g. the generation pipeline) may assert it, validated against
         the enum. It is never patched on update — it is fixed by the writer that
         created the row (origin-dimension.md §3).
-    source:
-      type: string
-      description: The source system or process that created the prompt
-      default: "config"
     intent:
       type: string
       description: >-
@@ -7823,6 +7837,9 @@ V2BrandUpdateResponse:
             re-sync failed (transient upstream error or user not provisioned in
             Semrush). The edit is persisted; Semrush will be reconciled via
             `--reconcile` migration once the underlying issue is resolved.
+            Returned only for organizations still inside the Semrush migration
+            window. An org carrying the `LLMO/serenity_ui` feature flag gets the
+            upstream failure reported instead (401/403/502), never this field.
         semrushRejectedAliases:
           type: array
           description: >-
@@ -7957,6 +7974,14 @@ V2BrandUpdateInput:
         Deferred Semrush provisioning data. Honored only while the brand is (and
         stays) pending — the draft Markets tab appends a market / edits a
         market's LLMs; silently ignored on a non-pending brand.
+    expectedUpdatedAt:
+      type: string
+      format: date-time
+      description: >-
+        Optimistic concurrency token. Pass the `updatedAt` value from the brand
+        you loaded before editing; if the brand has been modified since then,
+        the request is rejected with a 409 (code `brand_stale_write`) instead
+        of overwriting the newer write. Omit to skip this check.
 
 V2BrandListResponse:
   type: object
@@ -11235,6 +11260,34 @@ SerenityPrompt:
         Present on a create/update response
         (`SerenityCreatePromptsResponse.created`, the `updateSerenityPrompt`
         200); absent on `GET /serenity/prompts` list items, which carry `tags`.
+    createdAt:
+      type: [string, 'null']
+      format: date-time
+      description: |
+        RFC 3339 UTC timestamp the prompt was first created, from the
+        server-owned authorship metadata. Present on `GET /serenity/prompts`
+        list items; null for a prompt created before authorship stamping (an
+        un-backfilled prompt).
+    createdBy:
+      type: [string, 'null']
+      maxLength: 100
+      description: |
+        Opaque id of the caller that created the prompt (an IMS user id, or the
+        literal `unknown` when the author could not be resolved). Resolve to a
+        display name via the userDetails lookup. Null for an un-backfilled prompt.
+    updatedAt:
+      type: [string, 'null']
+      format: date-time
+      description: |
+        RFC 3339 UTC timestamp of the prompt's last in-place edit (its text or
+        tags). Equal to `createdAt` for a never-edited prompt. Null for an
+        un-backfilled prompt.
+    updatedBy:
+      type: [string, 'null']
+      maxLength: 100
+      description: |
+        Opaque id of the caller that last edited the prompt (or the literal
+        `unknown`). Null for an un-backfilled prompt.
 
 SerenityPromptTag:
   type: object
@@ -11675,11 +11728,14 @@ SerenityCreateMarketRequest:
       type: string
       description: |
         Display name of the new market. Optional — defaults server-side to
-        `<brandDisplayName>-<6 hex>` to disambiguate re-create-after-delete
-        and avoid collisions in shared workspaces.
+        `<REGION>-<languageCode>` (e.g. `US-en`), the market's own identity,
+        which is what the customer sees in the Semrush navigation. Supply this
+        field to choose the name instead.
     brandDisplayName:
       type: string
-      description: Used as the prefix for the default name when `name` is omitted.
+      description: |
+        Brand display name for the market's `brand_name_display` and its
+        own-brand benchmark.
     market:
       type: string
       description: ISO 3166-1 alpha-2 country code; resolved server-side to a Geo Target ID.
