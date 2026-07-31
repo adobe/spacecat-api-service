@@ -1,3 +1,10 @@
+# [1.713.0](https://github.com/adobe/spacecat-api-service/compare/v1.712.1...v1.713.0) (2026-07-31)
+
+
+### Features
+
+* **fixes:** expose deployedAt in the fix DTO (SITES-47997/48823) ([#2968](https://github.com/adobe/spacecat-api-service/issues/2968)) ([af60e89](https://github.com/adobe/spacecat-api-service/commit/af60e89da3d17b6654010fce651637576f0c2866)), closes [adobe/spacecat-shared#1857](https://github.com/adobe/spacecat-shared/issues/1857)
+
 ## [1.712.1](https://github.com/adobe/spacecat-api-service/compare/v1.712.0...v1.712.1) (2026-07-31)
 
 
