@@ -226,6 +226,7 @@ describe('Organizations Controller', () => {
       },
       Entitlement: {
         findByOrganizationIdAndProductCode: sinon.stub(),
+        allByOrganizationId: sinon.stub().resolves([]),
       },
       SiteEnrollment: {
         allBySiteId: sinon.stub(),
@@ -1211,6 +1212,56 @@ describe('Organizations Controller', () => {
     expect(organization).to.have.property('semrushWorkspaceId', 'ws_test_org2');
   });
 
+  it('GET org by id includes a compact per-product entitlements plan signal', async () => {
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+    mockDataAccess.Entitlement.allByOrganizationId.resolves([
+      { getProductCode: () => 'LLMO', getTier: () => 'FREE_TRIAL' },
+      { getProductCode: () => 'ASO', getTier: () => 'PAID' },
+    ]);
+
+    const result = await organizationsController.getByID({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...context });
+    const organization = await result.json();
+
+    expect(mockDataAccess.Entitlement.allByOrganizationId)
+      .to.have.been.calledOnceWith('9033554c-de8a-44ac-a356-09b51af8cc28');
+    expect(result.status).to.equal(200);
+    expect(organization.entitlements).to.deep.equal([
+      { productCode: 'LLMO', tier: 'FREE_TRIAL' },
+      { productCode: 'ASO', tier: 'PAID' },
+    ]);
+  });
+
+  it('GET org by id still returns the org (without entitlements) when the entitlement fetch fails', async () => {
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+    mockDataAccess.Entitlement.allByOrganizationId.rejects(new Error('db down'));
+
+    const result = await organizationsController.getByID({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...context });
+    const organization = await result.json();
+
+    expect(result.status).to.equal(200);
+    expect(organization).to.have.property('id', '9033554c-de8a-44ac-a356-09b51af8cc28');
+    expect(organization).to.not.have.property('entitlements');
+  });
+
+  it('GET org by id hides internal-only tiers (e.g. PRE_ONBOARD) from non-admin callers', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(true);
+    sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+    mockDataAccess.Entitlement.allByOrganizationId.resolves([
+      { getProductCode: () => 'LLMO', getTier: () => 'FREE_TRIAL' },
+      { getProductCode: () => 'ASO', getTier: () => 'PRE_ONBOARD' },
+    ]);
+
+    const result = await organizationsController.getByID({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...context });
+    const organization = await result.json();
+
+    expect(result.status).to.equal(200);
+    expect(organization.entitlements).to.deep.equal([
+      { productCode: 'LLMO', tier: 'FREE_TRIAL' },
+    ]);
+  });
+
   it('gets an organization by id for non belonging organization', async () => {
     context.attributes.authInfo.withProfile({ is_admin: false });
     sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
@@ -1253,6 +1304,23 @@ describe('Organizations Controller', () => {
     expect(organization).to.be.an('object');
     expect(result.status).to.equal(200);
     expect(organization).to.have.property('imsOrgId', imsOrgId);
+  });
+
+  it('GET org by IMS org ID includes the per-product entitlements plan signal', async () => {
+    mockDataAccess.Organization.findByImsOrgId.resolves(organizations[1]);
+    mockDataAccess.Entitlement.allByOrganizationId.resolves([
+      { getProductCode: () => 'LLMO', getTier: () => 'PAID' },
+    ]);
+    const imsOrgId = '1234567890ABCDEF12345678@AdobeOrg';
+    const result = await organizationsController.getByImsOrgID(
+      { params: { imsOrgId }, ...context },
+    );
+    const organization = await result.json();
+
+    expect(result.status).to.equal(200);
+    expect(organization.entitlements).to.deep.equal([
+      { productCode: 'LLMO', tier: 'PAID' },
+    ]);
   });
 
   it('gets an organization by IMS org ID for non belonging organization', async () => {

@@ -65,6 +65,9 @@ export default function organizationTests(getHttpClient, resetData) {
         expect(ids).to.include(ORG_1_ID);
         expect(ids).to.include(ORG_2_ID);
         expect(ids).to.include(ORG_3_ID);
+        // The list endpoint intentionally omits the per-org entitlements summary
+        // (avoids a per-org entitlement fetch / N+1) — only single-org GETs carry it.
+        sorted.forEach((org) => expect(org).to.not.have.property('entitlements'));
       });
 
       it('user: returns 403', async () => {
@@ -123,6 +126,15 @@ export default function organizationTests(getHttpClient, resetData) {
         // Enriched fields — config is exposed in OrganizationDto
         expect(res.body.config).to.be.an('object');
         expect(res.body.config.slack).to.deep.include({ channel: 'C0FAKE0ORG1' });
+
+        // Per-product plan signal (LLMO-6695): the single-org GET carries a compact
+        // entitlements summary so the UI can read TRIAL vs PAID off the org fetch.
+        // ORG_1 seeds ENT_1 (LLMO/FREE_TRIAL) + ENT_2 (ASO/PAID).
+        expect(res.body.entitlements).to.be.an('array');
+        expect(res.body.entitlements).to.have.deep.members([
+          { productCode: 'LLMO', tier: 'FREE_TRIAL' },
+          { productCode: 'ASO', tier: 'PAID' },
+        ]);
       });
 
       it('user: returns accessible org by ID', async () => {
@@ -160,6 +172,8 @@ export default function organizationTests(getHttpClient, resetData) {
         expectOrgDto(res.body);
         expect(res.body.id).to.equal(ORG_1_ID);
         expect(res.body.imsOrgId).to.equal(ORG_1_IMS_ORG_ID);
+        // Single-org GET carries the per-product plan signal (LLMO-6695).
+        expect(res.body.entitlements).to.deep.include({ productCode: 'LLMO', tier: 'FREE_TRIAL' });
       });
 
       it('user: finds accessible org by IMS org ID', async () => {

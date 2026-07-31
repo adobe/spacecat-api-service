@@ -434,6 +434,28 @@ Organization:
     updatedAt:
       description: The date and time when the organization was last updated
       $ref: '#/DateTime'
+    entitlements:
+      description: >-
+        Optional. A compact, per-product summary of the organization's product
+        entitlements, so a caller can read the TRIAL/PAID plan signal straight
+        off the org fetch. Present only on single-organization GETs
+        (`/organizations/{organizationId}` and
+        `/organizations/by-ims-org-id/{imsOrgId}`); omitted from the list
+        endpoint (`GET /organizations`) to avoid a per-org entitlement fetch. An
+        organization can be TRIAL on one product and PAID on another, so the
+        signal is intentionally per-product.
+      type: array
+      items:
+        type: object
+        properties:
+          productCode:
+            description: The product code this entitlement provides access to
+            type: string
+            enum: [LLMO, ASO, ACO]
+          tier:
+            description: The plan tier of the entitlement.
+            type: string
+            enum: [FREE_TRIAL, PAID]
   example:
     id: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
     name: 'Example Organization'
@@ -461,6 +483,9 @@ Organization:
         index: 'example-index-name'
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
+    entitlements:
+      - productCode: 'LLMO'
+        tier: 'FREE_TRIAL'
 OrganizationList:
   type: array
   items:

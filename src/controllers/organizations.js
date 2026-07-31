@@ -71,6 +71,31 @@ function OrganizationsController(ctx, env) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
+   * Resolves the compact entitlement summary for a single organization so the org DTO can
+   * carry the per-product TRIAL/PAID plan signal (consumed by the LLMO UI straight off the
+   * org fetch). Internal-only tiers (e.g. PRE_ONBOARD) are hidden from non-admin callers,
+   * matching the CUSTOMER_VISIBLE_TIERS convention used by the sites-listing paths
+   * (`filterSitesForProductCode`). Fails open: on any entitlement-fetch error the org is
+   * still returned, just without the `entitlements` field, so plan lookup degrades
+   * gracefully rather than 500ing.
+   *
+   * @param {string} organizationId - Organization ID.
+   * @returns {Promise<Array<object>|null>} Entitlement models, or null when unavailable.
+   */
+  const resolveOrgEntitlements = async (organizationId) => {
+    try {
+      const entitlements = await Entitlement.allByOrganizationId(organizationId);
+      if (accessControlUtil.hasAdminAccess()) {
+        return entitlements;
+      }
+      return entitlements.filter((e) => CUSTOMER_VISIBLE_TIERS.includes(e.getTier()));
+    } catch (e) {
+      ctx.log.warn(`Failed to load entitlements for organization ${organizationId}: ${e.message}`);
+      return null;
+    }
+  };
+
+  /**
    * Creates an organization. The organization ID is generated automatically.
    *
    * Write-time tier provisioning: when an organization is newly created, it ensures org
@@ -172,7 +197,8 @@ function OrganizationsController(ctx, env) {
       return forbidden('Only users belonging to the organization can view it');
     }
 
-    return ok(OrganizationDto.toJSON(organization));
+    const entitlements = await resolveOrgEntitlements(organization.getId());
+    return ok(OrganizationDto.toJSON(organization, entitlements));
   };
 
   /**
@@ -197,7 +223,8 @@ function OrganizationsController(ctx, env) {
       return forbidden('Only users belonging to the organization can view it');
     }
 
-    return ok(OrganizationDto.toJSON(organization));
+    const entitlements = await resolveOrgEntitlements(organization.getId());
+    return ok(OrganizationDto.toJSON(organization, entitlements));
   };
 
   /**
