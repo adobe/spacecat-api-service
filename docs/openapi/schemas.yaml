@@ -453,9 +453,14 @@ Organization:
             type: string
             enum: [LLMO, ASO, ACO]
           tier:
-            description: The plan tier of the entitlement.
+            description: >-
+              The plan tier of the entitlement. Non-admin (customer) callers
+              only ever see customer-visible tiers (`FREE_TRIAL`, `PAID`,
+              `PLG`); the internal `PRE_ONBOARD` tier is filtered out of
+              customer-facing responses and is present in the enum only because
+              admin callers receive unfiltered entitlements.
             type: string
-            enum: [FREE_TRIAL, PAID]
+            enum: [FREE_TRIAL, PAID, PLG, PRE_ONBOARD]
   example:
     id: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
     name: 'Example Organization'

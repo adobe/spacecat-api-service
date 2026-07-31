@@ -90,7 +90,7 @@ function OrganizationsController(ctx, env) {
       }
       return entitlements.filter((e) => CUSTOMER_VISIBLE_TIERS.includes(e.getTier()));
     } catch (e) {
-      ctx.log.warn(`Failed to load entitlements for organization ${organizationId}: ${e.message}`);
+      ctx.log.warn({ err: e, organizationId }, 'Failed to load entitlements for organization');
       return null;
     }
   };
@@ -237,6 +237,9 @@ function OrganizationsController(ctx, env) {
     if (!accessControlUtil.hasAdminReadAccess()) {
       return forbidden('Only admins can view Slack configurations');
     }
+    // Delegates to getByImsOrgID, which now resolves the org's entitlements; this admin-only,
+    // low-traffic endpoint discards them (it only reads config.slack). The extra fetch is an
+    // accepted trade-off for reusing the shared access/lookup path rather than duplicating it.
     const response = await getByImsOrgID(context);
     if (response.status !== 200) {
       return response;
