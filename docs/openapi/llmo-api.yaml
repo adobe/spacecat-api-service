@@ -3451,6 +3451,107 @@ site-llmo-cloudfront-permissions:
     security:
       - api_key: [ ]
 
+site-llmo-cloudfront-log-delivery:
+  post:
+    tags:
+      - llmo
+    summary: Enable CDN access-log forwarding for one CloudFront distribution
+    description: |
+      Enables CloudWatch Logs delivery of the selected CloudFront distribution's access logs to
+      Adobe's cross-account cdn-logs destination, via the customer's connector role. Idempotent —
+      returns `alreadyExisted: true` and mutates nothing when forwarding is already set up. The
+      assume-role `externalId` is the per-session value from bootstrap; the delivery destination is
+      org-scoped, resolved server-side from the site's IMS organization.
+    operationId: enableLlmoCloudFrontLogDelivery
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/cloudfront-distribution-request'
+    responses:
+      '200':
+        description: The CDN log-delivery result for the distribution.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                created:
+                  type: boolean
+                alreadyExisted:
+                  type: boolean
+                deliverySourceName:
+                  type: string
+                deliveryId:
+                  type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-llmo-cloudfront-log-rescan:
+  post:
+    tags:
+      - llmo
+    summary: Re-scan and enable CDN log forwarding for all distributions
+    description: |
+      Idempotently enables CloudWatch Logs delivery for every CloudFront distribution in the
+      customer account. Intended for recovery/re-scan: e.g. after a new distribution is added or
+      a missed setup. Each distribution is attempted independently — one failure never aborts the
+      rest — and the response summarizes per-distribution outcomes.
+    operationId: rescanLlmoCloudFrontLogDelivery
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/cloudfront-connector-request'
+    responses:
+      '200':
+        description: Summary of the log-delivery re-scan across all distributions.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scanned:
+                  type: integer
+                created:
+                  type: integer
+                alreadyExisted:
+                  type: integer
+                failed:
+                  type: integer
+                distributions:
+                  type: array
+                  items:
+                    type: object
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
 cloudfront-connector-request:
   type: object
   required:
