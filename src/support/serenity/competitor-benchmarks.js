@@ -23,6 +23,8 @@ import {
 import { dedupeAliases, sameAliasSet, rejectedAliasesFrom } from './aliases.js';
 import { resolveProjects } from './resolve-projects.js';
 
+/** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */
+
 /**
  * A brand's competitors ("other brands to track") propagated onto each
  * market/project as Semrush AIO **benchmarks** — the same surface as the
@@ -163,7 +165,7 @@ function benchmarkBody(c) {
  * it re-reads the benchmarks to capture any `rejected_brand_aliases` Semrush
  * silently dropped, so the caller can surface them.
  *
- * @param {object} transport - Semrush transport (lists/creates/updates/deletes benchmarks).
+ * @param {SerenityTransport} transport
  * @param {string} workspaceId - the brand's sub-workspace id.
  * @param {string} projectId - the market/project to sync competitor benchmarks on.
  * @param {Array<{name?: string, url?: string, regions?: string[], aliases?: string[]}>}
@@ -295,7 +297,7 @@ export async function syncCompetitorBenchmarksForProject(
  * republish is tolerated. `rejected` aggregates the per-market competitor aliases
  * Semrush refused, tagged with their project/market, so the caller can surface them.
  *
- * @param {object} transport - Semrush transport.
+ * @param {SerenityTransport} transport
  * @param {Array<{name?: string, url?: string, regions?: string[], aliases?: string[]}>}
  *   competitors - the brand's competitors to track as benchmarks (region-filtered per
  *   market by {@link collectCompetitorBenchmarks}).

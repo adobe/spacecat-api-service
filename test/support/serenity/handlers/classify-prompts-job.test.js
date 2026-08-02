@@ -59,7 +59,7 @@ describe('handlers/classify-prompts-job.js (serenity-docs#33)', () => {
     transport = {
       listProjectTags: makeListProjectTagsStub(),
       createProjectTags: sinon.stub(),
-      createPromptsByIds: sinon.stub().resolves({ items: [{ id: 'created-prompt' }] }),
+      createPromptsWithMetadata: sinon.stub().resolves({ items: [{ id: 'created-prompt' }] }),
       publishProject: sinon.stub().resolves(),
       updatePromptTagsByIds: sinon.stub().resolves(),
     };

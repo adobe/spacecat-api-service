@@ -23,6 +23,8 @@ import {
 import { dedupeAliases, sameAliasSet, rejectedAliasesFrom } from './aliases.js';
 import { resolveProjects } from './resolve-projects.js';
 
+/** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */
+
 /**
  * A brand's aliases (the extra names it is known by) propagated to its Semrush
  * projects. Each market/project carries them in two upstream surfaces, both kept
@@ -67,7 +69,7 @@ export function collectAliasNames(aliases, market) {
  * already-live brand must not silently diverge). `rejected` aggregates the aliases
  * Semrush refused per market, so the caller can surface them.
  *
- * @param {object} transport - Semrush transport.
+ * @param {SerenityTransport} transport
  * @param {Array<{name: string, regions?: string[]}>} aliases - the brand's aliases.
  * @param {string} displayName - the brand's display name (project `brand_name_display`
  *   + first `brand_names` entry).

@@ -72,7 +72,7 @@ import { isSemrushTransportError, unwrapTransportCause } from '../support/sereni
 import { syncBrandUrlsAcrossMarkets } from '../support/serenity/brand-urls.js';
 import { syncBrandAliasesAcrossMarkets } from '../support/serenity/brand-aliases.js';
 import { resolveProjects } from '../support/serenity/resolve-projects.js';
-import { isSerenityActiveForOrg } from '../support/serenity/serenity-active.js';
+import { isSerenityActiveForOrg, isSerenityUiActiveForOrg } from '../support/serenity/serenity-active.js';
 import {
   buildReservedDomains,
   dropReservedCompetitors,
@@ -84,7 +84,6 @@ import {
   LLMO_ONBOARDING_MODE_V2,
 } from '../support/llmo-onboarding-mode.js';
 import { postLlmoAlert } from './llmo/llmo-onboarding.js';
-import { hasPaidLlmoEntitlement } from '../support/llmo-paid-gate.js';
 import { createIntentClassifier } from '../support/intent-classifier.js';
 import { emitMetric, resolveEnvironment } from '../support/metrics-emf.js';
 import {
@@ -167,6 +166,57 @@ function BrandsController(ctx, log, env) {
     }
   };
 
+  // Best-effort observability signal (LLMO-6591): a PATCH carried an
+  // `expectedUpdatedAt` that no longer matches the persisted row and was
+  // rejected — the caller's view was stale (another tab/request wrote in
+  // between). Alarm on the count (Mysticat/Brands -> BrandStaleWriteRejected)
+  // to see how often this actually fires. Never affects the response.
+  const emitBrandStaleWriteRejected = (context, operation) => {
+    try {
+      emitMetric(
+        {
+          name: 'BrandStaleWriteRejected',
+          dimensions: {
+            Operation: operation,
+            Product: context?.pathInfo?.headers?.['x-product'],
+          },
+        },
+        { environment: resolveEnvironment(env), namespace: BRAND_METRICS_NAMESPACE },
+      );
+      log.warn(`BrandStaleWriteRejected: ${operation} rejected a stale write `
+        + `(org=${context?.params?.spaceCatId}, brand=${context?.params?.brandId}, `
+        + `updatedBy=${context?.attributes?.authInfo?.profile?.sub || 'system'}) — `
+        + 'expectedUpdatedAt did not match the persisted row.');
+    } catch {
+      // best-effort: metric/log emission must never affect the request path
+    }
+  };
+
+  // Best-effort observability signal (LLMO-6591): a successful write took one
+  // of the full-replace child collections from non-empty to empty. Often
+  // legitimate (deleting the last alias/competitor), so this is a detection
+  // signal for retroactive review, not a rejection — never blocks the write.
+  const emitBrandCollectionWiped = (context, operation, collection) => {
+    try {
+      emitMetric(
+        {
+          name: 'BrandCollectionWiped',
+          dimensions: {
+            Operation: operation,
+            Collection: collection,
+            Product: context?.pathInfo?.headers?.['x-product'],
+          },
+        },
+        { environment: resolveEnvironment(env), namespace: BRAND_METRICS_NAMESPACE },
+      );
+      log.warn(`BrandCollectionWiped: ${operation} took "${collection}" from non-empty to empty `
+        + `(org=${context?.params?.spaceCatId}, brand=${context?.params?.brandId}, `
+        + `updatedBy=${context?.attributes?.authInfo?.profile?.sub || 'system'}).`);
+    } catch {
+      // best-effort: metric/log emission must never affect the request path
+    }
+  };
+
   // Best-effort intent classifier for prompts that arrive without an intent
   // (human-added). Returns null when disabled by config or Azure OpenAI is not
   // configured, in which case intent is simply left null. Built once per
@@ -244,11 +294,21 @@ function BrandsController(ctx, log, env) {
     // Not a Semrush transport error: an app-level ErrorWithStatusCode (has `.status`), or a bare
     // Error whose safe message passes through. `err` is unwrapTransportCause's `unknown` return;
     // mirror the original any-typed access to `.status`/`.message` on the (unwrapped) error.
-    const appErr = /** @type {{ status?: number; message?: string }} */ (err);
+    const appErr = /** @type {{ status?: number; message?: string; code?: string }} */ (err);
     if (appErr.status) {
-      return createResponse({ message: appErr.message }, appErr.status, {
-        [HEADER_ERROR]: appErr.message,
-      });
+      // Every `.code` set anywhere in this controller/storage layer is an
+      // intentional, human-readable token meant for exactly this (e.g.
+      // `brand_status_demotion_not_allowed`, `brand_stale_write`) — never a raw
+      // DB error code (rethrowCheckViolation always constructs a fresh Error, so
+      // a Postgres code like '23514' never survives to here). Exposing it lets a
+      // client distinguish error cases without regex-matching the message text
+      // (LLMO-6591; see the `uq_brand_name_per_org` TODO this same pattern
+      // predates in elmo-ui's getBrandSaveErrorDescriptor).
+      return createResponse(
+        { message: appErr.message, ...(appErr.code ? { code: appErr.code } : {}) },
+        appErr.status,
+        { [HEADER_ERROR]: appErr.message },
+      );
     }
     return internalServerError(appErr.message);
   }
@@ -592,10 +652,18 @@ function BrandsController(ctx, log, env) {
       // queue consumer, re-ordered middleware) must not silently gain service
       // privilege — hence `!authType → user`, and a non-function `getType` resolves
       // to `undefined` (→ user) rather than throwing.
+      //
+      // `source` (the producing system) has NO write surface (source-dimension.md
+      // §1 item 6): a caller-supplied `source` is ignored, so a v2 create becomes
+      // the store's `config` default (item 5, gate §6.4/§6.6). It is dropped here
+      // rather than passed to upsertPrompts, whose `source: p.source || 'config'`
+      // write-side default stays load-bearing for the internal writers that DO set
+      // it. `updatePromptById` likewise never patches source (producer is fixed at
+      // creation).
       const { authInfo } = context.attributes ?? {};
       const authType = typeof authInfo?.getType === 'function' ? authInfo.getType() : undefined;
       const isUserPrincipal = !authType || authType === 'jwt' || authType === 'ims';
-      const derivedPrompts = prompts.map((p) => ({
+      const derivedPrompts = prompts.map(({ source: _, ...p }) => ({
         ...p,
         origin: deriveV2PromptOrigin(p?.origin, isUserPrincipal),
       }));
@@ -1903,6 +1971,35 @@ function BrandsController(ctx, log, env) {
         }
       }
 
+      // LLMO-6565 migration-window allowance. A Semrush failure on this edit is
+      // absorbed — the row is committed and the response carries
+      // semrushSyncPending — only while the org is still migrating: its LLMO users
+      // may have no Semrush user record yet, so Semrush answers 4xx on every call
+      // made on their behalf and no retry the caller can make will clear it. An org
+      // pinned to the Serenity UI is past that window, its users are provisioned, so
+      // a Semrush failure there is a real error and propagates to the caller.
+      //
+      // Resolved lazily, and at most once per request: only an actual Semrush
+      // failure needs the answer, so the happy path — and every flat-mode brand
+      // edit, which never reaches a Semrush call at all — pays no flag read. The
+      // memo also pins one answer for the whole request, so the pre-write
+      // competitor guard and the post-commit re-sync below cannot disagree and
+      // half-absorb an edit.
+      let serenityUiFlagPromise;
+      /**
+       * MUST be awaited — this returns the memoised PROMISE, not a boolean, so a
+       * bare `if (resolveSurfaceSemrushErrors())` is always truthy and would
+       * silently surface every Semrush error regardless of the flag.
+       *
+       * @returns {Promise<boolean>} `true` when Semrush failures must be reported.
+       */
+      const resolveSurfaceSemrushErrors = () => {
+        if (serenityUiFlagPromise === undefined) {
+          serenityUiFlagPromise = isSerenityUiActiveForOrg(context, spaceCatId, log);
+        }
+        return serenityUiFlagPromise;
+      };
+
       // LLMO-5645: a region must not be removed from a brand while prompts still
       // use it — DRS schedules off each prompt's `regions`, so dropping a brand
       // region would orphan those prompts on a market the brand no longer
@@ -1961,20 +2058,32 @@ function BrandsController(ctx, log, env) {
         if (hasText(brandState?.semrushSubWorkspaceId)) {
           // Semrush brand: market/project domains come from the project listing.
           // List once and stash for the post-commit re-sync (see prefetchedProjects).
-          // Best-effort: if the listing fails (e.g. user not provisioned in Semrush),
-          // degrade to brand-URL-only reserved set and log — the self-reference guard
-          // is a data-quality nicety and must not block the competitor write entirely.
+          // Best-effort for a migrating org: if the listing fails (e.g. user not
+          // provisioned in Semrush), degrade to brand-URL-only reserved set and log —
+          // the self-reference guard is a data-quality nicety and must not block the
+          // competitor write entirely. For an org on the Serenity UI the failure is
+          // real and rejects the write before the row is touched.
           try {
             const imsToken = await resolveSemrushImsToken(context, log, 'brands');
             const transport = createSerenityTransport({ env: context.env, imsToken });
             prefetchedProjects = await resolveProjects(transport, brandState.semrushSubWorkspaceId);
           } catch (guardError) {
-            log.warn('serenity: competitor-guard project listing failed; degrading to brand-URL-only reserved set', {
+            // Logged before the rethrow either way: the outer catch only sees a
+            // generic "Error updating brand", so this is the sole record of which
+            // Semrush workspace and which pre-write step failed.
+            const rejectingWrite = await resolveSurfaceSemrushErrors();
+            log.warn('serenity: competitor-guard project listing failed', {
               brandId,
               semrushSubWorkspaceId: brandState.semrushSubWorkspaceId,
               status: guardError?.status,
               message: guardError?.message,
+              // true → the write is rejected; false → degraded to the reserved set
+              // built from the brand's own URLs alone, and the write proceeds.
+              rejectingWrite,
             });
+            if (rejectingWrite) {
+              throw guardError;
+            }
           }
           reservedDomains = buildReservedDomains(
             (prefetchedProjects ?? []).map((p) => p?.domain),
@@ -1991,7 +2100,36 @@ function BrandsController(ctx, log, env) {
             brandId,
             dropped: dropped.map((c) => c?.url).filter(Boolean),
           });
+          // LLMO-6591: the caller submitted a non-empty replace, but every entry
+          // was self-referential and got stripped — persisting `kept` (`[]`) here
+          // would silently wipe the brand's existing competitors even though the
+          // caller never asked to clear the collection. Reject instead of writing
+          // an empty list the caller didn't actually request.
+          if (kept.length === 0) {
+            return badRequest(
+              'All submitted competitors reference this brand\'s own domains and were '
+              + 'rejected; none were saved. Remove the self-referencing entries, or omit '
+              + 'the competitors field to leave existing competitors unchanged.',
+            );
+          }
           updates.competitors = kept;
+        }
+      }
+
+      // LLMO-6591: best-effort detection when this write takes a collection
+      // from non-empty to empty. Only pays for the pre-write read when at
+      // least one collection is being explicitly emptied — the common edit
+      // touches none of them, or replaces them with real values. A failure here
+      // must not turn this detection-only read into a request-blocking 500 — the
+      // write itself would still succeed — so a failed read just skips detection.
+      const emptiedCollections = ['brandAliases', 'competitors', 'socialAccounts', 'earnedContent']
+        .filter((field) => Array.isArray(updates[field]) && updates[field].length === 0);
+      let beforeForWipeCheck = null;
+      if (emptiedCollections.length > 0) {
+        try {
+          beforeForWipeCheck = await getBrandById(spaceCatId, brandUuid, postgrestClient);
+        } catch (wipeCheckError) {
+          log.warn(`brands: wipe-check pre-read failed for brand ${brandUuid}, skipping detection: ${wipeCheckError.message}`);
         }
       }
 
@@ -2007,16 +2145,27 @@ function BrandsController(ctx, log, env) {
         return notFound(`Brand not found: ${brandId}`);
       }
 
+      if (beforeForWipeCheck) {
+        for (const field of emptiedCollections) {
+          if (Array.isArray(beforeForWipeCheck[field]) && beforeForWipeCheck[field].length > 0) {
+            emitBrandCollectionWiped(context, 'updateBrand', field);
+          }
+        }
+      }
+
       // Brand-level Semrush re-sync: when an edit changes URL sources, competitors
       // or aliases and the brand is in sub-workspace mode, propagate the change onto
       // every market/project (region-filtered per market). Skipped for flat-mode
       // brands and unrelated edits. One transport shared across all three syncs.
       //
-      // Best-effort, matching the create path: the brand row is already committed
-      // when this block runs, so a re-sync failure must not surface as a 5xx on an
-      // edit that did persist. The response carries semrushSyncPending:true so the
-      // divergence is visible to the caller, and the error log below carries the
-      // context needed to enumerate and recover drifted brands.
+      // For a migrating org this is best-effort, matching the create path: the brand
+      // row is already committed when this block runs, so a re-sync failure must not
+      // surface as a 5xx on an edit that did persist. The response carries
+      // semrushSyncPending:true so the divergence is visible to the caller, and the
+      // error log below carries the context needed to enumerate and recover drifted
+      // brands. For an org on the Serenity UI (see resolveSurfaceSemrushErrors) the
+      // failure is reported instead — that org's users are provisioned in Semrush, so
+      // a failure is a real fault rather than expected migration noise.
       const urlsTouched = updates.urls !== undefined
         || updates.socialAccounts !== undefined
         || updates.earnedContent !== undefined;
@@ -2111,6 +2260,15 @@ function BrandsController(ctx, log, env) {
             stack: syncError?.stack,
             permanent: isPermanent,
           });
+          if (await resolveSurfaceSemrushErrors()) {
+            // The org is on the Serenity UI: its users are provisioned in Semrush, so
+            // this is a genuine upstream failure and the caller is told. The row stays
+            // committed either way — the difference is whether the divergence is
+            // reported or absorbed. createErrorResponse maps the status and keeps the
+            // internal gateway URL out of the response. Any partial rejectedAliases
+            // are dropped with the body; the log above carries the same context.
+            throw syncError;
+          }
           // Preserve any partial rejectedAliases collected before the throw so
           // the UI can still warn about aliases that were refused by Semrush.
           return ok({
@@ -2137,6 +2295,9 @@ function BrandsController(ctx, log, env) {
     } catch (error) {
       if (error.code === 'brand_status_demotion_not_allowed') {
         emitBrandDemotionBlocked(context, 'updateBrand');
+      }
+      if (error.code === 'brand_stale_write') {
+        emitBrandStaleWriteRejected(context, 'updateBrand');
       }
       log.error(`Error updating brand ${brandId} for organization ${spaceCatId}:`, error);
       return createErrorResponse(error);
@@ -2229,16 +2390,19 @@ function BrandsController(ctx, log, env) {
         return organization;
       }
 
-      // Auth — same gate as Piece 1: membership + explicit PAID. PAID is stricter
-      // than the platform's any-tier "LLMO-enabled" bar; entitlements have no status
-      // column (getStatus() is an unbacked stub; revocation = row delete), so a PAID
-      // row is the "paying" signal. No separate admin requirement — mirrors Piece 1,
-      // which omits it so paying non-admin members aren't 403'd.
+      // Auth — org membership only. Activation is intentionally NOT paywalled
+      // (LLMO-6634): a brand that already resolves to a valid onboarded primary site
+      // (step 1 below) may be promoted pending -> active regardless of the org's LLMO
+      // tier — there is no reason to gate activation of an existing, URL-backed brand
+      // behind a paywall. The paid gate stays on NEW-URL onboarding ("Piece 1" of
+      // LLMO-3749, onboardSiteOnly in llmo.js): because activation only ever anchors an
+      // ALREADY-onboarded site (a pending brand with no resolvable primary site 400s
+      // below), a free org can never onboard a new site through this path.
+      // History: the PAID gate here was added intentionally alongside this endpoint
+      // (LLMO-5605, commit 5155192d), not as a regression — it is relaxed here per the
+      // product decision recorded on LLMO-6634. See the PR for the human sign-off note.
       if (!await accessControlUtil.hasAccess(organization)) {
         return forbidden('User does not have access to this organization');
-      }
-      if (!await hasPaidLlmoEntitlement(context, organization)) {
-        return forbidden('A paid LLMO entitlement is required to activate a brand');
       }
 
       const unavailable = requirePostgrestForV2Config(context);

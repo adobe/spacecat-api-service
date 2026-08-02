@@ -834,4 +834,79 @@ describe('createElementsService', () => {
       });
     });
   });
+
+  describe('getCitedDomains', () => {
+    const rawWith = (...rows) => ({ blocks: { data: rows } });
+    const domainRow = (overrides = {}) => ({
+      domain: 'example.com', mentions_end: 5, urls_count: 2, prompts_with_citations: 3, ...overrides,
+    });
+
+    it('makes a single call with no project_id when projectIds is absent', async () => {
+      transport.fetchElement.resolves(rawWith(domainRow()));
+      const result = await service.getCitedDomains('ws-1', { startDate: '2026-06-01', endDate: '2026-06-30' });
+      expect(transport.fetchElement).to.have.been.calledOnce;
+      const [, elementId, payload] = transport.fetchElement.firstCall.args;
+      expect(elementId).to.equal(ELEMENT_IDS.CITED_DOMAINS);
+      expect(payload).to.not.have.property('project_id');
+      expect(result.domains).to.have.length(1);
+    });
+
+    it('makes a single call with the given project_id when projectIds has exactly one id', async () => {
+      transport.fetchElement.resolves(rawWith(domainRow()));
+      await service.getCitedDomains('ws-1', { projectIds: ['proj-us'] });
+      expect(transport.fetchElement).to.have.been.calledOnce;
+      const [, , payload] = transport.fetchElement.firstCall.args;
+      expect(payload.project_id).to.equal('proj-us');
+    });
+
+    it('fans out one call per project_id when projectIds has more than one id', async () => {
+      transport.fetchElement.resolves(rawWith());
+      await service.getCitedDomains('ws-1', { projectIds: ['proj-us', 'proj-uk'] });
+      expect(transport.fetchElement).to.have.been.calledTwice;
+      const projectIdsSent = transport.fetchElement.getCalls().map((c) => c.args[2].project_id);
+      expect(projectIdsSent).to.have.members(['proj-us', 'proj-uk']);
+    });
+
+    it('merges domain rows from the fanned-out per-project calls, summing shared domains', async () => {
+      transport.fetchElement.callsFake(async (workspaceId, elementId, payload) => {
+        if (payload.project_id === 'proj-us') {
+          return rawWith(domainRow({ domain: 'shared.com', mentions_end: 5 }));
+        }
+        return rawWith(domainRow({ domain: 'shared.com', mentions_end: 4 }));
+      });
+      const result = await service.getCitedDomains('ws-1', { projectIds: ['proj-us', 'proj-uk'] });
+      expect(result.domains).to.have.length(1);
+      expect(result.domains[0].totalCitations).to.equal(9);
+    });
+
+    it('ignores blank/non-text entries in projectIds when deciding single vs fan-out', async () => {
+      transport.fetchElement.resolves(rawWith(domainRow()));
+      await service.getCitedDomains('ws-1', { projectIds: ['proj-us', '', undefined] });
+      expect(transport.fetchElement).to.have.been.calledOnce;
+      const [, , payload] = transport.fetchElement.firstCall.args;
+      expect(payload.project_id).to.equal('proj-us');
+    });
+
+    it('deduplicates a repeated projectId before fanning out (no double-counted citations)', async () => {
+      transport.fetchElement.resolves(rawWith(domainRow({ mentions_end: 5 })));
+      const result = await service.getCitedDomains('ws-1', { projectIds: ['proj-us', 'proj-us'] });
+      expect(transport.fetchElement).to.have.been.calledOnce;
+      expect(result.domains[0].totalCitations).to.equal(5);
+    });
+
+    it('propagates a rejected upstream call rather than swallowing it (single-call path)', async () => {
+      const upstreamError = new Error('Elements API POST failed: 502');
+      transport.fetchElement.rejects(upstreamError);
+      await expect(service.getCitedDomains('ws-1', {})).to.be.rejectedWith(upstreamError);
+    });
+
+    it('propagates a rejected upstream call from the fan-out (mapWithConcurrency) path', async () => {
+      const upstreamError = new Error('Elements API POST failed: 502');
+      transport.fetchElement.rejects(upstreamError);
+      await expect(
+        service.getCitedDomains('ws-1', { projectIds: ['proj-a', 'proj-b'] }),
+      ).to.be.rejectedWith(upstreamError);
+      expect(transport.fetchElement).to.have.been.calledTwice;
+    });
+  });
 });

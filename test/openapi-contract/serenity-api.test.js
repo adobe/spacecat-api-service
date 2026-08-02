@@ -109,12 +109,19 @@ const FIXTURES = {
         languageCode: 'en',
         text: 'sample',
         tagMap: { 'topic-a': 't-1' },
+        // Authorship metadata fields (LLMO-6289) on a list item.
+        createdAt: '2026-07-01T00:00:00Z',
+        createdBy: 'user-a',
+        updatedAt: '2026-07-02T00:00:00Z',
+        updatedBy: 'unknown',
       }],
       total: 1,
       page: 1,
       limit: 50,
     },
-    query: { geoTargetId: '2840', languageCode: 'en', tagIds: ['t-1'] },
+    query: {
+      geoTargetId: '2840', languageCode: 'en', tagIds: ['t-1'], sort: 'metadata.updated_at', order: 'desc',
+    },
   },
   createSerenityPrompts: {
     expectedStatus: 200,
@@ -558,6 +565,31 @@ const FIXTURES = {
       count: 1250,
       prompts: [],
     },
+  },
+  // Served by ElementsController (listUrlPrompts). getUrlPrompts resolves a FLAT
+  // array of per-prompt rows; the controller wraps it into { prompts }. url +
+  // startDate + endDate are required (400 otherwise), so the fixture supplies them.
+  getSerenityUrlInspectorUrlPrompts: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'listUrlPrompts',
+    serviceMethod: 'getUrlPrompts',
+    query: {
+      url: 'https://www.lovesac.com/sactionals',
+      startDate: '2026-06-29',
+      endDate: '2026-07-26',
+    },
+    handlerResult: [{
+      prompt: 'What size Lovesac sectional is best for a studio apartment?',
+      category: '',
+      region: '',
+      topics: '',
+      citations: 0,
+      sourceTitle: 'Modular Sectional Couches | Lovesac Sactionals',
+      brandMentioned: 'mentioned',
+      brands: ['Lovesac'],
+      closestDate: '2026-07-26T00:00:00Z',
+    }],
   },
 };
 

@@ -16,6 +16,8 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { resolveLocation } from './locations.js';
 
+/** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */
+
 /**
  * Shared helpers for the subworkspace path (serenity dual-mode). In subworkspace mode there
  * is no BrandSemrushProject mapping: a brand's markets are enumerated live
@@ -116,6 +118,7 @@ export function projectToSlice(project, brandId) {
  * Lists a subworkspace's projects (one v1 GET) and maps each to a slice.
  * Projects whose slice cannot be resolved (no geo/lang) are dropped — they are
  * not addressable markets.
+ * @param {SerenityTransport} transport
  */
 export async function listMarkets(transport, workspaceId, brandId) {
   const listing = await transport.listProjects(workspaceId);
@@ -138,6 +141,7 @@ export function sliceKey(geoTargetId, languageCode) {
  * prompts, bulk-delete) use this to resolve every input's owning project from a
  * single upstream listing instead of one resolve per slice. Projects that don't
  * resolve to a (geo, lang) slice are skipped — they are not addressable markets.
+ * @param {SerenityTransport} transport
  */
 export async function buildSliceProjectMap(transport, workspaceId, log) {
   const listing = await transport.listProjects(workspaceId);
@@ -176,6 +180,7 @@ export async function buildSliceProjectMap(transport, workspaceId, log) {
  * matches the slice, the OLDEST (`created_at`) wins and an error-level alert
  * is logged. Returns the raw project (so callers get `id`, `publish_status`,
  * settings) or null when no project matches.
+ * @param {SerenityTransport} transport
  */
 export async function resolveProject(transport, workspaceId, geoTargetId, languageCode, log) {
   const listing = await transport.listProjects(workspaceId);
