@@ -14,28 +14,36 @@ import {
   accepted, badRequest, notFound,
 } from '@adobe/spacecat-shared-http-utils';
 import {
-  isArray, isNonEmptyObject, isValidUrl, isValidUUID,
+  isArray, isNonEmptyObject, isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 import { Audit } from '@adobe/spacecat-shared-data-access';
 
 // Distinct from import-worker's MAX_VALIDATION_URLS (50), which governs the automatic
-// selectValidationUrls path only. A caller explicitly naming URLs to re-check is allowed a
-// larger batch since they've already narrowed down exactly what they want checked, rather
-// than asking the system to rank/select candidates itself.
-const MAX_VALIDATION_URLS = 200;
+// selectValidationUrls path only. A caller explicitly naming suggestions to re-check is
+// allowed a larger batch since they've already narrowed down exactly what they want checked,
+// rather than asking the system to rank/select candidates itself.
+const MAX_SUGGESTION_IDS = 200;
 
-// The message/route contract is generic (opportunityId, not prerenderOpportunityId) so a
-// future opportunity type can be added later without reshaping the request contract — this
-// is the one place that gates which types are supported today. Adding a second type means
-// adding it here (and building that type's own resolver/comparator on the import-worker
-// side); no other abstraction exists yet, per YAGNI.
-const SUPPORTED_OPPORTUNITY_TYPES = new Set([Audit.AUDIT_TYPES.PRERENDER]);
+// The route/request contract is generic (opportunityId, not prerenderOpportunityId) so a
+// future opportunity type can be added later without reshaping it. This map is the one place
+// that gates which opportunity types are actually supported today, and which import-worker
+// message type knows how to validate each one — adding a second type means adding an entry
+// here (and building that type's own resolver/comparator on the import-worker side); no other
+// abstraction exists yet, per YAGNI.
+const VALIDATION_MESSAGE_TYPE_BY_OPPORTUNITY_TYPE = {
+  [Audit.AUDIT_TYPES.PRERENDER]: 'optimize-at-edge-enabled-marking',
+};
 
 /**
  * Controller for on-demand opportunity validation. Lets a caller trigger the same
  * S3-vs-live-edge content validation the hourly optimize-at-edge-enabled-marking job runs,
- * scoped to a specific opportunity and an explicit list of URLs, instead of waiting for the
- * automatic per-site run or going through the Slack-only validate-only command.
+ * scoped to a specific opportunity and an explicit list of suggestion IDs, instead of waiting
+ * for the automatic per-site run or going through the Slack-only validate-only command.
+ *
+ * Suggestion IDs are validated for shape only here (UUID, cap); import-worker resolves each
+ * to its URL (via the suggestion's own data) and does not filter by suggestion status — a
+ * caller naming a specific suggestion already knows what they want re-checked regardless of
+ * its current status.
  *
  * Fire-and-forget: enqueues an SQS message to import-worker's existing "imports" queue and
  * responds immediately. The result lands in opportunity.data.validation, same as every other
@@ -44,7 +52,7 @@ const SUPPORTED_OPPORTUNITY_TYPES = new Set([Audit.AUDIT_TYPES.PRERENDER]);
 function OpportunityValidationController() {
   /**
    * POST /sites/:siteId/opportunities/:opportunityId/validate
-   * Body: { urls: string[] }
+   * Body: { suggestionIds: string[] }
    */
   const triggerValidation = async (context) => {
     const { dataAccess, sqs, log } = context;
@@ -75,7 +83,8 @@ function OpportunityValidationController() {
     }
 
     const opportunityType = opportunity.getType();
-    if (!SUPPORTED_OPPORTUNITY_TYPES.has(opportunityType)) {
+    const messageType = VALIDATION_MESSAGE_TYPE_BY_OPPORTUNITY_TYPE[opportunityType];
+    if (!messageType) {
       log.warn(`[opportunity-validation-api] site ${siteId}, opportunity ${opportunityId} is type '${opportunityType}', validation not supported`);
       return badRequest(`Validation not supported for opportunity type '${opportunityType}'`);
     }
@@ -83,30 +92,30 @@ function OpportunityValidationController() {
     if (!isNonEmptyObject(context.data)) {
       return badRequest('No data provided');
     }
-    const { urls } = context.data;
-    if (!isArray(urls) || urls.length === 0) {
-      return badRequest('Request body must contain a non-empty array of urls');
+    const { suggestionIds } = context.data;
+    if (!isArray(suggestionIds) || suggestionIds.length === 0) {
+      return badRequest('Request body must contain a non-empty array of suggestionIds');
     }
-    if (urls.length > MAX_VALIDATION_URLS) {
-      return badRequest(`Too many URLs: ${urls.length} provided, max ${MAX_VALIDATION_URLS} per request`);
+    if (suggestionIds.length > MAX_SUGGESTION_IDS) {
+      return badRequest(`Too many suggestionIds: ${suggestionIds.length} provided, max ${MAX_SUGGESTION_IDS} per request`);
     }
-    if (!urls.every((url) => typeof url === 'string' && isValidUrl(url))) {
-      return badRequest('urls must be an array of valid URL strings');
+    if (!suggestionIds.every((id) => typeof id === 'string' && isValidUUID(id))) {
+      return badRequest('suggestionIds must be an array of valid UUIDs');
     }
 
     const configuration = await Configuration.findLatest();
     await sqs.sendMessage(configuration.getQueues().imports, {
-      type: 'optimize-at-edge-enabled-marking',
+      type: messageType,
       siteId,
       validateOnly: true,
       opportunityId,
-      urls,
+      suggestionIds,
     });
 
-    log.info(`[opportunity-validation-api] queued validation for site ${siteId}, opportunity ${opportunityId}, ${urls.length} url(s)`);
+    log.info(`[opportunity-validation-api] queued validation for site ${siteId}, opportunity ${opportunityId}, ${suggestionIds.length} suggestion(s)`);
 
     return accepted({
-      siteId, opportunityId, status: 'queued', urlCount: urls.length,
+      siteId, opportunityId, status: 'queued', suggestionCount: suggestionIds.length,
     });
   };
 

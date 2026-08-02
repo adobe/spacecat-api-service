@@ -20,6 +20,8 @@ use(sinonChai);
 const SITE_ID = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
 const OPPORTUNITY_ID = 'a92e2a5e-7b3d-42f0-b3f0-6edd3746a932';
 const OTHER_SITE_ID = 'b56ef8d6-996b-4d5c-b308-8e0b0a95e1b6';
+const SUGGESTION_ID_1 = 'c1a2f5f0-6f3f-4c1a-9b3e-6a1b2c3d4e5f';
+const SUGGESTION_ID_2 = 'd2b3f6f1-7a4a-4d2b-8c4f-7b2c3d4e5f6a';
 
 function createMockOpportunity({
   id = OPPORTUNITY_ID, siteId = SITE_ID, type = 'prerender',
@@ -50,7 +52,7 @@ describe('OpportunityValidationController', () => {
 
     mockContext = {
       params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
-      data: { urls: ['https://example.com/page-1', 'https://example.com/page-2'] },
+      data: { suggestionIds: [SUGGESTION_ID_1, SUGGESTION_ID_2] },
       dataAccess: {
         Site: { findById: sandbox.stub().resolves(createMockSite()) },
         Opportunity: { findById: sandbox.stub().resolves(createMockOpportunity()) },
@@ -75,7 +77,7 @@ describe('OpportunityValidationController', () => {
     expect(result.status).to.equal(202);
     const body = await result.json();
     expect(body).to.deep.equal({
-      siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, status: 'queued', urlCount: 2,
+      siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, status: 'queued', suggestionCount: 2,
     });
 
     expect(mockContext.sqs.sendMessage).to.have.been.calledOnceWith('imports-queue-url', {
@@ -83,7 +85,7 @@ describe('OpportunityValidationController', () => {
       siteId: SITE_ID,
       validateOnly: true,
       opportunityId: OPPORTUNITY_ID,
-      urls: ['https://example.com/page-1', 'https://example.com/page-2'],
+      suggestionIds: [SUGGESTION_ID_1, SUGGESTION_ID_2],
     });
   });
 
@@ -151,7 +153,7 @@ describe('OpportunityValidationController', () => {
     expect(result.status).to.equal(400);
   });
 
-  it('returns 400 when urls is missing', async () => {
+  it('returns 400 when suggestionIds is missing', async () => {
     mockContext.data = {};
 
     const result = await controller.triggerValidation(mockContext);
@@ -159,40 +161,42 @@ describe('OpportunityValidationController', () => {
     expect(result.status).to.equal(400);
   });
 
-  it('returns 400 when urls is an empty array', async () => {
-    mockContext.data = { urls: [] };
+  it('returns 400 when suggestionIds is an empty array', async () => {
+    mockContext.data = { suggestionIds: [] };
 
     const result = await controller.triggerValidation(mockContext);
 
     expect(result.status).to.equal(400);
   });
 
-  it('returns 400 when urls is not an array', async () => {
-    mockContext.data = { urls: 'https://example.com' };
+  it('returns 400 when suggestionIds is not an array', async () => {
+    mockContext.data = { suggestionIds: SUGGESTION_ID_1 };
 
     const result = await controller.triggerValidation(mockContext);
 
     expect(result.status).to.equal(400);
   });
 
-  it('returns 400 when urls contains a non-string entry', async () => {
-    mockContext.data = { urls: ['https://example.com', 42] };
+  it('returns 400 when suggestionIds contains a non-string entry', async () => {
+    mockContext.data = { suggestionIds: [SUGGESTION_ID_1, 42] };
 
     const result = await controller.triggerValidation(mockContext);
 
     expect(result.status).to.equal(400);
   });
 
-  it('returns 400 when urls contains an invalid URL string', async () => {
-    mockContext.data = { urls: ['not a url'] };
+  it('returns 400 when suggestionIds contains an invalid UUID string', async () => {
+    mockContext.data = { suggestionIds: ['not-a-uuid'] };
 
     const result = await controller.triggerValidation(mockContext);
 
     expect(result.status).to.equal(400);
   });
 
-  it('returns 400 when urls exceeds the 200-URL cap', async () => {
-    mockContext.data = { urls: Array.from({ length: 201 }, (_, i) => `https://example.com/${i}`) };
+  it('returns 400 when suggestionIds exceeds the 200 cap', async () => {
+    mockContext.data = {
+      suggestionIds: Array.from({ length: 201 }, () => SUGGESTION_ID_1),
+    };
 
     const result = await controller.triggerValidation(mockContext);
 
@@ -202,8 +206,10 @@ describe('OpportunityValidationController', () => {
     expect(mockContext.sqs.sendMessage).not.to.have.been.called;
   });
 
-  it('accepts exactly 200 urls', async () => {
-    mockContext.data = { urls: Array.from({ length: 200 }, (_, i) => `https://example.com/${i}`) };
+  it('accepts exactly 200 suggestionIds', async () => {
+    mockContext.data = {
+      suggestionIds: Array.from({ length: 200 }, () => SUGGESTION_ID_1),
+    };
 
     const result = await controller.triggerValidation(mockContext);
 
