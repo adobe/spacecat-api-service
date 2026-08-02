@@ -3194,6 +3194,43 @@ OpportunityUpdate:
       description: Optional list of tags
       example:
         - 'Traffic acquisition'
+OpportunityValidationRequest:
+  type: object
+  required:
+    - urls
+  properties:
+    urls:
+      description: |
+        URLs to re-validate against this opportunity's own suggestions, regardless of each
+        suggestion's current status. A URL with no matching suggestion (or no stored
+        snapshot to compare against) is not validated, without failing the whole request.
+        Maximum 200 URLs per request.
+      type: array
+      minItems: 1
+      maxItems: 200
+      items:
+        type: string
+        format: url
+      example:
+        - 'https://example.com/page-1'
+        - 'https://example.com/page-2'
+OpportunityValidationResponse:
+  type: object
+  properties:
+    siteId:
+      type: string
+      format: uuid
+    opportunityId:
+      type: string
+      format: uuid
+    status:
+      type: string
+      enum:
+        - queued
+    urlCount:
+      description: Number of URLs accepted and queued for validation
+      type: integer
+      example: 2
 SuggestionStatus:
   description: Status of this suggestion; status reflects overall fix execution, flagged here for optimization
   type: string

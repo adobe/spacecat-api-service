@@ -198,6 +198,47 @@ site-opportunity:
     security:
       - ims_key: [ ]
 
+site-opportunity-validate:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+  post:
+    operationId: triggerSiteOpportunityValidation
+    summary: |
+      Trigger on-demand validation of specific URLs against this opportunity. Currently only
+      supported for prerender opportunities. Fire-and-forget: queues the validation and
+      responds immediately; the result lands in the opportunity's own data, not in this
+      response.
+    tags:
+      - opportunities
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/OpportunityValidationRequest'
+    responses:
+      '202':
+        description: Validation queued
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/OpportunityValidationResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
 site-opportunity-suggestions:
   parameters:
     - $ref: './parameters.yaml#/siteId'
