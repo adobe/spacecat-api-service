@@ -87,6 +87,18 @@ function BotBlockerController(ctx, log) {
 
       log.debug(`Bot blocker check completed for site ${siteId}: crawlable=${result.crawlable}, type=${result.type}, confidence=${result.confidence}`);
 
+      // Temporary debug: capture raw HTML snippet to diagnose challenge-platform false positives
+      try {
+        const debugResponse = await fetch(baseURL, { headers: customHeaders });
+        const debugHtml = await debugResponse.text();
+        const idx = debugHtml.indexOf('challenge-platform');
+        result.htmlSnippet = idx !== -1
+          ? debugHtml.substring(Math.max(0, idx - 100), idx + 200)
+          : debugHtml.substring(debugHtml.length - 500);
+      } catch (debugError) {
+        log.warn(`Debug HTML fetch failed for ${baseURL}: ${debugError.message}`);
+      }
+
       return ok(result);
     } catch (error) {
       log.error(`Failed to check bot blocker for site ${siteId}: ${error.message}`);
