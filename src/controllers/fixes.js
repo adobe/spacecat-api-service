@@ -480,6 +480,14 @@ export class FixesController {
     ) {
       return null;
     }
+    // Group semantics: a V2 page-group apply creates ONE fix linked to every
+    // suggestion in the group, so any member resolving to an active fix means the
+    // whole group is already covered — echoing that fix for the batch is correct,
+    // not an orphaned member. (For the same reason the UI, #2154, skips the aso
+    // create for V2-direct groups entirely.) A hypothetical non-homogeneous group
+    // (an active fix for suggestion A but not B) would leave B PATCHed to FIXED by
+    // the UI with no backing fix of its own; if a future writer can produce that,
+    // tighten this to require every suggestionId to resolve to the same fix.
     const existingFix = await this.#findExistingActiveFix(opportunityId, fixData.suggestionIds);
     if (!existingFix) {
       return null;
@@ -522,7 +530,8 @@ export class FixesController {
    */
   async #prepareDocumentPathEnrichment(fixDataArray, siteId, opportunityId, log) {
     const needsEnrichment = fixDataArray.some(
-      (fixData) => fixData.origin === 'aso' && !fixData.changeDetails?.documentPath,
+      (fixData) => fixData.origin === FixEntityModel.ORIGINS.ASO
+        && !fixData.changeDetails?.documentPath,
     );
     if (!needsEnrichment) {
       return null;

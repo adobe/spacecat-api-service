@@ -1711,6 +1711,72 @@ describe('Fixes Controller', () => {
       expect(fixEntityCollection.setSuggestionsForFixEntity).to.not.have.been.called;
     });
 
+    it('returns the existing fix (200) when the active fix is PUBLISHED '
+      + '(not just DEPLOYED) (SITES-48951)', async () => {
+      const suggestion = await createSuggestion({ type: 'CONTENT_UPDATE' });
+      const existingFix = await fixEntityCollection.create({
+        type: 'CONTENT_UPDATE',
+        opportunityId,
+        status: FixEntity.STATUSES.PUBLISHED,
+        changeDetails: {
+          documentPath: 'https://author-p1-e1.adobeaemcloud.com/editor.html/x.html',
+        },
+      });
+      suggestionCollection.getFixEntitiesBySuggestionId
+        .withArgs(suggestion.getId())
+        .resolves([existingFix]);
+
+      requestContext.data = [{
+        type: 'CONTENT_UPDATE',
+        opportunityId,
+        origin: FixEntity.ORIGINS.ASO,
+        suggestionIds: [suggestion.getId()],
+      }];
+
+      const response = await fixesController.createFixes(requestContext);
+      const { fixes, metadata } = await response.json();
+      expect(metadata).deep.equals({ total: 1, success: 1, failed: 0 });
+      expect(fixes[0]).includes({ index: 0, statusCode: 200 });
+      expect(fixes[0].fix.id).to.equal(existingFix.getId());
+      expect(fixEntityCollection.setSuggestionsForFixEntity).to.not.have.been.called;
+    });
+
+    it('dedupes the whole [A,B] group when only suggestion A has an active fix — '
+      + 'documents the group-homogeneity short-circuit (SITES-48951)', async () => {
+      const suggestionA = await createSuggestion({ type: 'CONTENT_UPDATE' });
+      const suggestionB = await createSuggestion({ type: 'CONTENT_UPDATE' });
+      const existingFix = await fixEntityCollection.create({
+        type: 'CONTENT_UPDATE',
+        opportunityId,
+        status: FixEntity.STATUSES.DEPLOYED,
+        changeDetails: {
+          documentPath: 'https://author-p1-e1.adobeaemcloud.com/editor.html/x.html',
+        },
+      });
+      // A resolves to the active fix; B has none of its own.
+      suggestionCollection.getFixEntitiesBySuggestionId
+        .withArgs(suggestionA.getId())
+        .resolves([existingFix]);
+      suggestionCollection.getFixEntitiesBySuggestionId
+        .withArgs(suggestionB.getId())
+        .resolves([]);
+
+      requestContext.data = [{
+        type: 'CONTENT_UPDATE',
+        opportunityId,
+        origin: FixEntity.ORIGINS.ASO,
+        suggestionIds: [suggestionA.getId(), suggestionB.getId()],
+      }];
+
+      const response = await fixesController.createFixes(requestContext);
+      const { fixes, metadata } = await response.json();
+      expect(metadata).deep.equals({ total: 1, success: 1, failed: 0 });
+      // The whole group short-circuits to A's fix; no second fix is created.
+      expect(fixes[0]).includes({ index: 0, statusCode: 200 });
+      expect(fixes[0].fix.id).to.equal(existingFix.getId());
+      expect(fixEntityCollection.setSuggestionsForFixEntity).to.not.have.been.called;
+    });
+
     it('still creates a fix when the suggestion has only terminal '
       + '(ROLLED_BACK) fixes', async () => {
       const suggestion = await createSuggestion({ type: 'CONTENT_UPDATE' });
