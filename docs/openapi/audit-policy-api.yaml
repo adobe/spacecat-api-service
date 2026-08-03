@@ -337,13 +337,26 @@ AuditPolicyRevision:
     changedFields:
       type: [object, 'null']
       description: >-
-        Fields that changed relative to the immediately preceding version, as
-        { fieldName: { before, after } }. Null for the first version (no predecessor).
+        Fields that changed relative to the immediately preceding version. Null for the first
+        version (no predecessor); otherwise an object keyed by field name, present only for
+        fields that actually changed. Array-shaped fields (exclusionGlobs, manualUrls) use
+        { added, removed } (a set difference); scalar/object-shaped fields (budget,
+        strategyName, scopeConfig, lifecycleOverrides) use { changed: { before, after } }.
       additionalProperties:
-        type: object
-        properties:
-          before: {}
-          after: {}
+        oneOf:
+          - type: object
+            description: Array-shaped field diff.
+            properties:
+              added: { type: array, items: {} }
+              removed: { type: array, items: {} }
+          - type: object
+            description: Scalar/object-shaped field diff.
+            properties:
+              changed:
+                type: object
+                properties:
+                  before: {}
+                  after: {}
 
 AuditPolicyRevisionList:
   type: object

@@ -242,7 +242,7 @@ describe('AuditPolicyDto', () => {
       effective_at: null,
       superseded_at: null,
     };
-    const changedFields = { budget: { before: 3000, after: 4000 } };
+    const changedFields = { budget: { changed: { before: 3000, after: 4000 } } };
     const dto = AuditPolicyRevisionDto.toJSON(row, undefined, changedFields);
     expect(dto.changedFields).to.deep.equal(changedFields);
   });
@@ -267,10 +267,24 @@ describe('diffAuditPolicyRevisions', () => {
     expect(diffAuditPolicyRevisions(baseRow, { ...baseRow })).to.deep.equal({});
   });
 
-  it('reports only the field that changed, with its before/after values', () => {
+  it('reports a scalar field change as { changed: { before, after } }', () => {
     const currentRow = { ...baseRow, budget: 5000 };
     expect(diffAuditPolicyRevisions(baseRow, currentRow)).to.deep.equal({
-      budget: { before: 4000, after: 5000 },
+      budget: { changed: { before: 4000, after: 5000 } },
+    });
+  });
+
+  it('reports an array field change as a set difference: { added, removed }', () => {
+    const currentRow = { ...baseRow, exclusion_globs: ['/account/*'] };
+    expect(diffAuditPolicyRevisions(baseRow, currentRow)).to.deep.equal({
+      exclusionGlobs: { added: ['/account/*'], removed: ['/checkout/*'] },
+    });
+  });
+
+  it('an array field that only gains entries reports removed as an empty array, not omitted', () => {
+    const currentRow = { ...baseRow, manual_urls: ['https://x/a'] };
+    expect(diffAuditPolicyRevisions(baseRow, currentRow)).to.deep.equal({
+      manualUrls: { added: ['https://x/a'], removed: [] },
     });
   });
 
@@ -281,15 +295,15 @@ describe('diffAuditPolicyRevisions', () => {
       manual_urls: ['https://x/a'],
     };
     expect(diffAuditPolicyRevisions(baseRow, currentRow)).to.deep.equal({
-      exclusionGlobs: { before: ['/checkout/*'], after: ['/checkout/*', '/account/*'] },
-      manualUrls: { before: [], after: ['https://x/a'] },
+      exclusionGlobs: { added: ['/account/*'], removed: [] },
+      manualUrls: { added: ['https://x/a'], removed: [] },
     });
   });
 
   it('detects a change in a nested object field (scopeConfig) via structural comparison', () => {
     const currentRow = { ...baseRow, scope_config: { maxDepth: 2 } };
     expect(diffAuditPolicyRevisions(baseRow, currentRow)).to.deep.equal({
-      scopeConfig: { before: {}, after: { maxDepth: 2 } },
+      scopeConfig: { changed: { before: {}, after: { maxDepth: 2 } } },
     });
   });
 });

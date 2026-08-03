@@ -902,9 +902,13 @@ describe('AuditPolicyController — listRevisions changedFields diff', () => {
     expect(res.status).to.equal(200);
     const body = await res.json();
     // v3 vs its in-page predecessor v2 (4000 -> 5000)
-    expect(body.items[0].changedFields).to.deep.equal({ budget: { before: 4000, after: 5000 } });
+    expect(body.items[0].changedFields).to.deep.equal({
+      budget: { changed: { before: 4000, after: 5000 } },
+    });
     // v2 (tail of the page) vs the extra-fetched v1 (3000 -> 4000)
-    expect(body.items[1].changedFields).to.deep.equal({ budget: { before: 3000, after: 4000 } });
+    expect(body.items[1].changedFields).to.deep.equal({
+      budget: { changed: { before: 3000, after: 4000 } },
+    });
     // exactly one boundary lookup, for the tail row only
     expect(client.eqSpy).to.have.been.calledWith('version', 1);
     expect(client.eqSpy.withArgs('version', sinon.match.any).callCount).to.equal(1);

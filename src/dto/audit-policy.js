@@ -59,28 +59,53 @@ export const AuditPolicyDto = {
   },
 };
 
-const DIFF_FIELDS = [
-  ['budget', 'budget'],
-  ['strategyName', 'strategy_name'],
+// Array-shaped fields diff as a set difference (added/removed elements) rather than a full
+// before/after snapshot - more useful for e.g. exclusionGlobs/manualUrls, where a single-entry
+// change would otherwise force the reader to diff two large arrays by eye.
+const ARRAY_DIFF_FIELDS = [
   ['exclusionGlobs', 'exclusion_globs'],
   ['manualUrls', 'manual_urls'],
+];
+
+// Scalar/object-shaped fields diff as a { changed: { before, after } } value.
+const SCALAR_DIFF_FIELDS = [
+  ['budget', 'budget'],
+  ['strategyName', 'strategy_name'],
   ['scopeConfig', 'scope_config'],
   ['lifecycleOverrides', 'lifecycle_overrides'],
 ];
 
+function diffArray(before, after) {
+  const beforeSet = new Set(before);
+  const afterSet = new Set(after);
+  return {
+    added: after.filter((v) => !beforeSet.has(v)),
+    removed: before.filter((v) => !afterSet.has(v)),
+  };
+}
+
 // Returns null when there is no predecessor (the first-ever version has nothing to diff
-// against). Otherwise an object containing only the fields that changed, each as
-// { before, after } - fields identical between the two rows are omitted entirely.
+// against). Otherwise an object containing only the fields that changed: array-shaped fields
+// as { added, removed }, scalar/object-shaped fields as { changed: { before, after } }. Fields
+// identical between the two rows are omitted entirely.
 export function diffAuditPolicyRevisions(previousRow, currentRow) {
   if (!previousRow) {
     return null;
   }
   const changed = {};
-  for (const [outKey, column] of DIFF_FIELDS) {
+  for (const [outKey, column] of ARRAY_DIFF_FIELDS) {
+    const before = previousRow[column];
+    const after = currentRow[column];
+    const { added, removed } = diffArray(before, after);
+    if (added.length > 0 || removed.length > 0) {
+      changed[outKey] = { added, removed };
+    }
+  }
+  for (const [outKey, column] of SCALAR_DIFF_FIELDS) {
     const before = previousRow[column];
     const after = currentRow[column];
     if (JSON.stringify(before) !== JSON.stringify(after)) {
-      changed[outKey] = { before, after };
+      changed[outKey] = { changed: { before, after } };
     }
   }
   return changed;

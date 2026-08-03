@@ -95,7 +95,7 @@ export default function auditPolicyTests(getHttpClient, resetData) {
       // relative to v1 - the inclusions/add write in between didn't touch exclusionGlobs.
       const v2 = items.find((item) => item.version === 2);
       expect(v2.changedFields).to.deep.equal({
-        manualUrls: { before: [], after: ['https://example.com/campaign-a'] },
+        manualUrls: { added: ['https://example.com/campaign-a'], removed: [] },
       });
       // v1 has no predecessor (the very first version) - changedFields is null, not {}.
       const v1 = items.find((item) => item.version === 1);
