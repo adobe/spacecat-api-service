@@ -136,6 +136,13 @@ describe('approveSiteCandidate', () => {
     expect(context.dataAccess.Site.create.calledOnceWithExactly({
       baseURL,
       hlxConfig,
+      code: {
+        type: 'github',
+        owner: 'some-owner',
+        repo: 'some-site',
+        ref: 'main',
+        url: 'https://github.com/some-owner/some-site',
+      },
       isLive: true,
       organizationId: context.env.ORGANIZATION_ID_FRIENDS_FAMILY,
     })).to.be.true;
