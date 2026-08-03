@@ -1,3 +1,10 @@
+# [1.716.0](https://github.com/adobe/spacecat-api-service/compare/v1.715.0...v1.716.0) (2026-08-03)
+
+
+### Features
+
+* allow insightsLocation in the geo-experiment PATCH endpoint ([#2986](https://github.com/adobe/spacecat-api-service/issues/2986)) ([37e4b23](https://github.com/adobe/spacecat-api-service/commit/37e4b23ec5b9957a462e1314972f3eb0e747436a))
+
 # [1.715.0](https://github.com/adobe/spacecat-api-service/compare/v1.714.0...v1.715.0) (2026-08-03)
 
 
