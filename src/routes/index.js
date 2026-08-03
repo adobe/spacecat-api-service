@@ -599,6 +599,7 @@ export default function getRouteHandlers(
     // LLMO Akamai Onboarding Routes
     'GET /sites/:siteId/llmo/cdn-onboard/akamai/config': llmoAkamaiController.getConfig,
     'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties': llmoAkamaiController.listProperties,
+    'GET /sites/:siteId/llmo/cdn-onboard/akamai/versions': llmoAkamaiController.getVersions,
     'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan': llmoAkamaiController.plan,
     'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy': llmoAkamaiController.deploy,
     'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate': llmoAkamaiController.activate,
