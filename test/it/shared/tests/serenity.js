@@ -1394,7 +1394,7 @@ export default function serenityTests(
 
       // Descending is the regression guard — the reverse of insertion/store order, so it fails if
       // the keys are ignored. Ascending equals insertion order, so it only CONFIRMS the direction
-      // (the pre-#1859 no-op would have passed asc by accident); the pair is what makes it decisive.
+      // (the pre-#1859 no-op would have passed asc by accident); the pair is what makes it firm.
       expect(await orderedMineIds('&sort=metadata.created_at&order=asc', mine))
         .to.deep.equal([first, second, third]);
       expect(await orderedMineIds('&sort=metadata.created_at&order=desc', mine))
