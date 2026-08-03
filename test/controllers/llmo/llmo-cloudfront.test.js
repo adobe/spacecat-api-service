@@ -490,6 +490,16 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(403);
     });
 
+    it('returns 400 for a subpath site (not eligible for CDN auto-routing)', async () => {
+      mockSite.getBaseURL.returns('https://www.example.com/blog');
+
+      const result = await controller.connect(connectContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('Subpath sites');
+    });
+
     it('returns 500 with a generic message when an unexpected error occurs', async () => {
       mockDataAccess.Site.findById.rejects(new Error('db boom'));
 

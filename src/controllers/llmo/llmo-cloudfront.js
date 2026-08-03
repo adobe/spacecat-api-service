@@ -23,6 +23,7 @@ import TokowakaClient, {
   CloudFrontEdgeClient,
 } from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
+import { hasSubpath } from '../../support/edge-routing-utils.js';
 
 // CloudFormation templates use intrinsic-function tags (!Ref/!Sub/!GetAtt/...) that plain YAML
 // rejects. This schema tolerates them (constructing each to its raw value) so the permissions
@@ -178,6 +179,9 @@ function LlmoCloudFrontController(ctx) {
     }
     if (!accessControlUtil.isLLMOAdministrator()) {
       return { error: forbidden(`Only LLMO administrators can ${action}`) };
+    }
+    if (hasSubpath(site.getBaseURL())) {
+      return { error: badRequest('Subpath sites are not eligible for CDN auto-routing') };
     }
     // Server-derived external ID (site's IMS org id); never accepted from the client. Matches what
     // bootstrap baked into the role's trust policy. See resolveConnectorExternalId.
