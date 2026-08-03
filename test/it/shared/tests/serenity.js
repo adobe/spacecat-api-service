@@ -1275,10 +1275,12 @@ export default function serenityTests(
       return res.body.created[0].semrushPromptId;
     };
 
-    // A few ms between two stamped writes so their `created_at` / `updated_at` don't tie at the
-    // millisecond precision of `new Date().toISOString()` — otherwise an ordering assertion would
-    // rest on two writes happening to land in different milliseconds.
-    const STAMP_GAP_MS = 5;
+    // A gap between two stamped writes so their `created_at` / `updated_at` can't tie at the
+    // millisecond precision of `new Date().toISOString()`. Server stamps are already spaced by the
+    // IT round-trip; this adds margin so a loaded CI runner can't collapse two writes into one ms.
+    // Sleeps are the only lever — create/edit stamp `now()` server-side, so the test cannot inject
+    // controlled timestamps; 20ms keeps ties impossible at negligible cost.
+    const STAMP_GAP_MS = 20;
     const sleep = (ms) => new Promise((resolve) => {
       setTimeout(resolve, ms);
     });
@@ -1390,7 +1392,9 @@ export default function serenityTests(
       const third = await createPrompt('admin', 'created-order three?', [tagId]);
       const mine = [first, second, third];
 
-      // Ascending = insertion order; descending = its reverse, which DIFFERS from store order.
+      // Descending is the regression guard — the reverse of insertion/store order, so it fails if
+      // the keys are ignored. Ascending equals insertion order, so it only CONFIRMS the direction
+      // (the pre-#1859 no-op would have passed asc by accident); the pair is what makes it decisive.
       expect(await orderedMineIds('&sort=metadata.created_at&order=asc', mine))
         .to.deep.equal([first, second, third]);
       expect(await orderedMineIds('&sort=metadata.created_at&order=desc', mine))
