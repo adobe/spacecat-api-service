@@ -132,7 +132,10 @@ export async function registerPromptSuggestionSchedule({
       provider_id: providerId,
       source: 'onboarding',
       priority: 'HIGH',
-      parameters: { siteId },
+      // snake_case: the DRS job-parameter convention. The agentic_traffic runner
+      // reads `site_id` only (no camel fallback), so `siteId` here made every
+      // agentic onboarding one-shot fail "site_id is required" (LLMO audit 2026-08-03).
+      parameters: { site_id: siteId },
     });
     log.info(`Submitted one-time DRS ${providerId} run (trial site) `
       + `job=${job?.job_id ?? 'unknown'} for site ${siteId}`);

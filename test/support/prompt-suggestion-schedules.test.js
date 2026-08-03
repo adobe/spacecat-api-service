@@ -96,6 +96,12 @@ describe('prompt-suggestion-schedules support module', () => {
       expect(drsClient.submitJob).to.have.been.calledThrice;
       expect(drsClient.createSchedule).to.not.have.been.called;
       expect(results.map((r) => r.status)).to.deep.equal(['submitted', 'submitted', 'submitted']);
+      // Params MUST use snake_case site_id: the agentic_traffic runner reads
+      // `site_id` only, so camel `siteId` here fails "site_id is required".
+      drsClient.submitJob.getCalls().forEach((call) => {
+        expect(call.args[0].parameters).to.deep.equal({ site_id: SITE_ID });
+        expect(call.args[0].parameters).to.not.have.property('siteId');
+      });
     });
 
     it('surfaces a single pipeline failure without masking the others (allSucceeded=false)', async () => {
