@@ -946,6 +946,22 @@ describe('AuditPolicyController — listRevisions updatedBy identity resolution'
     expect(ctx.log.warn).to.have.been.calledWith(sinon.match(/failed to resolve IMS profile/));
   });
 
+  it('falls back to raw updated_by and logs a warning when the resolution loop itself throws synchronously', async () => {
+    const rows = rowsWith(['A1B2C3D4E5F60708A1B2C3D4E5F60708@AdobeOrg']);
+    const client = clientReturning(rows);
+    // Throws synchronously (not a rejected promise) so batch.map() throws inside the try block,
+    // before Promise.allSettled ever runs - exercises the outer catch, not the per-lookup one.
+    const imsClient = { getImsAdminProfile: sinon.stub().throws(new Error('boom')) };
+    const controller = loadController();
+    const ctx = buildContext({ client });
+    ctx.imsClient = imsClient;
+    const res = await controller.listRevisions(ctx);
+    expect(res.status).to.equal(200);
+    const body = await res.json();
+    expect(body.items[0].updatedBy).to.equal('A1B2C3D4E5F60708A1B2C3D4E5F60708@AdobeOrg');
+    expect(ctx.log.warn).to.have.been.calledWith(sinon.match(/could not resolve author identities/));
+  });
+
   it('skips resolution entirely (no throw) when context.imsClient is not available', async () => {
     const rows = rowsWith(['A1B2C3D4E5F60708A1B2C3D4E5F60708@AdobeOrg']);
     const client = clientReturning(rows);
