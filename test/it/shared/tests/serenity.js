@@ -1285,8 +1285,10 @@ export default function serenityTests(
       setTimeout(resolve, ms);
     });
 
-    // An in-place text edit — bumps `updated_*` without touching `created_*` (spec §8).
-    const editPromptText = async (persona, promptId, text, tagIds) => {
+    // An in-place edit — replaces text AND tags (the PATCH body carries both), bumping `updated_*`
+    // without touching `created_*` (spec §8). The ordering tests pass the prompt's existing tag, so
+    // only the text (and the stamp) actually change.
+    const editPrompt = async (persona, promptId, text, tagIds) => {
       const res = await getHttpClient()[persona].patch(`${base}/prompts/${promptId}`, {
         text, tagIds, geoTargetId: US_GEO, languageCode: 'en',
       });
@@ -1414,11 +1416,11 @@ export default function serenityTests(
       // Re-touch in a DIFFERENT order than creation (b, then c, then a) so `updated_at` order
       // (b < c < a) diverges from both `created_at` order (a < b < c) and store order — proving the
       // wire sort key selects the right field, not just any monotonic default.
-      await editPromptText('admin', b, 'update-order B edited?', [tagId]);
+      await editPrompt('admin', b, 'update-order B edited?', [tagId]);
       await sleep(STAMP_GAP_MS);
-      await editPromptText('admin', c, 'update-order C edited?', [tagId]);
+      await editPrompt('admin', c, 'update-order C edited?', [tagId]);
       await sleep(STAMP_GAP_MS);
-      await editPromptText('admin', a, 'update-order A edited?', [tagId]);
+      await editPrompt('admin', a, 'update-order A edited?', [tagId]);
 
       expect(await orderedMineIds('&sort=metadata.updated_at&order=asc', mine))
         .to.deep.equal([b, c, a]);
