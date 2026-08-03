@@ -39,6 +39,7 @@ import {
   FEEDBACK_TIERS,
   verdictToSignal,
   toReviewView,
+  isAllowedSuggestionTransition,
 } from '@adobe/spacecat-shared-data-access';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto/suggestion.js';
@@ -1123,6 +1124,24 @@ function SuggestionsController(ctx, sqs, env) {
                 statusCode: 400,
               };
             }
+          }
+
+          // Reject per-item transitions the suggestion lifecycle does not allow
+          // (SITES-49063): the bulk endpoint applies a caller-supplied status across a
+          // whole batch, which previously flipped OUTDATED -> FIXED (an OUTDATED
+          // suggestion's issue is no longer detected, so it must not become FIXED).
+          // The shared transition table (SITES-47091) is the single source of truth;
+          // this also gates a safe flip of STATUS_TRANSITION_ENFORCEMENT=enforce (SITES-47286).
+          // NOTE: the REJECTED hard-rule above (REJECTED only from PENDING_VALIDATION) is a
+          // stricter subset of this same invariant kept for its specific message/ACL; it
+          // fires first, so keep it ahead of this general gate.
+          if (!isAllowedSuggestionTransition(currentStatus, status)) {
+            return {
+              index,
+              uuid: id,
+              message: `Illegal status transition: ${currentStatus} -> ${status}`,
+              statusCode: 400,
+            };
           }
 
           suggestion.setStatus(status);
