@@ -52,6 +52,9 @@ function buildClient({ row = null, rpcResult, revisions = [] } = {}) {
   };
 }
 
+// Deliberately omits `imsClient` so listRevisions' resolveUpdatedByIdentities() short-circuits
+// (returns an empty Map) - keeps the pre-existing listRevisions tests asserting raw updatedBy.
+// The identity-resolution suite attaches ctx.imsClient by hand after construction.
 function buildContext({
   client, params = {}, data = {}, profile = { email: 'u@x.com' },
 } = {}) {
@@ -903,6 +906,105 @@ describe('AuditPolicyController — listRevisions updatedBy identity resolution'
     const body = await res.json();
     expect(body.items.every((item) => item.updatedBy === 'Jane Doe')).to.equal(true);
     expect(imsClient.getImsAdminProfile).to.have.been.calledOnce;
+  });
+
+  it('maps two distinct GUIDs to their two distinct identities on the same page (per-row keying)', async () => {
+    const guidA = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA@AdobeOrg';
+    const guidB = 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB@AdobeOrg';
+    const rows = rowsWith([guidA, guidB]);
+    const client = clientReturning(rows);
+    const imsClient = { getImsAdminProfile: sinon.stub() };
+    imsClient.getImsAdminProfile.withArgs(guidA).resolves({ first_name: 'Ann', last_name: 'Alpha', email: 'ann@x.com' });
+    imsClient.getImsAdminProfile.withArgs(guidB).resolves({ first_name: 'Bob', last_name: 'Beta', email: 'bob@x.com' });
+    const controller = loadController();
+    const ctx = buildContext({ client });
+    ctx.imsClient = imsClient;
+    const res = await controller.listRevisions(ctx);
+    const body = await res.json();
+    // rowsWith assigns version desc: items[0] is guidA (v2), items[1] is guidB (v1)
+    expect(body.items[0].updatedBy).to.equal('Ann Alpha');
+    expect(body.items[1].updatedBy).to.equal('Bob Beta');
+  });
+
+  it('resolves across the batch boundary (>IMS_ENRICH_BATCH_SIZE distinct GUIDs) keying each row correctly', async () => {
+    // 6 distinct GUIDs > batch size 5, so the batching loop runs twice.
+    const guids = Array.from({ length: 6 }, (_, i) => `${'C'.repeat(31)}${i}@AdobeOrg`);
+    const rows = rowsWith(guids);
+    const client = clientReturning(rows);
+    const imsClient = { getImsAdminProfile: sinon.stub() };
+    guids.forEach((g, i) => imsClient.getImsAdminProfile.withArgs(g).resolves({ first_name: `User${i}`, last_name: null, email: null }));
+    const controller = loadController();
+    const ctx = buildContext({ client });
+    ctx.imsClient = imsClient;
+    const res = await controller.listRevisions(ctx);
+    const body = await res.json();
+    expect(imsClient.getImsAdminProfile.callCount).to.equal(6);
+    body.items.forEach((item, i) => expect(item.updatedBy).to.equal(`User${i}`));
+  });
+
+  it('a fulfilled-but-null IMS profile falls back to the raw GUID for that row without dropping sibling resolutions', async () => {
+    const guidA = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA@AdobeOrg';
+    const guidNull = 'DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD0@AdobeOrg';
+    const rows = rowsWith([guidA, guidNull]);
+    const client = clientReturning(rows);
+    const imsClient = { getImsAdminProfile: sinon.stub() };
+    imsClient.getImsAdminProfile.withArgs(guidA).resolves({ first_name: 'Ann', last_name: 'Alpha', email: 'ann@x.com' });
+    imsClient.getImsAdminProfile.withArgs(guidNull).resolves(null);
+    const controller = loadController();
+    const ctx = buildContext({ client });
+    ctx.imsClient = imsClient;
+    const res = await controller.listRevisions(ctx);
+    expect(res.status).to.equal(200);
+    const body = await res.json();
+    expect(body.items[0].updatedBy).to.equal('Ann Alpha');
+    expect(body.items[1].updatedBy).to.equal(guidNull);
+  });
+
+  it('resolves GUIDs but passes non-GUID values through untouched on a mixed page', async () => {
+    const guid = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA@AdobeOrg';
+    const rows = rowsWith([guid, 'system', 'jane@x.com']);
+    const client = clientReturning(rows);
+    const imsClient = {
+      getImsAdminProfile: sinon.stub().resolves({ first_name: 'Jane', last_name: 'Doe', email: 'jane@x.com' }),
+    };
+    const controller = loadController();
+    const ctx = buildContext({ client });
+    ctx.imsClient = imsClient;
+    const res = await controller.listRevisions(ctx);
+    const body = await res.json();
+    expect(body.items[0].updatedBy).to.equal('Jane Doe');
+    expect(body.items[1].updatedBy).to.equal('system');
+    expect(body.items[2].updatedBy).to.equal('jane@x.com');
+    expect(imsClient.getImsAdminProfile).to.have.been.calledOnce;
+  });
+
+  it('builds the display name from a partial (first-only) IMS profile', async () => {
+    const rows = rowsWith(['A1B2C3D4E5F60708A1B2C3D4E5F60708@AdobeOrg']);
+    const client = clientReturning(rows);
+    const imsClient = {
+      getImsAdminProfile: sinon.stub().resolves({ first_name: 'Jane', last_name: null, email: 'jane@x.com' }),
+    };
+    const controller = loadController();
+    const ctx = buildContext({ client });
+    ctx.imsClient = imsClient;
+    const res = await controller.listRevisions(ctx);
+    const body = await res.json();
+    expect(body.items[0].updatedBy).to.equal('Jane');
+  });
+
+  it('falls back to the raw GUID when the IMS profile has neither name nor email', async () => {
+    const guid = 'A1B2C3D4E5F60708A1B2C3D4E5F60708@AdobeOrg';
+    const rows = rowsWith([guid]);
+    const client = clientReturning(rows);
+    const imsClient = {
+      getImsAdminProfile: sinon.stub().resolves({ first_name: null, last_name: null, email: null }),
+    };
+    const controller = loadController();
+    const ctx = buildContext({ client });
+    ctx.imsClient = imsClient;
+    const res = await controller.listRevisions(ctx);
+    const body = await res.json();
+    expect(body.items[0].updatedBy).to.equal(guid);
   });
 
   it('falls back to email when the IMS profile has no first/last name', async () => {

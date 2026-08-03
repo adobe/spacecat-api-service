@@ -62,7 +62,9 @@ export const AuditPolicyDto = {
 export const AuditPolicyRevisionDto = {
   // `resolvedUpdatedBy` is a human-readable display name/email resolved server-side (e.g. via
   // IMS) for the row's raw `updated_by` value; falls back to the raw value when it can't be
-  // resolved (already a plain email/name, or IMS lookup failed/unavailable).
+  // resolved (already a plain email/name, or IMS lookup failed/unavailable). The `typeof`
+  // guard below defends against `list.map(AuditPolicyRevisionDto.toJSON)` - the repo's dominant
+  // DTO idiom - which would otherwise pass the array index in as `resolvedUpdatedBy`.
   toJSON(row, resolvedUpdatedBy) {
     return {
       version: row.version,
@@ -72,7 +74,7 @@ export const AuditPolicyRevisionDto = {
       manualUrls: row.manual_urls,
       scopeConfig: row.scope_config,
       lifecycleOverrides: row.lifecycle_overrides,
-      updatedBy: resolvedUpdatedBy || row.updated_by,
+      updatedBy: (typeof resolvedUpdatedBy === 'string' ? resolvedUpdatedBy : null) || row.updated_by,
       reason: row.reason,
       note: row.note,
       effectiveAt: toISO(row.effective_at),

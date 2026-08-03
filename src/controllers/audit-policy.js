@@ -73,8 +73,15 @@ function encodeCursor(version) {
   return Buffer.from(String(version), 'utf8').toString('base64url');
 }
 
-function displayName({ first_name: firstName, last_name: lastName, email }) {
-  const name = [firstName, lastName].filter(hasText).join(' ').trim();
+// Guards against a fulfilled-but-nullish IMS profile (a not-found/deactivated user that resolves
+// empty rather than throwing). Without the guard, destructuring null throws inside the batch
+// forEach, escapes to the outer catch, and abandons every remaining batch on the page.
+function displayName(profile) {
+  if (!profile) {
+    return null;
+  }
+  const { first_name: firstName, last_name: lastName, email } = profile;
+  const name = [firstName, lastName].filter(hasText).join(' ');
   return name || email || null;
 }
 
