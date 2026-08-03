@@ -809,6 +809,27 @@ describe('StateAccessMappingsController', () => {
       expect(res.status).to.equal(201);
     });
 
+    it("normalizes a bare 'org' subjectId so a bare imsOrgId + bare subjectId match (201)", async () => {
+      const createStub = sinon.stub().resolves({
+        created: [makeRow({ subject_type: 'org', subject_id: 'BARE-ORG@AdobeOrg', ims_org_id: 'BARE-ORG@AdobeOrg' })],
+        skipped: [],
+      });
+      const { Controller } = await loadController({ createFacsAccessMappings: createStub });
+      const ctx = makeContext({
+        isAdmin: true,
+        body: {
+          ...adminBody, imsOrgId: 'BARE-ORG', subjectType: 'org', subjectId: 'BARE-ORG',
+        },
+      });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(201);
+      // Both values are normalized to the canonical form before compare + persist.
+      expect(createStub.firstCall.args[1].imsOrgId).to.equal('BARE-ORG@AdobeOrg');
+      expect(createStub.firstCall.args[1].subjects).to.deep.equal([
+        { type: 'org', id: 'BARE-ORG@AdobeOrg' },
+      ]);
+    });
+
     it('returns 400 for a resourceType not valid for the product', async () => {
       const { Controller } = await loadController();
       const ctx = makeContext({ isAdmin: true, body: { ...adminBody, resourceType: 'site' } });
@@ -821,6 +842,15 @@ describe('StateAccessMappingsController', () => {
       const ctx = makeContext({ isAdmin: true, body: { ...adminBody, resourceId: '' } });
       const res = await Controller(ctx).adminCreateMapping(ctx);
       expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when resourceId is not a valid UUID', async () => {
+      const { Controller, stubs } = await loadController();
+      const ctx = makeContext({ isAdmin: true, body: { ...adminBody, resourceId: 'not-a-uuid' } });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(400);
+      // Denied before any write — no dangling reference is persisted.
+      expect(stubs.createFacsAccessMappings.called).to.be.false;
     });
 
     it('returns 400 when grantedCapabilities is empty', async () => {

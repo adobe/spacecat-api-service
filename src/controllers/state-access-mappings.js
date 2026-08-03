@@ -977,9 +977,13 @@ function StateAccessMappingsController(context) {
       return badRequest("subjectId for type 'user' must be canonical '<ident>@<authSrc>'");
     }
     // An org subject binds the org to its OWN resources; the only legal org
-    // subjectId is the payload's imsOrgId. (createMapping compares against the
-    // caller's org; here both values come from the body.)
-    if (subjectType === 'org' && subjectId !== imsOrgId) {
+    // subjectId is the payload's imsOrgId. Normalize it the same way as imsOrgId
+    // so a caller may send both bare (e.g. 'FOO' / 'FOO') or both canonical — the
+    // canonical form is what gets compared and persisted.
+    const normalizedSubjectId = subjectType === 'org'
+      ? normalizeImsOrgId(subjectId)
+      : subjectId;
+    if (subjectType === 'org' && normalizedSubjectId !== imsOrgId) {
       return badRequest("subjectId for type 'org' must equal the payload imsOrgId");
     }
 
@@ -992,7 +996,17 @@ function StateAccessMappingsController(context) {
     if (!hasText(resourceId)) {
       return badRequest('resourceId is required');
     }
+    // The only ReBAC resource types (brand, site) are UUID-keyed. Unlike
+    // createMapping, this endpoint performs no DB-backed resource check
+    // (canActOnResource / requireAdminResourceInOrg are bypassed), so validate
+    // the format here to avoid writing a dangling reference into the table.
+    if (!isValidUUID(resourceId)) {
+      return badRequest('resourceId must be a valid UUID');
+    }
 
+    // No requireFacsManageToGrant gate: unlike the customer flow, an internal
+    // admin is trusted to grant any capability in the product catalog (incl.
+    // can_manage_users). Catalog membership is still enforced below.
     const capErr = validateGrantedCapabilities(grantedCapabilities, product);
     if (capErr) {
       return badRequest(capErr);
@@ -1008,7 +1022,7 @@ function StateAccessMappingsController(context) {
       imsOrgId,
       product,
       subjectType,
-      subjectId,
+      subjectId: normalizedSubjectId,
       resourceType,
       resourceId,
       capabilitiesToStore,
