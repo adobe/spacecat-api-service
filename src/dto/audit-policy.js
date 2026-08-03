@@ -60,7 +60,10 @@ export const AuditPolicyDto = {
 };
 
 export const AuditPolicyRevisionDto = {
-  toJSON(row) {
+  // `resolvedUpdatedBy` is a human-readable display name/email resolved server-side (e.g. via
+  // IMS) for the row's raw `updated_by` value; falls back to the raw value when it can't be
+  // resolved (already a plain email/name, or IMS lookup failed/unavailable).
+  toJSON(row, resolvedUpdatedBy) {
     return {
       version: row.version,
       budget: row.budget,
@@ -69,7 +72,7 @@ export const AuditPolicyRevisionDto = {
       manualUrls: row.manual_urls,
       scopeConfig: row.scope_config,
       lifecycleOverrides: row.lifecycle_overrides,
-      updatedBy: row.updated_by,
+      updatedBy: resolvedUpdatedBy || row.updated_by,
       reason: row.reason,
       note: row.note,
       effectiveAt: toISO(row.effective_at),

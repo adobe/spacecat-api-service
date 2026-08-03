@@ -844,6 +844,119 @@ describe('AuditPolicyController — E3 listRevisions', () => {
   });
 });
 
+describe('AuditPolicyController — listRevisions updatedBy identity resolution', () => {
+  afterEach(() => sinon.restore());
+
+  function rowsWith(updatedByValues) {
+    return updatedByValues.map((updatedBy, i) => ({
+      version: updatedByValues.length - i,
+      budget: 4000,
+      strategy_name: 'tiered',
+      exclusion_globs: [],
+      manual_urls: [],
+      scope_config: {},
+      lifecycle_overrides: {},
+      updated_by: updatedBy,
+      reason: 'r',
+      note: null,
+      effective_at: '2026-01-01T00:00:00Z',
+      superseded_at: null,
+    }));
+  }
+
+  function clientReturning(rows) {
+    const order = sinon.stub().returnsThis();
+    const limit = sinon.stub().resolves({ data: rows, error: null });
+    return {
+      from: () => ({ select: () => ({ eq: () => ({ order, limit }) }) }),
+      rpc: sinon.stub(),
+    };
+  }
+
+  it('resolves an IMS-GUID updated_by to a display name via getImsAdminProfile', async () => {
+    const rows = rowsWith(['A1B2C3D4E5F60708A1B2C3D4E5F60708@AdobeOrg']);
+    const client = clientReturning(rows);
+    const imsClient = {
+      getImsAdminProfile: sinon.stub().resolves({ first_name: 'Jane', last_name: 'Doe', email: 'jane@x.com' }),
+    };
+    const controller = loadController();
+    const ctx = buildContext({ client });
+    ctx.imsClient = imsClient;
+    const res = await controller.listRevisions(ctx);
+    expect(res.status).to.equal(200);
+    const body = await res.json();
+    expect(body.items[0].updatedBy).to.equal('Jane Doe');
+    expect(imsClient.getImsAdminProfile).to.have.been.calledOnceWith('A1B2C3D4E5F60708A1B2C3D4E5F60708@AdobeOrg');
+  });
+
+  it('dedupes repeated updated_by values into a single IMS lookup', async () => {
+    const guid = 'A1B2C3D4E5F60708A1B2C3D4E5F60708@AdobeOrg';
+    const rows = rowsWith([guid, guid, guid]);
+    const client = clientReturning(rows);
+    const imsClient = {
+      getImsAdminProfile: sinon.stub().resolves({ first_name: 'Jane', last_name: 'Doe', email: 'jane@x.com' }),
+    };
+    const controller = loadController();
+    const ctx = buildContext({ client });
+    ctx.imsClient = imsClient;
+    const res = await controller.listRevisions(ctx);
+    const body = await res.json();
+    expect(body.items.every((item) => item.updatedBy === 'Jane Doe')).to.equal(true);
+    expect(imsClient.getImsAdminProfile).to.have.been.calledOnce;
+  });
+
+  it('falls back to email when the IMS profile has no first/last name', async () => {
+    const rows = rowsWith(['A1B2C3D4E5F60708A1B2C3D4E5F60708@AdobeOrg']);
+    const client = clientReturning(rows);
+    const imsClient = {
+      getImsAdminProfile: sinon.stub().resolves({ first_name: null, last_name: null, email: 'jane@x.com' }),
+    };
+    const controller = loadController();
+    const ctx = buildContext({ client });
+    ctx.imsClient = imsClient;
+    const res = await controller.listRevisions(ctx);
+    const body = await res.json();
+    expect(body.items[0].updatedBy).to.equal('jane@x.com');
+  });
+
+  it('leaves a non-GUID updated_by value (plain email/name/"system") untouched, without calling IMS', async () => {
+    const rows = rowsWith(['system']);
+    const client = clientReturning(rows);
+    const imsClient = { getImsAdminProfile: sinon.stub() };
+    const controller = loadController();
+    const ctx = buildContext({ client });
+    ctx.imsClient = imsClient;
+    const res = await controller.listRevisions(ctx);
+    const body = await res.json();
+    expect(body.items[0].updatedBy).to.equal('system');
+    expect(imsClient.getImsAdminProfile).to.not.have.been.called;
+  });
+
+  it('falls back to the raw GUID when the IMS lookup rejects, and logs a warning', async () => {
+    const rows = rowsWith(['A1B2C3D4E5F60708A1B2C3D4E5F60708@AdobeOrg']);
+    const client = clientReturning(rows);
+    const imsClient = { getImsAdminProfile: sinon.stub().rejects(new Error('ims down')) };
+    const controller = loadController();
+    const ctx = buildContext({ client });
+    ctx.imsClient = imsClient;
+    const res = await controller.listRevisions(ctx);
+    expect(res.status).to.equal(200);
+    const body = await res.json();
+    expect(body.items[0].updatedBy).to.equal('A1B2C3D4E5F60708A1B2C3D4E5F60708@AdobeOrg');
+    expect(ctx.log.warn).to.have.been.calledWith(sinon.match(/failed to resolve IMS profile/));
+  });
+
+  it('skips resolution entirely (no throw) when context.imsClient is not available', async () => {
+    const rows = rowsWith(['A1B2C3D4E5F60708A1B2C3D4E5F60708@AdobeOrg']);
+    const client = clientReturning(rows);
+    const controller = loadController();
+    const res = await controller.listRevisions(buildContext({ client }));
+    expect(res.status).to.equal(200);
+    const body = await res.json();
+    expect(body.items[0].updatedBy).to.equal('A1B2C3D4E5F60708A1B2C3D4E5F60708@AdobeOrg');
+  });
+});
+
 describe('AuditPolicyController — E4-E6 scope-read 501 stubs', () => {
   afterEach(() => sinon.restore());
   for (const fn of ['getScopePages', 'getScopeSummary', 'getScopeSections']) {
