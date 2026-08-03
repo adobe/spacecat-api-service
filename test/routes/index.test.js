@@ -742,6 +742,7 @@ describe('getRouteHandlers', () => {
       'GET /state/access-mappings',
       'GET /state/access-mappings/history',
       'POST /state/access-mappings',
+      'POST /state/access-mappings/admin',
       'GET /product/capabilities',
       'POST /tools/import/jobs',
       'POST /tools/scrape/jobs',

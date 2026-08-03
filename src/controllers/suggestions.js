@@ -2521,6 +2521,7 @@ function SuggestionsController(ctx, sqs, env) {
       { key: 'suggestionIds', setter: 'setSuggestionIds' },
       { key: 'promptsCount', setter: 'setPromptsCount' },
       { key: 'promptsLocation', setter: 'setPromptsLocation' },
+      { key: 'insightsLocation', setter: 'setInsightsLocation' },
       { key: 'startTime', setter: 'setStartTime' },
       { key: 'endTime', setter: 'setEndTime' },
       { key: 'metadata', setter: 'setMetadata' },

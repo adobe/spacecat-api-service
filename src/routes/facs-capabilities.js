@@ -178,6 +178,11 @@ const routeFacsCapabilities = {
     'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate',
     'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status',
     // Admin-only writes
+    // State-layer backend provisioning — admin-only (isAdmin() in the
+    // state-access-mappings controller). Full payload (imsOrgId, product,
+    // subject, resource, capabilities); nothing derived from authInfo. Not a
+    // customer FACS surface, so it bypasses facsWrapper entirely.
+    'POST /state/access-mappings/admin', // hasAdminAccess (adminCreateMapping)
     'POST /sites', // hasAdminAccess
     'DELETE /sites/:siteId', // restricted (always 403)
     'PATCH /sites/:siteId/:auditType', // hasAdminAccess (sites-audits-toggle)
