@@ -10546,6 +10546,7 @@ describe('Suggestions Controller', () => {
         setSuggestionIds: sandbox.stub(),
         setPromptsCount: sandbox.stub(),
         setPromptsLocation: sandbox.stub(),
+        setInsightsLocation: sandbox.stub(),
         setStartTime: sandbox.stub(),
         setEndTime: sandbox.stub(),
         setMetadata: sandbox.stub(),
@@ -10671,6 +10672,18 @@ describe('Suggestions Controller', () => {
       expect(mockGeoExperiment.save.calledOnce).to.be.true;
     });
 
+    it('patches insightsLocation and saves', async () => {
+      const insightsLocation = `geo-experiments/${GEO_EXP_ID}/insights.json`;
+      const response = await suggestionsController.patchGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+        data: { insightsLocation },
+      });
+      expect(response.status).to.equal(200);
+      expect(mockGeoExperiment.setInsightsLocation.calledWith(insightsLocation)).to.be.true;
+      expect(mockGeoExperiment.save.calledOnce).to.be.true;
+    });
+
     it('patches all optional geo experiment fields in one request', async () => {
       const suggestionIds = [SUGGESTION_IDS[0]];
       const errorPayload = { code: 'E_TEST' };
@@ -10685,6 +10698,7 @@ describe('Suggestions Controller', () => {
           suggestionIds,
           promptsCount: 7,
           promptsLocation: 'geo-experiments/bucket/key.json',
+          insightsLocation: 'geo-experiments/bucket/insights.json',
           startTime: '2026-01-01T00:00:00.000Z',
           endTime: '2026-06-01T00:00:00.000Z',
           error: errorPayload,
@@ -10698,6 +10712,7 @@ describe('Suggestions Controller', () => {
       expect(mockGeoExperiment.setSuggestionIds.calledWith(suggestionIds)).to.be.true;
       expect(mockGeoExperiment.setPromptsCount.calledWith(7)).to.be.true;
       expect(mockGeoExperiment.setPromptsLocation.calledWith('geo-experiments/bucket/key.json')).to.be.true;
+      expect(mockGeoExperiment.setInsightsLocation.calledWith('geo-experiments/bucket/insights.json')).to.be.true;
       expect(mockGeoExperiment.setStartTime.calledWith('2026-01-01T00:00:00.000Z')).to.be.true;
       expect(mockGeoExperiment.setEndTime.calledWith('2026-06-01T00:00:00.000Z')).to.be.true;
       expect(mockGeoExperiment.setError.calledWith(errorPayload)).to.be.true;
