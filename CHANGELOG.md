@@ -1,3 +1,24 @@
+# [1.716.0](https://github.com/adobe/spacecat-api-service/compare/v1.715.0...v1.716.0) (2026-08-03)
+
+
+### Features
+
+* allow insightsLocation in the geo-experiment PATCH endpoint ([#2986](https://github.com/adobe/spacecat-api-service/issues/2986)) ([37e4b23](https://github.com/adobe/spacecat-api-service/commit/37e4b23ec5b9957a462e1314972f3eb0e747436a))
+
+# [1.715.0](https://github.com/adobe/spacecat-api-service/compare/v1.714.0...v1.715.0) (2026-08-03)
+
+
+### Features
+
+* admin-gated backend create for state-layer access mappings ([#2983](https://github.com/adobe/spacecat-api-service/issues/2983)) ([75fafc2](https://github.com/adobe/spacecat-api-service/commit/75fafc27233433e47a75d2523bfa232f037d9b1e))
+
+# [1.714.0](https://github.com/adobe/spacecat-api-service/compare/v1.713.0...v1.714.0) (2026-07-31)
+
+
+### Features
+
+* support platform=all in url-prompts endpoint | LLMO-6697 ([#2978](https://github.com/adobe/spacecat-api-service/issues/2978)) ([408043c](https://github.com/adobe/spacecat-api-service/commit/408043c54be320283f1569756fb89687c762e6e2))
+
 # [1.713.0](https://github.com/adobe/spacecat-api-service/compare/v1.712.1...v1.713.0) (2026-07-31)
 
 

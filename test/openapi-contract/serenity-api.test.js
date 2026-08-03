@@ -566,6 +566,31 @@ const FIXTURES = {
       prompts: [],
     },
   },
+  // Served by ElementsController (listUrlPrompts). getUrlPrompts resolves a FLAT
+  // array of per-prompt rows; the controller wraps it into { prompts }. url +
+  // startDate + endDate are required (400 otherwise), so the fixture supplies them.
+  getSerenityUrlInspectorUrlPrompts: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'listUrlPrompts',
+    serviceMethod: 'getUrlPrompts',
+    query: {
+      url: 'https://www.lovesac.com/sactionals',
+      startDate: '2026-06-29',
+      endDate: '2026-07-26',
+    },
+    handlerResult: [{
+      prompt: 'What size Lovesac sectional is best for a studio apartment?',
+      category: '',
+      region: '',
+      topics: '',
+      citations: 0,
+      sourceTitle: 'Modular Sectional Couches | Lovesac Sactionals',
+      brandMentioned: 'mentioned',
+      brands: ['Lovesac'],
+      closestDate: '2026-07-26T00:00:00Z',
+    }],
+  },
 };
 
 function makeAjv() {

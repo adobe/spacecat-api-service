@@ -55,6 +55,44 @@ describe('url-prompts definitions', () => {
       )).to.equal('chatgpt-paid');
     });
 
+    it('lets an explicit model win over platform=all (single model, not the union)', () => {
+      expect(advancedVal(
+        buildUrlPromptsPayload({ url: URL, model: 'search-gpt', platform: 'all' }),
+        'CBF_model',
+      )).to.equal('search-gpt');
+    });
+
+    it('OMITS the CBF_model filter for the `all` sentinel (deduped cross-model union)', () => {
+      const payload = buildUrlPromptsPayload({ url: URL, model: 'all' });
+      expect(payload.filters.advanced.filters.some((f) => f.col === 'CBF_model')).to.equal(false);
+    });
+
+    it('treats the `all` sentinel case-insensitively', () => {
+      const payload = buildUrlPromptsPayload({ url: URL, platform: 'ALL' });
+      expect(advancedVal(payload, 'CBF_model')).to.be.undefined;
+    });
+
+    it('trims surrounding whitespace before matching the `all` sentinel', () => {
+      const payload = buildUrlPromptsPayload({ url: URL, model: '  all  ' });
+      expect(advancedVal(payload, 'CBF_model')).to.be.undefined;
+    });
+
+    it('recognises `all` via platform as well as model', () => {
+      expect(advancedVal(buildUrlPromptsPayload({ url: URL, platform: 'all' }), 'CBF_model'))
+        .to.be.undefined;
+    });
+
+    it('still applies the other filters when platform is `all`', () => {
+      const payload = buildUrlPromptsPayload({
+        url: URL, model: 'all', startDate: '2026-06-29', endDate: '2026-07-26', category: 'category__Brand',
+      });
+      expect(payload.filters.simple.CBF_source).to.equal(URL);
+      expect(advancedVal(payload, 'CBF_source')).to.equal(URL);
+      expect(advancedVal(payload, 'CBF_date__start')).to.equal('2026-06-29');
+      expect(advancedVal(payload, 'CBF_date__end')).to.equal('2026-07-26');
+      expect(advancedVal(payload, 'CBF_tags')).to.equal('category__Brand');
+    });
+
     it('sends the date window as CBF_date__start (gte) / CBF_date__end (lte) in advanced', () => {
       const payload = buildUrlPromptsPayload({
         url: URL, startDate: '2026-06-29', endDate: '2026-07-26',
