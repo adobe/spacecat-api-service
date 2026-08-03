@@ -87,14 +87,19 @@ function BotBlockerController(ctx, log) {
 
       log.debug(`Bot blocker check completed for site ${siteId}: crawlable=${result.crawlable}, type=${result.type}, confidence=${result.confidence}`);
 
-      // Temporary debug: capture raw HTML snippet to diagnose challenge-platform false positives
+      // Temporary debug: capture all HTML snippets around challenge-platform to diagnose false positives
       try {
         const debugResponse = await fetch(baseURL, { headers: customHeaders });
         const debugHtml = await debugResponse.text();
-        const idx = debugHtml.indexOf('challenge-platform');
-        result.htmlSnippet = idx !== -1
-          ? debugHtml.substring(Math.max(0, idx - 100), idx + 200)
-          : debugHtml.substring(debugHtml.length - 500);
+        const snippets = [];
+        let searchFrom = 0;
+        let idx = debugHtml.indexOf('challenge-platform', searchFrom);
+        while (idx !== -1) {
+          snippets.push(debugHtml.substring(Math.max(0, idx - 100), idx + 200));
+          searchFrom = idx + 1;
+          idx = debugHtml.indexOf('challenge-platform', searchFrom);
+        }
+        result.htmlSnippets = snippets.length > 0 ? snippets : [debugHtml.substring(debugHtml.length - 500)];
       } catch (debugError) {
         log.warn(`Debug HTML fetch failed for ${baseURL}: ${debugError.message}`);
       }
