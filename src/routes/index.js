@@ -504,6 +504,11 @@ export default function getRouteHandlers(
     'GET /state/access-mappings': stateAccessMappingsController.listMappings,
     'GET /state/access-mappings/history': stateAccessMappingsController.listHistory,
     'POST /state/access-mappings': stateAccessMappingsController.createMapping,
+    // Admin-only backend provisioning: the entire binding (imsOrgId, product,
+    // subject, resource, capabilities) comes from the body — nothing from
+    // authInfo. Gated by isAdmin() in the controller; see INTERNAL_ROUTES in
+    // facs-capabilities.js (bypasses facsWrapper).
+    'POST /state/access-mappings/admin': stateAccessMappingsController.adminCreateMapping,
     'PATCH /state/access-mappings/:id': stateAccessMappingsController.patchMapping,
     'DELETE /state/access-mappings/:id': stateAccessMappingsController.deleteMapping,
     'GET /product/capabilities': stateAccessMappingsController.getProductCapabilities,
