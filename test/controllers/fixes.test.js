@@ -634,6 +634,7 @@ describe('Fixes Controller', () => {
           opportunityId,
           changeDetails: { arbitrary: 'value 1' },
           executedAt: executedAtOnDate,
+          deployedAt: executedAtOnDate,
         });
 
         fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
@@ -674,6 +675,7 @@ describe('Fixes Controller', () => {
           executedBy: testExternalUserId,
           changeDetails: { arbitrary: 'value 1' },
           executedAt: executedAtOnDate,
+          deployedAt: executedAtOnDate,
         });
         fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
           .withArgs(opportunityId)
@@ -697,11 +699,13 @@ describe('Fixes Controller', () => {
           type: Suggestion.TYPES.CONTENT_UPDATE,
           opportunityId,
           executedAt: executedAtOnDate,
+          deployedAt: executedAtOnDate,
         });
         const fixOtherDate = await fixEntityCollection.create({
           type: Suggestion.TYPES.REDIRECT_UPDATE,
           opportunityId,
           executedAt: executedAtOtherDate,
+          deployedAt: executedAtOtherDate,
         });
 
         fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
@@ -735,6 +739,7 @@ describe('Fixes Controller', () => {
           type: Suggestion.TYPES.CONTENT_UPDATE,
           opportunityId: 'wrong-opportunity-id',
           executedAt: executedAtOnDate,
+          deployedAt: executedAtOnDate,
         });
 
         fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
@@ -758,6 +763,7 @@ describe('Fixes Controller', () => {
           type: Suggestion.TYPES.CONTENT_UPDATE,
           opportunityId,
           executedAt: executedAtOnDate,
+          deployedAt: executedAtOnDate,
         });
 
         fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
@@ -794,6 +800,7 @@ describe('Fixes Controller', () => {
           opportunityId,
           changeDetails: { arbitrary: 'value 1' },
           executedAt: executedAtOnDate,
+          deployedAt: executedAtOnDate,
         });
 
         const fixEntity2 = await fixEntityCollection.create({
@@ -801,6 +808,7 @@ describe('Fixes Controller', () => {
           opportunityId,
           changeDetails: { arbitrary: 'value 2' },
           executedAt: executedAtOnDate,
+          deployedAt: executedAtOnDate,
         });
 
         fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
@@ -837,6 +845,7 @@ describe('Fixes Controller', () => {
           opportunityId,
           changeDetails: { arbitrary: 'value 1' },
           executedAt: executedAtOnDate,
+          deployedAt: executedAtOnDate,
         });
 
         fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
@@ -868,6 +877,7 @@ describe('Fixes Controller', () => {
         });
         // Simulate executedAt=null (not yet deployed) with createdAt on target date
         sandbox.stub(fixEntity, 'getExecutedAt').returns(null);
+        sandbox.stub(fixEntity, 'getDeployedAt').returns(null);
         sandbox.stub(fixEntity, 'getCreatedAt').returns(executedAtOnDate);
 
         fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
@@ -888,6 +898,7 @@ describe('Fixes Controller', () => {
         });
         // Simulate executedAt=null with createdAt on a DIFFERENT date
         sandbox.stub(fixEntity, 'getExecutedAt').returns(null);
+        sandbox.stub(fixEntity, 'getDeployedAt').returns(null);
         sandbox.stub(fixEntity, 'getCreatedAt').returns(executedAtOtherDate);
 
         fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
@@ -906,6 +917,7 @@ describe('Fixes Controller', () => {
           opportunityId,
         });
         sandbox.stub(fixEntity, 'getExecutedAt').returns('not-a-valid-date');
+        sandbox.stub(fixEntity, 'getDeployedAt').returns('not-a-valid-date');
         sandbox.stub(fixEntity, 'getCreatedAt').returns('also-garbage');
 
         fixEntityCollection.getAllFixesWithSuggestionsByOpportunityId
@@ -2893,6 +2905,7 @@ describe('Fixes Controller', () => {
         status: FixEntity.STATUSES.DEPLOYED,
         executedBy: 'test-user',
         executedAt: '2025-05-19T01:23:45.678Z',
+        deployedAt: '2025-05-19T01:23:45.678Z',
         publishedAt: '2025-05-19T02:23:45.678Z',
       };
 
@@ -3051,6 +3064,7 @@ describe('Fixes Controller', () => {
         getUpdatedAt: () => '2025-05-19T01:23:45.678Z',
         getExecutedBy: () => 'test-user',
         getExecutedAt: () => '2025-05-19T01:23:45.678Z',
+        getDeployedAt: () => '2025-05-19T01:23:45.678Z',
         getPublishedAt: () => '2025-05-19T01:23:45.678Z',
         getChangeDetails: () => ({}),
         getOrigin: () => 'SPACECAT',
@@ -3089,6 +3103,7 @@ describe('Fixes Controller', () => {
         getUpdatedAt: () => '2025-05-19T01:23:45.678Z',
         getExecutedBy: () => 'test-user',
         getExecutedAt: () => '2025-05-19T01:23:45.678Z',
+        getDeployedAt: () => '2025-05-19T01:23:45.678Z',
         getPublishedAt: () => '2025-05-19T01:23:45.678Z',
         getChangeDetails: () => ({ arbitrary: 'test value' }),
         getOrigin: () => 'SPACECAT',
@@ -3160,6 +3175,7 @@ describe('Fixes Controller', () => {
         getUpdatedAt: () => '2025-05-19T01:23:45.678Z',
         getExecutedBy: () => 'test-user',
         getExecutedAt: () => '2025-05-19T01:23:45.678Z',
+        getDeployedAt: () => '2025-05-19T01:23:45.678Z',
         getPublishedAt: () => '2025-05-19T01:23:45.678Z',
         getChangeDetails: () => ({ arbitrary: 'test value' }),
         getOrigin: () => 'SPACECAT',
@@ -3274,6 +3290,7 @@ function fakeCreateFix(data) {
   data.createdAt ??= ISO_DATE;
   data.executedAt ??= ISO_DATE;
   data.executedBy ??= 'test user';
+  data.deployedAt ??= ISO_DATE;
   data.publishedAt ??= ISO_DATE;
   data.updatedAt ??= ISO_DATE;
 

@@ -1,3 +1,38 @@
+# [1.714.0](https://github.com/adobe/spacecat-api-service/compare/v1.713.0...v1.714.0) (2026-07-31)
+
+
+### Features
+
+* support platform=all in url-prompts endpoint | LLMO-6697 ([#2978](https://github.com/adobe/spacecat-api-service/issues/2978)) ([408043c](https://github.com/adobe/spacecat-api-service/commit/408043c54be320283f1569756fb89687c762e6e2))
+
+# [1.713.0](https://github.com/adobe/spacecat-api-service/compare/v1.712.1...v1.713.0) (2026-07-31)
+
+
+### Features
+
+* **fixes:** expose deployedAt in the fix DTO (SITES-47997/48823) ([#2968](https://github.com/adobe/spacecat-api-service/issues/2968)) ([af60e89](https://github.com/adobe/spacecat-api-service/commit/af60e89da3d17b6654010fce651637576f0c2866)), closes [adobe/spacecat-shared#1857](https://github.com/adobe/spacecat-shared/issues/1857)
+
+## [1.712.1](https://github.com/adobe/spacecat-api-service/compare/v1.712.0...v1.712.1) (2026-07-31)
+
+
+### Bug Fixes
+
+* read geo-experiment insights from the Mystique bucket (S3_MYSTIQUE_BUCKET) ([#2977](https://github.com/adobe/spacecat-api-service/issues/2977)) ([fecabdd](https://github.com/adobe/spacecat-api-service/commit/fecabdd50c6514e2393f8834d01f3c9538105203))
+
+# [1.712.0](https://github.com/adobe/spacecat-api-service/compare/v1.711.4...v1.712.0) (2026-07-31)
+
+
+### Features
+
+* **geo-experiment:** presign insights rawDataUrl for UI download ([#2844](https://github.com/adobe/spacecat-api-service/issues/2844)) ([cd7412c](https://github.com/adobe/spacecat-api-service/commit/cd7412c9f96e283c1cbfdbd468576360dd80b8dc))
+
+## [1.711.4](https://github.com/adobe/spacecat-api-service/compare/v1.711.3...v1.711.4) (2026-07-31)
+
+
+### Bug Fixes
+
+* URL-prompts honors market & category filters | LLMO-6674 ([#2969](https://github.com/adobe/spacecat-api-service/issues/2969)) ([c36a130](https://github.com/adobe/spacecat-api-service/commit/c36a130a70045ef893d669705eebcde73d03b5a1))
+
 ## [1.711.3](https://github.com/adobe/spacecat-api-service/compare/v1.711.2...v1.711.3) (2026-07-30)
 
 
