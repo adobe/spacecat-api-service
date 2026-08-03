@@ -693,8 +693,11 @@ function StateAccessMappingsController(context) {
       });
       return createResponse(toMappingDto(createdRow), 201);
     } catch (error) {
+      // Log the full error (stack + any nested cause), not just the message:
+      // this shared helper fails for several reasons (PostgREST drop, constraint
+      // violation, unexpected null) and the stack is what pins the call site.
       log.error(
-        { tag: 'state-access-mappings', err: error.message },
+        { tag: 'state-access-mappings', err: error },
         'Failed to create state-layer access mapping',
       );
       return internalServerError('Failed to create access mapping');

@@ -775,6 +775,13 @@ describe('StateAccessMappingsController', () => {
       expect(res.status).to.equal(400);
     });
 
+    it('returns 400 when subjectId is missing', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ isAdmin: true, body: { ...adminBody, subjectId: '' } });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
     it('returns 400 when user subjectId is not canonical', async () => {
       const { Controller } = await loadController();
       const ctx = makeContext({ isAdmin: true, body: { ...adminBody, subjectId: 'noatsign' } });
