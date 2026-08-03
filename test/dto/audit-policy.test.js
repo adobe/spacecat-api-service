@@ -130,6 +130,64 @@ describe('AuditPolicyDto', () => {
     });
   });
 
+  it('revision toJSON uses resolvedUpdatedBy over the raw column when supplied', () => {
+    const row = {
+      version: 4,
+      budget: 4000,
+      strategy_name: 'tiered',
+      exclusion_globs: [],
+      manual_urls: [],
+      scope_config: {},
+      lifecycle_overrides: {},
+      updated_by: 'A1B2C3D4E5F6@AdobeOrg',
+      reason: 'r',
+      note: null,
+      effective_at: null,
+      superseded_at: null,
+    };
+    const dto = AuditPolicyRevisionDto.toJSON(row, 'Jane Doe');
+    expect(dto.updatedBy).to.equal('Jane Doe');
+  });
+
+  it('revision toJSON ignores a non-string 2nd arg (e.g. the array index from list.map) and keeps the raw column', () => {
+    const row = {
+      version: 4,
+      budget: 4000,
+      strategy_name: 'tiered',
+      exclusion_globs: [],
+      manual_urls: [],
+      scope_config: {},
+      lifecycle_overrides: {},
+      updated_by: 'u@x.com',
+      reason: 'r',
+      note: null,
+      effective_at: null,
+      superseded_at: null,
+    };
+    // Simulates [row].map(AuditPolicyRevisionDto.toJSON) passing (row, index).
+    const dto = AuditPolicyRevisionDto.toJSON(row, 3);
+    expect(dto.updatedBy).to.equal('u@x.com');
+  });
+
+  it('revision toJSON falls back to the raw updated_by column when no resolution is supplied', () => {
+    const row = {
+      version: 4,
+      budget: 4000,
+      strategy_name: 'tiered',
+      exclusion_globs: [],
+      manual_urls: [],
+      scope_config: {},
+      lifecycle_overrides: {},
+      updated_by: 'u@x.com',
+      reason: 'r',
+      note: null,
+      effective_at: null,
+      superseded_at: null,
+    };
+    const dto = AuditPolicyRevisionDto.toJSON(row);
+    expect(dto.updatedBy).to.equal('u@x.com');
+  });
+
   it('revision toJSON normalizes raw Postgres timestamptz text to Z-suffixed ISO8601', () => {
     const row = {
       version: 4,

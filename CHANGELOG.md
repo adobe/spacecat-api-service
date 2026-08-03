@@ -1,3 +1,10 @@
+## [1.716.1](https://github.com/adobe/spacecat-api-service/compare/v1.716.0...v1.716.1) (2026-08-03)
+
+
+### Bug Fixes
+
+* resolve updatedBy identity in audit-policy revisions API ([#2988](https://github.com/adobe/spacecat-api-service/issues/2988)) ([84f88db](https://github.com/adobe/spacecat-api-service/commit/84f88dbea4c9ef78fceaca0c9fe7e268a27a8a81))
+
 # [1.716.0](https://github.com/adobe/spacecat-api-service/compare/v1.715.0...v1.716.0) (2026-08-03)
 
 
