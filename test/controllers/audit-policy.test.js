@@ -99,6 +99,52 @@ function buildSequencedClient({ selectQueue, rpcQueue }) {
   };
 }
 
+// listRevisions client: `.eq('site_id', siteId)` fans out into a chain supporting either the
+// main page query (`.lt().order().limit()`) or the predecessor boundary lookup
+// (`.eq('version', v).maybeSingle()`) - both start from the same site_id eq() call, so both
+// need to be reachable from the same returned chain object.
+function buildRevisionsPageClient({
+  rows,
+  predecessors = {},
+  ltSpy = sinon.stub().returnsThis(),
+  orderSpy = sinon.stub().returnsThis(),
+} = {}) {
+  const limitSpy = sinon.stub().resolves({ data: rows, error: null });
+  const eq = sinon.stub().callsFake((col, val) => {
+    if (col === 'version') {
+      const predecessorRow = predecessors[val] ?? null;
+      return { maybeSingle: () => Promise.resolve({ data: predecessorRow, error: null }) };
+    }
+    return {
+      order: orderSpy, limit: limitSpy, lt: ltSpy, eq,
+    };
+  });
+  return {
+    from: () => ({ select: () => ({ eq }) }),
+    rpc: sinon.stub(),
+    limitSpy,
+    eqSpy: eq,
+  };
+}
+
+function revisionRow(version, overrides = {}) {
+  return {
+    version,
+    budget: 4000,
+    strategy_name: 'tiered',
+    exclusion_globs: [],
+    manual_urls: [],
+    scope_config: {},
+    lifecycle_overrides: {},
+    updated_by: 'b',
+    reason: 'r',
+    note: null,
+    effective_at: '2026-01-01T00:00:00Z',
+    superseded_at: '2026-01-02T00:00:00Z',
+    ...overrides,
+  };
+}
+
 const ROW_V5 = {
   site_id: SITE_ID,
   version: 5,
@@ -716,13 +762,7 @@ describe('AuditPolicyController — E3 listRevisions', () => {
     // (returnsThis); only the terminal limit() call resolves { data, error } — see
     // makeWeeksChainClient in test/controllers/llmo/llmo-referral-traffic.test.js.
     const orderSpy = sinon.stub().returnsThis();
-    const limitSpy = sinon.stub().resolves({ data: rows, error: null });
-    const client = {
-      from: () => ({
-        select: () => ({ eq: () => ({ order: orderSpy, limit: limitSpy }) }),
-      }),
-      rpc: sinon.stub(),
-    };
+    const client = buildRevisionsPageClient({ rows, orderSpy });
     const controller = loadController();
     const res = await controller.listRevisions(buildContext({ client, params: { limit: '2' } }));
     expect(res.status).to.equal(200);
@@ -844,6 +884,65 @@ describe('AuditPolicyController — E3 listRevisions', () => {
     const body = await res.json();
     expect(body.items).to.deep.equal([]);
     expect(body.cursor).to.be.undefined;
+  });
+});
+
+describe('AuditPolicyController — listRevisions changedFields diff', () => {
+  afterEach(() => sinon.restore());
+
+  it('diffs every row against its predecessor: in-page for all but the last, one extra lookup for the tail', async () => {
+    const rows = [
+      revisionRow(3, { budget: 5000 }),
+      revisionRow(2, { budget: 4000 }),
+    ];
+    const predecessorV1 = revisionRow(1, { budget: 3000 });
+    const client = buildRevisionsPageClient({ rows, predecessors: { 1: predecessorV1 } });
+    const controller = loadController();
+    const res = await controller.listRevisions(buildContext({ client }));
+    expect(res.status).to.equal(200);
+    const body = await res.json();
+    // v3 vs its in-page predecessor v2 (4000 -> 5000)
+    expect(body.items[0].changedFields).to.deep.equal({ budget: { before: 4000, after: 5000 } });
+    // v2 (tail of the page) vs the extra-fetched v1 (3000 -> 4000)
+    expect(body.items[1].changedFields).to.deep.equal({ budget: { before: 3000, after: 4000 } });
+    // exactly one boundary lookup, for the tail row only
+    expect(client.eqSpy).to.have.been.calledWith('version', 1);
+    expect(client.eqSpy.withArgs('version', sinon.match.any).callCount).to.equal(1);
+  });
+
+  it('returns an empty diff (not null) when adjacent versions carry identical field values', async () => {
+    const rows = [revisionRow(3), revisionRow(2)];
+    const client = buildRevisionsPageClient({ rows, predecessors: { 1: revisionRow(1) } });
+    const controller = loadController();
+    const res = await controller.listRevisions(buildContext({ client }));
+    const body = await res.json();
+    expect(body.items[0].changedFields).to.deep.equal({});
+  });
+
+  it('the first-ever revision (version 1) has changedFields null and triggers no boundary lookup', async () => {
+    const rows = [revisionRow(1)];
+    const client = buildRevisionsPageClient({ rows });
+    const controller = loadController();
+    const res = await controller.listRevisions(buildContext({ client }));
+    expect(res.status).to.equal(200);
+    const body = await res.json();
+    expect(body.items[0].changedFields).to.equal(null);
+    expect(client.eqSpy.withArgs('version', sinon.match.any)).to.not.have.been.called;
+  });
+
+  it('falls back to changedFields null and logs a warning (without failing the request) when the boundary lookup errors', async () => {
+    const rows = [revisionRow(2)];
+    const client = buildRevisionsPageClient({ rows });
+    client.eqSpy.withArgs('version', 1).returns({
+      maybeSingle: () => Promise.resolve({ data: null, error: { code: '500', message: 'boom' } }),
+    });
+    const controller = loadController();
+    const ctx = buildContext({ client });
+    const res = await controller.listRevisions(ctx);
+    expect(res.status).to.equal(200);
+    const body = await res.json();
+    expect(body.items[0].changedFields).to.equal(null);
+    expect(ctx.log.warn).to.have.been.calledWith(sinon.match(/predecessor lookup failed/));
   });
 });
 

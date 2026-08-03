@@ -83,7 +83,7 @@ export default function auditPolicyTests(getHttpClient, resetData) {
       expect(res.status).to.equal(403);
     });
 
-    it('API-10: revisions are newest-first', async () => {
+    it('API-10: revisions are newest-first, each carrying changedFields against its predecessor', async () => {
       const http = getHttpClient();
       const res = await http.admin.get(`/sites/${SITE_1_ID}/audit-policy/revisions`);
       expect(res.status).to.equal(200);
@@ -91,6 +91,15 @@ export default function auditPolicyTests(getHttpClient, resetData) {
       if (items.length > 1) {
         expect(items[0].version).to.be.greaterThan(items[1].version);
       }
+      // v2 (superseded by the exclusions/delete write above) only changed manualUrls
+      // relative to v1 - the inclusions/add write in between didn't touch exclusionGlobs.
+      const v2 = items.find((item) => item.version === 2);
+      expect(v2.changedFields).to.deep.equal({
+        manualUrls: { before: [], after: ['https://example.com/campaign-a'] },
+      });
+      // v1 has no predecessor (the very first version) - changedFields is null, not {}.
+      const v1 = items.find((item) => item.version === 1);
+      expect(v1.changedFields).to.equal(null);
     });
 
     it('API-15: scope-read endpoints return 501 pre-implementation', async () => {

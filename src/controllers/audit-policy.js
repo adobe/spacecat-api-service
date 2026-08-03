@@ -16,7 +16,7 @@ import {
 import { hasText, isObject, isValidUUID } from '@adobe/spacecat-shared-utils';
 import AccessControlUtil from '../support/access-control-util.js';
 import { UnauthorizedProductError } from '../support/errors.js';
-import { AuditPolicyDto, AuditPolicyRevisionDto } from '../dto/audit-policy.js';
+import { AuditPolicyDto, AuditPolicyRevisionDto, diffAuditPolicyRevisions } from '../dto/audit-policy.js';
 
 const POLICY_TABLE = 'audit_policy';
 const REVISION_TABLE = 'audit_policy_revision';
@@ -347,8 +347,32 @@ export default function AuditPolicyController() {
     }
     const rows = data || [];
     const identityMap = await resolveUpdatedByIdentities(context, rows);
+
+    // Predecessor (version - 1) for every row except the last is already in `rows` itself
+    // (versions are contiguous, one row per version - see audit_policy_revision's append-only,
+    // never-pruned design). Only the tail of the page may need one extra indexed lookup.
+    const byVersion = new Map(rows.map((row) => [row.version, row]));
+    const lastRow = rows[rows.length - 1];
+    if (lastRow && lastRow.version > 1 && !byVersion.has(lastRow.version - 1)) {
+      const { data: predecessor, error: predecessorError } = await client
+        .from(REVISION_TABLE)
+        .select('*')
+        .eq('site_id', siteId)
+        .eq('version', lastRow.version - 1)
+        .maybeSingle();
+      if (predecessorError) {
+        context.log?.warn?.(`audit-policy listRevisions: predecessor lookup failed: ${predecessorError.code} ${predecessorError.message}`);
+      } else if (predecessor) {
+        byVersion.set(predecessor.version, predecessor);
+      }
+    }
+
     const items = rows.map(
-      (row) => AuditPolicyRevisionDto.toJSON(row, identityMap.get(row.updated_by)),
+      (row) => AuditPolicyRevisionDto.toJSON(
+        row,
+        identityMap.get(row.updated_by),
+        diffAuditPolicyRevisions(byVersion.get(row.version - 1), row),
+      ),
     );
     // A full page implies more rows may exist; if the last page happens to contain exactly
     // `limit` rows, the client makes one harmless extra request that returns an empty page.

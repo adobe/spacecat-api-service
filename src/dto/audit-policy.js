@@ -59,13 +59,40 @@ export const AuditPolicyDto = {
   },
 };
 
+const DIFF_FIELDS = [
+  ['budget', 'budget'],
+  ['strategyName', 'strategy_name'],
+  ['exclusionGlobs', 'exclusion_globs'],
+  ['manualUrls', 'manual_urls'],
+  ['scopeConfig', 'scope_config'],
+  ['lifecycleOverrides', 'lifecycle_overrides'],
+];
+
+// Returns null when there is no predecessor (the first-ever version has nothing to diff
+// against). Otherwise an object containing only the fields that changed, each as
+// { before, after } - fields identical between the two rows are omitted entirely.
+export function diffAuditPolicyRevisions(previousRow, currentRow) {
+  if (!previousRow) {
+    return null;
+  }
+  const changed = {};
+  for (const [outKey, column] of DIFF_FIELDS) {
+    const before = previousRow[column];
+    const after = currentRow[column];
+    if (JSON.stringify(before) !== JSON.stringify(after)) {
+      changed[outKey] = { before, after };
+    }
+  }
+  return changed;
+}
+
 export const AuditPolicyRevisionDto = {
   // `resolvedUpdatedBy` is a human-readable display name/email resolved server-side (e.g. via
   // IMS) for the row's raw `updated_by` value; falls back to the raw value when it can't be
   // resolved (already a plain email/name, or IMS lookup failed/unavailable). The `typeof`
   // guard below defends against `list.map(AuditPolicyRevisionDto.toJSON)` - the repo's dominant
   // DTO idiom - which would otherwise pass the array index in as `resolvedUpdatedBy`.
-  toJSON(row, resolvedUpdatedBy) {
+  toJSON(row, resolvedUpdatedBy, changedFields) {
     return {
       version: row.version,
       budget: row.budget,
@@ -79,6 +106,7 @@ export const AuditPolicyRevisionDto = {
       note: row.note,
       effectiveAt: toISO(row.effective_at),
       supersededAt: toISO(row.superseded_at),
+      changedFields: changedFields ?? null,
     };
   },
 };

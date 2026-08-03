@@ -11,7 +11,7 @@
  */
 
 import { expect } from 'chai';
-import { AuditPolicyDto, AuditPolicyRevisionDto } from '../../src/dto/audit-policy.js';
+import { AuditPolicyDto, AuditPolicyRevisionDto, diffAuditPolicyRevisions } from '../../src/dto/audit-policy.js';
 
 const SITE_ID = '7b2e3f9c-0000-4000-8000-000000000001';
 
@@ -206,5 +206,90 @@ describe('AuditPolicyDto', () => {
     const dto = AuditPolicyRevisionDto.toJSON(row);
     expect(dto.effectiveAt).to.equal('2026-01-01T00:00:00.123Z');
     expect(dto.supersededAt).to.equal(null);
+  });
+
+  it('revision toJSON defaults changedFields to null when not supplied', () => {
+    const row = {
+      version: 4,
+      budget: 4000,
+      strategy_name: 'tiered',
+      exclusion_globs: [],
+      manual_urls: [],
+      scope_config: {},
+      lifecycle_overrides: {},
+      updated_by: 'b',
+      reason: 'r',
+      note: null,
+      effective_at: null,
+      superseded_at: null,
+    };
+    const dto = AuditPolicyRevisionDto.toJSON(row);
+    expect(dto.changedFields).to.equal(null);
+  });
+
+  it('revision toJSON passes through a computed changedFields object', () => {
+    const row = {
+      version: 4,
+      budget: 4000,
+      strategy_name: 'tiered',
+      exclusion_globs: [],
+      manual_urls: [],
+      scope_config: {},
+      lifecycle_overrides: {},
+      updated_by: 'b',
+      reason: 'r',
+      note: null,
+      effective_at: null,
+      superseded_at: null,
+    };
+    const changedFields = { budget: { before: 3000, after: 4000 } };
+    const dto = AuditPolicyRevisionDto.toJSON(row, undefined, changedFields);
+    expect(dto.changedFields).to.deep.equal(changedFields);
+  });
+});
+
+describe('diffAuditPolicyRevisions', () => {
+  const baseRow = {
+    budget: 4000,
+    strategy_name: 'tiered',
+    exclusion_globs: ['/checkout/*'],
+    manual_urls: [],
+    scope_config: {},
+    lifecycle_overrides: {},
+  };
+
+  it('returns null when there is no predecessor', () => {
+    expect(diffAuditPolicyRevisions(null, baseRow)).to.equal(null);
+    expect(diffAuditPolicyRevisions(undefined, baseRow)).to.equal(null);
+  });
+
+  it('returns an empty object when nothing changed between the two rows', () => {
+    expect(diffAuditPolicyRevisions(baseRow, { ...baseRow })).to.deep.equal({});
+  });
+
+  it('reports only the field that changed, with its before/after values', () => {
+    const currentRow = { ...baseRow, budget: 5000 };
+    expect(diffAuditPolicyRevisions(baseRow, currentRow)).to.deep.equal({
+      budget: { before: 4000, after: 5000 },
+    });
+  });
+
+  it('reports multiple changed fields, camelCased, leaving unchanged fields out', () => {
+    const currentRow = {
+      ...baseRow,
+      exclusion_globs: ['/checkout/*', '/account/*'],
+      manual_urls: ['https://x/a'],
+    };
+    expect(diffAuditPolicyRevisions(baseRow, currentRow)).to.deep.equal({
+      exclusionGlobs: { before: ['/checkout/*'], after: ['/checkout/*', '/account/*'] },
+      manualUrls: { before: [], after: ['https://x/a'] },
+    });
+  });
+
+  it('detects a change in a nested object field (scopeConfig) via structural comparison', () => {
+    const currentRow = { ...baseRow, scope_config: { maxDepth: 2 } };
+    expect(diffAuditPolicyRevisions(baseRow, currentRow)).to.deep.equal({
+      scopeConfig: { before: {}, after: { maxDepth: 2 } },
+    });
   });
 });

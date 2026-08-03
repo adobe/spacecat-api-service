@@ -334,6 +334,16 @@ AuditPolicyRevision:
     note: { type: [string, 'null'] }
     effectiveAt: { type: [string, 'null'], format: date-time }
     supersededAt: { type: [string, 'null'], format: date-time }
+    changedFields:
+      type: [object, 'null']
+      description: >-
+        Fields that changed relative to the immediately preceding version, as
+        { fieldName: { before, after } }. Null for the first version (no predecessor).
+      additionalProperties:
+        type: object
+        properties:
+          before: {}
+          after: {}
 
 AuditPolicyRevisionList:
   type: object
