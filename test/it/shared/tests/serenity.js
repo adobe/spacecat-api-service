@@ -1275,6 +1275,30 @@ export default function serenityTests(
       return res.body.created[0].semrushPromptId;
     };
 
+    // A few ms between two stamped writes so their `created_at` / `updated_at` don't tie at the
+    // millisecond precision of `new Date().toISOString()` — otherwise an ordering assertion would
+    // rest on two writes happening to land in different milliseconds.
+    const STAMP_GAP_MS = 5;
+    const sleep = (ms) => new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    });
+
+    // An in-place text edit — bumps `updated_*` without touching `created_*` (spec §8).
+    const editPromptText = async (persona, promptId, text, tagIds) => {
+      const res = await getHttpClient()[persona].patch(`${base}/prompts/${promptId}`, {
+        text, tagIds, geoTargetId: US_GEO, languageCode: 'en',
+      });
+      expect(res.status).to.equal(200);
+    };
+
+    // The server-side order of just the prompts THIS test created. `resetData` is per-`describe`,
+    // not per-`it`, so a sorted list also carries prior tests' prompts; filtering to `mine` keeps
+    // their relative order within the global sort, which is exactly `mine` sorted by the key.
+    const orderedMineIds = async (extraQuery, mine) => {
+      const items = await listPrompts(extraQuery);
+      return items.map((p) => p.semrushPromptId).filter((id) => mine.includes(id));
+    };
+
     it('GET /serenity/prompts returns the four authorship fields for a stamped prompt', async () => {
       await createUsMarket();
       const tagId = await createCategory('Running');
@@ -1322,16 +1346,16 @@ export default function serenityTests(
     // brand's slice resolves to a project created fresh per run, so no unstamped row is ever
     // visible on the slice this endpoint reads. Reaching it would mean injecting one through the
     // mock's `__seed` control route into the resolved project — harness work beyond this change.
-    // `buildPromptDto`'s `metadata?.x ?? null` mapping carries that path at the unit level.
+    // `buildPromptDto`'s `metadata?.x ?? null` mapping carries that path at the unit level, and the
+    // absent-metadata SORT position (NULLS-LAST in both directions) is asserted where it is
+    // reachable — the project-engine-client mock e2e (spacecat-shared#1859, LLMO-6666).
 
     // The metadata opt-in travels on the QUERY string while the sort keys travel in the BODY, so a
-    // sorted read exercises both at once. This guards the interaction: a regression that moved the
-    // opt-in into the body alongside the sort keys would strip the authorship fields here while
+    // sorted read exercises both at once. These two guard that INTERACTION: a regression that moved
+    // the opt-in into the body alongside the sort keys would strip the authorship fields while
     // leaving the unsorted read above green. One case per sortable field, so a regression that
-    // reaches only one of them is reported on its own rather than hidden behind the other.
-    //
-    // Ordering itself is deliberately NOT asserted — the mock implements no sort logic, so any
-    // order assertion would pass regardless of which keys were sent and prove nothing.
+    // reaches only one of them is reported on its own. (The ORDER itself is asserted separately
+    // below.)
     it('still returns the authorship fields on a read sorted by created_at', async () => {
       await createUsMarket();
       const tagId = await createCategory('Cameras');
@@ -1350,6 +1374,56 @@ export default function serenityTests(
       const item = await readPromptById(promptId, '&sort=metadata.updated_at&order=desc');
       expect(item.createdBy).to.equal('test-admin@adobe.com');
       expect(item.updatedAt).to.be.a('string');
+    });
+
+    // Ordering, now that the mock honours the wire sort keys (spacecat-shared#1859, client 1.18.0 —
+    // LLMO-6666/6667). The descending case is the regression catcher: the pre-#1859 no-op returned
+    // store (insertion) order regardless of keys, so a reversed expectation fails if the keys ever
+    // regress to being ignored (or are sent under the wrong names).
+    it('orders the list by metadata.created_at, ascending and descending', async () => {
+      await createUsMarket();
+      const tagId = await createCategory('Tripods');
+      const first = await createPrompt('admin', 'created-order one?', [tagId]);
+      await sleep(STAMP_GAP_MS);
+      const second = await createPrompt('admin', 'created-order two?', [tagId]);
+      await sleep(STAMP_GAP_MS);
+      const third = await createPrompt('admin', 'created-order three?', [tagId]);
+      const mine = [first, second, third];
+
+      // Ascending = insertion order; descending = its reverse, which DIFFERS from store order.
+      expect(await orderedMineIds('&sort=metadata.created_at&order=asc', mine))
+        .to.deep.equal([first, second, third]);
+      expect(await orderedMineIds('&sort=metadata.created_at&order=desc', mine))
+        .to.deep.equal([third, second, first]);
+    });
+
+    it('orders the list by metadata.updated_at, independent of created order', async () => {
+      await createUsMarket();
+      const tagId = await createCategory('Gimbals');
+      const a = await createPrompt('admin', 'update-order A?', [tagId]);
+      await sleep(STAMP_GAP_MS);
+      const b = await createPrompt('admin', 'update-order B?', [tagId]);
+      await sleep(STAMP_GAP_MS);
+      const c = await createPrompt('admin', 'update-order C?', [tagId]);
+      const mine = [a, b, c];
+
+      // Re-touch in a DIFFERENT order than creation (b, then c, then a) so `updated_at` order
+      // (b < c < a) diverges from both `created_at` order (a < b < c) and store order — proving the
+      // wire sort key selects the right field, not just any monotonic default.
+      await editPromptText('admin', b, 'update-order B edited?', [tagId]);
+      await sleep(STAMP_GAP_MS);
+      await editPromptText('admin', c, 'update-order C edited?', [tagId]);
+      await sleep(STAMP_GAP_MS);
+      await editPromptText('admin', a, 'update-order A edited?', [tagId]);
+
+      expect(await orderedMineIds('&sort=metadata.updated_at&order=asc', mine))
+        .to.deep.equal([b, c, a]);
+      expect(await orderedMineIds('&sort=metadata.updated_at&order=desc', mine))
+        .to.deep.equal([a, c, b]);
+      // The edits left `created_at` untouched, so its order is still insertion order — the two keys
+      // sort independently.
+      expect(await orderedMineIds('&sort=metadata.created_at&order=asc', mine))
+        .to.deep.equal([a, b, c]);
     });
   });
 }
