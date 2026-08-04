@@ -326,12 +326,16 @@ function OpportunitiesController(ctx) {
         opportunity.setUpdatedBy(profile.email || 'system');
         const updatedOppty = await opportunity.save(opportunity);
 
-        if (isResolving && await getIsSummitPlgEnabled(site, ctx, context)) {
+        if (isResolving) {
           try {
-            await revokeExistingGrants(dataAccess, updatedOppty);
+            // No requestContext: revocation must apply regardless of the caller
+            // (UI or backend-initiated resolve), unlike the UI-only PLG filtering above.
+            if (await getIsSummitPlgEnabled(site, ctx)) {
+              await revokeExistingGrants(dataAccess, updatedOppty);
+            }
           /* c8 ignore next 3 */
           } catch (err) {
-            ctx.log?.warn?.('Revoke existing grants handler failed', err?.message ?? err);
+            ctx.log?.warn?.(`Revoke existing grants handler failed for opportunity ${opportunityId} on site ${siteId}`, err?.message ?? err);
           }
         }
 

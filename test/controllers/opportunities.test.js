@@ -765,22 +765,50 @@ describe('Opportunities Controller', () => {
     });
 
     it('does not invoke revokeExistingGrants when the opportunity is already RESOLVED', async () => {
+      const previousStatus = opptys[0].status;
       opptys[0].status = 'RESOLVED';
-      const { controller, mockSuggestion } = buildController();
+      try {
+        const { controller, mockSuggestion } = buildController();
+
+        const response = await controller.patchOpportunity({
+          ...defaultAuthAttributes,
+          ...plgHeaders,
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: { status: 'RESOLVED', title: 'still resolved' },
+        });
+
+        expect(response.status).to.equal(200);
+        expect(mockSuggestion.allByOpportunityIdAndStatus).to.not.have.been.called;
+      } finally {
+        opptys[0].status = previousStatus;
+      }
+    });
+
+    it('does not invoke revokeExistingGrants when the site is not PLG-enabled', async () => {
+      const { controller, mockSuggestion } = buildController({
+        Entitlement: {
+          findByOrganizationIdAndProductCode: sandbox.stub().resolves({ getTier: () => 'FREE' }),
+        },
+      });
 
       const response = await controller.patchOpportunity({
         ...defaultAuthAttributes,
         ...plgHeaders,
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
-        data: { status: 'RESOLVED', title: 'still resolved' },
+        data: { status: 'RESOLVED' },
       });
 
       expect(response.status).to.equal(200);
       expect(mockSuggestion.allByOpportunityIdAndStatus).to.not.have.been.called;
     });
 
-    it('does not invoke revokeExistingGrants when the site is not PLG-enabled', async () => {
-      const { controller, mockSuggestion } = buildController();
+    it('invokes revokeExistingGrants for backend-initiated resolves without the UI client-type header', async () => {
+      const s1 = { getId: () => 'sugg-1' };
+      const { controller, mockSuggestion, mockSuggestionGrant } = buildController();
+      mockSuggestion.allByOpportunityIdAndStatus.resolves([s1]);
+      mockSuggestionGrant.splitSuggestionsByGrantStatus.resolves({
+        grantedIds: ['sugg-1'], notGrantedIds: [], grantIds: ['grant-1'],
+      });
 
       const response = await controller.patchOpportunity({
         ...defaultAuthAttributes,
@@ -789,7 +817,7 @@ describe('Opportunities Controller', () => {
       });
 
       expect(response.status).to.equal(200);
-      expect(mockSuggestion.allByOpportunityIdAndStatus).to.not.have.been.called;
+      expect(mockSuggestionGrant.revokeSuggestionGrant).to.have.been.calledOnceWith('grant-1');
     });
 
     it('catches and logs a revokeExistingGrants failure without failing the PATCH response', async () => {
@@ -805,8 +833,30 @@ describe('Opportunities Controller', () => {
 
       expect(response.status).to.equal(200);
       expect(mockContext.log.warn).to.have.been.calledOnceWith(
-        'Revoke existing grants handler failed',
+        `Revoke existing grants handler failed for opportunity ${OPPORTUNITY_ID} on site ${SITE_ID}`,
         'db failure',
+      );
+    });
+
+    it('returns 200 when the entitlement lookup itself fails, not a 500', async () => {
+      const { controller, mockSuggestion } = buildController({
+        Entitlement: {
+          findByOrganizationIdAndProductCode: sandbox.stub().rejects(new Error('entitlement lookup failed')),
+        },
+      });
+
+      const response = await controller.patchOpportunity({
+        ...defaultAuthAttributes,
+        ...plgHeaders,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { status: 'RESOLVED' },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(mockSuggestion.allByOpportunityIdAndStatus).to.not.have.been.called;
+      expect(mockContext.log.error).to.have.been.calledOnceWith(
+        'Error checking audit summit-plg for site:',
+        sinon.match.instanceOf(Error),
       );
     });
   });

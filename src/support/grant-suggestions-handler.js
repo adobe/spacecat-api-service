@@ -256,7 +256,8 @@ export async function revokeExistingGrants(dataAccess, opportunity) {
     return;
   }
 
-  const { grantIds } = await SuggestionGrant.splitSuggestionsByGrantStatus(newSuggestionIds);
+  const splitResult = await SuggestionGrant.splitSuggestionsByGrantStatus(newSuggestionIds);
+  const { grantIds } = splitResult ?? {};
   await revokeGrants(SuggestionGrant, grantIds);
 }
 

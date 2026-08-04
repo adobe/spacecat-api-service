@@ -1404,9 +1404,8 @@ describe('grant-suggestions-handler', () => {
     const opportunity = { getId: () => opptyId };
 
     it('returns early when dataAccess is missing', async () => {
-      await revokeExistingGrants(null, opportunity);
-      await revokeExistingGrants(undefined, opportunity);
-      expect(true).to.be.true;
+      expect(await revokeExistingGrants(null, opportunity)).to.be.undefined;
+      expect(await revokeExistingGrants(undefined, opportunity)).to.be.undefined;
     });
 
     it('returns early when opportunity is missing', async () => {
