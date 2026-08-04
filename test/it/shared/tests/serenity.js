@@ -1360,9 +1360,14 @@ export default function serenityTests(
   // via admin, OR (Option B) via a state-layer `facs_access_mappings` grant. Without
   // both, the override is DROPPED (not 403) and the prompt stays `source:config`.
   //
-  // The producing tag is asserted by resolving the `source` root's children by name
-  // (roots via `parentId=`, then children via `parentId=<sourceRootId>` — same shape
-  // the tag-tree tests use), then checking the created prompt's `tagIds`.
+  // The producing tag is asserted by resolving the ONE `source`-root child present in
+  // the created prompt's `tagIds` and checking its name (roots via `parentId=`, then
+  // children via `parentId=<sourceRootId>` — same shape the tag-tree tests use).
+  //
+  // The JWT-carried `can_track` path (`authInfo.hasFacsPermission`) is not re-exercised
+  // here — no IT persona carries `can_track` in its JWT, and it is the same call the
+  // controller unit tests already pin; this suite covers the admin and STATE-LAYER
+  // grant surfaces, which the unit layer can only stub.
   describe('Serenity API — assertSource producer gate (live mock, SITES-47870)', () => {
     const base = `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity`;
     const US_GEO = 2840;
@@ -1387,9 +1392,11 @@ export default function serenityTests(
       return res.body.id;
     };
 
-    // Resolve a `source`-root child's upstream id by its bare name (`config` /
-    // `semrush`), or undefined when that producer has not been minted yet.
-    const sourceChildId = async (name) => {
+    // The producing `source` tag stamped on a created prompt: the single `source`-root
+    // child present in its `tagIds`. Returns its bare name (`config` / `semrush` / …),
+    // or undefined if none was stamped. The producer is mutually exclusive — exactly one
+    // source child is injected per prompt — so a single name assertion fully pins it.
+    const producerTagName = async (tagIds) => {
       const roots = await getHttpClient().admin.get(
         `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=`,
       );
@@ -1400,7 +1407,7 @@ export default function serenityTests(
         `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${sourceRoot.id}`,
       );
       expect(children.status).to.equal(200);
-      return children.body.items.find((t) => t.name === name)?.id;
+      return children.body.items.find((t) => tagIds.includes(t.id))?.name;
     };
 
     // `assertSource` is only added to the body when true, so the "no opt-in" case sends
@@ -1424,9 +1431,7 @@ export default function serenityTests(
       const res = await createTracked('admin', { assertSource: true, source: 'semrush', tagIds: [tagId] });
       expect(res.status).to.equal(200);
       expect(res.body.created).to.have.lengthOf(1);
-      const semrushId = await sourceChildId('semrush');
-      expect(semrushId, 'the semrush producer tag resolved under the source root').to.exist;
-      expect(res.body.created[0].tagIds).to.include(semrushId);
+      expect(await producerTagName(res.body.created[0].tagIds)).to.equal('semrush');
     });
 
     // The core Option B assertion: brandManager's JWT facs_permissions are empty, so
@@ -1442,13 +1447,7 @@ export default function serenityTests(
       });
       expect(res.status).to.equal(200);
       expect(res.body.created).to.have.lengthOf(1);
-      const semrushId = await sourceChildId('semrush');
-      expect(semrushId).to.exist;
-      expect(res.body.created[0].tagIds).to.include(semrushId);
-      const configId = await sourceChildId('config');
-      if (configId) {
-        expect(res.body.created[0].tagIds).to.not.include(configId);
-      }
+      expect(await producerTagName(res.body.created[0].tagIds)).to.equal('semrush');
     });
 
     it('DROPS the override for a caller without can_track — source stays config', async () => {
@@ -1459,13 +1458,7 @@ export default function serenityTests(
       const res = await createTracked('user', { assertSource: true, source: 'semrush', tagIds: [tagId] });
       expect(res.status).to.equal(200);
       expect(res.body.created).to.have.lengthOf(1);
-      const configId = await sourceChildId('config');
-      expect(configId, 'the config default producer is stamped').to.exist;
-      expect(res.body.created[0].tagIds).to.include(configId);
-      const semrushId = await sourceChildId('semrush');
-      if (semrushId) {
-        expect(res.body.created[0].tagIds).to.not.include(semrushId);
-      }
+      expect(await producerTagName(res.body.created[0].tagIds)).to.equal('config');
     });
 
     it('requires the body opt-in too: can_track WITHOUT assertSource stays config', async () => {
@@ -1478,9 +1471,7 @@ export default function serenityTests(
       });
       expect(res.status).to.equal(200);
       expect(res.body.created).to.have.lengthOf(1);
-      const configId = await sourceChildId('config');
-      expect(configId).to.exist;
-      expect(res.body.created[0].tagIds).to.include(configId);
+      expect(await producerTagName(res.body.created[0].tagIds)).to.equal('config');
     });
   });
 }
