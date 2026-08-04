@@ -54,6 +54,41 @@ const TARGETED_PATHS_MAX_ENTRY_LENGTH = 256;
 function LlmoCloudFrontController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
+  // Caller identity for audit lines; defaults so the field is always present (mirrors Cloudflare).
+  const getCallerId = (context) => context?.attributes?.authInfo?.getProfile?.()?.email || 'unknown';
+
+  // Best-effort site hostname for audit lines. Never throws: a log line must not be able to fail
+  // the request it describes, and calculateForwardedHost rejects malformed base URLs.
+  const siteHost = (site, log) => {
+    try {
+      return calculateForwardedHost(site?.getBaseURL?.(), log) || undefined;
+    } catch (e) {
+      log?.debug?.(`[cdn-onboard-cloudfront] could not derive host for audit line: ${e.message}`);
+      return undefined;
+    }
+  };
+
+  // Greppable key=value audit line per mutation (started/done/error), correlated by requestId —
+  // same shape as the Cloudflare onboarding controller. Null/empty fields are dropped.
+  const auditLine = (context, action, outcome, fields = {}) => {
+    const entries = {
+      action,
+      outcome,
+      caller: getCallerId(context),
+      requestId: context?.invocation?.id || 'unknown',
+      ...fields,
+    };
+    const fmt = (v) => {
+      const s = String(v);
+      return /\s/.test(s) ? `"${s.replace(/"/g, "'")}"` : s;
+    };
+    const kv = Object.entries(entries)
+      .filter(([, v]) => v !== undefined && v !== null && v !== '')
+      .map(([k, v]) => `${k}=${fmt(v)}`)
+      .join(' ');
+    return `[cdn-onboard-cloudfront] ${kv}`;
+  };
+
   /**
    * POST /sites/{siteId}/llmo/cdn-onboard/cloudfront/bootstrap-url
    * Builds a one-click CloudFormation quick-create URL (with a server-side
@@ -147,7 +182,11 @@ function LlmoCloudFrontController(ctx) {
       Object.entries(params).forEach(([k, v]) => qs.set(`param_${k}`, v));
       const quickCreateUrl = `https://${region}.console.aws.amazon.com/cloudformation/home?region=${region}#/stacks/quickcreate?${qs.toString()}`;
 
-      log.info(`[cdn-onboard-cloudfront] Generated bootstrap URL for site ${siteId}, account ${accountId}`);
+      // First step of the CloudFront wizard the customer can reach, so this doubles as the
+      // "onboarding started" signal for alerting — hence caller + host, not just ids.
+      log.info(auditLine(context, 'bootstrap-url', 'generated', {
+        siteId, accountId, host: siteHost(site, log),
+      }));
 
       return ok({
         externalId,
@@ -217,30 +256,6 @@ function LlmoCloudFrontController(ctx) {
       ...assumed,
       cloudFrontClient: new CloudFrontEdgeClient({ credentials: assumed.credentials }),
     };
-  };
-
-  // Caller identity for audit lines; defaults so the field is always present (mirrors Cloudflare).
-  const getCallerId = (context) => context?.attributes?.authInfo?.getProfile?.()?.email || 'unknown';
-
-  // Greppable key=value audit line per mutation (started/done/error), correlated by requestId —
-  // same shape as the Cloudflare onboarding controller. Null/empty fields are dropped.
-  const auditLine = (context, action, outcome, fields = {}) => {
-    const entries = {
-      action,
-      outcome,
-      caller: getCallerId(context),
-      requestId: context?.invocation?.id || 'unknown',
-      ...fields,
-    };
-    const fmt = (v) => {
-      const s = String(v);
-      return /\s/.test(s) ? `"${s.replace(/"/g, "'")}"` : s;
-    };
-    const kv = Object.entries(entries)
-      .filter(([, v]) => v !== undefined && v !== null && v !== '')
-      .map(([k, v]) => `${k}=${fmt(v)}`)
-      .join(' ');
-    return `[cdn-onboard-cloudfront] ${kv}`;
   };
 
   // Surface actionable AWS failures (permissions, preconditions, throttling) as 4xx instead of a
@@ -314,19 +329,24 @@ function LlmoCloudFrontController(ctx) {
     }
 
     try {
-      const { error, externalId } = await gateEdgeOptimizeWizard(siteId, Site, 'connect the CloudFront connector role');
+      const { error, site, externalId } = await gateEdgeOptimizeWizard(siteId, Site, 'connect the CloudFront connector role');
       if (error) {
         return error;
       }
 
       try {
         const { roleArn } = await assumeConnectorRole({ accountId, externalId, roleName });
-        log.info(`[cdn-onboard-cloudfront] Connected site ${siteId} to account ${accountId}`);
+        log.info(auditLine(context, 'connect', 'done', {
+          siteId, accountId, host: siteHost(site, log),
+        }));
         return ok({ connected: true, accountId, roleArn });
       } catch (assumeError) {
         // The role may not exist yet (customer still creating it) or the external ID may not
         // match — surface as not-connected so the wizard can keep polling rather than erroring.
-        log.info(`[cdn-onboard-cloudfront] Role not yet assumable for site ${siteId}: ${assumeError.message}`);
+        // Emitted once per poll, so dedupe by siteId before alerting on it.
+        log.info(auditLine(context, 'connect', 'role-not-assumable', {
+          siteId, accountId, error: assumeError.message,
+        }));
         return ok({ connected: false, reason: cleanupHeaderValue(assumeError.message) });
       }
     } catch (error) {
@@ -901,7 +921,9 @@ function LlmoCloudFrontController(ctx) {
 
       const url = /^https?:\/\//.test(domain) ? domain : `https://${domain}/`;
       const result = await verifyAwsRouting(url);
-      log.info(`[cdn-onboard-cloudfront] Verified routing for site ${siteId}: passed=${result.passed}`);
+      log.info(auditLine(context, 'verify', result.passed ? 'passed' : 'failed', {
+        siteId, accountId, distributionId, host: domain,
+      }));
       return ok(result);
     } catch (error) {
       log.error(`Failed to verify CloudFront routing for site ${siteId}:`, error);
@@ -1072,8 +1094,12 @@ function LlmoCloudFrontController(ctx) {
         accountId: resolvedAccountId,
       });
 
-      log.info(`[cdn-onboard-cloudfront] site ${siteId}: canProceed=${result.canProceed},`
-        + ` steps=${result.steps.map((s) => `${s.key}:${s.action}`).join(',')}`);
+      log.info(auditLine(context, 'plan', result.canProceed ? 'ok' : 'blocked', {
+        siteId,
+        distributionId,
+        host: forwardedHost,
+        steps: result.steps.map((s) => `${s.key}:${s.action}`).join(','),
+      }));
       // targetDomain lets the FE display exactly the host the BE will route to for this site.
       // Loosely coupled: the FE also knows it locally, so this is purely informational.
       return ok({ ...result, targetDomain: forwardedHost });
@@ -1140,7 +1166,7 @@ function LlmoCloudFrontController(ctx) {
         })),
       };
 
-      log.info(`[cdn-onboard-cloudfront] Returned permissions for site ${siteId}`);
+      log.info(auditLine(context, 'permissions', 'returned', { siteId }));
       return ok({ adobeAccount, manifest });
     } catch (error) {
       log.error(`Failed to read the CloudFront connector permissions for site ${siteId}:`, error);

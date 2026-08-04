@@ -456,6 +456,12 @@ function LlmoAkamaiController(ctx) {
       // on an empty domain (guarded above), so the catch below is defensive against future client
       // versions. Mutating flows (deploy/activate) disambiguate this via an authenticated probe.
       const properties = await client.findPropertiesByDomain(host);
+      // First call made with the customer's own EdgeGrid credentials, so this is the earliest
+      // server-side evidence that an Akamai onboarding is under way. Everything before it is
+      // client-side only. Alerting keys off this; `plan` is several steps later.
+      log.info(auditLine(context, 'list-properties', 'ok', {
+        siteId: site.getId(), host, count: properties.length,
+      }));
       return ok({ domain: host, properties });
     } catch (e) {
       return papiErrorResponse(e, 'property listing', context, { siteId: site.getId(), host });
@@ -547,12 +553,21 @@ function LlmoAkamaiController(ctx) {
         validated = false;
         warnings = ruleTree.warnings || [];
         log.warn(auditLine(context, 'plan', 'dry-run-failed', {
-          siteId: site.getId(), propertyId, version, error: dryRunError.message,
+          siteId: site.getId(),
+          host: siteHostname(site),
+          propertyId,
+          version,
+          error: dryRunError.message,
         }));
       }
 
       log.info(auditLine(context, 'plan', 'ok', {
-        siteId: site.getId(), propertyId, version, validated, errorCount: errors.length,
+        siteId: site.getId(),
+        host: siteHostname(site),
+        propertyId,
+        version,
+        validated,
+        errorCount: errors.length,
       }));
       return ok({
         propertyId,
@@ -635,7 +650,9 @@ function LlmoAkamaiController(ctx) {
       return cfgError;
     }
 
-    log.info(auditLine(context, 'deploy', 'started', { siteId, propertyId }));
+    log.info(auditLine(context, 'deploy', 'started', {
+      siteId, host: siteHostname(site), propertyId,
+    }));
 
     // Hoisted so the catch can report it: createVersion may succeed before a later call throws.
     let newVersion;
@@ -681,7 +698,11 @@ function LlmoAkamaiController(ctx) {
       const warnings = putResult?.warnings || [];
       if (papiErrors.length > 0) {
         log.error(auditLine(context, 'deploy', 'papi-rejected', {
-          siteId, propertyId, newVersion, errorCount: papiErrors.length,
+          siteId,
+          host: siteHostname(site),
+          propertyId,
+          newVersion,
+          errorCount: papiErrors.length,
         }));
         return createResponse({
           message: 'Akamai rejected the rule tree',
@@ -692,7 +713,12 @@ function LlmoAkamaiController(ctx) {
       }
 
       log.info(auditLine(context, 'deploy', 'deployed', {
-        siteId, propertyId, baseVersion, newVersion, warningCount: warnings.length,
+        siteId,
+        host: siteHostname(site),
+        propertyId,
+        baseVersion,
+        newVersion,
+        warningCount: warnings.length,
       }));
       return ok({
         propertyId,
@@ -794,7 +820,12 @@ function LlmoAkamaiController(ctx) {
         return createResponse({ message: 'Akamai returned no activation link' }, 502);
       }
       log.info(auditLine(context, 'activate', 'submitted', {
-        siteId, propertyId, version, network, activationId,
+        siteId,
+        host: siteHostname(site),
+        propertyId,
+        version,
+        network,
+        activationId,
       }));
       return ok({
         propertyId, version, network, activationId, activationLink,

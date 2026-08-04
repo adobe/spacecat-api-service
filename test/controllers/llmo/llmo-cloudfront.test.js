@@ -338,6 +338,14 @@ describe('LlmoCloudFrontController', () => {
       expect(getSignedUrlStub.calledOnce).to.equal(true);
     });
 
+    it('emits a bootstrap-url audit line carrying caller and host (onboarding-started signal)', async () => {
+      await controller.createBootstrapUrl(bootstrapContext);
+      const logged = bootstrapContext.log.info.getCalls().map((c) => c.args[0]).join('\n');
+      expect(logged).to.contain('[cdn-onboard-cloudfront] action=bootstrap-url outcome=generated');
+      expect(logged).to.contain('accountId=682033462621');
+      expect(logged).to.contain('caller=');
+    });
+
     it('returns 400 for an invalid account id', async () => {
       const result = await controller.createBootstrapUrl({ ...bootstrapContext, data: { accountId: '123' } });
 

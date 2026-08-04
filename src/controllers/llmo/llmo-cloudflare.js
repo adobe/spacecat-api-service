@@ -76,6 +76,18 @@ const toWorkerTag = (value) => {
 };
 
 /**
+ * Best-effort hostname for audit lines. Returns undefined for a malformed base URL so auditLine
+ * simply drops the field — a log line must never be able to fail the request it describes.
+ */
+const siteHostname = (site) => {
+  try {
+    return new URL(site.getBaseURL()).hostname;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
  * Builds a single greppable audit line for the Cloudflare onboarding operations. Every line
  * carries action, outcome, caller, and requestId so a deploy/route attempt can be correlated
  * end-to-end in Splunk; `fields` adds operation-specific identifiers (siteId, accountId, ...).
@@ -220,17 +232,27 @@ function LlmoCloudflareController(ctx) {
    * Builds a handler for a parameter-less Cloudflare list call (accounts, zones, ...): runs
    * access control + token resolution, invokes `cfClient[method]()`, and maps failures.
    */
-  const cfListProxy = (method, action) => async (context) => {
+  const cfListProxy = (method, action, auditAction) => async (context) => {
     const result = await getSiteAndCheckAccess(context);
     if (result.status) {
       return result;
     }
+    const { site } = result;
     const { client, error } = requireCfClient(context);
     if (error) {
       return error;
     }
     try {
-      return ok(await client[method]());
+      const listed = await client[method]();
+      // Runs with the customer's own Cloudflare API token, so this is the earliest server-side
+      // evidence that a Cloudflare onboarding is under way — every preceding wizard step is
+      // client-side only and `deploy-worker` is the last step. Onboarding alerts key off this.
+      log.info(auditLine(context, auditAction, 'ok', {
+        siteId: site.getId(),
+        host: siteHostname(site),
+        count: Array.isArray(listed) ? listed.length : undefined,
+      }));
+      return ok(listed);
     } catch (e) {
       return cfErrorResponse(e, action, context, { siteId: context.params?.siteId });
     }
@@ -255,7 +277,7 @@ function LlmoCloudflareController(ctx) {
   };
 
   // GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts
-  const listAccounts = cfListProxy('listAccounts', 'account listing');
+  const listAccounts = cfListProxy('listAccounts', 'account listing', 'list-accounts');
 
   /**
    * GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones?accountId=<id>
@@ -292,6 +314,15 @@ function LlmoCloudflareController(ctx) {
       const matching = (zones || []).filter(
         (zone) => hasText(zone?.name) && !!siteApex && registrableDomain(zone.name) === siteApex,
       );
+      // matched=0 with listed>0 means the token works but no zone is on the site's apex — the
+      // most common Cloudflare onboarding dead end, and invisible without this line.
+      log.info(auditLine(context, 'list-zones', 'ok', {
+        siteId: site.getId(),
+        host: siteHostname(site),
+        accountId,
+        listed: (zones || []).length,
+        matched: matching.length,
+      }));
       return ok(matching);
     } catch (e) {
       return cfErrorResponse(e, 'zone listing', context, {
