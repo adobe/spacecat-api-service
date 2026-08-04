@@ -21,6 +21,7 @@ import AkamaiClient, {
 } from '@adobe/spacecat-shared-akamai-client';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
+import { auditHostname } from './llmo-utils.js';
 import {
   buildRuleConfig, mergeIntoTree, managedRuleNames, redactSecrets,
 } from './llmo-akamai-utils.js';
@@ -221,7 +222,9 @@ function LlmoAkamaiController(ctx) {
    */
   const papiErrorResponse = (error, action, context, fields = {}) => {
     const message = error?.message || String(error);
-    log.error(auditLine(context, 'papi-call', 'error', { op: action, ...fields, error: message }));
+    log.error(auditLine(context, 'papi-call', 'error', {
+      severity: 'error', op: action, ...fields, error: message,
+    }));
     // Read the status from the "-> <status>:" token the client emits right after the path, not by
     // scanning the whole string: the response body (up to 1000 chars) can itself contain a
     // "-> 404" and mis-map a genuine 5xx. Take the FIRST such token, which is the real status.
@@ -363,7 +366,9 @@ function LlmoAkamaiController(ctx) {
       apiKey = await getLlmoApiKey(site, context);
     } catch (e) {
       log.error(auditLine(context, 'resolve-config', 'metaconfig-failed', {
-        siteId: site.getId(), error: e.message,
+        severity: 'error',
+        siteId: site.getId(),
+        error: e.message,
       }));
       return { error: createResponse({ message: 'Failed to fetch site metaconfig' }, 502) };
     }
@@ -553,8 +558,9 @@ function LlmoAkamaiController(ctx) {
         validated = false;
         warnings = ruleTree.warnings || [];
         log.warn(auditLine(context, 'plan', 'dry-run-failed', {
+          severity: 'error',
           siteId: site.getId(),
-          host: siteHostname(site),
+          host: auditHostname(site),
           propertyId,
           version,
           error: dryRunError.message,
@@ -563,7 +569,7 @@ function LlmoAkamaiController(ctx) {
 
       log.info(auditLine(context, 'plan', 'ok', {
         siteId: site.getId(),
-        host: siteHostname(site),
+        host: auditHostname(site),
         propertyId,
         version,
         validated,
@@ -651,7 +657,7 @@ function LlmoAkamaiController(ctx) {
     }
 
     log.info(auditLine(context, 'deploy', 'started', {
-      siteId, host: siteHostname(site), propertyId,
+      siteId, host: auditHostname(site), propertyId,
     }));
 
     // Hoisted so the catch can report it: createVersion may succeed before a later call throws.
@@ -698,8 +704,9 @@ function LlmoAkamaiController(ctx) {
       const warnings = putResult?.warnings || [];
       if (papiErrors.length > 0) {
         log.error(auditLine(context, 'deploy', 'papi-rejected', {
+          severity: 'error',
           siteId,
-          host: siteHostname(site),
+          host: auditHostname(site),
           propertyId,
           newVersion,
           errorCount: papiErrors.length,
@@ -714,7 +721,7 @@ function LlmoAkamaiController(ctx) {
 
       log.info(auditLine(context, 'deploy', 'deployed', {
         siteId,
-        host: siteHostname(site),
+        host: auditHostname(site),
         propertyId,
         baseVersion,
         newVersion,
@@ -782,7 +789,7 @@ function LlmoAkamaiController(ctx) {
     // an IMS user GUID) — never accepted from the client.
     const notifyEmail = getCallerEmail(context);
     if (!notifyEmail) {
-      log.error(auditLine(context, 'activate', 'no-notify-email', { siteId, propertyId }));
+      log.error(auditLine(context, 'activate', 'no-notify-email', { severity: 'error', siteId, propertyId }));
       return forbidden('Unable to derive a notification email from the authenticated user');
     }
 
@@ -815,13 +822,17 @@ function LlmoAkamaiController(ctx) {
         // PAPI accepted the activation but returned no usable link — surface it rather than
         // reporting success with an empty activationId the UI cannot poll.
         log.error(auditLine(context, 'activate', 'no-activation-link', {
-          siteId, propertyId, version, network,
+          severity: 'error',
+          siteId,
+          propertyId,
+          version,
+          network,
         }));
         return createResponse({ message: 'Akamai returned no activation link' }, 502);
       }
       log.info(auditLine(context, 'activate', 'submitted', {
         siteId,
-        host: siteHostname(site),
+        host: auditHostname(site),
         propertyId,
         version,
         network,
@@ -878,7 +889,12 @@ function LlmoAkamaiController(ctx) {
           // Double failure (activate POST AND the recovery probe both failed) — log at error level
           // for alerting visibility; the caller still gets the sanitized activation error below.
           log.error(auditLine(context, 'activate', 'recover-failed', {
-            siteId, propertyId, version, network, error: recoverErr?.message,
+            severity: 'error',
+            siteId,
+            propertyId,
+            version,
+            network,
+            error: recoverErr?.message,
           }));
         }
       }

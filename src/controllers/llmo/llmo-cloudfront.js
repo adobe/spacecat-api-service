@@ -23,6 +23,7 @@ import TokowakaClient, {
   CloudFrontEdgeClient,
 } from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
+import { auditHostname } from './llmo-utils.js';
 
 // CloudFormation templates use intrinsic-function tags (!Ref/!Sub/!GetAtt/...) that plain YAML
 // rejects. This schema tolerates them (constructing each to its raw value) so the permissions
@@ -56,17 +57,6 @@ function LlmoCloudFrontController(ctx) {
 
   // Caller identity for audit lines; defaults so the field is always present (mirrors Cloudflare).
   const getCallerId = (context) => context?.attributes?.authInfo?.getProfile?.()?.email || 'unknown';
-
-  // Best-effort site hostname for audit lines. Never throws: a log line must not be able to fail
-  // the request it describes, and calculateForwardedHost rejects malformed base URLs.
-  const siteHost = (site, log) => {
-    try {
-      return calculateForwardedHost(site?.getBaseURL?.(), log) || undefined;
-    } catch (e) {
-      log?.debug?.(`[cdn-onboard-cloudfront] could not derive host for audit line: ${e.message}`);
-      return undefined;
-    }
-  };
 
   // Greppable key=value audit line per mutation (started/done/error), correlated by requestId —
   // same shape as the Cloudflare onboarding controller. Null/empty fields are dropped.
@@ -185,7 +175,7 @@ function LlmoCloudFrontController(ctx) {
       // First step of the CloudFront wizard the customer can reach, so this doubles as the
       // "onboarding started" signal for alerting — hence caller + host, not just ids.
       log.info(auditLine(context, 'bootstrap-url', 'generated', {
-        siteId, accountId, host: siteHost(site, log),
+        siteId, accountId, host: auditHostname(site),
       }));
 
       return ok({
@@ -337,7 +327,7 @@ function LlmoCloudFrontController(ctx) {
       try {
         const { roleArn } = await assumeConnectorRole({ accountId, externalId, roleName });
         log.info(auditLine(context, 'connect', 'done', {
-          siteId, accountId, host: siteHost(site, log),
+          siteId, accountId, host: auditHostname(site),
         }));
         return ok({ connected: true, accountId, roleArn });
       } catch (assumeError) {
@@ -590,7 +580,11 @@ function LlmoCloudFrontController(ctx) {
       return ok(result);
     } catch (error) {
       log.error(auditLine(context, 'create-origin', 'error', {
-        siteId, accountId, distributionId, error: error.message,
+        severity: 'error',
+        siteId,
+        accountId,
+        distributionId,
+        error: error.message,
       }));
       return mutationErrorResponse(error, 'Failed to create the Edge Optimize origin, please try again');
     }
@@ -667,7 +661,11 @@ function LlmoCloudFrontController(ctx) {
       return ok(result);
     } catch (error) {
       log.error(auditLine(context, 'create-function', 'error', {
-        siteId, accountId, distributionId, error: error.message,
+        severity: 'error',
+        siteId,
+        accountId,
+        distributionId,
+        error: error.message,
       }));
       return mutationErrorResponse(error, 'Failed to create the CloudFront routing function, please try again');
     }
@@ -718,7 +716,12 @@ function LlmoCloudFrontController(ctx) {
       return ok(result);
     } catch (error) {
       log.error(auditLine(context, 'apply-cache', 'error', {
-        siteId, accountId, distributionId, behavior: pathPattern, error: error.message,
+        severity: 'error',
+        siteId,
+        accountId,
+        distributionId,
+        behavior: pathPattern,
+        error: error.message,
       }));
       return mutationErrorResponse(error, 'Failed to apply CloudFront cache headers, please try again');
     }
@@ -770,7 +773,11 @@ function LlmoCloudFrontController(ctx) {
       return ok(result);
     } catch (error) {
       log.error(auditLine(context, 'create-lambda', 'error', {
-        siteId, accountId, distributionId, error: error.message,
+        severity: 'error',
+        siteId,
+        accountId,
+        distributionId,
+        error: error.message,
       }));
       return mutationErrorResponse(error, 'Failed to create the CloudFront Lambda@Edge function, please try again');
     }
@@ -868,7 +875,12 @@ function LlmoCloudFrontController(ctx) {
       return ok(result);
     } catch (error) {
       log.error(auditLine(context, 'associate', 'error', {
-        siteId, accountId, distributionId, behavior: pathPattern, error: error.message,
+        severity: 'error',
+        siteId,
+        accountId,
+        distributionId,
+        behavior: pathPattern,
+        error: error.message,
       }));
       return mutationErrorResponse(error, 'Failed to associate CloudFront routing, please try again');
     }
@@ -921,8 +933,15 @@ function LlmoCloudFrontController(ctx) {
 
       const url = /^https?:\/\//.test(domain) ? domain : `https://${domain}/`;
       const result = await verifyAwsRouting(url);
+      // `host` is always the site (comparable across providers); `probedHost` is what was actually
+      // hit, which may be a caller override or the distribution's *.cloudfront.net fallback.
       log.info(auditLine(context, 'verify', result.passed ? 'passed' : 'failed', {
-        siteId, accountId, distributionId, host: domain,
+        siteId,
+        accountId,
+        distributionId,
+        host: auditHostname(site),
+        probedHost: domain,
+        severity: result.passed ? undefined : 'error',
       }));
       return ok(result);
     } catch (error) {
@@ -1016,7 +1035,12 @@ function LlmoCloudFrontController(ctx) {
       return ok(result);
     } catch (error) {
       log.error(auditLine(context, 'deploy', 'error', {
-        siteId, accountId, distributionId, behavior, error: error.message,
+        severity: 'error',
+        siteId,
+        accountId,
+        distributionId,
+        behavior,
+        error: error.message,
       }));
       return mutationErrorResponse(error, 'Failed to deploy CloudFront routing, please try again');
     }
@@ -1097,7 +1121,8 @@ function LlmoCloudFrontController(ctx) {
       log.info(auditLine(context, 'plan', result.canProceed ? 'ok' : 'blocked', {
         siteId,
         distributionId,
-        host: forwardedHost,
+        host: auditHostname(site),
+        forwardedHost,
         steps: result.steps.map((s) => `${s.key}:${s.action}`).join(','),
       }));
       // targetDomain lets the FE display exactly the host the BE will route to for this site.

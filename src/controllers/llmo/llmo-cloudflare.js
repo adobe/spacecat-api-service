@@ -17,6 +17,7 @@ import { hasText, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import CloudflareClient from '@adobe/spacecat-shared-cloudflare-client';
 import AccessControlUtil from '../../support/access-control-util.js';
+import { auditHostname } from './llmo-utils.js';
 import {
   deriveWorkerName, hostInSiteDomain, registrableDomain, routePatternHost, routePatternHostGlob,
   routePatternsOverlap,
@@ -73,18 +74,6 @@ const toWorkerTag = (value) => {
   // Replacement preserves length (every char maps to itself or '_'), so a non-empty input always
   // yields a non-empty tag — no empty-result case to guard here.
   return value.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, CF_TAG_MAX_LEN);
-};
-
-/**
- * Best-effort hostname for audit lines. Returns undefined for a malformed base URL so auditLine
- * simply drops the field — a log line must never be able to fail the request it describes.
- */
-const siteHostname = (site) => {
-  try {
-    return new URL(site.getBaseURL()).hostname;
-  } catch {
-    return undefined;
-  }
 };
 
 /**
@@ -171,7 +160,9 @@ function LlmoCloudflareController(ctx) {
    */
   const cfErrorResponse = (error, action, context, fields = {}) => {
     const message = error?.message || String(error);
-    log.error(auditLine(context, 'cf-call', 'error', { op: action, ...fields, error: message }));
+    log.error(auditLine(context, 'cf-call', 'error', {
+      severity: 'error', op: action, ...fields, error: message,
+    }));
     if (/returned 401\b/.test(message)) {
       return unauthorized('Cloudflare authentication failed');
     }
@@ -249,7 +240,7 @@ function LlmoCloudflareController(ctx) {
       // client-side only and `deploy-worker` is the last step. Onboarding alerts key off this.
       log.info(auditLine(context, auditAction, 'ok', {
         siteId: site.getId(),
-        host: siteHostname(site),
+        host: auditHostname(site),
         count: Array.isArray(listed) ? listed.length : undefined,
       }));
       return ok(listed);
@@ -318,7 +309,7 @@ function LlmoCloudflareController(ctx) {
       // most common Cloudflare onboarding dead end, and invisible without this line.
       log.info(auditLine(context, 'list-zones', 'ok', {
         siteId: site.getId(),
-        host: siteHostname(site),
+        host: auditHostname(site),
         accountId,
         listed: (zones || []).length,
         matched: matching.length,
@@ -399,12 +390,18 @@ function LlmoCloudflareController(ctx) {
       llmoApiKey = await getLlmoApiKey(site, context);
     } catch (e) {
       log.error(auditLine(context, 'deploy-worker', 'metaconfig-failed', {
-        siteId, accountId, scriptName, error: e.message,
+        severity: 'error',
+        siteId,
+        accountId,
+        scriptName,
+        error: e.message,
       }));
       return createResponse({ message: 'Failed to fetch site metaconfig' }, 502);
     }
     if (!hasText(llmoApiKey)) {
-      log.error(auditLine(context, 'deploy-worker', 'no-api-key', { siteId, accountId, scriptName }));
+      log.error(auditLine(context, 'deploy-worker', 'no-api-key', {
+        severity: 'error', siteId, accountId, scriptName,
+      }));
       return internalServerError('LLMO API key not configured for this site');
     }
 
@@ -466,6 +463,7 @@ function LlmoCloudflareController(ctx) {
       // log the partial state explicitly and return a structured response the caller can
       // act on (re-deploy to set the secret).
       log.error(auditLine(context, 'deploy-worker', 'secret-failed', {
+        severity: 'error',
         siteId,
         accountId,
         scriptName,
