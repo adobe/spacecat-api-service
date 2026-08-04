@@ -1098,7 +1098,7 @@ describe('Sites Controller', () => {
       expect(body).to.have.all.keys('sites', 'pagination');
       expect(body.sites).to.be.an('array').with.lengthOf(2);
       expect(body.pagination).to.deep.equal({ limit: 100, cursor: null, hasMore: false });
-      // No fetchAllPages scan - defaults route through the cursor-paginated path.
+      // Defaults route through the cursor-paginated path.
       expect(mockDataAccess.Site.all).to.have.been.calledWithMatch(
         {},
         sinon.match({ limit: 100, cursor: null, returnCursor: true }),
@@ -1587,8 +1587,8 @@ describe('Sites Controller', () => {
       context.invocation = { id: 'req-abc-123' };
       mockDataAccess.Consumer.findByClientIdAndImsOrgId
         .resolves(makeFreshConsumer({ capabilities: ['site:readAll'] }));
-      // Default (no-param) call now routes through the cursor-paginated path,
-      // which reads `results.data` - override the block's flat-array mock.
+      // The no-param call routes through the cursor-paginated path (reads
+      // `results.data`), so override the block's flat-array mock.
       mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
 
       const result = await sitesController.getAll(context);

@@ -487,7 +487,7 @@ function SitesController(ctx, log, env) {
    *
    * When called without `limit`/`cursor`, returns the first page (limit defaults to
    * 100, no cursor) as the `{ sites, pagination }` envelope - the same shape as an
-   * explicit paginated request. There is no un-paginated flat-array response.
+   * explicit paginated request.
    *
    * Optional `baseUrlContains` query param: when provided (3-256 chars after trim),
    * performs a case-insensitive substring search on `baseURL` and returns a non-cursor
@@ -617,9 +617,7 @@ function SitesController(ctx, log, env) {
       }
     }
 
-    // No limit/cursor -> first page (DEFAULT_LIMIT, no cursor). The legacy
-    // un-paginated flat-array path has been sunset (SITES-41367 follow-up); every
-    // call now returns the `{ sites, pagination }` envelope.
+    // No limit/cursor defaults to the first page (DEFAULT_LIMIT, no cursor).
     let sites;
     let responseBody;
 

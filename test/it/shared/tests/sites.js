@@ -94,11 +94,10 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get('/sites');
         expect(res.status).to.equal(200);
-        // No limit/cursor now returns the first page (limit defaults to 100) as the
-        // `{ sites, pagination }` envelope. The legacy flat-array path — which excluded
-        // DEFAULT_ORGANIZATION_ID (ORG_1) and ORGANIZATION_ID_FRIENDS_FAMILY to stay
-        // under the 6MB Lambda limit — is gone, so all 7 seeded sites come back on the
-        // first page (well under the default limit, so hasMore is false).
+        // No limit/cursor returns the first page (limit defaults to 100) as the
+        // `{ sites, pagination }` envelope. No org filtering is applied, so all 7
+        // seeded sites come back on the first page (under the default limit, so
+        // hasMore is false).
         expect(res.body).to.be.an('object').that.has.all.keys('sites', 'pagination');
         expect(res.body.sites).to.be.an('array').with.lengthOf(7);
         expect(res.body.pagination).to.include({ hasMore: false });
@@ -125,7 +124,7 @@ export default function siteTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.s2sConsumerReadAll.get('/sites');
         expect(res.status).to.equal(200);
-        // Same first-page envelope as the admin path, no exclusion: all 7 seeded sites.
+        // Same first-page envelope as the admin path: all 7 seeded sites.
         expect(res.body).to.be.an('object').that.has.all.keys('sites', 'pagination');
         expect(res.body.sites).to.be.an('array').with.lengthOf(7);
         expect(res.body.pagination).to.include({ hasMore: false });
@@ -155,8 +154,7 @@ export default function siteTests(getHttpClient, resetData) {
       it('admin: returns the paginated envelope and advances via cursor', async () => {
         // Pins both the controller↔DAL contract for the `returnCursor: true` shape AND
         // the cursor round-trip that pagination exists to provide. Seed has 7 sites
-        // total (no path applies the org exclusion), so limit=2 MUST yield
-        // exactly 2 sites with hasMore=true on page 1.
+        // total, so limit=2 MUST yield exactly 2 sites with hasMore=true on page 1.
         const http = getHttpClient();
         const page1 = await http.admin.get('/sites?limit=2');
         expect(page1.status).to.equal(200);
