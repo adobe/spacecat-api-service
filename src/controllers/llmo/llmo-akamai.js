@@ -485,14 +485,15 @@ function LlmoAkamaiController(ctx) {
     }
     // Optional: preview against a specific version instead of the latest. PAPI versions start at 1,
     // so reject 0 here (it passes DECIMAL_INT_RE) for a clean 400 — mirrors deploy's baseVersion
-    // check.
-    if (rawBaseVersion !== undefined && rawBaseVersion !== null && rawBaseVersion !== ''
+    // check. hasText is unsuitable: a JSON-body baseVersion can be a number, which hasText rejects.
+    const hasBaseVersion = rawBaseVersion !== undefined && rawBaseVersion !== null && rawBaseVersion !== '';
+    if (hasBaseVersion
       && (!DECIMAL_INT_RE.test(String(rawBaseVersion)) || Number(rawBaseVersion) < 1)) {
       return badRequest('baseVersion must be a positive integer');
     }
 
     try {
-      const version = (rawBaseVersion !== undefined && rawBaseVersion !== null && rawBaseVersion !== '')
+      const version = hasBaseVersion
         ? Number(rawBaseVersion)
         : await client.getLatestVersion(propertyId, contractId, groupId);
       const {
@@ -542,10 +543,8 @@ function LlmoAkamaiController(ctx) {
       }));
       return ok({
         propertyId,
-        // The version the plan was built against (chosen baseVersion, else latest). `latestVersion`
-        // is retained for back-compat; `baseVersion` is the unambiguous name now that plan can
-        // preview a non-latest version.
-        latestVersion: version,
+        // The version the plan was built against: the chosen baseVersion, else the property's
+        // latest. Named baseVersion (not latestVersion) because it is NOT necessarily the latest.
         baseVersion: version,
         ruleFormat,
         managedRules: managedRuleNames(cfg),
@@ -916,17 +915,26 @@ function LlmoAkamaiController(ctx) {
     const siteId = site.getId();
 
     try {
-      // Active-per-network from the full activation history: Akamai keeps at most one ACTIVE
-      // activation per network, so key the ACTIVE entries by network. (latestActivation is
-      // newest-*submitted* — could be a failed/aborted record — so it is deliberately not used.)
-      const activations = await client.listActivations(propertyId, contractId, groupId);
+      // Independent reads — run concurrently to halve endpoint latency.
+      const [activations, latestVersion] = await Promise.all([
+        client.listActivations(propertyId, contractId, groupId),
+        client.getLatestVersion(propertyId, contractId, groupId),
+      ]);
+      // Active-per-network from the full activation history: key the ACTIVE entries by network.
+      // (latestActivation is newest-*submitted* — could be a failed/aborted record — so it is
+      // deliberately not used here.)
       const active = activations.reduce((acc, activation) => {
-        if (String(activation.status || '').toUpperCase() === 'ACTIVE') {
-          acc[String(activation.network || '').toUpperCase()] = activation;
+        if (String(activation.status || '').toUpperCase() !== 'ACTIVE') {
+          return acc;
+        }
+        const network = String(activation.network || '').toUpperCase();
+        // Akamai keeps at most one ACTIVE activation per network; if PAPI ever returns more, keep
+        // the first seen rather than letting a later one silently overwrite it (deterministic).
+        if (!(network in acc)) {
+          acc[network] = activation;
         }
         return acc;
       }, {});
-      const latestVersion = await client.getLatestVersion(propertyId, contractId, groupId);
       return ok({ propertyId, latestVersion, active });
     } catch (e) {
       return papiErrorResponse(e, 'version listing', context, { siteId, propertyId });

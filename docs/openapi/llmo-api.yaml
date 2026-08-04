@@ -6214,8 +6214,11 @@ site-llmo-akamai-plan:
               properties:
                 propertyId:
                   type: string
-                latestVersion:
+                baseVersion:
                   type: integer
+                  description: >-
+                    The version the plan was built against: the chosen `baseVersion`, else the
+                    property's latest.
                 ruleFormat:
                   type: string
                   description: The property's PAPI rule format (e.g. `v2024-01-01`).

@@ -107,6 +107,7 @@ export const INTERNAL_ROUTES = [
   // uses caller-supplied EdgeGrid credentials via x-akamai-* headers, not S2S JWT
   'GET /sites/:siteId/llmo/cdn-onboard/akamai/config',
   'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties',
+  'GET /sites/:siteId/llmo/cdn-onboard/akamai/versions',
   'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan',
   'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy',
   'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate',

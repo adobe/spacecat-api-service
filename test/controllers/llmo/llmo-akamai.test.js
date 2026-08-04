@@ -248,7 +248,7 @@ describe('LlmoAkamaiController', () => {
       const res = await controller.plan(withData(propertyRef));
       const body = await res.json();
       expect(res.status).to.equal(200);
-      expect(body.latestVersion).to.equal(7);
+      expect(body.baseVersion).to.equal(7);
       expect(body.currentChildRules).to.deep.equal(['Existing']);
       // The OAE wrapper is appended LAST so its origin + cacheId win (Akamai is last-match-wins).
       expect(body.mergedChildRules).to.deep.equal(['Existing', 'Optimize at Edge']);
@@ -311,7 +311,7 @@ describe('LlmoAkamaiController', () => {
       const body = await res.json();
       expect(res.status).to.equal(200);
       expect(body.baseVersion).to.equal(3);
-      expect(body.latestVersion).to.equal(3);
+      expect(body).to.not.have.property('latestVersion');
       expect(mockAkamaiClient.getLatestVersion).to.not.have.been.called;
       expect(mockAkamaiClient.getRuleTree).to.have.been.calledWith(PROPERTY_ID, 3);
     });
@@ -321,6 +321,14 @@ describe('LlmoAkamaiController', () => {
       const body = await res.json();
       expect(body.baseVersion).to.equal(7);
       expect(mockAkamaiClient.getLatestVersion).to.have.been.calledOnce;
+    });
+
+    it('accepts a string-typed baseVersion (values may arrive as strings)', async () => {
+      const res = await controller.plan(withData({ ...propertyRef, baseVersion: '3' }));
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.baseVersion).to.equal(3);
+      expect(mockAkamaiClient.getRuleTree).to.have.been.calledWith(PROPERTY_ID, 3);
     });
 
     it('rejects a non-positive baseVersion', async () => {
@@ -700,6 +708,22 @@ describe('LlmoAkamaiController', () => {
       const res = await controller.getVersions(withData(propertyRef));
       const body = await res.json();
       expect(body.active).to.deep.equal({});
+    });
+
+    it('keeps the first ACTIVE activation per network (does not overwrite with a later one)', async () => {
+      // Two ACTIVE STAGING entries (should not happen per Akamai's one-active-per-network rule):
+      // the first seen wins; a later one must not silently overwrite it.
+      mockAkamaiClient.listActivations.resolves([
+        {
+          activationId: 'atv_first', status: 'ACTIVE', network: 'STAGING', propertyVersion: 9,
+        },
+        {
+          activationId: 'atv_second', status: 'ACTIVE', network: 'STAGING', propertyVersion: 6,
+        },
+      ]);
+      const res = await controller.getVersions(withData(propertyRef));
+      const body = await res.json();
+      expect(body.active.STAGING.propertyVersion).to.equal(9);
     });
 
     it('maps a PAPI failure to 502', async () => {
