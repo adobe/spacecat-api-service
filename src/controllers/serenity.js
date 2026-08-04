@@ -17,6 +17,7 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, isNonEmptyObject, isValidUUID } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
+import { callerHasStateLayerCapability } from '../support/facs-identity.js';
 
 import { createSerenityTransport } from '../support/serenity/rest-transport.js';
 import { isSemrushTransportError, unwrapTransportCause } from '../support/serenity/errors.js';
@@ -592,14 +593,31 @@ function SerenityController(context, log, env) {
       const facs = ctx?.attributes?.facs;
       const authInfo = ctx?.attributes?.authInfo;
       const assertSourceRequested = body?.assertSource === true;
-      const trackCapability = `${(facs?.product || 'LLMO').toLowerCase()}/can_track`;
+      const trackProduct = (facs?.product || 'LLMO').toUpperCase();
+      const trackCapability = `${trackProduct.toLowerCase()}/can_track`;
       // FIX (review must-fix): FAIL-CLOSED. Honour `assertSource` only for a caller that
       // explicitly holds `<product>/can_track` OR is an admin — never merely because FACS
       // is off. The old `!facs?.enabled` bypass was fail-OPEN: a non-FACS-enrolled org's
       // regular IMS users inherited it and could assert an arbitrary producer, crossing the
       // "no client write surface" line (source-dimension.md §1 item 6) for those orgs.
-      const assertSourceAllowed = authInfo?.hasFacsPermission?.(trackCapability) === true
+      //
+      // Two grant surfaces, unioned (SITES-47870 Option B): the JWT `facs_permissions`
+      // (org-wide, admin short-circuit first — no DB read on the common path) OR a FACS
+      // STATE-layer binding for this brand. `can_track` is an in-controller gate, not a
+      // route requirement, so `facsWrapper` never unions the state layer for it — we do
+      // that here (see `callerHasStateLayerCapability`) so a `POST /state/access-mappings`
+      // grant is honoured like every other capability. Only read the state layer when the
+      // request opted in AND the JWT/admin path didn't already allow.
+      let assertSourceAllowed = authInfo?.hasFacsPermission?.(trackCapability) === true
         || authInfo?.isAdmin?.() === true;
+      if (assertSourceRequested && !assertSourceAllowed) {
+        assertSourceAllowed = await callerHasStateLayerCapability(ctx, {
+          product: trackProduct,
+          capability: trackCapability,
+          brandUuid: auth.brandUuid,
+          log,
+        });
+      }
       if (assertSourceRequested && !assertSourceAllowed) {
         log.warn(
           'serenity createPrompts: assertSource requested without the producer capability; '

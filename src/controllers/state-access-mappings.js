@@ -33,6 +33,7 @@ import {
   requirePostgrestForFacsMappings,
   updateFacsAccessMappingCapabilities,
 } from '../support/state-access-mapping-utils.js';
+import { resolveCallerImsOrgIdentBare, resolveCallerUserIdent } from '../support/facs-identity.js';
 
 // Inlined deliberately: the shared `normalizeImsOrgId` ships in
 // `@adobe/spacecat-shared-http-utils` (spacecat-shared#1717) but is not yet in
@@ -225,13 +226,10 @@ function toAuditEventDto(row) {
 function StateAccessMappingsController(context) {
   const { log } = context;
 
-  function resolveCallerImsOrgIdentBare(ctx) {
-    return ctx.attributes?.authInfo?.getTenantIds?.()?.[0] ?? null;
-  }
-
-  function resolveCallerUserIdent(ctx) {
-    return ctx.attributes?.authInfo?.getProfile?.()?.sub ?? null;
-  }
+  // `resolveCallerImsOrgIdentBare` / `resolveCallerUserIdent` are imported from
+  // ../support/facs-identity.js so the state-layer WRITE path here and the
+  // serenity `can_track` READ path derive the org / subject identically — a
+  // single source of truth keeps them from drifting out of key alignment.
 
   /**
    * Read and validate the `x-product` header. Uppercased so it matches the

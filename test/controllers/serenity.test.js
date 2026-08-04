@@ -187,9 +187,14 @@ describe('SerenityController', () => {
   let createAndEnqueueJobStub;
   let MockTransportError;
   let SerenityController;
+  let callerHasStateLayerCapabilityStub;
 
   beforeEach(async () => {
     Object.values(handlers).forEach((s) => s.reset());
+    // Default: no state-layer grant (SITES-47870 Option B). The assertSource gate's
+    // JWT/admin short-circuit runs first; this only matters when the request opts in
+    // and the JWT denies. Granting tests override with `.resolves(true)`.
+    callerHasStateLayerCapabilityStub = sinon.stub().resolves(false);
     resolveWorkspaceIdStub = sinon.stub().resolves(WORKSPACE);
     // Default: flat mode — existing assertions (handlers called with
     // WORKSPACE) hold unchanged. Subworkspace-mode tests override this stub.
@@ -293,6 +298,9 @@ describe('SerenityController', () => {
       '../../src/support/access-control-util.js': MockAccessControlUtil,
       '../../src/support/prompts-storage.js': {
         resolveBrandUuid: resolveBrandUuidStub,
+      },
+      '../../src/support/facs-identity.js': {
+        callerHasStateLayerCapability: callerHasStateLayerCapabilityStub,
       },
       '../../src/support/brands-storage.js': {
         getBrandAliases: getBrandAliasesStub,
@@ -2954,6 +2962,64 @@ describe('SerenityController', () => {
       const response = await controller.createPrompts(ctx);
       expect(response.status).to.equal(200);
       expect(handlers.handleCreatePrompts.lastCall.args[10].allowAssertSource).to.equal(true);
+    });
+
+    // SITES-47870 Option B: the gate unions the JWT/admin check with a FACS STATE-layer
+    // read (a `POST /state/access-mappings` grant), since can_track is an in-controller
+    // gate the wrapper never unions for.
+    it('assertSource: allowed via a STATE-layer grant when the JWT lacks the capability', async () => {
+      handlers.handleCreatePrompts.resolves({ created: 1, failed: [] });
+      callerHasStateLayerCapabilityStub.resolves(true);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ data: trackData() });
+      ctx.attributes.authInfo.hasFacsPermission = sinon.stub().returns(false);
+
+      const response = await controller.createPrompts(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleCreatePrompts.lastCall.args[10].allowAssertSource).to.equal(true);
+      // Keyed on the resolved brand + LLMO can_track (BRAND is resolveBrandUuidStub's value).
+      expect(callerHasStateLayerCapabilityStub).to.have.been.calledOnce;
+      expect(callerHasStateLayerCapabilityStub.lastCall.args[1]).to.include({
+        product: 'LLMO', capability: 'llmo/can_track', brandUuid: BRAND,
+      });
+    });
+
+    it('assertSource: DROPPED when neither the JWT nor the state layer grants it', async () => {
+      handlers.handleCreatePrompts.resolves({ created: 1, failed: [] });
+      callerHasStateLayerCapabilityStub.resolves(false);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ data: trackData() });
+      ctx.attributes.authInfo.hasFacsPermission = sinon.stub().returns(false);
+
+      const response = await controller.createPrompts(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleCreatePrompts.lastCall.args[10].allowAssertSource).to.equal(false);
+    });
+
+    it('assertSource: JWT/admin short-circuits — no state-layer read when already allowed', async () => {
+      handlers.handleCreatePrompts.resolves({ created: 1, failed: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ data: trackData() });
+      ctx.attributes.authInfo.hasFacsPermission = sinon.stub()
+        .callsFake((cap) => cap === 'llmo/can_track');
+
+      const response = await controller.createPrompts(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleCreatePrompts.lastCall.args[10].allowAssertSource).to.equal(true);
+      expect(callerHasStateLayerCapabilityStub).to.not.have.been.called;
+    });
+
+    it('assertSource: no state-layer read when the request did not opt in', async () => {
+      handlers.handleCreatePrompts.resolves({ created: 1, failed: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      // assertSource omitted → the whole gate short-circuits, no capability work at all.
+      const ctx = fakeContext({ data: { prompts: [{ text: 'x', geoTargetId: 2840, languageCode: 'en' }] } });
+      ctx.attributes.authInfo.hasFacsPermission = sinon.stub().returns(false);
+
+      const response = await controller.createPrompts(ctx);
+      expect(response.status).to.equal(200);
+      expect(callerHasStateLayerCapabilityStub).to.not.have.been.called;
+      expect(handlers.handleCreatePrompts.lastCall.args[10].allowAssertSource).to.equal(false);
     });
 
     it('builds a working type classifier from the brand name + aliases and passes it to the handler (serenity-docs#31)', async () => {
