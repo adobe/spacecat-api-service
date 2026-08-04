@@ -172,6 +172,7 @@ describe('SerenityController', () => {
   let isSerenityActiveStub;
   let createTransportStub;
   let mintSemrushImsTokenStub;
+  let withMemberAutoProvisionStub;
   let resolveBrandUuidStub;
   let getBrandAliasesStub;
   let getBrandUrlSourcesStub;
@@ -206,6 +207,10 @@ describe('SerenityController', () => {
     clearBrandWorkspaceCacheStub = sinon.stub();
     createTransportStub = sinon.stub().returns({ name: 'transport' });
     mintSemrushImsTokenStub = sinon.stub().resolves('semrush-ims-tech-token');
+    // Default: transparent pass-through (just run the read), so existing read tests are
+    // unaffected. The auto-provision behavior itself is unit-tested in
+    // test/support/serenity/member-autoprovision.test.js; here we assert the wiring.
+    withMemberAutoProvisionStub = sinon.stub().callsFake(({ run }) => run());
     resolveBrandUuidStub = sinon.stub().resolves(BRAND);
     getBrandAliasesStub = sinon.stub().resolves([]);
     getBrandUrlSourcesStub = sinon.stub()
@@ -249,6 +254,9 @@ describe('SerenityController', () => {
       },
       '../../src/support/serenity/semrush-ims-token.js': {
         mintSemrushImsToken: mintSemrushImsTokenStub,
+      },
+      '../../src/support/serenity/member-autoprovision.js': {
+        withMemberAutoProvision: withMemberAutoProvisionStub,
       },
       '../../src/support/serenity/handlers/prompts.js': {
         handleListPrompts: handlers.handleListPrompts,
@@ -1791,6 +1799,61 @@ describe('SerenityController', () => {
     });
   });
 
+  describe('read auto-provision wiring (withMemberAutoProvision)', () => {
+    it('wraps listPrompts with provisioning DISABLED by default, passing the workspace', async () => {
+      handlers.handleListPrompts.resolves({
+        items: [], total: 0, page: 1, limit: 50,
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.request = { url: 'https://x/v2/orgs/x/brands/y/serenity/prompts' };
+
+      await controller.listPrompts(ctx);
+
+      expect(withMemberAutoProvisionStub).to.have.been.calledOnce;
+      const args = withMemberAutoProvisionStub.firstCall.args[0];
+      expect(args.enabled).to.equal(false);
+      expect(args.workspaceId).to.equal(WORKSPACE);
+      // Pass-through still produced the handler's result (200).
+      expect(handlers.handleListPrompts).to.have.been.calledOnce;
+    });
+
+    it('enables provisioning when SERENITY_MEMBER_AUTOPROVISION=true and passes the caller email', async () => {
+      handlers.handleListMarkets.resolves([]);
+      const controller = SerenityController(
+        { env: { SERENITY_MEMBER_AUTOPROVISION: 'true' } },
+        fakeLog(),
+        { SERENITY_MEMBER_AUTOPROVISION: 'true' },
+      );
+      const ctx = fakeContext({ env: { SERENITY_MEMBER_AUTOPROVISION: 'true' } });
+      ctx.attributes.authInfo.getProfile = () => ({ email: 'caller@adobe.com' });
+
+      await controller.listMarkets(ctx);
+
+      const args = withMemberAutoProvisionStub.firstCall.args[0];
+      expect(args.enabled).to.equal(true);
+      expect(args.memberEmail).to.equal('caller@adobe.com');
+      expect(args.workspaceId).to.equal(WORKSPACE);
+    });
+
+    it('wraps every brand-scoped read handler (prompts, markets, getMarket, tags, models)', async () => {
+      handlers.handleListPrompts.resolves({ items: [] });
+      handlers.handleListMarkets.resolves([]);
+      handlers.handleGetMarket.resolves({});
+      handlers.handleListTags.resolves([]);
+      handlers.handleListModels.resolves([]);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+
+      await controller.listPrompts(fakeContext({ params: {} }));
+      await controller.listMarkets(fakeContext({ params: {} }));
+      await controller.getMarket(fakeContext({ params: { geoTargetId: '2840', languageCode: 'en' } }));
+      await controller.listTags(fakeContext({ params: {} }));
+      await controller.listModels(fakeContext({ params: {} }));
+
+      expect(withMemberAutoProvisionStub.callCount).to.equal(5);
+    });
+  });
+
   describe('addMembers (RBAC workspace member grant — minted Semrush IMS token)', () => {
     let addWorkspaceMembersStub;
 
@@ -1909,6 +1972,24 @@ describe('SerenityController', () => {
         data: { members: ['a@adobe.com'] },
       }));
       expect(response.status).to.equal(403);
+    });
+
+    it('surfaces an upstream 422 (no user units) as 422, not a generic 502', async () => {
+      addWorkspaceMembersStub.rejects(
+        new MockTransportError(422, 'corporate account does not have enough user units', {
+          limit_exceeded: true,
+          emails: ['a@adobe.com'],
+        }),
+      );
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.addMembers(fakeContext({
+        data: { members: ['a@adobe.com'] },
+      }));
+      expect(response.status).to.equal(422);
+      const body = await readBody(response);
+      expect(body.error).to.equal('unprocessableEntity');
+      // The limit flag + emails must NOT leak to the client.
+      expect(JSON.stringify(body)).to.not.include('limit_exceeded');
     });
   });
 
