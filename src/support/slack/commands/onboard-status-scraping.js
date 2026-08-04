@@ -106,9 +106,15 @@ export async function buildScrapingSection(baseURL, lastStartTime, context) {
   try {
     const stats = await getScrapingStats(baseURL, lastStartTime, context);
     const status = deriveScrapingStatus(stats);
+    // 'unknown' (no scrape data yet) shows a neutral info icon — not ❌ (which would
+    // falsely read as failed on an early snapshot) and not ⏳ (which would overclaim
+    // active progress). Only a genuinely terminal-failed scrape (0 completed, 0 pending,
+    // >0 failed) shows ❌.
     const emoji = {
       available: ':white_check_mark:',
       in_progress: ':hourglass_flowing_sand:',
+      unknown: ':information_source:',
+      failed: ':x:',
     }[status] || ':x:';
 
     if (!stats) {

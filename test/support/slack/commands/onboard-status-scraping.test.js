@@ -123,13 +123,14 @@ describe('onboard-status scraping helpers', () => {
       expect(section.dataSourceLine).to.equal('Scraping :hourglass_flowing_sand:');
     });
 
-    it('renders the "no results yet" message when there are no scrape jobs', async () => {
+    it('renders the "no results yet" message with an in-progress (not failed) status', async () => {
       scrapeClientStub.getScrapeJobsByBaseURL.resolves([]);
 
       const section = await buildScrapingSection('https://example.com', 1000, { log: console });
 
       expect(section.statsMessage).to.contain('no results available yet');
-      expect(section.dataSourceLine).to.equal('Scraping :x:');
+      // No scrape data yet must not read as a failure — it shows a neutral info icon.
+      expect(section.dataSourceLine).to.equal('Scraping :information_source:');
     });
 
     it('returns null (best-effort) when the scrape client throws', async () => {
