@@ -90,21 +90,24 @@ export default function siteTests(getHttpClient, resetData) {
     // ── Read-only assertions on baseline seed ──
 
     describe('GET /sites', () => {
-      it('admin: returns all sites (excluding default org)', async () => {
+      it('admin: returns the first page of all sites (no exclusion)', async () => {
         const http = getHttpClient();
         const res = await http.admin.get('/sites');
         expect(res.status).to.equal(200);
-        // Legacy path (no limit/cursor params) excludes DEFAULT_ORGANIZATION_ID (ORG_1)
-        // and ORGANIZATION_ID_FRIENDS_FAMILY sites to stay under 6MB Lambda limit.
-        // Returns SITE_3 (ORG_2) + SITE_4 (ORG_3) + SITE_LEGACY_LLMO + SITE_NEW_LLMO
-        // (LLMO-4176 mode-resolution test fixtures, neither under ORG_1).
-        expect(res.body).to.be.an('array').with.lengthOf(4);
+        // No limit/cursor now returns the first page (limit defaults to 100) as the
+        // `{ sites, pagination }` envelope. The legacy flat-array path — which excluded
+        // DEFAULT_ORGANIZATION_ID (ORG_1) and ORGANIZATION_ID_FRIENDS_FAMILY to stay
+        // under the 6MB Lambda limit — is gone, so all 7 seeded sites come back on the
+        // first page (well under the default limit, so hasMore is false).
+        expect(res.body).to.be.an('object').that.has.all.keys('sites', 'pagination');
+        expect(res.body.sites).to.be.an('array').with.lengthOf(7);
+        expect(res.body.pagination).to.include({ hasMore: false });
         // Skip the LLMO fixtures in the DTO check — they have intentional
         // historical/future createdAt values that fail the "recent" assertion.
-        res.body
+        res.body.sites
           .filter((s) => !LLMO_FIXTURE_SITE_IDS.has(s.id))
           .forEach((s) => expectSiteListDto(s));
-        const ids = res.body.map((s) => s.id);
+        const ids = res.body.sites.map((s) => s.id);
         expect(ids).to.include(SITE_3_ID);
         expect(ids).to.include(SITE_4_ID);
       });
@@ -118,14 +121,15 @@ export default function siteTests(getHttpClient, resetData) {
       // ── S2S readAll capability path ──
       // See docs/s2s/READALL_CAPABILITY_DESIGN.md.
 
-      it('s2sConsumerReadAll: returns all sites (site:readAll)', async () => {
+      it('s2sConsumerReadAll: returns the first page of all sites (site:readAll)', async () => {
         const http = getHttpClient();
         const res = await http.s2sConsumerReadAll.get('/sites');
         expect(res.status).to.equal(200);
-        // Same exclusions as the admin path apply (DEFAULT_ORGANIZATION_ID excluded).
-        // Admin baseline returns 4: SITE_3, SITE_4, SITE_LEGACY_LLMO, SITE_NEW_LLMO.
-        expect(res.body).to.be.an('array').with.lengthOf(4);
-        const ids = res.body.map((s) => s.id);
+        // Same first-page envelope as the admin path, no exclusion: all 7 seeded sites.
+        expect(res.body).to.be.an('object').that.has.all.keys('sites', 'pagination');
+        expect(res.body.sites).to.be.an('array').with.lengthOf(7);
+        expect(res.body.pagination).to.include({ hasMore: false });
+        const ids = res.body.sites.map((s) => s.id);
         expect(ids).to.include(SITE_3_ID);
         expect(ids).to.include(SITE_4_ID);
       });
@@ -150,8 +154,8 @@ export default function siteTests(getHttpClient, resetData) {
 
       it('admin: returns the paginated envelope and advances via cursor', async () => {
         // Pins both the controller↔DAL contract for the `returnCursor: true` shape AND
-        // the cursor round-trip that pagination exists to provide. Seed has 6 sites
-        // total (paginated branch bypasses the org exclusion), so limit=2 MUST yield
+        // the cursor round-trip that pagination exists to provide. Seed has 7 sites
+        // total (no path applies the org exclusion), so limit=2 MUST yield
         // exactly 2 sites with hasMore=true on page 1.
         const http = getHttpClient();
         const page1 = await http.admin.get('/sites?limit=2');

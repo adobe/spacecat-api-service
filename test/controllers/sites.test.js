@@ -969,13 +969,15 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Only users belonging to the organization can update its sites');
   });
 
-  it('gets all sites with slim DTO', async () => {
-    mockDataAccess.Site.all.resolves(sites);
+  it('gets all sites with slim DTO (default first page)', async () => {
+    mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
 
     const result = await sitesController.getAll();
-    const resultSites = await result.json();
+    const body = await result.json();
 
     expect(mockDataAccess.Site.all).to.have.been.calledOnce;
+    expect(body).to.have.all.keys('sites', 'pagination');
+    const resultSites = body.sites;
     expect(resultSites).to.be.an('array').with.lengthOf(2);
     expect(resultSites[0]).to.have.property('id', SITE_IDS[0]);
     expect(resultSites[0]).to.have.property('baseURL', 'https://site1.com');
@@ -985,16 +987,16 @@ describe('Sites Controller', () => {
     expect(resultSites[0]).to.not.have.any.keys('hlxConfig', 'authoringType', 'deliveryConfig', 'pageTypes', 'projectId', 'isPrimaryLocale', 'language', 'code', 'audits', 'updatedBy', 'isLiveToggledAt');
   });
 
-  it('projects sites to the requested fields when ?fields= is passed (legacy shape)', async () => {
-    mockDataAccess.Site.all.resolves(sites);
+  it('projects sites to the requested fields when ?fields= is passed (default first page)', async () => {
+    mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
 
     const result = await sitesController.getAll({ ...context, data: { fields: 'baseURL' } });
-    const resultSites = await result.json();
+    const body = await result.json();
 
     expect(result.status).to.equal(200);
-    expect(resultSites).to.be.an('array').with.lengthOf(2);
-    expect(Object.keys(resultSites[0]).sort()).to.deep.equal(['baseURL', 'id']);
-    expect(resultSites[0]).to.not.have.any.keys('config', 'deliveryType', 'name');
+    expect(body.sites).to.be.an('array').with.lengthOf(2);
+    expect(Object.keys(body.sites[0]).sort()).to.deep.equal(['baseURL', 'id']);
+    expect(body.sites[0]).to.not.have.any.keys('config', 'deliveryType', 'name');
   });
 
   it('projects the sites array inside the paginated shape when ?fields= is passed', async () => {
@@ -1010,7 +1012,7 @@ describe('Sites Controller', () => {
   });
 
   it('returns 400 when ?fields= matches no known site field', async () => {
-    mockDataAccess.Site.all.resolves(sites);
+    mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
 
     const result = await sitesController.getAll({ ...context, data: { fields: 'nope' } });
     expect(result.status).to.equal(400);
@@ -1018,28 +1020,15 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Invalid fields: nope');
   });
 
-  it('emits [sites][legacy-shape] log on every legacy-path hit', async () => {
-    // The [sites][legacy-shape] marker is the sunset gate for removing the legacy
-    // branch — Coralogix must show zero hits before removal. Pin the format here so
-    // a rename or accidental drop is caught by tests, not 30 days of silent lying.
-    mockDataAccess.Site.all.resolves(sites);
-
-    await sitesController.getAll({ ...context, invocation: { id: 'req-legacy-1' } });
-
-    expect(loggerStub.info).to.have.been.calledWithMatch(
-      /\[sites\]\[legacy-shape\] GET \/sites called without limit\/cursor requestId=req-legacy-1/,
-    );
-  });
-
   it('gets all sites for a read-only admin user', async () => {
     context.attributes.authInfo.withProfile({ is_admin: false, is_read_only_admin: true });
-    mockDataAccess.Site.all.resolves(sites);
+    mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
 
     const result = await sitesController.getAll();
-    const resultSites = await result.json();
+    const body = await result.json();
 
     expect(result.status).to.equal(200);
-    expect(resultSites).to.be.an('array').with.lengthOf(2);
+    expect(body.sites).to.be.an('array').with.lengthOf(2);
   });
 
   it('gets all sites for a non-admin user', async () => {
@@ -1061,14 +1050,14 @@ describe('Sites Controller', () => {
       .withScopes([])
       .withProfile({ user_id: 'api-key-svc' })
       .withAuthenticated(true);
-    mockDataAccess.Site.all.resolves(sites);
+    mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
     sitesController = SitesControllerMocked(context, loggerStub, context.env);
 
     const result = await sitesController.getAll();
     const body = await result.json();
 
     expect(result.status).to.equal(200);
-    expect(body).to.be.an('array').with.lengthOf(2);
+    expect(body.sites).to.be.an('array').with.lengthOf(2);
   });
 
   describe('GET /sites - cursor-based pagination', () => {
@@ -1099,31 +1088,36 @@ describe('Sites Controller', () => {
       expect(body.pagination.limit).to.equal(100); // DEFAULT_LIMIT
     });
 
-    it('returns flat array when no limit or cursor is provided (legacy)', async () => {
-      mockDataAccess.Site.all.resolves(sites);
+    it('returns the first-page envelope when no limit or cursor is provided', async () => {
+      mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
 
       const result = await sitesController.getAll(context);
       const body = await result.json();
 
       expect(result.status).to.equal(200);
-      expect(body).to.be.an('array').with.lengthOf(2);
+      expect(body).to.have.all.keys('sites', 'pagination');
+      expect(body.sites).to.be.an('array').with.lengthOf(2);
+      expect(body.pagination).to.deep.equal({ limit: 100, cursor: null, hasMore: false });
+      // No fetchAllPages scan - defaults route through the cursor-paginated path.
+      expect(mockDataAccess.Site.all).to.have.been.calledWithMatch(
+        {},
+        sinon.match({ limit: 100, cursor: null, returnCursor: true }),
+      );
     });
 
-    it('routes an empty-string cursor to the legacy path (no envelope)', async () => {
-      // `?cursor=` coerces to null via `|| null`, so hasText() is false and the
-      // request falls through to the legacy flat-array shape. Pinned so a future
-      // switch from `||` to `??` (which would keep "") is caught.
-      mockDataAccess.Site.all.resolves(sites);
+    it('routes an empty-string cursor to the first page (cursor normalized to null)', async () => {
+      // `?cursor=` coerces to null via `|| null`, so it behaves like the default
+      // first page. Pinned so a future switch from `||` to `??` (which would keep
+      // "") is caught.
+      mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
 
       const result = await sitesController.getAll({ ...context, data: { cursor: '' } });
       const body = await result.json();
 
       expect(result.status).to.equal(200);
-      expect(body).to.be.an('array').with.lengthOf(2);
-      expect(mockDataAccess.Site.all).to.have.been.calledWithMatch(
-        {},
-        sinon.match({ fetchAllPages: true }),
-      );
+      expect(body).to.have.all.keys('sites', 'pagination');
+      expect(body.sites).to.be.an('array').with.lengthOf(2);
+      expect(body.pagination).to.deep.equal({ limit: 100, cursor: null, hasMore: false });
     });
 
     it('uses provided limit and returns cursor when more pages exist', async () => {
@@ -1593,12 +1587,15 @@ describe('Sites Controller', () => {
       context.invocation = { id: 'req-abc-123' };
       mockDataAccess.Consumer.findByClientIdAndImsOrgId
         .resolves(makeFreshConsumer({ capabilities: ['site:readAll'] }));
+      // Default (no-param) call now routes through the cursor-paginated path,
+      // which reads `results.data` - override the block's flat-array mock.
+      mockDataAccess.Site.all.resolves({ data: sites, cursor: null });
 
       const result = await sitesController.getAll(context);
 
       expect(result.status).to.equal(200);
       const body = await result.json();
-      expect(body).to.be.an('array').with.lengthOf(2);
+      expect(body.sites).to.be.an('array').with.lengthOf(2);
       expect(mockDataAccess.Consumer.findByClientIdAndImsOrgId).to.have.been.calledOnce;
       expect(loggerStub.info).to.have.been.calledWithMatch(
         /\[s2s-readall\] GET \/sites granted clientId=svc-1 consumerId=consumer-id-1 capability=site:readAll count=2 requestId=req-abc-123/,
@@ -1637,24 +1634,6 @@ describe('Sites Controller', () => {
       expect(body.pagination).to.not.have.property('cursor');
       expect(loggerStub.info).to.have.been.calledWithMatch(
         /\[s2s-readall\] GET \/sites \(baseUrlContains\) granted clientId=svc-1 consumerId=consumer-id-1 capability=site:readAll count=2 requestId=req-s2s-baseurlcontains-1/,
-      );
-    });
-
-    it('logs clientId=unknown-s2s on the legacy path when a granted consumer has no clientId', async () => {
-      // Granted S2S consumer (non-admin) reaching the legacy flat-array path with a
-      // falsy clientId: the log marker falls back to `unknown-s2s` (not `admin-bypass`).
-      context.s2sConsumer = makeS2SConsumer({ clientId: '' });
-      context.invocation = { id: 'req-unknown-s2s-1' };
-      mockDataAccess.Consumer.findByClientIdAndImsOrgId
-        .resolves(makeFreshConsumer({ capabilities: ['site:readAll'] }));
-
-      const result = await sitesController.getAll(context);
-      const body = await result.json();
-
-      expect(result.status).to.equal(200);
-      expect(body).to.be.an('array').with.lengthOf(2);
-      expect(loggerStub.info).to.have.been.calledWithMatch(
-        /\[sites\]\[legacy-shape\] GET \/sites called without limit\/cursor requestId=req-unknown-s2s-1 clientId=unknown-s2s/,
       );
     });
 
