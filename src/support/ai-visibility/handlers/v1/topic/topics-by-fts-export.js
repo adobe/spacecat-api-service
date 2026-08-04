@@ -34,11 +34,13 @@ import {
   PROTO_FROM_JSON,
   PROTO_TO_JSON,
 } from '../../../grpc-utils.js';
+import { buildTopicsByFtsDimensionFilterQl } from './topics-by-fts.js';
 
 export async function handleTopicsByFtsExport(sp, clients) {
   const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const country = resolveCountry(sp) || COUNTRY_ENUM.US;
   const { limit, offset } = parseLimitOffset(sp);
+  const dimensionFilterQl = buildTopicsByFtsDimensionFilterQl(sp);
   let request;
   try {
     const listRequest = fromJson(TopicsByFTSRequestSchema, {
@@ -50,6 +52,7 @@ export async function handleTopicsByFtsExport(sp, clients) {
         direction: sp.get('sortDirection') || ORDER_DIRECTION_ENUM.DESC,
       },
       range: { limit, offset },
+      dimensionFilterQl,
     }, PROTO_FROM_JSON);
     request = fromJson(TopicsByFTSExportRequestSchema, {
       request: listRequest,

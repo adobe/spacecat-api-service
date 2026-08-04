@@ -24,16 +24,19 @@ import {
   PROTO_FROM_JSON,
   PROTO_TO_JSON,
 } from '../../../grpc-utils.js';
+import { buildTopicsByFtsDimensionFilterQl } from './topics-by-fts.js';
 
 export async function handleTopicsByFtsTotals(sp, clients) {
   const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const country = resolveCountry(sp) || COUNTRY_ENUM.US;
+  const dimensionFilterQl = buildTopicsByFtsDimensionFilterQl(sp);
   let request;
   try {
     request = fromJson(TopicsByFTSTotalsRequestSchema, {
       country,
       llm: engine,
       query: sp.get('query'),
+      dimensionFilterQl,
     }, PROTO_FROM_JSON);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Invalid topics by FTS totals request';

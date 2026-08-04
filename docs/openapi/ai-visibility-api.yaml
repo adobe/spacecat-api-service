@@ -2311,6 +2311,7 @@ ai-visibility-v1-topic-topics-by-fts:
       - *regionParam
       - *engineParam
       - *v1FtsTopicsSortByParam
+      - *textFilterParam
       - *ftsSortDirectionParam
       - *limitParam
       - *offsetParam
@@ -2339,6 +2340,7 @@ ai-visibility-v1-topic-topics-by-fts-totals:
       - *countryParam
       - *regionParam
       - *engineParam
+      - *textFilterParam
     responses:
       '200':
         description: Topic total retrieved successfully
@@ -2365,6 +2367,7 @@ ai-visibility-v1-topic-topics-by-fts-export:
       - *regionParam
       - *engineParam
       - *v1FtsTopicsSortByParam
+      - *textFilterParam
       - *ftsSortDirectionParam
       - *limitParam
       - *offsetParam
