@@ -14,7 +14,11 @@ import { expect, use } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
-import { getTopSuggestions, grantSuggestionsForOpportunity } from '../../src/support/grant-suggestions-handler.js';
+import {
+  getTopSuggestions,
+  grantSuggestionsForOpportunity,
+  revokeExistingGrants,
+} from '../../src/support/grant-suggestions-handler.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -1392,6 +1396,117 @@ describe('grant-suggestions-handler', () => {
       await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
 
       expect(SuggestionGrant.grantSuggestions).to.not.have.been.called;
+    });
+  });
+
+  describe('revokeExistingGrants', () => {
+    const opptyId = 'oppty-uuid';
+    const opportunity = { getId: () => opptyId };
+
+    it('returns early when dataAccess is missing', async () => {
+      await revokeExistingGrants(null, opportunity);
+      await revokeExistingGrants(undefined, opportunity);
+      expect(true).to.be.true;
+    });
+
+    it('returns early when opportunity is missing', async () => {
+      const Suggestion = { allByOpportunityIdAndStatus: sandbox.stub() };
+      const SuggestionGrant = { splitSuggestionsByGrantStatus: sandbox.stub() };
+      await revokeExistingGrants({ Suggestion, SuggestionGrant }, null);
+      expect(Suggestion.allByOpportunityIdAndStatus).to.not.have.been.called;
+    });
+
+    it('returns early when Suggestion or SuggestionGrant is missing from dataAccess', async () => {
+      const Suggestion = { allByOpportunityIdAndStatus: sandbox.stub() };
+      const SuggestionGrant = { splitSuggestionsByGrantStatus: sandbox.stub() };
+      await revokeExistingGrants({ Suggestion, SuggestionGrant: null }, opportunity);
+      await revokeExistingGrants({ Suggestion: null, SuggestionGrant }, opportunity);
+      expect(Suggestion.allByOpportunityIdAndStatus).to.not.have.been.called;
+      expect(SuggestionGrant.splitSuggestionsByGrantStatus).to.not.have.been.called;
+    });
+
+    it('does nothing when there are no NEW suggestions', async () => {
+      const Suggestion = {
+        allByOpportunityIdAndStatus: sandbox.stub().resolves([]),
+      };
+      const SuggestionGrant = {
+        splitSuggestionsByGrantStatus: sandbox.stub(),
+        revokeSuggestionGrant: sandbox.stub(),
+      };
+      await revokeExistingGrants({ Suggestion, SuggestionGrant }, opportunity);
+
+      expect(Suggestion.allByOpportunityIdAndStatus).to.have.been.calledOnceWith(
+        opptyId,
+        'NEW',
+      );
+      expect(SuggestionGrant.splitSuggestionsByGrantStatus).to.not.have.been.called;
+    });
+
+    it('revokes grants tied to NEW suggestions only', async () => {
+      const s1 = { getId: () => 'sugg-1' };
+      const s2 = { getId: () => 'sugg-2' };
+      const Suggestion = {
+        allByOpportunityIdAndStatus: sandbox.stub().resolves([s1, s2]),
+      };
+      const SuggestionGrant = {
+        splitSuggestionsByGrantStatus: sandbox.stub().resolves({
+          grantedIds: ['sugg-1', 'sugg-2'],
+          notGrantedIds: [],
+          grantIds: ['grant-1', 'grant-2'],
+        }),
+        revokeSuggestionGrant: sandbox.stub().resolves({ success: true }),
+      };
+      await revokeExistingGrants({ Suggestion, SuggestionGrant }, opportunity);
+
+      expect(Suggestion.allByOpportunityIdAndStatus).to.have.been.calledOnceWith(
+        opptyId,
+        'NEW',
+      );
+      expect(SuggestionGrant.splitSuggestionsByGrantStatus).to.have.been.calledOnceWith(
+        ['sugg-1', 'sugg-2'],
+      );
+      expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledTwice;
+      expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledWith('grant-1');
+      expect(SuggestionGrant.revokeSuggestionGrant).to.have.been.calledWith('grant-2');
+    });
+
+    it('does nothing when NEW suggestions have no grants', async () => {
+      const s1 = { getId: () => 'sugg-1' };
+      const Suggestion = {
+        allByOpportunityIdAndStatus: sandbox.stub().resolves([s1]),
+      };
+      const SuggestionGrant = {
+        splitSuggestionsByGrantStatus: sandbox.stub().resolves({
+          grantedIds: [],
+          notGrantedIds: ['sugg-1'],
+          grantIds: [],
+        }),
+        revokeSuggestionGrant: sandbox.stub(),
+      };
+      await revokeExistingGrants({ Suggestion, SuggestionGrant }, opportunity);
+
+      expect(SuggestionGrant.revokeSuggestionGrant).to.not.have.been.called;
+    });
+
+    it('propagates an error when a revoke fails', async () => {
+      const s1 = { getId: () => 'sugg-1' };
+      const Suggestion = {
+        allByOpportunityIdAndStatus: sandbox.stub().resolves([s1]),
+      };
+      const SuggestionGrant = {
+        splitSuggestionsByGrantStatus: sandbox.stub().resolves({
+          grantedIds: ['sugg-1'],
+          notGrantedIds: [],
+          grantIds: ['grant-1'],
+        }),
+        revokeSuggestionGrant: sandbox.stub().rejects(new Error('rpc failure')),
+      };
+      try {
+        await revokeExistingGrants({ Suggestion, SuggestionGrant }, opportunity);
+        expect.fail('Should have thrown');
+      } catch (err) {
+        expect(err.message).to.equal('Failed to revoke 1/1 grants');
+      }
     });
   });
 });

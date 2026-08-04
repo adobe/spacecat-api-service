@@ -679,6 +679,138 @@ describe('Opportunities Controller', () => {
     expect(updatedOppty).to.have.property('updatedBy', 'system');
   });
 
+  describe('patchOpportunity revoke existing grants (SITES-49175)', () => {
+    const plgSite = {
+      getId: () => SITE_ID,
+      getOrganizationId: () => 'org-123',
+    };
+    const plgHeaders = { pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui' } } };
+
+    beforeEach(() => {
+      // mockOpptyEntity is a module-level fixture shared across all tests in this file;
+      // an earlier test permanently overwrites .save to throw (it isn't sandbox-tracked,
+      // so sandbox.restore() in the outer afterEach can't undo it). Mocha runs every
+      // top-level `it` in this describe before any nested describe, so by the time this
+      // block runs, that mutation has already happened — restore the passthrough here.
+      mockOpptyEntity.save = () => mockOpptyEntity;
+    });
+
+    const buildController = (overrides = {}) => {
+      const mockSiteWithOrg = { findById: sandbox.stub().resolves(plgSite) };
+      const mockEntitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub().resolves({ getTier: () => 'PLG' }),
+      };
+      const mockSuggestion = {
+        allByOpportunityIdAndStatus: sandbox.stub().resolves([]),
+      };
+      const mockSuggestionGrant = {
+        splitSuggestionsByGrantStatus: sandbox.stub().resolves({
+          grantedIds: [], notGrantedIds: [], grantIds: [],
+        }),
+        revokeSuggestionGrant: sandbox.stub().resolves({ success: true }),
+      };
+      const ctxWithGrants = {
+        ...mockContext,
+        dataAccess: {
+          ...mockOpportunityDataAccess,
+          Site: mockSiteWithOrg,
+          Suggestion: mockSuggestion,
+          SuggestionGrant: mockSuggestionGrant,
+          Entitlement: mockEntitlement,
+          ...overrides,
+        },
+      };
+      return {
+        controller: OpportunitiesController(ctxWithGrants),
+        mockSuggestion,
+        mockSuggestionGrant,
+      };
+    };
+
+    it('invokes revokeExistingGrants when the opportunity resolves on a PLG-enabled site', async () => {
+      const s1 = { getId: () => 'sugg-1' };
+      const { controller, mockSuggestion, mockSuggestionGrant } = buildController();
+      mockSuggestion.allByOpportunityIdAndStatus.resolves([s1]);
+      mockSuggestionGrant.splitSuggestionsByGrantStatus.resolves({
+        grantedIds: ['sugg-1'], notGrantedIds: [], grantIds: ['grant-1'],
+      });
+
+      const response = await controller.patchOpportunity({
+        ...defaultAuthAttributes,
+        ...plgHeaders,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { status: 'RESOLVED' },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(mockSuggestion.allByOpportunityIdAndStatus).to.have.been.calledOnceWith(
+        OPPORTUNITY_ID,
+        'NEW',
+      );
+      expect(mockSuggestionGrant.revokeSuggestionGrant).to.have.been.calledOnceWith('grant-1');
+    });
+
+    it('does not invoke revokeExistingGrants when status changes to something other than RESOLVED', async () => {
+      const { controller, mockSuggestion } = buildController();
+
+      const response = await controller.patchOpportunity({
+        ...defaultAuthAttributes,
+        ...plgHeaders,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { status: 'APPROVED' },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(mockSuggestion.allByOpportunityIdAndStatus).to.not.have.been.called;
+    });
+
+    it('does not invoke revokeExistingGrants when the opportunity is already RESOLVED', async () => {
+      opptys[0].status = 'RESOLVED';
+      const { controller, mockSuggestion } = buildController();
+
+      const response = await controller.patchOpportunity({
+        ...defaultAuthAttributes,
+        ...plgHeaders,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { status: 'RESOLVED', title: 'still resolved' },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(mockSuggestion.allByOpportunityIdAndStatus).to.not.have.been.called;
+    });
+
+    it('does not invoke revokeExistingGrants when the site is not PLG-enabled', async () => {
+      const { controller, mockSuggestion } = buildController();
+
+      const response = await controller.patchOpportunity({
+        ...defaultAuthAttributes,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { status: 'RESOLVED' },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(mockSuggestion.allByOpportunityIdAndStatus).to.not.have.been.called;
+    });
+
+    it('catches and logs a revokeExistingGrants failure without failing the PATCH response', async () => {
+      const { controller, mockSuggestion } = buildController();
+      mockSuggestion.allByOpportunityIdAndStatus.rejects(new Error('db failure'));
+
+      const response = await controller.patchOpportunity({
+        ...defaultAuthAttributes,
+        ...plgHeaders,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { status: 'RESOLVED' },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(mockContext.log.warn).to.have.been.calledOnceWith(
+        'Revoke existing grants handler failed',
+        'db failure',
+      );
+    });
+  });
+
   it('returns bad request when creating an opportunity if site not provided', async () => {
     // eslint-disable-next-line max-len
     const response = await opportunitiesController.createOpportunity({ params: {}, data: opptys[0] });

@@ -25,11 +25,15 @@ import {
   arrayEquals,
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
+import { Opportunity as OpportunityModel } from '@adobe/spacecat-shared-data-access';
 import { OpportunityDto } from '../dto/opportunity.js';
 import { isValidLocale } from '../utils/validations.js';
 import { applyFieldProjection } from '../utils/field-projection.js';
 import AccessControlUtil from '../support/access-control-util.js';
-import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
+import {
+  grantSuggestionsForOpportunity,
+  revokeExistingGrants,
+} from '../support/grant-suggestions-handler.js';
 import { getIsSummitPlgEnabled } from '../support/utils.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
@@ -282,6 +286,7 @@ function OpportunitiesController(ctx) {
     const { auditId, runbook, data, title, description, status, guidance, tags } = context.data;
     // update opportunity with new data
     let hasUpdates = false;
+    let isResolving = false;
     try {
       if (auditId && auditId !== opportunity.getAuditId()) {
         hasUpdates = true;
@@ -306,6 +311,7 @@ function OpportunitiesController(ctx) {
       }
       if (status && status !== opportunity.getStatus()) {
         hasUpdates = true;
+        isResolving = status === OpportunityModel.STATUSES.RESOLVED;
         opportunity.setStatus(status);
       }
       if (isNonEmptyObject(guidance)) {
@@ -319,6 +325,16 @@ function OpportunitiesController(ctx) {
       if (hasUpdates) {
         opportunity.setUpdatedBy(profile.email || 'system');
         const updatedOppty = await opportunity.save(opportunity);
+
+        if (isResolving && await getIsSummitPlgEnabled(site, ctx, context)) {
+          try {
+            await revokeExistingGrants(dataAccess, updatedOppty);
+          /* c8 ignore next 3 */
+          } catch (err) {
+            ctx.log?.warn?.('Revoke existing grants handler failed', err?.message ?? err);
+          }
+        }
+
         return ok(OpportunityDto.toJSON(updatedOppty));
       }
     } catch (e) {
