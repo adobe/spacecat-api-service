@@ -121,6 +121,9 @@ async function loadController(supportStubs = {}) {
     listFacsAccessMappingAuditEvents: sinon.stub().resolves([]),
     insertFacsAccessMappingAuditEvent: sinon.stub().resolves({}),
     getFacsAccessMappingById: sinon.stub().resolves(null),
+    // Default: the target resource belongs to the caller's own org, so the
+    // admin create-scope guard passes. Out-of-org / unknown cases override this.
+    getResourceImsOrgId: sinon.stub().resolves(CALLER_ORG_CANONICAL),
     requirePostgrestForFacsMappings: () => null,
     ...supportStubs,
   };
@@ -700,6 +703,282 @@ describe('StateAccessMappingsController', () => {
     });
   });
 
+  describe('POST /state/access-mappings/admin (adminCreateMapping)', () => {
+    // A trial customer's org — deliberately DIFFERENT from the caller's tenant
+    // (CALLER_ORG_BARE) so tests prove the org is taken from the payload, not
+    // from authInfo.
+    const TRIAL_ORG = 'TRIAL-ORG-777@AdobeOrg';
+    const adminBody = {
+      imsOrgId: TRIAL_ORG,
+      product: 'LLMO',
+      subjectType: 'user',
+      subjectId: 'trial-user@AdobeID',
+      resourceType: 'brand',
+      resourceId: VALID_UUID_RES,
+      grantedCapabilities: ['llmo/can_view'],
+    };
+    // Row the create helper returns — stamped with the payload org/product.
+    const adminRow = () => makeRow({
+      subject_id: 'trial-user@AdobeID', ims_org_id: TRIAL_ORG,
+    });
+
+    it('returns 403 when the caller is not an admin', async () => {
+      const { Controller, stubs } = await loadController();
+      const ctx = makeContext({ isAdmin: false, body: adminBody });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(403);
+      // Denied before any DB work.
+      expect(stubs.createFacsAccessMappings.called).to.be.false;
+    });
+
+    it('returns 503 when postgrest is unavailable', async () => {
+      const { Controller } = await loadController({
+        requirePostgrestForFacsMappings: () => ({ status: 503 }),
+      });
+      const ctx = makeContext({ isAdmin: true, body: adminBody });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(503);
+    });
+
+    it('returns 400 when body is missing', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ isAdmin: true, body: null });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when product is missing', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ isAdmin: true, body: { ...adminBody, product: undefined } });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when product is unknown', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ isAdmin: true, body: { ...adminBody, product: 'BOGUS' } });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when imsOrgId is missing', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ isAdmin: true, body: { ...adminBody, imsOrgId: '' } });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 for invalid subjectType', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ isAdmin: true, body: { ...adminBody, subjectType: 'group' } });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when subjectId is missing', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ isAdmin: true, body: { ...adminBody, subjectId: '' } });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when user subjectId is not canonical', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ isAdmin: true, body: { ...adminBody, subjectId: 'noatsign' } });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it("returns 400 when an 'org' subjectId differs from the payload imsOrgId", async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({
+        isAdmin: true,
+        body: {
+          ...adminBody, subjectType: 'org', subjectId: 'OTHER@AdobeOrg',
+        },
+      });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it("accepts an 'org' subjectId equal to the payload imsOrgId (201)", async () => {
+      const row = makeRow({ subject_type: 'org', subject_id: TRIAL_ORG, ims_org_id: TRIAL_ORG });
+      const { Controller } = await loadController({
+        createFacsAccessMappings: sinon.stub().resolves({ created: [row], skipped: [] }),
+      });
+      const ctx = makeContext({
+        isAdmin: true,
+        body: {
+          ...adminBody, subjectType: 'org', subjectId: TRIAL_ORG,
+        },
+      });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(201);
+    });
+
+    it("normalizes a bare 'org' subjectId so a bare imsOrgId + bare subjectId match (201)", async () => {
+      const createStub = sinon.stub().resolves({
+        created: [makeRow({ subject_type: 'org', subject_id: 'BARE-ORG@AdobeOrg', ims_org_id: 'BARE-ORG@AdobeOrg' })],
+        skipped: [],
+      });
+      const { Controller } = await loadController({ createFacsAccessMappings: createStub });
+      const ctx = makeContext({
+        isAdmin: true,
+        body: {
+          ...adminBody, imsOrgId: 'BARE-ORG', subjectType: 'org', subjectId: 'BARE-ORG',
+        },
+      });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(201);
+      // Both values are normalized to the canonical form before compare + persist.
+      expect(createStub.firstCall.args[1].imsOrgId).to.equal('BARE-ORG@AdobeOrg');
+      expect(createStub.firstCall.args[1].subjects).to.deep.equal([
+        { type: 'org', id: 'BARE-ORG@AdobeOrg' },
+      ]);
+    });
+
+    it('returns 400 for a resourceType not valid for the product', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ isAdmin: true, body: { ...adminBody, resourceType: 'site' } });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when resourceId is empty', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ isAdmin: true, body: { ...adminBody, resourceId: '' } });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when resourceId is not a valid UUID', async () => {
+      const { Controller, stubs } = await loadController();
+      const ctx = makeContext({ isAdmin: true, body: { ...adminBody, resourceId: 'not-a-uuid' } });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(400);
+      // Denied before any write — no dangling reference is persisted.
+      expect(stubs.createFacsAccessMappings.called).to.be.false;
+    });
+
+    it('returns 400 when grantedCapabilities is empty', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ isAdmin: true, body: { ...adminBody, grantedCapabilities: [] } });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when a granted capability is outside the payload product catalog', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({
+        isAdmin: true, body: { ...adminBody, grantedCapabilities: ['aso/can_view'] },
+      });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('creates the binding from the PAYLOAD org + product, not from authInfo/x-product', async () => {
+      const createStub = sinon.stub().resolves({ created: [adminRow()], skipped: [] });
+      const { Controller, stubs } = await loadController({ createFacsAccessMappings: createStub });
+      // Caller tenant is CALLER_ORG_BARE and the x-product header says ASO —
+      // both MUST be ignored in favour of the payload's TRIAL_ORG / LLMO.
+      const ctx = makeContext({
+        isAdmin: true,
+        product: 'ASO',
+        imsOrgId: CALLER_ORG_BARE,
+        body: adminBody,
+      });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(201);
+      const args = createStub.firstCall.args[1];
+      expect(args.imsOrgId).to.equal(TRIAL_ORG);
+      expect(args.product).to.equal('LLMO');
+      // No manager/authority evaluation and no admin same-org resource check.
+      expect(stubs.listFacsAccessMappings.called).to.be.false;
+      expect(stubs.getResourceImsOrgId.called).to.be.false;
+    });
+
+    it('normalizes a bare payload imsOrgId to the canonical form', async () => {
+      const createStub = sinon.stub().resolves({ created: [adminRow()], skipped: [] });
+      const { Controller } = await loadController({ createFacsAccessMappings: createStub });
+      const ctx = makeContext({
+        isAdmin: true, body: { ...adminBody, imsOrgId: 'BARE-TRIAL-ORG' },
+      });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(201);
+      expect(createStub.firstCall.args[1].imsOrgId).to.equal('BARE-TRIAL-ORG@AdobeOrg');
+    });
+
+    it('injects the baseline can_view when the request omits it', async () => {
+      const createStub = sinon.stub().resolves({ created: [adminRow()], skipped: [] });
+      const { Controller } = await loadController({ createFacsAccessMappings: createStub });
+      const ctx = makeContext({
+        isAdmin: true, body: { ...adminBody, grantedCapabilities: ['llmo/can_configure'] },
+      });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(201);
+      expect(createStub.firstCall.args[1].grantedCapabilities)
+        .to.have.members(['llmo/can_configure', 'llmo/can_view']);
+    });
+
+    it('lets an admin grant can_manage_users (no FACS-layer gate on this surface)', async () => {
+      const createStub = sinon.stub().resolves({ created: [adminRow()], skipped: [] });
+      const { Controller } = await loadController({ createFacsAccessMappings: createStub });
+      const ctx = makeContext({
+        isAdmin: true,
+        facsPermissions: [],
+        body: { ...adminBody, grantedCapabilities: ['llmo/can_manage_users'] },
+      });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(201);
+      expect(createStub.firstCall.args[1].grantedCapabilities)
+        .to.include('llmo/can_manage_users');
+    });
+
+    it('emits a create audit event stamped with the payload org + caller actor', async () => {
+      const { Controller, stubs } = await loadController({
+        createFacsAccessMappings: sinon.stub().resolves({ created: [adminRow()], skipped: [] }),
+      });
+      const ctx = makeContext({ isAdmin: true, body: adminBody });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(201);
+      const event = stubs.insertFacsAccessMappingAuditEvent.firstCall.args[1];
+      expect(event).to.include({
+        imsOrgId: TRIAL_ORG,
+        product: 'LLMO',
+        operation: 'create',
+        outcome: 'allow',
+      });
+      // Actor is the real admin caller (audit trail only).
+      expect(event.actorId).to.equal(CALLER_USER);
+    });
+
+    it('upserts on an active duplicate: overwrites capabilities and returns 200', async () => {
+      const existing = makeRow({ id: 'pre-existing-id', ims_org_id: TRIAL_ORG });
+      const updateStub = sinon.stub().resolves(existing);
+      const { Controller } = await loadController({
+        createFacsAccessMappings: sinon.stub().resolves({
+          created: [],
+          skipped: [{ subject: { type: 'user', id: 'trial-user@AdobeID' }, reason: 'duplicate' }],
+        }),
+        listFacsAccessMappings: sinon.stub().resolves([existing]),
+        updateFacsAccessMappingCapabilities: updateStub,
+      });
+      const ctx = makeContext({ isAdmin: true, body: adminBody });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(200);
+      expect(updateStub.firstCall.args[1].imsOrgId).to.equal(TRIAL_ORG);
+    });
+
+    it('returns 500 when the helper throws', async () => {
+      const { Controller } = await loadController({
+        createFacsAccessMappings: sinon.stub().rejects(new Error('boom')),
+      });
+      const ctx = makeContext({ isAdmin: true, body: adminBody });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(500);
+    });
+  });
+
   describe('PATCH /state/access-mappings/:id (patchMapping)', () => {
     it('returns 400 when id is not a UUID', async () => {
       const { Controller } = await loadController();
@@ -1226,7 +1505,7 @@ describe('StateAccessMappingsController', () => {
     });
   });
 
-  describe('internal admins may not write (create/update) mappings', () => {
+  describe('internal admins are scoped to their own org for writes', () => {
     const adminWriteBody = {
       subjectType: 'user',
       subjectId: 'someone@AdobeID',
@@ -1235,54 +1514,69 @@ describe('StateAccessMappingsController', () => {
       grantedCapabilities: ['llmo/can_view'],
     };
 
-    it('createMapping returns 403 for an internal admin', async () => {
-      const { Controller, stubs } = await loadController();
-      const ctx = makeContext({
-        facsPermissions: [],
-        isAdmin: true,
-        body: adminWriteBody,
+    it('createMapping succeeds (201) when the resource belongs to the admin\'s org', async () => {
+      const created = makeRow();
+      const { Controller, stubs } = await loadController({
+        createFacsAccessMappings: sinon.stub().resolves({ created: [created], skipped: [] }),
+        // Resource resolves to the caller's own org.
+        getResourceImsOrgId: sinon.stub().resolves(CALLER_ORG_CANONICAL),
       });
+      const ctx = makeContext({ isAdmin: true, body: adminWriteBody });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(201);
+      expect(stubs.getResourceImsOrgId.calledWithMatch(sinon.match.any, {
+        resourceType: 'brand', resourceId: VALID_UUID_RES,
+      })).to.be.true;
+    });
+
+    it('createMapping returns 403 when the resource belongs to another org', async () => {
+      const { Controller, stubs } = await loadController({
+        getResourceImsOrgId: sinon.stub().resolves('OTHER-ORG-999@AdobeOrg'),
+      });
+      const ctx = makeContext({ isAdmin: true, body: adminWriteBody });
       const res = await Controller(ctx).createMapping(ctx);
       expect(res.status).to.equal(403);
-      // The block short-circuits before any DB write.
+      // Denied before any write.
       expect(stubs.createFacsAccessMappings.called).to.be.false;
     });
 
-    it('patchMapping returns 403 for an internal admin', async () => {
-      const { Controller, stubs } = await loadController();
+    it('createMapping returns 403 (fail-closed) when the resource is unknown', async () => {
+      const { Controller, stubs } = await loadController({
+        getResourceImsOrgId: sinon.stub().resolves(null),
+      });
+      const ctx = makeContext({ isAdmin: true, body: adminWriteBody });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(403);
+      expect(stubs.createFacsAccessMappings.called).to.be.false;
+    });
+
+    it('patchMapping is allowed for an admin (org-scoped by the RPC)', async () => {
+      const updated = makeRow();
+      const { Controller, stubs } = await loadController({
+        updateFacsAccessMappingCapabilities: sinon.stub().resolves(updated),
+      });
       const ctx = makeContext({
-        facsPermissions: [],
         isAdmin: true,
         pathParams: { id: VALID_UUID_MAPPING },
         body: { grantedCapabilities: ['llmo/can_view'] },
       });
       const res = await Controller(ctx).patchMapping(ctx);
-      expect(res.status).to.equal(403);
-      expect(stubs.updateFacsAccessMappingCapabilities.called).to.be.false;
+      expect(res.status).to.equal(200);
+      // No resource-org lookup on PATCH — the RPC's ims_org_id filter scopes it.
+      expect(stubs.getResourceImsOrgId.called).to.be.false;
     });
 
-    it('deleteMapping (revoke access) returns 403 for an internal admin', async () => {
-      const { Controller, stubs } = await loadController();
+    it('deleteMapping (revoke access) is allowed for an admin (org-scoped by the RPC)', async () => {
+      const updated = makeRow({ granted_capabilities: [] });
+      const { Controller } = await loadController({
+        updateFacsAccessMappingCapabilities: sinon.stub().resolves(updated),
+      });
       const ctx = makeContext({
-        facsPermissions: [],
         isAdmin: true,
         pathParams: { id: VALID_UUID_MAPPING },
       });
       const res = await Controller(ctx).deleteMapping(ctx);
-      expect(res.status).to.equal(403);
-      expect(stubs.updateFacsAccessMappingCapabilities.called).to.be.false;
-    });
-
-    it('an internal admin who also holds FACS can_manage_users is still blocked from create', async () => {
-      const { Controller, stubs } = await loadController();
-      const ctx = makeContext({
-        facsPermissions: ['llmo/can_manage_users'],
-        isAdmin: true,
-        body: adminWriteBody,
-      });
-      const res = await Controller(ctx).createMapping(ctx);
-      expect(res.status).to.equal(403);
-      expect(stubs.createFacsAccessMappings.called).to.be.false;
+      expect(res.status).to.equal(200);
     });
   });
 

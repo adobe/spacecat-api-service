@@ -49,6 +49,16 @@ export const ELEMENT_IDS = Object.freeze({
   STATS_PER_URL: '9af5ed83-049b-493a-85d7-99c7d4deddba',
   URL_TRENDS: 'afb2e5d3-3955-4e0d-aeb1-7e28cdecd9f9',
 
+  // URL Inspector — URL Prompts (details drill-down: the prompts that cited a
+  // specific URL). `table` envelope, one row per distinct prompt:
+  //   { prompt, source(=url), source_title, brand_mentioned, brands_string,
+  //     closest_date, url_cbf }.
+  // Scoped by `CBF_source` = the full URL string (placed in BOTH simple and
+  // advanced — unique to this element) + date (`CBF_date__start`/`__end`) +
+  // `CBF_model`. Brand scoping is via the sub-workspace (no CBF_brand filter).
+  // Does NOT return category/topic/region. Verified live 2026-07-29.
+  URL_PROMPTS: 'b4f1ead7-4aea-41ea-b1ce-311004715d63',
+
   MENTIONS: 'e1a6811b-d0c9-4d6f-8a29-290a32db863f',
   VISIBILITY: '2724878e-e0e9-4217-ad21-d6bcb7887a09',
   CITATIONS_KPI: '588054fe-b987-40f6-9360-b5673738bdfa',
@@ -101,4 +111,18 @@ export const ELEMENT_IDS = Object.freeze({
   PROMPT_AI_ANSWERS: '45d6251f-15cd-4b33-a7f6-de97925e900e',
   PROMPT_SOURCES: '7db0df5c-6679-4495-8ea8-ef2dfd7e5251',
   PROMPT_VISIBILITY: 'f5230e00-b14f-4a52-bf89-2952ef7fe39b',
+
+  // KPI Headlines (Overview-SR exact-parity cards, LLMO-6515 follow-up). Verified
+  // live against the Brand Presence MFE — each is a per-brand `kpiLineChart`
+  // element carrying a Semrush-computed `mainValue`/`secondaryValue` period
+  // comparison, distinct from the multi-brand weekly series `TRENDS_MV`/
+  // `MARKET_CITATIONS_TREND` already provide (see kpi-headlines.js).
+  KPI_SHARE_OF_VOICE: '69a4befb-268e-42ff-b949-fdb9609c8f52',
+  KPI_BRAND_VISIBILITY: '6db33cf0-f4bc-4ab9-8bd0-f10ac4623562',
+  // Scoped by CBF_brand_urls (the brand's own URL list from BRAND_URLS below),
+  // NOT CBF_ws_brand — source visibility is domain-cited, not brand-name-mentioned.
+  KPI_SOURCE_VISIBILITY: 'a6e7e811-4274-4f69-a2b3-35c5d639124d',
+  // Filter element: the brand's own URL list (main domain + tracked social
+  // profiles), scoped by CBF_brand. Feeds KPI_SOURCE_VISIBILITY's CBF_brand_urls.
+  BRAND_URLS: 'c8bea9ec-dca4-4121-9353-4189c0edd4b5',
 });

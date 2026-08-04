@@ -35,6 +35,7 @@ import {
   INTENT_ENRICH_CONCURRENCY,
   buildCitedDomainsPayload,
   transformCitedDomainsResponse,
+  transformCitedDomainsResponses,
   buildTopicPromptsPayload,
   transformTopicPromptsResponse,
   aggregateTopicsFromPrompts,
@@ -45,9 +46,13 @@ import {
   transformOwnedUrlsResponse,
   buildDomainUrlsPayload,
   transformDomainUrlsResponse,
+  buildUrlPromptsPayload,
+  transformUrlPromptsResponse,
+  mergeUrlPromptsResponses,
   buildMarketMentionsTrendPayload,
   buildMarketCitationsTrendPayload,
   transformMarketTrackingTrends,
+  transformCompetitorSummary,
   buildStatsTotalExecutionsPayload,
   transformStatsTotalExecutionsResponse,
   buildStatsMentionsPayload,
@@ -57,7 +62,21 @@ import {
   buildStatsCitationsPayload,
   transformStatsCitationsResponse,
   aggregateUrlInspectorStats,
+  buildKpiHeadlinePayload,
+  buildBrandUrlsPayload,
+  transformBrandUrlsResponse,
+  buildSourceVisibilityPayload,
+  transformKpiHeadlineResponse,
 } from './definitions/index.js';
+
+// Tightened per-call budget for getSourceVisibilityHeadline's two SEQUENTIAL
+// calls (brand-URL-list, then the KPI itself) — the transport's normal 30s x 2
+// retries would blow the API-Gateway's ~30s hard integration timeout ceiling on
+// its own (see elements-transport.js's DEFAULT_TIMEOUT_MS doc), regardless of
+// what else shares the endpoint. 1 retry max per call keeps the worst case
+// (~12s + one jittered backoff) x 2 safely under that ceiling.
+const SOURCE_VISIBILITY_CALL_TIMEOUT_MS = 12_000;
+const SOURCE_VISIBILITY_CALL_MAX_RETRIES = 1;
 
 // Bounds parallel per-week upstream fan-out for the /stats trends array (up to
 // TRENDS_MAX_WEEKS=8 weeks x 4 element calls each) so a wide date range can't
@@ -236,16 +255,40 @@ export function createElementsService(transport, log) {
      * @param {string} workspaceId - Semrush workspace UUID.
      * @param {object} params - Query params (model/platform, brand, startDate, endDate,
      *   page, pageSize).
+     * @param {string[]} [params.projectIds] - Semrush project ids to scope to. The
+     *   element only accepts one project per call, so more than one id fans out a
+     *   call per project (bounded concurrency) and merges the results. Deduplicated
+     *   here as a safety net — a repeated id would otherwise double-count that
+     *   project's citations in the merge (the controller already dedupes, but this
+     *   fan-out is where a duplicate would actually corrupt counts, so it dedupes
+     *   independently rather than relying solely on the caller).
      * @returns {Promise<object>} Legacy contract `{ domains: [...], totalCount }`.
      */
     /* c8 ignore start -- LLMO-6020 POC endpoint; unit tests intentionally deferred */
     async getCitedDomains(workspaceId, params) {
+      const { projectIds, ...rest } = params;
+      const ids = Array.isArray(projectIds)
+        ? [...new Set(projectIds.filter(hasText))]
+        : [];
+      if (ids.length > 1) {
+        const CITED_DOMAINS_PROJECT_CONCURRENCY = 8;
+        const rawList = await mapWithConcurrency(
+          ids,
+          CITED_DOMAINS_PROJECT_CONCURRENCY,
+          (projectId) => transport.fetchElement(
+            workspaceId,
+            ELEMENT_IDS.CITED_DOMAINS,
+            buildCitedDomainsPayload({ ...rest, projectId }),
+          ),
+        );
+        return transformCitedDomainsResponses(rawList, rest);
+      }
       const raw = await transport.fetchElement(
         workspaceId,
         ELEMENT_IDS.CITED_DOMAINS,
-        buildCitedDomainsPayload(params),
+        buildCitedDomainsPayload({ ...rest, projectId: ids[0] }),
       );
-      return transformCitedDomainsResponse(raw, params);
+      return transformCitedDomainsResponse(raw, rest);
     },
 
     /**
@@ -256,13 +299,13 @@ export function createElementsService(transport, log) {
      * Single call (like getCitedDomains, not a per-project fan-out): with
      * `auto_bucketing: 'week'` the element returns weekly sentiment buckets directly
      * (server-side, honoring the requested date range) — no daily→weekly rollup here.
-     * Region scoping, when requested, is a `CBF_project` (Semrush project id) advanced
-     * filter (resolved by the controller via resolveRegionProjectId); region=all/absent →
-     * the brand's whole sub-workspace.
+     * Project scoping, when requested, is a `CBF_project` (Semrush project id) advanced
+     * filter built from the caller-supplied `projectId`/`projectIds`; absent → the brand's
+     * whole sub-workspace.
      *
      * @param {string} workspaceId - Semrush workspace UUID.
      * @param {object} params - Query params (model/platform, startDate, endDate, category,
-     *   projectId).
+     *   projectId, projectIds).
      * @returns {Promise<{ weeklyTrends: object[] }>} Legacy contract.
      */
     async getSentimentOverview(workspaceId, params) {
@@ -300,6 +343,63 @@ export function createElementsService(transport, log) {
     /* c8 ignore stop */
 
     /**
+     * Fetches the URL Inspector details drill-down: the prompts that cited a specific
+     * URL, from the URL_PROMPTS element (b4f1ead7), scoped by `CBF_source` (the URL).
+     * Returns a flat array of per-prompt rows. Pagination is applied client-side by the
+     * controller (Semrush has no server-side paging).
+     *
+     * Market scope: the element takes ONE top-level `project_id` per call (a `CBF_project`
+     * advanced filter is a no-op — verified live LLMO-6674). So when the caller selects
+     * markets, this fans out one call per project id (bounded concurrency, mirroring
+     * owned-urls) and UNIONS the results, deduped by prompt text via
+     * {@link mergeUrlPromptsResponses} (which documents the dedupe/collision rules). No
+     * `projectIds` → one unscoped call across the whole sub-workspace (unchanged behavior).
+     * Category is a `CBF_tags` filter applied on every per-project call.
+     *
+     * @param {string} workspaceId - Semrush sub-workspace UUID (projects/prompts live here).
+     * @param {object} params - Query params (url, model/platform, startDate, endDate,
+     *   category, projectIds).
+     * @param {string[]} [params.projectIds] - Semrush project ids to scope to. Empty → one
+     *   unscoped (sub-workspace-wide) fetch.
+     * @returns {Promise<Array<object>>} Per-prompt rows (see transformUrlPromptsResponse).
+     */
+    /* c8 ignore start -- LLMO-6620 POC endpoint; unit tests deferred (see url-prompts.js tests) */
+    async getUrlPrompts(workspaceId, {
+      url, model, platform, startDate, endDate, category, projectIds = [],
+    }) {
+      const ids = Array.isArray(projectIds)
+        ? [...new Set(projectIds.filter(hasText))]
+        : [];
+      // One top-level project_id per call; `undefined` = the unscoped aggregate.
+      const scopes = ids.length > 0 ? ids : [undefined];
+      // Bound the per-market fan-out (mirrors owned-urls) so a brand with many markets
+      // can't spawn unbounded parallel Semrush requests (429 / pool risk).
+      const URL_PROMPTS_PROJECT_CONCURRENCY = 8;
+      const perProject = await mapWithConcurrency(
+        scopes,
+        URL_PROMPTS_PROJECT_CONCURRENCY,
+        async (projectId) => {
+          const raw = await transport.fetchElement(
+            workspaceId,
+            ELEMENT_IDS.URL_PROMPTS,
+            buildUrlPromptsPayload({
+              url, model, platform, startDate, endDate, category, projectId,
+            }),
+          );
+          return transformUrlPromptsResponse(raw);
+        },
+      );
+
+      // Single scope → nothing to merge; return the transformed rows as-is.
+      if (scopes.length === 1) {
+        return perProject[0];
+      }
+      // Multi-market: union + dedupe by prompt text (see mergeUrlPromptsResponses).
+      return mergeUrlPromptsResponses(perProject);
+    },
+    /* c8 ignore stop */
+
+    /**
      * Fetches the Data Insights per-TOPIC table. Uses the SAME PROMPTS_BY_TOPIC element
      * (78864493) as getTopicPrompts but with NO topic filter (all topics), then groups
      * the per-prompt rows by topic and aggregates server-side (see aggregateTopicsFromPrompts).
@@ -322,50 +422,12 @@ export function createElementsService(transport, log) {
     /* c8 ignore stop */
 
     /**
-     * Resolves a URL Inspector `region` code (e.g. `US`) to its Semrush `project_id` for the
-     * given brand, by fetching the Markets element and matching the region label + brand.
-     * Semrush projects are unique per (brand, market), so the resulting project_id scopes
-     * subsequent element calls to that brand + region via a top-level `project_id`.
-     *
-     * @param {string} workspaceId - Semrush workspace UUID.
-     * @param {object} opts
-     * @param {string} [opts.brandId] - SpaceCat brand UUID for the site; used only as a
-     *   tiebreaker when several brands have a project for the same region.
-     * @param {string} opts.region - UI region code (e.g. `US`).
-     * @param {object[]} [opts.brandSemrushProjects] - Flattened BrandSemrushProject rows for
-     *   ALL org brands (the site's own brand may not own any Semrush projects), used to
-     *   enrich/match the Markets response.
-     * @returns {Promise<string|null>} The matching `semrush_project_id`, or null if none.
-     */
-    async resolveRegionProjectId(workspaceId, {
-      brandId, region, brandSemrushProjects = [],
-    }) {
-      // Fetch markets workspace-wide (mirrors getUrlInspectorFilterDimensions) — a
-      // brand-scoped Markets call (CBF_ws_brand) can come back empty when the Semrush
-      // brand value differs from our brand name.
-      const raw = await transport.fetchElement(
-        workspaceId,
-        ELEMENT_IDS.MARKETS,
-        buildMarketsPayload({}),
-      );
-      const regions = transformMarketsToFilterDimensions(raw, brandSemrushProjects);
-      const wanted = String(region).toLowerCase();
-      const matches = regions.filter((r) => r.semrush_project_id
-        && String(r.id ?? '').toLowerCase() === wanted);
-      if (matches.length === 0) {
-        return null;
-      }
-      // Prefer the site's brand when it owns a project for this region; else first match.
-      const preferred = matches.find((r) => r.spacecat_brand_id === brandId);
-      return (preferred ?? matches[0]).semrush_project_id;
-    },
-
-    /**
-     * Resolves every (region, projectId) pair for the workspace, used to fan the
-     * owned-urls query out per-project. Per-project scoping keeps each element
-     * call under the Semrush 50k-row cap (a workspace-wide call hit it) and lets
-     * the transform tag each URL with the region it was cited in. Reuses the
-     * Markets element + transform (same as resolveRegionProjectId).
+     * Resolves every (region, projectId) pair for the workspace, used as the
+     * aggregate ("all projects") fallback when the caller doesn't supply a
+     * `projectId` filter, and to fan the owned-urls query out per-project.
+     * Per-project scoping keeps each element call under the Semrush 50k-row cap
+     * (a workspace-wide call hit it) and lets the transform tag each URL with the
+     * region it was cited in. Reuses the Markets element + transform.
      *
      * @param {string} workspaceId - Semrush workspace UUID.
      * @param {object} [opts]
@@ -534,6 +596,51 @@ export function createElementsService(transport, log) {
         ),
       ]);
       return { weeklyTrends: transformMarketTrackingTrends(mentions, citations, brandName) };
+    },
+    /* c8 ignore stop */
+
+    /**
+     * Fetches aggregate per-competitor mentions/citations totals (no weekly breakdown)
+     * for the Overview Competitor Comparison bar chart
+     * (`GET .../brand-presence/competitor-summary`) — the lightweight counterpart to
+     * {@link getMarketTrackingTrends}, reusing the exact same two elements (TRENDS_MV +
+     * MARKET_CITATIONS_TREND) but summed into one row per competitor instead of a
+     * weekly series.
+     *
+     * `projectId` (a single selected region) takes precedence over `projectIds` (the
+     * aggregate "all regions" view). Both are OR-ed into one call per element.
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params
+     * @param {string} [params.model] / [params.platform] - AI model filter.
+     * @param {string} params.startDate / params.endDate - YYYY-MM-DD.
+     * @param {string} [params.projectId] - Single Semrush project UUID (one region).
+     * @param {string[]} [params.projectIds] - All the brand's project UUIDs (aggregate).
+     * @param {string} params.brandName - Tracked brand display name (excluded from the result).
+     * @returns {Promise<{competitors: Array<{name: string, mentions: number, citations: number}>}>}
+     */
+    /* c8 ignore start -- competitor-summary POC endpoint; unit tests intentionally deferred */
+    async getCompetitorSummary(workspaceId, {
+      model, platform, startDate, endDate, projectId, projectIds, brandName,
+    }) {
+      const resolvedProjectIds = projectId ? [projectId] : (projectIds ?? []);
+      const [mentions, citations] = await Promise.all([
+        transport.fetchElement(
+          workspaceId,
+          ELEMENT_IDS.TRENDS_MV,
+          buildMarketMentionsTrendPayload({
+            model, platform, startDate, endDate, projectIds: resolvedProjectIds,
+          }),
+        ),
+        transport.fetchElement(
+          workspaceId,
+          ELEMENT_IDS.MARKET_CITATIONS_TREND,
+          buildMarketCitationsTrendPayload({
+            model, platform, startDate, endDate, projectIds: resolvedProjectIds,
+          }),
+        ),
+      ]);
+      return transformCompetitorSummary(mentions, citations, brandName);
     },
     /* c8 ignore stop */
 
@@ -782,6 +889,132 @@ export function createElementsService(transport, log) {
       }));
 
       return { stats, weeklyTrends };
+    },
+
+    /**
+     * Fetches the Overview-SR Share of Voice + Brand Visibility KPI headline
+     * cards (`GET .../brand-presence/kpi-headlines`) — the MFE's own per-brand
+     * `kpiLineChart` elements (`KPI_SHARE_OF_VOICE`, `KPI_BRAND_VISIBILITY`),
+     * NOT derived from `market-tracking-trends`'s weekly series (LLMO-6516
+     * follow-up, exact MFE parity — see docs/elements/kpi-headlines-plan.md).
+     *
+     * Both calls are brand-NAME scoped (`CBF_ws_brand`) and independent of each
+     * other, so they run in parallel — this endpoint's own worst-case wall time
+     * stays a single call's worth. Deliberately split from Source Visibility
+     * (below): that one needs a SEQUENTIAL brand-URL-list lookup first, which
+     * would double this endpoint's worst case against the API-Gateway's ~30s
+     * ceiling if bundled in here.
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params
+     * @param {string} params.brandName - Brand display name (`CBF_ws_brand` value).
+     * @param {string} [params.model] / [params.platform] - AI model filter.
+     * @param {string} params.startDate / params.endDate - Required YYYY-MM-DD (main period).
+     * @param {string} [params.projectId] - Single Semrush project UUID (one region).
+     * @param {string[]} [params.projectIds] - All the brand's project UUIDs (aggregate).
+     * @param {string} [params.category] - Full `category__<label>` tag value (caller
+     *   includes the `category__` prefix), sent as-is.
+     * @returns {Promise<{
+     *   shareOfVoice: {value: number, comparisonValue: number | null},
+     *   brandVisibility: {value: number, comparisonValue: number | null},
+     * }>}
+     */
+    async getKpiHeadlines(workspaceId, {
+      brandName, model, platform, startDate, endDate, projectId, projectIds, category,
+    }) {
+      const resolvedProjectIds = projectId ? [projectId] : (projectIds ?? []);
+      const [sov, brandVis] = await Promise.all([
+        transport.fetchElement(
+          workspaceId,
+          ELEMENT_IDS.KPI_SHARE_OF_VOICE,
+          buildKpiHeadlinePayload({
+            brandName,
+            model,
+            platform,
+            startDate,
+            endDate,
+            projectIds: resolvedProjectIds,
+            category,
+          }),
+        ),
+        transport.fetchElement(
+          workspaceId,
+          ELEMENT_IDS.KPI_BRAND_VISIBILITY,
+          buildKpiHeadlinePayload({
+            brandName,
+            model,
+            platform,
+            startDate,
+            endDate,
+            projectIds: resolvedProjectIds,
+            category,
+          }),
+        ),
+      ]);
+      return {
+        shareOfVoice: transformKpiHeadlineResponse(sov),
+        brandVisibility: transformKpiHeadlineResponse(brandVis),
+      };
+    },
+
+    /**
+     * Fetches the Overview-SR Source Visibility KPI headline card
+     * (`GET .../brand-presence/source-visibility-headline`) — split into its
+     * OWN endpoint from Share of Voice/Brand Visibility because it needs a
+     * SEQUENTIAL two-hop fetch (the brand's URL list via `BRAND_URLS`, then
+     * `KPI_SOURCE_VISIBILITY` scoped by that list's `CBF_brand_urls`), unlike
+     * the other two brand-NAME-scoped, single-hop calls. Each hop uses a
+     * tightened per-call timeout ({@link SOURCE_VISIBILITY_CALL_TIMEOUT_MS}) so
+     * the worst case stays under the API-Gateway's ~30s hard ceiling — the
+     * transport's normal 30s-per-call default x 2 sequential calls would blow
+     * it on its own, independent of what else shares the endpoint.
+     *
+     * A brand with no registered URLs has nothing to scope
+     * `KPI_SOURCE_VISIBILITY` by (an empty `CBF_brand_urls` OR-filter is
+     * unscoped/undefined behavior upstream) — returns `{ value: 0, comparisonValue: null }`
+     * rather than issuing that call (no real measurement exists either period,
+     * so `comparisonValue` stays `null` — same "no data" convention as
+     * {@link transformKpiHeadlineResponse}), mirroring the empty-projects
+     * guards elsewhere in this service.
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params
+     * @param {string} params.brandName - Brand display name (`CBF_brand` value, for the URL list).
+     * @param {string} [params.model] / [params.platform] - AI model filter.
+     * @param {string} params.startDate / params.endDate - Required YYYY-MM-DD (main period).
+     * @param {string} [params.projectId] - Single Semrush project UUID (one region).
+     * @param {string[]} [params.projectIds] - All the brand's project UUIDs (aggregate).
+     * @param {string} [params.category] - Full `category__<label>` tag value (caller
+     *   includes the `category__` prefix), sent as-is.
+     * @returns {Promise<{value: number, comparisonValue: number | null}>}
+     */
+    async getSourceVisibilityHeadline(workspaceId, {
+      brandName, model, platform, startDate, endDate, projectId, projectIds, category,
+    }) {
+      const resolvedProjectIds = projectId ? [projectId] : (projectIds ?? []);
+      const callOpts = {
+        timeoutMs: SOURCE_VISIBILITY_CALL_TIMEOUT_MS,
+        maxRetries: SOURCE_VISIBILITY_CALL_MAX_RETRIES,
+      };
+      const brandUrlsRaw = await transport.fetchElement(
+        workspaceId,
+        ELEMENT_IDS.BRAND_URLS,
+        buildBrandUrlsPayload({ brandName }),
+        callOpts,
+      );
+      const brandUrls = transformBrandUrlsResponse(brandUrlsRaw);
+      if (brandUrls.length === 0) {
+        return { value: 0, comparisonValue: null };
+      }
+      const raw = await transport.fetchElement(
+        workspaceId,
+        ELEMENT_IDS.KPI_SOURCE_VISIBILITY,
+        buildSourceVisibilityPayload({
+          brandUrls, model, platform, startDate, endDate, projectIds: resolvedProjectIds, category,
+        }),
+        callOpts,
+      );
+      return transformKpiHeadlineResponse(raw);
     },
   };
 }

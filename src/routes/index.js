@@ -110,6 +110,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} elementsController - Elements API controller (Semrush Elements wrappers).
  * @param {Object} proxyController - URL proxy controller for client-side previews.
  * @param {Object} taskManagementController - Task-management (Jira ticket creation) controller.
+ * @param {Object} onboardingController - Semrush onboarding notification controller.
  * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
  * @param {Object} auditPolicyController - Audit policy + audit scope controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
@@ -179,6 +180,7 @@ export default function getRouteHandlers(
   elementsController,
   proxyController,
   taskManagementController,
+  onboardingController,
   redirectsController,
   auditPolicyController,
 ) {
@@ -189,6 +191,9 @@ export default function getRouteHandlers(
     'GET /config/:service/redirects.txt': redirectsController.getRedirects,
     'GET /audits/latest/:auditType': auditsController.getAllLatest,
     'GET /configurations/latest': configurationController.getLatest,
+    // Static route — matched before the dynamic `GET /configurations/:version`
+    // (see src/utils/route-utils.js), so "versions" is never treated as a VersionId.
+    'GET /configurations/versions': configurationController.listVersions,
     'PATCH /configurations/latest': configurationController.updateConfiguration,
     'POST /configurations/:version/restore': configurationController.restoreVersion,
     'GET /configurations/:version': configurationController.getByVersion,
@@ -262,6 +267,7 @@ export default function getRouteHandlers(
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics/:topicId/prompts': elementsController.listTopicPrompts,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls': elementsController.listOwnedUrls,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/domain-urls': elementsController.listDomainUrls,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/url-prompts': elementsController.listUrlPrompts,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/market-tracking-trends': elementsController.getMarketTrackingTrends,
     // eslint-disable-next-line max-len
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/stats': elementsController.getStats,
@@ -269,10 +275,19 @@ export default function getRouteHandlers(
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/stats': elementsController.getUrlInspectorStats,
     // eslint-disable-next-line max-len
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/prompts/count': elementsController.getUrlInspectorPromptsCount,
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/competitor-summary': elementsController.getCompetitorSummary,
+    // Overview-SR exact-parity KPI headlines (LLMO-6515 follow-up). Source Visibility is
+    // split into its own route — see getSourceVisibilityHeadline's timeout-budget rationale.
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/kpi-headlines': elementsController.getKpiHeadlines,
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/source-visibility-headline': elementsController.getSourceVisibilityHeadline,
     // Brand-independent Semrush language catalog (add-brand wizard language picker).
     'GET /v2/orgs/:spaceCatId/serenity/languages': serenityController.listOrgLanguages,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': serenityController.activate,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate': serenityController.deactivate,
+    'POST /v2/orgs/:spaceCatId/semrush-onboarding': onboardingController.triggerOnboarding,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.listPromptsByBrand,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats': brandsController.getPromptStatsByBrand,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.createPromptsByBrand,
@@ -362,6 +377,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/latest-metrics': sitesController.getLatestSiteMetrics,
     'GET /sites/by-base-url/:baseURL': sitesController.getByBaseURL,
     'GET /sites/by-delivery-type/:deliveryType': sitesController.getAllByDeliveryType,
+    'GET /sites/by-tier/:tier': sitesController.getAllByEnrollmentAndTier,
     'GET /sites/with-latest-audit/:auditType': sitesController.getAllWithLatestAudit,
     'GET /sites/:siteId/opportunities': opportunitiesController.getAllForSite,
     'GET /sites/:siteId/opportunities/top-paid': topPaidOpportunitiesController.getTopPaidOpportunities,
@@ -488,6 +504,11 @@ export default function getRouteHandlers(
     'GET /state/access-mappings': stateAccessMappingsController.listMappings,
     'GET /state/access-mappings/history': stateAccessMappingsController.listHistory,
     'POST /state/access-mappings': stateAccessMappingsController.createMapping,
+    // Admin-only backend provisioning: the entire binding (imsOrgId, product,
+    // subject, resource, capabilities) comes from the body — nothing from
+    // authInfo. Gated by isAdmin() in the controller; see INTERNAL_ROUTES in
+    // facs-capabilities.js (bypasses facsWrapper).
+    'POST /state/access-mappings/admin': stateAccessMappingsController.adminCreateMapping,
     'PATCH /state/access-mappings/:id': stateAccessMappingsController.patchMapping,
     'DELETE /state/access-mappings/:id': stateAccessMappingsController.deleteMapping,
     'GET /product/capabilities': stateAccessMappingsController.getProductCapabilities,

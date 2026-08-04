@@ -12,6 +12,14 @@
 
 const DEFAULTS = { budget: 5000, strategyName: 'tiered' };
 
+// Postgres returns timestamptz columns as raw text (microsecond precision, numeric offset,
+// e.g. "2026-01-01T00:00:00.123456+00:00") - normalize to the Z-suffixed, millisecond-precision
+// ISO8601 every other resource in this API returns (via the shared ORM's Date.toISOString()).
+// Deliberately throws (RangeError) rather than passing an unparseable value through: a real
+// timestamptz column is never non-date text, so a throw here means the row itself is
+// corrupted - surface that loudly instead of silently returning garbage to a client.
+const toISO = (value) => (value == null ? value : new Date(value).toISOString());
+
 export const AuditPolicyDto = {
   toJSON(row) {
     return {
@@ -27,8 +35,8 @@ export const AuditPolicyDto = {
       updatedBy: row.updated_by,
       reason: row.reason,
       note: row.note,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
+      createdAt: toISO(row.created_at),
+      updatedAt: toISO(row.updated_at),
     };
   },
   defaultDocument(siteId) {
@@ -52,7 +60,12 @@ export const AuditPolicyDto = {
 };
 
 export const AuditPolicyRevisionDto = {
-  toJSON(row) {
+  // `resolvedUpdatedBy` is a human-readable display name/email resolved server-side (e.g. via
+  // IMS) for the row's raw `updated_by` value; falls back to the raw value when it can't be
+  // resolved (already a plain email/name, or IMS lookup failed/unavailable). The `typeof`
+  // guard below defends against `list.map(AuditPolicyRevisionDto.toJSON)` - the repo's dominant
+  // DTO idiom - which would otherwise pass the array index in as `resolvedUpdatedBy`.
+  toJSON(row, resolvedUpdatedBy) {
     return {
       version: row.version,
       budget: row.budget,
@@ -61,11 +74,11 @@ export const AuditPolicyRevisionDto = {
       manualUrls: row.manual_urls,
       scopeConfig: row.scope_config,
       lifecycleOverrides: row.lifecycle_overrides,
-      updatedBy: row.updated_by,
+      updatedBy: (typeof resolvedUpdatedBy === 'string' ? resolvedUpdatedBy : null) || row.updated_by,
       reason: row.reason,
       note: row.note,
-      effectiveAt: row.effective_at,
-      supersededAt: row.superseded_at,
+      effectiveAt: toISO(row.effective_at),
+      supersededAt: toISO(row.superseded_at),
     };
   },
 };

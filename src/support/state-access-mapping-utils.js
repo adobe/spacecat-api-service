@@ -254,6 +254,56 @@ export async function getFacsAccessMappingById(postgrestClient, { id, imsOrgId, 
   return Array.isArray(data) ? (data[0] ?? null) : (data ?? null);
 }
 
+// Maps a state-layer resource type to the table that owns it. Both tables
+// carry `organization_id`; only these two resource types are ReBAC-scoped
+// (LLMO→brand, ASO→site), so anything else is unresolvable by design.
+const RESOURCE_TYPE_TABLE = { site: 'sites', brand: 'brands' };
+
+/**
+ * Resolves the canonical IMS org id that OWNS a ReBAC resource, by walking
+ * `<resourceTable>.organization_id` → `organizations.ims_org_id`. Used to
+ * confirm a resource belongs to the caller's org before an internal admin may
+ * author a binding for it (the mapping row itself is stamped with the caller's
+ * org, so without this an admin could grant on another org's resource).
+ *
+ * Fail-closed: returns `null` when the resource type is not ReBAC-scoped, the
+ * resource row is missing, it has no `organization_id`, or the org has no
+ * `ims_org_id`. Callers MUST treat `null` as "cannot confirm ownership".
+ *
+ * @param {object} postgrestClient
+ * @param {object} args
+ * @param {string} args.resourceType - 'site' | 'brand'.
+ * @param {string} args.resourceId   - The resource's primary key.
+ * @returns {Promise<string|null>} Canonical `ims_org_id`, or `null`.
+ */
+export async function getResourceImsOrgId(postgrestClient, { resourceType, resourceId }) {
+  const table = RESOURCE_TYPE_TABLE[resourceType];
+  if (!table || !resourceId) {
+    return null;
+  }
+  const { data: resourceRow, error: resourceErr } = await postgrestClient
+    .from(table)
+    .select('organization_id')
+    .eq('id', resourceId)
+    .limit(1);
+  if (resourceErr) {
+    throw new Error(`getResourceImsOrgId failed resolving ${resourceType}: ${resourceErr.message}`);
+  }
+  const orgId = (Array.isArray(resourceRow) ? resourceRow[0] : resourceRow)?.organization_id;
+  if (!orgId) {
+    return null;
+  }
+  const { data: orgRow, error: orgErr } = await postgrestClient
+    .from('organizations')
+    .select('ims_org_id')
+    .eq('id', orgId)
+    .limit(1);
+  if (orgErr) {
+    throw new Error(`getResourceImsOrgId failed resolving organization: ${orgErr.message}`);
+  }
+  return (Array.isArray(orgRow) ? orgRow[0] : orgRow)?.ims_org_id ?? null;
+}
+
 /**
  * Lists access bindings including tombstones (active + revoked) within the
  * caller's org + product. Powers `GET /state/access-mappings/history` for

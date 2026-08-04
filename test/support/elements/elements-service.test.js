@@ -664,4 +664,249 @@ describe('createElementsService', () => {
       expect(maxInFlight).to.be.at.most(8);
     });
   });
+
+  const kpiLineChartResponse = (mainValue, secondaryValue) => ({
+    blocks: {
+      mainValue: [{ mainValue }],
+      secondaryValue: [{ period: 'previous', secondaryValue }],
+    },
+  });
+
+  describe('getKpiHeadlines', () => {
+    it('fetches Share of Voice + Brand Visibility in parallel and extracts mainValue/secondaryValue', async () => {
+      transport.fetchElement.callsFake(async (workspaceId, elementId) => {
+        if (elementId === ELEMENT_IDS.KPI_SHARE_OF_VOICE) {
+          return kpiLineChartResponse(0.3628, 0.3927);
+        }
+        if (elementId === ELEMENT_IDS.KPI_BRAND_VISIBILITY) {
+          return kpiLineChartResponse(0.4959, 0.548);
+        }
+        throw new Error(`unexpected elementId: ${elementId}`);
+      });
+
+      const result = await service.getKpiHeadlines('ws-1', {
+        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24',
+      });
+
+      expect(result).to.deep.equal({
+        shareOfVoice: { value: 0.3628, comparisonValue: 0.3927 },
+        brandVisibility: { value: 0.4959, comparisonValue: 0.548 },
+      });
+      expect(transport.fetchElement).to.have.been.calledTwice;
+    });
+
+    it('prefers a single projectId over the aggregate projectIds list', async () => {
+      transport.fetchElement.resolves({ blocks: {} });
+      await service.getKpiHeadlines('ws-1', {
+        brandName: 'Lovesac',
+        startDate: '2026-06-25',
+        endDate: '2026-07-24',
+        projectId: 'proj-single',
+        projectIds: ['proj-a', 'proj-b'],
+      });
+      const [, , payload] = transport.fetchElement.firstCall.args;
+      const projectFilter = payload.filters.advanced.filters
+        .find((f) => f.filters?.some((inner) => inner.col === 'CBF_project'));
+      expect(projectFilter.filters).to.deep.equal([{ op: 'eq', val: 'proj-single', col: 'CBF_project' }]);
+    });
+
+    it('propagates a rejected upstream call rather than swallowing it', async () => {
+      const upstreamError = new Error('Elements API POST failed: 502');
+      transport.fetchElement.rejects(upstreamError);
+      await expect(service.getKpiHeadlines('ws-1', {
+        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24',
+      })).to.be.rejectedWith(upstreamError);
+    });
+
+    it('passes category through to both KPI element payloads as-is', async () => {
+      transport.fetchElement.resolves({ blocks: {} });
+      await service.getKpiHeadlines('ws-1', {
+        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24', category: 'category__Firefly',
+      });
+      for (const call of transport.fetchElement.getCalls()) {
+        const [, , payload] = call.args;
+        expect(payload.filters.advanced.filters).to.deep.include({
+          op: 'eq', val: 'category__Firefly', col: 'CBF_tags',
+        });
+      }
+    });
+  });
+
+  describe('getSourceVisibilityHeadline', () => {
+    it('fetches the brand URL list, then the KPI element scoped by it, sequentially', async () => {
+      const callOrder = [];
+      transport.fetchElement.callsFake(async (workspaceId, elementId) => {
+        callOrder.push(elementId);
+        if (elementId === ELEMENT_IDS.BRAND_URLS) {
+          return { blocks: { value: [{ value: 'lovesac.com' }, { value: 'instagram.com/lovesac' }] } };
+        }
+        if (elementId === ELEMENT_IDS.KPI_SOURCE_VISIBILITY) {
+          return kpiLineChartResponse(0.3954, 0.4865);
+        }
+        throw new Error(`unexpected elementId: ${elementId}`);
+      });
+
+      const result = await service.getSourceVisibilityHeadline('ws-1', {
+        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24',
+      });
+
+      expect(result).to.deep.equal({ value: 0.3954, comparisonValue: 0.4865 });
+      expect(callOrder).to.deep.equal([ELEMENT_IDS.BRAND_URLS, ELEMENT_IDS.KPI_SOURCE_VISIBILITY]);
+    });
+
+    it('passes the brand URL list into the KPI element payload', async () => {
+      transport.fetchElement.callsFake(async (workspaceId, elementId) => {
+        if (elementId === ELEMENT_IDS.BRAND_URLS) {
+          return { blocks: { value: [{ value: 'lovesac.com' }] } };
+        }
+        return { blocks: {} };
+      });
+      await service.getSourceVisibilityHeadline('ws-1', {
+        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24',
+      });
+      const kpiCall = transport.fetchElement.getCalls()
+        .find((c) => c.args[1] === ELEMENT_IDS.KPI_SOURCE_VISIBILITY);
+      const urlFilter = kpiCall.args[2].filters.advanced.filters
+        .find((f) => f.filters?.some((inner) => inner.col === 'CBF_brand_urls'));
+      expect(urlFilter.filters).to.deep.equal([{ op: 'url_match', val: 'lovesac.com', col: 'CBF_brand_urls' }]);
+    });
+
+    it('uses the tightened per-call timeout/retry budget for both hops', async () => {
+      transport.fetchElement.callsFake(async (workspaceId, elementId) => {
+        if (elementId === ELEMENT_IDS.BRAND_URLS) {
+          return { blocks: { value: [{ value: 'lovesac.com' }] } };
+        }
+        return { blocks: {} };
+      });
+      await service.getSourceVisibilityHeadline('ws-1', {
+        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24',
+      });
+      expect(transport.fetchElement).to.have.been.calledTwice;
+      for (const call of transport.fetchElement.getCalls()) {
+        expect(call.args[3]).to.deep.equal({ timeoutMs: 12_000, maxRetries: 1 });
+      }
+    });
+
+    it('returns a zeroed result without calling the KPI element when the brand has no registered URLs', async () => {
+      transport.fetchElement.resolves({ blocks: { value: [] } });
+      const result = await service.getSourceVisibilityHeadline('ws-1', {
+        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24',
+      });
+      expect(result).to.deep.equal({ value: 0, comparisonValue: null });
+      expect(transport.fetchElement).to.have.been.calledOnce;
+    });
+
+    it('propagates a rejected brand-URL-list lookup (first hop) rather than swallowing it', async () => {
+      const upstreamError = new Error('Elements API POST failed: 504');
+      transport.fetchElement.rejects(upstreamError);
+      await expect(service.getSourceVisibilityHeadline('ws-1', {
+        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24',
+      })).to.be.rejectedWith(upstreamError);
+    });
+
+    it('propagates a rejected KPI element call (second hop) after the URL list succeeds', async () => {
+      const upstreamError = new Error('Elements API POST failed: 502');
+      transport.fetchElement.callsFake(async (workspaceId, elementId) => {
+        if (elementId === ELEMENT_IDS.BRAND_URLS) {
+          return { blocks: { value: [{ value: 'lovesac.com' }] } };
+        }
+        throw upstreamError;
+      });
+      await expect(service.getSourceVisibilityHeadline('ws-1', {
+        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24',
+      })).to.be.rejectedWith(upstreamError);
+    });
+
+    it('passes category through to the KPI element payload as-is', async () => {
+      transport.fetchElement.callsFake(async (workspaceId, elementId) => {
+        if (elementId === ELEMENT_IDS.BRAND_URLS) {
+          return { blocks: { value: [{ value: 'lovesac.com' }] } };
+        }
+        return { blocks: {} };
+      });
+      await service.getSourceVisibilityHeadline('ws-1', {
+        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24', category: 'category__Firefly',
+      });
+      const kpiCall = transport.fetchElement.getCalls()
+        .find((c) => c.args[1] === ELEMENT_IDS.KPI_SOURCE_VISIBILITY);
+      expect(kpiCall.args[2].filters.advanced.filters).to.deep.include({
+        op: 'eq', val: 'category__Firefly', col: 'CBF_tags',
+      });
+    });
+  });
+
+  describe('getCitedDomains', () => {
+    const rawWith = (...rows) => ({ blocks: { data: rows } });
+    const domainRow = (overrides = {}) => ({
+      domain: 'example.com', mentions_end: 5, urls_count: 2, prompts_with_citations: 3, ...overrides,
+    });
+
+    it('makes a single call with no project_id when projectIds is absent', async () => {
+      transport.fetchElement.resolves(rawWith(domainRow()));
+      const result = await service.getCitedDomains('ws-1', { startDate: '2026-06-01', endDate: '2026-06-30' });
+      expect(transport.fetchElement).to.have.been.calledOnce;
+      const [, elementId, payload] = transport.fetchElement.firstCall.args;
+      expect(elementId).to.equal(ELEMENT_IDS.CITED_DOMAINS);
+      expect(payload).to.not.have.property('project_id');
+      expect(result.domains).to.have.length(1);
+    });
+
+    it('makes a single call with the given project_id when projectIds has exactly one id', async () => {
+      transport.fetchElement.resolves(rawWith(domainRow()));
+      await service.getCitedDomains('ws-1', { projectIds: ['proj-us'] });
+      expect(transport.fetchElement).to.have.been.calledOnce;
+      const [, , payload] = transport.fetchElement.firstCall.args;
+      expect(payload.project_id).to.equal('proj-us');
+    });
+
+    it('fans out one call per project_id when projectIds has more than one id', async () => {
+      transport.fetchElement.resolves(rawWith());
+      await service.getCitedDomains('ws-1', { projectIds: ['proj-us', 'proj-uk'] });
+      expect(transport.fetchElement).to.have.been.calledTwice;
+      const projectIdsSent = transport.fetchElement.getCalls().map((c) => c.args[2].project_id);
+      expect(projectIdsSent).to.have.members(['proj-us', 'proj-uk']);
+    });
+
+    it('merges domain rows from the fanned-out per-project calls, summing shared domains', async () => {
+      transport.fetchElement.callsFake(async (workspaceId, elementId, payload) => {
+        if (payload.project_id === 'proj-us') {
+          return rawWith(domainRow({ domain: 'shared.com', mentions_end: 5 }));
+        }
+        return rawWith(domainRow({ domain: 'shared.com', mentions_end: 4 }));
+      });
+      const result = await service.getCitedDomains('ws-1', { projectIds: ['proj-us', 'proj-uk'] });
+      expect(result.domains).to.have.length(1);
+      expect(result.domains[0].totalCitations).to.equal(9);
+    });
+
+    it('ignores blank/non-text entries in projectIds when deciding single vs fan-out', async () => {
+      transport.fetchElement.resolves(rawWith(domainRow()));
+      await service.getCitedDomains('ws-1', { projectIds: ['proj-us', '', undefined] });
+      expect(transport.fetchElement).to.have.been.calledOnce;
+      const [, , payload] = transport.fetchElement.firstCall.args;
+      expect(payload.project_id).to.equal('proj-us');
+    });
+
+    it('deduplicates a repeated projectId before fanning out (no double-counted citations)', async () => {
+      transport.fetchElement.resolves(rawWith(domainRow({ mentions_end: 5 })));
+      const result = await service.getCitedDomains('ws-1', { projectIds: ['proj-us', 'proj-us'] });
+      expect(transport.fetchElement).to.have.been.calledOnce;
+      expect(result.domains[0].totalCitations).to.equal(5);
+    });
+
+    it('propagates a rejected upstream call rather than swallowing it (single-call path)', async () => {
+      const upstreamError = new Error('Elements API POST failed: 502');
+      transport.fetchElement.rejects(upstreamError);
+      await expect(service.getCitedDomains('ws-1', {})).to.be.rejectedWith(upstreamError);
+    });
+
+    it('propagates a rejected upstream call from the fan-out (mapWithConcurrency) path', async () => {
+      const upstreamError = new Error('Elements API POST failed: 502');
+      transport.fetchElement.rejects(upstreamError);
+      await expect(
+        service.getCitedDomains('ws-1', { projectIds: ['proj-a', 'proj-b'] }),
+      ).to.be.rejectedWith(upstreamError);
+      expect(transport.fetchElement).to.have.been.calledTwice;
+    });
+  });
 });

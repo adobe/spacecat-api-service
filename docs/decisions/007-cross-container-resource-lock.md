@@ -1,5 +1,11 @@
 # ADR-007: Cross-container serialization for the dynamic-allocation absolute-set race
 
+> **Applies only when `SERENITY_DYNAMIC_ALLOCATION` is on**, which it is not in any deployed
+> environment. The race described here is between `ensureAiHeadroom` and `releaseAiSurplus`; both
+> are JIT-only. The sub-workspace lifecycle transfers no resources at all, so with the flag off
+> there is nothing to serialize. See ADR-008 and `docs/serenity.md` § Sub-workspace resource
+> allocation.
+
 ## Context
 
 The dynamic (JIT) Semrush AI resource allocator (PR #2764, `SERENITY_DYNAMIC_ALLOCATION`, default

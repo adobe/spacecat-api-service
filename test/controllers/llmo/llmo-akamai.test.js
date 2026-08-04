@@ -262,6 +262,29 @@ describe('LlmoAkamaiController', () => {
       expect(body.errors).to.deep.equal([]);
     });
 
+    it('injects the x-edgeoptimize-fetcher-key header in the preview with its value redacted', async () => {
+      const res = await controller.plan(withData({ ...propertyRef }));
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      const headers = [];
+      const collect = (rule) => {
+        (rule.behaviors || []).forEach((b) => {
+          if (b.name === 'modifyIncomingRequestHeader') {
+            headers.push(b.options);
+          }
+        });
+        (rule.children || []).forEach(collect);
+      };
+      collect(body.merged.rules);
+      // The header is present (deploy adds it too), but its value is redacted in the returned tree.
+      const fetcher = headers.find((o) => o.customHeaderName === 'x-edgeoptimize-fetcher-key');
+      expect(fetcher).to.exist;
+      expect(fetcher.headerValue).to.equal('***');
+      // redactSecrets also redacts the LLMO API key.
+      const apiKey = headers.find((o) => o.customHeaderName === 'x-edgeoptimize-api-key');
+      expect(apiKey.headerValue).to.equal('***');
+    });
+
     it('surfaces dry-run validation errors and warnings the PUT deploy would apply', async () => {
       mockAkamaiClient.updateRuleTree.resolves({
         errors: [{ detail: 'bad' }], warnings: [{ detail: 'w' }],
@@ -409,6 +432,36 @@ describe('LlmoAkamaiController', () => {
       const res = await controller.deploy(withData({ ...propertyRef, baseVersion: '1e3' }));
       expect(res.status).to.equal(400);
       expect(mockAkamaiClient.createVersion).to.not.have.been.called;
+    });
+
+    it('always injects a server-minted x-edgeoptimize-fetcher-key header and returns it', async () => {
+      const res = await controller.deploy(withData({ ...propertyRef }));
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      const [, , , , merged] = mockAkamaiClient.updateRuleTree.firstCall.args;
+      const headers = [];
+      const collect = (rule) => {
+        (rule.behaviors || []).forEach((b) => {
+          if (b.name === 'modifyIncomingRequestHeader') {
+            headers.push(b.options);
+          }
+        });
+        (rule.children || []).forEach(collect);
+      };
+      collect(merged.rules.children.find((c) => c.name === 'Optimize at Edge'));
+      const fetcher = headers.find((o) => o.customHeaderName === 'x-edgeoptimize-fetcher-key');
+      expect(fetcher).to.exist;
+      // 32 random bytes as hex (`openssl rand -hex 32`).
+      expect(fetcher.headerValue).to.match(/^[0-9a-f]{64}$/);
+      // The deployed key is returned once and matches what was baked into the rule.
+      expect(body.fetcherKey).to.equal(fetcher.headerValue);
+    });
+
+    it('mints a fresh fetcher key on each deploy (rotation)', async () => {
+      const first = await (await controller.deploy(withData({ ...propertyRef }))).json();
+      const second = await (await controller.deploy(withData({ ...propertyRef }))).json();
+      expect(first.fetcherKey).to.match(/^[0-9a-f]{64}$/);
+      expect(second.fetcherKey).to.not.equal(first.fetcherKey);
     });
 
     it('rejects baseVersion 0 (PAPI versions start at 1)', async () => {

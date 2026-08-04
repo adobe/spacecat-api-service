@@ -139,6 +139,10 @@ const routeFacsCapabilities = {
     'GET /config/:service/redirects.txt',
     // LLMO onboarding — internal/manual provisioning flow, not a customer FACS surface.
     'POST /v2/orgs/:spaceCatId/llmo/onboard-site',
+    // Semrush onboarding notification — org-membership gated only (hasAccess(org),
+    // no product capability check), fires a Slack webhook; not a product-scoped
+    // FACS surface today.
+    'POST /v2/orgs/:spaceCatId/semrush-onboarding',
     // LLMO CloudFront "Optimize at Edge" onboarding wizard — admin-only
     // (gateEdgeOptimizeWizard requires LLMO admin); cross-account control-plane, not a
     // customer FACS surface.
@@ -175,6 +179,11 @@ const routeFacsCapabilities = {
     'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate',
     'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status',
     // Admin-only writes
+    // State-layer backend provisioning — admin-only (isAdmin() in the
+    // state-access-mappings controller). Full payload (imsOrgId, product,
+    // subject, resource, capabilities); nothing derived from authInfo. Not a
+    // customer FACS surface, so it bypasses facsWrapper entirely.
+    'POST /state/access-mappings/admin', // hasAdminAccess (adminCreateMapping)
     'POST /sites', // hasAdminAccess
     'DELETE /sites/:siteId', // restricted (always 403)
     'PATCH /sites/:siteId/:auditType', // hasAdminAccess (sites-audits-toggle)
@@ -199,6 +208,7 @@ const routeFacsCapabilities = {
     'GET /sites.csv', // hasAdminReadAccess
     'GET /sites.xlsx', // hasAdminReadAccess
     'GET /sites/by-delivery-type/:deliveryType', // hasAdminReadAccess
+    'GET /sites/by-tier/:tier', // hasAdminAccess
     'GET /sites/with-latest-audit/:auditType', // hasAdminReadAccess
     'GET /projects', // hasAdminReadAccess
     'GET /audits/latest/:auditType', // hasAdminReadAccess
@@ -238,6 +248,7 @@ const routeFacsCapabilities = {
     'GET /ephemeral-run/batch/:batchId/status', // admin/internal
 
     // System configuration (Configuration model — admin-only)
+    'GET /configurations/versions', // admin
     'GET /configurations/:version', // admin
     'GET /configurations/latest', // admin
     'PATCH /configurations/latest', // admin
@@ -320,10 +331,12 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/audit-policy/inclusions': 'llmo/can_configure',
       'POST /sites/:siteId/audit-policy/inclusions/delete': 'llmo/can_configure',
 
-      // ---- Deploy --------------------------------------------------------
-      // Edge-source optimization writes. Read-side endpoints stay under can_view.
-      'POST /sites/:siteId/llmo/edge-optimize-config': 'llmo/can_deploy',
-      'POST /sites/:siteId/llmo/edge-optimize-config/stage': 'llmo/can_deploy',
+      // ---- Configure -----------------------------------------------------
+      // Edge-optimize configuration writes (opt-in + CDN routing setup). These
+      // are site-configuration changes, not deploys of a specific fix, so they
+      // sit under can_configure. Read-side endpoints stay under can_view.
+      'POST /sites/:siteId/llmo/edge-optimize-config': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/edge-optimize-config/stage': 'llmo/can_configure',
 
       // ---- View (read-only) ----------------------------------------------
       // Top-level LLMO surfaces
@@ -833,11 +846,16 @@ const routeFacsCapabilities = {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics/:topicId/prompts': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/domain-urls': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/url-prompts': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/market-tracking-trends': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/stats': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/stats': 'llmo/can_view',
       // eslint-disable-next-line max-len
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/prompts/count': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/competitor-summary': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/kpi-headlines': 'llmo/can_view',
+      // eslint-disable-next-line max-len
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/source-visibility-headline': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats': 'llmo/can_view',
       // Preflight (site-scoped reads)
       'GET /sites/:siteId/preflights': 'llmo/can_view',
@@ -1252,7 +1270,7 @@ const routeFacsCapabilities = {
     'dataSource', 'deliveryType', 'endDate', 'eventType',
     'exportId', 'flagName', 'geo', 'handlerType', 'hookSecret', 'limit',
     'metric', 'processingType', 'product', 'projectName',
-    'sheetType', 'source', 'startDate', 'status', 'tokenType', 'type',
+    'sheetType', 'source', 'startDate', 'status', 'tier', 'tokenType', 'type',
     'url', 'version', 'week',
     // Single-row id used by the state-layer management endpoints
     // (`/state/access-mappings/:id` — the binding row's own UUID, never a

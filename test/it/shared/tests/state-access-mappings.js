@@ -38,7 +38,15 @@ function expectIsoTimestamp(value, label = 'timestamp') {
 // Literal UUIDs below identify the ReBAC resources being granted.
 const BRAND_RESOURCE_ID = 'b1111111-1111-4111-8111-111111111111';
 const BRAND_RESOURCE_ID_2 = 'b2222222-2222-4222-8222-222222222222';
+const BRAND_RESOURCE_ID_3 = 'b3333333-3333-4333-8333-333333333333';
 const SITE_RESOURCE_ID = '5a5a5a5a-5a5a-4a5a-8a5a-5a5a5a5a5a5a';
+
+// A trial customer's org, deliberately DIFFERENT from any test persona's tenant
+// so the admin-backend-create tests prove the org is taken from the payload
+// (not from the caller's JWT). `ims_org_id` is a plain text column with no FK,
+// so an org that owns no seeded resource is a valid target.
+const TRIAL_CUSTOMER_ORG = 'TRIAL-CUST-IT-ORG@AdobeOrg';
+const ADMIN_BASE = '/state/access-mappings/admin';
 
 // Canonical IMS user idents (subject_id for subject_type='user').
 const USER_SUBJECT = 'grantee123@AdobeID';
@@ -75,12 +83,15 @@ function expectMappingDto(m) {
  * validation and the active-duplicate → upsert (overwrite) semantics.
  *
  * Persona split: **writes** (POST / PATCH / DELETE) use `facsManager` — a
- * non-admin, org-wide FACS `can_manage_users` holder — because internal admins
- * are blocked from mutating state-layer bindings (`blockInternalAdminWrite`).
- * **Reads** use `admin` (still permitted, and keeps admin-read coverage). Both
- * personas share the same org, so rows written by one are visible to the other.
- * The controller logic and the real `facs_access_mappings` table are what's
- * under test here, not the capability gate (covered by the facsWrapper suite).
+ * non-admin, org-wide FACS `can_manage_users` holder. Internal admins may
+ * CREATE only for resources that belong to their own org (`requireAdminResourceInOrg`),
+ * which these tests can't exercise without seeding real brand/site rows; a
+ * non-admin manager has no such resource-existence dependency, so it drives the
+ * write flow. **Reads** use `admin` (still permitted, and keeps admin-read
+ * coverage). Both personas share the same org, so rows written by one are
+ * visible to the other. The controller logic and the real `facs_access_mappings`
+ * table are what's under test here, not the capability gate (covered by the
+ * facsWrapper suite).
  *
  * @param {() => object} getHttpClient - Getter returning the initialized HTTP client
  * @param {() => Promise<void>} resetData - Truncates all data and re-seeds baseline
@@ -392,6 +403,92 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
           grantedCapabilities: ['llmo/can_view'],
         });
         expect(res.status).to.equal(404);
+      });
+    });
+
+    describe('admin backend create (full payload, cross-org)', () => {
+      before(() => resetData());
+
+      it('403s for a non-admin caller (even a FACS manager)', async () => {
+        const http = getHttpClient();
+        const res = await http.facsManager.post(ADMIN_BASE, {
+          imsOrgId: TRIAL_CUSTOMER_ORG,
+          product: 'LLMO',
+          subjectType: 'user',
+          subjectId: USER_SUBJECT,
+          resourceType: 'brand',
+          resourceId: BRAND_RESOURCE_ID_3,
+          grantedCapabilities: ['llmo/can_view'],
+        });
+        expect(res.status).to.equal(403);
+      });
+
+      it('creates a binding scoped to the PAYLOAD org + product (201)', async () => {
+        const http = getHttpClient();
+        // The admin persona's tenant is ORG_1's IMS org and the default
+        // x-product for this route is ASO — both are ignored; the row is stamped
+        // with the payload's TRIAL_CUSTOMER_ORG / LLMO.
+        const res = await http.admin.post(ADMIN_BASE, {
+          imsOrgId: TRIAL_CUSTOMER_ORG,
+          product: 'LLMO',
+          subjectType: 'user',
+          subjectId: USER_SUBJECT,
+          resourceType: 'brand',
+          resourceId: BRAND_RESOURCE_ID_3,
+          grantedCapabilities: ['llmo/can_configure'],
+        });
+        expect(res.status).to.equal(201);
+        expectMappingDto(res.body);
+        expect(res.body.imsOrgId).to.equal(TRIAL_CUSTOMER_ORG);
+        expect(res.body.product).to.equal('LLMO');
+        expect(res.body.subjectId).to.equal(USER_SUBJECT);
+        expect(res.body.resourceId).to.equal(BRAND_RESOURCE_ID_3);
+        // can_view baseline is auto-injected alongside the requested capability.
+        expect(res.body.grantedCapabilities)
+          .to.have.members(['llmo/can_configure', 'llmo/can_view']);
+      });
+
+      it('upserts a duplicate for the same payload org/subject/resource (200)', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.post(ADMIN_BASE, {
+          imsOrgId: TRIAL_CUSTOMER_ORG,
+          product: 'LLMO',
+          subjectType: 'user',
+          subjectId: USER_SUBJECT,
+          resourceType: 'brand',
+          resourceId: BRAND_RESOURCE_ID_3,
+          grantedCapabilities: ['llmo/can_deploy'],
+        });
+        expect(res.status).to.equal(200);
+        expect(res.body.imsOrgId).to.equal(TRIAL_CUSTOMER_ORG);
+        expect(res.body.grantedCapabilities)
+          .to.have.members(['llmo/can_deploy', 'llmo/can_view']);
+      });
+
+      it('400s when the payload is missing product', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.post(ADMIN_BASE, {
+          imsOrgId: TRIAL_CUSTOMER_ORG,
+          subjectType: 'user',
+          subjectId: USER_SUBJECT,
+          resourceType: 'brand',
+          resourceId: BRAND_RESOURCE_ID_3,
+          grantedCapabilities: ['llmo/can_view'],
+        });
+        expect(res.status).to.equal(400);
+      });
+
+      it('400s when the payload is missing imsOrgId', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.post(ADMIN_BASE, {
+          product: 'LLMO',
+          subjectType: 'user',
+          subjectId: USER_SUBJECT,
+          resourceType: 'brand',
+          resourceId: BRAND_RESOURCE_ID_3,
+          grantedCapabilities: ['llmo/can_view'],
+        });
+        expect(res.status).to.equal(400);
       });
     });
 

@@ -109,12 +109,15 @@ export function computeWriteDeadline(now = Date.now()) {
  * Remaining budget (ms) available for classification: whatever is left on the
  * deadline, minus the reserve for create-fanout + publish. Never negative.
  *
- * @param {number} deadline - epoch ms deadline from {@link computeWriteDeadline}.
+ * @param {number} [deadline] - epoch ms deadline from {@link computeWriteDeadline}. Omitted
+ *   (e.g. finalize's deferred prompt push has no deadline of its own) → NaN, which every
+ *   `< PER_CALL_MS` budget check treats as "not exhausted" (NaN comparisons are always
+ *   false) — falls through to the actual default-to-Informational path.
  * @param {number} [now] - override for testing.
  * @returns {number}
  */
 function remainingClassifyBudget(deadline, now = Date.now()) {
-  return Math.max(0, (deadline - now) - CREATE_PUBLISH_RESERVE_MS);
+  return Math.max(0, ((deadline ?? NaN) - now) - CREATE_PUBLISH_RESERVE_MS);
 }
 
 /**
@@ -144,7 +147,11 @@ function remainingClassifyBudget(deadline, now = Date.now()) {
  * @param {object} options
  * @param {object} [options.env] - environment (Azure OpenAI creds).
  * @param {object} [options.log] - logger.
- * @param {number} options.deadline - the request's write deadline (epoch ms).
+ * @param {number} [options.deadline] - the request's write deadline (epoch ms). Optional —
+ *   a caller with no deadline of its own (e.g. finalize's deferred prompt push) omits it;
+ *   remainingClassifyBudget(undefined) is NaN, which the `< PER_CALL_MS` check treats as
+ *   "not exhausted" and falls through to the config check below, which is the actual
+ *   default-to-Informational path when env is also unset.
  * @param {string} [options.writePath] - which write-path this call serves, for
  *   the metric `WritePath` dimension: `'create' | 'edit' | 'csv' | 'ai-gen'`.
  * @param {string} [options.workspaceId] - the Semrush workspace id, used as the
