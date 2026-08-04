@@ -203,6 +203,9 @@ export const INTERNAL_ROUTES = [
   'GET /state/access-mappings',
   'GET /state/access-mappings/history',
   'POST /state/access-mappings',
+  // Admin-only backend provisioning (full payload; nothing from authInfo).
+  // Internal-only, self-gated by isAdmin() in the controller — never S2S.
+  'POST /state/access-mappings/admin',
   'PATCH /state/access-mappings/:id',
   'DELETE /state/access-mappings/:id',
   'GET /organizations/:organizationId/permission/audit-logs',
@@ -310,6 +313,7 @@ const routeRequiredCapabilities = {
   'GET /v2/orgs/:spaceCatId/serenity/languages': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/filter-dimensions': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks': 'organization:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/access': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview': 'brand:read',

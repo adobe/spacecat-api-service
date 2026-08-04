@@ -1187,6 +1187,69 @@ v2-serenity-url-inspector-filter-dimensions:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
 
+v2-serenity-brand-presence-access:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: Whether the caller can access the Semrush workspace linked to the brand
+    description: |
+      Reliable Semrush-workspace access check backing the "Semrush workspace access
+      needed" banner. Probes the User Manager resource-allowance endpoint
+      (`GET /v1/workspaces/{id}/resources`) with the caller's forwarded IMS token —
+      a purpose-built surface whose auth layer returns a clean 401/403 when the caller
+      lacks access — instead of the `brand-presence/weeks` reporting endpoint the UI
+      previously repurposed (whose 4xx/5xx conflated "no access" with "no data / bad
+      query / upstream outage").
+
+      The workspace is resolved from `:brandId` via the same dual-mode resolution the
+      other brand-presence routes use (brand sub-workspace, falling back to the org's
+      parent workspace). Returns a clean `{ hasAccess }` boolean so the client never has
+      to guess from a raw HTTP status; a genuine upstream/config failure surfaces as a
+      4xx/5xx and is treated as indeterminate (assume access), not a denial.
+    operationId: getSerenityBrandPresenceAccess
+    security:
+      - ims_key: []
+    responses:
+      '200':
+        description: |
+          Access determined. `hasAccess: true` when the upstream returned 2xx;
+          `hasAccess: false` when it returned 401/403.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityWorkspaceAccess' }
+      '400': { $ref: './responses.yaml#/400' }
+      '401':
+        description: Caller did not authenticate via IMS and sent no x-promise-token.
+      '403':
+        description: Caller lacks access to the organization.
+      '404':
+        description: Organization not found, brand not found for this organization, or the brand has no resolvable Semrush workspace.
+      '502':
+        description: Upstream resource-allowance request failed (5xx or timeout).
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '503':
+        description: PostgREST client or Semrush gateway not configured for this deployment.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
 v2-serenity-brand-presence-sentiment-overview:
   parameters:
     - name: spaceCatId

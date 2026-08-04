@@ -1,3 +1,52 @@
+# [1.718.0](https://github.com/adobe/spacecat-api-service/compare/v1.717.0...v1.718.0) (2026-08-04)
+
+
+### Features
+
+* **serenity:** reliable Semrush workspace access-check endpoint (LLMO-6747) ([#2994](https://github.com/adobe/spacecat-api-service/issues/2994)) ([6275a20](https://github.com/adobe/spacecat-api-service/commit/6275a20217ce9917633fdb545c8c820b626bdddb))
+
+# [1.717.0](https://github.com/adobe/spacecat-api-service/compare/v1.716.3...v1.717.0) (2026-08-04)
+
+
+### Features
+
+* retire legacy un-paginated GET /sites response ([#2993](https://github.com/adobe/spacecat-api-service/issues/2993)) ([483ec75](https://github.com/adobe/spacecat-api-service/commit/483ec757fc94b518395e1006efedc38527bf4317)), closes [#2591](https://github.com/adobe/spacecat-api-service/issues/2591) [#2591](https://github.com/adobe/spacecat-api-service/issues/2591) [#2591](https://github.com/adobe/spacecat-api-service/issues/2591)
+
+## [1.716.3](https://github.com/adobe/spacecat-api-service/compare/v1.716.2...v1.716.3) (2026-08-04)
+
+
+### Bug Fixes
+
+* **suggestions:** reject illegal per-item status transitions in bulk PATCH (SITES-49063) ([#2987](https://github.com/adobe/spacecat-api-service/issues/2987)) ([7924ca0](https://github.com/adobe/spacecat-api-service/commit/7924ca0e461e6b537855cad83c2978c6559fc139)), closes [adobe/spacecat-shared#1860](https://github.com/adobe/spacecat-shared/issues/1860)
+
+## [1.716.2](https://github.com/adobe/spacecat-api-service/compare/v1.716.1...v1.716.2) (2026-08-03)
+
+
+### Bug Fixes
+
+* dedupe fix_entity creation for aso mark-as-deployed (SITES-48951) ([#2972](https://github.com/adobe/spacecat-api-service/issues/2972)) ([a5df080](https://github.com/adobe/spacecat-api-service/commit/a5df080a419c49a4a05c11dec12eb272bf2febb3))
+
+## [1.716.1](https://github.com/adobe/spacecat-api-service/compare/v1.716.0...v1.716.1) (2026-08-03)
+
+
+### Bug Fixes
+
+* resolve updatedBy identity in audit-policy revisions API ([#2988](https://github.com/adobe/spacecat-api-service/issues/2988)) ([84f88db](https://github.com/adobe/spacecat-api-service/commit/84f88dbea4c9ef78fceaca0c9fe7e268a27a8a81))
+
+# [1.716.0](https://github.com/adobe/spacecat-api-service/compare/v1.715.0...v1.716.0) (2026-08-03)
+
+
+### Features
+
+* allow insightsLocation in the geo-experiment PATCH endpoint ([#2986](https://github.com/adobe/spacecat-api-service/issues/2986)) ([37e4b23](https://github.com/adobe/spacecat-api-service/commit/37e4b23ec5b9957a462e1314972f3eb0e747436a))
+
+# [1.715.0](https://github.com/adobe/spacecat-api-service/compare/v1.714.0...v1.715.0) (2026-08-03)
+
+
+### Features
+
+* admin-gated backend create for state-layer access mappings ([#2983](https://github.com/adobe/spacecat-api-service/issues/2983)) ([75fafc2](https://github.com/adobe/spacecat-api-service/commit/75fafc27233433e47a75d2523bfa232f037d9b1e))
+
 # [1.714.0](https://github.com/adobe/spacecat-api-service/compare/v1.713.0...v1.714.0) (2026-07-31)
 
 

@@ -77,7 +77,7 @@ describe('Suggestions Controller', () => {
       return suggData.status;
     },
     setStatus(value) {
-      if (value === 'throw-error') {
+      if (value === 'throw-error' || suggData.throwOnSetStatus) {
         throw new ValidationError('Validation error');
       }
       suggData.status = value;
@@ -3353,7 +3353,7 @@ describe('Suggestions Controller', () => {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
-      data: [{ id: SUGGESTION_IDS[0], status: 'NEW-updated' }, { id: SUGGESTION_IDS[1], status: 'APPROVED-updated' }],
+      data: [{ id: SUGGESTION_IDS[0], status: 'IN_PROGRESS' }, { id: SUGGESTION_IDS[1], status: 'FIXED' }],
       ...context,
     });
 
@@ -3371,8 +3371,8 @@ describe('Suggestions Controller', () => {
     expect(bulkPatchResponse.suggestions[1]).to.have.property('statusCode', 200);
     expect(bulkPatchResponse.suggestions[0].suggestion).to.exist;
     expect(bulkPatchResponse.suggestions[1].suggestion).to.exist;
-    expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('status', 'NEW-updated');
-    expect(bulkPatchResponse.suggestions[1].suggestion).to.have.property('status', 'APPROVED-updated');
+    expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('status', 'IN_PROGRESS');
+    expect(bulkPatchResponse.suggestions[1].suggestion).to.have.property('status', 'FIXED');
   });
 
   it('bulk patches suggestion status sets updatedBy to caller profile email on status change', async () => {
@@ -3381,7 +3381,7 @@ describe('Suggestions Controller', () => {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
-      data: [{ id: SUGGESTION_IDS[0], status: 'NEW-updated' }],
+      data: [{ id: SUGGESTION_IDS[0], status: 'IN_PROGRESS' }],
       ...context,
     });
 
@@ -3527,7 +3527,7 @@ describe('Suggestions Controller', () => {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
-      data: [{ id: SUGGESTION_IDS[1], status: 'NEW-APPROVED' }, { status: 'NEW-APPROVED' }],
+      data: [{ id: SUGGESTION_IDS[1], status: 'FIXED' }, { status: 'FIXED' }],
       ...context,
     });
     expect(response.status).to.equal(207);
@@ -3581,7 +3581,7 @@ describe('Suggestions Controller', () => {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
-      data: [{ id: SUGGESTION_IDS[1], status: 'NEW-APPROVED' }, { id: SUGGESTION_IDS[0] }],
+      data: [{ id: SUGGESTION_IDS[1], status: 'FIXED' }, { id: SUGGESTION_IDS[0] }],
       ...context,
     });
     expect(response.status).to.equal(207);
@@ -3608,7 +3608,7 @@ describe('Suggestions Controller', () => {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
-      data: [{ id: 'wrong-sugg-id', status: 'NEW-NEW' }, { id: SUGGESTION_IDS[0], status: 'NEW-APPROVED' }],
+      data: [{ id: 'wrong-sugg-id', status: 'APPROVED' }, { id: SUGGESTION_IDS[0], status: 'APPROVED' }],
       ...context,
     });
     expect(response.status).to.equal(207);
@@ -3700,14 +3700,14 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
       },
       data: [
-        { id: SUGGESTION_IDS[0], status: 'APPROVED' },
+        { id: SUGGESTION_IDS[0], status: 'NEW' },
       ],
       ...context,
     });
     expect(response.status).to.equal(207);
     const bulkPatchResponse = await response.json();
     expect(bulkPatchResponse.metadata.success).to.equal(1);
-    expect(suggs[0].status).to.equal('APPROVED');
+    expect(suggs[0].status).to.equal('NEW');
     expect(suggs[0].skipReason).to.be.null;
     expect(suggs[0].skipDetail).to.be.null;
   });
@@ -3735,7 +3735,7 @@ describe('Suggestions Controller', () => {
     expect(suggs[0].skipDetail).to.be.null;
   });
 
-  it('bulk patches suggestion status changes from SKIPPED to APPROVED without setSkipReason on model', async () => {
+  it('bulk patches suggestion status changes from SKIPPED to NEW without setSkipReason on model', async () => {
     suggs[0].status = 'SKIPPED';
     const entity = mockSuggestionEntity(suggs[0]);
     delete entity.setSkipReason;
@@ -3752,14 +3752,14 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
       },
       data: [
-        { id: SUGGESTION_IDS[0], status: 'APPROVED' },
+        { id: SUGGESTION_IDS[0], status: 'NEW' },
       ],
       ...context,
     });
     expect(response.status).to.equal(207);
     const bulkPatchResponse = await response.json();
     expect(bulkPatchResponse.metadata.success).to.equal(1);
-    expect(suggs[0].status).to.equal('APPROVED');
+    expect(suggs[0].status).to.equal('NEW');
     // Restore
     mockSuggestion.findById.callsFake((id) => {
       const s = suggs.find((sg) => sg.id === id);
@@ -3954,12 +3954,16 @@ describe('Suggestions Controller', () => {
   });
 
   it('bulk patches suggestion status fails if validation error in set status', async () => {
+    // A legal transition (NEW -> IN_PROGRESS) that still throws inside setStatus,
+    // to exercise the setStatus ValidationError -> 400 path after the transition gate.
+    suggs[0].throwOnSetStatus = true;
+    suggs[1].throwOnSetStatus = true;
     const response = await suggestionsController.patchSuggestionsStatus({
       params: {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
-      data: [{ id: SUGGESTION_IDS[0], status: 'throw-error' }, { id: SUGGESTION_IDS[1], status: 'throw-error' }],
+      data: [{ id: SUGGESTION_IDS[0], status: 'IN_PROGRESS' }, { id: SUGGESTION_IDS[1], status: 'IN_PROGRESS' }],
       ...context,
     });
     expect(response.status).to.equal(207);
@@ -3988,7 +3992,9 @@ describe('Suggestions Controller', () => {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
-      data: [{ id: SUGGESTION_IDS[0], status: 'NEW updated' }, { id: SUGGESTION_IDS[1], status: 'APPROVED updated' }],
+      // Legal transitions (NEW->IN_PROGRESS, APPROVED->FIXED) so the request reaches
+      // save(), where the mock throws.
+      data: [{ id: SUGGESTION_IDS[0], status: 'IN_PROGRESS' }, { id: SUGGESTION_IDS[1], status: 'FIXED' }],
       ...context,
     });
     expect(response.status).to.equal(207);
@@ -4254,6 +4260,62 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.suggestions[0]).to.have.property('message', 'auth service unavailable');
       expect(bulkPatchResponse.metadata).to.have.property('failed', 1);
       expect(context.log.error).to.have.been.calledWithMatch(/\[patchSuggestionsStatus\] unexpected error/);
+    });
+  });
+
+  describe('status transition legality (SITES-49063)', () => {
+    const patchToStatus = async (currentStatus, targetStatus) => {
+      const suggestionEntity = mockSuggestionEntity({
+        id: SUGGESTION_IDS[0],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'CODE_CHANGE',
+        status: currentStatus,
+        rank: 1,
+        data: { info: 'sample data' },
+      }, removeStub);
+      const saveSpy = sandbox.spy(suggestionEntity, 'save');
+
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(suggestionEntity);
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(opportunity);
+      mockSite.findById.withArgs(SITE_ID).resolves(site);
+
+      sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability').resolves({ allowed: false, reason: 'not-s2s' });
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+
+      const response = await suggestionsController.patchSuggestionsStatus({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: [{ id: SUGGESTION_IDS[0], status: targetStatus }],
+        ...context,
+      });
+      return { response, saveSpy };
+    };
+
+    it('rejects OUTDATED -> FIXED with a 400 and does not save', async () => {
+      const { response, saveSpy } = await patchToStatus('OUTDATED', 'FIXED');
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.suggestions[0]).to.have.property('statusCode', 400);
+      expect(body.suggestions[0]).to.have.property('uuid', SUGGESTION_IDS[0]);
+      expect(body.suggestions[0]).to.have.property('message', 'Illegal status transition: OUTDATED -> FIXED');
+      expect(body.suggestions[0].suggestion).to.not.exist;
+      expect(body.metadata).to.have.property('failed', 1);
+      expect(body.metadata).to.have.property('success', 0);
+      // the exact invariant SITES-49063 is about: an illegal transition must not write
+      expect(saveSpy).to.not.have.been.called;
+    });
+
+    it('allows a legal transition (IN_PROGRESS -> FIXED)', async () => {
+      const { response, saveSpy } = await patchToStatus('IN_PROGRESS', 'FIXED');
+
+      expect(saveSpy).to.have.been.calledOnce;
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.suggestions[0]).to.have.property('statusCode', 200);
+      expect(body.suggestions[0].suggestion).to.have.property('status', 'FIXED');
+      expect(body.metadata).to.have.property('success', 1);
+      expect(body.metadata).to.have.property('failed', 0);
     });
   });
 
@@ -10546,6 +10608,7 @@ describe('Suggestions Controller', () => {
         setSuggestionIds: sandbox.stub(),
         setPromptsCount: sandbox.stub(),
         setPromptsLocation: sandbox.stub(),
+        setInsightsLocation: sandbox.stub(),
         setStartTime: sandbox.stub(),
         setEndTime: sandbox.stub(),
         setMetadata: sandbox.stub(),
@@ -10671,6 +10734,18 @@ describe('Suggestions Controller', () => {
       expect(mockGeoExperiment.save.calledOnce).to.be.true;
     });
 
+    it('patches insightsLocation and saves', async () => {
+      const insightsLocation = `geo-experiments/${GEO_EXP_ID}/insights.json`;
+      const response = await suggestionsController.patchGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+        data: { insightsLocation },
+      });
+      expect(response.status).to.equal(200);
+      expect(mockGeoExperiment.setInsightsLocation.calledWith(insightsLocation)).to.be.true;
+      expect(mockGeoExperiment.save.calledOnce).to.be.true;
+    });
+
     it('patches all optional geo experiment fields in one request', async () => {
       const suggestionIds = [SUGGESTION_IDS[0]];
       const errorPayload = { code: 'E_TEST' };
@@ -10685,6 +10760,7 @@ describe('Suggestions Controller', () => {
           suggestionIds,
           promptsCount: 7,
           promptsLocation: 'geo-experiments/bucket/key.json',
+          insightsLocation: 'geo-experiments/bucket/insights.json',
           startTime: '2026-01-01T00:00:00.000Z',
           endTime: '2026-06-01T00:00:00.000Z',
           error: errorPayload,
@@ -10698,6 +10774,7 @@ describe('Suggestions Controller', () => {
       expect(mockGeoExperiment.setSuggestionIds.calledWith(suggestionIds)).to.be.true;
       expect(mockGeoExperiment.setPromptsCount.calledWith(7)).to.be.true;
       expect(mockGeoExperiment.setPromptsLocation.calledWith('geo-experiments/bucket/key.json')).to.be.true;
+      expect(mockGeoExperiment.setInsightsLocation.calledWith('geo-experiments/bucket/insights.json')).to.be.true;
       expect(mockGeoExperiment.setStartTime.calledWith('2026-01-01T00:00:00.000Z')).to.be.true;
       expect(mockGeoExperiment.setEndTime.calledWith('2026-06-01T00:00:00.000Z')).to.be.true;
       expect(mockGeoExperiment.setError.calledWith(errorPayload)).to.be.true;

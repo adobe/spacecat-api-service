@@ -178,6 +178,11 @@ const routeFacsCapabilities = {
     'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate',
     'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status',
     // Admin-only writes
+    // State-layer backend provisioning — admin-only (isAdmin() in the
+    // state-access-mappings controller). Full payload (imsOrgId, product,
+    // subject, resource, capabilities); nothing derived from authInfo. Not a
+    // customer FACS surface, so it bypasses facsWrapper entirely.
+    'POST /state/access-mappings/admin', // hasAdminAccess (adminCreateMapping)
     'POST /sites', // hasAdminAccess
     'DELETE /sites/:siteId', // restricted (always 403)
     'PATCH /sites/:siteId/:auditType', // hasAdminAccess (sites-audits-toggle)
@@ -834,6 +839,7 @@ const routeFacsCapabilities = {
       'GET /v2/orgs/:spaceCatId/serenity/languages': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/filter-dimensions': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/access': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview': 'llmo/can_view',
