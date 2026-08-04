@@ -1046,11 +1046,11 @@ export function createSerenityTransport({ env, imsToken }) {
     /**
      * POST /v1/workspaces/{ws}/members — grant one or more users a role on the
      * workspace (Semrush RBAC). Body: `{ members: string[], role: string }`
-     * (e.g. role `role/workspace/viewer`). SPIKE (ADR-draft-2): first RBAC write
-     * slice — reuses the already-wired User Manager client + IMS-bearer auth; no
-     * new secret/config. Auth model is unchanged: the CALLER'S IMS token is
-     * forwarded, so the grant succeeds only if that caller holds member-management
-     * rights on the workspace (Semrush is the auth boundary, not this proxy).
+     * (e.g. role `role/workspace/viewer`). ADR-draft-2/3: RBAC write slice that
+     * reuses the already-wired User Manager client. The bearer this transport is
+     * built with is the DEDICATED Semrush IMS technical-account token (minted by
+     * the controller via SEMRUSH_IMS_TECH_*), NOT the calling user's token — so it
+     * can provision a user who is not yet a member of the workspace.
      *
      * `/v1/workspaces/{id}/members` (op `workspace-add-members`) is present in the
      * user-manager-client generated spec with body `{ members: string[]; role: string }`.

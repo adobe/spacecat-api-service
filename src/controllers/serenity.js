@@ -24,6 +24,7 @@ import {
   resolveBrandWorkspace,
   clearBrandWorkspaceCache,
 } from '../support/serenity/workspace-resolver.js';
+import { mintSemrushImsToken } from '../support/serenity/semrush-ims-token.js';
 import {
   handleListPrompts,
   handleCreatePrompts,
@@ -1233,18 +1234,21 @@ function SerenityController(context, log, env) {
 
   /**
    * POST /serenity/members — grant one or more users a Semrush workspace role
-   * (RBAC write slice; ADR-draft-2 spike). Resolves the brand's workspace via
+   * (RBAC write slice; ADR-draft-2/3). Resolves the brand's workspace via
    * `authorize` (the brand's sub-workspace in subworkspace mode, else the org's
-   * flat parent workspace) and forwards the caller's IMS token to Semrush's User
-   * Manager `POST /v1/workspaces/{ws}/members`. Body: `{ members: string[],
-   * role?: string }`; `role` defaults to `role/workspace/viewer`.
+   * flat parent workspace) and calls Semrush's User Manager
+   * `POST /v1/workspaces/{ws}/members`. Body: `{ members: string[], role?: string }`;
+   * `role` defaults to `role/workspace/viewer`.
    *
-   * Auth: unchanged pass-through — Semrush authorizes the forwarded token, so the
-   * grant only lands if the caller holds member-management rights on the workspace.
+   * Auth: the Adobe caller is authorized here at the ORG level (`authorize` →
+   * AccessControlUtil), but the OUTBOUND Semrush call is authenticated with a token
+   * minted for the DEDICATED Semrush IMS technical account (SEMRUSH_IMS_TECH_*),
+   * NOT the caller's own token. This is what lets the grant provision a user who is
+   * not yet a member of the workspace — the mint identity holds the member-management
+   * rights, so the "user hits 401/403 → provision them" flow can succeed.
    */
   const addMembers = async (ctx) => {
     try {
-      const imsToken = await resolveSemrushImsToken(ctx);
       const auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
@@ -1257,6 +1261,10 @@ function SerenityController(context, log, env) {
         throw new ErrorWithStatusCode('members must be a non-empty array of user identifiers', 400);
       }
       const role = hasText(body.role) ? body.role : 'role/workspace/viewer';
+      // Mint the dedicated Semrush IMS technical-account token (NOT the caller's) so a
+      // not-yet-a-member user can still be provisioned. Minted only after the org-level
+      // authorize gate + input validation pass, so a bad request never mints a token.
+      const imsToken = await mintSemrushImsToken(ctx.env || env, log);
       const transport = buildTransport(ctx, imsToken);
       const result = await transport.addWorkspaceMembers(
         /** @type {string} */ (auth.workspaceId),

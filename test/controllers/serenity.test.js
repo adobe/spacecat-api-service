@@ -171,6 +171,7 @@ describe('SerenityController', () => {
   let resolveBrandWorkspaceStub;
   let isSerenityActiveStub;
   let createTransportStub;
+  let mintSemrushImsTokenStub;
   let resolveBrandUuidStub;
   let getBrandAliasesStub;
   let getBrandUrlSourcesStub;
@@ -204,6 +205,7 @@ describe('SerenityController', () => {
     ensureSubworkspaceStub = sinon.stub().resolves(SUBWS);
     clearBrandWorkspaceCacheStub = sinon.stub();
     createTransportStub = sinon.stub().returns({ name: 'transport' });
+    mintSemrushImsTokenStub = sinon.stub().resolves('semrush-ims-tech-token');
     resolveBrandUuidStub = sinon.stub().resolves(BRAND);
     getBrandAliasesStub = sinon.stub().resolves([]);
     getBrandUrlSourcesStub = sinon.stub()
@@ -244,6 +246,9 @@ describe('SerenityController', () => {
         resolveWorkspaceId: resolveWorkspaceIdStub,
         resolveBrandWorkspace: resolveBrandWorkspaceStub,
         clearBrandWorkspaceCache: clearBrandWorkspaceCacheStub,
+      },
+      '../../src/support/serenity/semrush-ims-token.js': {
+        mintSemrushImsToken: mintSemrushImsTokenStub,
       },
       '../../src/support/serenity/handlers/prompts.js': {
         handleListPrompts: handlers.handleListPrompts,
@@ -1786,7 +1791,7 @@ describe('SerenityController', () => {
     });
   });
 
-  describe('addMembers (RBAC workspace member grant — ADR-draft-2 spike)', () => {
+  describe('addMembers (RBAC workspace member grant — minted Semrush IMS token)', () => {
     let addWorkspaceMembersStub;
 
     beforeEach(() => {
@@ -1808,6 +1813,17 @@ describe('SerenityController', () => {
         'role/workspace/viewer',
       );
       expect(await readBody(response)).to.deep.equal({ consumedUnits: -1 });
+    });
+
+    it('authenticates with the MINTED Semrush IMS token, not the caller token', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      await controller.addMembers(fakeContext({
+        data: { members: ['a@adobe.com'] },
+      }));
+      // The dedicated Semrush IMS token is minted and passed to the transport.
+      expect(mintSemrushImsTokenStub).to.have.been.calledOnce;
+      expect(createTransportStub.firstCall.args[0])
+        .to.have.property('imsToken', 'semrush-ims-tech-token');
     });
 
     it('defaults the role to role/workspace/viewer when none is supplied', async () => {
@@ -1842,12 +1858,14 @@ describe('SerenityController', () => {
       });
     });
 
-    it('rejects a missing members array with 400 and never calls upstream', async () => {
+    it('rejects a missing members array with 400 — no token minted, no upstream call', async () => {
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.addMembers(fakeContext({
         data: { role: 'role/workspace/viewer' },
       }));
       expect(response.status).to.equal(400);
+      // Mint happens only after the authorize gate + input validation pass.
+      expect(mintSemrushImsTokenStub).to.not.have.been.called;
       expect(addWorkspaceMembersStub).to.not.have.been.called;
     });
 
@@ -1860,13 +1878,27 @@ describe('SerenityController', () => {
       expect(addWorkspaceMembersStub).to.not.have.been.called;
     });
 
-    it('propagates an authorize failure (no org access) as 403 without calling upstream', async () => {
+    it('propagates an authorize failure (no org access) as 403 — no token minted', async () => {
       accessControlHasAccessStub.resolves(false);
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.addMembers(fakeContext({
         data: { members: ['a@adobe.com'] },
       }));
       expect(response.status).to.equal(403);
+      expect(mintSemrushImsTokenStub).to.not.have.been.called;
+      expect(addWorkspaceMembersStub).to.not.have.been.called;
+    });
+
+    it('surfaces a token-mint config failure (missing SEMRUSH_IMS_TECH_*) as 503', async () => {
+      mintSemrushImsTokenStub.rejects(
+        new ErrorWithStatusCode('SEMRUSH_IMS_TECH_ID and SEMRUSH_IMS_TECH_SECRET must be set', 503),
+      );
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.addMembers(fakeContext({
+        data: { members: ['a@adobe.com'] },
+      }));
+      expect(response.status).to.equal(503);
+      // Token mint failed → never reach the upstream member add.
       expect(addWorkspaceMembersStub).to.not.have.been.called;
     });
 
