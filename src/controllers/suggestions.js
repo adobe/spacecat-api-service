@@ -1126,16 +1126,13 @@ function SuggestionsController(ctx, sqs, env) {
             }
           }
 
-          // Reject per-item transitions the suggestion lifecycle does not allow
-          // (SITES-49063): the bulk endpoint applies a caller-supplied status across a
-          // whole batch, which previously flipped OUTDATED -> FIXED (an OUTDATED
-          // suggestion's issue is no longer detected, so it must not become FIXED).
-          // The shared transition table (SITES-47091) is the single source of truth;
-          // this also gates a safe flip of STATUS_TRANSITION_ENFORCEMENT=enforce (SITES-47286).
-          // NOTE: the REJECTED hard-rule above (REJECTED only from PENDING_VALIDATION) is a
-          // stricter subset of this same invariant kept for its specific message/ACL; it
-          // fires first, so keep it ahead of this general gate.
+          // Per-item transition-legality gate (SITES-49063; part of the SITES-47286
+          // warn->enforce rollout). NOTE: the REJECTED hard-rule above is a stricter
+          // subset of this and fires first — keep it ahead of this general gate.
           if (!isAllowedSuggestionTransition(currentStatus, status)) {
+            // logged so unexpected 400s can be triaged from Splunk when
+            // STATUS_TRANSITION_ENFORCEMENT is flipped to enforce (SITES-47286).
+            context.log.info(`[patchSuggestionsStatus] rejected illegal status transition suggestionId=${id} ${currentStatus} -> ${status}`);
             return {
               index,
               uuid: id,
