@@ -70,6 +70,19 @@ import { handleCitedSourcesTotals as handleCitedSourcesTotalsV1 } from '../suppo
 import { handleStatsByCountry as handleBrandStatsByCountryV1 } from '../support/ai-visibility/handlers/v1/brand/stats-by-country.js';
 import { handleStatsByLLM as handleBrandStatsByLLMV1 } from '../support/ai-visibility/handlers/v1/brand/stats-by-llm.js';
 import { handleCompetitorsStats as handleBrandCompetitorsStatsV1 } from '../support/ai-visibility/handlers/v1/brand/competitors-stats.js';
+import { handleBrandsByTopicFts as handleBrandsByTopicFtsV1 } from '../support/ai-visibility/handlers/v1/brand/brands-by-topic-fts.js';
+import { handleBrandsByTopicFtsExport as handleBrandsByTopicFtsExportV1 } from '../support/ai-visibility/handlers/v1/brand/brands-by-topic-fts-export.js';
+import { handleBrandsByTopicFtsTotals as handleBrandsByTopicFtsTotalsV1 } from '../support/ai-visibility/handlers/v1/brand/brands-by-topic-fts-totals.js';
+import { handleMetricsByFts as handleMetricsByFtsV1 } from '../support/ai-visibility/handlers/v1/topic/metrics-by-fts.js';
+import { handleTopicsByFts as handleTopicsByFtsV1 } from '../support/ai-visibility/handlers/v1/topic/topics-by-fts.js';
+import { handleTopicsByFtsExport as handleTopicsByFtsExportV1 } from '../support/ai-visibility/handlers/v1/topic/topics-by-fts-export.js';
+import { handleTopicsByFtsTotals as handleTopicsByFtsTotalsV1 } from '../support/ai-visibility/handlers/v1/topic/topics-by-fts-totals.js';
+import { handlePromptsByTopicFts as handlePromptsByTopicFtsV1 } from '../support/ai-visibility/handlers/v1/prompt/prompts-by-topic-fts.js';
+import { handlePromptsByTopicFtsExport as handlePromptsByTopicFtsExportV1 } from '../support/ai-visibility/handlers/v1/prompt/prompts-by-topic-fts-export.js';
+import { handlePromptsByTopicFtsTotals as handlePromptsByTopicFtsTotalsV1 } from '../support/ai-visibility/handlers/v1/prompt/prompts-by-topic-fts-totals.js';
+import { handleSourceDomainsByTopicFts as handleSourceDomainsByTopicFtsV1 } from '../support/ai-visibility/handlers/v1/source/source-domains-by-topic-fts.js';
+import { handleSourceDomainsByTopicFtsExport as handleSourceDomainsByTopicFtsExportV1 } from '../support/ai-visibility/handlers/v1/source/source-domains-by-topic-fts-export.js';
+import { handleSourceDomainsByTopicFtsTotals as handleSourceDomainsByTopicFtsTotalsV1 } from '../support/ai-visibility/handlers/v1/source/source-domains-by-topic-fts-totals.js';
 import { handleMeta as handleMetaV1 } from '../support/ai-visibility/handlers/v1/meta/meta.js';
 import { handlePromptsResearchExport as handlePromptsResearchExportV1 } from '../support/ai-visibility/handlers/v1/prompt-research/prompts-export.js';
 import { handleBrandsResearchExport as handleBrandsResearchExportV1 } from '../support/ai-visibility/handlers/v1/prompt-research/brands-export.js';
@@ -125,6 +138,19 @@ const ROUTE_MAP = [
   ['/v1/brand/stats-by-country', handleBrandStatsByCountryV1],
   ['/v1/brand/stats-by-llm', handleBrandStatsByLLMV1],
   ['/v1/brand/competitors-stats', handleBrandCompetitorsStatsV1],
+  ['/v1/topic/metrics-by-fts', handleMetricsByFtsV1],
+  ['/v1/topic/topics-by-fts', handleTopicsByFtsV1],
+  ['/v1/topic/topics-by-fts-export', handleTopicsByFtsExportV1],
+  ['/v1/topic/topics-by-fts-totals', handleTopicsByFtsTotalsV1],
+  ['/v1/prompt/prompts-by-topic-fts', handlePromptsByTopicFtsV1],
+  ['/v1/prompt/prompts-by-topic-fts-export', handlePromptsByTopicFtsExportV1],
+  ['/v1/prompt/prompts-by-topic-fts-totals', handlePromptsByTopicFtsTotalsV1],
+  ['/v1/brand/brands-by-topic-fts', handleBrandsByTopicFtsV1],
+  ['/v1/brand/brands-by-topic-fts-export', handleBrandsByTopicFtsExportV1],
+  ['/v1/brand/brands-by-topic-fts-totals', handleBrandsByTopicFtsTotalsV1],
+  ['/v1/source/source-domains-by-topic-fts', handleSourceDomainsByTopicFtsV1],
+  ['/v1/source/source-domains-by-topic-fts-export', handleSourceDomainsByTopicFtsExportV1],
+  ['/v1/source/source-domains-by-topic-fts-totals', handleSourceDomainsByTopicFtsTotalsV1],
   ['/v1/meta/meta', handleMetaV1],
 ];
 

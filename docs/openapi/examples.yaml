@@ -942,3 +942,126 @@ AiVisibilityV1BrandCompetitorsStats:
       models: [chatgpt]
       marketsCatalog: [WW, AE, AR, US]
       modelsCatalog: [all, chatgpt, gemini, googleAiMode, googleAiOverview]
+
+AiVisibilityV1TopicMetricsByFts:
+  description: Native topic FTS metrics with API search-result filters
+  value:
+    date:
+      year: 2026
+      month: 7
+      day: 1
+    volume: '18400'
+    volumeTrend: [71, 74, 79, 83]
+    topicsCount: '124'
+    promptsCount: '836'
+    brandsCount: '92'
+    topBrands: [Adobe, Canva, Figma]
+    sourceDomainsCount: '417'
+    topSourceDomains: [adobe.com, wikipedia.org]
+    srFilters:
+      markets: [US]
+      models: [chatgpt]
+      marketsCatalog: [WW, AE, AR, US]
+      modelsCatalog: [all, chatgpt, gemini, googleAiMode, googleAiOverview]
+
+AiVisibilityV1TopicsByFts:
+  description: Native topic rows returned by TopicsByFTS
+  value:
+    data:
+      - id: '984221'
+        name: generative ai tools
+        volume: '12100'
+        volumeTrend: [70, 75, 81]
+        promptsCount: '215'
+        relevanceScore: 97
+    srFilters:
+      markets: [US]
+      models: [chatgpt]
+      marketsCatalog: [WW, AE, AR, US]
+      modelsCatalog: [all, chatgpt, gemini, googleAiMode, googleAiOverview]
+
+AiVisibilityV1PromptsByTopicFts:
+  description: Native prompt rows returned by PromptsByTopicFTS
+  value:
+    date: { year: 2026, month: 7, day: 1 }
+    data:
+      - prompt: What are the best generative AI tools?
+        promptHash: '472901'
+        mentionedBrandsCount: '8'
+        sourcesCount: '12'
+        briefResponse: Several tools support image and document generation.
+        llm: CHAT_GPT
+        serpId: response-123
+        topicId: '984221'
+        topicName: generative ai tools
+        topicVolume: '12100'
+        relevanceScore: 97
+    srFilters:
+      markets: [US]
+      models: [chatgpt]
+      marketsCatalog: [WW, AE, AR, US]
+      modelsCatalog: [all, chatgpt, gemini, googleAiMode, googleAiOverview]
+
+AiVisibilityV1BrandsByTopicFts:
+  description: Native brand rows returned by BrandsByTopicFTS
+  value:
+    date: { year: 2026, month: 7, day: 1 }
+    data:
+      - name: Adobe
+        domain: adobe.com
+        mentions: '184'
+        overallMentions: '924'
+        sourceDomainsCount: '48'
+        examplePrompt: What are the best generative AI tools?
+        examplePromptHash: '472901'
+        examplePromptTopicId: '984221'
+        serpId: response-123
+        llm: CHAT_GPT
+    srFilters:
+      markets: [US]
+      models: [chatgpt]
+      marketsCatalog: [WW, AE, AR, US]
+      modelsCatalog: [all, chatgpt, gemini, googleAiMode, googleAiOverview]
+
+AiVisibilityV1SourceDomainsByTopicFts:
+  description: Native source-domain rows returned by SourceDomainsByTopicFTS
+  value:
+    date: { year: 2026, month: 7, day: 1 }
+    data:
+      - domain: wikipedia.org
+        sourcesCount: '31'
+        mentions: '68'
+        overallMentions: '412'
+        organicTraffic: '8200000'
+        examplePrompt: What are the best generative AI tools?
+        examplePromptHash: '472901'
+        examplePromptTopicId: '984221'
+        serpId: response-123
+        llm: CHAT_GPT
+    srFilters:
+      markets: [US]
+      models: [chatgpt]
+      marketsCatalog: [WW, AE, AR, US]
+      modelsCatalog: [all, chatgpt, gemini, googleAiMode, googleAiOverview]
+
+AiVisibilityV1FtsTotals:
+  description: Native FTS total response
+  value:
+    total: '124'
+    srFilters:
+      markets: [US]
+      models: [chatgpt]
+      marketsCatalog: [WW, AE, AR, US]
+      modelsCatalog: [all, chatgpt, gemini, googleAiMode, googleAiOverview]
+
+AiVisibilityV1FtsExport:
+  description: Native Semrush CSV export response
+  value:
+    fileContent: dG9waWMsdm9sdW1lCnRlc3QsMTAwCg==
+    fileName: topics_by_fts.csv
+    contentType: text/csv
+    srFilters:
+      markets: [US]
+      models: [chatgpt]
+      marketsCatalog: [WW, AE, AR, US]
+      modelsCatalog: [all, chatgpt, gemini, googleAiMode, googleAiOverview]

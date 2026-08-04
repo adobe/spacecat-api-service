@@ -11142,6 +11142,241 @@ AiVisibilityPromptResearchExportResponse:
       $ref: '#/AiVisibilitySrFilters'
   additionalProperties: true
 
+AiVisibilityV1UInt64:
+  description: Protobuf `uint64`, serialized as a decimal string by protobuf JSON.
+  oneOf:
+    - type: string
+      pattern: '^[0-9]+$'
+    - type: integer
+      minimum: 0
+
+AiVisibilityV1TopicMetricsByFtsResponse:
+  type: object
+  description: Native Semrush `MetricsByFTSResponse` protobuf JSON plus API filters.
+  properties:
+    date:
+      $ref: '#/AiVisibilitySemrushDate'
+    volume:
+      $ref: '#/AiVisibilityV1UInt64'
+    volumeTrend:
+      type: array
+      items:
+        type: integer
+    topicsCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    promptsCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    intents:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySemrushTopicIntentEntry'
+    brandsCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    topBrands:
+      type: array
+      items:
+        type: string
+    sourceDomainsCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    topSourceDomains:
+      type: array
+      items:
+        type: string
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1TopicByFtsRow:
+  type: object
+  properties:
+    id:
+      $ref: '#/AiVisibilityV1UInt64'
+    name:
+      type: string
+    volume:
+      $ref: '#/AiVisibilityV1UInt64'
+    volumeTrend:
+      type: array
+      items:
+        type: integer
+    intents:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySemrushTopicIntentEntry'
+    promptsCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    relevanceScore:
+      type: integer
+      minimum: 0
+      maximum: 100
+  additionalProperties: true
+
+AiVisibilityV1TopicsByFtsResponse:
+  type: object
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1TopicByFtsRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [data]
+  additionalProperties: true
+
+AiVisibilityV1PromptByTopicFtsRow:
+  type: object
+  properties:
+    prompt:
+      type: string
+    promptHash:
+      $ref: '#/AiVisibilityV1UInt64'
+    mentionedBrandsCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    sourcesCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    briefResponse:
+      type: string
+    llm:
+      $ref: '#/AiVisibilitySemrushLlm'
+    serpId:
+      type: string
+    topicId:
+      $ref: '#/AiVisibilityV1UInt64'
+    topicName:
+      type: string
+    topicVolume:
+      $ref: '#/AiVisibilityV1UInt64'
+    relevanceScore:
+      type: integer
+      minimum: 0
+      maximum: 100
+  additionalProperties: true
+
+AiVisibilityV1PromptsByTopicFtsResponse:
+  type: object
+  properties:
+    date:
+      $ref: '#/AiVisibilitySemrushDate'
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1PromptByTopicFtsRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [data]
+  additionalProperties: true
+
+AiVisibilityV1BrandByTopicFtsRow:
+  type: object
+  properties:
+    name:
+      type: string
+    mentions:
+      $ref: '#/AiVisibilityV1UInt64'
+    overallMentions:
+      $ref: '#/AiVisibilityV1UInt64'
+    sourceDomainsCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    examplePrompt:
+      type: string
+    examplePromptHash:
+      $ref: '#/AiVisibilityV1UInt64'
+    examplePromptTopicId:
+      $ref: '#/AiVisibilityV1UInt64'
+    domain:
+      type: string
+    serpId:
+      type: string
+    llm:
+      $ref: '#/AiVisibilitySemrushLlm'
+  additionalProperties: true
+
+AiVisibilityV1BrandsByTopicFtsResponse:
+  type: object
+  properties:
+    date:
+      $ref: '#/AiVisibilitySemrushDate'
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1BrandByTopicFtsRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [data]
+  additionalProperties: true
+
+AiVisibilityV1SourceDomainByTopicFtsRow:
+  type: object
+  properties:
+    domain:
+      type: string
+    sourcesCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    mentions:
+      $ref: '#/AiVisibilityV1UInt64'
+    overallMentions:
+      $ref: '#/AiVisibilityV1UInt64'
+    organicTraffic:
+      $ref: '#/AiVisibilityV1UInt64'
+    examplePrompt:
+      type: string
+    examplePromptHash:
+      $ref: '#/AiVisibilityV1UInt64'
+    examplePromptTopicId:
+      $ref: '#/AiVisibilityV1UInt64'
+    serpId:
+      type: string
+    llm:
+      $ref: '#/AiVisibilitySemrushLlm'
+  additionalProperties: true
+
+AiVisibilityV1SourceDomainsByTopicFtsResponse:
+  type: object
+  properties:
+    date:
+      $ref: '#/AiVisibilitySemrushDate'
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1SourceDomainByTopicFtsRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [data]
+  additionalProperties: true
+
+AiVisibilityV1FtsTotalsResponse:
+  type: object
+  properties:
+    total:
+      $ref: '#/AiVisibilityV1UInt64'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [total]
+  additionalProperties: true
+
+AiVisibilityV1DatedFtsTotalsResponse:
+  allOf:
+    - $ref: '#/AiVisibilityV1FtsTotalsResponse'
+    - type: object
+      properties:
+        date:
+          $ref: '#/AiVisibilitySemrushDate'
+
+AiVisibilityV1FtsExportResponse:
+  type: object
+  properties:
+    fileContent:
+      type: string
+      format: byte
+    fileName:
+      type: string
+    contentType:
+      type: string
+      example: text/csv
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
 AiVisibilityCompetitorsMetrics:
   type: object
   description: Competitor comparison time-series response
