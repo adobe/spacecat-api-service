@@ -858,6 +858,7 @@ export default function getRouteHandlers(
     'GET /llmo/ai-visibility/v1/source/cited-sources-totals': aiVisibilityController.getV1SourceCitedSourcesTotals,
     'GET /llmo/ai-visibility/v1/brand/stats-by-country': aiVisibilityController.getV1BrandStatsByCountry,
     'GET /llmo/ai-visibility/v1/brand/stats-by-llm': aiVisibilityController.getV1BrandStatsByLlm,
+    'GET /llmo/ai-visibility/v1/brand/competitors-stats': aiVisibilityController.getV1BrandCompetitorsStats,
     'GET /llmo/ai-visibility/v1/meta/meta': aiVisibilityController.getV1MetaMeta,
     'GET /llmo/ai-visibility/v1/prompt-research/prompts-export': aiVisibilityController.getV1PromptResearchPromptsExport,
     'GET /llmo/ai-visibility/v1/prompt-research/brands-export': aiVisibilityController.getV1PromptResearchBrandsExport,

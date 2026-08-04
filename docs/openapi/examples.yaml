@@ -908,3 +908,37 @@ AiVisibilityV1SourceCitedSourcesExport:
       models: [chatgpt]
       marketsCatalog: [WW, AE, AR, US]
       modelsCatalog: [all, chatgpt, gemini, googleAiMode, googleAiOverview]
+
+AiVisibilityV1BrandCompetitorsStats:
+  description: Native competitor time-series statistics with API search-result filters
+  value:
+    byBrand:
+      - brand:
+          domain: adobe.com
+          name: adobe.com
+        byDate:
+          - date:
+              year: 2026
+              month: 3
+              day: 15
+            visibility: 72
+            mentions: '124'
+            audience: '48000'
+            ownedSources: '18'
+      - brand:
+          domain: example.com
+          name: example.com
+        byDate:
+          - date:
+              year: 2026
+              month: 3
+              day: 15
+            visibility: 54
+            mentions: '87'
+            audience: '32000'
+            ownedSources: '11'
+    srFilters:
+      markets: [US]
+      models: [chatgpt]
+      marketsCatalog: [WW, AE, AR, US]
+      modelsCatalog: [all, chatgpt, gemini, googleAiMode, googleAiOverview]

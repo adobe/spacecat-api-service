@@ -753,6 +753,7 @@ const routeRequiredCapabilities = {
   'GET /llmo/ai-visibility/v1/prompt-research/topics-export': 'report:read',
   'GET /llmo/ai-visibility/v1/brand/stats-by-country': 'report:read',
   'GET /llmo/ai-visibility/v1/brand/stats-by-llm': 'report:read',
+  'GET /llmo/ai-visibility/v1/brand/competitors-stats': 'report:read',
   'GET /llmo/ai-visibility/v1/meta/meta': 'report:read',
 
   // User Activities

@@ -10187,6 +10187,61 @@ AiVisibilityV1BrandStatsByLLMResponse:
       $ref: '#/AiVisibilitySrFilters'
   additionalProperties: true
 
+AiVisibilityV1BrandCompetitorsStatsByDate:
+  type: object
+  description: |
+    One row from `CompetitorsMetrics.StatsResponse.ByDate` as native protobuf JSON.
+    UInt64 fields are serialized as JSON strings.
+  properties:
+    date:
+      $ref: '#/AiVisibilitySemrushDate'
+    visibility:
+      type: integer
+      description: AI Visibility score for the brand on this date
+    mentions:
+      oneOf:
+        - type: string
+        - type: integer
+      description: Prompt responses mentioning the brand
+    audience:
+      oneOf:
+        - type: string
+        - type: integer
+      description: Estimated audience for the brand
+    ownedSources:
+      oneOf:
+        - type: string
+        - type: integer
+      description: Citations from the brand domain
+  additionalProperties: true
+
+AiVisibilityV1BrandCompetitorsStatsByBrand:
+  type: object
+  description: Statistics for one target or competitor brand
+  properties:
+    brand:
+      $ref: '#/AiVisibilitySemrushBrand'
+    byDate:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1BrandCompetitorsStatsByDate'
+  additionalProperties: true
+
+AiVisibilityV1BrandCompetitorsStatsResponse:
+  type: object
+  description: |
+    Native Semrush `CompetitorsMetrics.StatsResponse` protobuf JSON from
+    `GET /llmo/ai-visibility/v1/brand/competitors-stats`, plus `srFilters`
+    from the API layer.
+  properties:
+    byBrand:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1BrandCompetitorsStatsByBrand'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
 AiVisibilityV1BrandStatsByCountryEntry:
   type: object
   description: |

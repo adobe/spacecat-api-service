@@ -69,6 +69,7 @@ import { handleCitedSourcesExport as handleCitedSourcesExportV1 } from '../suppo
 import { handleCitedSourcesTotals as handleCitedSourcesTotalsV1 } from '../support/ai-visibility/handlers/v1/source/cited-sources-totals.js';
 import { handleStatsByCountry as handleBrandStatsByCountryV1 } from '../support/ai-visibility/handlers/v1/brand/stats-by-country.js';
 import { handleStatsByLLM as handleBrandStatsByLLMV1 } from '../support/ai-visibility/handlers/v1/brand/stats-by-llm.js';
+import { handleCompetitorsStats as handleBrandCompetitorsStatsV1 } from '../support/ai-visibility/handlers/v1/brand/competitors-stats.js';
 import { handleMeta as handleMetaV1 } from '../support/ai-visibility/handlers/v1/meta/meta.js';
 import { handlePromptsResearchExport as handlePromptsResearchExportV1 } from '../support/ai-visibility/handlers/v1/prompt-research/prompts-export.js';
 import { handleBrandsResearchExport as handleBrandsResearchExportV1 } from '../support/ai-visibility/handlers/v1/prompt-research/brands-export.js';
@@ -123,6 +124,7 @@ const ROUTE_MAP = [
   ['/v1/source/cited-sources-totals', handleCitedSourcesTotalsV1],
   ['/v1/brand/stats-by-country', handleBrandStatsByCountryV1],
   ['/v1/brand/stats-by-llm', handleBrandStatsByLLMV1],
+  ['/v1/brand/competitors-stats', handleBrandCompetitorsStatsV1],
   ['/v1/meta/meta', handleMetaV1],
 ];
 

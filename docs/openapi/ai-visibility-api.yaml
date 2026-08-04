@@ -1370,6 +1370,42 @@ ai-visibility-v1-brand-stats-by-llm:
     security:
       - api_key: []
 
+ai-visibility-v1-brand-competitors-stats:
+  get:
+    tags: [ai-visibility]
+    summary: Get competitor statistics (CompetitorsMetrics v1 JSON)
+    description: |
+      Returns time-series statistics for the target brand and its competitors using Semrush
+      `CompetitorsMetrics.Stats`. The response is native protobuf JSON (camelCase) without
+      additional field mapping.
+      Optional `engine` selects one LLM.
+    operationId: getAiVisibilityV1BrandCompetitorsStats
+    parameters:
+      - *domainParam
+      - name: competitors
+        in: query
+        required: true
+        description: Comma-separated list of competitor domains
+        schema:
+          type: string
+          example: competitor1.com,competitor2.com
+      - *countryParam
+      - *regionParam
+      - *engineParam
+    responses:
+      '200':
+        description: Competitor statistics retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1BrandCompetitorsStatsResponse'
+            examples:
+              competitorsStats:
+                $ref: './examples.yaml#/AiVisibilityV1BrandCompetitorsStats'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
 ai-visibility-v1-brand-stats-by-country:
   get:
     tags: [ai-visibility]

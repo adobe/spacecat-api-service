@@ -365,6 +365,7 @@ const routeFacsCapabilities = {
       'GET /llmo/ai-visibility/brands/competitors': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/brand/stats-by-country': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/brand/stats-by-llm': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/brand/competitors-stats': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/meta/meta': 'llmo/can_view',
       'GET /llmo/ai-visibility/competitors/metrics': 'llmo/can_view',
       'GET /llmo/ai-visibility/meta': 'llmo/can_view',
