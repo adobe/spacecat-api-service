@@ -1,3 +1,10 @@
+# [1.717.0](https://github.com/adobe/spacecat-api-service/compare/v1.716.3...v1.717.0) (2026-08-04)
+
+
+### Features
+
+* retire legacy un-paginated GET /sites response ([#2993](https://github.com/adobe/spacecat-api-service/issues/2993)) ([483ec75](https://github.com/adobe/spacecat-api-service/commit/483ec757fc94b518395e1006efedc38527bf4317)), closes [#2591](https://github.com/adobe/spacecat-api-service/issues/2591) [#2591](https://github.com/adobe/spacecat-api-service/issues/2591) [#2591](https://github.com/adobe/spacecat-api-service/issues/2591)
+
 ## [1.716.3](https://github.com/adobe/spacecat-api-service/compare/v1.716.2...v1.716.3) (2026-08-04)
 
 
