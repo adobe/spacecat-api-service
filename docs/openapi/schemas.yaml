@@ -11749,6 +11749,23 @@ SerenityErrorResponse:
     error: { type: string }
     message: { type: string }
 
+SerenityWorkspaceAccess:
+  type: object
+  description: |
+    Whether the calling user can reach the Semrush workspace linked to the brand.
+    Derived from the User Manager resource-allowance endpoint
+    (`GET /v1/workspaces/{id}/resources`) probed with the caller's IMS token: an
+    upstream 2xx yields `true`, a 401/403 yields `false`. A genuine upstream/config
+    failure is NOT reported here — it surfaces as a 4xx/5xx error status instead, so a
+    transient blip is never mistaken for a denial.
+  required: [hasAccess]
+  properties:
+    hasAccess:
+      type: boolean
+      description: |
+        `true` — the caller can access the linked workspace (no banner). `false` — the
+        caller has no access (the only case that shows the "access needed" banner).
+
 SerenityBrandPresenceSentimentOverview:
   type: object
   description: |
