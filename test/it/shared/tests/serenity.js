@@ -1352,4 +1352,135 @@ export default function serenityTests(
       expect(item.updatedAt).to.be.a('string');
     });
   });
+
+  // Producer `source` gate (SITES-47870). On CREATE the server stamps a producing
+  // `source:` tag; the human-dialog default is `source:config`. A caller may only
+  // OVERRIDE that to a real producer (`semrush`, …) when the request opts in with
+  // `assertSource: true` AND the caller holds `<product>/can_track` — via the JWT,
+  // via admin, OR (Option B) via a state-layer `facs_access_mappings` grant. Without
+  // both, the override is DROPPED (not 403) and the prompt stays `source:config`.
+  //
+  // The producing tag is asserted by resolving the `source` root's children by name
+  // (roots via `parentId=`, then children via `parentId=<sourceRootId>` — same shape
+  // the tag-tree tests use), then checking the created prompt's `tagIds`.
+  describe('Serenity API — assertSource producer gate (live mock, SITES-47870)', () => {
+    const base = `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity`;
+    const US_GEO = 2840;
+
+    beforeEach(async () => {
+      await resetData();
+      await resetMocks();
+    });
+
+    const createUsMarket = async () => {
+      const res = await getHttpClient().admin.post(`${base}/markets`, {
+        market: 'US', languageCode: 'en', brandDomain: 'example.com', brandNames: ['Test Brand'],
+      });
+      expect(res.status).to.equal(201);
+    };
+
+    const createCategory = async (name) => {
+      const res = await getHttpClient().admin.post(`${base}/tags`, {
+        type: 'category', name, geoTargetId: US_GEO, languageCode: 'en',
+      });
+      expect(res.status).to.equal(201);
+      return res.body.id;
+    };
+
+    // Resolve a `source`-root child's upstream id by its bare name (`config` /
+    // `semrush`), or undefined when that producer has not been minted yet.
+    const sourceChildId = async (name) => {
+      const roots = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=`,
+      );
+      expect(roots.status).to.equal(200);
+      const sourceRoot = roots.body.items.find((t) => t.name === 'source');
+      expect(sourceRoot, 'the server-owned `source` root is provisioned').to.exist;
+      const children = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${sourceRoot.id}`,
+      );
+      expect(children.status).to.equal(200);
+      return children.body.items.find((t) => t.name === name)?.id;
+    };
+
+    // `assertSource` is only added to the body when true, so the "no opt-in" case sends
+    // a per-item `source` with the request-level flag absent — exactly what an un-gated
+    // client would send.
+    const createTracked = (persona, { assertSource, source, tagIds }) => getHttpClient()[persona]
+      .post(`${base}/prompts`, {
+        ...(assertSource ? { assertSource: true } : {}),
+        prompts: [{
+          text: 'Which mirrorless camera is best?',
+          tagIds,
+          geoTargetId: US_GEO,
+          languageCode: 'en',
+          ...(source ? { source } : {}),
+        }],
+      });
+
+    it('admin may assert the producing source (semrush, not the config default)', async () => {
+      await createUsMarket();
+      const tagId = await createCategory('Cameras');
+      const res = await createTracked('admin', { assertSource: true, source: 'semrush', tagIds: [tagId] });
+      expect(res.status).to.equal(200);
+      expect(res.body.created).to.have.lengthOf(1);
+      const semrushId = await sourceChildId('semrush');
+      expect(semrushId, 'the semrush producer tag resolved under the source root').to.exist;
+      expect(res.body.created[0].tagIds).to.include(semrushId);
+    });
+
+    // The core Option B assertion: brandManager's JWT facs_permissions are empty, so
+    // BOTH the facsWrapper route gate (`can_configure`) and the in-controller
+    // `assertSource` gate (`can_track`) are satisfied purely from the seeded
+    // `facs_access_mappings` binding on BRAND_1 — proving the state-layer read wired
+    // into the controller actually honours a `POST /state/access-mappings`-style grant.
+    it('honours a STATE-LAYER can_track grant for a non-admin caller (Option B)', async () => {
+      await createUsMarket();
+      const tagId = await createCategory('Cameras');
+      const res = await createTracked('brandManager', {
+        assertSource: true, source: 'semrush', tagIds: [tagId],
+      });
+      expect(res.status).to.equal(200);
+      expect(res.body.created).to.have.lengthOf(1);
+      const semrushId = await sourceChildId('semrush');
+      expect(semrushId).to.exist;
+      expect(res.body.created[0].tagIds).to.include(semrushId);
+      const configId = await sourceChildId('config');
+      if (configId) {
+        expect(res.body.created[0].tagIds).to.not.include(configId);
+      }
+    });
+
+    it('DROPS the override for a caller without can_track — source stays config', async () => {
+      await createUsMarket();
+      const tagId = await createCategory('Cameras');
+      // `user` reaches the handler (its JWT carries no facs_permissions claim) but holds
+      // no can_track, so the asserted source is ignored and the producer defaults.
+      const res = await createTracked('user', { assertSource: true, source: 'semrush', tagIds: [tagId] });
+      expect(res.status).to.equal(200);
+      expect(res.body.created).to.have.lengthOf(1);
+      const configId = await sourceChildId('config');
+      expect(configId, 'the config default producer is stamped').to.exist;
+      expect(res.body.created[0].tagIds).to.include(configId);
+      const semrushId = await sourceChildId('semrush');
+      if (semrushId) {
+        expect(res.body.created[0].tagIds).to.not.include(semrushId);
+      }
+    });
+
+    it('requires the body opt-in too: can_track WITHOUT assertSource stays config', async () => {
+      await createUsMarket();
+      const tagId = await createCategory('Cameras');
+      // brandManager holds can_track, but the request did not set assertSource — both are
+      // required, so the per-item source is dropped and the producer defaults to config.
+      const res = await createTracked('brandManager', {
+        assertSource: false, source: 'semrush', tagIds: [tagId],
+      });
+      expect(res.status).to.equal(200);
+      expect(res.body.created).to.have.lengthOf(1);
+      const configId = await sourceChildId('config');
+      expect(configId).to.exist;
+      expect(res.body.created[0].tagIds).to.include(configId);
+    });
+  });
 }

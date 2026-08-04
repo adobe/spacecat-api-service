@@ -16,6 +16,7 @@ import {
   MANAGED_BRAND_ID,
   UNMANAGED_BRAND_ID,
   UNMANAGED_MAPPING_ID,
+  BRAND_1_ID,
 } from '../../shared/seed-ids.js';
 
 /*
@@ -27,6 +28,15 @@ import {
  *  2. A pre-existing `llmo/can_view` binding on UNMANAGED_BRAND_ID (a different
  *     user) lets the tests assert the brandManager cannot PATCH / DELETE
  *     bindings on resources it does not manage.
+ *  3. A `can_configure` + `can_track` binding for the brandManager on BRAND_1_ID
+ *     (the Serenity test brand), for the SITES-47870 producer-gate IT: the
+ *     `can_configure` satisfies facsWrapper's route requirement on
+ *     `POST /serenity/prompts` (brandManager's JWT facs_permissions are empty, so
+ *     authority is purely state-layer), and `can_track` is what the in-controller
+ *     `assertSource` gate reads from the state layer. This binding grants neither
+ *     `can_manage_users` (so it does not widen brandManager's §8.3 management
+ *     authority) nor touches MANAGED_/UNMANAGED_BRAND_ID (so the state-layer suite
+ *     is unaffected).
  *
  * Standalone table (ims_org_id is TEXT, no FK), so these are not bound to the
  * organizations seed. anon holds INSERT on this table (default privileges), so
@@ -54,6 +64,16 @@ export const facsAccessMappings = [
     ims_org_id: ORG_1_IMS_ORG_ID,
     product: 'LLMO',
     granted_capabilities: ['llmo/can_view'],
+    created_by: 'seed',
+  },
+  {
+    subject_type: 'user',
+    subject_id: BRAND_MANAGER_SUBJECT,
+    resource_type: 'brand',
+    resource_id: BRAND_1_ID,
+    ims_org_id: ORG_1_IMS_ORG_ID,
+    product: 'LLMO',
+    granted_capabilities: ['llmo/can_configure', 'llmo/can_track', 'llmo/can_view'],
     created_by: 'seed',
   },
 ];
