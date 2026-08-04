@@ -493,9 +493,10 @@ function LlmoAkamaiController(ctx) {
     }
 
     try {
-      const version = hasBaseVersion
-        ? Number(rawBaseVersion)
-        : await client.getLatestVersion(propertyId, contractId, groupId);
+      // Always resolve the true latest so the response can report it (latestVersion), even when the
+      // caller previews a specific baseVersion.
+      const latestVersion = await client.getLatestVersion(propertyId, contractId, groupId);
+      const version = hasBaseVersion ? Number(rawBaseVersion) : latestVersion;
       const {
         ruleTree, ruleFormat,
       } = await client.getRuleTree(propertyId, version, contractId, groupId);
@@ -543,8 +544,9 @@ function LlmoAkamaiController(ctx) {
       }));
       return ok({
         propertyId,
-        // The version the plan was built against: the chosen baseVersion, else the property's
-        // latest. Named baseVersion (not latestVersion) because it is NOT necessarily the latest.
+        // The property's latest (highest-numbered) version.
+        latestVersion,
+        // The version the plan was built against: the chosen baseVersion, else the latest.
         baseVersion: version,
         ruleFormat,
         managedRules: managedRuleNames(cfg),
@@ -931,7 +933,14 @@ function LlmoAkamaiController(ctx) {
         // Akamai keeps at most one ACTIVE activation per network; if PAPI ever returns more, keep
         // the first seen rather than letting a later one silently overwrite it (deterministic).
         if (!(network in acc)) {
-          acc[network] = activation;
+          // Project only the fields the UI needs — do NOT pass the raw PAPI record through, so a
+          // future upstream field (e.g. notifyEmails) can't leak into the response.
+          acc[network] = {
+            activationId: activation.activationId,
+            propertyVersion: activation.propertyVersion,
+            network: activation.network,
+            status: activation.status,
+          };
         }
         return acc;
       }, {});

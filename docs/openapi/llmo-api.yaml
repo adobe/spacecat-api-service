@@ -6155,13 +6155,9 @@ site-llmo-akamai-versions:
                     name. A network with no active version is absent.
                   properties:
                     STAGING:
-                      type: object
-                      additionalProperties: true
-                      description: The PAPI activation record active on STAGING (status, propertyVersion, ...).
+                      $ref: '#/akamai-active-activation'
                     PRODUCTION:
-                      type: object
-                      additionalProperties: true
-                      description: The PAPI activation record active on PRODUCTION (status, propertyVersion, ...).
+                      $ref: '#/akamai-active-activation'
       '400':
         $ref: './responses.yaml#/400'
       '401':
@@ -6214,6 +6210,9 @@ site-llmo-akamai-plan:
               properties:
                 propertyId:
                   type: string
+                latestVersion:
+                  type: integer
+                  description: The property's latest (highest-numbered) version.
                 baseVersion:
                   type: integer
                   description: >-
@@ -6583,6 +6582,24 @@ akamai-property-ref:
         (plan and deploy) Optional property version to operate on. On deploy, the new version is
         copied from it; on plan, the dry-run preview is built against it. Defaults to the property's
         latest version.
+
+akamai-active-activation:
+  type: object
+  additionalProperties: false
+  description: The version currently ACTIVE on a network (projected from the PAPI activation record).
+  properties:
+    activationId:
+      type: string
+      example: 'atv_20135679'
+    propertyVersion:
+      type: integer
+      example: 5
+    network:
+      type: string
+      enum: [STAGING, PRODUCTION]
+    status:
+      type: string
+      example: 'ACTIVE'
 
 akamai-property:
   type: object

@@ -248,6 +248,7 @@ describe('LlmoAkamaiController', () => {
       const res = await controller.plan(withData(propertyRef));
       const body = await res.json();
       expect(res.status).to.equal(200);
+      expect(body.latestVersion).to.equal(7);
       expect(body.baseVersion).to.equal(7);
       expect(body.currentChildRules).to.deep.equal(['Existing']);
       // The OAE wrapper is appended LAST so its origin + cacheId win (Akamai is last-match-wins).
@@ -306,19 +307,20 @@ describe('LlmoAkamaiController', () => {
       expect(res.status).to.equal(502);
     });
 
-    it('previews a chosen baseVersion instead of the latest', async () => {
+    it('previews a chosen baseVersion but still reports the true latest', async () => {
       const res = await controller.plan(withData({ ...propertyRef, baseVersion: 3 }));
       const body = await res.json();
       expect(res.status).to.equal(200);
       expect(body.baseVersion).to.equal(3);
-      expect(body).to.not.have.property('latestVersion');
-      expect(mockAkamaiClient.getLatestVersion).to.not.have.been.called;
+      // latestVersion always reflects the true latest, even when previewing an older base.
+      expect(body.latestVersion).to.equal(7);
       expect(mockAkamaiClient.getRuleTree).to.have.been.calledWith(PROPERTY_ID, 3);
     });
 
     it('defaults to the latest version when no baseVersion is supplied', async () => {
       const res = await controller.plan(withData(propertyRef));
       const body = await res.json();
+      expect(body.latestVersion).to.equal(7);
       expect(body.baseVersion).to.equal(7);
       expect(mockAkamaiClient.getLatestVersion).to.have.been.calledOnce;
     });
