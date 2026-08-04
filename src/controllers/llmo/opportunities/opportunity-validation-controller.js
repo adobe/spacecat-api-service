@@ -37,22 +37,30 @@ const VALIDATION_MESSAGE_TYPE_BY_OPPORTUNITY_TYPE = {
 /**
  * Controller for on-demand opportunity validation. Lets a caller trigger the same
  * S3-vs-live-edge content validation the hourly optimize-at-edge-enabled-marking job runs,
- * scoped to a specific opportunity and an explicit list of suggestion IDs, instead of waiting
- * for the automatic per-site run or going through the Slack-only validate-only command.
+ * scoped to a specific opportunity, instead of waiting for the automatic per-site run or going
+ * through the Slack-only validate-only command. Two mutually-exclusive request bodies:
  *
- * Suggestion IDs are validated for shape only here (UUID, cap); import-worker resolves each
- * to its URL (via the suggestion's own data) and does not filter by suggestion status — a
- * caller naming a specific suggestion already knows what they want re-checked regardless of
- * its current status.
+ * - { suggestionIds: string[] } — an explicit, ad hoc list of suggestions to re-check.
+ *   Validated for shape only here (UUID, cap); import-worker resolves each to its URL (via the
+ *   suggestion's own data) and does not filter by suggestion status — a caller naming a
+ *   specific suggestion already knows what they want re-checked regardless of its current
+ *   status. The result lands in opportunity.data.validation.
+ * - { geoExperimentId: string } — used by the deploy-to-edge experimentation flow. This
+ *   controller does not resolve the GeoExperiment or its suggestions itself (that happens in
+ *   import-worker, which already owns the GeoExperiment/Suggestion collections) — it only
+ *   validates the ID's shape and forwards it. The result lands on
+ *   GeoExperiment.metadata.validation and each covered Suggestion's own data.validation, not
+ *   opportunity.data.validation (a geoExperimentId run only covers a scoped subset of
+ *   suggestions, so writing the site-wide opportunity field would corrupt the bulk job's cache).
  *
- * Fire-and-forget: enqueues an SQS message to import-worker's existing "imports" queue and
- * responds immediately. The result lands in opportunity.data.validation, same as every other
- * validation path — this endpoint does not wait for or return the validation outcome itself.
+ * Fire-and-forget either way: enqueues an SQS message to import-worker's existing "imports"
+ * queue and responds immediately — this endpoint does not wait for or return the validation
+ * outcome itself.
  */
 function OpportunityValidationController() {
   /**
    * POST /sites/:siteId/opportunities/:opportunityId/validate
-   * Body: { suggestionIds: string[] }
+   * Body: { suggestionIds: string[] } or { geoExperimentId: string } (mutually exclusive).
    */
   const triggerValidation = async (context) => {
     const { dataAccess, sqs, log } = context;
@@ -92,7 +100,32 @@ function OpportunityValidationController() {
     if (!isNonEmptyObject(context.data)) {
       return badRequest('No data provided');
     }
-    const { suggestionIds } = context.data;
+    const { suggestionIds, geoExperimentId } = context.data;
+
+    if (geoExperimentId !== undefined && suggestionIds !== undefined) {
+      return badRequest('Request body must contain exactly one of geoExperimentId or suggestionIds, not both');
+    }
+
+    if (geoExperimentId !== undefined) {
+      if (typeof geoExperimentId !== 'string' || !isValidUUID(geoExperimentId)) {
+        return badRequest('geoExperimentId must be a valid UUID');
+      }
+
+      const configuration = await Configuration.findLatest();
+      await sqs.sendMessage(configuration.getQueues().imports, {
+        type: messageType,
+        siteId,
+        validateOnly: true,
+        geoExperimentId,
+      });
+
+      log.info(`[opportunity-validation-api] queued validation for site ${siteId}, opportunity ${opportunityId}, geoExperiment ${geoExperimentId}`);
+
+      return accepted({
+        siteId, opportunityId, geoExperimentId, status: 'queued',
+      });
+    }
+
     if (!isArray(suggestionIds) || suggestionIds.length === 0) {
       return badRequest('Request body must contain a non-empty array of suggestionIds');
     }

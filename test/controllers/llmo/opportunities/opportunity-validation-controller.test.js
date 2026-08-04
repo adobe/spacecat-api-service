@@ -22,6 +22,7 @@ const OPPORTUNITY_ID = 'a92e2a5e-7b3d-42f0-b3f0-6edd3746a932';
 const OTHER_SITE_ID = 'b56ef8d6-996b-4d5c-b308-8e0b0a95e1b6';
 const SUGGESTION_ID_1 = 'c1a2f5f0-6f3f-4c1a-9b3e-6a1b2c3d4e5f';
 const SUGGESTION_ID_2 = 'd2b3f6f1-7a4a-4d2b-8c4f-7b2c3d4e5f6a';
+const GEO_EXPERIMENT_ID = 'e3c4a7a2-8b5b-4e3c-9d5a-8c3d4e5f6a7b';
 
 function createMockOpportunity({
   id = OPPORTUNITY_ID, siteId = SITE_ID, type = 'prerender',
@@ -214,5 +215,59 @@ describe('OpportunityValidationController', () => {
     const result = await controller.triggerValidation(mockContext);
 
     expect(result.status).to.equal(202);
+  });
+
+  describe('geoExperimentId mode', () => {
+    it('enqueues a validation message and returns 202 on the happy path', async () => {
+      mockContext.data = { geoExperimentId: GEO_EXPERIMENT_ID };
+
+      const result = await controller.triggerValidation(mockContext);
+
+      expect(result.status).to.equal(202);
+      const body = await result.json();
+      expect(body).to.deep.equal({
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        geoExperimentId: GEO_EXPERIMENT_ID,
+        status: 'queued',
+      });
+
+      expect(mockContext.sqs.sendMessage).to.have.been.calledOnceWith('imports-queue-url', {
+        type: 'optimize-at-edge-enabled-marking',
+        siteId: SITE_ID,
+        validateOnly: true,
+        geoExperimentId: GEO_EXPERIMENT_ID,
+      });
+    });
+
+    it('returns 400 when both geoExperimentId and suggestionIds are provided', async () => {
+      mockContext.data = {
+        geoExperimentId: GEO_EXPERIMENT_ID, suggestionIds: [SUGGESTION_ID_1],
+      };
+
+      const result = await controller.triggerValidation(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.match(/exactly one of geoExperimentId or suggestionIds/);
+      expect(mockContext.sqs.sendMessage).not.to.have.been.called;
+    });
+
+    it('returns 400 when geoExperimentId is not a valid UUID', async () => {
+      mockContext.data = { geoExperimentId: 'not-a-uuid' };
+
+      const result = await controller.triggerValidation(mockContext);
+
+      expect(result.status).to.equal(400);
+      expect(mockContext.sqs.sendMessage).not.to.have.been.called;
+    });
+
+    it('returns 400 when geoExperimentId is not a string', async () => {
+      mockContext.data = { geoExperimentId: 12345 };
+
+      const result = await controller.triggerValidation(mockContext);
+
+      expect(result.status).to.equal(400);
+    });
   });
 });
