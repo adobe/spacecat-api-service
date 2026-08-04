@@ -1,3 +1,10 @@
+## [1.716.3](https://github.com/adobe/spacecat-api-service/compare/v1.716.2...v1.716.3) (2026-08-04)
+
+
+### Bug Fixes
+
+* **suggestions:** reject illegal per-item status transitions in bulk PATCH (SITES-49063) ([#2987](https://github.com/adobe/spacecat-api-service/issues/2987)) ([7924ca0](https://github.com/adobe/spacecat-api-service/commit/7924ca0e461e6b537855cad83c2978c6559fc139)), closes [adobe/spacecat-shared#1860](https://github.com/adobe/spacecat-shared/issues/1860)
+
 ## [1.716.2](https://github.com/adobe/spacecat-api-service/compare/v1.716.1...v1.716.2) (2026-08-03)
 
 
