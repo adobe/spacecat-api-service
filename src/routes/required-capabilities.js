@@ -203,6 +203,9 @@ export const INTERNAL_ROUTES = [
   'GET /state/access-mappings',
   'GET /state/access-mappings/history',
   'POST /state/access-mappings',
+  // Admin-only backend provisioning (full payload; nothing from authInfo).
+  // Internal-only, self-gated by isAdmin() in the controller — never S2S.
+  'POST /state/access-mappings/admin',
   'PATCH /state/access-mappings/:id',
   'DELETE /state/access-mappings/:id',
   'GET /organizations/:organizationId/permission/audit-logs',

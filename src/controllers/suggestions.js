@@ -47,6 +47,7 @@ import { applyFieldProjection } from '../utils/field-projection.js';
 import {
   getScheduleParams,
   buildExperimentMetadata,
+  presignInsightsRawData,
 } from '../support/geo-experiment-helper.js';
 import { FixDto } from '../dto/fix.js';
 import { GeoExperimentDto } from '../dto/geo-experiment.js';
@@ -2443,19 +2444,25 @@ function SuggestionsController(ctx, sqs, env) {
     // Fetch impact-measurement insights from S3 only when explicitly requested.
     // Insights exist once impact measurement completes; the S3 key is stored on the
     // experiment as insightsLocation (see spacecat-shared GeoExperiment model).
+    // The insights JSON (and the per-analysis detail blobs its rawDataUrls point at) are
+    // written by Mystique/the engine to the Mystique assets bucket (S3_MYSTIQUE_BUCKET),
+    // NOT the default services bucket — read it from there.
     let insights;
     const includeInsights = context.data?.includeInsights === 'true';
     if (includeInsights) {
       insights = null;
       const insightsS3Key = geoExperiment.getInsightsLocation?.();
-      if (insightsS3Key) {
+      const { S3_MYSTIQUE_BUCKET: mystiqueBucket } = context.env;
+      if (insightsS3Key && mystiqueBucket) {
         try {
-          const { s3Client, s3Bucket, GetObjectCommand } = context.s3;
+          const { s3Client, GetObjectCommand } = context.s3;
           const response = await s3Client.send(
-            new GetObjectCommand({ Bucket: s3Bucket, Key: insightsS3Key }),
+            new GetObjectCommand({ Bucket: mystiqueBucket, Key: insightsS3Key }),
           );
           const body = await response.Body.transformToString();
           insights = JSON.parse(body);
+          // Presign each analysis's rawDataUrl so the UI can download the S3 detail blobs directly.
+          insights = await presignInsightsRawData(insights, context.s3, context.log);
         } catch (s3Error) {
           // Insights may not exist yet (e.g. impact measurement not yet complete)
           context.log.info(`[geo-experiment] Could not fetch insights for ${geoExperimentId}: ${s3Error.message}`);
@@ -2514,6 +2521,7 @@ function SuggestionsController(ctx, sqs, env) {
       { key: 'suggestionIds', setter: 'setSuggestionIds' },
       { key: 'promptsCount', setter: 'setPromptsCount' },
       { key: 'promptsLocation', setter: 'setPromptsLocation' },
+      { key: 'insightsLocation', setter: 'setInsightsLocation' },
       { key: 'startTime', setter: 'setStartTime' },
       { key: 'endTime', setter: 'setEndTime' },
       { key: 'metadata', setter: 'setMetadata' },

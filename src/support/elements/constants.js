@@ -12,6 +12,28 @@
 
 export const DEFAULT_ELEMENT_MODEL = 'search-gpt';
 
+/**
+ * Sentinel platform/model value meaning "all platforms" — no single-model filter.
+ * Mirrors the UI's `PLATFORM_CODES.All` ('all'), the same "no filter" convention the
+ * category/region dimensions already use. Elements that support it OMIT the `CBF_model`
+ * filter for this value, returning the deduped cross-model union.
+ */
+export const ALL_PLATFORMS = 'all';
+
+/**
+ * True when `value` is the {@link ALL_PLATFORMS} sentinel (case-insensitive, whitespace
+ * trimmed — matching the sibling `'all'`-sentinel helpers `SKIP_VALUES` in
+ * `llmo-brand-presence.js` and `normalizeEngineFromQuery`). Callers MUST check this
+ * BEFORE {@link resolveElementModel}, which would otherwise coerce `'all'` to
+ * {@link DEFAULT_ELEMENT_MODEL} (it is not a valid Semrush model).
+ *
+ * @param {string} [value] - Raw value from the `model` or `platform` query param.
+ * @returns {boolean}
+ */
+export function isAllPlatforms(value) {
+  return typeof value === 'string' && value.trim().toLowerCase() === ALL_PLATFORMS;
+}
+
 export const ELEMENT_MODELS = Object.freeze([
   'google-ai-mode',
   'grok-3',
