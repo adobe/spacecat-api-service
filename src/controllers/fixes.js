@@ -57,6 +57,12 @@ const IMS_ENRICH_BATCH_SIZE = 5;
 const DEFAULT_SITE_FIXES_LIMIT = 200;
 const MAX_SITE_FIXES_LIMIT = 1000;
 
+// Fix statuses that count as an already-live deployment for dedupe purposes.
+const ACTIVE_FIX_STATUSES = [
+  FixEntityModel.STATUSES.DEPLOYED,
+  FixEntityModel.STATUSES.PUBLISHED,
+];
+
 /**
  * @typedef {Object} DataAccess
  * @property {FixEntityCollection} FixEntity
@@ -401,6 +407,13 @@ export class FixesController {
     const FixEntity = this.#FixEntity;
     const fixes = await Promise.all(context.data.map(async (fixData, index) => {
       try {
+        // Dedupe (SITES-48951): for the ASO-UI "mark as deployed" path, return the
+        // existing active fix instead of creating a duplicate. See #dedupeAsoFix.
+        const dedupedResult = await this.#dedupeAsoFix(opportunityId, fixData, index, log);
+        if (dedupedResult) {
+          return dedupedResult;
+        }
+
         const enrichedFixData = await FixesController.#enrichWithDocumentPath(
           fixData,
           enrichmentCtx,
@@ -448,6 +461,67 @@ export class FixesController {
   }
 
   /**
+   * Dedupe for the ASO-UI "mark as deployed" path (SITES-48951): a duplicate
+   * fix_entity is only ever created via origin 'aso'. If a target suggestion already
+   * has an active (DEPLOYED/PUBLISHED) fix in this opportunity — e.g. a Mystique apply
+   * fix that raced it — return that existing fix as a 200 result instead of creating a
+   * duplicate. Scoped to 'aso' so the Mystique SQS worker's create_fixes (origin
+   * 'spacecat', which relies on a 201) is untouched; preserves the manual-deploy case
+   * (no active fix => create). Returns the short-circuit result object, or null to
+   * proceed with creation.
+   *
+   * @returns {Promise<{index: number, fix: object, statusCode: number}|null>}
+   */
+  async #dedupeAsoFix(opportunityId, fixData, index, log) {
+    if (
+      fixData.origin !== FixEntityModel.ORIGINS.ASO
+      || !isArray(fixData.suggestionIds)
+      || fixData.suggestionIds.length === 0
+    ) {
+      return null;
+    }
+    // Group semantics: a V2 page-group apply creates ONE fix linked to every
+    // suggestion in the group, so any member resolving to an active fix means the
+    // whole group is already covered — echoing that fix for the batch is correct,
+    // not an orphaned member. (For the same reason the UI, #2154, skips the aso
+    // create for V2-direct groups entirely.) A hypothetical non-homogeneous group
+    // (an active fix for suggestion A but not B) would leave B PATCHed to FIXED by
+    // the UI with no backing fix of its own; if a future writer can produce that,
+    // tighten this to require every suggestionId to resolve to the same fix.
+    const existingFix = await this.#findExistingActiveFix(opportunityId, fixData.suggestionIds);
+    if (!existingFix) {
+      return null;
+    }
+    log.info(`[createFixes] active fix ${existingFix.getId()} already exists for suggestion(s) ${fixData.suggestionIds.join(', ')}; skipping duplicate create`);
+    return { index, fix: FixDto.toJSON(existingFix), statusCode: 200 };
+  }
+
+  /**
+   * Finds an existing active (DEPLOYED/PUBLISHED) fix in the given opportunity linked
+   * to any of the given suggestions, or null. The `opportunityId` filter keeps a
+   * caller from probing (and having echoed back) another tenant's fix by passing a
+   * foreign `suggestionId`, and matches the intent (duplicates are within-opportunity).
+   *
+   * @param {string} opportunityId
+   * @param {string[]} suggestionIds
+   * @returns {Promise<FixEntity|null>}
+   */
+  async #findExistingActiveFix(opportunityId, suggestionIds) {
+    for (const suggestionId of suggestionIds) {
+      // eslint-disable-next-line no-await-in-loop -- short-circuits on first active fix
+      const linkedFixes = await this.#Suggestion.getFixEntitiesBySuggestionId(suggestionId);
+      const activeFix = linkedFixes.find(
+        (fix) => ACTIVE_FIX_STATUSES.includes(fix.getStatus())
+          && fix.getOpportunityId() === opportunityId,
+      );
+      if (activeFix) {
+        return activeFix;
+      }
+    }
+    return null;
+  }
+
+  /**
    * Prepares context for documentPath enrichment by pre-fetching site and opportunity.
    * Only performs lookups when at least one fix in the batch is a manual fix (origin: 'aso')
    * that doesn't already have a documentPath.
@@ -456,7 +530,8 @@ export class FixesController {
    */
   async #prepareDocumentPathEnrichment(fixDataArray, siteId, opportunityId, log) {
     const needsEnrichment = fixDataArray.some(
-      (fixData) => fixData.origin === 'aso' && !fixData.changeDetails?.documentPath,
+      (fixData) => fixData.origin === FixEntityModel.ORIGINS.ASO
+        && !fixData.changeDetails?.documentPath,
     );
     if (!needsEnrichment) {
       return null;
