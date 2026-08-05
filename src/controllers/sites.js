@@ -1835,7 +1835,16 @@ function SitesController(ctx, log, env) {
     } = context.data;
     const { pathInfo } = context;
     const X_PRODUCT_HEADER = 'x-product';
-    const productCode = pathInfo.headers[X_PRODUCT_HEADER];
+    let productCode = pathInfo.headers[X_PRODUCT_HEADER];
+    // Local-dev affordance (SKIP_AUTH only): the local UI harness may run a UI
+    // build that predates the x-product requirement on /sites-resolve and so omits
+    // the header. When auth is skipped (local only; SKIP_AUTH is never 'true' in a
+    // deployed env), default the product to ASO so the local UI ⇄ local api-service
+    // e2e can resolve a site. Prod keeps enforcing the header contract below.
+    if (!hasText(productCode) && env.SKIP_AUTH === 'true') {
+      productCode = ASO_PRODUCT_CODE;
+      log.info('[resolveSite] SKIP_AUTH local-dev: defaulting missing x-product to ASO');
+    }
     if (!hasText(productCode)) {
       return badRequest('Product code required in x-product header');
     }
