@@ -10,7 +10,7 @@ The "MCP Tool/Resource Template Builder" is a specialized system prompt, saved i
 
 Refer to the Cursor Custom Mode documentation on how to add this prompt to your Cursor: https://docs.cursor.com/chat/custom-modes
 
-## 3. How to Use the MCP Builder Mode
+## 3. How to Use the MCP Builder Mode 
 
 Once the Custom Mode is setup, select it in the "Agent" dropdown.
 
