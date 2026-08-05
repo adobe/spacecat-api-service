@@ -135,7 +135,7 @@ x-ai-vis-text-filter: &textFilterParam
   description: |
     Optional free-text filter applied server-side across the full result set (not just the
     current page), via a `dimension_filter_ql` `CONTAINS` clause on the dataset's primary
-    column (prompts→`prompt`, topics→`topic`, brands→`name`, source-domains→`domain`). When
+    column (prompts→`prompt`, topics→`topic`, brands→`brand_name`, source-domains→`domain`). When
     set, `total` reflects the filtered count. Distinct from `searchQuery` (the topic FTS query).
   schema:
     type: string
@@ -2562,6 +2562,7 @@ ai-visibility-v1-brand-brands-by-topic-fts:
     operationId: getAiVisibilityV1BrandBrandsByTopicFts
     parameters:
       - *ftsQueryParam
+      - *textFilterParam
       - *countryParam
       - *regionParam
       - *engineParam
@@ -2591,6 +2592,7 @@ ai-visibility-v1-brand-brands-by-topic-fts-totals:
     operationId: getAiVisibilityV1BrandBrandsByTopicFtsTotals
     parameters:
       - *ftsQueryParam
+      - *textFilterParam
       - *countryParam
       - *regionParam
       - *engineParam
@@ -2616,6 +2618,7 @@ ai-visibility-v1-brand-brands-by-topic-fts-export:
     operationId: getAiVisibilityV1BrandBrandsByTopicFtsExport
     parameters:
       - *ftsQueryParam
+      - *textFilterParam
       - *countryParam
       - *regionParam
       - *engineParam
