@@ -22,7 +22,7 @@ import AkamaiClient, {
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
 import {
-  buildRuleConfig, mergeIntoTree, buildRuleTreePatch, managedRuleNames, redactSecrets,
+  buildRuleConfig, mergeIntoTree, managedRuleNames, redactSecrets,
 } from './llmo-akamai-utils.js';
 
 // EdgeGrid credentials are CLIENT-SUPPLIED per request (never persisted, never logged): the caller
@@ -227,7 +227,7 @@ function LlmoAkamaiController(ctx) {
     // "-> 404" and mis-map a genuine 5xx. Take the FIRST such token, which is the real status.
     const status = Number(message.match(/-> (\d{3}):/)?.[1]);
     // Surface a version the operation may have already created before a later call threw (e.g.
-    // deploy created a new version, then patchRuleTree failed) so the caller can find/clean it up.
+    // deploy created a new version, then updateRuleTree failed) so the caller can find/clean it up.
     const extra = fields.newVersion !== undefined ? { newVersion: fields.newVersion } : {};
     if (status === 401) {
       return unauthorized('Akamai authentication failed');
@@ -504,7 +504,7 @@ function LlmoAkamaiController(ctx) {
     try {
       const version = await client.getLatestVersion(propertyId, contractId, groupId);
       const {
-        ruleTree, ruleFormat, etag,
+        ruleTree, ruleFormat,
       } = await client.getRuleTree(propertyId, version, contractId, groupId);
 
       // Enforce the CUSTOM-default scope gate and decide the caching behavior from the actual tree.
@@ -519,29 +519,32 @@ function LlmoAkamaiController(ctx) {
       if (gateError) {
         return gateError;
       }
-      // mergeIntoTree is a pure, local in-memory merge — used only to build the UI-facing preview
-      // (mergedChildRules, the redacted merged-tree JSON). It never talks to Akamai.
       const merged = mergeIntoTree(ruleTree, cfg, insertIndex);
 
-      // Validate the exact change deploy will make: dry-run the same JSON Patch deploy will apply.
-      // PAPI applies it to the STORED tree and returns errors/warnings without saving, so Review
-      // reflects the real deploy outcome. A PATCH never re-serializes a behavior we didn't touch
-      // (unlike a full-tree PUT), which avoids PAPI rejecting untouched GET-expanded behaviors
-      // elsewhere in a large property's tree. A dry-run still needs an EDITABLE version, so if
-      // `version` is activated it 403s — fall back to the base tree's warnings and flag the preview
-      // unvalidated (deploy validates for real on its own new/resumed version anyway).
-      const ops = buildRuleTreePatch(ruleTree, cfg, insertIndex);
+      // Validate the exact change deploy will make: dry-run the full-tree PUT. PAPI validates the
+      // submitted tree and returns errors/warnings without persisting. A dry-run PUT still needs an
+      // EDITABLE version, so if `version` is activated it 403s — fall back to the base tree's
+      // warnings and flag the preview unvalidated (deploy validates on its own new version anyway).
+      //
+      // A JSON-Patch-based merge (buildRuleTreePatch + client.patchRuleTree) was tried here
+      // instead of the full-tree PUT — it avoids re-serializing untouched behaviors, which is
+      // the right fix for the class of bug where PAPI rejects a GET-expanded behavior we never
+      // touched. But real testing against live Akamai showed PATCH fails outright (generic 400
+      // "cannot understand your request") on a RE-onboard (remove-then-add), while working fine
+      // on a first-time add — 100% reproducible, not intermittent. That is almost certainly why
+      // PR #2820 (which introduced the patch path) was quietly reverted 4 days later in #2850
+      // with no stated reason. Back to full-tree PUT here until that format issue is root-caused.
       let errors = [];
       let warnings = [];
       let validated = true;
       try {
-        const dryRun = await client.patchRuleTree(
+        const dryRun = await client.updateRuleTree(
           propertyId,
           version,
           contractId,
           groupId,
-          ops,
-          etag,
+          merged,
+          ruleFormat,
           { dryRun: true },
         );
         errors = dryRun?.errors || [];
@@ -588,16 +591,16 @@ function LlmoAkamaiController(ctx) {
    * POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy
    * Body: { propertyId, contractId, groupId, insertIndex?, baseVersion?, retryVersion? }
    * Creates a NEW property version from `baseVersion` (default: latest) and applies the managed
-   * rules via a server-side JSON Patch (PAPI-side validation) — a delta, so existing behaviors are
-   * never re-serialized/re-submitted. Supported only for properties whose default origin uses
-   * CUSTOM SSL verification (scope gate). Does NOT activate (a separate, explicit step). Guarded so
-   * the target property must serve the site's own domain. Idempotent by rule name (trimmed):
-   * re-running replaces prior managed rules rather than duplicating them.
+   * rules via a full-tree PUT with PAPI-side validation, pinning the base version's ruleFormat.
+   * Supported only for properties whose default origin uses CUSTOM SSL verification (scope gate).
+   * Does NOT activate (a separate, explicit step). Guarded so the target property must serve the
+   * site's own domain. Idempotent by rule name (trimmed): re-running replaces prior managed rules
+   * rather than duplicating them.
    *
    * `retryVersion`: if a PRIOR deploy attempt already created a property version but failed to
-   * write the rules into it (e.g. the PATCH itself timed out on a large property), pass that
-   * version back here to resume writing into it directly — skips `createVersion` entirely, so a
-   * customer clicking Retry repeatedly doesn't mint a fresh, permanently-empty version every time.
+   * write the rules into it (e.g. a PUT that timed out on a large property), pass that version back
+   * here to resume writing into it directly — skips `createVersion` entirely, so a customer
+   * clicking Retry repeatedly doesn't mint a fresh, permanently-empty version every time.
    */
   const deploy = async (context) => {
     const result = await getSiteAndCheckAccess(context);
@@ -663,9 +666,15 @@ function LlmoAkamaiController(ctx) {
 
       // Read the base version's tree first so we can enforce the CUSTOM-default scope gate and
       // decide caching BEFORE creating a version — a rejected onboarding then leaves no orphan
-      // version behind. The patch is built from this tree either way (it's what a fresh clone or
-      // an unwritten retryVersion currently looks like).
-      const { ruleTree } = await client.getRuleTree(propertyId, baseVersion, contractId, groupId);
+      // version behind. The new/resumed version is a clone of baseVersion, so merging the base tree
+      // and PUTting it into the target version is equivalent, and pins the base version's
+      // ruleFormat.
+      const { ruleTree, ruleFormat } = await client.getRuleTree(
+        propertyId,
+        baseVersion,
+        contractId,
+        groupId,
+      );
       const edgeDomain = context.env?.EDGE_OPTIMIZE_EDGE_DOMAIN;
       const { cfg, error: gateError } = buildCfgFromTree(
         host,
@@ -677,7 +686,7 @@ function LlmoAkamaiController(ctx) {
       if (gateError) {
         return gateError;
       }
-      const ops = buildRuleTreePatch(ruleTree, cfg, insertIndex);
+      const merged = mergeIntoTree(ruleTree, cfg, insertIndex);
 
       const retryVersion = (rawRetryVersion !== undefined && rawRetryVersion !== null && rawRetryVersion !== '')
         ? Number(rawRetryVersion)
@@ -685,22 +694,17 @@ function LlmoAkamaiController(ctx) {
       newVersion = retryVersion
         ?? await client.createVersion(propertyId, baseVersion, contractId, groupId);
 
-      // Always read the TARGET version's own etag right before patching it — it's distinct from
-      // baseVersion's even though the content is currently identical (a fresh clone, or a
-      // retryVersion whose write never went through), and patchRuleTree sends it as If-Match so a
-      // concurrent edit fails the PATCH cleanly instead of silently clobbering.
-      const { etag } = await client.getRuleTree(propertyId, newVersion, contractId, groupId);
-      const patchResult = await client.patchRuleTree(
+      const putResult = await client.updateRuleTree(
         propertyId,
         newVersion,
         contractId,
         groupId,
-        ops,
-        etag,
+        merged,
+        ruleFormat,
       );
 
-      const papiErrors = patchResult?.errors || [];
-      const warnings = patchResult?.warnings || [];
+      const papiErrors = putResult?.errors || [];
+      const warnings = putResult?.warnings || [];
       if (papiErrors.length > 0) {
         log.error(auditLine(context, 'deploy', 'papi-rejected', {
           siteId,
