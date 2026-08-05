@@ -243,23 +243,6 @@ function buildTagsOf(item) {
 }
 
 /**
- * DEPRECATED — `{ tagName → semrushTagId }`, kept only so existing consumers
- * keep working while they migrate to {@link buildTagsOf}'s `tags` list. Being
- * name-keyed, it CANNOT represent a prompt carrying two same-named tags from
- * different dimensions: the later one overwrites the earlier, and which survives
- * depends on upstream ordering. Remove once every consumer reads `tags`.
- *
- * @param {any} item - the upstream prompt item.
- * @returns {Record<string, string>}
- */
-function buildTagMapOf(item) {
-  return buildTagsOf(item).reduce((acc, t) => {
-    acc[t.name] = t.id;
-    return acc;
-  }, /** @type {Record<string, string>} */({}));
-}
-
-/**
  * @param {number} geoTargetId
  * @param {string} languageCode
  * @param {any} item - the upstream prompt item.
@@ -280,7 +263,6 @@ export function buildPromptDto(geoTargetId, languageCode, item) {
     languageCode,
     text,
     tags: buildTagsOf(item),
-    tagMap: buildTagMapOf(item),
     createdAt: metadata?.created_at ?? null,
     createdBy: metadata?.created_by ?? null,
     updatedAt: metadata?.updated_at ?? null,
