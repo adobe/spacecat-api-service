@@ -1,3 +1,10 @@
+# [1.720.0](https://github.com/adobe/spacecat-api-service/compare/v1.719.1...v1.720.0) (2026-08-05)
+
+
+### Features
+
+* **serenity:** surface per-market promptsCount + modelsCount on the markets listing ([#2998](https://github.com/adobe/spacecat-api-service/issues/2998)) ([0f40cb2](https://github.com/adobe/spacecat-api-service/commit/0f40cb28fcc31a6420a5077002f6609bcc624e38)), closes [adobe/project-elmo-ui#2723](https://github.com/adobe/project-elmo-ui/issues/2723)
+
 ## [1.719.1](https://github.com/adobe/spacecat-api-service/compare/v1.719.0...v1.719.1) (2026-08-05)
 
 
