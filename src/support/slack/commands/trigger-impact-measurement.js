@@ -15,19 +15,17 @@ import { isValidUUID } from '@adobe/spacecat-shared-utils';
 
 import BaseCommand from './base.js';
 import { postErrorMessage } from '../../../utils/slack/base.js';
+import { triggerGeoExperimentImpactMeasurement } from '../../utils.js';
 
 const PHRASES = ['trigger impact measurement'];
 
 const { STATUSES, PHASES, METADATA_KEYS } = GeoExperiment;
 
-// Metadata key counting consecutive Mystique 429s for the impact-measurement submit. Must stay in
-// sync with IMPACT_MEASUREMENT_RETRY_COUNT_KEY in llmo-experimentation-engine/src/constants.js —
-// it isn't promoted to GeoExperiment.METADATA_KEYS because it's an engine-internal retry counter,
-// not part of the shared model contract.
-const IMPACT_MEASUREMENT_RETRY_COUNT_KEY = 'impact_measurement_retry_count';
-
 // Phases at which the experiment has reached (or passed) post-analysis, i.e. there is DRS
-// post-analysis data for Mystique to measure. Earlier phases have nothing to measure yet.
+// post-analysis data for Mystique to measure. Earlier phases have nothing to measure yet. This
+// mirrors llmo-experimentation-engine's own eligibility check (which is authoritative — the
+// engine re-validates on receipt) — checked here only so the Slack reply is immediate and
+// accurate instead of "sent, wait and see".
 // See llmo-experimentation-engine/docs/decisions/004-manual-impact-measurement-retrigger.md.
 const MEASUREMENT_ELIGIBLE_PHASES = [
   PHASES.POST_ANALYSIS_DONE,
@@ -57,9 +55,9 @@ function TriggerImpactMeasurementCommand(context) {
   const { GeoExperiment: GeoExperimentCollection } = dataAccess;
 
   /**
-   * Validates input, loads the GeoExperiment, and — if eligible — resets it back to
-   * phase POST_ANALYSIS_DONE / status IN_PROGRESS so the experimentation engine's next cron
-   * tick resubmits the impact-measurement task via its normal handlePostAnalysisCompleted path.
+   * Validates input, loads the GeoExperiment for an immediate eligibility read, and — if
+   * eligible — sends a TRIGGER_IMPACT_MEASUREMENT message to the llmo-experimentation-engine-queue
+   * so the engine re-arms and resubmits it via its normal handlePostAnalysisCompleted path.
    *
    * @param {string[]} args - The arguments provided to the command ([geoExperimentId]).
    * @param {Object} slackContext - The Slack context object.
@@ -102,32 +100,13 @@ function TriggerImpactMeasurementCommand(context) {
         return;
       }
 
-      // Re-arm terminal/already-measured experiments: strip the prior measurement handle and
-      // retry count so the resubmitted task doesn't inherit stale state, then hand back to
-      // POST_ANALYSIS_DONE / IN_PROGRESS — the exact state the engine reaches organically via
-      // handlePostAnalysisSubmitted — so the next cron tick resubmits via the normal path.
-      const alreadyArmed = phase === PHASES.POST_ANALYSIS_DONE && status === STATUSES.IN_PROGRESS;
-      if (!alreadyArmed) {
-        const restMetadata = { ...(geoExperiment.getMetadata() || {}) };
-        delete restMetadata[METADATA_KEYS.IMPACT_MEASUREMENT_TASK_ID];
-        delete restMetadata[IMPACT_MEASUREMENT_RETRY_COUNT_KEY];
+      await triggerGeoExperimentImpactMeasurement(geoExperimentId, slackContext, context);
 
-        geoExperiment.setStatus(STATUSES.IN_PROGRESS);
-        geoExperiment.setPhase(PHASES.POST_ANALYSIS_DONE);
-        geoExperiment.setError(null);
-        geoExperiment.setEndTime(null);
-        geoExperiment.setInsightsLocation(null);
-        geoExperiment.setMetadata(restMetadata);
-        geoExperiment.setUpdatedBy(`slack:${slackContext.userId || 'trigger-impact-measurement'}`);
-        await geoExperiment.save();
-
-        log.info(`[geo-experiment] Manually re-armed GeoExperiment ${geoExperimentId} for impact`
-          + ` measurement (previousPhase: ${phase}, previousStatus: ${status})`);
-      }
+      log.info('[geo-experiment] Sent manual impact-measurement trigger for GeoExperiment'
+        + ` ${geoExperimentId} (phase: ${phase}, status: ${status})`);
 
       await say(':white_check_mark: Triggered impact measurement for GeoExperiment'
-        + ` \`${geoExperimentId}\`. The experimentation engine will submit it on its next`
-        + ' processing cycle.');
+        + ` \`${geoExperimentId}\`. The experimentation engine will process it shortly.`);
     } catch (error) {
       log.error(error);
       await postErrorMessage(say, error);

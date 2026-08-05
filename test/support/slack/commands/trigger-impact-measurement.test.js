@@ -27,28 +27,11 @@ function createMockGeoExperiment({
   status = STATUSES.IN_PROGRESS,
   metadata = {},
 } = {}) {
-  let currentPhase = phase;
-  let currentStatus = status;
-  let currentMetadata = metadata;
-  let currentError;
-  let currentEndTime;
-  let currentInsightsLocation;
   return {
     getId: () => GEO_EXPERIMENT_ID,
-    getPhase: () => currentPhase,
-    getStatus: () => currentStatus,
-    getMetadata: () => currentMetadata,
-    getError: () => currentError,
-    getEndTime: () => currentEndTime,
-    getInsightsLocation: () => currentInsightsLocation,
-    setPhase: (v) => { currentPhase = v; },
-    setStatus: (v) => { currentStatus = v; },
-    setMetadata: (v) => { currentMetadata = v; },
-    setError: (v) => { currentError = v; },
-    setEndTime: (v) => { currentEndTime = v; },
-    setInsightsLocation: (v) => { currentInsightsLocation = v; },
-    setUpdatedBy: sinon.stub(),
-    save: sinon.stub().resolves(),
+    getPhase: () => phase,
+    getStatus: () => status,
+    getMetadata: () => metadata,
   };
 }
 
@@ -56,9 +39,11 @@ describe('TriggerImpactMeasurementCommand', () => {
   let context;
   let slackContext;
   let findByIdStub;
+  let sendMessageStub;
 
   beforeEach(() => {
     findByIdStub = sinon.stub();
+    sendMessageStub = sinon.stub().resolves();
     context = {
       dataAccess: {
         GeoExperiment: { findById: findByIdStub },
@@ -68,6 +53,8 @@ describe('TriggerImpactMeasurementCommand', () => {
         error: sinon.spy(),
         warn: sinon.spy(),
       },
+      sqs: { sendMessage: sendMessageStub },
+      env: { LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'testQueueUrl' },
     };
     slackContext = { say: sinon.spy(), userId: 'U123' };
   });
@@ -81,6 +68,7 @@ describe('TriggerImpactMeasurementCommand', () => {
 
     expect(slackContext.say).to.have.been.calledWithMatch('Usage:');
     expect(findByIdStub).to.not.have.been.called;
+    expect(sendMessageStub).to.not.have.been.called;
   });
 
   it('replies with usage when the id is not a valid UUID', async () => {
@@ -89,7 +77,7 @@ describe('TriggerImpactMeasurementCommand', () => {
     await command.handleExecution(['not-a-uuid'], slackContext);
 
     expect(slackContext.say).to.have.been.calledWithMatch('Usage:');
-    expect(findByIdStub).to.not.have.been.called;
+    expect(sendMessageStub).to.not.have.been.called;
   });
 
   it('replies not found when the experiment does not exist', async () => {
@@ -99,6 +87,7 @@ describe('TriggerImpactMeasurementCommand', () => {
     await command.handleExecution([GEO_EXPERIMENT_ID], slackContext);
 
     expect(slackContext.say).to.have.been.calledWithMatch('not found');
+    expect(sendMessageStub).to.not.have.been.called;
   });
 
   it('refuses to trigger when the experiment has not reached post-analysis', async () => {
@@ -112,7 +101,7 @@ describe('TriggerImpactMeasurementCommand', () => {
     await command.handleExecution([GEO_EXPERIMENT_ID], slackContext);
 
     expect(slackContext.say).to.have.been.calledWithMatch('has not');
-    expect(geo.save).to.not.have.been.called;
+    expect(sendMessageStub).to.not.have.been.called;
   });
 
   it('refuses to resubmit while a measurement task is already in flight', async () => {
@@ -127,7 +116,7 @@ describe('TriggerImpactMeasurementCommand', () => {
     await command.handleExecution([GEO_EXPERIMENT_ID], slackContext);
 
     expect(slackContext.say).to.have.been.calledWithMatch('task-123');
-    expect(geo.save).to.not.have.been.called;
+    expect(sendMessageStub).to.not.have.been.called;
   });
 
   it('falls back to "unknown" when an in-flight experiment has no recorded task ID', async () => {
@@ -142,10 +131,10 @@ describe('TriggerImpactMeasurementCommand', () => {
     await command.handleExecution([GEO_EXPERIMENT_ID], slackContext);
 
     expect(slackContext.say).to.have.been.calledWithMatch('unknown');
-    expect(geo.save).to.not.have.been.called;
+    expect(sendMessageStub).to.not.have.been.called;
   });
 
-  it('does not touch an experiment that is already armed (POST_ANALYSIS_DONE / IN_PROGRESS)', async () => {
+  it('sends a TRIGGER_IMPACT_MEASUREMENT message for an experiment ready for measurement', async () => {
     const geo = createMockGeoExperiment({
       phase: PHASES.POST_ANALYSIS_DONE,
       status: STATUSES.IN_PROGRESS,
@@ -155,36 +144,30 @@ describe('TriggerImpactMeasurementCommand', () => {
 
     await command.handleExecution([GEO_EXPERIMENT_ID], slackContext);
 
-    expect(geo.save).to.not.have.been.called;
+    expect(sendMessageStub).to.have.been.calledOnceWithExactly('testQueueUrl', {
+      type: 'TRIGGER_IMPACT_MEASUREMENT',
+      geoExperimentId: GEO_EXPERIMENT_ID,
+      triggeredBy: 'slack:U123',
+    });
     expect(slackContext.say).to.have.been.calledWithMatch('Triggered impact measurement');
   });
 
-  it('re-arms a failed in-flight experiment, clearing stale measurement state', async () => {
+  it('sends the message to re-arm a failed in-flight experiment', async () => {
     const geo = createMockGeoExperiment({
       phase: PHASES.IMPACT_MEASUREMENT_STARTED,
       status: STATUSES.FAILED,
-      metadata: {
-        [METADATA_KEYS.IMPACT_MEASUREMENT_TASK_ID]: 'old-task',
-        impact_measurement_retry_count: 6,
-        scheduleConfig: { pre: {}, post: {} },
-      },
+      metadata: { [METADATA_KEYS.IMPACT_MEASUREMENT_TASK_ID]: 'old-task' },
     });
     findByIdStub.resolves(geo);
     const command = TriggerImpactMeasurementCommand(context);
 
     await command.handleExecution([GEO_EXPERIMENT_ID], slackContext);
 
-    expect(geo.getPhase()).to.equal(PHASES.POST_ANALYSIS_DONE);
-    expect(geo.getStatus()).to.equal(STATUSES.IN_PROGRESS);
-    expect(geo.getMetadata()).to.deep.equal({ scheduleConfig: { pre: {}, post: {} } });
-    expect(geo.getError()).to.be.null;
-    expect(geo.getEndTime()).to.be.null;
-    expect(geo.getInsightsLocation()).to.be.null;
-    expect(geo.save).to.have.been.calledOnce;
+    expect(sendMessageStub).to.have.been.calledOnce;
     expect(slackContext.say).to.have.been.calledWithMatch('Triggered impact measurement');
   });
 
-  it('re-arms a completed experiment for re-measurement', async () => {
+  it('sends the message to re-arm a completed experiment for re-measurement', async () => {
     const geo = createMockGeoExperiment({
       phase: PHASES.IMPACT_MEASUREMENT_DONE,
       status: STATUSES.COMPLETED,
@@ -195,16 +178,13 @@ describe('TriggerImpactMeasurementCommand', () => {
 
     await command.handleExecution([GEO_EXPERIMENT_ID], slackContext);
 
-    expect(geo.getPhase()).to.equal(PHASES.POST_ANALYSIS_DONE);
-    expect(geo.getStatus()).to.equal(STATUSES.IN_PROGRESS);
-    expect(geo.getMetadata()).to.deep.equal({});
-    expect(geo.save).to.have.been.calledOnce;
+    expect(sendMessageStub).to.have.been.calledOnce;
   });
 
-  it('falls back to a generic updatedBy label when the slack context has no userId', async () => {
+  it('defaults triggeredBy to "slack" when the slack context has no userId', async () => {
     const geo = createMockGeoExperiment({
-      phase: PHASES.IMPACT_MEASUREMENT_DONE,
-      status: STATUSES.COMPLETED,
+      phase: PHASES.POST_ANALYSIS_DONE,
+      status: STATUSES.IN_PROGRESS,
     });
     findByIdStub.resolves(geo);
     const command = TriggerImpactMeasurementCommand(context);
@@ -212,7 +192,11 @@ describe('TriggerImpactMeasurementCommand', () => {
 
     await command.handleExecution([GEO_EXPERIMENT_ID], anonymousSlackContext);
 
-    expect(geo.setUpdatedBy).to.have.been.calledWith('slack:trigger-impact-measurement');
+    expect(sendMessageStub).to.have.been.calledOnceWithExactly('testQueueUrl', {
+      type: 'TRIGGER_IMPACT_MEASUREMENT',
+      geoExperimentId: GEO_EXPERIMENT_ID,
+      triggeredBy: 'slack',
+    });
   });
 
   it('posts an error message when an unexpected error is thrown', async () => {

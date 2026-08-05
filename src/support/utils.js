@@ -384,6 +384,27 @@ export const triggerA11yCodefixForOpportunity = async (
   { opportunityId, opportunityType, aggregationKey },
 );
 
+/**
+ * Sends a message to the llmo-experimentation-engine-queue to manually (re-)trigger Mystique
+ * impact measurement for a GeoExperiment (see adobe/spacecat-infrastructure#655 for the queue,
+ * llmo-experimentation-engine's docs/decisions/004-manual-impact-measurement-retrigger.md for the
+ * handler contract). The engine re-validates eligibility itself before resubmitting.
+ *
+ * @param {string} geoExperimentId - The GeoExperiment ID to trigger measurement for.
+ * @param {Object} slackContext - The Slack context object.
+ * @param {Object} lambdaContext - The Lambda context object.
+ * @return {Promise} - A promise representing the SQS send operation.
+ */
+export const triggerGeoExperimentImpactMeasurement = async (
+  geoExperimentId,
+  slackContext,
+  lambdaContext,
+) => lambdaContext.sqs.sendMessage(lambdaContext.env.LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL, {
+  type: 'TRIGGER_IMPACT_MEASUREMENT',
+  geoExperimentId,
+  triggeredBy: slackContext.userId ? `slack:${slackContext.userId}` : 'slack',
+});
+
 // todo: prototype - untested
 /* c8 ignore start */
 export const triggerExperimentationCandidates = async (
