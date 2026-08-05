@@ -1,3 +1,45 @@
+# [1.721.0](https://github.com/adobe/spacecat-api-service/compare/v1.720.0...v1.721.0) (2026-08-05)
+
+
+### Features
+
+* **sites:** default missing x-product to ASO on /sites-resolve under SKIP_AUTH ([#2964](https://github.com/adobe/spacecat-api-service/issues/2964)) ([3d65f6d](https://github.com/adobe/spacecat-api-service/commit/3d65f6d7c07a00f1e8f35614df558ef1284cabd9)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+# [1.720.0](https://github.com/adobe/spacecat-api-service/compare/v1.719.1...v1.720.0) (2026-08-05)
+
+
+### Features
+
+* **serenity:** surface per-market promptsCount + modelsCount on the markets listing ([#2998](https://github.com/adobe/spacecat-api-service/issues/2998)) ([0f40cb2](https://github.com/adobe/spacecat-api-service/commit/0f40cb28fcc31a6420a5077002f6609bcc624e38)), closes [adobe/project-elmo-ui#2723](https://github.com/adobe/project-elmo-ui/issues/2723)
+
+## [1.719.1](https://github.com/adobe/spacecat-api-service/compare/v1.719.0...v1.719.1) (2026-08-05)
+
+
+### Bug Fixes
+
+* **opportunities:** revoke stale suggestion grants on resolve (SITES-49175) ([#2992](https://github.com/adobe/spacecat-api-service/issues/2992)) ([1e0ff7f](https://github.com/adobe/spacecat-api-service/commit/1e0ff7fc379b3bd52dd9ce26da480df5b8612e01))
+
+# [1.719.0](https://github.com/adobe/spacecat-api-service/compare/v1.718.0...v1.719.0) (2026-08-04)
+
+
+### Features
+
+* **onboard-status:** show scraping stats and data-source status on demand ([#2974](https://github.com/adobe/spacecat-api-service/issues/2974)) ([3d7bf6f](https://github.com/adobe/spacecat-api-service/commit/3d7bf6fc735ef5100dff7cc1fc23e5a95d048adf)), closes [spacecat-task-processor#340](https://github.com/spacecat-task-processor/issues/340)
+
+# [1.718.0](https://github.com/adobe/spacecat-api-service/compare/v1.717.0...v1.718.0) (2026-08-04)
+
+
+### Features
+
+* **serenity:** reliable Semrush workspace access-check endpoint (LLMO-6747) ([#2994](https://github.com/adobe/spacecat-api-service/issues/2994)) ([6275a20](https://github.com/adobe/spacecat-api-service/commit/6275a20217ce9917633fdb545c8c820b626bdddb))
+
+# [1.717.0](https://github.com/adobe/spacecat-api-service/compare/v1.716.3...v1.717.0) (2026-08-04)
+
+
+### Features
+
+* retire legacy un-paginated GET /sites response ([#2993](https://github.com/adobe/spacecat-api-service/issues/2993)) ([483ec75](https://github.com/adobe/spacecat-api-service/commit/483ec757fc94b518395e1006efedc38527bf4317)), closes [#2591](https://github.com/adobe/spacecat-api-service/issues/2591) [#2591](https://github.com/adobe/spacecat-api-service/issues/2591) [#2591](https://github.com/adobe/spacecat-api-service/issues/2591)
+
 ## [1.716.3](https://github.com/adobe/spacecat-api-service/compare/v1.716.2...v1.716.3) (2026-08-04)
 
 
