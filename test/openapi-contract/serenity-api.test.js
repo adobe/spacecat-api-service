@@ -21,6 +21,9 @@ import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 
 import { loadBundledSpec, operationsForTag } from './_lib/openapi-loader.js';
+// Real class (not a mock) so the elements esmock block can pass it through without
+// adding a second class to this file (max-classes-per-file).
+import { SerenityTransportError } from '../../src/support/serenity/rest-transport.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -351,6 +354,16 @@ const FIXTURES = {
       tags: [],
     },
   },
+  // Also served by ElementsController (see note above) — the reliable Semrush-workspace
+  // access check (LLMO-6747). Unlike the other elements fixtures it does NOT call the
+  // elements service: checkAccess probes the Serenity User Manager transport
+  // (getWorkspaceResources, mocked in the elements esmock block). A resolved probe →
+  // the handler returns { hasAccess: true }.
+  getSerenityBrandPresenceAccess: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'checkAccess',
+  },
   // Also served by ElementsController (see note above) — the Market Tracking
   // Trends endpoint backed by the two Semrush trend elements.
   listSerenityMarketTrackingTrends: {
@@ -566,6 +579,31 @@ const FIXTURES = {
       prompts: [],
     },
   },
+  // Served by ElementsController (listUrlPrompts). getUrlPrompts resolves a FLAT
+  // array of per-prompt rows; the controller wraps it into { prompts }. url +
+  // startDate + endDate are required (400 otherwise), so the fixture supplies them.
+  getSerenityUrlInspectorUrlPrompts: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'listUrlPrompts',
+    serviceMethod: 'getUrlPrompts',
+    query: {
+      url: 'https://www.lovesac.com/sactionals',
+      startDate: '2026-06-29',
+      endDate: '2026-07-26',
+    },
+    handlerResult: [{
+      prompt: 'What size Lovesac sectional is best for a studio apartment?',
+      category: '',
+      region: '',
+      topics: '',
+      citations: 0,
+      sourceTitle: 'Modular Sectional Couches | Lovesac Sactionals',
+      brandMentioned: 'mentioned',
+      brands: ['Lovesac'],
+      closestDate: '2026-07-26T00:00:00Z',
+    }],
+  },
 };
 
 function makeAjv() {
@@ -640,6 +678,16 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
                 // fixture above).
                 getOwnedUrlProjects: sinon.stub().resolves([{ region: 'US', projectId: 'proj-1' }]),
               }),
+            },
+            // checkAccess (getSerenityBrandPresenceAccess) probes the User Manager
+            // resource-allowance endpoint via this transport, NOT the elements service.
+            // A resolved probe makes the handler return { hasAccess: true }; inert for
+            // every other elements fixture (none call it).
+            '../../src/support/serenity/rest-transport.js': {
+              createSerenityTransport: () => ({
+                getWorkspaceResources: sinon.stub().resolves({}),
+              }),
+              SerenityTransportError,
             },
           },
         )).default;

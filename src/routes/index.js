@@ -254,6 +254,9 @@ export default function getRouteHandlers(
     // eslint-disable-next-line max-len
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/filter-dimensions': elementsController.listUrlInspectorFilterDimensions,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks': elementsController.listWeeks,
+    // Reliable Semrush access check for the "access needed" banner (LLMO-6747): probes the User
+    // Manager resource-allowance endpoint and returns { hasAccess }, replacing the weeks probe.
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/access': elementsController.checkAccess,
     // Brand-scoped: prompts/projects live in the brand's sub-workspace, not the org workspace.
     // eslint-disable-next-line max-len
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': elementsController.listPrompts,
@@ -267,6 +270,7 @@ export default function getRouteHandlers(
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics/:topicId/prompts': elementsController.listTopicPrompts,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls': elementsController.listOwnedUrls,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/domain-urls': elementsController.listDomainUrls,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/url-prompts': elementsController.listUrlPrompts,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/market-tracking-trends': elementsController.getMarketTrackingTrends,
     // eslint-disable-next-line max-len
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/stats': elementsController.getStats,
@@ -503,6 +507,11 @@ export default function getRouteHandlers(
     'GET /state/access-mappings': stateAccessMappingsController.listMappings,
     'GET /state/access-mappings/history': stateAccessMappingsController.listHistory,
     'POST /state/access-mappings': stateAccessMappingsController.createMapping,
+    // Admin-only backend provisioning: the entire binding (imsOrgId, product,
+    // subject, resource, capabilities) comes from the body — nothing from
+    // authInfo. Gated by isAdmin() in the controller; see INTERNAL_ROUTES in
+    // facs-capabilities.js (bypasses facsWrapper).
+    'POST /state/access-mappings/admin': stateAccessMappingsController.adminCreateMapping,
     'PATCH /state/access-mappings/:id': stateAccessMappingsController.patchMapping,
     'DELETE /state/access-mappings/:id': stateAccessMappingsController.deleteMapping,
     'GET /product/capabilities': stateAccessMappingsController.getProductCapabilities,
