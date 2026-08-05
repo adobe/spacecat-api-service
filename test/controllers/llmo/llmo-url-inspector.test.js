@@ -1724,6 +1724,89 @@ describe('URL Inspector Handlers', () => {
       expect(response.status).to.equal(400);
     });
 
+    it('returns badRequest for invalid platform value', async () => {
+      const { context } = createContext(
+        {},
+        { url: 'https://example.com/a', platform: 'invalid-model-name' },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      expect(response.status).to.equal(400);
+    });
+
+    it('falls back to Mysticat when resolveBrandUuid finds no matching brand', async () => {
+      resolveBrandUuidStub.resolves(null);
+      const urlId = '66666666-6666-6666-6666-666666666666';
+      const { context, rpcStub } = createContext(
+        { brandId: BRAND_UUID },
+        { url: 'https://example.com/a', urlId },
+        { rpcResults: { rpc_url_inspector_url_prompts: { data: [], error: null } } },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      expect(resolveBrandWorkspaceStub).to.not.have.been.called;
+      expect(rpcStub).to.have.been.calledWith('rpc_url_inspector_url_prompts', sinon.match({ p_url_id: urlId }));
+    });
+
+    it('single-hop by-url RPC handles null data from RPC gracefully', async () => {
+      resolveBrandWorkspaceStub.resolves({ mode: 'flat', workspaceId: null, parentWorkspaceId: null });
+      const { context } = createContext(
+        { brandId: BRAND_UUID },
+        { url: 'https://example.com/a' },
+        {
+          rpcResults: {
+            rpc_url_inspector_prompts_by_url: { data: null, error: null },
+          },
+        },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body).to.deep.equal({ prompts: [] });
+    });
+
+    it('single-hop by-url RPC handles null row fields', async () => {
+      resolveBrandWorkspaceStub.resolves({ mode: 'flat', workspaceId: null, parentWorkspaceId: null });
+      const rpcData = [{
+        prompt: null, category: null, region: null, topics: null, citations: null,
+      }];
+      const { context } = createContext(
+        { brandId: BRAND_UUID },
+        { url: 'https://example.com/a' },
+        {
+          rpcResults: {
+            rpc_url_inspector_prompts_by_url: { data: rpcData, error: null },
+          },
+        },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.prompts[0].prompt).to.equal('');
+      expect(body.prompts[0].category).to.equal('');
+      expect(body.prompts[0].region).to.equal('');
+      expect(body.prompts[0].topics).to.equal('');
+      expect(body.prompts[0].citations).to.equal(0);
+    });
+
+    it('returns internalServerError when the Semrush service throws a non-Error value', async () => {
+      // eslint-disable-next-line prefer-promise-reject-errors -- covers e?.message||e fallback
+      getUrlPromptsStub.callsFake(() => Promise.reject('semrush boom'));
+      const { context } = createContext(
+        { brandId: BRAND_UUID },
+        { url: 'https://example.com/a' },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      expect(response.status).to.equal(500);
+    });
+
     it('returns forbidden when site does not belong to org', async () => {
       const { context, limitStub } = createContext({}, { url: 'https://example.com/a' });
       limitStub.resolves({ data: [], error: null });
