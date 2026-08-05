@@ -74,6 +74,21 @@ export function langOf(project) {
   return hasText(lang) ? String(lang).toLowerCase() : null;
 }
 
+/**
+ * The project's configured prompt count (`settings.ai.prompts_count`), or null
+ * when upstream reports no usable count. Accepts a non-negative integer or its
+ * decimal-string echo ONLY — a `typeof` gate first, so falsy non-null shapes
+ * (`''`, `false`, `[]`) can never coerce to a fabricated 0.
+ */
+export function promptsCountOf(project) {
+  const raw = project?.settings?.ai?.prompts_count;
+  if (typeof raw !== 'number' && (typeof raw !== 'string' || !/^\d+$/.test(raw))) {
+    return null;
+  }
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 ? n : null;
+}
+
 // Deterministic ordering key for the duplicate-slice "oldest wins" rule. The
 // key is built from the IMMUTABLE `created_at` plus the (immutable) project id
 // ONLY — it deliberately does NOT fall back to `updated_at`. The v1 list view
@@ -95,8 +110,14 @@ function orderKey(project) {
  * elmo client binds, plus the additive `status`/`semrushProjectId` fields.
  * `createdAt`/`updatedAt` come from the project's own timestamps (also the key
  * used by the duplicate-race oldest-wins read, design §7).
+ * `promptsCount` is the project's configured prompt count
+ * (`settings.ai.prompts_count`), draft-faithful on this v1 read view (draft and
+ * live converge at rest because every ABV prompt write publishes); surfaced for
+ * the UI's cross-market usage summary and omitted when upstream reports no
+ * usable count.
  */
 export function projectToSlice(project, brandId) {
+  const promptsCount = promptsCountOf(project);
   return {
     brandId,
     geoTargetId: geoOf(project),
@@ -111,6 +132,9 @@ export function projectToSlice(project, brandId) {
     // overview can show it. Echoed at the project's top level on the v1 read
     // view (the same field brand-urls re-sync reads back). Null when absent.
     domain: hasText(project?.domain) ? String(project.domain) : null,
+    // Omitted (not null) when absent/invalid — flat mode never carries the key,
+    // so subworkspace mode matches that contract for the no-count case.
+    ...(promptsCount === null ? {} : { promptsCount }),
   };
 }
 

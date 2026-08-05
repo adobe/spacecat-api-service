@@ -33,7 +33,7 @@ const WS = 'subworkspace-ws-1';
 function project({
   id = 'p1', location = 2276, language = 'de', country = null, publishStatus = 'live',
   createdAt = '2026-06-01T00:00:00Z', updatedAt = '2026-06-02T00:00:00Z',
-  domain = 'example.com',
+  domain = 'example.com', promptsCount = undefined,
 } = {}) {
   // Mirrors the live v1 list item shape: nested location/language objects,
   // updated_at present, created_at usually absent (passed here for mapping
@@ -41,6 +41,7 @@ function project({
   // the Semrush-UI shape where settings.ai.location.id is null but a country is
   // set (settings.ai.country.code); omitted by default. `domain` is the project's
   // top-level primary host (null to mirror a project that carries none).
+  // `promptsCount` feeds settings.ai.prompts_count; absent by default.
   return {
     id,
     publish_status: publishStatus,
@@ -52,6 +53,7 @@ function project({
         location: location === null ? null : { id: location, name: 'X' },
         language: language === null ? null : { id: 'lang-uuid', name: language },
         ...(country === null ? {} : { country: { code: country, name: 'X' } }),
+        ...(promptsCount === undefined ? {} : { prompts_count: promptsCount }),
       },
     },
   };
@@ -91,6 +93,29 @@ describe('subworkspace-projects', () => {
     it('surfaces the project domain, and nulls it when the project carries none', () => {
       expect(projectToSlice(project({ domain: 'acme.com' }), BRAND).domain).to.equal('acme.com');
       expect(projectToSlice(project({ domain: null }), BRAND).domain).to.equal(null);
+    });
+    it('surfaces promptsCount from settings.ai.prompts_count (0 included)', () => {
+      expect(projectToSlice(project({ promptsCount: 24 }), BRAND).promptsCount).to.equal(24);
+      expect(projectToSlice(project({ promptsCount: 0 }), BRAND).promptsCount).to.equal(0);
+      // Number() coercion accepts a numeric string — pinned deliberately.
+      expect(projectToSlice(project({ promptsCount: '24' }), BRAND).promptsCount).to.equal(24);
+    });
+    it('omits promptsCount (key absent, matching flat mode) for missing/invalid counts', () => {
+      expect(projectToSlice(project(), BRAND)).to.not.have.property('promptsCount');
+      expect(projectToSlice(project({ promptsCount: null }), BRAND)).to.not.have.property('promptsCount');
+      expect(projectToSlice(project({ promptsCount: 'abc' }), BRAND)).to.not.have.property('promptsCount');
+      expect(projectToSlice(project({ promptsCount: -1 }), BRAND)).to.not.have.property('promptsCount');
+      expect(projectToSlice(project({ promptsCount: 1.5 }), BRAND)).to.not.have.property('promptsCount');
+    });
+    it('never fabricates a 0 from falsy non-null shapes (typeof gate before coercion)', () => {
+      // Number('') / Number(false) / Number([]) are all 0 — each would report a
+      // fabricated "0 prompts" if the guard coerced before type-checking.
+      expect(projectToSlice(project({ promptsCount: '' }), BRAND)).to.not.have.property('promptsCount');
+      expect(projectToSlice(project({ promptsCount: '  ' }), BRAND)).to.not.have.property('promptsCount');
+      expect(projectToSlice(project({ promptsCount: false }), BRAND)).to.not.have.property('promptsCount');
+      expect(projectToSlice(project({ promptsCount: true }), BRAND)).to.not.have.property('promptsCount');
+      expect(projectToSlice(project({ promptsCount: [] }), BRAND)).to.not.have.property('promptsCount');
+      expect(projectToSlice(project({ promptsCount: ['5'] }), BRAND)).to.not.have.property('promptsCount');
     });
     it('lowercases the language and nulls an invalid geo', () => {
       const s = projectToSlice(project({ location: 'x', language: 'EN' }), BRAND);

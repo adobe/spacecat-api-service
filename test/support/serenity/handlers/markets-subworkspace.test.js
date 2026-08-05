@@ -63,13 +63,20 @@ const log = { info: () => {}, error: () => {}, warn: () => {} };
 
 function proj({
   id = 'p1', geo = 2840, lang = 'en', status = 'live', domain = undefined,
+  promptsCount = undefined,
 } = {}) {
   return {
     id,
     publish_status: status,
     updated_at: '2026-06-02T00:00:00Z',
     ...(domain === undefined ? {} : { domain }),
-    settings: { ai: { location: { id: geo }, language: { name: lang } } },
+    settings: {
+      ai: {
+        location: { id: geo },
+        language: { name: lang },
+        ...(promptsCount === undefined ? {} : { prompts_count: promptsCount }),
+      },
+    },
   };
 }
 
@@ -147,6 +154,17 @@ describe('markets-subworkspace handlers', () => {
       expect(result.items).to.deep.equal([]);
     });
 
+    it('passes promptsCount through when the project carries one, omits it otherwise', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({
+          items: [proj({ promptsCount: 24 }), proj({ id: 'p2', geo: 2276, lang: 'de' })],
+        }),
+      });
+      const result = await handleListMarketsSubworkspace(transport, BRAND, WS);
+      expect(result.items[0].promptsCount).to.equal(24);
+      expect(result.items[1]).to.not.have.property('promptsCount');
+    });
+
     it('leaves siteId null when no dataAccess is supplied (best-effort)', async () => {
       const transport = makeTransport({ listProjects: sinon.stub().resolves({ items: [proj()] }) });
       const result = await handleListMarketsSubworkspace(transport, BRAND, WS);
@@ -216,6 +234,17 @@ describe('markets-subworkspace handlers', () => {
       });
       const result = await handleGetMarketSubworkspace(transport, BRAND, WS, 2840, 'en', log);
       expect(result.initialized).to.equal(null);
+    });
+
+    it('carries promptsCount on the detail shape too (slice DTO parity with the list)', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [proj({ promptsCount: 24 })] }),
+      });
+      const result = await handleGetMarketSubworkspace(transport, BRAND, WS, 2840, 'en', log);
+      expect(result.promptsCount).to.equal(24);
+      const bare = makeTransport({ listProjects: sinon.stub().resolves({ items: [proj()] }) });
+      const noCount = await handleGetMarketSubworkspace(bare, BRAND, WS, 2840, 'en', log);
+      expect(noCount).to.not.have.property('promptsCount');
     });
 
     it('404s marketNotFound when no slice matches', async () => {

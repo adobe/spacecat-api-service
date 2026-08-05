@@ -11405,6 +11405,15 @@ SerenityMarket:
       oneOf:
         - type: string
         - type: 'null'
+    promptsCount:
+      type: integer
+      minimum: 0
+      description: |
+        Number of prompts configured on this market's upstream project
+        (Semrush `settings.ai.prompts_count`). Additive, sub-workspace mode
+        only; absent in flat mode and when the upstream project reports no
+        count. Draft-faithful — a pre-publish (draft) market's count reflects
+        its drafted prompts.
     siteId:
       description: |
         The SpaceCat Site UUID this market is bound to (LLMO-6405 Phase 2) — the

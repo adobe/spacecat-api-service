@@ -648,6 +648,11 @@ export default function serenityTests(
       expect(slice.status).to.equal('live');
       // The listed slice is the same project the create returned.
       expect(slice.semrushProjectId).to.equal(created.body.projectId);
+      // promptsCount surfaces the project's settings.ai.prompts_count end-to-end.
+      // The PE mock's read-view always echoes 0 for a fresh project — the value
+      // itself is the mock's static seed; what this pins is that the field flows
+      // through the listing (a prompt-less market reports 0, not an absent key).
+      expect(slice.promptsCount).to.equal(0);
       // NOTE (LLMO-6405): the sub-workspace market DTO also carries `siteId`
       // (enriched from the brand_to_semrush_projects mapping row). The round-trip
       // siteId assertions were removed pending live verification of the mapping-row
