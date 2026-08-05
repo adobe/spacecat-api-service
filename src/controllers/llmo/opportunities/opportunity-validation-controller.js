@@ -56,7 +56,7 @@ function OpportunityValidationController() {
 
     if (!isValidUUID(siteId)) {
       log.warn(`[opportunity-validation-api] siteId ${siteId} is not a valid UUID`);
-      return badRequest('Site ID required');
+      return badRequest('Site ID must be a valid UUID');
     }
 
     const site = await Site.findById(siteId);
@@ -67,7 +67,7 @@ function OpportunityValidationController() {
 
     if (!isValidUUID(opportunityId)) {
       log.warn(`[opportunity-validation-api] site ${siteId}, opportunityId ${opportunityId} is not a valid UUID`);
-      return badRequest('Opportunity ID required');
+      return badRequest('Opportunity ID must be a valid UUID');
     }
 
     const opportunity = await Opportunity.findById(opportunityId);
@@ -91,6 +91,11 @@ function OpportunityValidationController() {
     if (typeof geoExperimentId !== 'string' || !isValidUUID(geoExperimentId)) {
       return badRequest('geoExperimentId must be a valid UUID');
     }
+
+    // Ownership check (does this GeoExperiment belong to siteId/opportunityId) is deferred to
+    // import-worker, which already loads the GeoExperiment to resolve its suggestions. This
+    // controller only validates UUID format; the caller must already hold the privileged
+    // llmo/can_configure capability to reach this route at all.
 
     const configuration = await Configuration.findLatest();
     await sqs.sendMessage(configuration.getQueues().imports, {
