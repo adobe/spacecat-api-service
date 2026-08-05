@@ -39,6 +39,7 @@ import {
   FEEDBACK_TIERS,
   verdictToSignal,
   toReviewView,
+  isAllowedSuggestionTransition,
 } from '@adobe/spacecat-shared-data-access';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto/suggestion.js';
@@ -1123,6 +1124,21 @@ function SuggestionsController(ctx, sqs, env) {
                 statusCode: 400,
               };
             }
+          }
+
+          // Per-item transition-legality gate (SITES-49063; part of the SITES-47286
+          // warn->enforce rollout). NOTE: the REJECTED hard-rule above is a stricter
+          // subset of this and fires first — keep it ahead of this general gate.
+          if (!isAllowedSuggestionTransition(currentStatus, status)) {
+            // logged so unexpected 400s can be triaged from Splunk when
+            // STATUS_TRANSITION_ENFORCEMENT is flipped to enforce (SITES-47286).
+            context.log.info(`[patchSuggestionsStatus] rejected illegal status transition suggestionId=${id} ${currentStatus} -> ${status}`);
+            return {
+              index,
+              uuid: id,
+              message: `Illegal status transition: ${currentStatus} -> ${status}`,
+              statusCode: 400,
+            };
           }
 
           suggestion.setStatus(status);

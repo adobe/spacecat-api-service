@@ -254,6 +254,9 @@ export default function getRouteHandlers(
     // eslint-disable-next-line max-len
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/filter-dimensions': elementsController.listUrlInspectorFilterDimensions,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks': elementsController.listWeeks,
+    // Reliable Semrush access check for the "access needed" banner (LLMO-6747): probes the User
+    // Manager resource-allowance endpoint and returns { hasAccess }, replacing the weeks probe.
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/access': elementsController.checkAccess,
     // Brand-scoped: prompts/projects live in the brand's sub-workspace, not the org workspace.
     // eslint-disable-next-line max-len
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': elementsController.listPrompts,

@@ -11405,6 +11405,25 @@ SerenityMarket:
       oneOf:
         - type: string
         - type: 'null'
+    promptsCount:
+      type: integer
+      minimum: 0
+      description: |
+        Number of prompts configured on this market's upstream project
+        (Semrush `settings.ai.prompts_count`). Additive, sub-workspace mode
+        only; absent in flat mode and when the upstream project reports no
+        count. Draft-faithful — a pre-publish (draft) market's count reflects
+        its drafted prompts.
+    modelsCount:
+      type: integer
+      minimum: 0
+      description: |
+        Number of AI models enabled on this market's upstream project
+        (Semrush `settings.ai.models_stats.models_count`). Additive,
+        sub-workspace mode only; absent in flat mode and when the upstream
+        project reports no usable value. Metered prompt usage for a market is
+        promptsCount × modelsCount (per Semrush's allocation formula); the
+        product is deliberately left to consumers.
     siteId:
       description: |
         The SpaceCat Site UUID this market is bound to (LLMO-6405 Phase 2) — the
@@ -11748,6 +11767,23 @@ SerenityErrorResponse:
   properties:
     error: { type: string }
     message: { type: string }
+
+SerenityWorkspaceAccess:
+  type: object
+  description: |
+    Whether the calling user can reach the Semrush workspace linked to the brand.
+    Derived from the User Manager resource-allowance endpoint
+    (`GET /v1/workspaces/{id}/resources`) probed with the caller's IMS token: an
+    upstream 2xx yields `true`, a 401/403 yields `false`. A genuine upstream/config
+    failure is NOT reported here — it surfaces as a 4xx/5xx error status instead, so a
+    transient blip is never mistaken for a denial.
+  required: [hasAccess]
+  properties:
+    hasAccess:
+      type: boolean
+      description: |
+        `true` — the caller can access the linked workspace (no banner). `false` — the
+        caller has no access (the only case that shows the "access needed" banner).
 
 SerenityBrandPresenceSentimentOverview:
   type: object

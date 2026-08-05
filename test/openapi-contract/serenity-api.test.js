@@ -21,6 +21,9 @@ import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 
 import { loadBundledSpec, operationsForTag } from './_lib/openapi-loader.js';
+// Real class (not a mock) so the elements esmock block can pass it through without
+// adding a second class to this file (max-classes-per-file).
+import { SerenityTransportError } from '../../src/support/serenity/rest-transport.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -175,12 +178,20 @@ const FIXTURES = {
   listSerenityMarkets: {
     expectedStatus: 200,
     controllerMethod: 'listMarkets',
-    handlerName: 'handleListMarkets',
+    // Sub-workspace mode: the only producer of the additive promptsCount field
+    // (flat mode is a pure DB read that never carries it), so validate the
+    // richer shape against the schema here. The flat shape is a strict subset.
+    mode: 'subworkspace',
+    handlerName: 'handleListMarketsSubworkspace',
     handlerResult: {
       items: [{
         brandId: BRAND,
         geoTargetId: 2840,
         languageCode: 'en',
+        status: 'live',
+        semrushProjectId: 'proj-1',
+        promptsCount: 24,
+        modelsCount: 5,
       }],
     },
   },
@@ -350,6 +361,16 @@ const FIXTURES = {
       content_types: [{ id: 'owned', label: 'Owned' }],
       tags: [],
     },
+  },
+  // Also served by ElementsController (see note above) — the reliable Semrush-workspace
+  // access check (LLMO-6747). Unlike the other elements fixtures it does NOT call the
+  // elements service: checkAccess probes the Serenity User Manager transport
+  // (getWorkspaceResources, mocked in the elements esmock block). A resolved probe →
+  // the handler returns { hasAccess: true }.
+  getSerenityBrandPresenceAccess: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'checkAccess',
   },
   // Also served by ElementsController (see note above) — the Market Tracking
   // Trends endpoint backed by the two Semrush trend elements.
@@ -666,6 +687,16 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
                 getOwnedUrlProjects: sinon.stub().resolves([{ region: 'US', projectId: 'proj-1' }]),
               }),
             },
+            // checkAccess (getSerenityBrandPresenceAccess) probes the User Manager
+            // resource-allowance endpoint via this transport, NOT the elements service.
+            // A resolved probe makes the handler return { hasAccess: true }; inert for
+            // every other elements fixture (none call it).
+            '../../src/support/serenity/rest-transport.js': {
+              createSerenityTransport: () => ({
+                getWorkspaceResources: sinon.stub().resolves({}),
+              }),
+              SerenityTransportError,
+            },
           },
         )).default;
 
@@ -709,6 +740,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         handleListModels: sinon.stub(),
         handleUpdateModels: sinon.stub(),
         handleCreateMarketSubworkspace: sinon.stub(),
+        handleListMarketsSubworkspace: sinon.stub(),
         ensureSubworkspace: sinon.stub().resolves(WORKSPACE),
         decommissionBrandWorkspace: sinon.stub(),
         listGlobalModelCatalog: sinon.stub(),
@@ -725,8 +757,14 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
           },
           '../../src/support/serenity/workspace-resolver.js': {
             resolveWorkspaceId: () => Promise.resolve(WORKSPACE),
+            // Mode defaults to flat; a fixture pins `mode: 'subworkspace'` when the
+            // documented shape is only produced by the subworkspace handler. The
+            // parent must differ from the workspace in subworkspace mode or the
+            // controller's misconfiguration guard 409s before reaching the handler.
             resolveBrandWorkspace: () => Promise.resolve({
-              mode: 'flat', workspaceId: WORKSPACE, parentWorkspaceId: WORKSPACE,
+              mode: fx.mode ?? 'flat',
+              workspaceId: WORKSPACE,
+              parentWorkspaceId: fx.mode === 'subworkspace' ? `parent-${WORKSPACE}` : WORKSPACE,
             }),
           },
           '../../src/support/access-control-util.js': {
@@ -759,7 +797,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             handleUpdateTagSubworkspace: sinon.stub(),
           },
           '../../src/support/serenity/handlers/markets-subworkspace.js': {
-            handleListMarketsSubworkspace: sinon.stub(),
+            handleListMarketsSubworkspace: handlerStubs.handleListMarketsSubworkspace,
             handleGetMarketSubworkspace: sinon.stub(),
             handleCreateMarketSubworkspace: handlerStubs.handleCreateMarketSubworkspace,
             handleDeleteMarketSubworkspace: sinon.stub(),
