@@ -22,7 +22,6 @@ admin-idp-p*.json
 scripts/*
 !scripts/backfill-rum-config.mjs
 !scripts/serenity-metered-405-canary.mjs
-!scripts/serenity-rightsizing-sweep.mjs
 !scripts/generate-insomnia-collection.mjs
 !scripts/serenity-job-runner-ops.mjs
 docs/index.html
