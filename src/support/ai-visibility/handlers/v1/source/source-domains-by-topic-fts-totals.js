@@ -24,16 +24,19 @@ import {
   PROTO_FROM_JSON,
   PROTO_TO_JSON,
 } from '../../../grpc-utils.js';
+import { buildSourceDomainsByTopicFtsDimensionFilterQl } from './source-domains-by-topic-fts.js';
 
 export async function handleSourceDomainsByTopicFtsTotals(sp, clients) {
   const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const country = resolveCountry(sp) || COUNTRY_ENUM.US;
+  const dimensionFilterQl = buildSourceDomainsByTopicFtsDimensionFilterQl(sp);
   let request;
   try {
     request = fromJson(SourceDomainsByTopicFTSTotalsRequestSchema, {
       country,
       llm: engine,
       query: sp.get('query'),
+      dimensionFilterQl,
     }, PROTO_FROM_JSON);
   } catch (error) {
     const message = error instanceof Error

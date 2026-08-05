@@ -2648,6 +2648,7 @@ ai-visibility-v1-source-source-domains-by-topic-fts:
     operationId: getAiVisibilityV1SourceSourceDomainsByTopicFts
     parameters:
       - *ftsQueryParam
+      - *textFilterParam
       - *countryParam
       - *regionParam
       - *engineParam
@@ -2677,6 +2678,7 @@ ai-visibility-v1-source-source-domains-by-topic-fts-totals:
     operationId: getAiVisibilityV1SourceSourceDomainsByTopicFtsTotals
     parameters:
       - *ftsQueryParam
+      - *textFilterParam
       - *countryParam
       - *regionParam
       - *engineParam
@@ -2702,6 +2704,7 @@ ai-visibility-v1-source-source-domains-by-topic-fts-export:
     operationId: getAiVisibilityV1SourceSourceDomainsByTopicFtsExport
     parameters:
       - *ftsQueryParam
+      - *textFilterParam
       - *countryParam
       - *regionParam
       - *engineParam

@@ -27,14 +27,20 @@ import {
   engineToLlm,
   resolveCountry,
   responseFromGrpcError,
+  buildTextFilterQl,
   PROTO_FROM_JSON,
   PROTO_TO_JSON,
 } from '../../../grpc-utils.js';
+
+export function buildSourceDomainsByTopicFtsDimensionFilterQl(sp) {
+  return buildTextFilterQl(sp.get('textFilter'), 'domain');
+}
 
 export async function handleSourceDomainsByTopicFts(sp, clients) {
   const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const country = resolveCountry(sp) || COUNTRY_ENUM.US;
   const { limit, offset } = parseLimitOffset(sp);
+  const dimensionFilterQl = buildSourceDomainsByTopicFtsDimensionFilterQl(sp);
   let request;
   try {
     request = fromJson(SourceDomainsByTopicFTSRequestSchema, {
@@ -47,6 +53,7 @@ export async function handleSourceDomainsByTopicFts(sp, clients) {
         direction: sp.get('sortDirection') || ORDER_DIRECTION_ENUM.DESC,
       },
       range: { limit, offset },
+      dimensionFilterQl,
     }, PROTO_FROM_JSON);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Invalid source domains by topic FTS request';
