@@ -554,6 +554,57 @@ describe('OnboardStatusCommand', () => {
       );
     });
   });
+
+  describe('handleExecution — scraping section', () => {
+    let buildScrapingSectionStub;
+
+    beforeEach(async () => {
+      buildScrapingSectionStub = sinon.stub();
+      OnboardStatusCommand = await esmock(
+        '../../../../src/support/slack/commands/onboard-status.js',
+        {
+          '../../../../src/utils/slack/base.js': {
+            extractURLFromSlackInput: extractURLFromSlackInputStub,
+            loadProfileConfig: loadProfileConfigStub,
+          },
+          '../../../../src/support/slack/commands/onboard-status-scraping.js': {
+            buildScrapingSection: buildScrapingSectionStub,
+          },
+        },
+      );
+    });
+
+    it('renders scraping stats + Data Sources when scrape data exists', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves(makeSite({ lastStartTime: onboardTime }));
+      dataAccessStub.LatestAudit.allBySiteId.resolves([]);
+      buildScrapingSectionStub.resolves({
+        statsMessage: ':mag: *Scraping Statistics for https://example.com*\n⏳ In progress: 5\n📊 Total: 6',
+        dataSourceLine: 'Scraping :hourglass_flowing_sand:',
+      });
+
+      const command = OnboardStatusCommand(context);
+      await command.handleExecution([siteUrl], slackContext);
+
+      const said = slackContext.say.getCalls().map((c) => c.args[0]).join('\n');
+      expect(said).to.contain('Scraping Statistics');
+      expect(said).to.contain('⏳ In progress: 5');
+      expect(said).to.contain('*Data Sources for site https://example.com*');
+      expect(said).to.contain('Scraping :hourglass_flowing_sand:');
+    });
+
+    it('omits the scraping section when no scrape data is available', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves(makeSite({ lastStartTime: onboardTime }));
+      dataAccessStub.LatestAudit.allBySiteId.resolves([]);
+      buildScrapingSectionStub.resolves(null);
+
+      const command = OnboardStatusCommand(context);
+      await command.handleExecution([siteUrl], slackContext);
+
+      const said = slackContext.say.getCalls().map((c) => c.args[0]).join('\n');
+      expect(said).to.not.contain('Scraping Statistics');
+      expect(said).to.not.contain('Data Sources');
+    });
+  });
 });
 
 describe('computeAuditCompletion', () => {

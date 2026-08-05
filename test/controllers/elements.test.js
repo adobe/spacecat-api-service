@@ -18,6 +18,10 @@ import esmock from 'esmock';
 import { ErrorWithStatusCode } from '../../src/support/utils.js';
 import { parseShowTrends, parseUserIntent } from '../../src/controllers/elements.js';
 import { addDaysToDate } from '../../src/support/elements/week-utils.js';
+// Real error class (not a mock) so the controller's `instanceof SerenityTransportError`
+// check in checkAccess matches errors thrown by these tests — and so this file keeps a
+// single mock class (max-classes-per-file).
+import { SerenityTransportError } from '../../src/support/serenity/rest-transport.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -196,6 +200,8 @@ describe('ElementsController', () => {
   let exchangePromiseTokenStub;
   let resolveBrandUuidStub;
   let MockElementsTransportError;
+  let getWorkspaceResourcesStub;
+  let createSerenityTransportStub;
   let ElementsController;
 
   beforeEach(async () => {
@@ -229,6 +235,12 @@ describe('ElementsController', () => {
       }
     };
 
+    // Serenity (User Manager) transport used by checkAccess for the resource-allowance probe.
+    getWorkspaceResourcesStub = sinon.stub().resolves({ product_resources: {} });
+    createSerenityTransportStub = sinon.stub().returns({
+      getWorkspaceResources: getWorkspaceResourcesStub,
+    });
+
     const MockAccessControlUtil = {
       default: {
         fromContext: () => ({ hasAccess: accessControlHasAccessStub }),
@@ -254,6 +266,10 @@ describe('ElementsController', () => {
       },
       '../../src/support/serenity/workspace-resolver.js': {
         resolveBrandWorkspace: resolveBrandWorkspaceStub,
+      },
+      '../../src/support/serenity/rest-transport.js': {
+        createSerenityTransport: createSerenityTransportStub,
+        SerenityTransportError,
       },
       '../../src/support/access-control-util.js': MockAccessControlUtil,
       '../../src/support/utils.js': {
@@ -972,6 +988,98 @@ describe('ElementsController', () => {
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.listWeeks(ctx);
       expect(res.status).to.equal(502);
+    });
+  });
+
+  // ─── checkAccess ──────────────────────────────────────────────────────────
+
+  describe('checkAccess', () => {
+    const accessUrl = () => `https://api.example.com/v2/orgs/${ORG_ID}`
+      + `/brands/${BRAND_ID}/serenity/brand-presence/access`;
+
+    it('returns 200 { hasAccess: true } when the resource-allowance probe succeeds', async () => {
+      const ctx = fakeContext({ url: accessUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.checkAccess(ctx);
+      expect(res.status).to.equal(200);
+      const body = await readBody(res);
+      expect(body).to.deep.equal({ hasAccess: true });
+      expect(getWorkspaceResourcesStub).to.have.been.calledOnce;
+    });
+
+    it('forwards the resolved workspace id and the caller IMS token to the transport', async () => {
+      const ctx = fakeContext({ url: accessUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.checkAccess(ctx);
+      // Dual-mode resolution → the brand's sub-workspace (see resolveBrandWorkspaceStub).
+      expect(getWorkspaceResourcesStub).to.have.been.calledWith(SUB_WORKSPACE_ID);
+      const transportArgs = createSerenityTransportStub.firstCall.args[0];
+      expect(transportArgs.env).to.equal(ENV);
+      expect(transportArgs.imsToken).to.equal(IMS_TOKEN);
+    });
+
+    it('returns 200 { hasAccess: false } when upstream returns 401', async () => {
+      getWorkspaceResourcesStub.rejects(new SerenityTransportError(401, 'unauthorized'));
+      const ctx = fakeContext({ url: accessUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.checkAccess(ctx);
+      expect(res.status).to.equal(200);
+      const body = await readBody(res);
+      expect(body).to.deep.equal({ hasAccess: false });
+    });
+
+    it('returns 200 { hasAccess: false } when upstream returns 403', async () => {
+      getWorkspaceResourcesStub.rejects(new SerenityTransportError(403, 'forbidden'));
+      const ctx = fakeContext({ url: accessUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.checkAccess(ctx);
+      expect(res.status).to.equal(200);
+      const body = await readBody(res);
+      expect(body).to.deep.equal({ hasAccess: false });
+    });
+
+    it('returns 502 (indeterminate, not a denial) when the upstream fails with a 5xx', async () => {
+      getWorkspaceResourcesStub.rejects(new SerenityTransportError(500, 'upstream down'));
+      const ctx = fakeContext({ url: accessUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.checkAccess(ctx);
+      expect(res.status).to.equal(502);
+      const body = await readBody(res);
+      expect(body.error).to.equal('serenityUpstreamError');
+    });
+
+    it('returns 502 when the upstream request times out (504)', async () => {
+      getWorkspaceResourcesStub.rejects(new SerenityTransportError(504, 'timed out'));
+      const ctx = fakeContext({ url: accessUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.checkAccess(ctx);
+      expect(res.status).to.equal(502);
+    });
+
+    it('returns 403 (auth error) and never probes upstream when SpaceCat access is denied', async () => {
+      accessControlHasAccessStub.resolves(false);
+      const ctx = fakeContext({ url: accessUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.checkAccess(ctx);
+      expect(res.status).to.equal(403);
+      expect(getWorkspaceResourcesStub).to.not.have.been.called;
+    });
+
+    it('returns 404 when the brand has no resolvable workspace', async () => {
+      resolveBrandWorkspaceStub.resolves({ mode: 'flat', workspaceId: null });
+      const ctx = fakeContext({ url: accessUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.checkAccess(ctx);
+      expect(res.status).to.equal(404);
+      expect(getWorkspaceResourcesStub).to.not.have.been.called;
+    });
+
+    it('returns 401 and never probes upstream when the caller is not authenticated', async () => {
+      const ctx = fakeContext({ url: accessUrl(), bearer: null });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.checkAccess(ctx);
+      expect(res.status).to.equal(401);
+      expect(getWorkspaceResourcesStub).to.not.have.been.called;
     });
   });
 

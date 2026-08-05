@@ -481,9 +481,13 @@ function SitesController(ctx, log, env) {
   };
 
   /**
-   * Gets all sites with cursor-based pagination. Accessible to admin callers (legacy admin path)
-   * and to S2S consumers that hold the `site:readAll` capability - see
+   * Gets all sites with cursor-based pagination. Accessible to admin callers and to
+   * S2S consumers that hold the `site:readAll` capability - see
    * `docs/s2s/READALL_CAPABILITY_DESIGN.md`.
+   *
+   * When called without `limit`/`cursor`, returns the first page (limit defaults to
+   * 100, no cursor) as the `{ sites, pagination }` envelope - the same shape as an
+   * explicit paginated request.
    *
    * Optional `baseUrlContains` query param: when provided (3-256 chars after trim),
    * performs a case-insensitive substring search on `baseURL` and returns a non-cursor
@@ -604,8 +608,6 @@ function SitesController(ctx, log, env) {
       });
     }
 
-    const paginated = hasText(limitParam) || hasText(cursor);
-
     if (cursor !== null) {
       if (typeof cursor !== 'string') {
         return badRequest('cursor must be a string');
@@ -615,53 +617,36 @@ function SitesController(ctx, log, env) {
       }
     }
 
+    // No limit/cursor defaults to the first page (DEFAULT_LIMIT, no cursor).
     let sites;
     let responseBody;
 
-    if (paginated) {
-      const parsedLimit = hasText(limitParam) ? parseInt(limitParam, 10) : DEFAULT_LIMIT;
-      if (!Number.isInteger(parsedLimit) || parsedLimit <= 0) {
-        return badRequest('limit must be a positive integer');
-      }
-      const effectiveLimit = Math.min(parsedLimit, MAX_LIMIT);
+    const parsedLimit = hasText(limitParam) ? parseInt(limitParam, 10) : DEFAULT_LIMIT;
+    if (!Number.isInteger(parsedLimit) || parsedLimit <= 0) {
+      return badRequest('limit must be a positive integer');
+    }
+    const effectiveLimit = Math.min(parsedLimit, MAX_LIMIT);
 
-      const results = await Site.all({}, { limit: effectiveLimit, cursor, returnCursor: true });
-      if (!Array.isArray(results?.data)) {
-        log.error(`[sites] Site.all returned unexpected shape with returnCursor=true; hasResults=${!!results}`);
-        sites = [];
-        responseBody = {
-          sites,
-          pagination: { limit: effectiveLimit, cursor: null, hasMore: false },
-        };
-      } else {
-        sites = results.data.map((site) => SiteDto.toListJSON(site));
-        responseBody = {
-          sites,
-          pagination: {
-            limit: effectiveLimit,
-            // `|| null` (not `??`) so an empty-string cursor normalizes to null,
-            // staying consistent with `hasMore: !!results.cursor` below.
-            cursor: results.cursor || null,
-            hasMore: !!results.cursor,
-          },
-        };
-      }
+    const results = await Site.all({}, { limit: effectiveLimit, cursor, returnCursor: true });
+    if (!Array.isArray(results?.data)) {
+      log.error(`[sites] Site.all returned unexpected shape with returnCursor=true; hasResults=${!!results}`);
+      sites = [];
+      responseBody = {
+        sites,
+        pagination: { limit: effectiveLimit, cursor: null, hasMore: false },
+      };
     } else {
-      // TODO: remove this legacy branch once Coralogix shows zero hits on
-      // [sites][legacy-shape] for 30 consecutive days.
-      // legacy: no limit/cursor params -> flat array for backwards comp.
-      // keep the default + friends-and-family exclusion on this path to stay
-      // under the 6MB Lambda response limit until consumers migrate to pagination.
-      log.info(`[sites][legacy-shape] GET /sites called without limit/cursor requestId=${requestId} clientId=${s2sResult.clientId || (isAdmin ? 'admin-bypass' : 'unknown-s2s')}`);
-      const excludedOrgIds = [
-        env.DEFAULT_ORGANIZATION_ID,
-        env.ORGANIZATION_ID_FRIENDS_FAMILY,
-      ];
-      const all = await Site.all({}, { fetchAllPages: true });
-      sites = all
-        .filter((site) => !excludedOrgIds.includes(site.getOrganizationId()))
-        .map((site) => SiteDto.toListJSON(site));
-      responseBody = sites;
+      sites = results.data.map((site) => SiteDto.toListJSON(site));
+      responseBody = {
+        sites,
+        pagination: {
+          limit: effectiveLimit,
+          // `|| null` (not `??`) so an empty-string cursor normalizes to null,
+          // staying consistent with `hasMore: !!results.cursor` below.
+          cursor: results.cursor || null,
+          hasMore: !!results.cursor,
+        },
+      };
     }
 
     if (s2sResult.allowed) {
@@ -672,7 +657,7 @@ function SitesController(ctx, log, env) {
     if (error) {
       return badRequest(error);
     }
-    responseBody = Array.isArray(responseBody) ? list : { ...responseBody, sites: list };
+    responseBody = { ...responseBody, sites: list };
 
     return ok(responseBody);
   };
