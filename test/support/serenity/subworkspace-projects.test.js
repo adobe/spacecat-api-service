@@ -33,7 +33,7 @@ const WS = 'subworkspace-ws-1';
 function project({
   id = 'p1', location = 2276, language = 'de', country = null, publishStatus = 'live',
   createdAt = '2026-06-01T00:00:00Z', updatedAt = '2026-06-02T00:00:00Z',
-  domain = 'example.com', promptsCount = undefined,
+  domain = 'example.com', promptsCount = undefined, modelsCount = undefined,
 } = {}) {
   // Mirrors the live v1 list item shape: nested location/language objects,
   // updated_at present, created_at usually absent (passed here for mapping
@@ -41,7 +41,8 @@ function project({
   // the Semrush-UI shape where settings.ai.location.id is null but a country is
   // set (settings.ai.country.code); omitted by default. `domain` is the project's
   // top-level primary host (null to mirror a project that carries none).
-  // `promptsCount` feeds settings.ai.prompts_count; absent by default.
+  // `promptsCount` feeds settings.ai.prompts_count and `modelsCount` feeds
+  // settings.ai.models_stats.models_count; both absent by default.
   return {
     id,
     publish_status: publishStatus,
@@ -54,6 +55,8 @@ function project({
         language: language === null ? null : { id: 'lang-uuid', name: language },
         ...(country === null ? {} : { country: { code: country, name: 'X' } }),
         ...(promptsCount === undefined ? {} : { prompts_count: promptsCount }),
+        ...(modelsCount === undefined
+          ? {} : { models_stats: { models: [], models_count: modelsCount } }),
       },
     },
   };
@@ -116,6 +119,21 @@ describe('subworkspace-projects', () => {
       expect(projectToSlice(project({ promptsCount: true }), BRAND)).to.not.have.property('promptsCount');
       expect(projectToSlice(project({ promptsCount: [] }), BRAND)).to.not.have.property('promptsCount');
       expect(projectToSlice(project({ promptsCount: ['5'] }), BRAND)).to.not.have.property('promptsCount');
+    });
+    it('surfaces modelsCount from settings.ai.models_stats.models_count (0 and string echo included)', () => {
+      expect(projectToSlice(project({ modelsCount: 5 }), BRAND).modelsCount).to.equal(5);
+      expect(projectToSlice(project({ modelsCount: 0 }), BRAND).modelsCount).to.equal(0);
+      expect(projectToSlice(project({ modelsCount: '5' }), BRAND).modelsCount).to.equal(5);
+    });
+    it('omits modelsCount (key absent) for missing/invalid/falsy-non-null values', () => {
+      expect(projectToSlice(project(), BRAND)).to.not.have.property('modelsCount');
+      expect(projectToSlice(project({ modelsCount: null }), BRAND)).to.not.have.property('modelsCount');
+      expect(projectToSlice(project({ modelsCount: 'abc' }), BRAND)).to.not.have.property('modelsCount');
+      expect(projectToSlice(project({ modelsCount: -1 }), BRAND)).to.not.have.property('modelsCount');
+      expect(projectToSlice(project({ modelsCount: 1.5 }), BRAND)).to.not.have.property('modelsCount');
+      expect(projectToSlice(project({ modelsCount: '' }), BRAND)).to.not.have.property('modelsCount');
+      expect(projectToSlice(project({ modelsCount: false }), BRAND)).to.not.have.property('modelsCount');
+      expect(projectToSlice(project({ modelsCount: [] }), BRAND)).to.not.have.property('modelsCount');
     });
     it('lowercases the language and nulls an invalid geo', () => {
       const s = projectToSlice(project({ location: 'x', language: 'EN' }), BRAND);

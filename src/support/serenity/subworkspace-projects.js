@@ -75,18 +75,37 @@ export function langOf(project) {
 }
 
 /**
- * The project's configured prompt count (`settings.ai.prompts_count`), or null
- * when upstream reports no usable count. Accepts a non-negative integer or its
- * decimal-string echo ONLY — a `typeof` gate first, so falsy non-null shapes
- * (`''`, `false`, `[]`) can never coerce to a fabricated 0.
+ * A non-negative integer read of an upstream count field, or null when the
+ * value is unusable. Accepts a non-negative integer or its decimal-string echo
+ * ONLY — a `typeof` gate first, so falsy non-null shapes (`''`, `false`, `[]`)
+ * can never coerce to a fabricated 0.
+ * @param {unknown} raw
  */
-export function promptsCountOf(project) {
-  const raw = project?.settings?.ai?.prompts_count;
+function nonNegativeIntOf(raw) {
   if (typeof raw !== 'number' && (typeof raw !== 'string' || !/^\d+$/.test(raw))) {
     return null;
   }
   const n = Number(raw);
   return Number.isInteger(n) && n >= 0 ? n : null;
+}
+
+/**
+ * The project's configured prompt count (`settings.ai.prompts_count`), or null
+ * when upstream reports no usable count.
+ */
+export function promptsCountOf(project) {
+  return nonNegativeIntOf(project?.settings?.ai?.prompts_count);
+}
+
+/**
+ * The number of AI models enabled on the project
+ * (`settings.ai.models_stats.models_count`), or null when upstream reports no
+ * usable value. Semrush meters prompt allocation per project as
+ * prompts × enabled models, so this is the second factor of a market's real
+ * (metered) usage — the product is deliberately left to consumers.
+ */
+export function modelsCountOf(project) {
+  return nonNegativeIntOf(project?.settings?.ai?.models_stats?.models_count);
 }
 
 // Deterministic ordering key for the duplicate-slice "oldest wins" rule. The
@@ -114,10 +133,13 @@ function orderKey(project) {
  * (`settings.ai.prompts_count`), draft-faithful on this v1 read view (draft and
  * live converge at rest because every ABV prompt write publishes); surfaced for
  * the UI's cross-market usage summary and omitted when upstream reports no
- * usable count.
+ * usable count. `modelsCount` (enabled AI models) is its metered-usage
+ * companion — a market's real allocation usage is promptsCount × modelsCount —
+ * with the same omit-when-unusable contract.
  */
 export function projectToSlice(project, brandId) {
   const promptsCount = promptsCountOf(project);
+  const modelsCount = modelsCountOf(project);
   return {
     brandId,
     geoTargetId: geoOf(project),
@@ -135,6 +157,7 @@ export function projectToSlice(project, brandId) {
     // Omitted (not null) when absent/invalid — flat mode never carries the key,
     // so subworkspace mode matches that contract for the no-count case.
     ...(promptsCount === null ? {} : { promptsCount }),
+    ...(modelsCount === null ? {} : { modelsCount }),
   };
 }
 

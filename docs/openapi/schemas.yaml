@@ -11414,6 +11414,16 @@ SerenityMarket:
         only; absent in flat mode and when the upstream project reports no
         count. Draft-faithful — a pre-publish (draft) market's count reflects
         its drafted prompts.
+    modelsCount:
+      type: integer
+      minimum: 0
+      description: |
+        Number of AI models enabled on this market's upstream project
+        (Semrush `settings.ai.models_stats.models_count`). Additive,
+        sub-workspace mode only; absent in flat mode and when the upstream
+        project reports no usable value. Metered prompt usage for a market is
+        promptsCount × modelsCount (per Semrush's allocation formula); the
+        product is deliberately left to consumers.
     siteId:
       description: |
         The SpaceCat Site UUID this market is bound to (LLMO-6405 Phase 2) — the

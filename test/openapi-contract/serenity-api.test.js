@@ -188,6 +188,7 @@ const FIXTURES = {
         status: 'live',
         semrushProjectId: 'proj-1',
         promptsCount: 24,
+        modelsCount: 5,
       }],
     },
   },
