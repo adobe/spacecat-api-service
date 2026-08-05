@@ -36,6 +36,16 @@ function createMockSite({ id = SITE_ID } = {}) {
   return { getId: () => id };
 }
 
+function createMockGeoExperiment({
+  id = GEO_EXPERIMENT_ID, siteId = SITE_ID, opportunityId = null,
+} = {}) {
+  return {
+    getId: () => id,
+    getSiteId: () => siteId,
+    getOpportunityId: () => opportunityId,
+  };
+}
+
 describe('OpportunityValidationController', () => {
   let sandbox;
   let controller;
@@ -55,6 +65,7 @@ describe('OpportunityValidationController', () => {
       dataAccess: {
         Site: { findById: sandbox.stub().resolves(createMockSite()) },
         Opportunity: { findById: sandbox.stub().resolves(createMockOpportunity()) },
+        GeoExperiment: { findById: sandbox.stub().resolves(createMockGeoExperiment()) },
         Configuration: { findLatest: sandbox.stub().resolves(mockConfiguration) },
       },
       sqs: { sendMessage: sandbox.stub().resolves() },
@@ -177,5 +188,46 @@ describe('OpportunityValidationController', () => {
     const result = await controller.triggerValidation(mockContext);
 
     expect(result.status).to.equal(400);
+  });
+
+  it('returns 404 when the geoExperiment is not found', async () => {
+    mockContext.dataAccess.GeoExperiment.findById.resolves(null);
+
+    const result = await controller.triggerValidation(mockContext);
+
+    expect(result.status).to.equal(404);
+    expect(mockContext.sqs.sendMessage).not.to.have.been.called;
+  });
+
+  it('returns 404 when the geoExperiment belongs to a different site', async () => {
+    mockContext.dataAccess.GeoExperiment.findById.resolves(
+      createMockGeoExperiment({ siteId: OTHER_SITE_ID }),
+    );
+
+    const result = await controller.triggerValidation(mockContext);
+
+    expect(result.status).to.equal(404);
+    expect(mockContext.sqs.sendMessage).not.to.have.been.called;
+  });
+
+  it('returns 404 when the geoExperiment belongs to a different opportunity', async () => {
+    mockContext.dataAccess.GeoExperiment.findById.resolves(
+      createMockGeoExperiment({ opportunityId: 'f4d5b8b3-9c6c-4f4d-a6b1-9d4e5f6a7b8c' }),
+    );
+
+    const result = await controller.triggerValidation(mockContext);
+
+    expect(result.status).to.equal(404);
+    expect(mockContext.sqs.sendMessage).not.to.have.been.called;
+  });
+
+  it('accepts a geoExperiment whose opportunityId matches this opportunity', async () => {
+    mockContext.dataAccess.GeoExperiment.findById.resolves(
+      createMockGeoExperiment({ opportunityId: OPPORTUNITY_ID }),
+    );
+
+    const result = await controller.triggerValidation(mockContext);
+
+    expect(result.status).to.equal(202);
   });
 });
