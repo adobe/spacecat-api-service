@@ -205,10 +205,10 @@ site-opportunity-validate:
   post:
     operationId: triggerSiteOpportunityValidation
     summary: |
-      Trigger on-demand validation of specific suggestions against this opportunity. Currently
-      only supported for prerender opportunities. Fire-and-forget: queues the validation and
-      responds immediately; the result lands in the opportunity's own data, not in this
-      response.
+      Trigger on-demand validation of a GeoExperiment's own suggestions against this
+      opportunity. Currently only supported for prerender opportunities. Fire-and-forget: queues
+      the validation and responds immediately; the result lands on the GeoExperiment's own
+      metadata and each covered suggestion's own data, not in this response.
     tags:
       - opportunities
     requestBody:
