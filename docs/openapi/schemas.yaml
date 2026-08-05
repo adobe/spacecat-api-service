@@ -11266,6 +11266,44 @@ AiVisibilityV1PromptsByTopicFtsResponse:
   required: [data]
   additionalProperties: true
 
+AiVisibilityV1PromptByTopicIdsRow:
+  type: object
+  description: Native Semrush `PromptsByTopicIDsResponse.Prompt` protobuf JSON.
+  properties:
+    prompt:
+      type: string
+    promptHash:
+      $ref: '#/AiVisibilityV1UInt64'
+    mentionedBrandsCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    sourcesCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    briefResponse:
+      type: string
+    llm:
+      $ref: '#/AiVisibilitySemrushLlm'
+    serpId:
+      type: string
+    topicId:
+      $ref: '#/AiVisibilityV1UInt64'
+    country:
+      $ref: '#/AiVisibilitySemrushCountry'
+  additionalProperties: true
+
+AiVisibilityV1PromptsByTopicIdsResponse:
+  type: object
+  properties:
+    date:
+      $ref: '#/AiVisibilitySemrushDate'
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1PromptByTopicIdsRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [data]
+  additionalProperties: true
+
 AiVisibilityV1BrandByTopicFtsRow:
   type: object
   properties:

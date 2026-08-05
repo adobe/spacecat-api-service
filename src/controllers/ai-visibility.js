@@ -80,6 +80,8 @@ import { handleTopicsByFtsTotals as handleTopicsByFtsTotalsV1 } from '../support
 import { handlePromptsByTopicFts as handlePromptsByTopicFtsV1 } from '../support/ai-visibility/handlers/v1/prompt/prompts-by-topic-fts.js';
 import { handlePromptsByTopicFtsExport as handlePromptsByTopicFtsExportV1 } from '../support/ai-visibility/handlers/v1/prompt/prompts-by-topic-fts-export.js';
 import { handlePromptsByTopicFtsTotals as handlePromptsByTopicFtsTotalsV1 } from '../support/ai-visibility/handlers/v1/prompt/prompts-by-topic-fts-totals.js';
+import { handlePromptsByTopicIds as handlePromptsByTopicIdsV1 } from '../support/ai-visibility/handlers/v1/prompt/prompts-by-topic-ids.js';
+import { handlePromptsByTopicIdsTotals as handlePromptsByTopicIdsTotalsV1 } from '../support/ai-visibility/handlers/v1/prompt/prompts-by-topic-ids-totals.js';
 import { handleSourceDomainsByTopicFts as handleSourceDomainsByTopicFtsV1 } from '../support/ai-visibility/handlers/v1/source/source-domains-by-topic-fts.js';
 import { handleSourceDomainsByTopicFtsExport as handleSourceDomainsByTopicFtsExportV1 } from '../support/ai-visibility/handlers/v1/source/source-domains-by-topic-fts-export.js';
 import { handleSourceDomainsByTopicFtsTotals as handleSourceDomainsByTopicFtsTotalsV1 } from '../support/ai-visibility/handlers/v1/source/source-domains-by-topic-fts-totals.js';
@@ -145,6 +147,8 @@ const ROUTE_MAP = [
   ['/v1/prompt/prompts-by-topic-fts', handlePromptsByTopicFtsV1],
   ['/v1/prompt/prompts-by-topic-fts-export', handlePromptsByTopicFtsExportV1],
   ['/v1/prompt/prompts-by-topic-fts-totals', handlePromptsByTopicFtsTotalsV1],
+  ['/v1/prompt/prompts-by-topic-ids', handlePromptsByTopicIdsV1],
+  ['/v1/prompt/prompts-by-topic-ids-totals', handlePromptsByTopicIdsTotalsV1],
   ['/v1/brand/brands-by-topic-fts', handleBrandsByTopicFtsV1],
   ['/v1/brand/brands-by-topic-fts-export', handleBrandsByTopicFtsExportV1],
   ['/v1/brand/brands-by-topic-fts-totals', handleBrandsByTopicFtsTotalsV1],

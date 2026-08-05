@@ -870,6 +870,10 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-gap-prompts-export'
   /llmo/ai-visibility/v1/prompt/gap-prompts-totals:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-gap-prompts-totals'
+  /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompts-by-topic-ids'
+  /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompts-by-topic-ids-totals'
   /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompts-by-topic-fts'
   /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-export:

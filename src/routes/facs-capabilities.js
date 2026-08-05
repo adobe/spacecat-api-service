@@ -396,6 +396,8 @@ const routeFacsCapabilities = {
       'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-export': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-totals': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids-totals': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/source/gap-source-domains': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/source/gap-source-domains-export': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/source/gap-source-domains-totals': 'llmo/can_view',

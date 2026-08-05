@@ -552,6 +552,8 @@ describe('getRouteHandlers', () => {
     getV1PromptPromptsByTopicFts: sinon.stub(),
     getV1PromptPromptsByTopicFtsExport: sinon.stub(),
     getV1PromptPromptsByTopicFtsTotals: sinon.stub(),
+    getV1PromptPromptsByTopicIds: sinon.stub(),
+    getV1PromptPromptsByTopicIdsTotals: sinon.stub(),
     getV1PromptPromptResponse: sinon.stub(),
     getV1SourceGapSourceDomains: sinon.stub(),
     getV1SourceGapSourceDomainsExport: sinon.stub(),
@@ -808,6 +810,8 @@ describe('getRouteHandlers', () => {
       'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts',
       'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-export',
       'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-totals',
+      'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids',
+      'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids-totals',
       'GET /llmo/ai-visibility/v1/prompt/prompt-response',
       'GET /llmo/ai-visibility/v1/source/gap-source-domains',
       'GET /llmo/ai-visibility/v1/source/gap-source-domains-export',
@@ -904,6 +908,8 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts']).to.equal(mockAiVisibilityController.getV1PromptPromptsByTopicFts);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-export']).to.equal(mockAiVisibilityController.getV1PromptPromptsByTopicFtsExport);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-totals']).to.equal(mockAiVisibilityController.getV1PromptPromptsByTopicFtsTotals);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids']).to.equal(mockAiVisibilityController.getV1PromptPromptsByTopicIds);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids-totals']).to.equal(mockAiVisibilityController.getV1PromptPromptsByTopicIdsTotals);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/prompt-response']).to.equal(mockAiVisibilityController.getV1PromptPromptResponse);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/source/gap-source-domains']).to.equal(mockAiVisibilityController.getV1SourceGapSourceDomains);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/source/gap-source-domains-export']).to.equal(mockAiVisibilityController.getV1SourceGapSourceDomainsExport);

@@ -150,6 +150,25 @@ x-ai-vis-topic-id: &topicIdParam
     type: string
     example: '12345'
 
+x-ai-vis-topic-ids: &topicIdsParam
+  name: topicIds
+  in: query
+  required: true
+  description: |
+    Topic identifiers for `PromptsByTopicIDs`. Repeat the parameter to request prompts for
+    multiple topics (for example, `?topicIds=12345&topicIds=67890`). Digits only; capped at
+    50 identifiers per request. The singular `topicId` parameter is not supported.
+  style: form
+  explode: true
+  schema:
+    type: array
+    minItems: 1
+    maxItems: 50
+    items:
+      type: string
+      pattern: '^\d+$'
+      example: '12345'
+
 x-ai-vis-topic-id-optional: &topicIdOptionalParam
   name: topicId
   in: query
@@ -486,6 +505,16 @@ x-ai-vis-v1-fts-prompts-sort-by: &v1FtsPromptsSortByParam
   schema:
     type: string
     enum: [PROMPT, MENTIONED_BRANDS_COUNT, SOURCES_COUNT, RELEVANCE_SCORE]
+    default: MENTIONED_BRANDS_COUNT
+
+x-ai-vis-v1-prompts-by-topic-ids-sort-by: &v1PromptsByTopicIdsSortByParam
+  name: sortBy
+  in: query
+  required: false
+  description: Semrush `PROMPTS_BY_TOPIC_IDS_REQUEST_ORDER_BY`; defaults to `MENTIONED_BRANDS_COUNT`.
+  schema:
+    type: string
+    enum: [PROMPT, MENTIONED_BRANDS_COUNT, SOURCES_COUNT]
     default: MENTIONED_BRANDS_COUNT
 
 x-ai-vis-v1-fts-brands-sort-by: &v1FtsBrandsSortByParam
@@ -2422,6 +2451,63 @@ ai-visibility-v1-prompt-prompts-by-topic-fts-totals:
     operationId: getAiVisibilityV1PromptPromptsByTopicFtsTotals
     parameters:
       - *ftsQueryParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+    responses:
+      '200':
+        description: Prompt total retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1DatedFtsTotalsResponse'
+            examples:
+              totals:
+                $ref: './examples.yaml#/AiVisibilityV1FtsTotals'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-prompt-prompts-by-topic-ids:
+  get:
+    tags: [ai-visibility]
+    summary: Get prompts by topic IDs
+    description: |
+      Returns native prompt rows from Semrush `PromptService.PromptsByTopicIDs`.
+      Results are paginated by `limit` and `offset`; only the repeated `topicIds`
+      query parameter is accepted for selecting topics.
+    operationId: getAiVisibilityV1PromptPromptsByTopicIds
+    parameters:
+      - *topicIdsParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *v1PromptsByTopicIdsSortByParam
+      - *ftsSortDirectionParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Prompts retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1PromptsByTopicIdsResponse'
+            examples:
+              prompts:
+                $ref: './examples.yaml#/AiVisibilityV1PromptsByTopicIds'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-prompt-prompts-by-topic-ids-totals:
+  get:
+    tags: [ai-visibility]
+    summary: Get prompts-by-topic-IDs total
+    description: Returns native protobuf JSON from Semrush `PromptService.PromptsByTopicIDsTotal`.
+    operationId: getAiVisibilityV1PromptPromptsByTopicIdsTotals
+    parameters:
+      - *topicIdsParam
       - *countryParam
       - *regionParam
       - *engineParam

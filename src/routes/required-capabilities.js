@@ -745,6 +745,8 @@ const routeRequiredCapabilities = {
   'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-export': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-totals': 'report:read',
+  'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids': 'report:read',
+  'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids-totals': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/prompt-response': 'report:read',
   'GET /llmo/ai-visibility/v1/source/gap-source-domains': 'report:read',
   'GET /llmo/ai-visibility/v1/source/gap-source-domains-export': 'report:read',

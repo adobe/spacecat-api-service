@@ -856,6 +856,8 @@ export default function getRouteHandlers(
     'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts': aiVisibilityController.getV1PromptPromptsByTopicFts,
     'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-export': aiVisibilityController.getV1PromptPromptsByTopicFtsExport,
     'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-totals': aiVisibilityController.getV1PromptPromptsByTopicFtsTotals,
+    'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids': aiVisibilityController.getV1PromptPromptsByTopicIds,
+    'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids-totals': aiVisibilityController.getV1PromptPromptsByTopicIdsTotals,
     'GET /llmo/ai-visibility/v1/prompt/prompt-response': aiVisibilityController.getV1PromptPromptResponse,
     'GET /llmo/ai-visibility/v1/source/gap-source-domains': aiVisibilityController.getV1SourceGapSourceDomains,
     'GET /llmo/ai-visibility/v1/source/gap-source-domains-export': aiVisibilityController.getV1SourceGapSourceDomainsExport,

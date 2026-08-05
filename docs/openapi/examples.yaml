@@ -1002,6 +1002,26 @@ AiVisibilityV1PromptsByTopicFts:
       marketsCatalog: [WW, AE, AR, US]
       modelsCatalog: [all, chatgpt, gemini, googleAiMode, googleAiOverview]
 
+AiVisibilityV1PromptsByTopicIds:
+  description: Native prompt rows returned by PromptsByTopicIDs
+  value:
+    date: { year: 2026, month: 7, day: 1 }
+    data:
+      - prompt: What are the best generative AI tools?
+        promptHash: '472901'
+        mentionedBrandsCount: '8'
+        sourcesCount: '12'
+        briefResponse: Several tools support image and document generation.
+        llm: CHAT_GPT
+        serpId: response-123
+        topicId: '984221'
+        country: US
+    srFilters:
+      markets: [US]
+      models: [chatgpt]
+      marketsCatalog: [WW, AE, AR, US]
+      modelsCatalog: [all, chatgpt, gemini, googleAiMode, googleAiOverview]
+
 AiVisibilityV1BrandsByTopicFts:
   description: Native brand rows returned by BrandsByTopicFTS
   value:

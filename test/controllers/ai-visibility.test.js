@@ -78,6 +78,8 @@ describe('AiVisibilityController', () => {
   let mockHandleV1PromptPromptsByTopicFts;
   let mockHandleV1PromptPromptsByTopicFtsExport;
   let mockHandleV1PromptPromptsByTopicFtsTotals;
+  let mockHandleV1PromptPromptsByTopicIds;
+  let mockHandleV1PromptPromptsByTopicIdsTotals;
   let mockHandleV1SourceSourceDomainsByTopicFts;
   let mockHandleV1SourceSourceDomainsByTopicFtsExport;
   let mockHandleV1SourceSourceDomainsByTopicFtsTotals;
@@ -240,6 +242,8 @@ describe('AiVisibilityController', () => {
     mockHandleV1PromptPromptsByTopicFts = sandbox.stub().resolves({ status: 200, body: {} });
     mockHandleV1PromptPromptsByTopicFtsExport = sandbox.stub().resolves({ status: 200, body: {} });
     mockHandleV1PromptPromptsByTopicFtsTotals = sandbox.stub().resolves({ status: 200, body: {} });
+    mockHandleV1PromptPromptsByTopicIds = sandbox.stub().resolves({ status: 200, body: {} });
+    mockHandleV1PromptPromptsByTopicIdsTotals = sandbox.stub().resolves({ status: 200, body: {} });
     mockHandleV1SourceSourceDomainsByTopicFts = sandbox.stub().resolves({ status: 200, body: {} });
     mockHandleV1SourceSourceDomainsByTopicFtsExport = sandbox.stub().resolves({ status: 200, body: {} });
     mockHandleV1SourceSourceDomainsByTopicFtsTotals = sandbox.stub().resolves({ status: 200, body: {} });
@@ -397,6 +401,12 @@ describe('AiVisibilityController', () => {
       },
       '../../src/support/ai-visibility/handlers/v1/prompt/prompts-by-topic-fts-totals.js': {
         handlePromptsByTopicFtsTotals: mockHandleV1PromptPromptsByTopicFtsTotals,
+      },
+      '../../src/support/ai-visibility/handlers/v1/prompt/prompts-by-topic-ids.js': {
+        handlePromptsByTopicIds: mockHandleV1PromptPromptsByTopicIds,
+      },
+      '../../src/support/ai-visibility/handlers/v1/prompt/prompts-by-topic-ids-totals.js': {
+        handlePromptsByTopicIdsTotals: mockHandleV1PromptPromptsByTopicIdsTotals,
       },
       '../../src/support/ai-visibility/handlers/v1/source/source-domains-by-topic-fts.js': {
         handleSourceDomainsByTopicFts: mockHandleV1SourceSourceDomainsByTopicFts,
@@ -759,6 +769,8 @@ describe('AiVisibilityController', () => {
       getV1PromptPromptsByTopicFts: mockHandleV1PromptPromptsByTopicFts,
       getV1PromptPromptsByTopicFtsExport: mockHandleV1PromptPromptsByTopicFtsExport,
       getV1PromptPromptsByTopicFtsTotals: mockHandleV1PromptPromptsByTopicFtsTotals,
+      getV1PromptPromptsByTopicIds: mockHandleV1PromptPromptsByTopicIds,
+      getV1PromptPromptsByTopicIdsTotals: mockHandleV1PromptPromptsByTopicIdsTotals,
       getV1SourceSourceDomainsByTopicFts: mockHandleV1SourceSourceDomainsByTopicFts,
       getV1SourceSourceDomainsByTopicFtsExport: mockHandleV1SourceSourceDomainsByTopicFtsExport,
       getV1SourceSourceDomainsByTopicFtsTotals: mockHandleV1SourceSourceDomainsByTopicFtsTotals,
