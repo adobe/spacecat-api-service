@@ -1,3 +1,10 @@
+## [1.719.1](https://github.com/adobe/spacecat-api-service/compare/v1.719.0...v1.719.1) (2026-08-05)
+
+
+### Bug Fixes
+
+* **opportunities:** revoke stale suggestion grants on resolve (SITES-49175) ([#2992](https://github.com/adobe/spacecat-api-service/issues/2992)) ([1e0ff7f](https://github.com/adobe/spacecat-api-service/commit/1e0ff7fc379b3bd52dd9ce26da480df5b8612e01))
+
 # [1.719.0](https://github.com/adobe/spacecat-api-service/compare/v1.718.0...v1.719.0) (2026-08-04)
 
 
