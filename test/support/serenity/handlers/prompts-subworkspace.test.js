@@ -125,7 +125,6 @@ describe('prompts-subworkspace handlers', () => {
           parentId: TAG_IDS.categoryRoot,
           path: [{ id: TAG_IDS.categoryRoot, name: 'category' }],
         }],
-        tagMap: { 'Running Shoes': TAG_IDS.categoryRunningShoes },
         createdAt: null,
         createdBy: null,
         updatedAt: null,
