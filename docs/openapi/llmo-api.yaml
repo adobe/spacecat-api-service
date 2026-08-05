@@ -6107,9 +6107,12 @@ site-llmo-akamai-plan:
     description: |
       Fetches the property's latest version and rule tree, merges the managed Edge Optimize rules
       in memory, and returns the before/after top-level rule names plus the full merged tree for the
-      UI to preview and diff. No mutation — no new property version is created. The managed rules
-      (origin, cache-key, headers, failover) are derived server-side from the site's hostname and
-      LLMO API key.
+      UI to preview and diff. No mutation — no new property version is created. Also dry-runs the
+      same server-side JSON Patch `deploy` would apply, so `validated`/`errors`/`warnings` reflect
+      the real deploy outcome; this degrades to `validated: false` (not an error) when the dry-run
+      itself can't execute (e.g. the latest version is already active and not editable). The
+      managed rules (origin, cache-key, headers, failover) are derived server-side from the site's
+      hostname and LLMO API key.
 
       **Note:** This endpoint requires LLMO administrator access for the site.
     tags:
@@ -6201,13 +6204,15 @@ site-llmo-akamai-deploy:
     operationId: deployLlmoAkamai
     summary: Create a new property version with the Edge Optimize rules
     description: |
-      Creates a NEW property version from `baseVersion` (default: latest), merges the managed Edge
-      Optimize rules into it, and PUTs the rule tree with Akamai-side validation. Only supported for
-      properties whose default origin uses "Choose Your Own" (CUSTOM) SSL verification; a property on
-      "Use Platform Settings" is rejected with `400`. Does NOT activate — activation is a
-      separate, explicit step. Guarded so the target property must serve the site's own domain on an
-      active hostname. Idempotent by rule name: the merge replaces any previously-managed rules
-      rather than duplicating them.
+      Creates a NEW property version from `baseVersion` (default: latest) — or resumes into
+      `retryVersion` if given — and applies the managed Edge Optimize rules via a server-side JSON
+      Patch with Akamai-side validation. A patch is a delta: existing rules/behaviors are never
+      re-serialized, which avoids Akamai rejecting untouched, GET-expanded behaviors elsewhere in a
+      large property's tree. Only supported for properties whose default origin uses "Choose Your
+      Own" (CUSTOM) SSL verification; a property on "Use Platform Settings" is rejected with `400`.
+      Does NOT activate — activation is a separate, explicit step. Guarded so the target property
+      must serve the site's own domain on an active hostname. Idempotent by rule name: the merge
+      replaces any previously-managed rules rather than duplicating them.
 
       If Akamai rejects the rule tree, the response is `422` with the PAPI `papiErrors` (and any
       `warnings`).
@@ -6504,6 +6509,13 @@ akamai-property-ref:
       description: >-
         (deploy only) Optional property version to copy the new version from. Defaults to the
         property's latest version.
+    retryVersion:
+      type: integer
+      minimum: 1
+      description: >-
+        (deploy only) Optional property version, created by a PRIOR deploy attempt that failed to
+        write its rules, to resume writing into directly. When given, `createVersion` is skipped
+        entirely — the response's `newVersion` echoes this value instead of a freshly-created one.
 
 akamai-property:
   type: object
