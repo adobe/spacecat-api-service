@@ -25,6 +25,11 @@ import {
 } from './llmo-brand-presence.js';
 import { parseAgentTypes } from './llmo-agent-types.js';
 import { cachedOk } from '../../support/cached-response.js';
+import { resolveBrandUuid } from '../../support/prompts-storage.js';
+import { resolveBrandWorkspace } from '../../support/serenity/workspace-resolver.js';
+import { createElementsTransport } from '../../support/elements/elements-transport.js';
+import { createElementsService } from '../../support/elements/elements-service.js';
+import { resolveSemrushImsToken } from '../../support/utils.js';
 
 /**
  * URL Inspector handlers for org-based routes.
@@ -587,6 +592,104 @@ export function createUrlInspectorDomainUrlsHandler(
 }
 
 /**
+ * Fetches prompts that cited `urlId` from the Mysticat/DRS RPC
+ * (`rpc_url_inspector_url_prompts`). Shared by `createUrlInspectorUrlPromptsHandler`
+ * and `createUrlInspectorPromptsByUrlHandler` (LLMO-5789) so the RPC call and its
+ * synthetic-url_id soft-empty handling live in one place.
+ * @param {object} client - PostgREST client.
+ * @param {object} log - Logger.
+ * @param {{siteId: string, urlId: string, startDate: string, endDate: string,
+ *   model: string|null}} rpcInputs
+ * @returns {Promise<{prompts: Array<object>}|{error: object}>} `error` is a
+ *   ready-to-return Response.
+ */
+async function fetchUrlPromptsViaMysticat(client, log, {
+  siteId, urlId, startDate, endDate, model,
+}) {
+  const { data, error } = await client.rpc('rpc_url_inspector_url_prompts', {
+    p_site_id: siteId,
+    p_start_date: startDate,
+    p_end_date: endDate,
+    p_url_id: urlId,
+    p_platform: model,
+  });
+
+  if (error) {
+    // PostgREST/Supabase wraps Postgres errors with `code` (SQLSTATE) and
+    // `message`. UUID parse failures (SQLSTATE 22P02 — invalid_text_representation)
+    // happen when callers pass synthetic url_ids — most commonly the URL
+    // Inspector PG dashboard's owned-urls flow, where the rpc_url_inspector_owned_urls
+    // RPC does not return a real source_urls.id and the dashboard
+    // synthesises `url-${index}-${slug}` ids per LLMO-4526 (multi-persona
+    // PR review M2 follow-up).
+    //
+    // The drilldown is genuinely empty for those rows (we do not know
+    // which prompts cited that URL), so it is more useful to clients to
+    // surface that as an empty list than as a 500 the dialog would have
+    // to interpret. Other Postgres errors continue to bubble up as 500.
+    if (error.code === '22P02' || /invalid input syntax for( type)? uuid/i.test(error.message)) {
+      log.info(`URL Inspector URL prompts: invalid url_id "${urlId}" — returning empty prompt list`);
+      return { prompts: [] };
+    }
+    log.error(`URL Inspector URL prompts RPC error: ${error.message}`);
+    return { error: internalServerError('Internal error processing URL Inspector URL prompts') };
+  }
+
+  const rows = data || [];
+  const prompts = rows.map((r) => ({
+    prompt: r.prompt || '',
+    category: r.category || '',
+    region: r.region || '',
+    topics: r.topics || '',
+    citations: Number(r.citations ?? 0),
+  }));
+
+  return { prompts };
+}
+
+/**
+ * Fetches prompts that cited `url` from the Mysticat/DRS RPC
+ * (`rpc_url_inspector_prompts_by_url`, LLMO-5789). Single-hop counterpart to
+ * `fetchUrlPromptsViaMysticat`: the RPC itself resolves `url` to a `source_urls.id`
+ * (same www/scheme/trailing-slash normalization as `rpc_brand_presence_url_detail`)
+ * and delegates to `rpc_url_inspector_url_prompts`, so callers that only have a
+ * URL string no longer need to paginate `domain-urls` first.
+ * @param {object} client - PostgREST client.
+ * @param {object} log - Logger.
+ * @param {{siteId: string, url: string, startDate: string, endDate: string,
+ *   model: string|null}} rpcInputs
+ * @returns {Promise<{prompts: Array<object>}|{error: object}>} `error` is a
+ *   ready-to-return Response.
+ */
+async function fetchUrlPromptsByUrlViaMysticat(client, log, {
+  siteId, url, startDate, endDate, model,
+}) {
+  const { data, error } = await client.rpc('rpc_url_inspector_prompts_by_url', {
+    p_site_id: siteId,
+    p_url: url,
+    p_start_date: startDate,
+    p_end_date: endDate,
+    p_platform: model,
+  });
+
+  if (error) {
+    log.error(`URL Inspector prompts-by-url RPC error: ${error.message}`);
+    return { error: internalServerError('Internal error processing URL Inspector prompts') };
+  }
+
+  const rows = data || [];
+  const prompts = rows.map((r) => ({
+    prompt: r.prompt || '',
+    category: r.category || '',
+    region: r.region || '',
+    topics: r.topics || '',
+    citations: Number(r.citations ?? 0),
+  }));
+
+  return { prompts };
+}
+
+/**
  * Creates the getUrlInspectorUrlPrompts handler.
  * Phase 3 drilldown: prompts that cited a specific URL.
  *
@@ -631,45 +734,164 @@ export function createUrlInspectorUrlPromptsHandler(
         return badRequest(modelError);
       }
 
-      const { data, error } = await client.rpc('rpc_url_inspector_url_prompts', {
-        p_site_id: params.siteId,
-        p_start_date: params.startDate || defaults.startDate,
-        p_end_date: params.endDate || defaults.endDate,
-        p_url_id: urlId,
-        p_platform: model,
+      const result = await fetchUrlPromptsViaMysticat(client, ctx.log, {
+        siteId: params.siteId,
+        urlId,
+        startDate: params.startDate || defaults.startDate,
+        endDate: params.endDate || defaults.endDate,
+        model,
       });
+      if (result.error) {
+        return result.error;
+      }
+      return cachedOk({ prompts: result.prompts });
+    },
+  );
+}
 
-      if (error) {
-        // PostgREST/Supabase wraps Postgres errors with `code` (SQLSTATE) and
-        // `message`. UUID parse failures (SQLSTATE 22P02 — invalid_text_representation)
-        // happen when callers pass synthetic url_ids — most commonly the URL
-        // Inspector PG dashboard's owned-urls flow, where the rpc_url_inspector_owned_urls
-        // RPC does not return a real source_urls.id and the dashboard
-        // synthesises `url-${index}-${slug}` ids per LLMO-4526 (multi-persona
-        // PR review M2 follow-up).
-        //
-        // The drilldown is genuinely empty for those rows (we do not know
-        // which prompts cited that URL), so it is more useful to clients to
-        // surface that as an empty list than as a 500 the dialog would have
-        // to interpret. Other Postgres errors continue to bubble up as 500.
-        if (error.code === '22P02' || /invalid input syntax for( type)? uuid/i.test(error.message)) {
-          ctx.log.info(`URL Inspector URL prompts: invalid url_id "${urlId}" — returning empty prompt list`);
-          return cachedOk({ prompts: [] });
-        }
-        ctx.log.error(`URL Inspector URL prompts RPC error: ${error.message}`);
-        return internalServerError('Internal error processing URL Inspector URL prompts');
+/**
+ * Resolves whether `brandId` is eligible for the single-hop Semrush URL_PROMPTS
+ * lookup: it must resolve to a real brand AND that brand must have an active
+ * Semrush SUB-workspace of its own. A flat-mode brand (no sub-workspace — just
+ * the org's shared parent workspace) is NOT eligible even when the org has a
+ * Semrush workspace at all: prompts/projects live only in a brand's own
+ * sub-workspace (see `elements.js: authorizeBrandSubWorkspace`), never the
+ * shared parent. `workspaceId === parentWorkspaceId` is the same misconfiguration
+ * guard that function uses — a sub-workspace must never coincide with the org
+ * parent, or a scoped query would run against the shared parent pool.
+ * @param {object} ctx - Request context.
+ * @param {string} spaceCatId - SpaceCat organization UUID.
+ * @param {string} brandId - Brand id/name from the route (path param).
+ * @param {object} client - PostgREST client (also usable as postgrestClient).
+ * @returns {Promise<{eligible: boolean, workspaceId?: string}>}
+ */
+async function resolveSemrushEligibility(ctx, spaceCatId, brandId, client) {
+  if (!brandId || brandId === 'all') {
+    return { eligible: false };
+  }
+  const brandUuid = await resolveBrandUuid(spaceCatId, brandId, client);
+  if (!brandUuid) {
+    return { eligible: false };
+  }
+  const { mode, workspaceId, parentWorkspaceId } = await resolveBrandWorkspace(
+    ctx,
+    spaceCatId,
+    brandUuid,
+  );
+  if (mode !== 'subworkspace') {
+    return { eligible: false };
+  }
+  if (workspaceId === parentWorkspaceId) {
+    ctx.log.error('url-inspector-prompts-by-url: brand sub-workspace equals org parent workspace - refusing', {
+      brandUuid, spaceCatId, workspaceId,
+    });
+    return { eligible: false };
+  }
+  return { eligible: true, workspaceId };
+}
+
+/**
+ * Creates the getUrlInspectorPromptsByUrl handler — a single entry point for
+ * "prompts that cited this URL" regardless of whether the org/brand is on
+ * Semrush or still Mysticat/DRS-backed (LLMO-5789).
+ *
+ * Accepts EITHER `url` or `urlId` (at least one required):
+ *   - Semrush-eligible (see `resolveSemrushEligibility`) AND `url` given ->
+ *     single-hop Semrush URL_PROMPTS lookup by the URL string itself, calling
+ *     `elements-service.js: getUrlPrompts` directly — no `domain-urls`
+ *     resolution needed at all. No market/project scoping is exposed on this
+ *     endpoint (`projectIds: []` -> the service's own unscoped aggregate
+ *     across the whole sub-workspace), so the cross-brand project-ownership
+ *     check `elements.js: listUrlPrompts` does for caller-supplied `projectId`
+ *     does not apply here — there is no such input to validate.
+ *   - Otherwise, if `urlId` is given -> the existing Mysticat RPC path via
+ *     `fetchUrlPromptsViaMysticat` (`rpc_url_inspector_url_prompts`), same as
+ *     `createUrlInspectorUrlPromptsHandler`. Preferred over the by-url RPC
+ *     when both are present since the caller has already paid the
+ *     resolution cost (e.g. via `domain-urls`).
+ *   - Otherwise (only `url` given, not Semrush-eligible) -> single-hop
+ *     Mysticat RPC path via `fetchUrlPromptsByUrlViaMysticat`
+ *     (`rpc_url_inspector_prompts_by_url`, LLMO-5789) — resolves the URL to a
+ *     url_id inside the RPC itself, so DRS-backed callers no longer need to
+ *     paginate `domain-urls` either.
+ *
+ * Both branches apply the same 28-day `defaultDateRange()` fallback so callers
+ * see identical behavior regardless of which backend actually serves the
+ * request (the Semrush service call otherwise requires explicit dates).
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createUrlInspectorPromptsByUrlHandler(
+  getOrgAndValidateAccess,
+) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'url-inspector-prompts-by-url',
+    async (ctx, client) => {
+      const { spaceCatId, brandId } = ctx.params;
+      const params = parseFilterDimensionsParams(ctx);
+      const defaults = defaultDateRange();
+      const q = ctx.data || /* c8 ignore next */ {};
+
+      if (!shouldApplyFilter(params.siteId)) {
+        return badRequest('siteId is required for URL Inspector endpoints');
       }
 
-      const rows = data || [];
-      const prompts = rows.map((r) => ({
-        prompt: r.prompt || '',
-        category: r.category || '',
-        region: r.region || '',
-        topics: r.topics || '',
-        citations: Number(r.citations ?? 0),
-      }));
+      const { url } = q;
+      const urlId = q.urlId || q.url_id;
+      if (!url && !urlId) {
+        return badRequest('Either url or urlId is required for URL prompt breakdown');
+      }
 
-      return cachedOk({ prompts });
+      const siteBelongsToOrg = await validateSiteBelongsToOrg(
+        client,
+        spaceCatId,
+        params.siteId,
+      );
+      if (!siteBelongsToOrg) {
+        return forbidden('Site does not belong to the organization');
+      }
+
+      const { model, error: modelError } = resolveUrlInspectorPlatform(params);
+      if (modelError) {
+        return badRequest(modelError);
+      }
+
+      const startDate = params.startDate || defaults.startDate;
+      const endDate = params.endDate || defaults.endDate;
+
+      const { eligible, workspaceId } = url
+        ? await resolveSemrushEligibility(ctx, spaceCatId, brandId, client)
+        : { eligible: false };
+
+      if (eligible) {
+        try {
+          const imsToken = await resolveSemrushImsToken(ctx, ctx.log, 'url-inspector-prompts-by-url');
+          const service = createElementsService(
+            createElementsTransport({ env: ctx.env, imsToken }),
+            ctx.log,
+          );
+          const prompts = await service.getUrlPrompts(workspaceId, {
+            url, model, startDate, endDate, projectIds: [],
+          });
+          return cachedOk({ prompts });
+        } catch (e) {
+          ctx.log.error(`URL Inspector prompts-by-url Semrush error: ${e?.message || e}`);
+          return internalServerError('Internal error processing URL Inspector prompts');
+        }
+      }
+
+      const result = urlId
+        ? await fetchUrlPromptsViaMysticat(client, ctx.log, {
+          siteId: params.siteId, urlId, startDate, endDate, model,
+        })
+        : await fetchUrlPromptsByUrlViaMysticat(client, ctx.log, {
+          siteId: params.siteId, url, startDate, endDate, model,
+        });
+      if (result.error) {
+        return result.error;
+      }
+      return cachedOk({ prompts: result.prompts });
     },
   );
 }
