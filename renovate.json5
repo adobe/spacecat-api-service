@@ -1,12 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "enabled": true,
-  // Pin the npm Renovate uses to regenerate the lockfile to <12. The CI runner defaults
-  // to npm 12, but @adobe/spacecat-helix-content-sdk pins engines.npm ">=10.9.0 <12.0.0";
-  // with engine-strict=true (.npmrc), an npm-12 `npm install` hard-fails EBADENGINE, so
-  // Renovate cannot update package-lock.json and every dep-bump PR then fails CI's
-  // `npm ci` with EUSAGE (package.json vs lock out of sync). Regenerating with npm 11
-  // keeps engine-strict intact and leaves CI's `npm ci` on npm 12 (which works). See #2453.
   "constraints": {
     "npm": "<12.0.0"
   },
