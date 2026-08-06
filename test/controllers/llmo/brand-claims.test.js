@@ -214,6 +214,26 @@ describe('handleBrandClaims', () => {
     expect(signedKey()).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/gpt-4.1.json.gz`);
   });
 
+  it('returns 400 for a model containing a path separator (no key probing)', async () => {
+    const context = { ...baseContext, data: { model: 'foo/bar' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(400);
+    expect((await result.json()).message).to.equal('Invalid model parameter');
+    expect(mockS3Send).not.to.have.been.called;
+  });
+
+  it('ignores a malformed date when model is supplied (model takes precedence)', async () => {
+    const context = { ...baseContext, data: { model: 'gpt-4.1', date: 'garbage' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(200);
+    const headCmd = mockS3Send.getCall(0).args[0];
+    expect(headCmd.input.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/gpt-4.1.json.gz`);
+  });
+
   it('returns 400 when S3 is not configured', async () => {
     const result = await handleBrandClaims({ ...baseContext, s3: null });
     expect(result.status).to.equal(400);

@@ -20,6 +20,10 @@ import { dateToIsoWeek } from '../../support/elements/week-utils.js';
 const CLAIMS_PREFIX = 'brand_claims/llmo';
 const WEEK_RE = /^\d{4}-W\d{2}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+// `model` is interpolated into the S3 key, so constrain it to alphanumerics,
+// dots, hyphens, underscores — no `/` — to prevent using HeadObject as an
+// object-existence probe across arbitrary key paths.
+const MODEL_RE = /^[\w.-]+$/;
 
 /**
  * Latest run key for a site: the lexically-greatest `YYYY-Www` folder under the
@@ -81,17 +85,21 @@ export async function handleBrandClaims(context) {
     return badRequest('S3 bucket is not configured for this environment');
   }
 
-  if (date !== undefined && (!DATE_RE.test(date) || Number.isNaN(new Date(date).getTime()))) {
-    return badRequest('Invalid date parameter: expected YYYY-MM-DD format');
+  if (model !== undefined && !MODEL_RE.test(model)) {
+    return badRequest('Invalid model parameter');
   }
 
-  // Model files are managed flat (not week-partitioned); `date` resolves directly
-  // to its week; otherwise default to the legacy flat key and upgrade it to the
-  // latest week (via a list) inside the try below.
+  // Model files are managed flat (not week-partitioned) and take precedence;
+  // `date` resolves directly to its week (validated only here, where it is
+  // actually used); otherwise default to the legacy flat key and upgrade it to
+  // the latest week (via a list) inside the try below.
   let s3Key;
   if (model) {
     s3Key = `${CLAIMS_PREFIX}/${siteId}/${model}.json.gz`;
   } else if (date) {
+    if (!DATE_RE.test(date) || Number.isNaN(new Date(date).getTime())) {
+      return badRequest('Invalid date parameter: expected YYYY-MM-DD format');
+    }
     s3Key = `${CLAIMS_PREFIX}/${siteId}/${dateToIsoWeek(date)}/data.json.gz`;
   } else {
     s3Key = `${CLAIMS_PREFIX}/${siteId}/data.json.gz`;
