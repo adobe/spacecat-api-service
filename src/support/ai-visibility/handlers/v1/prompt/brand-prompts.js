@@ -36,13 +36,24 @@ import {
   PROTO_TO_JSON,
 } from '../../../grpc-utils.js';
 
+const TOPIC_HASH_ID_PATTERN = /^\d+$/;
+
 export function buildBrandPromptsDimensionFilterQl(sp) {
   const filters = [];
   const topicId = sp.get('topicId');
   const targetUrl = sp.get('targetUrl');
 
   if (topicId) {
-    filters.push(`topic_hash = ${escapeQlString(topicId)}`);
+    if (!TOPIC_HASH_ID_PATTERN.test(topicId)) {
+      return {
+        status: 400,
+        body: {
+          error: 'invalid_request',
+          message: 'topicId must be a non-negative integer',
+        },
+      };
+    }
+    filters.push(`topic_hash = ${topicId}`);
   }
   if (targetUrl) {
     filters.push(`target_url = "${escapeQlString(targetUrl)}"`);
@@ -61,6 +72,9 @@ export async function handleBrandPrompts(sp, clients) {
   const date = sp.get('date');
   const { limit, offset } = parseLimitOffset(sp);
   const dimensionFilterQl = buildBrandPromptsDimensionFilterQl(sp);
+  if (typeof dimensionFilterQl !== 'string') {
+    return dimensionFilterQl;
+  }
 
   const categories = [
     PROMPT_CATEGORY_ENUM.MENTIONS_TARGET,
