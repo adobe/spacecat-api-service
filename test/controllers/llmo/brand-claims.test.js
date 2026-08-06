@@ -175,6 +175,17 @@ describe('handleBrandClaims', () => {
     expect(mockS3Send).not.to.have.been.called;
   });
 
+  it('returns 400 for a calendar-invalid date that would roll over', async () => {
+    // 2026-02-30 parses (JS rolls it to Mar 2); reject rather than key the wrong week.
+    const context = { ...baseContext, data: { date: '2026-02-30' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(400);
+    expect((await result.json()).message).to.equal('Invalid date parameter: expected YYYY-MM-DD format');
+    expect(mockS3Send).not.to.have.been.called;
+  });
+
   it('resolves the latest week and warns when the listing is truncated', async () => {
     listResult = { IsTruncated: true, CommonPrefixes: [weekPrefix('2026-W17')] };
 

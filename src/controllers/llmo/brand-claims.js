@@ -19,7 +19,6 @@ import { dateToIsoWeek } from '../../support/elements/week-utils.js';
 
 const CLAIMS_PREFIX = 'brand_claims/llmo';
 const WEEK_RE = /^\d{4}-W\d{2}$/;
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // `model` is interpolated into the S3 key, so constrain it to alphanumerics,
 // dots, hyphens, underscores — no `/` — to prevent using HeadObject as an
 // object-existence probe across arbitrary key paths.
@@ -97,7 +96,10 @@ export async function handleBrandClaims(context) {
   if (model) {
     s3Key = `${CLAIMS_PREFIX}/${siteId}/${model}.json.gz`;
   } else if (date) {
-    if (!DATE_RE.test(date) || Number.isNaN(new Date(date).getTime())) {
+    // Round-trip parse (UTC): rejects unparseable dates AND ones JS silently
+    // rolls over (e.g. 2026-02-30 -> Mar 2), which would key the wrong week.
+    const parsed = new Date(`${date}T00:00:00Z`);
+    if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) {
       return badRequest('Invalid date parameter: expected YYYY-MM-DD format');
     }
     s3Key = `${CLAIMS_PREFIX}/${siteId}/${dateToIsoWeek(date)}/data.json.gz`;
