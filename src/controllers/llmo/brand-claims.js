@@ -13,13 +13,59 @@
 import {
   badRequest, notFound,
 } from '@adobe/spacecat-shared-http-utils';
-import { HeadObjectCommand } from '@aws-sdk/client-s3';
+import { HeadObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { cachedOk } from '../../support/cached-response.js';
+
+const CLAIMS_PREFIX = 'brand_claims/llmo';
+const WEEK_RE = /^\d{4}-W\d{2}$/;
+
+/**
+ * ISO-week key segment (`YYYY-Www`) for a date, matching the delivery side
+ * (mystique) that writes one export per run under that folder.
+ *
+ * @param {Date} d - a valid Date
+ * @returns {string} e.g. '2026-W17'
+ */
+export function toIsoWeek(d) {
+  const date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7) + 3); // Thursday of this week
+  const isoYear = date.getUTCFullYear();
+  const firstThursday = new Date(Date.UTC(isoYear, 0, 4));
+  firstThursday.setUTCDate(firstThursday.getUTCDate() - ((firstThursday.getUTCDay() + 6) % 7) + 3);
+  const week = 1 + Math.round((date.getTime() - firstThursday.getTime()) / (7 * 24 * 3600 * 1000));
+  return `${isoYear}-W${String(week).padStart(2, '0')}`;
+}
+
+/**
+ * Latest run key for a site: the lexically-greatest `YYYY-Www` folder under the
+ * site prefix. Returns null when no week folder exists yet (caller falls back to
+ * the legacy flat key).
+ */
+async function latestWeekKey(s3, bucketName, siteId) {
+  const prefix = `${CLAIMS_PREFIX}/${siteId}/`;
+  const res = await s3.s3Client.send(new ListObjectsV2Command({
+    Bucket: bucketName,
+    Prefix: prefix,
+    Delimiter: '/',
+  }));
+  const latest = (res.CommonPrefixes || [])
+    .map((p) => p.Prefix.slice(prefix.length).replace(/\/$/, ''))
+    .filter((seg) => WEEK_RE.test(seg))
+    .sort()
+    .pop();
+  return latest ? `${prefix}${latest}/data.json.gz` : null;
+}
 
 /**
  * Handles the brand claims retrieval by generating a presigned S3 URL.
  * Data files are .json.gz and can exceed Lambda's 6MB response limit,
  * so this endpoint returns a presigned URL rather than the data directly.
+ *
+ * Runs are stored per ISO week (`{siteId}/{YYYY-Www}/data.json.gz`). With no
+ * `date`, the latest week is served (falling back to the legacy flat
+ * `{siteId}/data.json.gz` for sites not yet migrated); with `date`, the run for
+ * that date's ISO week is served. A `model` selects a legacy flat
+ * `{model}.json.gz` file, unchanged.
  *
  * @param {object} context - The request context containing log, s3, env, and params
  * @returns {Promise<Response>} The brand claims presigned URL response
@@ -27,7 +73,7 @@ import { cachedOk } from '../../support/cached-response.js';
 export async function handleBrandClaims(context) {
   const { log, s3 } = context;
   const { siteId } = context.params;
-  const { model } = context.data;
+  const { model, date } = context.data;
 
   if (!s3 || !s3.s3Client) {
     return badRequest('S3 storage is not configured for this environment');
@@ -38,14 +84,29 @@ export async function handleBrandClaims(context) {
     return badRequest('S3 bucket is not configured for this environment');
   }
 
-  const s3Key = model
-    ? `brand_claims/llmo/${siteId}/${model}.json.gz`
-    : `brand_claims/llmo/${siteId}/data.json.gz`;
+  if (date !== undefined && Number.isNaN(new Date(date).getTime())) {
+    return badRequest(`Invalid date parameter: ${date}`);
+  }
 
-  log.info(`Getting brand claims for site ${siteId}, model: ${model || 'default'}`);
+  // Model files are managed flat (not week-partitioned); resolved synchronously.
+  // Date resolves directly to its week. The default (no model, no date) needs a
+  // list to find the latest week, so it is resolved inside the try below.
+  let s3Key;
+  if (model) {
+    s3Key = `${CLAIMS_PREFIX}/${siteId}/${model}.json.gz`;
+  } else if (date) {
+    s3Key = `${CLAIMS_PREFIX}/${siteId}/${toIsoWeek(new Date(date))}/data.json.gz`;
+  }
+
+  log.info(`Getting brand claims for site ${siteId}, model: ${model || 'default'}${date ? `, date: ${date}` : ''}`);
 
   try {
     const { getSignedUrl, GetObjectCommand } = s3;
+
+    if (!s3Key) {
+      s3Key = (await latestWeekKey(s3, bucketName, siteId))
+        || `${CLAIMS_PREFIX}/${siteId}/data.json.gz`;
+    }
 
     // Presigning a GetObject URL is an offline operation and never checks that
     // the object exists, so without this HeadObject the endpoint would happily
