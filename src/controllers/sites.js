@@ -99,6 +99,32 @@ async function buildResolveData(org, site, context, asoEntitlement) {
 }
 
 /**
+ * Recursively deep-merges `patch` into `base`, returning a new object.
+ *
+ * Merge semantics (used for PATCH of nested config like hlxConfig/deliveryConfig):
+ * - Omitted keys keep their existing value in `base`.
+ * - A `null` value deletes the key.
+ * - Plain objects are merged recursively; arrays and non-object values replace.
+ *
+ * @param {object} base - Existing value.
+ * @param {object} patch - Incoming partial patch.
+ * @returns {object} Merged result.
+ */
+function deepMerge(base, patch) {
+  const result = { ...(isObject(base) ? base : {}) };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === null) {
+      delete result[key];
+    } else if (isObject(value) && isObject(result[key])) {
+      result[key] = deepMerge(result[key], value);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+/**
  * Resolves the org's per-product default site from config.defaults, validating it belongs
  * to the org and is enrolled. Returns the resolved data object or null to fall through
  * to getFirstEnrollment().
@@ -1187,12 +1213,15 @@ function SitesController(ctx, log, env) {
       ? requestBody.authoringType
       : site.getAuthoringType();
 
+    // Deep-merge `deliveryConfig`/`hlxConfig` so a partial patch (e.g. hlxConfig with only
+    // rso+code) preserves omitted sub-keys like hlxConfig.content.source. An explicit `null`
+    // for a sub-key deletes it; omitting the field entirely keeps the existing value.
     const nextDeliveryConfig = isObject(requestBody.deliveryConfig)
-      ? requestBody.deliveryConfig
+      ? deepMerge(site.getDeliveryConfig(), requestBody.deliveryConfig)
       : site.getDeliveryConfig();
 
     const nextHlxConfig = isObject(requestBody.hlxConfig)
-      ? requestBody.hlxConfig
+      ? deepMerge(site.getHlxConfig(), requestBody.hlxConfig)
       : site.getHlxConfig();
 
     const authoringTypeChanged = nextAuthoringType !== site.getAuthoringType();
