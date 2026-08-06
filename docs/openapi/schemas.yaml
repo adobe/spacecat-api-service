@@ -4674,6 +4674,28 @@ LlmoOnboardSiteResponse:
       enum: ["processing"]
       description: Always `processing` — triggered audits run asynchronously.
       example: "processing"
+    detectedCdn:
+      type:
+        - string
+        - 'null'
+      enum:
+        - aem-cs-fastly
+        - commerce-fastly
+        - byocdn-fastly
+        - byocdn-akamai
+        - byocdn-cloudfront
+        - byocdn-cloudflare
+        - byocdn-imperva
+        - byocdn-other
+        - ams-cloudfront
+        - ams-frontdoor
+      description: |
+        CDN provider detected during onboarding, or null when detection was
+        inconclusive. The enum is the canonical `CDN_TYPES` vocabulary shared
+        with the radio selector UI (see
+        `src/controllers/llmo/llmo-utils.js#CDN_TYPES`), so the value can
+        drive the UI auto-select directly. Persisted on the site's LLMO
+        config regardless of this response (see `siteConfig.updateLlmoDetectedCdn`).
 
 LlmoQuestion:
   type: object
