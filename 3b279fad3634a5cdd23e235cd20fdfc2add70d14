@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "full",
+  "commit_sha": "3b279fad3634a5cdd23e235cd20fdfc2add70d14",
+  "author": "cboldis@yahoo.com",
+  "timestamp": "2026-06-11T07:53:57+03:00",
+  "detection": {
+    "ai_assisted": true,
+    "method": "heuristic",
+    "tool": "claude-code",
+    "model": "",
+    "confidence": 0.9
+  },
+  "stats": {
+    "total_additions": 31,
+    "total_deletions": 0,
+    "ai_additions": 31,
+    "ai_deletions": 0,
+    "human_additions": 0,
+    "human_deletions": 0
+  },
+  "files": {
+    "test/controllers/llmo/llmo-url-inspector.test.js": {
+      "ai_additions": 31,
+      "human_additions": 0,
+      "ai_deletions": 0,
+      "human_deletions": 0
+    }
+  }
+}
