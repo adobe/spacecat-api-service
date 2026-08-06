@@ -15,26 +15,10 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { HeadObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { cachedOk } from '../../support/cached-response.js';
+import { dateToIsoWeek } from '../../support/elements/week-utils.js';
 
 const CLAIMS_PREFIX = 'brand_claims/llmo';
 const WEEK_RE = /^\d{4}-W\d{2}$/;
-
-/**
- * ISO-week key segment (`YYYY-Www`) for a date, matching the delivery side
- * (mystique) that writes one export per run under that folder.
- *
- * @param {Date} d - a valid Date
- * @returns {string} e.g. '2026-W17'
- */
-export function toIsoWeek(d) {
-  const date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-  date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7) + 3); // Thursday of this week
-  const isoYear = date.getUTCFullYear();
-  const firstThursday = new Date(Date.UTC(isoYear, 0, 4));
-  firstThursday.setUTCDate(firstThursday.getUTCDate() - ((firstThursday.getUTCDay() + 6) % 7) + 3);
-  const week = 1 + Math.round((date.getTime() - firstThursday.getTime()) / (7 * 24 * 3600 * 1000));
-  return `${isoYear}-W${String(week).padStart(2, '0')}`;
-}
 
 /**
  * Latest run key for a site: the lexically-greatest `YYYY-Www` folder under the
@@ -95,7 +79,7 @@ export async function handleBrandClaims(context) {
   if (model) {
     s3Key = `${CLAIMS_PREFIX}/${siteId}/${model}.json.gz`;
   } else if (date) {
-    s3Key = `${CLAIMS_PREFIX}/${siteId}/${toIsoWeek(new Date(date))}/data.json.gz`;
+    s3Key = `${CLAIMS_PREFIX}/${siteId}/${dateToIsoWeek(date.slice(0, 10))}/data.json.gz`;
   }
 
   log.info(`Getting brand claims for site ${siteId}, model: ${model || 'default'}${date ? `, date: ${date}` : ''}`);

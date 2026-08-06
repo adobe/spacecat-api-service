@@ -28,7 +28,6 @@ function weekPrefix(week) {
 
 describe('handleBrandClaims', () => {
   let handleBrandClaims;
-  let toIsoWeek;
   let mockLog;
   let mockS3Client;
   let mockS3Send;
@@ -57,7 +56,6 @@ describe('handleBrandClaims', () => {
       '@adobe/spacecat-shared-http-utils': mockHttpUtils,
     });
     handleBrandClaims = mod.handleBrandClaims;
-    toIsoWeek = mod.toIsoWeek;
   });
 
   beforeEach(() => {
@@ -277,20 +275,5 @@ describe('handleBrandClaims', () => {
     const oneHourMs = 60 * 60 * 1000;
     expect(expiresAt).to.be.at.least(before + oneHourMs);
     expect(expiresAt).to.be.at.most(after + oneHourMs);
-  });
-
-  describe('toIsoWeek', () => {
-    it('matches ISO-8601 week numbering', () => {
-      expect(toIsoWeek(new Date('2026-04-22'))).to.equal('2026-W17');
-    });
-
-    it('handles the ISO year boundary (belongs to prior year week 53)', () => {
-      // 2027-01-01 is a Friday → ISO week 53 of 2026.
-      expect(toIsoWeek(new Date('2027-01-01'))).to.equal('2026-W53');
-    });
-
-    it('zero-pads single-digit weeks', () => {
-      expect(toIsoWeek(new Date('2026-01-05'))).to.equal('2026-W02');
-    });
   });
 });
