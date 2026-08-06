@@ -1,3 +1,17 @@
+## [1.721.1](https://github.com/adobe/spacecat-api-service/compare/v1.721.0...v1.721.1) (2026-08-05)
+
+
+### Bug Fixes
+
+* **serenity:** remove deprecated tagMap prompt DTO field (SITES-49198) ([#3001](https://github.com/adobe/spacecat-api-service/issues/3001)) ([9c68c98](https://github.com/adobe/spacecat-api-service/commit/9c68c98e41c9204578e18ad3b9722b47e3611717))
+
+# [1.721.0](https://github.com/adobe/spacecat-api-service/compare/v1.720.0...v1.721.0) (2026-08-05)
+
+
+### Features
+
+* **sites:** default missing x-product to ASO on /sites-resolve under SKIP_AUTH ([#2964](https://github.com/adobe/spacecat-api-service/issues/2964)) ([3d65f6d](https://github.com/adobe/spacecat-api-service/commit/3d65f6d7c07a00f1e8f35614df558ef1284cabd9)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 # [1.720.0](https://github.com/adobe/spacecat-api-service/compare/v1.719.1...v1.720.0) (2026-08-05)
 
 
