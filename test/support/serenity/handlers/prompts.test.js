@@ -203,7 +203,9 @@ describe('handlers/prompts.js — handleListPrompts', () => {
     });
 
     expect(result.items[0].semrushPromptId).to.equal('');
-    expect(result.items[0].tagMap).to.deep.equal({ consideration: '' });
+    expect(result.items[0].tags).to.deep.equal([{
+      id: '', name: 'consideration', parentId: null, path: null,
+    }]);
   });
 
   // Branch coverage: tagNamesOf handles items with no tags array (DTO carries
@@ -238,7 +240,6 @@ describe('handlers/prompts.js — handleListPrompts', () => {
       languageCode: 'en',
       text: 'good prompt',
       tags: [],
-      tagMap: {},
       // No upstream `metadata` on this item → all four authorship fields null.
       createdAt: null,
       createdBy: null,
@@ -279,7 +280,6 @@ describe('handlers/prompts.js — handleListPrompts', () => {
       tags: [{
         id: 't-1', name: 'awareness', parentId: null, path: null,
       }],
-      tagMap: { awareness: 't-1' },
       createdAt: null,
       createdBy: null,
       updatedAt: null,
@@ -292,8 +292,8 @@ describe('handlers/prompts.js — handleListPrompts', () => {
   // The load-bearing property of the id-keyed `tags` array: a prompt can carry
   // two tags with the same bare name from different dimensions. Upstream embeds
   // each tag's own parentage on the prompt, so the dimension reads straight off
-  // `path[0]`. `tagMap`, being name-keyed, can only represent one of them —
-  // which is why it is deprecated.
+  // `path[0]`. A name-keyed view could only represent one of them — which is why
+  // the id-keyed `tags` list is the canonical shape.
   it('keeps two same-named prompt tags distinct, reading each dimension off its own path', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
@@ -341,8 +341,8 @@ describe('handlers/prompts.js — handleListPrompts', () => {
     expect(tags.map((t) => t.path[0].name)).to.deep.equal(['category', 'origin']);
     expect(tags[0].parentId).to.equal(TAG_IDS.categoryRunningShoes);
     expect(tags[1].parentId).to.equal(TAG_IDS.originRoot);
-    // The deprecated name-keyed view collapses them; only one id survives.
-    expect(Object.keys(result.items[0].tagMap)).to.deep.equal(['human']);
+    // Both same-named tags survive as distinct entries in the id-keyed list.
+    expect(tags.map((t) => t.id)).to.deep.equal([TAG_IDS.subCategoryHuman, TAG_IDS.originHuman]);
     // Listing prompts costs exactly ONE upstream call — no tag-tree walk.
     expect(transport.listProjectTags).to.not.have.been.called;
   });
@@ -386,7 +386,7 @@ describe('handlers/prompts.js — handleListPrompts', () => {
     expect(body.tag_ids).to.deep.equal([]);
   });
 
-  it('buildTagMapOf: skips null/non-object entries and objects without name; coerces numeric id', async () => {
+  it('buildTagsOf: skips null/non-object entries and objects without name; coerces numeric id', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
@@ -416,11 +416,17 @@ describe('handlers/prompts.js — handleListPrompts', () => {
       geoTargetId: 2840, languageCode: 'en',
     });
 
-    expect(result.items[0].tagMap).to.deep.equal({
-      'name-only': '',
-      valid: '42',
-      'string-tag': '',
-    });
+    expect(result.items[0].tags).to.deep.equal([
+      {
+        id: '', name: 'name-only', parentId: null, path: null,
+      },
+      {
+        id: '42', name: 'valid', parentId: null, path: null,
+      },
+      {
+        id: '', name: 'string-tag', parentId: null, path: null,
+      },
+    ]);
   });
 
   it('slices tagIds to MAX_TAG_IDS (50) before forwarding', async () => {
@@ -2877,6 +2883,12 @@ describe('handlers/prompts.js — per-item source override (LLMO-6556)', () => {
       const { value, reason } = normalizePromptInput({ ...base, source: 'Semrush' });
       expect(reason).to.equal(null);
       expect(value.source).to.equal('semrush');
+    });
+
+    it('accepts strategy-chat (chat-originated Track prompts)', () => {
+      const { value, reason } = normalizePromptInput({ ...base, source: 'strategy-chat' });
+      expect(reason).to.equal(null);
+      expect(value.source).to.equal('strategy-chat');
     });
 
     it('rejects an unknown source (closed vocabulary — select, never invent)', () => {

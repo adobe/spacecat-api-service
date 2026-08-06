@@ -118,6 +118,16 @@ x-ai-vis-search-query: &searchQueryParam
     type: string
     example: coffee
 
+x-ai-vis-fts-query: &ftsQueryParam
+  name: query
+  in: query
+  required: true
+  description: Full-text topic query forwarded directly to the Semrush v2 FTS request.
+  schema:
+    type: string
+    minLength: 1
+    example: coffee
+
 x-ai-vis-text-filter: &textFilterParam
   name: textFilter
   in: query
@@ -125,7 +135,7 @@ x-ai-vis-text-filter: &textFilterParam
   description: |
     Optional free-text filter applied server-side across the full result set (not just the
     current page), via a `dimension_filter_ql` `CONTAINS` clause on the dataset's primary
-    column (prompts→`prompt`, topics→`topic`, brands→`name`, source-domains→`domain`). When
+    column (prompts→`prompt`, topics→`topic`, brands→`brand_name`, source-domains→`domain`). When
     set, `total` reflects the filtered count. Distinct from `searchQuery` (the topic FTS query).
   schema:
     type: string
@@ -140,6 +150,25 @@ x-ai-vis-topic-id: &topicIdParam
     type: string
     example: '12345'
 
+x-ai-vis-topic-ids: &topicIdsParam
+  name: topicIds
+  in: query
+  required: true
+  description: |
+    Topic identifiers for `PromptsByTopicIDs`. Repeat the parameter to request prompts for
+    multiple topics (for example, `?topicIds=12345&topicIds=67890`). Digits only; capped at
+    50 identifiers per request. The singular `topicId` parameter is not supported.
+  style: form
+  explode: true
+  schema:
+    type: array
+    minItems: 1
+    maxItems: 50
+    items:
+      type: string
+      pattern: '^\d+$'
+      example: '12345'
+
 x-ai-vis-topic-id-optional: &topicIdOptionalParam
   name: topicId
   in: query
@@ -151,6 +180,18 @@ x-ai-vis-topic-id-optional: &topicIdOptionalParam
     type: string
     pattern: '^\d+$'
     example: '12345'
+
+x-ai-vis-target-url-optional: &targetUrlOptionalParam
+  name: targetUrl
+  in: query
+  required: false
+  description: |
+    When set, restricts brand prompts to this exact target URL (sent to Semrush as
+    `target_url = "<targetUrl>"`).
+  schema:
+    type: string
+    format: uri
+    example: 'https://www.semrush.com/siteaudit/'
 
 x-ai-vis-v1-brand-topics-sort-by: &v1BrandTopicsSortByParam
   name: sortBy
@@ -446,6 +487,56 @@ x-ai-vis-fts-source-domains-sort-by: &ftsSourceDomainsSortByParam
     enum: [DOMAIN, SOURCES_COUNT, MENTIONS, ORGANIC_TRAFFIC]
     default: MENTIONS
 
+x-ai-vis-v1-fts-topics-sort-by: &v1FtsTopicsSortByParam
+  name: sortBy
+  in: query
+  required: false
+  description: Semrush `TOPICS_BY_FTS_REQUEST_ORDER_BY`; defaults to `RELEVANCE_SCORE`.
+  schema:
+    type: string
+    enum: [RELEVANCE_SCORE, VOLUME]
+    default: RELEVANCE_SCORE
+
+x-ai-vis-v1-fts-prompts-sort-by: &v1FtsPromptsSortByParam
+  name: sortBy
+  in: query
+  required: false
+  description: Semrush `PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY`; defaults to `MENTIONED_BRANDS_COUNT`.
+  schema:
+    type: string
+    enum: [PROMPT, MENTIONED_BRANDS_COUNT, SOURCES_COUNT, RELEVANCE_SCORE]
+    default: MENTIONED_BRANDS_COUNT
+
+x-ai-vis-v1-prompts-by-topic-ids-sort-by: &v1PromptsByTopicIdsSortByParam
+  name: sortBy
+  in: query
+  required: false
+  description: Semrush `PROMPTS_BY_TOPIC_IDS_REQUEST_ORDER_BY`; defaults to `MENTIONED_BRANDS_COUNT`.
+  schema:
+    type: string
+    enum: [PROMPT, MENTIONED_BRANDS_COUNT, SOURCES_COUNT]
+    default: MENTIONED_BRANDS_COUNT
+
+x-ai-vis-v1-fts-brands-sort-by: &v1FtsBrandsSortByParam
+  name: sortBy
+  in: query
+  required: false
+  description: Semrush `BRANDS_BY_TOPIC_FTS_REQUEST_ORDER_BY`; defaults to `MENTIONS`.
+  schema:
+    type: string
+    enum: [NAME, MENTIONS, SOURCES_COUNT]
+    default: MENTIONS
+
+x-ai-vis-v1-fts-source-domains-sort-by: &v1FtsSourceDomainsSortByParam
+  name: sortBy
+  in: query
+  required: false
+  description: Semrush `SOURCE_DOMAINS_BY_TOPIC_FTS_REQUEST_ORDER_BY`; defaults to `MENTIONS`.
+  schema:
+    type: string
+    enum: [DOMAIN, SOURCES_COUNT, MENTIONS, ORGANIC_TRAFFIC]
+    default: MENTIONS
+
 x-ai-vis-brands-cited-pages-sort-by: &brandsCitedPagesSortByParam
   name: sortBy
   in: query
@@ -456,6 +547,30 @@ x-ai-vis-brands-cited-pages-sort-by: &brandsCitedPagesSortByParam
   schema:
     type: string
     enum: [URL, PROMPTS_COUNT]
+    default: PROMPTS_COUNT
+
+x-ai-vis-v1-source-cited-pages-sort-by: &v1SourceCitedPagesSortByParam
+  name: sortBy
+  in: query
+  required: false
+  description: |
+    `SOURCES_REQUEST_ORDER_BY` for Semrush v2 `SourcesRequest.order.by`.
+    Default when omitted: `PROMPTS_COUNT`. Invalid values return `400 invalid_request`.
+  schema:
+    type: string
+    enum: [URL, PROMPTS_COUNT]
+    default: PROMPTS_COUNT
+
+x-ai-vis-v1-source-cited-sources-sort-by: &v1SourceCitedSourcesSortByParam
+  name: sortBy
+  in: query
+  required: false
+  description: |
+    `DOMAINS_REQUEST_ORDER_BY` for Semrush v2 `SourceDomainsRequest.order.by`.
+    Default when omitted: `PROMPTS_COUNT`. Invalid values return `400 invalid_request`.
+  schema:
+    type: string
+    enum: [DOMAIN, MENTIONS, SOURCES_COUNT, PROMPTS_COUNT, ORGANIC_TRAFFIC]
     default: PROMPTS_COUNT
 
 x-ai-vis-brands-top-brands-sort-by: &brandsTopBrandsSortByParam
@@ -1334,6 +1449,42 @@ ai-visibility-v1-brand-stats-by-llm:
     security:
       - api_key: []
 
+ai-visibility-v1-brand-competitors-stats:
+  get:
+    tags: [ai-visibility]
+    summary: Get competitor statistics (CompetitorsMetrics v1 JSON)
+    description: |
+      Returns time-series statistics for the target brand and its competitors using Semrush
+      `CompetitorsMetrics.Stats`. The response is native protobuf JSON (camelCase) without
+      additional field mapping.
+      Optional `engine` selects one LLM.
+    operationId: getAiVisibilityV1BrandCompetitorsStats
+    parameters:
+      - *domainParam
+      - name: competitors
+        in: query
+        required: true
+        description: Comma-separated list of competitor domains
+        schema:
+          type: string
+          example: competitor1.com,competitor2.com
+      - *countryParam
+      - *regionParam
+      - *engineParam
+    responses:
+      '200':
+        description: Competitor statistics retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1BrandCompetitorsStatsResponse'
+            examples:
+              competitorsStats:
+                $ref: './examples.yaml#/AiVisibilityV1BrandCompetitorsStats'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
 ai-visibility-v1-brand-stats-by-country:
   get:
     tags: [ai-visibility]
@@ -1627,7 +1778,9 @@ ai-visibility-v1-prompt-brand-prompts:
       (camelCase) with `PROMPT_CATEGORY` in `categories`, and supports `sortBy` / `sortDirection` on
       `PROMPTS_REQUEST_ORDER_BY` (default `MENTIONED_BRANDS_COUNT` descending). Responds with
       `{ data, total }` plus `srFilters`; `offset` and `limit` are not echoed (use the query parameters).
-      Optional `topicId` applies a `topic_hash = <topicId>` dimension filter.
+      Optional `topicId` and `targetUrl` apply `topic_hash = <topicId>` and
+      `target_url = "<targetUrl>"` dimension filters, respectively. When both are present,
+      the filters are combined with `AND`.
     operationId: getAiVisibilityV1PromptBrandPrompts
     parameters:
       - *domainParam
@@ -1638,6 +1791,7 @@ ai-visibility-v1-prompt-brand-prompts:
       - *v1PromptsSortByParam
       - *sortDirectionParam
       - *topicIdOptionalParam
+      - *targetUrlOptionalParam
       - *limitParam
       - *offsetParam
     responses:
@@ -1659,8 +1813,8 @@ ai-visibility-v1-prompt-brand-prompts-export:
       Exports prompts for the target domain using Semrush `PromptService` v2 `PromptsExport`.
       The nested `PromptsRequest` uses the same filters and sorting as
       `/llmo/ai-visibility/v1/prompt/brand-prompts`: fixed prompt categories
-      `MENTIONS_TARGET` and `CITES_TARGET`, optional `topicId` as
-      `topic_hash = <topicId>`, `PROMPTS_REQUEST_ORDER_BY` sorting, and `limit` / `offset`.
+      `MENTIONS_TARGET` and `CITES_TARGET`, optional `topicId` and `targetUrl` dimension
+      filters, `PROMPTS_REQUEST_ORDER_BY` sorting, and `limit` / `offset`.
       The response is the native Semrush `ExportResponse` protobuf JSON with CSV
       `fileContent` base64-encoded, plus `fileName`, `contentType`, and `srFilters`.
     operationId: getAiVisibilityV1PromptBrandPromptsExport
@@ -1673,6 +1827,7 @@ ai-visibility-v1-prompt-brand-prompts-export:
       - *v1PromptsSortByParam
       - *sortDirectionParam
       - *topicIdOptionalParam
+      - *targetUrlOptionalParam
       - *limitParam
       - *offsetParam
     responses:
@@ -1912,6 +2067,213 @@ ai-visibility-v1-source-gap-source-domains-totals:
     security:
       - api_key: []
 
+ai-visibility-v1-source-cited-pages:
+  get:
+    tags: [ai-visibility]
+    summary: Get cited pages (Source v2 JSON)
+    description: |
+      Returns pages on the target domain that were cited in LLM responses using Semrush
+      `SourceService` v2 `Sources`. Rows use native protobuf JSON (camelCase). `searchQuery`
+      is forwarded as a `source_url CONTAINS "<query>"` dimension filter. Sorting supports
+      `URL` and `PROMPTS_COUNT` (default, descending). Pagination is offset-based through
+      `limit` and `offset`; those values are not echoed in the response.
+
+      This read-only endpoint exposes only documented upstream fields and URL filtering;
+      arbitrary or deeply nested filtering is not supported.
+    operationId: getAiVisibilityV1SourceCitedPages
+    parameters:
+      - *domainParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *dateParam
+      - *v1SourceCitedPagesSortByParam
+      - *sortDirectionParam
+      - *searchQueryParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Cited pages retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1SourceCitedPagesResponse'
+            examples:
+              citedPages:
+                $ref: './examples.yaml#/AiVisibilityV1SourceCitedPages'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-source-cited-pages-export:
+  get:
+    tags: [ai-visibility]
+    summary: Export cited pages as CSV (Source v2 JSON)
+    description: |
+      Exports cited pages using Semrush `SourceService` v2 `SourcesExport`. The nested
+      `SourcesRequest` uses the same date, engine, market, URL filter, sorting, and
+      offset/limit inputs as `/llmo/ai-visibility/v1/source/cited-pages`. The response is
+      the native Semrush `ExportResponse` protobuf JSON with base64-encoded CSV content.
+    operationId: getAiVisibilityV1SourceCitedPagesExport
+    parameters:
+      - *domainParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *dateParam
+      - *v1SourceCitedPagesSortByParam
+      - *sortDirectionParam
+      - *searchQueryParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Cited pages CSV export retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1SourceCitedPagesExportResponse'
+            examples:
+              citedPagesExport:
+                $ref: './examples.yaml#/AiVisibilityV1SourceCitedPagesExport'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-source-cited-pages-totals:
+  get:
+    tags: [ai-visibility]
+    summary: Get cited pages total (Source v2 JSON)
+    description: |
+      Returns the unpaginated count of owned pages cited in LLM responses using Semrush
+      `SourceService` v2 `OwnedSourcesTotal`. Accepts the same target, date, engine, market,
+      and `searchQuery` URL filter as the data endpoint, but no sorting or pagination.
+      Because this is a read-only upstream query, concurrent-update coordination is not required.
+    operationId: getAiVisibilityV1SourceCitedPagesTotals
+    parameters:
+      - *domainParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *dateParam
+      - *searchQueryParam
+    responses:
+      '200':
+        description: Cited pages total retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1SourceCitedPagesTotalsResponse'
+            examples:
+              citedPagesTotals:
+                $ref: './examples.yaml#/AiVisibilityV1SourceCitedPagesTotals'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-source-cited-sources:
+  get:
+    tags: [ai-visibility]
+    summary: Get cited source domains (Source v2 JSON)
+    description: |
+      Returns source domains cited in LLM responses for the target domain using Semrush
+      `SourceService` v2 `SourceDomains`. Rows use native protobuf JSON (camelCase).
+      `searchQuery` is forwarded as a `domain CONTAINS "<query>"` dimension filter.
+      Sorting defaults to `PROMPTS_COUNT` descending. Pagination is offset-based through
+      `limit` and `offset`; those values are not echoed in the response.
+
+      This read-only endpoint exposes only documented upstream fields and domain filtering;
+      arbitrary or deeply nested filtering is not supported.
+    operationId: getAiVisibilityV1SourceCitedSources
+    parameters:
+      - *domainParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *v1SourceCitedSourcesSortByParam
+      - *sortDirectionParam
+      - *searchQueryParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Cited source domains retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1SourceCitedSourcesResponse'
+            examples:
+              citedSources:
+                $ref: './examples.yaml#/AiVisibilityV1SourceCitedSources'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-source-cited-sources-export:
+  get:
+    tags: [ai-visibility]
+    summary: Export cited source domains as CSV (Source v2 JSON)
+    description: |
+      Exports cited source domains using Semrush `SourceService` v2 `SourceDomainsExport`.
+      The nested `SourceDomainsRequest` uses the same engine, market, domain filter, sorting,
+      and offset/limit inputs as `/llmo/ai-visibility/v1/source/cited-sources`. The response
+      is the native Semrush `ExportResponse` protobuf JSON with base64-encoded CSV content.
+    operationId: getAiVisibilityV1SourceCitedSourcesExport
+    parameters:
+      - *domainParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *v1SourceCitedSourcesSortByParam
+      - *sortDirectionParam
+      - *searchQueryParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Cited source domains CSV export retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1SourceCitedSourcesExportResponse'
+            examples:
+              citedSourcesExport:
+                $ref: './examples.yaml#/AiVisibilityV1SourceCitedSourcesExport'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-source-cited-sources-totals:
+  get:
+    tags: [ai-visibility]
+    summary: Get cited source domains total (Source v2 JSON)
+    description: |
+      Returns the unpaginated count of cited source domains using Semrush `SourceService` v2
+      `SourceDomainsTotals`. Accepts the same target, engine, market, and `searchQuery` domain
+      filter as the data endpoint, but no sorting or pagination.
+      Because this is a read-only upstream query, concurrent-update coordination is not required.
+    operationId: getAiVisibilityV1SourceCitedSourcesTotals
+    parameters:
+      - *domainParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *searchQueryParam
+    responses:
+      '200':
+        description: Cited source domains total retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1SourceCitedSourcesTotalsResponse'
+            examples:
+              citedSourcesTotals:
+                $ref: './examples.yaml#/AiVisibilityV1SourceCitedSourcesTotals'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
 ai-visibility-v1-prompt-prompt-response:
   get:
     tags: [ai-visibility]
@@ -1937,6 +2299,429 @@ ai-visibility-v1-prompt-prompt-response:
           application/json:
             schema:
               $ref: './schemas.yaml#/AiVisibilityV1PromptPromptResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-topic-metrics-by-fts:
+  get:
+    tags: [ai-visibility]
+    summary: Get topic FTS metrics
+    description: Returns native protobuf JSON from Semrush `TopicService.MetricsByFTS`.
+    operationId: getAiVisibilityV1TopicMetricsByFts
+    parameters:
+      - *ftsQueryParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+    responses:
+      '200':
+        description: Topic FTS metrics retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1TopicMetricsByFtsResponse'
+            examples:
+              metrics:
+                $ref: './examples.yaml#/AiVisibilityV1TopicMetricsByFts'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-topic-topics-by-fts:
+  get:
+    tags: [ai-visibility]
+    summary: Get topics by full-text search
+    description: Returns native topic rows from Semrush `TopicService.TopicsByFTS`.
+    operationId: getAiVisibilityV1TopicTopicsByFts
+    parameters:
+      - *ftsQueryParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *v1FtsTopicsSortByParam
+      - *textFilterParam
+      - *ftsSortDirectionParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Topics retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1TopicsByFtsResponse'
+            examples:
+              topics:
+                $ref: './examples.yaml#/AiVisibilityV1TopicsByFts'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-topic-topics-by-fts-totals:
+  get:
+    tags: [ai-visibility]
+    summary: Get topics FTS total
+    description: Returns native protobuf JSON from Semrush `TopicService.TopicsByFTSTotals`.
+    operationId: getAiVisibilityV1TopicTopicsByFtsTotals
+    parameters:
+      - *ftsQueryParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *textFilterParam
+    responses:
+      '200':
+        description: Topic total retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1FtsTotalsResponse'
+            examples:
+              totals:
+                $ref: './examples.yaml#/AiVisibilityV1FtsTotals'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-topic-topics-by-fts-export:
+  get:
+    tags: [ai-visibility]
+    summary: Export topics by full-text search
+    description: Returns a CSV export from Semrush `TopicService.TopicsByFTSExport`.
+    operationId: getAiVisibilityV1TopicTopicsByFtsExport
+    parameters:
+      - *ftsQueryParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *v1FtsTopicsSortByParam
+      - *textFilterParam
+      - *ftsSortDirectionParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Topics CSV export retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1FtsExportResponse'
+            examples:
+              export:
+                $ref: './examples.yaml#/AiVisibilityV1FtsExport'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-prompt-prompts-by-topic-fts:
+  get:
+    tags: [ai-visibility]
+    summary: Get prompts by topic full-text search
+    description: Returns native prompt rows from Semrush `PromptService.PromptsByTopicFTS`.
+    operationId: getAiVisibilityV1PromptPromptsByTopicFts
+    parameters:
+      - *ftsQueryParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *v1FtsPromptsSortByParam
+      - *ftsSortDirectionParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Prompts retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1PromptsByTopicFtsResponse'
+            examples:
+              prompts:
+                $ref: './examples.yaml#/AiVisibilityV1PromptsByTopicFts'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-prompt-prompts-by-topic-fts-totals:
+  get:
+    tags: [ai-visibility]
+    summary: Get prompts-by-topic FTS total
+    description: Returns native protobuf JSON from Semrush `PromptService.PromptsByTopicFTSTotals`.
+    operationId: getAiVisibilityV1PromptPromptsByTopicFtsTotals
+    parameters:
+      - *ftsQueryParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+    responses:
+      '200':
+        description: Prompt total retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1DatedFtsTotalsResponse'
+            examples:
+              totals:
+                $ref: './examples.yaml#/AiVisibilityV1FtsTotals'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-prompt-prompts-by-topic-ids:
+  get:
+    tags: [ai-visibility]
+    summary: Get prompts by topic IDs
+    description: |
+      Returns native prompt rows from Semrush `PromptService.PromptsByTopicIDs`.
+      Results are paginated by `limit` and `offset`; only the repeated `topicIds`
+      query parameter is accepted for selecting topics.
+    operationId: getAiVisibilityV1PromptPromptsByTopicIds
+    parameters:
+      - *topicIdsParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *v1PromptsByTopicIdsSortByParam
+      - *ftsSortDirectionParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Prompts retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1PromptsByTopicIdsResponse'
+            examples:
+              prompts:
+                $ref: './examples.yaml#/AiVisibilityV1PromptsByTopicIds'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-prompt-prompts-by-topic-ids-totals:
+  get:
+    tags: [ai-visibility]
+    summary: Get prompts-by-topic-IDs total
+    description: Returns native protobuf JSON from Semrush `PromptService.PromptsByTopicIDsTotal`.
+    operationId: getAiVisibilityV1PromptPromptsByTopicIdsTotals
+    parameters:
+      - *topicIdsParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+    responses:
+      '200':
+        description: Prompt total retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1DatedFtsTotalsResponse'
+            examples:
+              totals:
+                $ref: './examples.yaml#/AiVisibilityV1FtsTotals'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-prompt-prompts-by-topic-fts-export:
+  get:
+    tags: [ai-visibility]
+    summary: Export prompts by topic full-text search
+    description: Returns a CSV export from Semrush `PromptService.PromptsByTopicFTSExport`.
+    operationId: getAiVisibilityV1PromptPromptsByTopicFtsExport
+    parameters:
+      - *ftsQueryParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *v1FtsPromptsSortByParam
+      - *ftsSortDirectionParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Prompts CSV export retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1FtsExportResponse'
+            examples:
+              export:
+                $ref: './examples.yaml#/AiVisibilityV1FtsExport'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-brand-brands-by-topic-fts:
+  get:
+    tags: [ai-visibility]
+    summary: Get brands by topic full-text search
+    description: Returns native brand rows from Semrush `BrandService.BrandsByTopicFTS`.
+    operationId: getAiVisibilityV1BrandBrandsByTopicFts
+    parameters:
+      - *ftsQueryParam
+      - *textFilterParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *v1FtsBrandsSortByParam
+      - *ftsSortDirectionParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Brands retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1BrandsByTopicFtsResponse'
+            examples:
+              brands:
+                $ref: './examples.yaml#/AiVisibilityV1BrandsByTopicFts'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-brand-brands-by-topic-fts-totals:
+  get:
+    tags: [ai-visibility]
+    summary: Get brands-by-topic FTS total
+    description: Returns native protobuf JSON from Semrush `BrandService.BrandsByTopicFTSTotals`.
+    operationId: getAiVisibilityV1BrandBrandsByTopicFtsTotals
+    parameters:
+      - *ftsQueryParam
+      - *textFilterParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+    responses:
+      '200':
+        description: Brand total retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1DatedFtsTotalsResponse'
+            examples:
+              totals:
+                $ref: './examples.yaml#/AiVisibilityV1FtsTotals'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-brand-brands-by-topic-fts-export:
+  get:
+    tags: [ai-visibility]
+    summary: Export brands by topic full-text search
+    description: Returns a CSV export from Semrush `BrandService.BrandsByTopicFTSExport`.
+    operationId: getAiVisibilityV1BrandBrandsByTopicFtsExport
+    parameters:
+      - *ftsQueryParam
+      - *textFilterParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *v1FtsBrandsSortByParam
+      - *ftsSortDirectionParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Brands CSV export retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1FtsExportResponse'
+            examples:
+              export:
+                $ref: './examples.yaml#/AiVisibilityV1FtsExport'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-source-source-domains-by-topic-fts:
+  get:
+    tags: [ai-visibility]
+    summary: Get source domains by topic full-text search
+    description: Returns native rows from Semrush `SourceService.SourceDomainsByTopicFTS`.
+    operationId: getAiVisibilityV1SourceSourceDomainsByTopicFts
+    parameters:
+      - *ftsQueryParam
+      - *textFilterParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *v1FtsSourceDomainsSortByParam
+      - *ftsSortDirectionParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Source domains retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1SourceDomainsByTopicFtsResponse'
+            examples:
+              sourceDomains:
+                $ref: './examples.yaml#/AiVisibilityV1SourceDomainsByTopicFts'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-source-source-domains-by-topic-fts-totals:
+  get:
+    tags: [ai-visibility]
+    summary: Get source-domains-by-topic FTS total
+    description: Returns native protobuf JSON from Semrush `SourceService.SourceDomainsByTopicFTSTotals`.
+    operationId: getAiVisibilityV1SourceSourceDomainsByTopicFtsTotals
+    parameters:
+      - *ftsQueryParam
+      - *textFilterParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+    responses:
+      '200':
+        description: Source domain total retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1DatedFtsTotalsResponse'
+            examples:
+              totals:
+                $ref: './examples.yaml#/AiVisibilityV1FtsTotals'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-source-source-domains-by-topic-fts-export:
+  get:
+    tags: [ai-visibility]
+    summary: Export source domains by topic full-text search
+    description: Returns a CSV export from Semrush `SourceService.SourceDomainsByTopicFTSExport`.
+    operationId: getAiVisibilityV1SourceSourceDomainsByTopicFtsExport
+    parameters:
+      - *ftsQueryParam
+      - *textFilterParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *v1FtsSourceDomainsSortByParam
+      - *ftsSortDirectionParam
+      - *limitParam
+      - *offsetParam
+    responses:
+      '200':
+        description: Source domains CSV export retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1FtsExportResponse'
+            examples:
+              export:
+                $ref: './examples.yaml#/AiVisibilityV1FtsExport'
       <<: *errorResponses
     security:
       - api_key: []

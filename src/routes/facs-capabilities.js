@@ -178,6 +178,11 @@ const routeFacsCapabilities = {
     'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate',
     'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status',
     // Admin-only writes
+    // State-layer backend provisioning — admin-only (isAdmin() in the
+    // state-access-mappings controller). Full payload (imsOrgId, product,
+    // subject, resource, capabilities); nothing derived from authInfo. Not a
+    // customer FACS surface, so it bypasses facsWrapper entirely.
+    'POST /state/access-mappings/admin', // hasAdminAccess (adminCreateMapping)
     'POST /sites', // hasAdminAccess
     'DELETE /sites/:siteId', // restricted (always 403)
     'PATCH /sites/:siteId/:auditType', // hasAdminAccess (sites-audits-toggle)
@@ -360,6 +365,7 @@ const routeFacsCapabilities = {
       'GET /llmo/ai-visibility/brands/competitors': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/brand/stats-by-country': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/brand/stats-by-llm': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/brand/competitors-stats': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/meta/meta': 'llmo/can_view',
       'GET /llmo/ai-visibility/competitors/metrics': 'llmo/can_view',
       'GET /llmo/ai-visibility/meta': 'llmo/can_view',
@@ -380,12 +386,33 @@ const routeFacsCapabilities = {
       'GET /llmo/ai-visibility/v1/topic/brand-topics-totals': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/topic/gap-topics-export': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/topic/gap-topics-totals': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/topic/metrics-by-fts': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/topic/topics-by-fts': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/topic/topics-by-fts-export': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/topic/topics-by-fts-totals': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/prompt/brand-prompts-export': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/prompt/gap-prompts-export': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/prompt/gap-prompts-totals': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-export': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-totals': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids-totals': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/source/gap-source-domains': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/source/gap-source-domains-export': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/source/gap-source-domains-totals': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/source/cited-pages': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/source/cited-pages-export': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/source/cited-pages-totals': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/source/cited-sources': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/source/cited-sources-export': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/source/cited-sources-totals': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/source/source-domains-by-topic-fts': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/source/source-domains-by-topic-fts-export': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/source/source-domains-by-topic-fts-totals': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts-export': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts-totals': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/prompt-research/prompts-export': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/prompt-research/brands-export': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/prompt-research/source-domains-export': 'llmo/can_view',
@@ -442,6 +469,8 @@ const routeFacsCapabilities = {
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/domain-urls': 'llmo/can_view',
       'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/url-prompts': 'llmo/can_view',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/url-prompts': 'llmo/can_view',
+      'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/prompts-by-url': 'llmo/can_view',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/prompts-by-url': 'llmo/can_view',
       'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/filter-dimensions': 'llmo/can_view',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/filter-dimensions': 'llmo/can_view',
 
@@ -833,6 +862,7 @@ const routeFacsCapabilities = {
       'GET /v2/orgs/:spaceCatId/serenity/languages': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/filter-dimensions': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/access': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview': 'llmo/can_view',

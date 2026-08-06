@@ -355,7 +355,7 @@ AuditPolicyRevision:
     manualUrls: { type: array, items: { type: string } }
     scopeConfig: { type: object }
     lifecycleOverrides: { type: object }
-    updatedBy: { type: [string, 'null'] }
+    updatedBy: { type: [string, 'null'], description: 'Human-readable identity of who made this revision (display name or email), resolved server-side. May be "system" for unauthenticated writes.' }
     reason: { type: [string, 'null'] }
     note: { type: [string, 'null'] }
     effectiveAt: { type: [string, 'null'], format: date-time }

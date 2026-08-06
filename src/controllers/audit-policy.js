@@ -23,6 +23,14 @@ const REVISION_TABLE = 'audit_policy_revision';
 const SCOPE_PAGES_VIEW = 'v_audit_scope_pages';
 const UPSERT_RPC = 'wrpc_upsert_audit_policy';
 
+// getAuthor() stamps updated_by with an IMS user GUID for most auth paths (profile.email is
+// overloaded to carry the GUID, not an RFC-5322 address - see access-control-util.js) rather
+// than a human-readable identity. This gate mirrors fixes.js's IMS_ID_RE: only strings shaped
+// like a GUID@realm value are sent to getImsAdminProfile, so a legacy plain email/name/'system'
+// value already stored in the column is left untouched and returned as-is.
+const IMS_ID_RE = /^[A-Za-z0-9]+@(AdobeID|AdobeOrg|Email|AdobeServices|[0-9a-fA-F]{16,40}(?:\.[a-z])?)$/;
+const IMS_ENRICH_BATCH_SIZE = 5;
+
 const MAX_EXCLUSION_GLOBS = 200;
 const MAX_MANUAL_URLS = 2000;
 const MAX_ELEMENT_LEN = 2048;
@@ -81,6 +89,53 @@ function decodePageCursor(c) {
 
 function encodePageCursor(url) {
   return Buffer.from(String(url), 'utf8').toString('base64url');
+}
+
+// Guards against a fulfilled-but-nullish IMS profile (a not-found/deactivated user that resolves
+// empty rather than throwing). Without the guard, destructuring null throws inside the batch
+// forEach, escapes to the outer catch, and abandons every remaining batch on the page.
+function displayName(profile) {
+  if (!profile) {
+    return null;
+  }
+  const { first_name: firstName, last_name: lastName, email } = profile;
+  const name = [firstName, lastName].filter(hasText).join(' ');
+  return name || email || null;
+}
+
+// Resolves IMS-GUID updated_by values to a human-readable display name/email, batched to cap
+// IMS concurrency. Non-GUID values (legacy plain email/name/'system') pass through unresolved.
+// Fails silently per-lookup (and as a whole if imsClient is unavailable) so the caller always
+// gets a response even when IMS is unreachable.
+async function resolveUpdatedByIdentities(context, rows) {
+  const { imsClient, log } = context;
+  const map = new Map();
+  if (!imsClient) {
+    return map;
+  }
+  const userIds = [...new Set(
+    rows.map((row) => row.updated_by).filter((id) => id && IMS_ID_RE.test(id)),
+  )];
+  if (!userIds.length) {
+    return map;
+  }
+  try {
+    for (let i = 0; i < userIds.length; i += IMS_ENRICH_BATCH_SIZE) {
+      const batch = userIds.slice(i, i + IMS_ENRICH_BATCH_SIZE);
+      // eslint-disable-next-line no-await-in-loop
+      const results = await Promise.allSettled(batch.map((id) => imsClient.getImsAdminProfile(id)));
+      results.forEach((result, j) => {
+        if (result.status === 'fulfilled') {
+          map.set(batch[j], displayName(result.value));
+        } else {
+          log?.warn?.(`audit-policy revision: failed to resolve IMS profile for author: ${result.reason?.message}`);
+        }
+      });
+    }
+  } catch (e) {
+    log?.warn?.(`audit-policy revision: could not resolve author identities: ${e.message}`);
+  }
+  return map;
 }
 
 function getAuthor(context) {
@@ -308,7 +363,11 @@ export default function AuditPolicyController() {
       context.log?.error?.(`audit-policy listRevisions failed: ${error.code} ${error.message}`);
       return internalServerError('Failed to read audit policy revisions');
     }
-    const items = (data || []).map(AuditPolicyRevisionDto.toJSON);
+    const rows = data || [];
+    const identityMap = await resolveUpdatedByIdentities(context, rows);
+    const items = rows.map(
+      (row) => AuditPolicyRevisionDto.toJSON(row, identityMap.get(row.updated_by)),
+    );
     // A full page implies more rows may exist; if the last page happens to contain exactly
     // `limit` rows, the client makes one harmless extra request that returns an empty page.
     const nextCursor = items.length === limit
