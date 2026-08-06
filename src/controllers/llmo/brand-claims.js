@@ -19,25 +19,38 @@ import { dateToIsoWeek } from '../../support/elements/week-utils.js';
 
 const CLAIMS_PREFIX = 'brand_claims/llmo';
 const WEEK_RE = /^\d{4}-W\d{2}$/;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * Latest run key for a site: the lexically-greatest `YYYY-Www` folder under the
  * site prefix. Returns null when no week folder exists yet (caller falls back to
  * the legacy flat key).
  */
-async function latestWeekKey(s3, bucketName, siteId) {
+async function latestWeekKey(s3, bucketName, siteId, log) {
   const prefix = `${CLAIMS_PREFIX}/${siteId}/`;
-  const res = await s3.s3Client.send(new ListObjectsV2Command({
-    Bucket: bucketName,
-    Prefix: prefix,
-    Delimiter: '/',
-  }));
-  const latest = (res.CommonPrefixes || [])
-    .map((p) => p.Prefix.slice(prefix.length).replace(/\/$/, ''))
-    .filter((seg) => WEEK_RE.test(seg))
-    .sort()
-    .pop();
-  return latest ? `${prefix}${latest}/data.json.gz` : null;
+  try {
+    const res = await s3.s3Client.send(new ListObjectsV2Command({
+      Bucket: bucketName,
+      Prefix: prefix,
+      Delimiter: '/',
+    }));
+    // One folder per ISO week keeps this well under the 1000-prefix page limit
+    // (~19 years), so pagination is intentionally omitted; warn if that changes.
+    if (res.IsTruncated) {
+      log.warn(`Brand claims week listing truncated for site ${siteId}; latest-week resolution may be incomplete`);
+    }
+    const latest = (res.CommonPrefixes || [])
+      .map((p) => p.Prefix.slice(prefix.length).replace(/\/$/, ''))
+      .filter((seg) => WEEK_RE.test(seg))
+      .sort()
+      .pop();
+    return latest ? `${prefix}${latest}/data.json.gz` : null;
+  } catch (err) {
+    // Best-effort: a listing failure falls back to the legacy flat key rather
+    // than failing the request (a genuinely missing object still 404s at HEAD).
+    log.warn(`Failed to list brand claims weeks for site ${siteId}: ${err.message}`);
+    return null;
+  }
 }
 
 /**
@@ -68,18 +81,20 @@ export async function handleBrandClaims(context) {
     return badRequest('S3 bucket is not configured for this environment');
   }
 
-  if (date !== undefined && Number.isNaN(new Date(date).getTime())) {
-    return badRequest(`Invalid date parameter: ${date}`);
+  if (date !== undefined && (!DATE_RE.test(date) || Number.isNaN(new Date(date).getTime()))) {
+    return badRequest('Invalid date parameter: expected YYYY-MM-DD format');
   }
 
-  // Model files are managed flat (not week-partitioned); resolved synchronously.
-  // Date resolves directly to its week. The default (no model, no date) needs a
-  // list to find the latest week, so it is resolved inside the try below.
+  // Model files are managed flat (not week-partitioned); `date` resolves directly
+  // to its week; otherwise default to the legacy flat key and upgrade it to the
+  // latest week (via a list) inside the try below.
   let s3Key;
   if (model) {
     s3Key = `${CLAIMS_PREFIX}/${siteId}/${model}.json.gz`;
   } else if (date) {
-    s3Key = `${CLAIMS_PREFIX}/${siteId}/${dateToIsoWeek(date.slice(0, 10))}/data.json.gz`;
+    s3Key = `${CLAIMS_PREFIX}/${siteId}/${dateToIsoWeek(date)}/data.json.gz`;
+  } else {
+    s3Key = `${CLAIMS_PREFIX}/${siteId}/data.json.gz`;
   }
 
   log.info(`Getting brand claims for site ${siteId}, model: ${model || 'default'}${date ? `, date: ${date}` : ''}`);
@@ -87,9 +102,11 @@ export async function handleBrandClaims(context) {
   try {
     const { getSignedUrl, GetObjectCommand } = s3;
 
-    if (!s3Key) {
-      s3Key = (await latestWeekKey(s3, bucketName, siteId))
-        || `${CLAIMS_PREFIX}/${siteId}/data.json.gz`;
+    if (!model && !date) {
+      const latest = await latestWeekKey(s3, bucketName, siteId, log);
+      if (latest) {
+        s3Key = latest;
+      }
     }
 
     // Presigning a GetObject URL is an offline operation and never checks that

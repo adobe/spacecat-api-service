@@ -1803,8 +1803,9 @@ llmo-brand-claims:
       in: query
       required: false
       description: >
-        Any date within the ISO week of the run to retrieve (e.g. `2026-04-22`).
-        If omitted, the latest available run is returned. Ignored when `model` is set.
+        Any date (YYYY-MM-DD) within the ISO week of the run to retrieve (e.g.
+        `2026-04-22`). If omitted, the latest available run is returned. If
+        `model` is also set, `model` takes precedence for key selection.
       schema:
         type: string
         format: date

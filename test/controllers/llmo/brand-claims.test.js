@@ -34,6 +34,7 @@ describe('handleBrandClaims', () => {
   let mockGetSignedUrl;
   let baseContext;
   let listResult; // ListObjectsV2 response for the default (latest-week) path
+  let listBehavior; // () => Promise, controls the ListObjectsV2 call
   let headBehavior; // () => Promise, controls HeadObject existence
 
   const mockHttpUtils = {
@@ -66,11 +67,12 @@ describe('handleBrandClaims', () => {
     };
 
     listResult = { CommonPrefixes: [] }; // no week folders → fall back to flat key
+    listBehavior = () => Promise.resolve(listResult);
     headBehavior = () => Promise.resolve({}); // object exists
 
     mockS3Send = sinon.stub().callsFake((command) => {
       if (command instanceof ListObjectsV2Command) {
-        return Promise.resolve(listResult);
+        return listBehavior();
       }
       if (command instanceof HeadObjectCommand) {
         return headBehavior();
@@ -159,8 +161,40 @@ describe('handleBrandClaims', () => {
 
     expect(result.status).to.equal(400);
     const body = await result.json();
-    expect(body.message).to.equal('Invalid date parameter: not-a-date');
+    expect(body.message).to.equal('Invalid date parameter: expected YYYY-MM-DD format');
     expect(mockS3Send).not.to.have.been.called;
+  });
+
+  it('returns 400 for a partial date that is not YYYY-MM-DD', async () => {
+    const context = { ...baseContext, data: { date: '2026' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(400);
+    expect((await result.json()).message).to.equal('Invalid date parameter: expected YYYY-MM-DD format');
+    expect(mockS3Send).not.to.have.been.called;
+  });
+
+  it('resolves the latest week and warns when the listing is truncated', async () => {
+    listResult = { IsTruncated: true, CommonPrefixes: [weekPrefix('2026-W17')] };
+
+    const result = await handleBrandClaims(baseContext);
+
+    expect(result.status).to.equal(200);
+    expect(signedKey()).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/2026-W17/data.json.gz`);
+    expect(mockLog.warn).to.have.been.calledWithMatch(/listing truncated/);
+  });
+
+  it('falls back to the legacy flat key when listing fails', async () => {
+    listBehavior = () => Promise.reject(new Error('boom'));
+
+    const result = await handleBrandClaims(baseContext);
+
+    expect(result.status).to.equal(200);
+    const headCmd = mockS3Send.getCall(1).args[0];
+    expect(headCmd.input.Key).to.equal(FLAT_KEY);
+    expect(signedKey()).to.equal(FLAT_KEY);
+    expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to list brand claims weeks/);
   });
 
   it('serves a specific model from the legacy flat key without listing', async () => {
