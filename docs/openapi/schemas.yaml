@@ -11624,16 +11624,6 @@ SerenityPrompt:
         different dimensions (a sub-category `human` and the `source` value
         `human`). Read a tag's dimension from `path[0].name`, never from its
         own name.
-    tagMap:
-      type: object
-      additionalProperties: { type: string }
-      deprecated: true
-      description: |
-        DEPRECATED — use `tags`. Map of tag name → upstream tag id. Being keyed
-        by name, it cannot represent a prompt carrying two same-named tags from
-        different dimensions: only one survives, and which one depends on
-        upstream ordering. Removed once every consumer reads `tags`.
-      example: { "Firefly": "uuid-1", "Commercial": "uuid-2" }
     tagIds:
       type: array
       items: { type: string }

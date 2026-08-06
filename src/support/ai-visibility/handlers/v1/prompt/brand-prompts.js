@@ -42,7 +42,7 @@ export function buildBrandPromptsDimensionFilterQl(sp) {
   const targetUrl = sp.get('targetUrl');
 
   if (topicId) {
-    filters.push(`topic_hash = ${topicId}`);
+    filters.push(`topic_hash = ${escapeQlString(topicId)}`);
   }
   if (targetUrl) {
     filters.push(`target_url = "${escapeQlString(targetUrl)}"`);
