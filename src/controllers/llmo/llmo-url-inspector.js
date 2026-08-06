@@ -29,6 +29,7 @@ import { resolveBrandUuid } from '../../support/prompts-storage.js';
 import { resolveBrandWorkspace } from '../../support/serenity/workspace-resolver.js';
 import { createElementsTransport } from '../../support/elements/elements-transport.js';
 import { createElementsService } from '../../support/elements/elements-service.js';
+import { ALL_PLATFORMS } from '../../support/elements/constants.js';
 import { resolveSemrushImsToken } from '../../support/utils.js';
 
 /**
@@ -591,6 +592,18 @@ export function createUrlInspectorDomainUrlsHandler(
   );
 }
 
+/** Shared row shape for rpc_url_inspector_url_prompts and its by-url sibling. */
+function mapPromptRows(data) {
+  const rows = data || [];
+  return rows.map((r) => ({
+    prompt: r.prompt || '',
+    category: r.category || '',
+    region: r.region || '',
+    topics: r.topics || '',
+    citations: Number(r.citations ?? 0),
+  }));
+}
+
 /**
  * Fetches prompts that cited `urlId` via rpc_url_inspector_url_prompts.
  * Shared by createUrlInspectorUrlPromptsHandler and
@@ -620,19 +633,10 @@ async function fetchUrlPromptsViaMysticat(client, log, {
       return { prompts: [] };
     }
     log.error(`URL Inspector URL prompts RPC error: ${error.message}`);
-    return { error: internalServerError('Internal error processing URL Inspector URL prompts') };
+    return { error: internalServerError('Internal error processing URL Inspector prompts') };
   }
 
-  const rows = data || [];
-  const prompts = rows.map((r) => ({
-    prompt: r.prompt || '',
-    category: r.category || '',
-    region: r.region || '',
-    topics: r.topics || '',
-    citations: Number(r.citations ?? 0),
-  }));
-
-  return { prompts };
+  return { prompts: mapPromptRows(data) };
 }
 
 /**
@@ -661,16 +665,7 @@ async function fetchUrlPromptsByUrlViaMysticat(client, log, {
     return { error: internalServerError('Internal error processing URL Inspector prompts') };
   }
 
-  const rows = data || [];
-  const prompts = rows.map((r) => ({
-    prompt: r.prompt || '',
-    category: r.category || '',
-    region: r.region || '',
-    topics: r.topics || '',
-    citations: Number(r.citations ?? 0),
-  }));
-
-  return { prompts };
+  return { prompts: mapPromptRows(data) };
 }
 
 /**
@@ -815,8 +810,15 @@ export function createUrlInspectorPromptsByUrlHandler(
       const startDate = params.startDate || defaults.startDate;
       const endDate = params.endDate || defaults.endDate;
 
+      // Falls back to the Mysticat branch (rather than propagating) if
+      // eligibility resolution itself throws (e.g. Brand/Organization
+      // data-access unavailable, or a DB read error).
       const { eligible, workspaceId } = url
         ? await resolveSemrushEligibility(ctx, spaceCatId, brandId, client)
+          .catch((e) => {
+            ctx.log.error(`URL Inspector prompts-by-url Semrush eligibility check failed: ${e?.message || e}`);
+            return { eligible: false };
+          })
         : { eligible: false };
 
       if (eligible) {
@@ -826,12 +828,18 @@ export function createUrlInspectorPromptsByUrlHandler(
             createElementsTransport({ env: ctx.env, imsToken }),
             ctx.log,
           );
+          // Semrush and Mysticat use different model vocabularies (UI platform
+          // codes vs the llm_model enum) — reuse the raw request value here
+          // rather than `model` (already normalized to the Mysticat enum),
+          // so resolveElementModel/isAllPlatforms can do their own translation.
+          const semrushModel = shouldApplyFilter(params.model) ? params.model : ALL_PLATFORMS;
           const prompts = await service.getUrlPrompts(workspaceId, {
-            url, model, startDate, endDate, projectIds: [],
+            url, model: semrushModel, startDate, endDate, projectIds: [],
           });
           return cachedOk({ prompts });
         } catch (e) {
-          ctx.log.error(`URL Inspector prompts-by-url Semrush error: ${e?.message || e}`);
+          const statusPart = e?.status ? ` [status=${e.status}]` : '';
+          ctx.log.error(`URL Inspector prompts-by-url Semrush error: ${e?.message || e}${statusPart}`);
           return internalServerError('Internal error processing URL Inspector prompts');
         }
       }

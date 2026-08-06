@@ -1835,9 +1835,62 @@ describe('URL Inspector Handlers', () => {
       expect(getUrlPromptsStub).to.have.been.calledWith(WORKSPACE_ID, sinon.match({
         url: 'https://example.com/a',
         projectIds: [],
+        model: 'all',
       }));
       // Semrush path never touches the Mysticat RPC.
       expect(rpcStub).to.not.have.been.called;
+    });
+
+    it('passes the raw (un-normalized) model to Semrush, not the Mysticat-enum value', async () => {
+      getUrlPromptsStub.resolves([]);
+      const { context } = createContext(
+        { brandId: BRAND_UUID },
+        { url: 'https://example.com/a', model: 'chatgpt-free' },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      await handler(context);
+
+      expect(getUrlPromptsStub).to.have.been.calledWith(WORKSPACE_ID, sinon.match({
+        model: 'chatgpt-free',
+      }));
+    });
+
+    it('falls back to Mysticat when Semrush eligibility resolution throws', async () => {
+      resolveBrandWorkspaceStub.rejects(new Error('Brand data-access not available on context'));
+      const urlId = '66666666-6666-6666-6666-666666666666';
+      const { context, rpcStub } = createContext(
+        { brandId: BRAND_UUID },
+        { url: 'https://example.com/a', urlId },
+        { rpcResults: { rpc_url_inspector_url_prompts: { data: [], error: null } } },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      expect(getUrlPromptsStub).to.not.have.been.called;
+      expect(rpcStub).to.have.been.calledWith('rpc_url_inspector_url_prompts', sinon.match({ p_url_id: urlId }));
+      expect(context.log.error).to.have.been.calledWith(
+        sinon.match(/Semrush eligibility check failed/),
+      );
+    });
+
+    it('falls back to Mysticat when eligibility resolution rejects with a non-Error value', async () => {
+      // eslint-disable-next-line prefer-promise-reject-errors -- covers e?.message||e fallback
+      resolveBrandWorkspaceStub.callsFake(() => Promise.reject('workspace lookup boom'));
+      const urlId = '66666666-6666-6666-6666-666666666666';
+      const { context, rpcStub } = createContext(
+        { brandId: BRAND_UUID },
+        { url: 'https://example.com/a', urlId },
+        { rpcResults: { rpc_url_inspector_url_prompts: { data: [], error: null } } },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      expect(rpcStub).to.have.been.calledWith('rpc_url_inspector_url_prompts', sinon.match({ p_url_id: urlId }));
+      expect(context.log.error).to.have.been.calledWith(
+        sinon.match(/Semrush eligibility check failed: workspace lookup boom/),
+      );
     });
 
     it('falls back to Mysticat when brandId is "all" even if url is given', async () => {
@@ -1945,6 +1998,23 @@ describe('URL Inspector Handlers', () => {
       const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
       const response = await handler(context);
       expect(response.status).to.equal(500);
+    });
+
+    it('logs the status code when the Semrush call throws an ErrorWithStatusCode', async () => {
+      const err = new Error('Invalid or expired promise token');
+      err.status = 401;
+      getUrlPromptsStub.rejects(err);
+      const { context } = createContext(
+        { brandId: BRAND_UUID },
+        { url: 'https://example.com/a' },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(500);
+      expect(context.log.error).to.have.been.calledWith(
+        sinon.match(/Invalid or expired promise token.*\[status=401\]/),
+      );
     });
 
     it('does not resolve brand workspace at all for a urlId-only request (no url given)', async () => {
