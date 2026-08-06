@@ -42,11 +42,15 @@ async function latestWeekKey(s3, bucketName, siteId, log) {
     if (res.IsTruncated) {
       log.warn(`Brand claims week listing truncated for site ${siteId}; latest-week resolution may be incomplete`);
     }
-    const latest = (res.CommonPrefixes || [])
-      .map((p) => p.Prefix.slice(prefix.length).replace(/\/$/, ''))
-      .filter((seg) => WEEK_RE.test(seg))
-      .sort()
-      .pop();
+    // Zero-padded YYYY-Www sorts lexicographically, so the latest week is the
+    // string max — a linear scan, not a full sort.
+    let latest = null;
+    for (const cp of res.CommonPrefixes || []) {
+      const seg = cp.Prefix.slice(prefix.length).replace(/\/$/, '');
+      if (WEEK_RE.test(seg) && (latest === null || seg > latest)) {
+        latest = seg;
+      }
+    }
     return latest ? `${prefix}${latest}/data.json.gz` : null;
   } catch (err) {
     // Best-effort: a listing failure falls back to the legacy flat key rather
