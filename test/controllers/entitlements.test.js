@@ -1064,7 +1064,7 @@ describe('Entitlements Controller', () => {
 
       expect(result.status).to.equal(403);
       const body = await result.json();
-      expect(body.message).to.equal('Only S2S admins can update entitlements');
+      expect(body.message).to.equal('Unauthorized');
       expect(llmoEntitlement.setTier).to.not.have.been.called;
     });
 
@@ -1087,7 +1087,7 @@ describe('Entitlements Controller', () => {
 
       expect(result.status).to.equal(403);
       const body = await result.json();
-      expect(body.message).to.equal('Only S2S admins can update entitlements');
+      expect(body.message).to.equal('Unauthorized');
     });
 
     it('returns bad request for invalid organization ID', async () => {

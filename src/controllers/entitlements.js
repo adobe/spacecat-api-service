@@ -225,7 +225,7 @@ function EntitlementsController(ctx) {
    */
   const patchEntitlement = async (context) => {
     if (!accessControlUtil.hasS2SAdminAccess()) {
-      return forbidden('Only S2S admins can update entitlements');
+      return forbidden('Unauthorized');
     }
     const { organizationId } = context.params;
     const { productCode, tier } = context.data || {};
