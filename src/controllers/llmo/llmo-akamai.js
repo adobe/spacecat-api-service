@@ -464,10 +464,11 @@ function LlmoAkamaiController(ctx) {
 
   /**
    * POST /sites/:siteId/llmo/cdn-onboard/akamai/plan
-   * Body: { propertyId, contractId, groupId, insertIndex? }
-   * Dry run: fetches the property's latest version + rule tree, merges the managed Edge Optimize
-   * rules in memory, and returns the before/after child-rule names plus the merged tree for the UI
-   * to preview/diff. No mutation, no new version.
+   * Body: { propertyId, contractId, groupId, insertIndex?, baseVersion? }
+   * Dry run: fetches the rule tree of `baseVersion` (default: latest), merges the managed Edge
+   * Optimize rules in memory, and returns the before/after child-rule names plus the merged tree
+   * for the UI to preview/diff. No mutation, no new version. Previewing a chosen `baseVersion`
+   * keeps the preview honest when the user deploys from a version other than latest.
    */
   const plan = async (context) => {
     const result = await getSiteAndCheckAccess(context);
@@ -492,17 +493,28 @@ function LlmoAkamaiController(ctx) {
     }
 
     const { propertyId, contractId, groupId } = ref;
-    const { insertIndex } = context.data;
+    const { insertIndex, baseVersion: rawBaseVersion } = context.data;
     const insertIndexError = validateInsertIndex(insertIndex);
     if (insertIndexError) {
       return insertIndexError;
+    }
+    // Optional: preview against a specific version instead of the latest. PAPI versions start at 1,
+    // so reject 0 here (it passes DECIMAL_INT_RE) for a clean 400 — mirrors deploy's baseVersion
+    // check. hasText is unsuitable: a JSON-body baseVersion can be a number, which hasText rejects.
+    const hasBaseVersion = rawBaseVersion !== undefined && rawBaseVersion !== null && rawBaseVersion !== '';
+    if (hasBaseVersion
+      && (!DECIMAL_INT_RE.test(String(rawBaseVersion)) || Number(rawBaseVersion) < 1)) {
+      return badRequest('baseVersion must be a positive integer');
     }
     // Attach the placeholder so the preview reflects (and validates) the header deploy will add;
     // redactSecrets strips it from the returned tree. The real key is minted only in deploy.
     const fetcherKey = PLAN_FETCHER_KEY_PLACEHOLDER;
 
     try {
-      const version = await client.getLatestVersion(propertyId, contractId, groupId);
+      // Always resolve the true latest so the response can report it (latestVersion), even when the
+      // caller previews a specific baseVersion.
+      const latestVersion = await client.getLatestVersion(propertyId, contractId, groupId);
+      const version = hasBaseVersion ? Number(rawBaseVersion) : latestVersion;
       const {
         ruleTree, ruleFormat,
       } = await client.getRuleTree(propertyId, version, contractId, groupId);
@@ -556,7 +568,10 @@ function LlmoAkamaiController(ctx) {
       }));
       return ok({
         propertyId,
-        latestVersion: version,
+        // The property's latest (highest-numbered) version.
+        latestVersion,
+        // The version the plan was built against: the chosen baseVersion, else the latest.
+        baseVersion: version,
         ruleFormat,
         managedRules: managedRuleNames(cfg),
         // ruleTree.rules is guaranteed present here (mergeIntoTree throws otherwise, caught below);
@@ -910,9 +925,71 @@ function LlmoAkamaiController(ctx) {
     }
   };
 
+  /**
+   * GET /sites/:siteId/llmo/cdn-onboard/akamai/versions
+   * Query: { propertyId, contractId, groupId }
+   * Returns the property's latest (highest-numbered) version plus the version currently ACTIVE on
+   * each network, so the UI can offer a base version to onboard from (default: latest) and show
+   * what is live on staging vs production. Read-only.
+   */
+  const getVersions = async (context) => {
+    const result = await getSiteAndCheckAccess(context);
+    if (result.status) {
+      return result;
+    }
+    const { site } = result;
+
+    const { client, error } = requireClient(context);
+    if (error) {
+      return error;
+    }
+
+    const { ref, error: refError } = requirePropertyRef(context);
+    if (refError) {
+      return refError;
+    }
+
+    const { propertyId, contractId, groupId } = ref;
+    const siteId = site.getId();
+
+    try {
+      // Independent reads — run concurrently to halve endpoint latency.
+      const [activations, latestVersion] = await Promise.all([
+        client.listActivations(propertyId, contractId, groupId),
+        client.getLatestVersion(propertyId, contractId, groupId),
+      ]);
+      // Active-per-network from the full activation history: key the ACTIVE entries by network.
+      // (latestActivation is newest-*submitted* — could be a failed/aborted record — so it is
+      // deliberately not used here.)
+      const active = activations.reduce((acc, activation) => {
+        if (String(activation.status || '').toUpperCase() !== 'ACTIVE') {
+          return acc;
+        }
+        const network = String(activation.network || '').toUpperCase();
+        // Akamai keeps at most one ACTIVE activation per network; if PAPI ever returns more, keep
+        // the first seen rather than letting a later one silently overwrite it (deterministic).
+        if (!(network in acc)) {
+          // Project only the fields the UI needs — do NOT pass the raw PAPI record through, so a
+          // future upstream field (e.g. notifyEmails) can't leak into the response.
+          acc[network] = {
+            activationId: activation.activationId,
+            propertyVersion: activation.propertyVersion,
+            network: activation.network,
+            status: activation.status,
+          };
+        }
+        return acc;
+      }, {});
+      return ok({ propertyId, latestVersion, active });
+    } catch (e) {
+      return papiErrorResponse(e, 'version listing', context, { siteId, propertyId });
+    }
+  };
+
   return {
     getConfig,
     listProperties,
+    getVersions,
     plan,
     deploy,
     activate,

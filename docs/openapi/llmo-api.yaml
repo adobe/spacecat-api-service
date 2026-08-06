@@ -6093,6 +6093,86 @@ site-llmo-akamai-properties:
     security:
       - ims_key: [ ]
 
+site-llmo-akamai-versions:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/akamaiHost'
+    - $ref: './parameters.yaml#/akamaiClientToken'
+    - $ref: './parameters.yaml#/akamaiClientSecret'
+    - $ref: './parameters.yaml#/akamaiAccessToken'
+    - $ref: './parameters.yaml#/akamaiAccountSwitchKey'
+    - name: propertyId
+      in: query
+      required: true
+      description: Akamai property ID (e.g. `prp_1253269`).
+      schema:
+        type: string
+        pattern: '^prp_[A-Za-z0-9]+$'
+    - name: contractId
+      in: query
+      required: true
+      description: Akamai contract ID (e.g. `ctr_1-ABC123`).
+      schema:
+        type: string
+        pattern: '^ctr_[A-Za-z0-9-]+$'
+    - name: groupId
+      in: query
+      required: true
+      description: Akamai group ID (e.g. `grp_18385`).
+      schema:
+        type: string
+        pattern: '^grp_[A-Za-z0-9]+$'
+  get:
+    operationId: getLlmoAkamaiVersions
+    summary: Get the latest and active Akamai property versions
+    description: |
+      Returns the property's latest (highest-numbered) version plus the version currently ACTIVE on
+      each network (STAGING/PRODUCTION), so the onboarding UI can offer a base version to onboard
+      from (default: latest) and show what is live on each network. Read-only.
+
+      **Note:** This endpoint requires LLMO administrator access for the site.
+    tags:
+      - llmo
+    responses:
+      '200':
+        description: The latest and active versions for the property
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                propertyId:
+                  type: string
+                  example: 'prp_1253269'
+                latestVersion:
+                  type: integer
+                  description: The highest-numbered (newest-created) property version.
+                  example: 5
+                active:
+                  type: object
+                  description: >-
+                    The PAPI activation record currently ACTIVE on each network, keyed by network
+                    name. A network with no active version is absent.
+                  properties:
+                    STAGING:
+                      $ref: '#/akamai-active-activation'
+                    PRODUCTION:
+                      $ref: '#/akamai-active-activation'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '502':
+        $ref: './responses.yaml#/502'
+    security:
+      - ims_key: [ ]
+
 site-llmo-akamai-plan:
   parameters:
     - $ref: './parameters.yaml#/siteId'
@@ -6132,6 +6212,12 @@ site-llmo-akamai-plan:
                   type: string
                 latestVersion:
                   type: integer
+                  description: The property's latest (highest-numbered) version.
+                baseVersion:
+                  type: integer
+                  description: >-
+                    The version the plan was built against: the chosen `baseVersion`, else the
+                    property's latest.
                 ruleFormat:
                   type: string
                   description: The property's PAPI rule format (e.g. `v2024-01-01`).
@@ -6502,8 +6588,27 @@ akamai-property-ref:
       type: integer
       minimum: 1
       description: >-
-        (deploy only) Optional property version to copy the new version from. Defaults to the
-        property's latest version.
+        (plan and deploy) Optional property version to operate on. On deploy, the new version is
+        copied from it; on plan, the dry-run preview is built against it. Defaults to the property's
+        latest version.
+
+akamai-active-activation:
+  type: object
+  additionalProperties: false
+  description: The version currently ACTIVE on a network (projected from the PAPI activation record).
+  properties:
+    activationId:
+      type: string
+      example: 'atv_20135679'
+    propertyVersion:
+      type: integer
+      example: 5
+    network:
+      type: string
+      enum: [STAGING, PRODUCTION]
+    status:
+      type: string
+      example: 'ACTIVE'
 
 akamai-property:
   type: object

@@ -97,6 +97,17 @@ describe('LlmoAkamaiController', () => {
       activate: sandbox.stub().resolves('/papi/v1/properties/prp_1253269/activations/atv_123'),
       getActivation: sandbox.stub().resolves({ activationId: 'atv_123', status: 'ACTIVE' }),
       latestActivation: sandbox.stub().resolves({ activationId: 'atv_999', status: 'PENDING' }),
+      listActivations: sandbox.stub().resolves([
+        {
+          activationId: 'atv_s', status: 'ACTIVE', network: 'STAGING', propertyVersion: 7,
+        },
+        {
+          activationId: 'atv_p', status: 'ACTIVE', network: 'PRODUCTION', propertyVersion: 5,
+        },
+        {
+          activationId: 'atv_old', status: 'DEACTIVATED', network: 'PRODUCTION', propertyVersion: 4,
+        },
+      ]),
     };
     // Deploy fetches the NEW version (8); return a distinct etag so the deploy test proves it uses
     // the freshly-fetched version's etag, not a stale one from the latest-version (v7) lookup.
@@ -238,6 +249,7 @@ describe('LlmoAkamaiController', () => {
       const body = await res.json();
       expect(res.status).to.equal(200);
       expect(body.latestVersion).to.equal(7);
+      expect(body.baseVersion).to.equal(7);
       expect(body.currentChildRules).to.deep.equal(['Existing']);
       // The OAE wrapper is appended LAST so its origin + cacheId win (Akamai is last-match-wins).
       expect(body.mergedChildRules).to.deep.equal(['Existing', 'Optimize at Edge']);
@@ -316,6 +328,42 @@ describe('LlmoAkamaiController', () => {
       mockTokowakaClient.fetchMetaconfig.rejects(new Error('boom'));
       const res = await controller.plan(withData(propertyRef));
       expect(res.status).to.equal(502);
+    });
+
+    it('previews a chosen baseVersion but still reports the true latest', async () => {
+      const res = await controller.plan(withData({ ...propertyRef, baseVersion: 3 }));
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.baseVersion).to.equal(3);
+      // latestVersion always reflects the true latest, even when previewing an older base.
+      expect(body.latestVersion).to.equal(7);
+      expect(mockAkamaiClient.getRuleTree).to.have.been.calledWith(PROPERTY_ID, 3);
+    });
+
+    it('defaults to the latest version when no baseVersion is supplied', async () => {
+      const res = await controller.plan(withData(propertyRef));
+      const body = await res.json();
+      expect(body.latestVersion).to.equal(7);
+      expect(body.baseVersion).to.equal(7);
+      expect(mockAkamaiClient.getLatestVersion).to.have.been.calledOnce;
+    });
+
+    it('accepts a string-typed baseVersion (values may arrive as strings)', async () => {
+      const res = await controller.plan(withData({ ...propertyRef, baseVersion: '3' }));
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.baseVersion).to.equal(3);
+      expect(mockAkamaiClient.getRuleTree).to.have.been.calledWith(PROPERTY_ID, 3);
+    });
+
+    it('rejects a non-positive baseVersion', async () => {
+      const res = await controller.plan(withData({ ...propertyRef, baseVersion: 0 }));
+      expect(res.status).to.equal(400);
+    });
+
+    it('rejects a non-numeric baseVersion', async () => {
+      const res = await controller.plan(withData({ ...propertyRef, baseVersion: 'abc' }));
+      expect(res.status).to.equal(400);
     });
   });
 
@@ -678,8 +726,70 @@ describe('LlmoAkamaiController', () => {
     });
   });
 
+  describe('getVersions', () => {
+    it('returns the latest version and the ACTIVE activation per network', async () => {
+      const res = await controller.getVersions(withData(propertyRef));
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.propertyId).to.equal(PROPERTY_ID);
+      expect(body.latestVersion).to.equal(7);
+      expect(body.active.STAGING.propertyVersion).to.equal(7);
+      expect(body.active.PRODUCTION.propertyVersion).to.equal(5);
+      expect(mockAkamaiClient.listActivations)
+        .to.have.been.calledWith(PROPERTY_ID, CONTRACT_ID, GROUP_ID);
+    });
+
+    it('omits a network that has no ACTIVE activation', async () => {
+      mockAkamaiClient.listActivations.resolves([
+        {
+          activationId: 'atv_s', status: 'ACTIVE', network: 'STAGING', propertyVersion: 7,
+        },
+        {
+          activationId: 'atv_p', status: 'PENDING', network: 'PRODUCTION', propertyVersion: 6,
+        },
+      ]);
+      const res = await controller.getVersions(withData(propertyRef));
+      const body = await res.json();
+      expect(body.active.STAGING.propertyVersion).to.equal(7);
+      expect(body.active.PRODUCTION).to.be.undefined;
+    });
+
+    it('returns an empty active map when nothing is active', async () => {
+      mockAkamaiClient.listActivations.resolves([
+        {
+          activationId: 'atv_p', status: 'DEACTIVATED', network: 'PRODUCTION', propertyVersion: 4,
+        },
+      ]);
+      const res = await controller.getVersions(withData(propertyRef));
+      const body = await res.json();
+      expect(body.active).to.deep.equal({});
+    });
+
+    it('keeps the first ACTIVE activation per network (does not overwrite with a later one)', async () => {
+      // Two ACTIVE STAGING entries (should not happen per Akamai's one-active-per-network rule):
+      // the first seen wins; a later one must not silently overwrite it.
+      mockAkamaiClient.listActivations.resolves([
+        {
+          activationId: 'atv_first', status: 'ACTIVE', network: 'STAGING', propertyVersion: 9,
+        },
+        {
+          activationId: 'atv_second', status: 'ACTIVE', network: 'STAGING', propertyVersion: 6,
+        },
+      ]);
+      const res = await controller.getVersions(withData(propertyRef));
+      const body = await res.json();
+      expect(body.active.STAGING.propertyVersion).to.equal(9);
+    });
+
+    it('maps a PAPI failure to 502', async () => {
+      mockAkamaiClient.listActivations.rejects(new Error('PAPI GET /activations -> 500: oops'));
+      const res = await controller.getVersions(withData(propertyRef));
+      expect(res.status).to.equal(502);
+    });
+  });
+
   describe('guard paths across endpoints', () => {
-    const endpoints = ['listProperties', 'plan', 'deploy', 'activate', 'activationStatus'];
+    const endpoints = ['listProperties', 'getVersions', 'plan', 'deploy', 'activate', 'activationStatus'];
 
     it('every endpoint returns 404 when the site is missing', async () => {
       mockContext.dataAccess.Site.findById.resolves(null);
@@ -700,7 +810,7 @@ describe('LlmoAkamaiController', () => {
     });
 
     it('property endpoints reject a malformed contractId or groupId', async () => {
-      for (const name of ['plan', 'deploy', 'activate', 'activationStatus']) {
+      for (const name of ['getVersions', 'plan', 'deploy', 'activate', 'activationStatus']) {
         // eslint-disable-next-line no-await-in-loop
         const rc = await controller[name](withData({ ...propertyRef, contractId: 'bad' }));
         expect(rc.status, `${name} contractId`).to.equal(400);

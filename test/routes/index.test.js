@@ -1244,6 +1244,7 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes',
       'GET /sites/:siteId/llmo/cdn-onboard/akamai/config',
       'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/versions',
       'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan',
       'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy',
       'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate',
