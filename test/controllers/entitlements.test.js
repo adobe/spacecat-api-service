@@ -92,6 +92,7 @@ describe('Entitlements Controller', () => {
     const mockAccessControlUtilInstance = {
       hasAccess: sandbox.stub().resolves(true),
       hasAdminAccess: sandbox.stub().returns(true),
+      hasS2SAdminAccess: sandbox.stub().returns(true),
     };
 
     // Stub AccessControlUtil.fromContext to return our mock instance
@@ -1044,28 +1045,30 @@ describe('Entitlements Controller', () => {
       expect(log.info.firstCall.args[0]).to.include('actor=system');
     });
 
-    it('allows an S2S admin (non-IMS/JWT admin) to update the tier', async () => {
-      const s2sInstance = {
+    it('returns forbidden for a regular (non-S2S) admin', async () => {
+      const adminOnlyInstance = {
         hasAccess: sandbox.stub().resolves(true),
-        hasAdminAccess: sandbox.stub().returns(false),
-        hasS2SAdminAccess: sandbox.stub().returns(true),
+        hasAdminAccess: sandbox.stub().returns(true),
+        hasS2SAdminAccess: sandbox.stub().returns(false),
       };
       AccessControlUtil.fromContext.restore();
-      sandbox.stub(AccessControlUtil, 'fromContext').returns(s2sInstance);
-      const s2sController = EntitlementsController({
+      sandbox.stub(AccessControlUtil, 'fromContext').returns(adminOnlyInstance);
+      const adminOnlyController = EntitlementsController({
         dataAccess: mockDataAccess,
         attributes: {
-          authInfo: new AuthInfo().withType('jwt').withProfile({}).withAuthenticated(true),
+          authInfo: new AuthInfo().withType('jwt').withProfile({ is_admin: true }).withAuthenticated(true),
         },
       });
 
-      const result = await s2sController.patchEntitlement(makeContext());
+      const result = await adminOnlyController.patchEntitlement(makeContext());
 
-      expect(result.status).to.equal(200);
-      expect(llmoEntitlement.setTier).to.have.been.calledOnceWith('PAID');
+      expect(result.status).to.equal(403);
+      const body = await result.json();
+      expect(body.message).to.equal('Only S2S admins can update entitlements');
+      expect(llmoEntitlement.setTier).to.not.have.been.called;
     });
 
-    it('returns forbidden when caller is neither admin nor S2S admin', async () => {
+    it('returns forbidden when caller is not an S2S admin', async () => {
       const nonAdminInstance = {
         hasAccess: sandbox.stub().resolves(true),
         hasAdminAccess: sandbox.stub().returns(false),
@@ -1084,7 +1087,7 @@ describe('Entitlements Controller', () => {
 
       expect(result.status).to.equal(403);
       const body = await result.json();
-      expect(body.message).to.equal('Only admins can update entitlements');
+      expect(body.message).to.equal('Only S2S admins can update entitlements');
     });
 
     it('returns bad request for invalid organization ID', async () => {
