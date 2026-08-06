@@ -111,7 +111,9 @@ const FIXTURES = {
         geoTargetId: 2840,
         languageCode: 'en',
         text: 'sample',
-        tagMap: { 'topic-a': 't-1' },
+        tags: [{
+          id: 't-1', name: 'topic-a', parentId: null, path: null,
+        }],
         // Authorship metadata fields (LLMO-6289) on a list item.
         createdAt: '2026-07-01T00:00:00Z',
         createdBy: 'user-a',
