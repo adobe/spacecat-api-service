@@ -23,14 +23,13 @@ import { clearBrandWorkspaceCache } from './workspace-resolver.js';
 // INVARIANT: a brand's sub-workspace carries NO AI resource allocation of its own. It is created
 // without a `resources` payload, and nothing in this module ever transfers units onto or off it.
 // A child sits at `total: 0` on every AI dimension and still accepts every metered write, because
-// our parent workspaces run with `limits_enabled: false`.
+// our parent workspaces run with `limits_enabled: false` — Semrush does not enforce AI
+// project/prompt limits for proxy-routed LLMO workspaces (confirmed 2026-07-28), so nothing ever
+// needs to size a child. The former just-in-time allocator that would have sized one was removed in
+// SITES-49206.
 //
-// Just-in-time allocation (`resource-manager.js`, gated by `SERENITY_DYNAMIC_ALLOCATION`) is the
-// only thing that ever sizes a child, and it is off in every deployed environment.
-//
-// The live evidence for the invariant, why an up-front carve is actively harmful rather than
-// merely redundant, and when the JIT allocator would need turning on: see docs/serenity.md
-// § Sub-workspace resource allocation.
+// The live evidence for the invariant and why an up-front carve is actively harmful rather than
+// merely redundant: see docs/serenity.md § Sub-workspace resource allocation.
 
 // Workspace create normally settles `not ready → created` in seconds (workspace
 // doc §4), but a busy upstream can take noticeably longer — so we poll up to ~30s

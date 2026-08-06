@@ -1,5 +1,11 @@
 # ADR-008: A brand sub-workspace carries no resource allocation
 
+> **Update (2026-08, SITES-49206).** This decision stands and is now **unconditional**: the dormant
+> JIT allocator that this ADR described as "retained behind `SERENITY_DYNAMIC_ALLOCATION`" as a
+> fallback has been removed (Semrush no longer enforces AI limits for proxy-routed LLMO workspaces).
+> The no-carve behaviour is the only behaviour; references below to the allocator being retained
+> behind a flag are historical.
+
 ## Context
 
 A brand's Semrush sub-workspace was provisioned with an AI resource allocation carved out of the

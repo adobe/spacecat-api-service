@@ -1059,10 +1059,13 @@ export function createSerenityTransport({ env, imsToken }) {
     /**
      * GET /v1/workspaces/{ws}/resources — the workspace's own AI resources
      * (`NewWorkspaceResources`: `product_resources.ai.resources.{projects,prompts,weekly_prompts}`
-     * as `{ used, drafted, total }`). Read by the dynamic-allocation allocator before a metered op
-     * (child headroom) and against the MASTER workspace for the org pool (`free = total − used`).
+     * as `{ used, drafted, total }`).
      * NOTE: use this on the master id for the pool — `/parent/resources` returns the workspace's
      * OWN allocation, not the master pool (live-verified 2026-07-02).
+     *
+     * NOTE (SITES-49206): the just-in-time allocator that read this before a metered op was removed
+     * once Semrush stopped enforcing AI limits for proxy-routed LLMO workspaces; this read has no
+     * in-repo caller today but is kept as part of the transport's workspace-resource surface.
      *
      * @param {string} workspaceId
      */
@@ -1085,32 +1088,6 @@ export function createSerenityTransport({ env, imsToken }) {
       return unwrap('GET', await users.GET(
         '/v1/workspaces/{id}/family',
         { params: { path: { id: parentWorkspaceId } } },
-      ));
-    },
-
-    /**
-     * POST /v2/workspaces/{ws}/resources/transfer — set a sub-workspace's AI resource totals
-     * (ABSOLUTE, not a delta), drawing the difference from / returning it to the parent pool.
-     * A public user-token endpoint (workspace doc §5/§7). The only callers are the just-in-time
-     * allocator's `transferOnce` / `transferAndSettle` (`resource-manager.js`) — top-up before a
-     * metered write, best-effort surplus release after a delete or model change. The sub-workspace
-     * lifecycle itself never calls this: a child is created with no allocation and never carries
-     * one (see `workspace-lifecycle.js`).
-     * V2 wraps the resources under a `resources` key (WorkspaceResourcesTransferV2Form
-     * → createWorkspaceV2Resources); `payload` is the bare resources object
-     * (`{ ai: { projects, prompts } }`, the aiProductResources shape), so wrap it
-     * here. That `ai` shape is the SAME one already proven live as the v2 child-create
-     * `resources` body (createSubworkspace), so this is contract-compatible — the v1
-     * route's documented body (flat WorkspaceResources, no `ai` key) never matched
-     * what we send. The exact allocation values remain a Gate-A live-smoke pin.
-     *
-     * @param {string} workspaceId
-     * @param {WorkspaceResources} payload - bare resources object, wrapped here.
-     */
-    async transferWorkspaceResources(workspaceId, payload) {
-      return unwrap('POST', await users.POST(
-        '/v2/workspaces/{id}/resources/transfer',
-        { params: { path: { id: workspaceId } }, body: { resources: payload } },
       ));
     },
 

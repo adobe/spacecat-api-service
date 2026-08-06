@@ -83,53 +83,6 @@ export function isUpstreamGone(e) {
 }
 
 /**
- * The upstream error body as a lowercased string, for message-based classification. The gateway
- * returns either a JSON `{ message }` object or a bare text/html string (the disguised-405 case);
- * this normalises both so a predicate can match on substrings. Callers guard
- * `isSemrushTransportError` (short-circuit) before calling, so `e` is always a Semrush transport
- * error here.
- * @param {SerenityTransportError | ProjectEngineApiError} e
- * @returns {string}
- */
-function bodyText(e) {
-  const { body } = e;
-  if (typeof body === 'string') {
-    return body.toLowerCase();
-  }
-  // Only trust the upstream body's `message`; never fall back to `e.message` (the transport URL),
-  // which would let a classifier match on the request URL rather than the upstream content.
-  const msg = body && typeof body === 'object' ? /** @type {{message?: unknown}} */ (body).message : undefined;
-  return typeof msg === 'string' ? msg.toLowerCase() : '';
-}
-
-/**
- * Terminal parent-pool exhaustion: a `422` whose body says the subscription is out of units. The
- * dynamic allocator maps this to `orgPoolExhausted` (409). MUST match on the message, not the bare
- * status — the same route also emits a transient `422 "workspace not ready"` (see
- * {@link isWorkspaceNotReady}) that is retried, not surfaced.
- * @param {unknown} e
- * @returns {boolean}
- */
-export function isPoolExhausted(e) {
-  return isSemrushTransportError(e)
-    && e.status === 422
-    && bodyText(e).includes('insufficient available units');
-}
-
-/**
- * Transient async-lock `422 "workspace not ready"` — fired when a transfer/delete races a still
- * settling workspace, and (Gate 0) can persist even after `getWorkspaceStatus` reports `created`.
- * Retry with backoff; do NOT surface as pool exhaustion.
- * @param {unknown} e
- * @returns {boolean}
- */
-export function isWorkspaceNotReady(e) {
-  return isSemrushTransportError(e)
-    && e.status === 422
-    && bodyText(e).includes('workspace not ready');
-}
-
-/**
  * The disguised metered-quota rejection: a `405` from a metered write/publish when
  * `used + need > total`. Live-verified (Rainer, LLMO-6190, `LLMO-Dev-2`): the body carries NO
  * "quota"/"allocation exhausted" text at all — it is a bare nginx `text/html` page
@@ -142,8 +95,8 @@ export function isWorkspaceNotReady(e) {
  * Emits the `MeteredQuotaClassifier` observability metric (LLMO-6191 item 2) ONLY when `e` is an
  * actual `405` (the metric's denominator is "how many 405s", not "how many errors of any kind" —
  * see the non-405 early return), dimensioned by match/no-match, so the "405-classifier match
- * ratio" the rollout-hardening ticket asks for reflects the real shape-based signal now that
- * `retryOnQuota` (dynamic-allocation-active.js) is a live production caller.
+ * ratio" the rollout-hardening ticket asks for reflects the real shape-based signal at the
+ * metered-write/publish call sites (markets-subworkspace.js, prompts-subworkspace.js).
  * @param {unknown} e
  * @returns {boolean}
  */
@@ -194,36 +147,26 @@ export const ERROR_CODES = Object.freeze({
   // Subworkspace provisioning (serenity dual-mode, subworkspace path).
   AMBIGUOUS_WORKSPACE: 'ambiguousWorkspace',
   LINKED_SUBWORKSPACES: 'linkedSubworkspaces',
-  // Dynamic AI resource allocation (JIT top-up path).
-  ORG_POOL_EXHAUSTED: 'orgPoolExhausted',
-  BRAND_AI_LIMIT: 'brandAiLimit',
-  // Transient: a transfer never cleared the async `workspace not ready` lock — retryable, NOT
-  // pool exhaustion (distinct from ORG_POOL_EXHAUSTED so the operator/client isn't misled).
-  WORKSPACE_BUSY: 'workspaceBusy',
   // Publish-after-populate (LLMO-5492): a publish rejected because the workspace
   // has no `ai.projects` quota (Semrush's disguised metered 405). PERMANENT —
   // alert, do not retry — distinct from the transient publish failures.
   PUBLISH_QUOTA_EXHAUSTED: 'publishQuotaExhausted',
   // Case-1 quota rejection (serenity-docs#72 §2): the disguised-405 signal classified by
-  // isMeteredQuota, surfaced via toQuotaExceededError. Distinct from ORG_POOL_EXHAUSTED /
-  // BRAND_AI_LIMIT (the allocator-ON tokens) so a client need not tell them apart, but a caller
-  // debugging a specific rejection still can from the log line at the throw site.
+  // isMeteredQuota, surfaced via toQuotaExceededError.
   QUOTA_EXCEEDED: 'quotaExceeded',
 });
 
 /**
  * Case-1 quota rejection (serenity-docs#72 §2): the disguised 405 surfaced on a metered write.
  * A sub-workspace carries no allocation of its own to exhaust (see `workspace-lifecycle.js`), so
- * our own sizing is never the cause in either flag state — this means the upstream refused the
- * write on its own terms, which for a tenant whose parent enforces limits is the signal to turn
- * the JIT allocator on (docs/serenity.md). Maps the
- * classified {@link isMeteredQuota} signal to the same customer-facing contract as
- * `orgPoolExhausted` / `brandAiLimit` (409, stable token), so a caller never needs to
- * distinguish them — see `ERROR_CODES.QUOTA_EXCEEDED`.
+ * our own sizing is never the cause — this means the upstream refused the write on its own terms.
+ * Maps the classified {@link isMeteredQuota} signal to a stable customer-facing contract (409,
+ * `quotaExceeded` token) so a caller never needs to distinguish rejection sub-types — see
+ * `ERROR_CODES.QUOTA_EXCEEDED`.
  *
- * Client-facing message is deliberately generic — no internal ids, no upstream body — matching
- * the `orgPoolExhausted`/`brandAiLimit` factories in resource-manager.js. Callers should log the
- * upstream detail themselves before throwing this (see the markets-subworkspace.js call sites).
+ * Client-facing message is deliberately generic — no internal ids, no upstream body. Callers should
+ * log the upstream detail themselves before throwing this (see the markets-subworkspace.js call
+ * sites).
  * @returns {ErrorWithStatusCode}
  */
 export function toQuotaExceededError() {

@@ -40,11 +40,9 @@ import {
 import { ORIGIN_VALUE, PROXY_CREATE_SOURCE_VALUE } from '../prompt-tags.js';
 import { resolveProject, buildSliceProjectMap, sliceKey } from '../subworkspace-projects.js';
 import { redactUpstreamMessage } from '../rest-transport.js';
-import { createHeadroomGuard } from '../dynamic-allocation-active.js';
 import { classifyPromptIntents } from '../intent-classification.js';
 import { alertQuotaRejection } from '../quota-alerts.js';
 
-/** @typedef {import('../resource-manager.js').Blocks} Blocks */
 /** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
 
 /**
@@ -147,9 +145,6 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
  * @param {number} writeDeadline - shared request-write deadline for intent classification.
  * @param {string} callerId - resolved caller id (LLMO-6289) stamped as the created/updated author.
  * @param {object} [options]
- * @param {boolean} [options.dynamicAllocation]
- * @param {string} [options.parentWorkspaceId]
- * @param {Partial<Blocks>} [options.ceiling] - per-brand AI ceiling (LLMO-6190 flag-flip gate).
  * @param {string | null} [options.orgId] - serenity-docs#72 §5 alert payload only.
  * @param {string | null} [options.brandId] - serenity-docs#72 §5 alert payload only.
  */
@@ -163,9 +158,6 @@ export async function handleCreatePromptsSubworkspace(
   writeDeadline,
   callerId,
   {
-    dynamicAllocation = false,
-    parentWorkspaceId = '',
-    ceiling = /** @type {Partial<Blocks> | undefined} */ (undefined),
     orgId = null,
     brandId = null,
   } = {},
@@ -213,27 +205,6 @@ export async function handleCreatePromptsSubworkspace(
   );
   const injectComputedIntent = makeIntentInjector(transport, workspaceId, intentByText, log);
 
-  // PROMPT metering seam (Rainer, live-verified LLMO-6190): the metered write is
-  // `createPromptsWithMetadata` (inside `createOnePrompt` below), NOT publish — a disguised 405
-  // fires there, before any publish, if `used + drafted + batch > total`. Front headroom BEFORE
-  // this loop, sized on the whole incoming batch (`inputs.length` — a safe upper bound; some
-  // inputs may still skip on validation/missing-project, so this can over-provision slightly, never
-  // under). No-op when the flag is OFF.
-  const headroom = createHeadroomGuard(
-    transport,
-    {
-      enabled: dynamicAllocation,
-      subWorkspaceId: workspaceId,
-      parentWorkspaceId,
-      ceiling,
-      env,
-      orgId,
-      brandId,
-    },
-    log,
-  );
-  await headroom.ensure({ prompts: inputs.length }, { includeDrafted: true });
-
   const results = await mapLimit(inputs, BULK_CREATE_CONCURRENCY, async (raw) => {
     const { value: input, reason } = normalizePromptInput(raw);
     if (!input) {
@@ -260,11 +231,6 @@ export async function handleCreatePromptsSubworkspace(
       // intent (serenity-docs#32). The injectors act on disjoint dimensions.
       let typed = await injectComputedTags(projectId, input);
       typed = await injectComputedIntent(projectId, typed);
-      // LLMO-6190 follow-up: the metered write itself can still 405 as a disguised metered-quota
-      // rejection despite the pre-loop sizing above (the live-verified ~9s gateway
-      // write-enforcement lag after a JIT top-up) — route it through `headroom.retryOnQuota` (a
-      // no-op passthrough when the flag is OFF) so each item recovers independently; `mapLimit`'s
-      // own per-item try/catch below still isolates a surviving failure to this one item.
       // Intentional (not an inconsistency to fix): each item stamps its OWN
       // creation instant here — `buildCreateMetadata` runs per prompt inside
       // `createOnePrompt`, so a bulk batch gets slightly staggered `created_at`
@@ -272,9 +238,12 @@ export async function handleCreatePromptsSubworkspace(
       // `generateAndAttachPrompts` (markets-subworkspace.js), which shares ONE
       // metadata object (a single batch instant) across its whole group. Both
       // are defensible; per-item precision is preferred on the direct create path.
-      const semrushPromptId = await headroom.retryOnQuota(
-        () => createOnePrompt(transport, workspaceId, projectId, typed, callerId),
-        { callSite: 'createOnePrompt' },
+      const semrushPromptId = await createOnePrompt(
+        transport,
+        workspaceId,
+        projectId,
+        typed,
+        callerId,
       );
       return {
         created: {
@@ -343,16 +312,15 @@ export async function handleCreatePromptsSubworkspace(
     };
   }
 
-  // Route each project's publish through the headroom guard's retryOnQuota (LLMO-6190 item 4):
-  // a disguised metered-405 gets ONE bounded top-up+retry per project before being recorded as a
-  // failure. No-op passthrough when the flag is OFF (the guard's retryOnQuota is a plain call).
+  // Publish each affected project. A disguised metered-405 on publish is classified and surfaced by
+  // publishAffected / reconcilePublishErrors below (serenity-docs#72 §4.1) — see the alertContext.
   const alertContext = { orgId, brandId, env };
   const publishErrors = await publishAffected(
     transport,
     workspaceId,
     affectedProjectIds,
     log,
-    (fn) => headroom.retryOnQuota(fn, { callSite: 'publishAffected' }),
+    undefined,
     alertContext,
   );
   // serenity-docs#72 §4.1 atomicity: a quota-rejected publish rolls back (deletes) the prompts
