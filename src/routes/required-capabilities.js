@@ -381,6 +381,8 @@ const routeRequiredCapabilities = {
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/domain-urls': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/url-prompts': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/url-prompts': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/prompts-by-url': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/prompts-by-url': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/filter-dimensions': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/filter-dimensions': 'brand:read',
 
