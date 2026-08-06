@@ -1044,10 +1044,32 @@ describe('Entitlements Controller', () => {
       expect(log.info.firstCall.args[0]).to.include('actor=system');
     });
 
-    it('returns forbidden for non-admin user', async () => {
+    it('allows an S2S admin (non-IMS/JWT admin) to update the tier', async () => {
+      const s2sInstance = {
+        hasAccess: sandbox.stub().resolves(true),
+        hasAdminAccess: sandbox.stub().returns(false),
+        hasS2SAdminAccess: sandbox.stub().returns(true),
+      };
+      AccessControlUtil.fromContext.restore();
+      sandbox.stub(AccessControlUtil, 'fromContext').returns(s2sInstance);
+      const s2sController = EntitlementsController({
+        dataAccess: mockDataAccess,
+        attributes: {
+          authInfo: new AuthInfo().withType('jwt').withProfile({}).withAuthenticated(true),
+        },
+      });
+
+      const result = await s2sController.patchEntitlement(makeContext());
+
+      expect(result.status).to.equal(200);
+      expect(llmoEntitlement.setTier).to.have.been.calledOnceWith('PAID');
+    });
+
+    it('returns forbidden when caller is neither admin nor S2S admin', async () => {
       const nonAdminInstance = {
         hasAccess: sandbox.stub().resolves(true),
         hasAdminAccess: sandbox.stub().returns(false),
+        hasS2SAdminAccess: sandbox.stub().returns(false),
       };
       AccessControlUtil.fromContext.restore();
       sandbox.stub(AccessControlUtil, 'fromContext').returns(nonAdminInstance);

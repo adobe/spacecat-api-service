@@ -215,7 +215,8 @@ function EntitlementsController(ctx) {
    * the existing entitlement entity for (organization, productCode), validates the
    * requested tier from the payload, sets it directly on the entity, and saves.
    *
-   * Admin-only and not exposed to S2S consumers (listed in `INTERNAL_ROUTES`,
+   * Gated to admins or S2S admins (`hasAdminAccess() || hasS2SAdminAccess()`)
+   * and not exposed to S2S capability consumers (listed in `INTERNAL_ROUTES`,
    * matching the parallel `POST /organizations/:organizationId/entitlements`
    * contract). Emits an audit-trail log line recording who performed the change
    * and for which IMS org.
@@ -224,7 +225,7 @@ function EntitlementsController(ctx) {
    * @returns {Promise<Response>} Updated entitlement response.
    */
   const patchEntitlement = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
+    if (!accessControlUtil.hasAdminAccess() && !accessControlUtil.hasS2SAdminAccess()) {
       return forbidden('Only admins can update entitlements');
     }
     const { organizationId } = context.params;
