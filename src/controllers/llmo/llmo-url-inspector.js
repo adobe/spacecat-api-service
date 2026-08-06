@@ -592,16 +592,14 @@ export function createUrlInspectorDomainUrlsHandler(
 }
 
 /**
- * Fetches prompts that cited `urlId` from the Mysticat/DRS RPC
- * (`rpc_url_inspector_url_prompts`). Shared by `createUrlInspectorUrlPromptsHandler`
- * and `createUrlInspectorPromptsByUrlHandler` (LLMO-5789) so the RPC call and its
- * synthetic-url_id soft-empty handling live in one place.
+ * Fetches prompts that cited `urlId` via rpc_url_inspector_url_prompts.
+ * Shared by createUrlInspectorUrlPromptsHandler and
+ * createUrlInspectorPromptsByUrlHandler.
  * @param {object} client - PostgREST client.
  * @param {object} log - Logger.
  * @param {{siteId: string, urlId: string, startDate: string, endDate: string,
  *   model: string|null}} rpcInputs
- * @returns {Promise<{prompts: Array<object>}|{error: object}>} `error` is a
- *   ready-to-return Response.
+ * @returns {Promise<{prompts: Array<object>}|{error: object}>}
  */
 async function fetchUrlPromptsViaMysticat(client, log, {
   siteId, urlId, startDate, endDate, model,
@@ -615,18 +613,8 @@ async function fetchUrlPromptsViaMysticat(client, log, {
   });
 
   if (error) {
-    // PostgREST/Supabase wraps Postgres errors with `code` (SQLSTATE) and
-    // `message`. UUID parse failures (SQLSTATE 22P02 — invalid_text_representation)
-    // happen when callers pass synthetic url_ids — most commonly the URL
-    // Inspector PG dashboard's owned-urls flow, where the rpc_url_inspector_owned_urls
-    // RPC does not return a real source_urls.id and the dashboard
-    // synthesises `url-${index}-${slug}` ids per LLMO-4526 (multi-persona
-    // PR review M2 follow-up).
-    //
-    // The drilldown is genuinely empty for those rows (we do not know
-    // which prompts cited that URL), so it is more useful to clients to
-    // surface that as an empty list than as a 500 the dialog would have
-    // to interpret. Other Postgres errors continue to bubble up as 500.
+    // 22P02 (invalid uuid) happens with synthetic url_ids from the owned-urls
+    // dashboard fallback (LLMO-4526) — treat as empty, not an error.
     if (error.code === '22P02' || /invalid input syntax for( type)? uuid/i.test(error.message)) {
       log.info(`URL Inspector URL prompts: invalid url_id "${urlId}" — returning empty prompt list`);
       return { prompts: [] };
@@ -648,18 +636,14 @@ async function fetchUrlPromptsViaMysticat(client, log, {
 }
 
 /**
- * Fetches prompts that cited `url` from the Mysticat/DRS RPC
- * (`rpc_url_inspector_prompts_by_url`, LLMO-5789). Single-hop counterpart to
- * `fetchUrlPromptsViaMysticat`: the RPC itself resolves `url` to a `source_urls.id`
- * (same www/scheme/trailing-slash normalization as `rpc_brand_presence_url_detail`)
- * and delegates to `rpc_url_inspector_url_prompts`, so callers that only have a
- * URL string no longer need to paginate `domain-urls` first.
+ * Fetches prompts that cited `url` via rpc_url_inspector_prompts_by_url,
+ * which resolves the URL to a source_urls.id internally (no domain-urls
+ * pagination needed).
  * @param {object} client - PostgREST client.
  * @param {object} log - Logger.
  * @param {{siteId: string, url: string, startDate: string, endDate: string,
  *   model: string|null}} rpcInputs
- * @returns {Promise<{prompts: Array<object>}|{error: object}>} `error` is a
- *   ready-to-return Response.
+ * @returns {Promise<{prompts: Array<object>}|{error: object}>}
  */
 async function fetchUrlPromptsByUrlViaMysticat(client, log, {
   siteId, url, startDate, endDate, model,
@@ -750,15 +734,10 @@ export function createUrlInspectorUrlPromptsHandler(
 }
 
 /**
- * Resolves whether `brandId` is eligible for the single-hop Semrush URL_PROMPTS
- * lookup: it must resolve to a real brand AND that brand must have an active
- * Semrush SUB-workspace of its own. A flat-mode brand (no sub-workspace — just
- * the org's shared parent workspace) is NOT eligible even when the org has a
- * Semrush workspace at all: prompts/projects live only in a brand's own
- * sub-workspace (see `elements.js: authorizeBrandSubWorkspace`), never the
- * shared parent. `workspaceId === parentWorkspaceId` is the same misconfiguration
- * guard that function uses — a sub-workspace must never coincide with the org
- * parent, or a scoped query would run against the shared parent pool.
+ * True only when brandId resolves to a real brand with its own active
+ * Semrush sub-workspace — a flat-mode brand (shared parent workspace) is
+ * never eligible, since prompts/projects live only in a brand's own
+ * sub-workspace.
  * @param {object} ctx - Request context.
  * @param {string} spaceCatId - SpaceCat organization UUID.
  * @param {string} brandId - Brand id/name from the route (path param).
@@ -791,33 +770,9 @@ async function resolveSemrushEligibility(ctx, spaceCatId, brandId, client) {
 }
 
 /**
- * Creates the getUrlInspectorPromptsByUrl handler — a single entry point for
- * "prompts that cited this URL" regardless of whether the org/brand is on
- * Semrush or still Mysticat/DRS-backed (LLMO-5789).
- *
- * Accepts EITHER `url` or `urlId` (at least one required):
- *   - Semrush-eligible (see `resolveSemrushEligibility`) AND `url` given ->
- *     single-hop Semrush URL_PROMPTS lookup by the URL string itself, calling
- *     `elements-service.js: getUrlPrompts` directly — no `domain-urls`
- *     resolution needed at all. No market/project scoping is exposed on this
- *     endpoint (`projectIds: []` -> the service's own unscoped aggregate
- *     across the whole sub-workspace), so the cross-brand project-ownership
- *     check `elements.js: listUrlPrompts` does for caller-supplied `projectId`
- *     does not apply here — there is no such input to validate.
- *   - Otherwise, if `urlId` is given -> the existing Mysticat RPC path via
- *     `fetchUrlPromptsViaMysticat` (`rpc_url_inspector_url_prompts`), same as
- *     `createUrlInspectorUrlPromptsHandler`. Preferred over the by-url RPC
- *     when both are present since the caller has already paid the
- *     resolution cost (e.g. via `domain-urls`).
- *   - Otherwise (only `url` given, not Semrush-eligible) -> single-hop
- *     Mysticat RPC path via `fetchUrlPromptsByUrlViaMysticat`
- *     (`rpc_url_inspector_prompts_by_url`, LLMO-5789) — resolves the URL to a
- *     url_id inside the RPC itself, so DRS-backed callers no longer need to
- *     paginate `domain-urls` either.
- *
- * Both branches apply the same 28-day `defaultDateRange()` fallback so callers
- * see identical behavior regardless of which backend actually serves the
- * request (the Semrush service call otherwise requires explicit dates).
+ * "Prompts that cited this URL", routed to Semrush (if eligible and `url`
+ * given), else the urlId-based RPC (if `urlId` given), else the single-hop
+ * by-url RPC. Both RPC branches share the same 28-day default date range.
  * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
  */
 export function createUrlInspectorPromptsByUrlHandler(
