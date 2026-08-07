@@ -22,7 +22,7 @@ import { brandPointerReloader } from '../../src/controllers/serenity.js';
 // errors.js (isSemrushTransportError), which recognises the real SerenityTransportError /
 // ProjectEngineApiError by `instanceof`. The mapError tests below must feed those real types
 // (a bare mock class would not be recognised → would wrongly fall through to the generic 500).
-import { SerenityTransportError as RealSerenityTransportError } from '../../src/support/serenity/rest-transport.js';
+import { SerenityTransportError as RealSerenityTransportError } from '../../src/support/serenity/serenity-transport-error.js';
 
 use(chaiAsPromised);
 use(sinonChai);
