@@ -1,3 +1,10 @@
+# [1.731.0](https://github.com/adobe/spacecat-api-service/compare/v1.730.0...v1.731.0) (2026-08-07)
+
+
+### Features
+
+* **sites:** support field projection on GET /sites/by-tier/:tier ([#3017](https://github.com/adobe/spacecat-api-service/issues/3017)) ([e745fe4](https://github.com/adobe/spacecat-api-service/commit/e745fe4fb173c7da226b93a7b446ffd0414334ae))
+
 # [1.730.0](https://github.com/adobe/spacecat-api-service/compare/v1.729.0...v1.730.0) (2026-08-07)
 
 
