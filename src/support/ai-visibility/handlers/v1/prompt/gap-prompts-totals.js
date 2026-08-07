@@ -33,6 +33,9 @@ import {
 export async function handleGapPromptsTotals(sp, clients) {
   const domain = sp.get('domain');
   const competitorDomains = parseCompetitorDomainsList(sp);
+  const competitors = competitorDomains.length > 0
+    ? competitorDomains.map(brandTarget)
+    : [{ domain, name: domain }];
   const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const country = resolveCountry(sp) || COUNTRY_ENUM.WORLDWIDE;
   const date = sp.get('date');
@@ -46,7 +49,7 @@ export async function handleGapPromptsTotals(sp, clients) {
       country,
       llm: engine,
       target: { domain, name: domain },
-      competitors: competitorDomains.map(brandTarget),
+      competitors,
       target_date: date,
     };
     if (topicId) {
