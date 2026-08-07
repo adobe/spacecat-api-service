@@ -692,7 +692,8 @@ function SitesController(ctx, log, env) {
    * code via the `productCode` query parameter (e.g. 'LLMO').
    *
    * Returns the full result set (no pagination) - acceptable for a
-   * bounded admin-only use case. Sites are ordered by ID.
+   * bounded admin-only use case. Sites are ordered by ID. Supports the
+   * `fields` query parameter to project a subset of fields per site.
    *
    * @param {object} context - Context of the request.
    * @returns {Promise<Response>} Sites response.
@@ -718,8 +719,14 @@ function SitesController(ctx, log, env) {
     const all = (await Site.allByEnrollmentAndTier(tier, productCode))
       .sort((a, b) => a.getId().localeCompare(b.getId()));
 
+    const sites = all.map((site) => SiteDto.toJSON(site));
+    const { list, error } = applyFieldProjection(sites, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+
     return ok({
-      sites: all.map((site) => SiteDto.toJSON(site)),
+      sites: list,
     });
   };
 

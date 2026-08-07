@@ -1924,6 +1924,32 @@ describe('Sites Controller', () => {
     expect(mockDataAccess.Site.allByEnrollmentAndTier).to.have.not.been.called;
   });
 
+  it('projects sites by enrollment tier when ?fields= is passed', async () => {
+    mockDataAccess.Site.allByEnrollmentAndTier.resolves(sites);
+
+    const result = await sitesController.getAllByEnrollmentAndTier({
+      params: { tier: 'PAID' },
+      data: { fields: 'baseURL' },
+    });
+    const body = await result.json();
+
+    expect(result.status).to.equal(200);
+    expect(Object.keys(body.sites[0]).sort()).to.deep.equal(['baseURL', 'id']);
+  });
+
+  it('returns 400 when ?fields= matches no known field on getAllByEnrollmentAndTier', async () => {
+    mockDataAccess.Site.allByEnrollmentAndTier.resolves(sites);
+
+    const result = await sitesController.getAllByEnrollmentAndTier({
+      params: { tier: 'PAID' },
+      data: { fields: 'nope' },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'Invalid fields: nope');
+  });
+
   it('returns bad request if audit type is not provided', async () => {
     const result = await sitesController.getAllWithLatestAudit({ params: {} });
     const error = await result.json();
