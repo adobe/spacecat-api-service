@@ -8010,6 +8010,9 @@ describe('Brands Controller', () => {
         results: [],
         allSucceeded: true,
       }),
+      // Default: returns null (as if the brand-profile agent isn't configured / autorun off),
+      // so existing exact-body assertions are unaffected; wiring tests override this.
+      triggerBrandProfileAgentStub = sinon.stub().resolves(null),
     } = {}) {
       const getBrandByIdStub = typeof getBrandByIdResult === 'function'
         ? getBrandByIdResult
@@ -8067,6 +8070,9 @@ describe('Brands Controller', () => {
           isPayingLlmoSite: isPayingLlmoSiteStub,
           ensurePromptSuggestionSchedules: ensurePromptSuggestionSchedulesStub,
         },
+        '../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: triggerBrandProfileAgentStub,
+        },
       });
 
       return {
@@ -8079,6 +8085,7 @@ describe('Brands Controller', () => {
         fakeDrsClient,
         isPayingLlmoSiteStub,
         ensurePromptSuggestionSchedulesStub,
+        triggerBrandProfileAgentStub,
       };
     }
 
@@ -8973,6 +8980,61 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(200);
       const body = await response.json();
       expect(body.status).to.equal('active');
+    });
+
+    // -------------------------------------------------------------------------
+    // Brand-profile agent ("Brandaid") trigger — closes the gap where a brand
+    // added via activate had no brand profile, hard-failing Semrush/Synthetic
+    // prompt-gen. (#3014)
+    // -------------------------------------------------------------------------
+
+    it('triggers the brand-profile agent on activation', async () => {
+      const { controller, triggerBrandProfileAgentStub } = await buildActivateController({
+        triggerBrandProfileAgentStub: sinon.stub().resolves('brand-profile-site-123-brand-activation-abc'),
+      });
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: true }),
+      );
+
+      expect(response.status).to.equal(200);
+      expect(triggerBrandProfileAgentStub).to.have.been.calledOnce;
+      const args = triggerBrandProfileAgentStub.firstCall.args[0];
+      expect(args.site).to.exist;
+      expect(args.reason).to.equal('brand-activation');
+      const body = await response.json();
+      expect(body.brandProfileExecutionName).to.equal('brand-profile-site-123-brand-activation-abc');
+    });
+
+    it('triggers brand-profile even when generatePrompts is false', async () => {
+      const { controller, triggerBrandProfileAgentStub } = await buildActivateController({
+        triggerBrandProfileAgentStub: sinon.stub().resolves('exec-1'),
+      });
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: false }),
+      );
+
+      expect(response.status).to.equal(200);
+      expect(triggerBrandProfileAgentStub).to.have.been.calledOnce;
+    });
+
+    it('keeps activation a 200 (and still provisions schedules) when the brand-profile trigger throws', async () => {
+      const ensureStub = sinon.stub().resolves({ results: [], allSucceeded: true });
+      const { controller } = await buildActivateController({
+        triggerBrandProfileAgentStub: sinon.stub().rejects(new Error('sfn boom')),
+        ensurePromptSuggestionSchedulesStub: ensureStub,
+      });
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: true }),
+      );
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.status).to.equal('active');
+      // Its own try/catch means the throw doesn't skip prompt-suggestion provisioning.
+      expect(ensureStub).to.have.been.calledOnce;
     });
   });
 

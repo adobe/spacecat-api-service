@@ -88,6 +88,7 @@ import {
   ensurePromptSuggestionSchedules,
   isPayingLlmoSite,
 } from '../support/prompt-suggestion-schedules.js';
+import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 import { createIntentClassifier } from '../support/intent-classifier.js';
 import { emitMetric, resolveEnvironment } from '../support/metrics-emf.js';
 import {
@@ -2506,6 +2507,7 @@ function BrandsController(ctx, log, env) {
       let promptGenerationJobId;
       let scheduleId;
       let promptSuggestionResults = null;
+      let brandProfileExecutionName = null;
       let sideEffectError;
       try {
         const drsClient = DrsClient.createFrom(context);
@@ -2575,7 +2577,39 @@ function BrandsController(ctx, log, env) {
           scheduleId = schedule?.scheduleId;
         }
 
-        // 5) Recurring prompt-suggestion pipelines (Semrush / citation-attempts /
+        // Resolve the site once for the post-activation side-effects below.
+        const activatedSite = await Site.findById(baseSiteId);
+
+        // 5) Brand-profile agent ("Brandaid"). The create→activate path never triggered it
+        // (only full/PLG/Slack onboarding did), so brands added to an existing org had no
+        // brand profile — and Semrush / Synthetic-Personas prompt-gen HARD-FAILS without one
+        // ("...not onboarded in Spacecat (no brand-profile...)"). Fire it here so every
+        // newly-activated brand gets a profile generated, reaching parity with onboarding.
+        // Independent of DRS config (it's a SpaceCat agent) and in its own try so a failure
+        // never skips the prompt-suggestion provisioning below; triggerBrandProfileAgent is
+        // itself best-effort (env-gated, returns null when unconfigured). See #3014.
+        if (activatedSite) {
+          try {
+            brandProfileExecutionName = await triggerBrandProfileAgent({
+              context,
+              site: activatedSite,
+              reason: 'brand-activation',
+            });
+            if (brandProfileExecutionName) {
+              log.info(
+                `Brand ${brandUuid}: triggered brand-profile agent `
+                + `${brandProfileExecutionName} for site ${baseSiteId}`,
+              );
+            }
+          } catch (brandProfileError) {
+            log.error(
+              `Brand ${brandUuid}: brand-profile agent trigger failed for site `
+              + `${baseSiteId}: ${brandProfileError.message}`,
+            );
+          }
+        }
+
+        // 6) Recurring prompt-suggestion pipelines (Semrush / citation-attempts /
         // synthetic-personas). Without this, a brand added to an existing org via the
         // create→activate path never gets the recurring strategy pipelines — it would
         // get only the one-shot base_url job above (the gap that left Intuit's sub-brands
@@ -2587,9 +2621,8 @@ function BrandsController(ctx, log, env) {
         // monitored. ensurePromptSuggestionSchedules owns its per-pipeline errors and never
         // throws, so a failure here degrades gracefully without failing activation.
         if (drsConfigured) {
-          const site = await Site.findById(baseSiteId);
-          if (site) {
-            const isPaying = await isPayingLlmoSite(site, context);
+          if (activatedSite) {
+            const isPaying = await isPayingLlmoSite(activatedSite, context);
             const { results, allSucceeded } = await ensurePromptSuggestionSchedules({
               drsClient, siteId: baseSiteId, isPaying, log,
             });
@@ -2623,6 +2656,7 @@ function BrandsController(ctx, log, env) {
         ...(scheduleId ? { scheduleId } : {}),
         ...(promptSuggestionResults?.length
           ? { promptSuggestionSchedules: promptSuggestionResults } : {}),
+        ...(brandProfileExecutionName ? { brandProfileExecutionName } : {}),
       };
 
       // The activation alert is also best-effort. postLlmoAlert already swallows its own
