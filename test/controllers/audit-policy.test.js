@@ -1123,7 +1123,7 @@ describe('AuditPolicyController — E4 getScopePages', () => {
     const rows = [buildRow('https://example.com/a', '/a')];
     const { client } = buildScopeClient({ rows });
     const controller = loadController();
-    const res = await controller.getScopePages(buildContext({ client, params: { limit: '2' } }));
+    const res = await controller.getScopePages(buildContext({ client, data: { limit: '2' } }));
     expect(res.status).to.equal(200);
     const body = await res.json();
     expect(body.items).to.deep.equal([{
@@ -1141,7 +1141,7 @@ describe('AuditPolicyController — E4 getScopePages', () => {
       client, eqSpy, orderSpy, limitSpy,
     } = buildScopeClient({ rows: [] });
     const controller = loadController();
-    await controller.getScopePages(buildContext({ client, params: { limit: '9999' } }));
+    await controller.getScopePages(buildContext({ client, data: { limit: '9999' } }));
     expect(eqSpy).to.have.been.calledWith('site_id', SITE_ID);
     expect(orderSpy).to.have.been.calledWith('url', { ascending: true });
     expect(limitSpy).to.have.been.calledWith(200);
@@ -1154,7 +1154,7 @@ describe('AuditPolicyController — E4 getScopePages', () => {
     ];
     const { client } = buildScopeClient({ rows });
     const controller = loadController();
-    const res = await controller.getScopePages(buildContext({ client, params: { limit: '2' } }));
+    const res = await controller.getScopePages(buildContext({ client, data: { limit: '2' } }));
     const body = await res.json();
     expect(body.cursor).to.equal(Buffer.from('https://example.com/b', 'utf8').toString('base64url'));
   });
@@ -1163,7 +1163,7 @@ describe('AuditPolicyController — E4 getScopePages', () => {
     const { client, gtSpy } = buildScopeClient({ rows: [] });
     const controller = loadController();
     const cursor = Buffer.from('https://example.com/a', 'utf8').toString('base64url');
-    await controller.getScopePages(buildContext({ client, params: { cursor } }));
+    await controller.getScopePages(buildContext({ client, data: { cursor } }));
     expect(gtSpy).to.have.been.calledWith('url', 'https://example.com/a');
   });
 
@@ -1173,7 +1173,7 @@ describe('AuditPolicyController — E4 getScopePages', () => {
     const { client, gtSpy, limitSpy } = buildScopeClient({ rows: [] });
     const controller = loadController();
     const res = await controller.getScopePages(
-      buildContext({ client, params: { cursor: '!!!not-valid!!!' } }),
+      buildContext({ client, data: { cursor: '!!!not-valid!!!' } }),
     );
     expect(res.status).to.equal(400);
     expect(gtSpy).to.not.have.been.called;

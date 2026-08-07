@@ -382,10 +382,10 @@ export default function AuditPolicyController() {
     }
     const { siteId, client } = auth;
     const limit = Math.min(
-      Math.max(Number.parseInt(context.params?.limit, 10) || DEFAULT_PAGE, 1),
+      Math.max(Number.parseInt(context.data?.limit, 10) || DEFAULT_PAGE, 1),
       MAX_PAGE,
     );
-    const rawCursor = context.params?.cursor;
+    const rawCursor = context.data?.cursor;
     let cursor = null;
     if (hasText(rawCursor)) {
       cursor = decodePageCursor(rawCursor);
