@@ -103,6 +103,24 @@ export default function auditPolicyTests(getHttpClient, resetData, seedAuditScop
       }
     });
 
+    it('paginates revisions with limit + cursor read from the query string', async () => {
+      // Regression test: listRevisions must read limit/cursor from context.data (query
+      // string), not context.params (path segments) - the route has no :limit/:cursor
+      // path segments, so a context.params read is a silent no-op in production.
+      const http = getHttpClient();
+      const firstPage = await http.admin.get(`/sites/${SITE_1_ID}/audit-policy/revisions?limit=1`);
+      expect(firstPage.status).to.equal(200);
+      expect(firstPage.body.items).to.have.length(1);
+      expect(firstPage.body.cursor).to.be.a('string').and.not.empty;
+
+      const secondPage = await http.admin.get(
+        `/sites/${SITE_1_ID}/audit-policy/revisions?limit=1&cursor=${firstPage.body.cursor}`,
+      );
+      expect(secondPage.status).to.equal(200);
+      expect(secondPage.body.items).to.have.length(1);
+      expect(secondPage.body.items[0].version).to.be.lessThan(firstPage.body.items[0].version);
+    });
+
     it('API-15: scope-read endpoints return 501 pre-implementation', async () => {
       const http = getHttpClient();
       const res = await http.admin.get(`/sites/${SITE_1_ID}/audit-scope/summary`);

@@ -724,7 +724,7 @@ describe('AuditPolicyController — E3 listRevisions', () => {
       rpc: sinon.stub(),
     };
     const controller = loadController();
-    const res = await controller.listRevisions(buildContext({ client, params: { limit: '2' } }));
+    const res = await controller.listRevisions(buildContext({ client, data: { limit: '2' } }));
     expect(res.status).to.equal(200);
     const body = await res.json();
     expect(body.items[0].version).to.equal(4);
@@ -741,7 +741,7 @@ describe('AuditPolicyController — E3 listRevisions', () => {
       rpc: sinon.stub(),
     };
     const controller = loadController();
-    await controller.listRevisions(buildContext({ client, params: { limit: '9999' } }));
+    await controller.listRevisions(buildContext({ client, data: { limit: '9999' } }));
     expect(limitSpy).to.have.been.calledWith(200);
   });
 
@@ -753,7 +753,7 @@ describe('AuditPolicyController — E3 listRevisions', () => {
       rpc: sinon.stub(),
     };
     const controller = loadController();
-    await controller.listRevisions(buildContext({ client, params: { limit: '-5' } }));
+    await controller.listRevisions(buildContext({ client, data: { limit: '-5' } }));
     expect(limitSpy).to.have.been.calledWith(1);
   });
 
@@ -774,7 +774,7 @@ describe('AuditPolicyController — E3 listRevisions', () => {
     const controller = loadController();
     // encodeCursor(Number.MAX_SAFE_INTEGER) — far beyond MAX_CURSOR_VERSION
     const tamperedCursor = Buffer.from(String(Number.MAX_SAFE_INTEGER), 'utf8').toString('base64url');
-    const ctx = buildContext({ client, params: { cursor: tamperedCursor } });
+    const ctx = buildContext({ client, data: { cursor: tamperedCursor } });
     const res = await controller.listRevisions(ctx);
     expect(res.status).to.equal(400);
     expect(ltSpy).to.not.have.been.called;
@@ -784,7 +784,7 @@ describe('AuditPolicyController — E3 listRevisions', () => {
   it('returns 400 for a malformed (non-numeric) cursor', async () => {
     const client = buildClient();
     const controller = loadController();
-    const res = await controller.listRevisions(buildContext({ client, params: { cursor: 'not-base64-number' } }));
+    const res = await controller.listRevisions(buildContext({ client, data: { cursor: 'not-base64-number' } }));
     expect(res.status).to.equal(400);
   });
 
@@ -804,7 +804,7 @@ describe('AuditPolicyController — E3 listRevisions', () => {
     };
     const controller = loadController();
     const cursor = Buffer.from('5', 'utf8').toString('base64url');
-    await controller.listRevisions(buildContext({ client, params: { cursor } }));
+    await controller.listRevisions(buildContext({ client, data: { cursor } }));
     expect(ltSpy).to.have.been.calledWith('version', 5);
   });
 
