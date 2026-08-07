@@ -32,11 +32,10 @@ import { SITE_1_ID, SITE_1_BASE_URL, SITE_3_ID } from '../seed-ids.js';
  *
  * The `GET /audit-scope/pages` (E4, SITES-46351) describe block below reads
  * `v_audit_scope_pages`, a data-service view added in mysticat-data-service
- * migration `20260729162246_audit_scope_pages_view.sql` (feat/sites-46351-b4,
- * not yet merged/released at the time this IT was written) — it is NOT part
- * of the pinned image above. See seedAuditScopePages in test/it/postgres/seed.js
- * and this repo's Task C4 report for how this was validated locally before that
- * migration ships.
+ * migration `20260729162246_audit_scope_pages_view.sql`, first released in
+ * mysticat-data-service v5.81.0 — the docker-compose.yml pin above must stay
+ * at or above that tag for this describe block to pass. See seedAuditScopePages
+ * in test/it/postgres/seed.js.
  *
  * @param {() => object} getHttpClient - Getter returning the initialized HTTP client
  * @param {() => Promise<void>} resetData - Truncates all data and re-seeds baseline
