@@ -574,7 +574,9 @@ describe('getRouteHandlers', () => {
     getV1PromptResearchTopicsExport: sinon.stub(),
     getV1BrandStatsByCountry: sinon.stub(),
     getV1BrandStatsByLlm: sinon.stub(),
+    getV1BrandCompetitors: sinon.stub(),
     getV1BrandCompetitorsStats: sinon.stub(),
+    getV1BrandTopBrands: sinon.stub(),
     getV1BrandBrandsByTopicFts: sinon.stub(),
     getV1BrandBrandsByTopicFtsExport: sinon.stub(),
     getV1BrandBrandsByTopicFtsTotals: sinon.stub(),
@@ -837,7 +839,9 @@ describe('getRouteHandlers', () => {
       'GET /llmo/ai-visibility/v1/prompt-research/topics-export',
       'GET /llmo/ai-visibility/v1/brand/stats-by-country',
       'GET /llmo/ai-visibility/v1/brand/stats-by-llm',
+      'GET /llmo/ai-visibility/v1/brand/competitors',
       'GET /llmo/ai-visibility/v1/brand/competitors-stats',
+      'GET /llmo/ai-visibility/v1/brand/top-brands',
       'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts',
       'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts-export',
       'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts-totals',
@@ -935,7 +939,9 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt-research/topics-export']).to.equal(mockAiVisibilityController.getV1PromptResearchTopicsExport);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/brand/stats-by-country']).to.equal(mockAiVisibilityController.getV1BrandStatsByCountry);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/brand/stats-by-llm']).to.equal(mockAiVisibilityController.getV1BrandStatsByLlm);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/brand/competitors']).to.equal(mockAiVisibilityController.getV1BrandCompetitors);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/brand/competitors-stats']).to.equal(mockAiVisibilityController.getV1BrandCompetitorsStats);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/brand/top-brands']).to.equal(mockAiVisibilityController.getV1BrandTopBrands);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts']).to.equal(mockAiVisibilityController.getV1BrandBrandsByTopicFts);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts-export']).to.equal(mockAiVisibilityController.getV1BrandBrandsByTopicFtsExport);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts-totals']).to.equal(mockAiVisibilityController.getV1BrandBrandsByTopicFtsTotals);
