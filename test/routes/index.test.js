@@ -379,6 +379,7 @@ describe('getRouteHandlers', () => {
     listProperties: () => null,
     plan: () => null,
     deploy: () => null,
+    deployStatus: () => null,
     activate: () => null,
     activationStatus: () => null,
   };
@@ -1315,6 +1316,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties',
       'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan',
       'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/deploy-status',
       'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate',
       'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status',
       'GET /sites/:siteId/user-activities',
