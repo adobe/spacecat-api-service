@@ -9949,21 +9949,19 @@ AiVisibilitySrFilters:
     markets:
       type: array
       items:
-        type: object
-        properties:
-          code:
-            type: string
-          name:
-            type: string
+        type: string
     models:
       type: array
       items:
-        type: object
-        properties:
-          code:
-            type: string
-          name:
-            type: string
+        type: string
+    marketsCatalog:
+      type: array
+      items:
+        type: string
+    modelsCatalog:
+      type: array
+      items:
+        type: string
 
 AiVisibilityBrandStats:
   type: object
@@ -10185,6 +10183,61 @@ AiVisibilityV1BrandStatsByLLMResponse:
       type: array
       items:
         $ref: '#/AiVisibilityV1BrandStatsByLLMEntry'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1BrandCompetitorsStatsByDate:
+  type: object
+  description: |
+    One row from `CompetitorsMetrics.StatsResponse.ByDate` as native protobuf JSON.
+    UInt64 fields are serialized as JSON strings.
+  properties:
+    date:
+      $ref: '#/AiVisibilitySemrushDate'
+    visibility:
+      type: integer
+      description: AI Visibility score for the brand on this date
+    mentions:
+      oneOf:
+        - type: string
+        - type: integer
+      description: Prompt responses mentioning the brand
+    audience:
+      oneOf:
+        - type: string
+        - type: integer
+      description: Estimated audience for the brand
+    ownedSources:
+      oneOf:
+        - type: string
+        - type: integer
+      description: Citations from the brand domain
+  additionalProperties: true
+
+AiVisibilityV1BrandCompetitorsStatsByBrand:
+  type: object
+  description: Statistics for one target or competitor brand
+  properties:
+    brand:
+      $ref: '#/AiVisibilitySemrushBrand'
+    byDate:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1BrandCompetitorsStatsByDate'
+  additionalProperties: true
+
+AiVisibilityV1BrandCompetitorsStatsResponse:
+  type: object
+  description: |
+    Native Semrush `CompetitorsMetrics.StatsResponse` protobuf JSON from
+    `GET /llmo/ai-visibility/v1/brand/competitors-stats`, plus `srFilters`
+    from the API layer.
+  properties:
+    byBrand:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1BrandCompetitorsStatsByBrand'
     srFilters:
       $ref: '#/AiVisibilitySrFilters'
   additionalProperties: true
@@ -10885,6 +10938,186 @@ AiVisibilityV1SourceGapSourceDomainsExportResponse:
       $ref: '#/AiVisibilitySrFilters'
   additionalProperties: true
 
+AiVisibilityV1SourceCitedPageRow:
+  type: object
+  description: |
+    One cited page from Semrush `SourcesResponse.Source` as protobuf JSON (camelCase).
+    The `uint64` prompt count is serialized as a JSON string.
+  properties:
+    url:
+      type: string
+      format: uri
+      description: Page URL on the target domain cited by an LLM response
+    promptsCount:
+      type: string
+      pattern: '^[0-9]+$'
+      description: Number of prompt responses citing the page (`uint64`)
+    country:
+      description: Market (COUNTRY enum name or integer)
+      oneOf:
+        - $ref: '#/AiVisibilitySemrushCountry'
+        - type: integer
+  additionalProperties: true
+
+AiVisibilityV1SourceCitedPagesResponse:
+  type: object
+  description: |
+    Cited pages list from `GET /llmo/ai-visibility/v1/source/cited-pages`.
+    Wraps Semrush v2 source `Sources` JSON plus `srFilters` from the API layer.
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1SourceCitedPageRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1SourceCitedPagesTotalsResponse:
+  type: object
+  description: |
+    Cited pages count from `GET /llmo/ai-visibility/v1/source/cited-pages-totals`.
+    Returns only the count matching the request filters, without paginated data.
+  properties:
+    total:
+      description: Total owned/cited pages matching the request filters (`uint64`)
+      oneOf:
+        - type: string
+          pattern: '^[0-9]+$'
+        - type: integer
+          minimum: 0
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1SourceCitedPagesExportResponse:
+  type: object
+  description: |
+    Cited pages CSV export from `GET /llmo/ai-visibility/v1/source/cited-pages-export`.
+    Native Semrush v2 `ExportResponse` protobuf JSON plus `srFilters` from the API layer.
+  properties:
+    fileContent:
+      type: string
+      format: byte
+      description: Base64-encoded CSV file content from `ExportResponse.file_content`.
+    fileName:
+      type: string
+      description: Suggested CSV file name from `ExportResponse.file_name`.
+      example: cited-pages.csv
+    contentType:
+      type: string
+      description: MIME type from `ExportResponse.content_type`.
+      example: text/csv
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1SourceCitedSourceRow:
+  type: object
+  description: |
+    One cited source domain from Semrush `SourceDomainsResponse.Domain` as protobuf JSON
+    (camelCase). UInt64 fields may be serialized as JSON strings.
+  properties:
+    domain:
+      type: string
+      description: Source domain cited by an LLM response
+    mentions:
+      description: Brand mentions associated with the source domain (`uint64`)
+      oneOf:
+        - type: string
+          pattern: '^[0-9]+$'
+        - type: integer
+          minimum: 0
+    sourcesCount:
+      description: Number of cited URLs from the source domain (`uint64`)
+      oneOf:
+        - type: string
+          pattern: '^[0-9]+$'
+        - type: integer
+          minimum: 0
+    promptsCount:
+      description: Number of prompt responses citing the source domain (`uint64`)
+      oneOf:
+        - type: string
+          pattern: '^[0-9]+$'
+        - type: integer
+          minimum: 0
+    organicTraffic:
+      description: Estimated organic traffic to the source domain (`uint64`)
+      oneOf:
+        - type: string
+          pattern: '^[0-9]+$'
+        - type: integer
+          minimum: 0
+    mentionedBrandsCount:
+      description: Number of distinct brands mentioned with the source domain (`uint64`)
+      oneOf:
+        - type: string
+          pattern: '^[0-9]+$'
+        - type: integer
+          minimum: 0
+    country:
+      description: Market (COUNTRY enum name or integer)
+      oneOf:
+        - $ref: '#/AiVisibilitySemrushCountry'
+        - type: integer
+  additionalProperties: true
+
+AiVisibilityV1SourceCitedSourcesResponse:
+  type: object
+  description: |
+    Cited source domains list from `GET /llmo/ai-visibility/v1/source/cited-sources`.
+    Wraps Semrush v2 source `SourceDomains` JSON plus `srFilters` from the API layer.
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1SourceCitedSourceRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1SourceCitedSourcesTotalsResponse:
+  type: object
+  description: |
+    Cited source domains count from
+    `GET /llmo/ai-visibility/v1/source/cited-sources-totals`.
+    Returns only the count matching the request filters, without paginated data.
+  properties:
+    total:
+      description: Total cited source domains matching the request filters (`uint64`)
+      oneOf:
+        - type: string
+          pattern: '^[0-9]+$'
+        - type: integer
+          minimum: 0
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1SourceCitedSourcesExportResponse:
+  type: object
+  description: |
+    Cited source domains CSV export from
+    `GET /llmo/ai-visibility/v1/source/cited-sources-export`.
+    Native Semrush v2 `ExportResponse` protobuf JSON plus `srFilters` from the API layer.
+  properties:
+    fileContent:
+      type: string
+      format: byte
+      description: Base64-encoded CSV file content from `ExportResponse.file_content`.
+    fileName:
+      type: string
+      description: Suggested CSV file name from `ExportResponse.file_name`.
+      example: cited-sources.csv
+    contentType:
+      type: string
+      description: MIME type from `ExportResponse.content_type`.
+      example: text/csv
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
 AiVisibilityPromptResearchExportResponse:
   type: object
   description: |
@@ -10904,6 +11137,279 @@ AiVisibilityPromptResearchExportResponse:
     contentType:
       type: string
       description: MIME type from `ExportResponse.content_type`.
+      example: text/csv
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1UInt64:
+  description: Protobuf `uint64`, serialized as a decimal string by protobuf JSON.
+  oneOf:
+    - type: string
+      pattern: '^[0-9]+$'
+    - type: integer
+      minimum: 0
+
+AiVisibilityV1TopicMetricsByFtsResponse:
+  type: object
+  description: Native Semrush `MetricsByFTSResponse` protobuf JSON plus API filters.
+  properties:
+    date:
+      $ref: '#/AiVisibilitySemrushDate'
+    volume:
+      $ref: '#/AiVisibilityV1UInt64'
+    volumeTrend:
+      type: array
+      items:
+        type: integer
+    topicsCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    promptsCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    intents:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySemrushTopicIntentEntry'
+    brandsCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    topBrands:
+      type: array
+      items:
+        type: string
+    sourceDomainsCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    topSourceDomains:
+      type: array
+      items:
+        type: string
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1TopicByFtsRow:
+  type: object
+  properties:
+    id:
+      $ref: '#/AiVisibilityV1UInt64'
+    name:
+      type: string
+    volume:
+      $ref: '#/AiVisibilityV1UInt64'
+    volumeTrend:
+      type: array
+      items:
+        type: integer
+    intents:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySemrushTopicIntentEntry'
+    promptsCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    relevanceScore:
+      type: integer
+      minimum: 0
+      maximum: 100
+  additionalProperties: true
+
+AiVisibilityV1TopicsByFtsResponse:
+  type: object
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1TopicByFtsRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [data]
+  additionalProperties: true
+
+AiVisibilityV1PromptByTopicFtsRow:
+  type: object
+  properties:
+    prompt:
+      type: string
+    promptHash:
+      $ref: '#/AiVisibilityV1UInt64'
+    mentionedBrandsCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    sourcesCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    briefResponse:
+      type: string
+    llm:
+      $ref: '#/AiVisibilitySemrushLlm'
+    serpId:
+      type: string
+    topicId:
+      $ref: '#/AiVisibilityV1UInt64'
+    topicName:
+      type: string
+    topicVolume:
+      $ref: '#/AiVisibilityV1UInt64'
+    relevanceScore:
+      type: integer
+      minimum: 0
+      maximum: 100
+  additionalProperties: true
+
+AiVisibilityV1PromptsByTopicFtsResponse:
+  type: object
+  properties:
+    date:
+      $ref: '#/AiVisibilitySemrushDate'
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1PromptByTopicFtsRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [data]
+  additionalProperties: true
+
+AiVisibilityV1PromptByTopicIdsRow:
+  type: object
+  description: Native Semrush `PromptsByTopicIDsResponse.Prompt` protobuf JSON.
+  properties:
+    prompt:
+      type: string
+    promptHash:
+      $ref: '#/AiVisibilityV1UInt64'
+    mentionedBrandsCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    sourcesCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    briefResponse:
+      type: string
+    llm:
+      $ref: '#/AiVisibilitySemrushLlm'
+    serpId:
+      type: string
+    topicId:
+      $ref: '#/AiVisibilityV1UInt64'
+    country:
+      $ref: '#/AiVisibilitySemrushCountry'
+  additionalProperties: true
+
+AiVisibilityV1PromptsByTopicIdsResponse:
+  type: object
+  properties:
+    date:
+      $ref: '#/AiVisibilitySemrushDate'
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1PromptByTopicIdsRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [data]
+  additionalProperties: true
+
+AiVisibilityV1BrandByTopicFtsRow:
+  type: object
+  properties:
+    name:
+      type: string
+    mentions:
+      $ref: '#/AiVisibilityV1UInt64'
+    overallMentions:
+      $ref: '#/AiVisibilityV1UInt64'
+    sourceDomainsCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    examplePrompt:
+      type: string
+    examplePromptHash:
+      $ref: '#/AiVisibilityV1UInt64'
+    examplePromptTopicId:
+      $ref: '#/AiVisibilityV1UInt64'
+    domain:
+      type: string
+    serpId:
+      type: string
+    llm:
+      $ref: '#/AiVisibilitySemrushLlm'
+  additionalProperties: true
+
+AiVisibilityV1BrandsByTopicFtsResponse:
+  type: object
+  properties:
+    date:
+      $ref: '#/AiVisibilitySemrushDate'
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1BrandByTopicFtsRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [data]
+  additionalProperties: true
+
+AiVisibilityV1SourceDomainByTopicFtsRow:
+  type: object
+  properties:
+    domain:
+      type: string
+    sourcesCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    mentions:
+      $ref: '#/AiVisibilityV1UInt64'
+    overallMentions:
+      $ref: '#/AiVisibilityV1UInt64'
+    organicTraffic:
+      $ref: '#/AiVisibilityV1UInt64'
+    examplePrompt:
+      type: string
+    examplePromptHash:
+      $ref: '#/AiVisibilityV1UInt64'
+    examplePromptTopicId:
+      $ref: '#/AiVisibilityV1UInt64'
+    serpId:
+      type: string
+    llm:
+      $ref: '#/AiVisibilitySemrushLlm'
+  additionalProperties: true
+
+AiVisibilityV1SourceDomainsByTopicFtsResponse:
+  type: object
+  properties:
+    date:
+      $ref: '#/AiVisibilitySemrushDate'
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1SourceDomainByTopicFtsRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [data]
+  additionalProperties: true
+
+AiVisibilityV1FtsTotalsResponse:
+  type: object
+  properties:
+    total:
+      $ref: '#/AiVisibilityV1UInt64'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [total]
+  additionalProperties: true
+
+AiVisibilityV1DatedFtsTotalsResponse:
+  allOf:
+    - $ref: '#/AiVisibilityV1FtsTotalsResponse'
+    - type: object
+      properties:
+        date:
+          $ref: '#/AiVisibilitySemrushDate'
+
+AiVisibilityV1FtsExportResponse:
+  type: object
+  properties:
+    fileContent:
+      type: string
+      format: byte
+    fileName:
+      type: string
+    contentType:
+      type: string
       example: text/csv
     srFilters:
       $ref: '#/AiVisibilitySrFilters'
@@ -11118,16 +11624,6 @@ SerenityPrompt:
         different dimensions (a sub-category `human` and the `source` value
         `human`). Read a tag's dimension from `path[0].name`, never from its
         own name.
-    tagMap:
-      type: object
-      additionalProperties: { type: string }
-      deprecated: true
-      description: |
-        DEPRECATED — use `tags`. Map of tag name → upstream tag id. Being keyed
-        by name, it cannot represent a prompt carrying two same-named tags from
-        different dimensions: only one survives, and which one depends on
-        upstream ordering. Removed once every consumer reads `tags`.
-      example: { "Firefly": "uuid-1", "Commercial": "uuid-2" }
     tagIds:
       type: array
       items: { type: string }
@@ -11405,6 +11901,25 @@ SerenityMarket:
       oneOf:
         - type: string
         - type: 'null'
+    promptsCount:
+      type: integer
+      minimum: 0
+      description: |
+        Number of prompts configured on this market's upstream project
+        (Semrush `settings.ai.prompts_count`). Additive, sub-workspace mode
+        only; absent in flat mode and when the upstream project reports no
+        count. Draft-faithful — a pre-publish (draft) market's count reflects
+        its drafted prompts.
+    modelsCount:
+      type: integer
+      minimum: 0
+      description: |
+        Number of AI models enabled on this market's upstream project
+        (Semrush `settings.ai.models_stats.models_count`). Additive,
+        sub-workspace mode only; absent in flat mode and when the upstream
+        project reports no usable value. Metered prompt usage for a market is
+        promptsCount × modelsCount (per Semrush's allocation formula); the
+        product is deliberately left to consumers.
     siteId:
       description: |
         The SpaceCat Site UUID this market is bound to (LLMO-6405 Phase 2) — the

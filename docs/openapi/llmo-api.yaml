@@ -1799,6 +1799,17 @@ llmo-brand-claims:
       schema:
         type: string
         example: 'gpt-4.1'
+    - name: date
+      in: query
+      required: false
+      description: >
+        Any date (YYYY-MM-DD) within the ISO week of the run to retrieve (e.g.
+        `2026-04-22`). If omitted, the latest available run is returned. If
+        `model` is also set, `model` takes precedence for key selection.
+      schema:
+        type: string
+        format: date
+        example: '2026-04-22'
   get:
     tags:
       - llmo
@@ -1808,11 +1819,13 @@ llmo-brand-claims:
       The data files are `.json.gz` compressed and can be very large (100MB+ uncompressed),
       so this endpoint returns a presigned URL rather than the data directly.
 
-      The optional `model` query parameter selects which AI model's data to retrieve.
-      If omitted, the default model's data file is returned.
+      Runs are stored per ISO week. With no `date`, the latest available run is
+      returned; with `date`, the run for that date's ISO week is returned. The
+      optional `model` query parameter selects a legacy model-specific file.
 
       S3 key convention:
-      - Default model: `brand_claims/llmo/{siteId}/data.json.gz`
+      - Latest run: newest `brand_claims/llmo/{siteId}/{YYYY-Www}/data.json.gz` (falls back to the legacy `brand_claims/llmo/{siteId}/data.json.gz` before migration)
+      - Specific week: `brand_claims/llmo/{siteId}/{YYYY-Www}/data.json.gz`
       - Specific model: `brand_claims/llmo/{siteId}/{model}.json.gz`
     operationId: getBrandClaims
     responses:
