@@ -84,6 +84,10 @@ import {
   LLMO_ONBOARDING_MODE_V2,
 } from '../support/llmo-onboarding-mode.js';
 import { postLlmoAlert } from './llmo/llmo-onboarding.js';
+import {
+  ensurePromptSuggestionSchedules,
+  isPayingLlmoSite,
+} from '../support/prompt-suggestion-schedules.js';
 import { createIntentClassifier } from '../support/intent-classifier.js';
 import { emitMetric, resolveEnvironment } from '../support/metrics-emf.js';
 import {
@@ -2501,6 +2505,7 @@ function BrandsController(ctx, log, env) {
       // createErrorResponse, so raw upstream detail can't leak to the client (#5).
       let promptGenerationJobId;
       let scheduleId;
+      let promptSuggestionResults = null;
       let sideEffectError;
       try {
         const drsClient = DrsClient.createFrom(context);
@@ -2569,6 +2574,39 @@ function BrandsController(ctx, log, env) {
           });
           scheduleId = schedule?.scheduleId;
         }
+
+        // 5) Recurring prompt-suggestion pipelines (Semrush / citation-attempts /
+        // synthetic-personas). Without this, a brand added to an existing org via the
+        // create→activate path never gets the recurring strategy pipelines — it would
+        // get only the one-shot base_url job above (the gap that left Intuit's sub-brands
+        // with no auto-generated prompt strategies). Same tier-branched provisioning as
+        // onboarding's activateBrandAndGeneratePrompts: paying → recurring schedules,
+        // trial/indeterminate → one-shot runs. Idempotent (createSchedule upserts on
+        // (site, provider)), so re-activation is safe. Unconditional (not generatePrompts-
+        // gated): these pipelines derive their own inputs and every active brand should be
+        // monitored. ensurePromptSuggestionSchedules owns its per-pipeline errors and never
+        // throws, so a failure here degrades gracefully without failing activation.
+        if (drsConfigured) {
+          const site = await Site.findById(baseSiteId);
+          if (site) {
+            const isPaying = await isPayingLlmoSite(site, context);
+            const { results, allSucceeded } = await ensurePromptSuggestionSchedules({
+              drsClient, siteId: baseSiteId, isPaying, log,
+            });
+            promptSuggestionResults = results;
+            if (!allSucceeded) {
+              log.error(
+                `Brand ${brandUuid}: one or more prompt-suggestion pipelines failed to `
+                + `provision for site ${baseSiteId} (isPaying=${isPaying})`,
+              );
+            }
+          } else {
+            log.warn(
+              `Brand ${brandUuid}: site ${baseSiteId} not found; `
+              + 'skipping recurring prompt-suggestion schedules',
+            );
+          }
+        }
       } catch (error) {
         sideEffectError = error;
         log.error(
@@ -2583,6 +2621,8 @@ function BrandsController(ctx, log, env) {
         baseSiteId,
         ...(promptGenerationJobId ? { promptGenerationJobId } : {}),
         ...(scheduleId ? { scheduleId } : {}),
+        ...(promptSuggestionResults?.length
+          ? { promptSuggestionSchedules: promptSuggestionResults } : {}),
       };
 
       // The activation alert is also best-effort. postLlmoAlert already swallows its own
