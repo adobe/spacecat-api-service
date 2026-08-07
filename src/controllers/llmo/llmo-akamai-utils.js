@@ -612,6 +612,37 @@ export function redactSecrets(tree) {
 }
 
 /**
+ * Returns the fetcher-key value (the x-edgeoptimize-fetcher-key incoming-request header the managed
+ * routing rule injects) from a rule tree, or null if absent. A fresh fetcher key is minted on every
+ * deploy, so it's a per-deploy fingerprint: deploy-status compares it between a version and its
+ * base to tell "this deploy's fresh write landed" (keys differ) from "the version is just an
+ * unwritten clone inheriting the previous onboard's rule" (keys identical).
+ * NEVER return this value to a client — it's a secret (redactSecrets scrubs it from responses); it
+ * is only compared server-side. Walks the whole tree for the first matching header.
+ * @param {object} tree - a PAPI rule tree ({ rules: {...} })
+ * @returns {string|null} the fetcher-key header value, or null when the tree has no managed rule
+ */
+export function getManagedFetcherKey(tree) {
+  let found = null;
+  const walk = (rule) => {
+    if (found !== null || !rule || typeof rule !== 'object') {
+      return;
+    }
+    (rule.behaviors || []).forEach((b) => {
+      if (found === null
+        && b?.name === 'modifyIncomingRequestHeader'
+        && b.options?.customHeaderName === FETCHER_KEY_HEADER
+        && typeof b.options?.headerValue === 'string') {
+        found = b.options.headerValue;
+      }
+    });
+    (rule.children || []).forEach(walk);
+  };
+  walk(tree?.rules);
+  return found;
+}
+
+/**
  * Estimates how expensive Akamai's own PAPI `validateRules` pass will be for a rule tree, by
  * summing behaviors + criteria (match conditions) across every rule, recursively. This mirrors the
  * exact metric PAPI itself enforces a hard ceiling on — a property reports "Current usage is X out

@@ -6519,6 +6519,18 @@ site-llmo-akamai-deploy-status:
       schema:
         type: integer
         minimum: 1
+    - name: baseVersion
+      in: query
+      required: false
+      description: >-
+        The version the deploy was cloned from (the reviewed version). When supplied, the response
+        adds `freshWrite`: on a re-onboard a freshly-created version is a clone of its base, so
+        `deployed` alone can't tell a landed write from an inherited clone. Comparing the per-deploy
+        fetcher key against the base disambiguates it. The key value is compared server-side only,
+        never returned.
+      schema:
+        type: integer
+        minimum: 1
   get:
     operationId: getLlmoAkamaiDeployStatus
     summary: Check whether the Optimize-at-Edge rule landed in a property version
@@ -6560,6 +6572,13 @@ site-llmo-akamai-deploy-status:
                   items:
                     type: string
                   description: The managed rule names found at the top level of the checked version.
+                freshWrite:
+                  type: boolean
+                  description: >-
+                    Present only when `baseVersion` was supplied. True ⇒ this deploy's write is
+                    confirmed (the per-deploy fetcher key differs from the base clone). False ⇒ the
+                    version is an unwritten clone still carrying a previous onboard's rule. Absent ⇒
+                    not checked (first-onboard case, where `deployed` is already unambiguous).
       '400':
         $ref: './responses.yaml#/400'
       '401':

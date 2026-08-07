@@ -24,7 +24,7 @@ import AccessControlUtil from '../../support/access-control-util.js';
 import { auditHostname } from './llmo-utils.js';
 import {
   buildRuleConfig, mergeIntoTree, managedRuleNames, redactSecrets,
-  detectManagedRuleNames, estimateRuleTreeComplexity,
+  detectManagedRuleNames, estimateRuleTreeComplexity, getManagedFetcherKey,
 } from './llmo-akamai-utils.js';
 
 // EdgeGrid credentials are CLIENT-SUPPLIED per request (never persisted, never logged): the caller
@@ -724,18 +724,28 @@ function LlmoAkamaiController(ctx) {
 
   /**
    * GET /sites/:siteId/llmo/cdn-onboard/akamai/deploy-status
-   * Query: { propertyId, contractId, groupId, version? }
+   * Query: { propertyId, contractId, groupId, version?, baseVersion? }
    * Read-only: re-reads live Akamai state to answer "did the Optimize-at-Edge rule actually land?".
    * This is the source of truth when a deploy's own HTTP response was lost to the ~15s CDN
    * first-byte timeout in front of this Lambda: the Lambda keeps running (900s budget) and the
    * write may well have completed AFTER the customer's browser got a 503, so the browser can't tell
    * success from failure on its own. It polls this instead. Cheap by design (getLatestVersion + one
-   * getRuleTree ≈ a few seconds, comfortably inside the CDN window), so it never itself times out.
+   * or two getRuleTree reads ≈ a few seconds, well inside the CDN window), so it never itself
+   * times out.
    *
    * `version` (optional): check a specific version (e.g. a prior deploy's newVersion). Default:
    * the latest version — which is what deploy's createVersion produced, so if the write finished
    * the OAE rule is there; if it was cut mid-write the latest is an empty clone (deployed:false),
    * and `latestVersion` tells the caller which version to resume into.
+   *
+   * `baseVersion` (optional): the version the deploy was cloned from (the reviewed version). On a
+   * RE-onboard, `deployed` alone is ambiguous — a freshly-created version is a CLONE of its base,
+   * so if the base already carried a managed rule from a previous onboard, the clone shows the rule
+   * even if THIS deploy's write never landed. When `baseVersion` is given, we also compare the
+   * per-deploy fetcher key between the two versions: a fresh deploy mints a new key, so a key that
+   * DIFFERS from the base's proves this deploy's write actually persisted (`freshWrite: true`); an
+   * identical key means the version is an unwritten clone (`freshWrite: false`). The key value is
+   * only compared server-side, never returned.
    */
   const deployStatus = async (context) => {
     const result = await getSiteAndCheckAccess(context);
@@ -755,7 +765,7 @@ function LlmoAkamaiController(ctx) {
     }
 
     const { propertyId, contractId, groupId } = ref;
-    const { version: rawVersion } = context.data;
+    const { version: rawVersion, baseVersion: rawBaseVersion } = context.data;
     const siteId = site.getId();
 
     // Optional explicit version, validated like deploy/activate (reject 0 and non-decimal input).
@@ -766,6 +776,13 @@ function LlmoAkamaiController(ctx) {
       }
       requestedVersion = Number(rawVersion);
     }
+    let baseVersion;
+    if (rawBaseVersion !== undefined && rawBaseVersion !== null && rawBaseVersion !== '') {
+      if (!DECIMAL_INT_RE.test(String(rawBaseVersion)) || Number(rawBaseVersion) < 1) {
+        return badRequest('baseVersion must be a positive integer');
+      }
+      baseVersion = Number(rawBaseVersion);
+    }
 
     try {
       const latestVersion = await client.getLatestVersion(propertyId, contractId, groupId);
@@ -774,8 +791,21 @@ function LlmoAkamaiController(ctx) {
       const managedRulesPresent = detectManagedRuleNames(ruleTree);
       const deployed = managedRulesPresent.length > 0;
 
+      // Re-onboard disambiguation: compare the per-deploy fetcher key against the base version the
+      // deploy cloned from. A fresh key proves THIS deploy's write persisted (not just an inherited
+      // clone). Only meaningful when a distinct baseVersion is supplied and the rule is present.
+      let freshWrite;
+      if (deployed && baseVersion !== undefined && baseVersion !== version) {
+        const targetKey = getManagedFetcherKey(ruleTree);
+        const { ruleTree: baseTree } = await client
+          .getRuleTree(propertyId, baseVersion, contractId, groupId);
+        const baseKey = getManagedFetcherKey(baseTree);
+        // Distinct (or the base had no managed key at all) ⇒ this deploy wrote fresh content.
+        freshWrite = targetKey !== null && targetKey !== baseKey;
+      }
+
       log.info(auditLine(context, 'deploy-status', 'ok', {
-        siteId, propertyId, version, latestVersion, deployed,
+        siteId, propertyId, version, latestVersion, deployed, freshWrite,
       }));
       return ok({
         propertyId,
@@ -785,6 +815,10 @@ function LlmoAkamaiController(ctx) {
         // caller needs after a deploy whose response it never received.
         deployed,
         managedRulesPresent,
+        // Present only when baseVersion was supplied: true ⇒ this deploy's fresh write is confirmed
+        // (fetcher key differs from the base clone); false ⇒ the version is an unwritten clone.
+        // undefined ⇒ not checked (first-onboard case, where `deployed` is already unambiguous).
+        ...(freshWrite !== undefined ? { freshWrite } : {}),
       });
     } catch (e) {
       return papiErrorResponse(e, 'deploy status', context, { siteId, propertyId });

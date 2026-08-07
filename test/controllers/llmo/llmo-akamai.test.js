@@ -518,8 +518,68 @@ describe('LlmoAkamaiController', () => {
       expect(mockAkamaiClient.getRuleTree).to.have.been.calledWith(PROPERTY_ID, 5);
     });
 
+    // A managed tree carrying a specific per-deploy fetcher key, for re-onboard disambiguation.
+    const treeWithFetcherKey = (key) => ({
+      rules: {
+        name: 'default',
+        children: [{
+          name: 'Optimize at Edge',
+          children: [{
+            name: 'Optimize at Edge Routing',
+            behaviors: [{
+              name: 'modifyIncomingRequestHeader',
+              options: { customHeaderName: 'x-edgeoptimize-fetcher-key', headerValue: key },
+            }],
+          }],
+        }],
+        variables: [],
+      },
+    });
+
+    it('reports freshWrite:true when the fetcher key differs from the base (write landed)', async () => {
+      mockAkamaiClient.getRuleTree.withArgs(PROPERTY_ID, 7)
+        .resolves({ ruleTree: treeWithFetcherKey('NEW_KEY'), ruleFormat: 'v', etag: 'e7' });
+      mockAkamaiClient.getRuleTree.withArgs(PROPERTY_ID, 6)
+        .resolves({ ruleTree: treeWithFetcherKey('OLD_KEY'), ruleFormat: 'v', etag: 'e6' });
+      const res = await controller.deployStatus(withData({ ...propertyRef, baseVersion: '6' }));
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.deployed).to.equal(true);
+      expect(body.freshWrite).to.equal(true);
+      // The secret fetcher-key value is compared server-side but never returned.
+      expect(JSON.stringify(body)).to.not.contain('NEW_KEY');
+      expect(JSON.stringify(body)).to.not.contain('OLD_KEY');
+    });
+
+    it('reports freshWrite:false when the version is an unwritten clone (same key as base)', async () => {
+      mockAkamaiClient.getRuleTree.withArgs(PROPERTY_ID, 7)
+        .resolves({ ruleTree: treeWithFetcherKey('SAME_KEY'), ruleFormat: 'v', etag: 'e7' });
+      mockAkamaiClient.getRuleTree.withArgs(PROPERTY_ID, 6)
+        .resolves({ ruleTree: treeWithFetcherKey('SAME_KEY'), ruleFormat: 'v', etag: 'e6' });
+      const res = await controller.deployStatus(withData({ ...propertyRef, baseVersion: '6' }));
+      const body = await res.json();
+      expect(body.deployed).to.equal(true);
+      expect(body.freshWrite).to.equal(false);
+    });
+
+    it('omits freshWrite when no baseVersion is supplied', async () => {
+      mockAkamaiClient.getRuleTree.withArgs(PROPERTY_ID, 7)
+        .resolves({ ruleTree: treeWithFetcherKey('K'), ruleFormat: 'v', etag: 'e7' });
+      const res = await controller.deployStatus(withData(propertyRef));
+      const body = await res.json();
+      expect(body.deployed).to.equal(true);
+      expect(body).to.not.have.property('freshWrite');
+      // No base comparison ⇒ only the target version was read.
+      expect(mockAkamaiClient.getRuleTree).to.have.been.calledOnceWith(PROPERTY_ID, 7);
+    });
+
     it('rejects a non-positive-integer version', async () => {
       const res = await controller.deployStatus(withData({ ...propertyRef, version: '0' }));
+      expect(res.status).to.equal(400);
+    });
+
+    it('rejects a non-positive-integer baseVersion', async () => {
+      const res = await controller.deployStatus(withData({ ...propertyRef, baseVersion: '0' }));
       expect(res.status).to.equal(400);
     });
 

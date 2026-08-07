@@ -24,6 +24,7 @@ import {
   managedRuleNames,
   detectManagedRuleNames,
   estimateRuleTreeComplexity,
+  getManagedFetcherKey,
   redactSecrets,
 } from '../../../src/controllers/llmo/llmo-akamai-utils.js';
 
@@ -257,6 +258,46 @@ describe('llmo-akamai-utils', () => {
       expect(estimateRuleTreeComplexity(undefined)).to.equal(0);
       expect(estimateRuleTreeComplexity({})).to.equal(0);
       expect(estimateRuleTreeComplexity({ rules: {} })).to.equal(0);
+    });
+  });
+
+  describe('getManagedFetcherKey', () => {
+    const treeWithKey = (key) => ({
+      rules: {
+        children: [{
+          name: 'Optimize at Edge',
+          children: [{
+            name: 'Optimize at Edge Routing',
+            behaviors: [
+              { name: 'origin', options: {} },
+              {
+                name: 'modifyIncomingRequestHeader',
+                options: { customHeaderName: 'x-edgeoptimize-fetcher-key', headerValue: key },
+              },
+            ],
+          }],
+        }],
+      },
+    });
+
+    it('extracts the fetcher-key header value from the managed rule', () => {
+      expect(getManagedFetcherKey(treeWithKey('abc123'))).to.equal('abc123');
+    });
+
+    it('returns null when there is no managed fetcher-key header', () => {
+      const tree = { rules: { children: [{ name: 'Existing', behaviors: [{ name: 'origin' }] }] } };
+      expect(getManagedFetcherKey(tree)).to.equal(null);
+    });
+
+    it('is safe on empty/missing input', () => {
+      expect(getManagedFetcherKey(undefined)).to.equal(null);
+      expect(getManagedFetcherKey({})).to.equal(null);
+      expect(getManagedFetcherKey({ rules: {} })).to.equal(null);
+    });
+
+    it('distinguishes two versions minted with different keys', () => {
+      expect(getManagedFetcherKey(treeWithKey('K1')))
+        .to.not.equal(getManagedFetcherKey(treeWithKey('K2')));
     });
   });
 
