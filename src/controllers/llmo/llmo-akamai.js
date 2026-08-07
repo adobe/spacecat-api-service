@@ -204,8 +204,14 @@ function LlmoAkamaiController(ctx) {
     if (hasText(creds.accountSwitchKey) && !ACCOUNT_SWITCH_KEY_RE.test(creds.accountSwitchKey)) {
       return { error: badRequest(`${CRED_HEADERS.accountSwitchKey} contains invalid characters`) };
     }
+    // The rule-tree PUT on a large property can take longer than the shared client's 60s default
+    // (the deploy PUT holds the connection open while Akamai runs its whole-tree validation before
+    // responding). The browser is already released at the ~15s CDN cutoff and polling
+    // deploy-status, so the Lambda can afford to wait longer — give the size-scaling calls a bigger
+    // budget so a slow-but-succeeding write isn't aborted before Akamai commits. Env-overridable.
+    const ruleTreeTimeoutMs = Number(context.env?.AKAMAI_RULE_TREE_TIMEOUT_MS) || 120000;
     try {
-      return { client: new AkamaiClient({ ...creds, notifyEmails }, log) };
+      return { client: new AkamaiClient({ ...creds, notifyEmails, ruleTreeTimeoutMs }, log) };
     } catch (e) {
       // The constructor re-validates the required keys; after the checks above this is unexpected.
       // Log the error name only (not the message, which can echo credential-derived detail) and
