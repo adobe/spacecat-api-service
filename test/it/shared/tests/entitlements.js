@@ -248,5 +248,85 @@ export default function entitlementTests(getHttpClient, resetData) {
         expect(res.status).to.equal(400);
       });
     });
+
+    describe('PATCH /organizations/:organizationId/entitlements', () => {
+      // ORG_1 has a seeded LLMO entitlement (ENT_1, tier FREE_TRIAL) and an ASO
+      // entitlement (ENT_2, tier PAID). PATCH updates the tier of the existing
+      // entity directly (no TierClient), so we flip ENT_1 FREE_TRIAL -> PAID.
+      before(() => resetData());
+
+      it('admin: updates the tier of the org\'s existing LLMO entitlement', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.patch(
+          BASE,
+          { productCode: 'LLMO', tier: 'PAID' },
+        );
+        expect(res.status).to.equal(200);
+        expectEntitlementDto(res.body);
+        // Same entity is updated in place — id preserved, tier changed.
+        expect(res.body.id).to.equal(ENTITLEMENT_1_ID);
+        expect(res.body.productCode).to.equal('LLMO');
+        expect(res.body.tier).to.equal('PAID');
+
+        // Persisted: a follow-up GET reflects the new tier.
+        const check = await http.user.get(BASE);
+        const ent1 = check.body.find((e) => e.id === ENTITLEMENT_1_ID);
+        expect(ent1.tier).to.equal('PAID');
+      });
+
+      it('admin: returns 404 when the org has no entitlement for the product', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.patch(
+          BASE,
+          { productCode: 'ACO', tier: 'PAID' },
+        );
+        expect(res.status).to.equal(404);
+      });
+
+      it('admin: returns 404 for non-existent org', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.patch(
+          `/organizations/${NON_EXISTENT_ORG_ID}/entitlements`,
+          { productCode: 'LLMO', tier: 'PAID' },
+        );
+        expect(res.status).to.equal(404);
+      });
+
+      it('admin: returns 400 for invalid org UUID', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.patch(
+          '/organizations/not-a-uuid/entitlements',
+          { productCode: 'LLMO', tier: 'PAID' },
+        );
+        expect(res.status).to.equal(400);
+      });
+
+      it('admin: returns 400 for invalid productCode', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.patch(
+          BASE,
+          { productCode: 'BOGUS', tier: 'PAID' },
+        );
+        expect(res.status).to.equal(400);
+      });
+
+      it('admin: returns 400 for invalid tier', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.patch(
+          BASE,
+          { productCode: 'LLMO', tier: 'BOGUS_TIER' },
+        );
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: returns 403 (admin-only)', async () => {
+        const http = getHttpClient();
+        const res = await http.user.patch(
+          BASE,
+          { productCode: 'LLMO', tier: 'PAID' },
+        );
+        expect(res.status).to.equal(403);
+      });
+    });
   });
 }

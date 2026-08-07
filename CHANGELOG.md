@@ -1,3 +1,50 @@
+# [1.728.0](https://github.com/adobe/spacecat-api-service/compare/v1.727.0...v1.728.0) (2026-08-07)
+
+
+### Features
+
+* **audit-policy:** implement audit-scope/pages E4 + IT for B4 (SITES-46351) ([#2963](https://github.com/adobe/spacecat-api-service/issues/2963)) ([53ab1be](https://github.com/adobe/spacecat-api-service/commit/53ab1be10a3cf669b56ae488bccc945e66440542)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+# [1.727.0](https://github.com/adobe/spacecat-api-service/compare/v1.726.0...v1.727.0) (2026-08-07)
+
+
+### Features
+
+* **entitlements:** add admin-only PATCH to update entitlement tier ([#3005](https://github.com/adobe/spacecat-api-service/issues/3005)) ([bb04edf](https://github.com/adobe/spacecat-api-service/commit/bb04edfba24305477dc704848f3bcb19f7ec1000))
+
+# [1.726.0](https://github.com/adobe/spacecat-api-service/compare/v1.725.0...v1.726.0) (2026-08-07)
+
+
+### Features
+
+* fix competitors metrics ([#3011](https://github.com/adobe/spacecat-api-service/issues/3011)) ([db46c4a](https://github.com/adobe/spacecat-api-service/commit/db46c4a6f23aee4579f6e2e99c5c9af81efbe9d3))
+
+# [1.725.0](https://github.com/adobe/spacecat-api-service/compare/v1.724.0...v1.725.0) (2026-08-06)
+
+
+### Bug Fixes
+
+* optimize edge deploy/rollback apis ([#3009](https://github.com/adobe/spacecat-api-service/issues/3009)) ([8f877a6](https://github.com/adobe/spacecat-api-service/commit/8f877a680b81f4f4af2898cfccc54993c002e6a8))
+
+
+### Features
+
+* **llmo:** serve brand-claims history by ISO week (LLMO-6808) ([#3006](https://github.com/adobe/spacecat-api-service/issues/3006)) ([d9318e4](https://github.com/adobe/spacecat-api-service/commit/d9318e4e3636796f56316fa465a7d4f34ae96209))
+
+# [1.724.0](https://github.com/adobe/spacecat-api-service/compare/v1.723.0...v1.724.0) (2026-08-06)
+
+
+### Features
+
+* **llmo:** add caller + host to O@E onboarding logs and log the journey start ([#2990](https://github.com/adobe/spacecat-api-service/issues/2990)) ([97fc270](https://github.com/adobe/spacecat-api-service/commit/97fc27038576a251f062c7f4f7cbe4544c423fe1))
+
+# [1.723.0](https://github.com/adobe/spacecat-api-service/compare/v1.722.0...v1.723.0) (2026-08-06)
+
+
+### Features
+
+* **ai-seo:** AI SEO API revision  ([#2996](https://github.com/adobe/spacecat-api-service/issues/2996)) ([aa0b8b5](https://github.com/adobe/spacecat-api-service/commit/aa0b8b5e6ac8d108ce51b839f24ec9772953ccea))
+
 # [1.722.0](https://github.com/adobe/spacecat-api-service/compare/v1.721.1...v1.722.0) (2026-08-06)
 
 
