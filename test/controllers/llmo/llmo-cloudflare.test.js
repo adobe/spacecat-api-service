@@ -178,6 +178,16 @@ describe('LlmoCloudflareController', () => {
       expect(body).to.deep.equal(accounts);
     });
 
+    it('emits a list-accounts audit line carrying caller and host (onboarding-started signal)', async () => {
+      mockCfClient.listAccounts.resolves([{ id: ACCOUNT_ID, name: 'Test Account' }]);
+
+      await controller.listAccounts(mockContext);
+      const logged = mockContext.log.info.getCalls().map((c) => c.args[0]).join('\n');
+      expect(logged).to.contain('[llmo-cf] action=list-accounts outcome=ok');
+      expect(logged).to.contain('count=1');
+      expect(logged).to.contain('caller=');
+    });
+
     it('returns 400 when CF token is missing', async () => {
       mockContext.pathInfo.headers = {};
       const res = await controller.listAccounts(mockContext);

@@ -191,6 +191,14 @@ describe('LlmoAkamaiController', () => {
       expect(mockAkamaiClient.findPropertiesByDomain).to.have.been.calledWith('www.example.com');
     });
 
+    it('emits a list-properties audit line carrying caller and host (onboarding-started signal)', async () => {
+      await controller.listProperties(mockContext);
+      const logged = mockContext.log.info.getCalls().map((c) => c.args[0]).join('\n');
+      expect(logged).to.contain('[llmo-akamai] action=list-properties outcome=ok');
+      expect(logged).to.contain('host=www.example.com');
+      expect(logged).to.contain('caller=');
+    });
+
     it('returns 200 with an empty list when the client finds nothing (it swallows search errors)', async () => {
       // The real findPropertiesByDomain returns [] on bad creds/no match rather than rejecting.
       mockAkamaiClient.findPropertiesByDomain.resolves([]);
