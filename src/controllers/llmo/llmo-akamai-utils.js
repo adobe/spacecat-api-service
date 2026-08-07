@@ -477,6 +477,27 @@ export function managedRuleNames(cfg) {
 }
 
 /**
+ * Detects which managed "Optimize at Edge" rules are already present at the TOP LEVEL of a rule
+ * tree, by trimmed name. Used by the deploy-status endpoint to answer "did the OAE rule actually
+ * land in this version?" by re-reading live Akamai state — the source of truth when a deploy's own
+ * HTTP response was lost to a CDN timeout. Matches both the current wrapped layout (only the parent
+ * `"Optimize at Edge"` sits at top level, with routing/failover-test nested inside it) and the
+ * older flat layout (routing/failover-test at top level), and tolerates a legacy trailing space.
+ * Uses the frozen EDGE_OPTIMIZE_DEFAULTS names — no cfg needed, since a status check has no
+ * hostname/apiKey to build one from.
+ * @param {object} ruleTree - a PAPI rule tree ({ rules: {...} })
+ * @returns {string[]} the managed rule names found at top level (deduped); empty if none
+ */
+export function detectManagedRuleNames(ruleTree) {
+  const managed = new Set(Object.values(EDGE_OPTIMIZE_DEFAULTS.ruleNames));
+  const children = ruleTree?.rules?.children || [];
+  const found = children
+    .map((c) => (c?.name ?? '').trim())
+    .filter((name) => managed.has(name));
+  return [...new Set(found)];
+}
+
+/**
  * Builds a JSON Patch (RFC 6902) that inserts the managed "Optimize at Edge" wrapper rule (and its
  * PMUSER cache-key variable) into an existing rule tree WITHOUT re-serialising any existing rule or
  * behaviour.
@@ -588,6 +609,63 @@ export function redactSecrets(tree) {
   };
   walk(clone.rules);
   return clone;
+}
+
+/**
+ * Returns the fetcher-key value (the x-edgeoptimize-fetcher-key incoming-request header the managed
+ * routing rule injects) from a rule tree, or null if absent. A fresh fetcher key is minted on every
+ * deploy, so it's a per-deploy fingerprint: deploy-status compares it between a version and its
+ * base to tell "this deploy's fresh write landed" (keys differ) from "the version is just an
+ * unwritten clone inheriting the previous onboard's rule" (keys identical).
+ * NEVER return this value to a client — it's a secret (redactSecrets scrubs it from responses); it
+ * is only compared server-side. Walks the whole tree for the first matching header.
+ * @param {object} tree - a PAPI rule tree ({ rules: {...} })
+ * @returns {string|null} the fetcher-key header value, or null when the tree has no managed rule
+ */
+export function getManagedFetcherKey(tree) {
+  let found = null;
+  const walk = (rule) => {
+    if (found !== null || !rule || typeof rule !== 'object') {
+      return;
+    }
+    (rule.behaviors || []).forEach((b) => {
+      if (found === null
+        && b?.name === 'modifyIncomingRequestHeader'
+        && b.options?.customHeaderName === FETCHER_KEY_HEADER
+        && typeof b.options?.headerValue === 'string') {
+        found = b.options.headerValue;
+      }
+    });
+    (rule.children || []).forEach(walk);
+  };
+  walk(tree?.rules);
+  return found;
+}
+
+/**
+ * Estimates how expensive Akamai's own PAPI `validateRules` pass will be for a rule tree, by
+ * summing behaviors + criteria (match conditions) across every rule, recursively. This mirrors the
+ * exact metric PAPI itself enforces a hard ceiling on — a property reports "Current usage is X out
+ * of 3000 available" for this same behaviors+matches total when exceeded (confirmed against a real
+ * Akamai property while testing a large-property fix). Used as a fast, pre-flight proxy for "will
+ * this take too long to validate" before ever attempting the slow validate/write call — Akamai's
+ * own processing time scales with this same total, and unlike raw rule count it's tied to a real,
+ * already-observed Akamai constraint rather than an arbitrary number.
+ * @param {object} ruleTree - a PAPI rule tree ({ rules: {...} })
+ * @returns {number} total behaviors + criteria across every rule in the tree
+ */
+export function estimateRuleTreeComplexity(ruleTree) {
+  let total = 0;
+  const walk = (rule) => {
+    if (!rule || typeof rule !== 'object') {
+      return;
+    }
+    total += (rule.behaviors || []).length;
+    total += (rule.criteria || []).length;
+    (rule.children || []).forEach(walk);
+  };
+  walk(ruleTree?.rules);
+  return total;
 }
 
 // ---------------------------------------------------------------------------

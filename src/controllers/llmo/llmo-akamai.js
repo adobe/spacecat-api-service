@@ -24,6 +24,7 @@ import AccessControlUtil from '../../support/access-control-util.js';
 import { auditHostname } from './llmo-utils.js';
 import {
   buildRuleConfig, mergeIntoTree, managedRuleNames, redactSecrets,
+  detectManagedRuleNames, estimateRuleTreeComplexity, getManagedFetcherKey,
 } from './llmo-akamai-utils.js';
 
 // EdgeGrid credentials are CLIENT-SUPPLIED per request (never persisted, never logged): the caller
@@ -203,8 +204,14 @@ function LlmoAkamaiController(ctx) {
     if (hasText(creds.accountSwitchKey) && !ACCOUNT_SWITCH_KEY_RE.test(creds.accountSwitchKey)) {
       return { error: badRequest(`${CRED_HEADERS.accountSwitchKey} contains invalid characters`) };
     }
+    // The rule-tree PUT on a large property can take longer than the shared client's 60s default
+    // (the deploy PUT holds the connection open while Akamai runs its whole-tree validation before
+    // responding). The browser is already released at the ~15s CDN cutoff and polling
+    // deploy-status, so the Lambda can afford to wait longer — give the size-scaling calls a bigger
+    // budget so a slow-but-succeeding write isn't aborted before Akamai commits. Env-overridable.
+    const ruleTreeTimeoutMs = Number(context.env?.AKAMAI_RULE_TREE_TIMEOUT_MS) || 120000;
     try {
-      return { client: new AkamaiClient({ ...creds, notifyEmails }, log) };
+      return { client: new AkamaiClient({ ...creds, notifyEmails, ruleTreeTimeoutMs }, log) };
     } catch (e) {
       // The constructor re-validates the required keys; after the checks above this is unexpected.
       // Log the error name only (not the message, which can echo credential-derived detail) and
@@ -532,48 +539,16 @@ function LlmoAkamaiController(ctx) {
       }
       const merged = mergeIntoTree(ruleTree, cfg, insertIndex);
 
-      // Validate the exact change deploy will make: dry-run the full-tree PUT. PAPI validates the
-      // submitted tree and returns errors/warnings without persisting. A dry-run PUT still needs an
-      // EDITABLE version, so if `version` is activated it 403s — fall back to the base tree's
-      // warnings and flag the preview unvalidated (deploy validates on its own new version anyway).
-      let errors = [];
-      let warnings = [];
-      let validated = true;
-      try {
-        const dryRun = await client.updateRuleTree(
-          propertyId,
-          version,
-          contractId,
-          groupId,
-          merged,
-          ruleFormat,
-          { dryRun: true },
-        );
-        errors = dryRun?.errors || [];
-        warnings = dryRun?.warnings || [];
-      } catch (dryRunError) {
-        // A dry-run is best-effort: never fail the read-only preview because validation couldn't be
-        // performed. Fall back to the base tree's own warnings and flag that this preview is
-        // unvalidated so the UI can say so.
-        validated = false;
-        warnings = ruleTree.warnings || [];
-        log.warn(auditLine(context, 'plan', 'dry-run-failed', {
-          severity: 'error',
-          siteId: site.getId(),
-          host: auditHostname(site),
-          propertyId,
-          version,
-          error: dryRunError.message,
-        }));
-      }
-
+      // plan is a fast, read-only PREVIEW: getLatestVersion + getRuleTree + an in-memory merge,
+      // with NO Akamai validation call. We deliberately don't dry-run the change here. PAPI's
+      // validateRules pass scales with total rule-tree size and on a large property runs 45-60s —
+      // well past the ~15s CDN first-byte timeout in front of this Lambda — so the old dry-run made
+      // Review hang and then fail with an opaque 503 HTML page instead of our JSON. deploy() is now
+      // the sole validator (its real PUT keeps validateRules=true and surfaces any papiErrors), and
+      // the CUSTOM-SSL scope gate — the only common failure detectable before deploy — is already
+      // enforced above, in memory, with no Akamai round-trip. So the preview stays honest and fast.
       log.info(auditLine(context, 'plan', 'ok', {
-        siteId: site.getId(),
-        host: auditHostname(site),
-        propertyId,
-        version,
-        validated,
-        errorCount: errors.length,
+        siteId: site.getId(), host: auditHostname(site), propertyId, version,
       }));
       return ok({
         propertyId,
@@ -584,11 +559,11 @@ function LlmoAkamaiController(ctx) {
         // only its children may be absent. merge always writes a children array.
         currentChildRules: (ruleTree.rules.children || []).map((c) => c.name),
         mergedChildRules: merged.rules.children.map((c) => c.name),
-        // PAPI validation of the exact change deploy will make (see the dry-run above). `validated`
-        // is false only when the dry-run itself couldn't run.
-        validated,
-        errors,
-        warnings,
+        // No pre-deploy Akamai validation is performed (see above) — deploy validates for real.
+        // Kept in the response shape (validated:false, empty errors/warnings) for FE compatibility.
+        validated: false,
+        errors: [],
+        warnings: [],
         // Redact the injected LLMO API key before returning the preview — plan is read-only and
         // the real key is only needed server-side at deploy; the merged tree ends up in browser
         // devtools / HAR exports / proxy logs otherwise.
@@ -601,13 +576,20 @@ function LlmoAkamaiController(ctx) {
 
   /**
    * POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy
-   * Body: { propertyId, contractId, groupId, insertIndex?, baseVersion? }
+   * Body: { propertyId, contractId, groupId, insertIndex?, baseVersion?, retryVersion? }
    * Creates a NEW property version from `baseVersion` (default: latest) and applies the managed
    * rules via a full-tree PUT with PAPI-side validation, pinning the base version's ruleFormat.
    * Supported only for properties whose default origin uses CUSTOM SSL verification (scope gate).
    * Does NOT activate (a separate, explicit step). Guarded so the target property must serve the
    * site's own domain. Idempotent by rule name (trimmed): re-running replaces prior managed rules
    * rather than duplicating them.
+   *
+   * `retryVersion`: if a PRIOR attempt already created a property version but failed to write the
+   * rules into it (e.g. the write was cut by the CDN timeout), the caller passes that version back
+   * here to RESUME — we skip `createVersion` and write directly into it. This is what stops a
+   * repeated Retry from minting a fresh, permanently-empty version every time (478 → 479 → 480 …):
+   * the caller checks deploy-status first, and if a version was already created it sends it as
+   * `retryVersion` instead of letting us clone the base again.
    */
   const deploy = async (context) => {
     const result = await getSiteAndCheckAccess(context);
@@ -627,7 +609,9 @@ function LlmoAkamaiController(ctx) {
     }
 
     const { propertyId, contractId, groupId } = ref;
-    const { insertIndex, baseVersion: rawBaseVersion } = context.data;
+    const {
+      insertIndex, baseVersion: rawBaseVersion, retryVersion: rawRetryVersion,
+    } = context.data;
     const insertIndexError = validateInsertIndex(insertIndex);
     if (insertIndexError) {
       return insertIndexError;
@@ -642,6 +626,14 @@ function LlmoAkamaiController(ctx) {
       && (!DECIMAL_INT_RE.test(String(rawBaseVersion)) || Number(rawBaseVersion) < 1)) {
       return badRequest('baseVersion must be a positive integer');
     }
+    // Optional: resume into a version a prior attempt already created instead of minting a new one.
+    if (rawRetryVersion !== undefined && rawRetryVersion !== null && rawRetryVersion !== ''
+      && (!DECIMAL_INT_RE.test(String(rawRetryVersion)) || Number(rawRetryVersion) < 1)) {
+      return badRequest('retryVersion must be a positive integer');
+    }
+    const retryVersion = (rawRetryVersion !== undefined && rawRetryVersion !== null && rawRetryVersion !== '')
+      ? Number(rawRetryVersion)
+      : undefined;
     const siteId = site.getId();
 
     // Guard before fetching the metaconfig — no point resolving the API key for a call we will
@@ -689,8 +681,18 @@ function LlmoAkamaiController(ctx) {
         return gateError;
       }
       const merged = mergeIntoTree(ruleTree, cfg, insertIndex);
+      // Telemetry (NOT a gate): the rule-tree complexity PAPI's validateRules cost scales with,
+      // logged next to the measured write duration below so we can build a real
+      // complexity-vs-latency curve from production across every customer, instead of guessing a
+      // threshold from one synthetic test property.
+      const complexity = estimateRuleTreeComplexity(merged);
 
-      newVersion = await client.createVersion(propertyId, baseVersion, contractId, groupId);
+      // Resume into the version a prior attempt already created (retryVersion) instead of minting
+      // another one — this is the guard against piling up empty versions (478 → 479 → 480 …) when a
+      // deploy is retried. Otherwise clone baseVersion into a fresh version as usual.
+      newVersion = retryVersion
+        ?? await client.createVersion(propertyId, baseVersion, contractId, groupId);
+      const putStart = Date.now();
       const putResult = await client.updateRuleTree(
         propertyId,
         newVersion,
@@ -699,6 +701,7 @@ function LlmoAkamaiController(ctx) {
         merged,
         ruleFormat,
       );
+      const putMs = Date.now() - putStart;
 
       const papiErrors = putResult?.errors || [];
       const warnings = putResult?.warnings || [];
@@ -710,6 +713,8 @@ function LlmoAkamaiController(ctx) {
           propertyId,
           newVersion,
           errorCount: papiErrors.length,
+          complexity,
+          putMs,
         }));
         return createResponse({
           message: 'Akamai rejected the rule tree',
@@ -725,7 +730,11 @@ function LlmoAkamaiController(ctx) {
         propertyId,
         baseVersion,
         newVersion,
+        // true when we wrote into a version a prior attempt created (no new version minted).
+        resumed: retryVersion !== undefined,
         warningCount: warnings.length,
+        complexity,
+        putMs,
       }));
       return ok({
         propertyId,
@@ -739,6 +748,109 @@ function LlmoAkamaiController(ctx) {
       });
     } catch (e) {
       return papiErrorResponse(e, 'deploy', context, { siteId, propertyId, newVersion });
+    }
+  };
+
+  /**
+   * GET /sites/:siteId/llmo/cdn-onboard/akamai/deploy-status
+   * Query: { propertyId, contractId, groupId, version?, baseVersion? }
+   * Read-only: re-reads live Akamai state to answer "did the Optimize-at-Edge rule actually land?".
+   * This is the source of truth when a deploy's own HTTP response was lost to the ~15s CDN
+   * first-byte timeout in front of this Lambda: the Lambda keeps running (900s budget) and the
+   * write may well have completed AFTER the customer's browser got a 503, so the browser can't tell
+   * success from failure on its own. It polls this instead. Cheap by design (getLatestVersion + one
+   * or two getRuleTree reads ≈ a few seconds, well inside the CDN window), so it never itself
+   * times out.
+   *
+   * `version` (optional): check a specific version (e.g. a prior deploy's newVersion). Default:
+   * the latest version — which is what deploy's createVersion produced, so if the write finished
+   * the OAE rule is there; if it was cut mid-write the latest is an empty clone (deployed:false),
+   * and `latestVersion` tells the caller which version to resume into.
+   *
+   * `baseVersion` (optional): the version the deploy was cloned from (the reviewed version). On a
+   * RE-onboard, `deployed` alone is ambiguous — a freshly-created version is a CLONE of its base,
+   * so if the base already carried a managed rule from a previous onboard, the clone shows the rule
+   * even if THIS deploy's write never landed. When `baseVersion` is given, we also compare the
+   * per-deploy fetcher key between the two versions: a fresh deploy mints a new key, so a key that
+   * DIFFERS from the base's proves this deploy's write actually persisted (`freshWrite: true`); an
+   * identical key means the version is an unwritten clone (`freshWrite: false`). The key value is
+   * only compared server-side, never returned.
+   */
+  const deployStatus = async (context) => {
+    const result = await getSiteAndCheckAccess(context);
+    if (result.status) {
+      return result;
+    }
+    const { site } = result;
+
+    const { client, error } = requireClient(context);
+    if (error) {
+      return error;
+    }
+
+    const { ref, error: refError } = requirePropertyRef(context);
+    if (refError) {
+      return refError;
+    }
+
+    const { propertyId, contractId, groupId } = ref;
+    const { version: rawVersion, baseVersion: rawBaseVersion } = context.data;
+    const siteId = site.getId();
+
+    // Optional explicit version, validated like deploy/activate (reject 0 and non-decimal input).
+    let requestedVersion;
+    if (rawVersion !== undefined && rawVersion !== null && rawVersion !== '') {
+      if (!DECIMAL_INT_RE.test(String(rawVersion)) || Number(rawVersion) < 1) {
+        return badRequest('version must be a positive integer');
+      }
+      requestedVersion = Number(rawVersion);
+    }
+    let baseVersion;
+    if (rawBaseVersion !== undefined && rawBaseVersion !== null && rawBaseVersion !== '') {
+      if (!DECIMAL_INT_RE.test(String(rawBaseVersion)) || Number(rawBaseVersion) < 1) {
+        return badRequest('baseVersion must be a positive integer');
+      }
+      baseVersion = Number(rawBaseVersion);
+    }
+
+    try {
+      const latestVersion = await client.getLatestVersion(propertyId, contractId, groupId);
+      const version = requestedVersion ?? latestVersion;
+      const { ruleTree } = await client.getRuleTree(propertyId, version, contractId, groupId);
+      const managedRulesPresent = detectManagedRuleNames(ruleTree);
+      const deployed = managedRulesPresent.length > 0;
+
+      // Re-onboard disambiguation: compare the per-deploy fetcher key against the base version the
+      // deploy cloned from. A fresh key proves THIS deploy's write persisted (not just an inherited
+      // clone). Only meaningful when a distinct baseVersion is supplied and the rule is present.
+      let freshWrite;
+      if (deployed && baseVersion !== undefined && baseVersion !== version) {
+        const targetKey = getManagedFetcherKey(ruleTree);
+        const { ruleTree: baseTree } = await client
+          .getRuleTree(propertyId, baseVersion, contractId, groupId);
+        const baseKey = getManagedFetcherKey(baseTree);
+        // Distinct (or the base had no managed key at all) ⇒ this deploy wrote fresh content.
+        freshWrite = targetKey !== null && targetKey !== baseKey;
+      }
+
+      log.info(auditLine(context, 'deploy-status', 'ok', {
+        siteId, propertyId, version, latestVersion, deployed, freshWrite,
+      }));
+      return ok({
+        propertyId,
+        version,
+        latestVersion,
+        // true when the Optimize-at-Edge rule is present in `version` — the definitive answer a
+        // caller needs after a deploy whose response it never received.
+        deployed,
+        managedRulesPresent,
+        // Present only when baseVersion was supplied: true ⇒ this deploy's fresh write is confirmed
+        // (fetcher key differs from the base clone); false ⇒ the version is an unwritten clone.
+        // undefined ⇒ not checked (first-onboard case, where `deployed` is already unambiguous).
+        ...(freshWrite !== undefined ? { freshWrite } : {}),
+      });
+    } catch (e) {
+      return papiErrorResponse(e, 'deploy status', context, { siteId, propertyId });
     }
   };
 
@@ -898,6 +1010,28 @@ function LlmoAkamaiController(ctx) {
           }));
         }
       }
+      // Akamai refuses to activate a version that has BLOCKING validation errors, returning a 400
+      // on the activations endpoint (a well-formed activate request only 400s for this reason). No
+      // activation gets created, so the recovery probe above found nothing. Surface it as a
+      // specific, actionable block — the version must be fixed / re-created first — instead of a
+      // generic upstream 502 the UI might retry into a loop. This is the activation-time gate that
+      // stops a rule tree with errors (e.g. deploy-status reported the rule present, but the tree
+      // still fails validation) from being pushed live.
+      const activateStatus = Number((e?.message || '').match(/-> (\d{3}):/)?.[1]);
+      if (activateStatus === 400) {
+        const papiDetail = (e?.message || '').replace(/^.*?-> \d{3}:\s*/, '').slice(0, 2000);
+        log.error(auditLine(context, 'activate', 'validation-rejected', {
+          severity: 'error', siteId, host: auditHostname(site), propertyId, version, network,
+        }));
+        return createResponse({
+          message: 'This property version can’t be activated because it has validation errors. '
+            + 'Review the version in Akamai Property Manager (or create a new version) to fix them, '
+            + 'then try activating again.',
+          code: 'version_has_validation_errors',
+          version,
+          papiErrors: papiDetail,
+        }, 422);
+      }
       return papiErrorResponse(e, 'activation', context, { siteId, propertyId });
     }
   };
@@ -962,6 +1096,7 @@ function LlmoAkamaiController(ctx) {
     listProperties,
     plan,
     deploy,
+    deployStatus,
     activate,
     activationStatus,
   };

@@ -22,6 +22,9 @@ import {
   mergeIntoTree,
   buildRuleTreePatch,
   managedRuleNames,
+  detectManagedRuleNames,
+  estimateRuleTreeComplexity,
+  getManagedFetcherKey,
   redactSecrets,
 } from '../../../src/controllers/llmo/llmo-akamai-utils.js';
 
@@ -196,6 +199,105 @@ describe('llmo-akamai-utils', () => {
         cfg.ruleNames.routing,
         cfg.ruleNames.failoverTest,
       ]);
+    });
+  });
+
+  describe('detectManagedRuleNames', () => {
+    it('returns [] for a tree with no managed rules', () => {
+      const tree = { rules: { children: [{ name: 'Existing' }, { name: 'Other' }] } };
+      expect(detectManagedRuleNames(tree)).to.deep.equal([]);
+    });
+
+    it('detects the wrapped layout (parent at top level)', () => {
+      const tree = { rules: { children: [{ name: 'Existing' }, { name: 'Optimize at Edge' }] } };
+      expect(detectManagedRuleNames(tree)).to.deep.equal(['Optimize at Edge']);
+    });
+
+    it('detects the legacy flat layout and a trailing-space name, deduped', () => {
+      const tree = {
+        rules: {
+          children: [
+            { name: 'Optimize at Edge Routing' },
+            { name: 'EdgeOptimize Failover - Test Header' },
+            { name: 'Optimize at Edge ' }, // legacy trailing space
+          ],
+        },
+      };
+      const found = detectManagedRuleNames(tree);
+      expect(found).to.include.members([
+        'Optimize at Edge',
+        'Optimize at Edge Routing',
+        'EdgeOptimize Failover - Test Header',
+      ]);
+      expect(found).to.have.length(3);
+    });
+
+    it('is safe on a missing/empty tree', () => {
+      expect(detectManagedRuleNames(undefined)).to.deep.equal([]);
+      expect(detectManagedRuleNames({})).to.deep.equal([]);
+      expect(detectManagedRuleNames({ rules: {} })).to.deep.equal([]);
+    });
+  });
+
+  describe('estimateRuleTreeComplexity', () => {
+    it('sums behaviors + criteria recursively across the tree', () => {
+      const tree = {
+        rules: {
+          behaviors: [{ name: 'a' }, { name: 'b' }], // 2
+          criteria: [{ name: 'c' }], // 1
+          children: [
+            { behaviors: [{ name: 'd' }], criteria: [], children: [] }, // 1
+            { behaviors: [], criteria: [{ name: 'e' }, { name: 'f' }] }, // 2
+          ],
+        },
+      };
+      expect(estimateRuleTreeComplexity(tree)).to.equal(6);
+    });
+
+    it('is safe on empty/missing input', () => {
+      expect(estimateRuleTreeComplexity(undefined)).to.equal(0);
+      expect(estimateRuleTreeComplexity({})).to.equal(0);
+      expect(estimateRuleTreeComplexity({ rules: {} })).to.equal(0);
+    });
+  });
+
+  describe('getManagedFetcherKey', () => {
+    const treeWithKey = (key) => ({
+      rules: {
+        children: [{
+          name: 'Optimize at Edge',
+          children: [{
+            name: 'Optimize at Edge Routing',
+            behaviors: [
+              { name: 'origin', options: {} },
+              {
+                name: 'modifyIncomingRequestHeader',
+                options: { customHeaderName: 'x-edgeoptimize-fetcher-key', headerValue: key },
+              },
+            ],
+          }],
+        }],
+      },
+    });
+
+    it('extracts the fetcher-key header value from the managed rule', () => {
+      expect(getManagedFetcherKey(treeWithKey('abc123'))).to.equal('abc123');
+    });
+
+    it('returns null when there is no managed fetcher-key header', () => {
+      const tree = { rules: { children: [{ name: 'Existing', behaviors: [{ name: 'origin' }] }] } };
+      expect(getManagedFetcherKey(tree)).to.equal(null);
+    });
+
+    it('is safe on empty/missing input', () => {
+      expect(getManagedFetcherKey(undefined)).to.equal(null);
+      expect(getManagedFetcherKey({})).to.equal(null);
+      expect(getManagedFetcherKey({ rules: {} })).to.equal(null);
+    });
+
+    it('distinguishes two versions minted with different keys', () => {
+      expect(getManagedFetcherKey(treeWithKey('K1')))
+        .to.not.equal(getManagedFetcherKey(treeWithKey('K2')));
     });
   });
 

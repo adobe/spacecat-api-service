@@ -766,6 +766,8 @@ paths:
     $ref: './llmo-api.yaml#/site-llmo-akamai-plan'
   /sites/{siteId}/llmo/cdn-onboard/akamai/deploy:
     $ref: './llmo-api.yaml#/site-llmo-akamai-deploy'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/deploy-status:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-deploy-status'
   /sites/{siteId}/llmo/cdn-onboard/akamai/activate:
     $ref: './llmo-api.yaml#/site-llmo-akamai-activate'
   /sites/{siteId}/llmo/cdn-onboard/akamai/activation-status:
