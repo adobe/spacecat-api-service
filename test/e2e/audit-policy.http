@@ -123,12 +123,24 @@ Content-Type: application/json
 }
 
 # =============================================================================
-# AUDIT SCOPE - view stubs (501 until B4/B7 land)
+# AUDIT SCOPE - pages (E4, SITES-46351)
 # =============================================================================
 
-### Get scoped pages (not implemented yet)
+### Get in-scope pages, sorted by url ascending
 GET {{baseUrl}}/sites/{{siteId}}/audit-scope/pages
 Authorization: Bearer {{sessionToken}}
+
+### Get in-scope pages with a smaller page size
+GET {{baseUrl}}/sites/{{siteId}}/audit-scope/pages?limit=5
+Authorization: Bearer {{sessionToken}}
+
+### Get the next page of in-scope pages (replace with a "cursor" value from the previous response)
+GET {{baseUrl}}/sites/{{siteId}}/audit-scope/pages?limit=5&cursor=YOUR_CURSOR_HERE
+Authorization: Bearer {{sessionToken}}
+
+# =============================================================================
+# AUDIT SCOPE - summary/sections view stubs (501 until B7 lands)
+# =============================================================================
 
 ### Get scope summary (not implemented yet)
 GET {{baseUrl}}/sites/{{siteId}}/audit-scope/summary
