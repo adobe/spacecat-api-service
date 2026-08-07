@@ -18,8 +18,9 @@ import { getSessionToken } from './utils/session-auth.js';
  * E2E tests for the Audit Policy API contract (SITES-47306, SITES-48346).
  *
  * Scoped to what only this layer can prove: real auth wiring, real route-table wiring for the
- * audit-scope stubs, and one live read-write-revisions-write workflow through the deployed
- * Lambda + PostgREST stack. Per-field validation, the cross-org 403 matrix, and
+ * audit-scope endpoints (pages live as of E4/SITES-46351; summary/sections still 501 stubs),
+ * and one live read-write-revisions-write workflow through the deployed Lambda + PostgREST
+ * stack. Per-field validation, the cross-org 403 matrix, and
  * version-conflict retry logic are already covered by test/controllers/audit-policy.test.js
  * (mocked) and test/it/shared/tests/audit-policy.js (real Postgres) and aren't repeated here.
  * The workflow only exercises exclusions - inclusions share the same mutateArray code path,
@@ -123,15 +124,32 @@ describe('Audit Policy - E2E Tests', function auditPolicySuite() {
     });
   });
 
-  describe('Audit scope endpoints (not yet implemented)', () => {
-    it('returns 501 for pages, summary, and sections', async () => {
-      const subResources = ['pages', 'summary', 'sections'];
+  describe('Audit scope endpoints', () => {
+    it('returns 501 for summary and sections (not yet implemented)', async () => {
+      const subResources = ['summary', 'sections'];
       const responses = await Promise.all(subResources.map(
         (sub) => request({ path: `/sites/${SITE_ID}/audit-scope/${sub}` }),
       ));
       responses.forEach((response, i) => {
         expect(response.status, `audit-scope/${subResources[i]} should be 501`).to.equal(501);
       });
+    });
+
+    // E4 (SITES-46351): reads the v_audit_scope_pages data-service view. This only
+    // proves the route/auth wiring is live and the response has the paginated-list
+    // shape - it can't assert specific in-scope pages, since seeding real
+    // page_inventory + d_page_in_scope facts for the live dev test site is Mystique's
+    // write path, out of reach from this e2e suite. Exact scoping behavior (in-scope
+    // filtering, ordering, cursor pagination) is covered against real Postgres by
+    // test/it/shared/tests/audit-policy.js.
+    it('returns 200 with a paginated items array for pages', async () => {
+      const response = await request({ path: `/sites/${SITE_ID}/audit-scope/pages?limit=1` });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.items).to.be.an('array');
+      if (body.cursor !== undefined) {
+        expect(body.cursor).to.be.a('string');
+      }
     });
   });
 
