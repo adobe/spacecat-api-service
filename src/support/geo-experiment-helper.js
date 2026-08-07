@@ -12,6 +12,29 @@
 
 import { GeoExperiment } from '@adobe/spacecat-shared-data-access';
 
+const { STATUSES, PHASES } = GeoExperiment;
+
+/**
+ * Whether a GeoExperiment can have impact measurement (re-)triggered: it must be sitting
+ * *exactly* at POST_ANALYSIS_DONE with a status of IN_PROGRESS (the organic pending-submission
+ * state, e.g. stuck on a Mystique 429 retry budget) or COMPLETED (re-arming an experiment that
+ * was closed out before measurement ran). An experiment that already advanced to
+ * IMPACT_MEASUREMENT_STARTED/DONE, an earlier phase, or a FAILED status at POST_ANALYSIS_DONE,
+ * is not eligible.
+ *
+ * This mirrors llmo-experimentation-engine's own eligibility check (which is authoritative — the
+ * engine re-validates on receipt) — checked here only so the API response is immediate and
+ * accurate instead of "sent, wait and see". Keep the two in sync.
+ * See llmo-experimentation-engine/docs/decisions/004-manual-impact-measurement-retrigger.md.
+ * @param {Object} geoExperiment
+ * @returns {boolean}
+ */
+export function isImpactMeasurementEligible(geoExperiment) {
+  const status = geoExperiment.getStatus();
+  return geoExperiment.getPhase() === PHASES.POST_ANALYSIS_DONE
+    && (status === STATUSES.COMPLETED || status === STATUSES.IN_PROGRESS);
+}
+
 /**
  * Validates a single phase config block.
  * All fields are optional — only present fields are validated.

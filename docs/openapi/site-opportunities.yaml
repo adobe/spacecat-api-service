@@ -817,6 +817,47 @@ site-geo-experiment:
     security:
       - ims_key: [ ]
 
+site-geo-experiment-trigger-impact-measurement:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: geoExperimentId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: The GeoExperiment ID
+  post:
+    operationId: triggerImpactMeasurement
+    summary: Manually (re-)trigger impact measurement for a geo experiment
+    description: |
+      Manually (re-)triggers Mystique impact measurement for a GeoExperiment. Only allowed when
+      the experiment is at phase `post_analysis_done` with status `in_progress` or `completed`.
+      Sends a message to the llmo-experimentation-engine, which re-validates eligibility and
+      re-arms the experiment before resubmitting.
+    tags:
+      - geo-experiments
+    responses:
+      '202':
+        description: Impact measurement triggered; the experimentation engine will process it shortly
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+    security:
+      - ims_key: [ ]
+
 GeoExperiment:
   type: object
   properties:

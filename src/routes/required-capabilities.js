@@ -59,6 +59,7 @@ export const INTERNAL_ROUTES = [
   // Geo experiment — write/delete endpoints used by DRS/UI
   'PATCH /sites/:siteId/geo-experiments/:geoExperimentId',
   'DELETE /sites/:siteId/geo-experiments/:geoExperimentId',
+  'POST /sites/:siteId/geo-experiments/:geoExperimentId/trigger-impact-measurement',
 
   // Slack - event subscriptions and commands use Slack's signature verification
   'GET /slack/events',

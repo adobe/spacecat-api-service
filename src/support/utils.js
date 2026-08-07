@@ -391,18 +391,19 @@ export const triggerA11yCodefixForOpportunity = async (
  * handler contract). The engine re-validates eligibility itself before resubmitting.
  *
  * @param {string} geoExperimentId - The GeoExperiment ID to trigger measurement for.
- * @param {Object} slackContext - The Slack context object.
- * @param {Object} lambdaContext - The Lambda context object.
+ * @param {string} triggeredBy - Identity of the caller, for the engine's log line
+ *   (e.g. an IMS user id/email resolved from the request's auth profile).
+ * @param {Object} lambdaContext - The Lambda context object (sqs, env).
  * @return {Promise} - A promise representing the SQS send operation.
  */
 export const triggerGeoExperimentImpactMeasurement = async (
   geoExperimentId,
-  slackContext,
+  triggeredBy,
   lambdaContext,
 ) => lambdaContext.sqs.sendMessage(lambdaContext.env.LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL, {
   type: 'TRIGGER_IMPACT_MEASUREMENT',
   geoExperimentId,
-  triggeredBy: slackContext.userId ? `slack:${slackContext.userId}` : 'slack',
+  triggeredBy: triggeredBy || 'unknown',
 });
 
 // todo: prototype - untested
