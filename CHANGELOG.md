@@ -1,3 +1,10 @@
+# [1.728.0](https://github.com/adobe/spacecat-api-service/compare/v1.727.0...v1.728.0) (2026-08-07)
+
+
+### Features
+
+* **audit-policy:** implement audit-scope/pages E4 + IT for B4 (SITES-46351) ([#2963](https://github.com/adobe/spacecat-api-service/issues/2963)) ([53ab1be](https://github.com/adobe/spacecat-api-service/commit/53ab1be10a3cf669b56ae488bccc945e66440542)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 # [1.727.0](https://github.com/adobe/spacecat-api-service/compare/v1.726.0...v1.727.0) (2026-08-07)
 
 
