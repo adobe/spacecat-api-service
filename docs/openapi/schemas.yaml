@@ -773,6 +773,15 @@ SiteList:
   type: array
   items:
     $ref: './schemas.yaml#/Site'
+SiteEnrollmentList:
+  type: object
+  required:
+    - sites
+  properties:
+    sites:
+      type: array
+      items:
+        $ref: './schemas.yaml#/Site'
 SiteListItem:
   type: object
   description: |
@@ -4168,6 +4177,11 @@ Fix:
     executedAt:
       type: string
       format: date-time
+    deployedAt:
+      type:
+        - string
+        - 'null'
+      format: date-time
     publishedAt:
       type: string
       format: date-time
@@ -6575,6 +6589,12 @@ V2PromptListResponse:
 V2Prompt:
   type: object
   description: A prompt with brand, category, and topic enrichment
+  # FIX (MysticatBot suggestion): `origin` is required (non-nullable) in the
+  # response — it is NOT NULL in production and `mapRowToPrompt` returns it
+  # verbatim with no fallback (origin-dimension.md §2.3 / §3 item 4), so
+  # SDK-generated types must reflect it as always-present, never optional.
+  required:
+    - origin
   properties:
     id:
       type: string
@@ -6612,9 +6632,13 @@ V2Prompt:
       default: human
     source:
       type: string
-      description: The source system or process that created the prompt
+      readOnly: true
+      description: >-
+        The producing system (source-dimension.md). READ-ONLY: server-owned, with
+        no write surface — a create/update body cannot set it. Returned in its
+        CANONICAL form (`lower(replace(source, '_', '-'))`), so `agentic_traffic`
+        reads as `agentic-traffic`.
       example: "config"
-      default: "config"
     intent:
       type: [string, 'null']
       description: >-
@@ -6708,10 +6732,13 @@ V2PromptInput:
       type: string
       enum: [ai, human]
       default: human
-    source:
-      type: string
-      description: The source system or process that created the prompt
-      default: "config"
+      description: >-
+        Who authored the prompt's text. SERVICE-PRINCIPAL-ONLY and read-only for
+        end users: a user-authenticated request (IMS/JWT) has this field IGNORED
+        (never rejected) and the value derived as `human`; only a service
+        principal (e.g. the generation pipeline) may assert it, validated against
+        the enum. It is never patched on update — it is fixed by the writer that
+        created the row (origin-dimension.md §3).
     intent:
       type: string
       description: >-
@@ -7756,6 +7783,15 @@ V2Brand:
         - string
         - 'null'
       description: Industry vertical
+    brandClaimsEnabled:
+      type: boolean
+      default: false
+      readOnly: true
+      description: >-
+        Read-only internal ops gate (LLMO-5741). When true, the Brand Claims
+        scheduler turns a brand-presence sheet-ready event into a claims run for
+        this brand. Brand-scoped and opt-in (default false); set by operators via
+        the `brand-claims` Slack command, not customer-writable.
     region:
       type: array
       items:
@@ -7824,6 +7860,7 @@ V2Brand:
     brandContext: "Example Brand is a B2B analytics platform."
     mentionSentimentGuidance: "Treat factual pricing mentions as neutral unless the response recommends against the brand."
     vertical: 'technology'
+    brandClaimsEnabled: false
     region: ['US', 'DE']
     urls:
       - value: 'https://www.example.com'
@@ -7848,14 +7885,26 @@ V2Brand:
 
 V2BrandUpdateResponse:
   description: >-
-    A brand (as returned by GET) plus, when the edit re-synced aliases/competitors
-    to a sub-workspace brand's Semrush markets and Semrush refused some aliases,
-    the `semrushRejectedAliases` set. The field is omitted when nothing was
-    rejected (or the brand is flat-mode).
+    A brand (as returned by GET) plus optional fields when a sub-workspace brand's
+    Semrush re-sync produced notable results. `semrushSyncPending` is set when the
+    row was committed but the re-sync could not be completed (Semrush unavailable or
+    user not provisioned) — the edit persisted and will be reconciled later.
+    `semrushRejectedAliases` is set when Semrush refused some aliases during an
+    otherwise successful re-sync.
   allOf:
     - $ref: '#/V2Brand'
     - type: object
       properties:
+        semrushSyncPending:
+          type: boolean
+          description: >-
+            Present and `true` when the brand row was committed but the Semrush
+            re-sync failed (transient upstream error or user not provisioned in
+            Semrush). The edit is persisted; Semrush will be reconciled via
+            `--reconcile` migration once the underlying issue is resolved.
+            Returned only for organizations still inside the Semrush migration
+            window. An org carrying the `LLMO/serenity_ui` feature flag gets the
+            upstream failure reported instead (401/403/502), never this field.
         semrushRejectedAliases:
           type: array
           description: >-
@@ -7922,6 +7971,14 @@ V2BrandInput:
       type: array
       items:
         $ref: '#/V2BrandCompetitor'
+    baseSiteId:
+      type: string
+      format: uuid
+      description: >-
+        Id of the brand's primary SpaceCat Site — an existing onboarded site or one
+        onboarded inline. Written to `brands.site_id` as the brand's primary-URL
+        anchor. Sent on every create (a Serenity brand is anchored by BOTH its
+        sub-workspace and this primary Site).
 
 V2BrandUpdateInput:
   type: object
@@ -7982,6 +8039,14 @@ V2BrandUpdateInput:
         Deferred Semrush provisioning data. Honored only while the brand is (and
         stays) pending — the draft Markets tab appends a market / edits a
         market's LLMs; silently ignored on a non-pending brand.
+    expectedUpdatedAt:
+      type: string
+      format: date-time
+      description: >-
+        Optimistic concurrency token. Pass the `updatedAt` value from the brand
+        you loaded before editing; if the brand has been modified since then,
+        the request is rejected with a 409 (code `brand_stale_write`) instead
+        of overwriting the newer write. Omit to skip this check.
 
 V2BrandListResponse:
   type: object
@@ -9431,6 +9496,60 @@ UrlInspectorUrlPrompts:
         $ref: '#/UrlInspectorUrlPromptRow'
   required: [prompts]
 
+SerenityUrlInspectorUrlPromptRow:
+  type: object
+  description: |
+    One prompt that cited the inspected URL, from the Serenity URL_PROMPTS element.
+    `category`, `region`, `topics` and `citations` are always empty/0 — the element
+    does not expose them; they are kept for shape parity with the Postgres
+    `UrlInspectorUrlPromptRow` contract this endpoint replaces. `sourceTitle`,
+    `brandMentioned`, `brands` and `closestDate` are the Serenity-only extras that
+    power the URL details dialog.
+  properties:
+    prompt:
+      type: string
+      example: 'What size Lovesac sectional is best for a studio apartment?'
+    category:
+      type: string
+      description: Always empty (not exposed by the element); kept for PG-contract parity.
+      example: ''
+    region:
+      type: string
+      description: Always empty (not exposed by the element); kept for PG-contract parity.
+      example: ''
+    topics:
+      type: string
+      description: Always empty (not exposed by the element); kept for PG-contract parity.
+      example: ''
+    citations:
+      type: integer
+      description: Always 0 (one row per distinct prompt, no per-prompt count); kept for PG-contract parity.
+      example: 0
+    sourceTitle:
+      type: string
+      example: 'Modular Sectional Couches | Lovesac Sactionals'
+    brandMentioned:
+      type: string
+      example: 'mentioned'
+    brands:
+      type: array
+      items: { type: string }
+      example: ['Lovesac']
+    closestDate:
+      type: [string, 'null']
+      description: ISO timestamp of the most recent citation for this prompt, or null.
+      example: '2026-07-26T00:00:00Z'
+  required: [prompt]
+
+SerenityUrlInspectorUrlPrompts:
+  type: object
+  properties:
+    prompts:
+      type: array
+      items:
+        $ref: '#/SerenityUrlInspectorUrlPromptRow'
+  required: [prompts]
+
 UrlInspectorFilterDimensions:
   type: object
   description: |
@@ -9895,21 +10014,19 @@ AiVisibilitySrFilters:
     markets:
       type: array
       items:
-        type: object
-        properties:
-          code:
-            type: string
-          name:
-            type: string
+        type: string
     models:
       type: array
       items:
-        type: object
-        properties:
-          code:
-            type: string
-          name:
-            type: string
+        type: string
+    marketsCatalog:
+      type: array
+      items:
+        type: string
+    modelsCatalog:
+      type: array
+      items:
+        type: string
 
 AiVisibilityBrandStats:
   type: object
@@ -10131,6 +10248,61 @@ AiVisibilityV1BrandStatsByLLMResponse:
       type: array
       items:
         $ref: '#/AiVisibilityV1BrandStatsByLLMEntry'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1BrandCompetitorsStatsByDate:
+  type: object
+  description: |
+    One row from `CompetitorsMetrics.StatsResponse.ByDate` as native protobuf JSON.
+    UInt64 fields are serialized as JSON strings.
+  properties:
+    date:
+      $ref: '#/AiVisibilitySemrushDate'
+    visibility:
+      type: integer
+      description: AI Visibility score for the brand on this date
+    mentions:
+      oneOf:
+        - type: string
+        - type: integer
+      description: Prompt responses mentioning the brand
+    audience:
+      oneOf:
+        - type: string
+        - type: integer
+      description: Estimated audience for the brand
+    ownedSources:
+      oneOf:
+        - type: string
+        - type: integer
+      description: Citations from the brand domain
+  additionalProperties: true
+
+AiVisibilityV1BrandCompetitorsStatsByBrand:
+  type: object
+  description: Statistics for one target or competitor brand
+  properties:
+    brand:
+      $ref: '#/AiVisibilitySemrushBrand'
+    byDate:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1BrandCompetitorsStatsByDate'
+  additionalProperties: true
+
+AiVisibilityV1BrandCompetitorsStatsResponse:
+  type: object
+  description: |
+    Native Semrush `CompetitorsMetrics.StatsResponse` protobuf JSON from
+    `GET /llmo/ai-visibility/v1/brand/competitors-stats`, plus `srFilters`
+    from the API layer.
+  properties:
+    byBrand:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1BrandCompetitorsStatsByBrand'
     srFilters:
       $ref: '#/AiVisibilitySrFilters'
   additionalProperties: true
@@ -10831,6 +11003,186 @@ AiVisibilityV1SourceGapSourceDomainsExportResponse:
       $ref: '#/AiVisibilitySrFilters'
   additionalProperties: true
 
+AiVisibilityV1SourceCitedPageRow:
+  type: object
+  description: |
+    One cited page from Semrush `SourcesResponse.Source` as protobuf JSON (camelCase).
+    The `uint64` prompt count is serialized as a JSON string.
+  properties:
+    url:
+      type: string
+      format: uri
+      description: Page URL on the target domain cited by an LLM response
+    promptsCount:
+      type: string
+      pattern: '^[0-9]+$'
+      description: Number of prompt responses citing the page (`uint64`)
+    country:
+      description: Market (COUNTRY enum name or integer)
+      oneOf:
+        - $ref: '#/AiVisibilitySemrushCountry'
+        - type: integer
+  additionalProperties: true
+
+AiVisibilityV1SourceCitedPagesResponse:
+  type: object
+  description: |
+    Cited pages list from `GET /llmo/ai-visibility/v1/source/cited-pages`.
+    Wraps Semrush v2 source `Sources` JSON plus `srFilters` from the API layer.
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1SourceCitedPageRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1SourceCitedPagesTotalsResponse:
+  type: object
+  description: |
+    Cited pages count from `GET /llmo/ai-visibility/v1/source/cited-pages-totals`.
+    Returns only the count matching the request filters, without paginated data.
+  properties:
+    total:
+      description: Total owned/cited pages matching the request filters (`uint64`)
+      oneOf:
+        - type: string
+          pattern: '^[0-9]+$'
+        - type: integer
+          minimum: 0
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1SourceCitedPagesExportResponse:
+  type: object
+  description: |
+    Cited pages CSV export from `GET /llmo/ai-visibility/v1/source/cited-pages-export`.
+    Native Semrush v2 `ExportResponse` protobuf JSON plus `srFilters` from the API layer.
+  properties:
+    fileContent:
+      type: string
+      format: byte
+      description: Base64-encoded CSV file content from `ExportResponse.file_content`.
+    fileName:
+      type: string
+      description: Suggested CSV file name from `ExportResponse.file_name`.
+      example: cited-pages.csv
+    contentType:
+      type: string
+      description: MIME type from `ExportResponse.content_type`.
+      example: text/csv
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1SourceCitedSourceRow:
+  type: object
+  description: |
+    One cited source domain from Semrush `SourceDomainsResponse.Domain` as protobuf JSON
+    (camelCase). UInt64 fields may be serialized as JSON strings.
+  properties:
+    domain:
+      type: string
+      description: Source domain cited by an LLM response
+    mentions:
+      description: Brand mentions associated with the source domain (`uint64`)
+      oneOf:
+        - type: string
+          pattern: '^[0-9]+$'
+        - type: integer
+          minimum: 0
+    sourcesCount:
+      description: Number of cited URLs from the source domain (`uint64`)
+      oneOf:
+        - type: string
+          pattern: '^[0-9]+$'
+        - type: integer
+          minimum: 0
+    promptsCount:
+      description: Number of prompt responses citing the source domain (`uint64`)
+      oneOf:
+        - type: string
+          pattern: '^[0-9]+$'
+        - type: integer
+          minimum: 0
+    organicTraffic:
+      description: Estimated organic traffic to the source domain (`uint64`)
+      oneOf:
+        - type: string
+          pattern: '^[0-9]+$'
+        - type: integer
+          minimum: 0
+    mentionedBrandsCount:
+      description: Number of distinct brands mentioned with the source domain (`uint64`)
+      oneOf:
+        - type: string
+          pattern: '^[0-9]+$'
+        - type: integer
+          minimum: 0
+    country:
+      description: Market (COUNTRY enum name or integer)
+      oneOf:
+        - $ref: '#/AiVisibilitySemrushCountry'
+        - type: integer
+  additionalProperties: true
+
+AiVisibilityV1SourceCitedSourcesResponse:
+  type: object
+  description: |
+    Cited source domains list from `GET /llmo/ai-visibility/v1/source/cited-sources`.
+    Wraps Semrush v2 source `SourceDomains` JSON plus `srFilters` from the API layer.
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1SourceCitedSourceRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1SourceCitedSourcesTotalsResponse:
+  type: object
+  description: |
+    Cited source domains count from
+    `GET /llmo/ai-visibility/v1/source/cited-sources-totals`.
+    Returns only the count matching the request filters, without paginated data.
+  properties:
+    total:
+      description: Total cited source domains matching the request filters (`uint64`)
+      oneOf:
+        - type: string
+          pattern: '^[0-9]+$'
+        - type: integer
+          minimum: 0
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1SourceCitedSourcesExportResponse:
+  type: object
+  description: |
+    Cited source domains CSV export from
+    `GET /llmo/ai-visibility/v1/source/cited-sources-export`.
+    Native Semrush v2 `ExportResponse` protobuf JSON plus `srFilters` from the API layer.
+  properties:
+    fileContent:
+      type: string
+      format: byte
+      description: Base64-encoded CSV file content from `ExportResponse.file_content`.
+    fileName:
+      type: string
+      description: Suggested CSV file name from `ExportResponse.file_name`.
+      example: cited-sources.csv
+    contentType:
+      type: string
+      description: MIME type from `ExportResponse.content_type`.
+      example: text/csv
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
 AiVisibilityPromptResearchExportResponse:
   type: object
   description: |
@@ -10850,6 +11202,279 @@ AiVisibilityPromptResearchExportResponse:
     contentType:
       type: string
       description: MIME type from `ExportResponse.content_type`.
+      example: text/csv
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1UInt64:
+  description: Protobuf `uint64`, serialized as a decimal string by protobuf JSON.
+  oneOf:
+    - type: string
+      pattern: '^[0-9]+$'
+    - type: integer
+      minimum: 0
+
+AiVisibilityV1TopicMetricsByFtsResponse:
+  type: object
+  description: Native Semrush `MetricsByFTSResponse` protobuf JSON plus API filters.
+  properties:
+    date:
+      $ref: '#/AiVisibilitySemrushDate'
+    volume:
+      $ref: '#/AiVisibilityV1UInt64'
+    volumeTrend:
+      type: array
+      items:
+        type: integer
+    topicsCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    promptsCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    intents:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySemrushTopicIntentEntry'
+    brandsCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    topBrands:
+      type: array
+      items:
+        type: string
+    sourceDomainsCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    topSourceDomains:
+      type: array
+      items:
+        type: string
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
+AiVisibilityV1TopicByFtsRow:
+  type: object
+  properties:
+    id:
+      $ref: '#/AiVisibilityV1UInt64'
+    name:
+      type: string
+    volume:
+      $ref: '#/AiVisibilityV1UInt64'
+    volumeTrend:
+      type: array
+      items:
+        type: integer
+    intents:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySemrushTopicIntentEntry'
+    promptsCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    relevanceScore:
+      type: integer
+      minimum: 0
+      maximum: 100
+  additionalProperties: true
+
+AiVisibilityV1TopicsByFtsResponse:
+  type: object
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1TopicByFtsRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [data]
+  additionalProperties: true
+
+AiVisibilityV1PromptByTopicFtsRow:
+  type: object
+  properties:
+    prompt:
+      type: string
+    promptHash:
+      $ref: '#/AiVisibilityV1UInt64'
+    mentionedBrandsCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    sourcesCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    briefResponse:
+      type: string
+    llm:
+      $ref: '#/AiVisibilitySemrushLlm'
+    serpId:
+      type: string
+    topicId:
+      $ref: '#/AiVisibilityV1UInt64'
+    topicName:
+      type: string
+    topicVolume:
+      $ref: '#/AiVisibilityV1UInt64'
+    relevanceScore:
+      type: integer
+      minimum: 0
+      maximum: 100
+  additionalProperties: true
+
+AiVisibilityV1PromptsByTopicFtsResponse:
+  type: object
+  properties:
+    date:
+      $ref: '#/AiVisibilitySemrushDate'
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1PromptByTopicFtsRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [data]
+  additionalProperties: true
+
+AiVisibilityV1PromptByTopicIdsRow:
+  type: object
+  description: Native Semrush `PromptsByTopicIDsResponse.Prompt` protobuf JSON.
+  properties:
+    prompt:
+      type: string
+    promptHash:
+      $ref: '#/AiVisibilityV1UInt64'
+    mentionedBrandsCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    sourcesCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    briefResponse:
+      type: string
+    llm:
+      $ref: '#/AiVisibilitySemrushLlm'
+    serpId:
+      type: string
+    topicId:
+      $ref: '#/AiVisibilityV1UInt64'
+    country:
+      $ref: '#/AiVisibilitySemrushCountry'
+  additionalProperties: true
+
+AiVisibilityV1PromptsByTopicIdsResponse:
+  type: object
+  properties:
+    date:
+      $ref: '#/AiVisibilitySemrushDate'
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1PromptByTopicIdsRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [data]
+  additionalProperties: true
+
+AiVisibilityV1BrandByTopicFtsRow:
+  type: object
+  properties:
+    name:
+      type: string
+    mentions:
+      $ref: '#/AiVisibilityV1UInt64'
+    overallMentions:
+      $ref: '#/AiVisibilityV1UInt64'
+    sourceDomainsCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    examplePrompt:
+      type: string
+    examplePromptHash:
+      $ref: '#/AiVisibilityV1UInt64'
+    examplePromptTopicId:
+      $ref: '#/AiVisibilityV1UInt64'
+    domain:
+      type: string
+    serpId:
+      type: string
+    llm:
+      $ref: '#/AiVisibilitySemrushLlm'
+  additionalProperties: true
+
+AiVisibilityV1BrandsByTopicFtsResponse:
+  type: object
+  properties:
+    date:
+      $ref: '#/AiVisibilitySemrushDate'
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1BrandByTopicFtsRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [data]
+  additionalProperties: true
+
+AiVisibilityV1SourceDomainByTopicFtsRow:
+  type: object
+  properties:
+    domain:
+      type: string
+    sourcesCount:
+      $ref: '#/AiVisibilityV1UInt64'
+    mentions:
+      $ref: '#/AiVisibilityV1UInt64'
+    overallMentions:
+      $ref: '#/AiVisibilityV1UInt64'
+    organicTraffic:
+      $ref: '#/AiVisibilityV1UInt64'
+    examplePrompt:
+      type: string
+    examplePromptHash:
+      $ref: '#/AiVisibilityV1UInt64'
+    examplePromptTopicId:
+      $ref: '#/AiVisibilityV1UInt64'
+    serpId:
+      type: string
+    llm:
+      $ref: '#/AiVisibilitySemrushLlm'
+  additionalProperties: true
+
+AiVisibilityV1SourceDomainsByTopicFtsResponse:
+  type: object
+  properties:
+    date:
+      $ref: '#/AiVisibilitySemrushDate'
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1SourceDomainByTopicFtsRow'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [data]
+  additionalProperties: true
+
+AiVisibilityV1FtsTotalsResponse:
+  type: object
+  properties:
+    total:
+      $ref: '#/AiVisibilityV1UInt64'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [total]
+  additionalProperties: true
+
+AiVisibilityV1DatedFtsTotalsResponse:
+  allOf:
+    - $ref: '#/AiVisibilityV1FtsTotalsResponse'
+    - type: object
+      properties:
+        date:
+          $ref: '#/AiVisibilitySemrushDate'
+
+AiVisibilityV1FtsExportResponse:
+  type: object
+  properties:
+    fileContent:
+      type: string
+      format: byte
+    fileName:
+      type: string
+    contentType:
+      type: string
       example: text/csv
     srFilters:
       $ref: '#/AiVisibilitySrFilters'
@@ -11064,16 +11689,6 @@ SerenityPrompt:
         different dimensions (a sub-category `human` and the `source` value
         `human`). Read a tag's dimension from `path[0].name`, never from its
         own name.
-    tagMap:
-      type: object
-      additionalProperties: { type: string }
-      deprecated: true
-      description: |
-        DEPRECATED — use `tags`. Map of tag name → upstream tag id. Being keyed
-        by name, it cannot represent a prompt carrying two same-named tags from
-        different dimensions: only one survives, and which one depends on
-        upstream ordering. Removed once every consumer reads `tags`.
-      example: { "Firefly": "uuid-1", "Commercial": "uuid-2" }
     tagIds:
       type: array
       items: { type: string }
@@ -11082,6 +11697,34 @@ SerenityPrompt:
         Present on a create/update response
         (`SerenityCreatePromptsResponse.created`, the `updateSerenityPrompt`
         200); absent on `GET /serenity/prompts` list items, which carry `tags`.
+    createdAt:
+      type: [string, 'null']
+      format: date-time
+      description: |
+        RFC 3339 UTC timestamp the prompt was first created, from the
+        server-owned authorship metadata. Present on `GET /serenity/prompts`
+        list items; null for a prompt created before authorship stamping (an
+        un-backfilled prompt).
+    createdBy:
+      type: [string, 'null']
+      maxLength: 100
+      description: |
+        Opaque id of the caller that created the prompt (an IMS user id, or the
+        literal `unknown` when the author could not be resolved). Resolve to a
+        display name via the userDetails lookup. Null for an un-backfilled prompt.
+    updatedAt:
+      type: [string, 'null']
+      format: date-time
+      description: |
+        RFC 3339 UTC timestamp of the prompt's last in-place edit (its text or
+        tags). Equal to `createdAt` for a never-edited prompt. Null for an
+        un-backfilled prompt.
+    updatedBy:
+      type: [string, 'null']
+      maxLength: 100
+      description: |
+        Opaque id of the caller that last edited the prompt (or the literal
+        `unknown`). Null for an un-backfilled prompt.
 
 SerenityPromptTag:
   type: object
@@ -11167,10 +11810,20 @@ SerenityCreatePromptsRequest:
       minItems: 1
       maxItems: 500
       items: { $ref: '#/SerenityPromptInput' }
+    deferPublish:
+      type: boolean
+      default: false
+      description: >
+        When true, the created prompts are written to the upstream draft layer
+        but the project is NOT published as part of this request (the response
+        carries `published: false`). Used for chunked CSV imports, where the
+        client posts several chunks and issues a single publish after the last
+        one (serenity-docs#32). Omitted/false publishes once at the end of the
+        call as usual.
 
 SerenityCreatePromptsResponse:
   type: object
-  required: [created, skipped, failed]
+  required: [created, skipped, failed, published]
   properties:
     created:
       type: array
@@ -11194,6 +11847,13 @@ SerenityCreatePromptsResponse:
           languageCode: { type: string }
           status: { type: integer }
           message: { type: string }
+    published:
+      type: boolean
+      description: >
+        Whether the project was published as part of this request. Always true
+        unless the request set `deferPublish: true`, in which case the prompts
+        were written as drafts and the caller must publish separately
+        (serenity-docs#32).
 
 SerenityUpdatePromptRequest:
   type: object
@@ -11306,6 +11966,35 @@ SerenityMarket:
       oneOf:
         - type: string
         - type: 'null'
+    promptsCount:
+      type: integer
+      minimum: 0
+      description: |
+        Number of prompts configured on this market's upstream project
+        (Semrush `settings.ai.prompts_count`). Additive, sub-workspace mode
+        only; absent in flat mode and when the upstream project reports no
+        count. Draft-faithful — a pre-publish (draft) market's count reflects
+        its drafted prompts.
+    modelsCount:
+      type: integer
+      minimum: 0
+      description: |
+        Number of AI models enabled on this market's upstream project
+        (Semrush `settings.ai.models_stats.models_count`). Additive,
+        sub-workspace mode only; absent in flat mode and when the upstream
+        project reports no usable value. Metered prompt usage for a market is
+        promptsCount × modelsCount (per Semrush's allocation formula); the
+        product is deliberately left to consumers.
+    siteId:
+      description: |
+        The SpaceCat Site UUID this market is bound to (LLMO-6405 Phase 2) — the
+        Site whose base_url is the market's domain. Additive; surfaced in BOTH
+        flat and sub-workspace modes. Null when the market is not (yet) linked to
+        a Site (a market predating the site-linkage backfill, or one never linked).
+      oneOf:
+        - type: string
+          format: uuid
+        - type: 'null'
 
 SerenityMarketListResponse:
   type: object
@@ -11345,25 +12034,27 @@ SerenityMarketDetail:
 SerenityActivateRequest:
   type: object
   description: |
-    Activates a brand into sub-workspace mode: ensures the brand's own
-    Semrush sub-workspace exists (creating + resourcing it on first call),
-    then per supplied market creates-or-resumes a draft and publishes it once.
+    Activates a brand into sub-workspace mode.
 
-    All fields are optional. A pending (draft) brand activated from the wizard
-    sends an EMPTY body `{}` and every value is read from its stashed
-    `pending_semrush_provisioning` (primary URL, markets, generatePrompts). A
-    reactivation of an already-live brand re-supplies them in the body (the body
-    wins when present; there is no stored market memory otherwise). When no
-    primary URL/domain is available at all, a sub-workspace-only brand is
-    activated (no project). With a domain but no market, a single US/EN fallback
-    project is provisioned.
+    A PENDING (draft) brand activates SUB-WORKSPACE-ONLY: it ensures the brand's
+    own Semrush sub-workspace and flips the brand active, with NO project. The
+    wizard's approve sends an EMPTY body `{}`; any `markets`/`brandDomain` (or the
+    legacy `pending_semrush_provisioning` stash) are IGNORED for provisioning. The
+    brand is anchored by its primary site (`brands.site_id`, set at create), and
+    markets are added afterwards from the Markets tab.
+
+    An ALREADY-ACTIVE brand (reactivation / onboarding API) provisions the markets
+    supplied in the body: per market it creates-or-resumes a draft project and
+    publishes it once. With a `brandDomain` but no `markets`, a single US/EN
+    fallback project is provisioned. An active brand is never downgraded on a
+    partial failure (207 Multi-Status). All fields are optional.
   properties:
     generatePrompts:
       type: boolean
       description: >-
-        Whether to generate topics/prompts for the provisioned project(s).
-        Overrides the stashed value; defaults to the stash (else false). Requires
-        a primary URL/domain (a project) — true with no domain is rejected (400).
+        Whether to generate topics/prompts for a supplied market's project
+        (already-active brand only). Ignored for a pending brand, which activates
+        sub-workspace-only with no project.
     brandDomain:
       type: string
       description: Primary domain for the brand's upstream projects.
@@ -11402,10 +12093,8 @@ SerenityActivateRequest:
             items:
               type: string
             description: >-
-              Optional AI model (LLM) ids to attach to this market's project.
-              When omitted here, the markets stashed on the pending brand supply
-              them (a draft activated from the wizard carries per-market LLMs in
-              pending_semrush_provisioning).
+              Optional AI model (LLM) ids to attach to this market's project
+              (already-active brand reactivation).
 
 SerenityActivateResponse:
   type: object
@@ -11481,17 +12170,28 @@ SerenityDeactivateResponse:
 
 SerenityCreateMarketRequest:
   type: object
-  required: [market, languageCode, brandDomain, brandNames]
+  description: |
+    Creates a market (a (geoTargetId, languageCode) Semrush project) for a brand.
+
+    Supply EITHER `brandDomain` (a raw domain) OR `siteId` (an already-onboarded
+    SpaceCat Site whose base_url is the market's domain). When `siteId` is given
+    and `brandDomain` is omitted, the server derives `brandDomain` from the Site
+    and, in sub-workspace mode, links THAT Site to the market directly (LLMO-6405
+    Phase 2). At least one of the two is required.
+  required: [market, languageCode, brandNames]
   properties:
     name:
       type: string
       description: |
         Display name of the new market. Optional — defaults server-side to
-        `<brandDisplayName>-<6 hex>` to disambiguate re-create-after-delete
-        and avoid collisions in shared workspaces.
+        `<REGION>-<languageCode>` (e.g. `US-en`), the market's own identity,
+        which is what the customer sees in the Semrush navigation. Supply this
+        field to choose the name instead.
     brandDisplayName:
       type: string
-      description: Used as the prefix for the default name when `name` is omitted.
+      description: |
+        Brand display name for the market's `brand_name_display` and its
+        own-brand benchmark.
     market:
       type: string
       description: ISO 3166-1 alpha-2 country code; resolved server-side to a Geo Target ID.
@@ -11502,7 +12202,17 @@ SerenityCreateMarketRequest:
       pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
     brandDomain:
       type: string
-      description: Brand domain the upstream should track (e.g. adobe.com).
+      description: |
+        Brand domain the upstream should track (e.g. adobe.com). Optional when
+        `siteId` is supplied — the server derives it from the Site's base_url.
+        Required when `siteId` is absent.
+    siteId:
+      type: string
+      format: uuid
+      description: |
+        SpaceCat Site UUID to bind this market to (LLMO-6405 Phase 2). When
+        provided, the server derives `brandDomain` from the Site and links the
+        Site to the market. Supply this OR `brandDomain`.
     brandNames:
       type: array
       minItems: 1
@@ -11619,6 +12329,23 @@ SerenityErrorResponse:
     error: { type: string }
     message: { type: string }
 
+SerenityWorkspaceAccess:
+  type: object
+  description: |
+    Whether the calling user can reach the Semrush workspace linked to the brand.
+    Derived from the User Manager resource-allowance endpoint
+    (`GET /v1/workspaces/{id}/resources`) probed with the caller's IMS token: an
+    upstream 2xx yields `true`, a 401/403 yields `false`. A genuine upstream/config
+    failure is NOT reported here — it surfaces as a 4xx/5xx error status instead, so a
+    transient blip is never mistaken for a denial.
+  required: [hasAccess]
+  properties:
+    hasAccess:
+      type: boolean
+      description: |
+        `true` — the caller can access the linked workspace (no banner). `false` — the
+        caller has no access (the only case that shows the "access needed" banner).
+
 SerenityBrandPresenceSentimentOverview:
   type: object
   description: |
@@ -11692,6 +12419,137 @@ SerenityBrandPresenceSentimentOverview:
             description: Stubbed empty (parity with the legacy contract).
             items: { type: object }
 
+SerenityBrandPresenceTopics:
+  type: object
+  description: |
+    Data Insights per-topic table, aggregated server-side from the Semrush "Prompts
+    by Topic" element (78864493) grouped by topic. `totalCount` is the number of topics.
+  required: [topics, totalCount]
+  properties:
+    totalCount:
+      type: integer
+      description: Number of topics returned.
+    topics:
+      type: array
+      description: One entry per topic, ordered by total search volume descending.
+      items:
+        type: object
+        required:
+          - topic
+          - promptCount
+          - brandMentions
+          - brandCitations
+          - volume
+          - averageVisibilityScore
+        properties:
+          topic:
+            type: string
+            description: Topic name (the identifier used by the drill-down `:topicId`).
+          promptCount:
+            type: integer
+            description: |
+              Number of prompts in the topic, from grouping the (unfiltered) prompts
+              element by topic. Reflects the returned population; it can lag the
+              per-topic drill-down's `totalCount` only if the workspace exceeds the
+              element's row cap (not observed at current data volumes).
+          brandMentions:
+            type: integer
+            description: Sum of brand mentions across the topic's prompts.
+          brandCitations:
+            type: integer
+            description: Sum of citations across the topic's prompts.
+          volume:
+            type: integer
+            description: Sum of search volume across the topic's prompts (feeds UI popularity bucketing).
+          averageVisibilityScore:
+            type: number
+            description: Mean visibility (0-100) over all prompts in the topic.
+          averagePosition:
+            type: [number, 'null']
+            description: |
+              Mean rank position over prompts that are ranked, or `null` when the topic
+              has no ranked prompt (the element's `-1` sentinel is excluded, not averaged).
+          averageSentiment:
+            type: [number, 'null']
+            description: |
+              Mean sentiment (0-1) over prompts that have sentiment, or `null` when none do.
+          prompts:
+            type: array
+            description: |
+              The topic's own per-prompt rows (sorted by volume desc), embedded so the
+              eager Data Insights table renders rows + drill-down from a single call.
+            items: { $ref: '#/SerenityBrandPresenceTopicPromptRow' }
+
+SerenityBrandPresenceTopicPrompts:
+  type: object
+  description: |
+    Per-prompt drill-down for a single Data Insights topic, sourced from the
+    Semrush "Prompts by Topic" element (78864493). One `prompts[]` entry per
+    prompt in the topic; `totalCount` is the full pre-pagination count and
+    `page`/`pageSize` echo the applied server-side slice.
+  required: [topicId, prompts, totalCount]
+  properties:
+    topicId:
+      type: string
+      description: The topic name this drill-down is scoped to (echoes the decoded `:topicId`).
+    totalCount:
+      type: integer
+      description: Total prompts for the topic before pagination.
+    page:
+      type: integer
+      description: Zero-based page index applied.
+    pageSize:
+      type: integer
+      description: Page size applied.
+    prompts:
+      type: array
+      description: One entry per prompt in this topic (for the current page).
+      items: { $ref: '#/SerenityBrandPresenceTopicPromptRow' }
+
+SerenityBrandPresenceTopicPromptRow:
+  type: object
+  description: A single prompt row within a Data Insights topic.
+  required:
+    - prompt
+    - topic
+    - mentions
+    - citations
+    - visibility
+    - volume
+  properties:
+    prompt:
+      type: string
+      description: The prompt text.
+    topic:
+      type: string
+      description: The topic name this prompt belongs to.
+    primaryIntent:
+      type: string
+      description: Semrush primary intent (e.g. informational, commercial, transactional).
+    region:
+      type: string
+      description: Semrush project title for the prompt's market (e.g. `US-en`).
+    mentions:
+      type: integer
+      description: Brand mentions for this prompt.
+    citations:
+      type: integer
+      description: Citations for this prompt.
+    visibility:
+      type: number
+      description: Visibility score (0-100).
+    position:
+      type: [number, 'null']
+      description: |
+        Average rank position, or `null` when unranked (the element's `-1`
+        "not answered / not ranked" sentinel is normalized to `null`).
+    sentiment:
+      type: [number, 'null']
+      description: Sentiment score (0-1), or `null` when the prompt has no sentiment.
+    volume:
+      type: integer
+      description: Search volume for the prompt.
+
 SerenityFilterDimensionItem:
   type: object
   description: |
@@ -11714,18 +12572,19 @@ SerenityUrlInspectorFilterDimensions:
   type: object
   description: |
     Filter dimensions for the Serenity (Semrush Elements-backed) URL Inspector
-    dashboard, sourced from the Semrush Brands, Markets, and Topics elements.
+    dashboard, sourced from the Semrush Brands, Markets, Topics, and Content
+    Types elements.
 
-    `brands`, `regions`, `topics`, `categories`, `page_intents`, `origins`, and
-    `tags` are always present (empty array when Semrush has no data). Any
-    additional Semrush tag prefix not already covered by the fixed dimensions
-    (e.g. a future `type__branded` tag) surfaces as an extra dynamic array
-    property keyed by that prefix — this is why the schema allows
-    `additionalProperties`. Prefixes that would collide with one of the fixed
-    keys above are routed into `tags` instead of clobbering that key. Bare
-    prefix declarations with no value (e.g. a lone `category` row) are ignored
-    entirely and never appear in any dimension.
-  required: [brands, regions, topics, categories, page_intents, origins, tags]
+    `brands`, `regions`, `topics`, `categories`, `page_intents`, `origins`,
+    `content_types`, and `tags` are always present (empty array when Semrush
+    has no data). Any additional Semrush tag prefix not already covered by the
+    fixed dimensions (e.g. a future `type__branded` tag) surfaces as an extra
+    dynamic array property keyed by that prefix — this is why the schema
+    allows `additionalProperties`. Prefixes that would collide with one of the
+    fixed keys above are routed into `tags` instead of clobbering that key.
+    Bare prefix declarations with no value (e.g. a lone `category` row) are
+    ignored entirely and never appear in any dimension.
+  required: [brands, regions, topics, categories, page_intents, origins, content_types, tags]
   properties:
     brands:
       type: array
@@ -11771,6 +12630,14 @@ SerenityUrlInspectorFilterDimensions:
       type: array
       description: Distinct `source__`-prefixed tags. `id` is the original `source__`-prefixed tag value.
       items: { $ref: '#/SerenityFilterDimensionItem' }
+    content_types:
+      type: array
+      description: |
+        Available content types (Semrush `domain_type` values, e.g. Owned,
+        Other, Social, Earned, Benchmark Competitors). `id` is derived from
+        `label` (lowercased, spaces replaced with underscores) — Semrush has
+        no stable content-type id.
+      items: { $ref: '#/SerenityFilterDimensionItem' }
     tags:
       type: array
       description: |
@@ -11786,11 +12653,13 @@ SerenityMarketTrackingTrends:
   type: object
   description: |
     Weekly Market Tracking Trends for the Serenity (Semrush Elements-backed)
-    Brand Presence Competitor Comparison chart. Each entry is one ISO week; the
-    tracked brand's own totals are at the top level and every tracked competitor
-    (a Semrush benchmark) is an entry in `competitors`. Mentions come from the
-    Trends Mentions/Visibility element and citations from the Market Tracking
-    citations element; both are already weekly-bucketed by Semrush.
+    Brand Presence Competitor Comparison chart and the Overview-SR KPI cards
+    (LLMO-6515). Each entry is one ISO week; the tracked brand's own totals are
+    at the top level and every tracked competitor (a Semrush benchmark) is an
+    entry in `competitors`. Mentions/Share of Voice/Brand Visibility come from
+    the Trends Mentions/Visibility element and citations/Source Visibility from
+    the Market Tracking citations element; both are already weekly-bucketed by
+    Semrush.
   required: [weeklyTrends]
   properties:
     weeklyTrends:
@@ -11798,7 +12667,7 @@ SerenityMarketTrackingTrends:
       description: One entry per ISO week, sorted ascending by `week`.
       items:
         type: object
-        required: [week, weekNumber, year, mentions, citations, competitors]
+        required: [week, weekNumber, year, mentions, citations, shareOfVoice, brandVisibility, sourceVisibility, competitors]
         properties:
           week:
             type: string
@@ -11816,6 +12685,24 @@ SerenityMarketTrackingTrends:
           citations:
             type: integer
             description: The tracked brand's own citations in this week.
+          shareOfVoice:
+            type: number
+            format: double
+            minimum: 0
+            maximum: 1
+            description: The tracked brand's Share of Voice this week, a 0–1 fraction (defaults to 0 if not returned upstream).
+          brandVisibility:
+            type: number
+            format: double
+            minimum: 0
+            maximum: 1
+            description: The tracked brand's Brand Visibility this week — fraction of analyzed prompts where the brand appears (prompts_mentioned / total_num_prompts), 0–1 (defaults to 0 if not returned upstream).
+          sourceVisibility:
+            type: number
+            format: double
+            minimum: 0
+            maximum: 1
+            description: The tracked brand's Source Visibility this week — fraction of analyzed prompts where the brand's domain is cited (prompts_with_mentions / total_prompts), 0–1 (defaults to 0 if not returned upstream).
           competitors:
             type: array
             description: Per-competitor mentions + citations for this week, sorted by mentions desc.
@@ -11826,6 +12713,64 @@ SerenityMarketTrackingTrends:
                 name: { type: string }
                 mentions: { type: integer }
                 citations: { type: integer }
+SerenityCompetitorSummary:
+  type: object
+  description: |
+    Aggregate per-competitor mentions/citations totals (no weekly breakdown) for
+    the Overview Competitor Comparison bar chart — the lightweight counterpart
+    to `SerenityMarketTrackingTrends`. Sourced from the same two Semrush
+    elements (Trends Mentions/Visibility + Market Tracking citations), summed
+    across the requested date range instead of bucketed by week. The tracked
+    brand itself is excluded; only competitors (Semrush benchmarks) are returned.
+  required: [competitors]
+  properties:
+    competitors:
+      type: array
+      description: One entry per tracked competitor, sorted by mentions desc.
+      items:
+        type: object
+        required: [name, mentions, citations]
+        properties:
+          name: { type: string }
+          mentions: { type: integer }
+          citations: { type: integer }
+SerenityKpiHeadline:
+  type: object
+  description: |
+    A single KPI headline value with its period-over-period comparison figure,
+    sourced from a Semrush `kpiLineChart` element's `mainValue`/`secondaryValue`
+    — the same Semrush-computed aggregate the Brand Presence MFE itself
+    displays (verified live), NOT derived from `SerenityMarketTrackingTrends`'s
+    weekly series. Both fields are 0-1 fractions; the UI multiplies by 100 for
+    display.
+  required: [value, comparisonValue]
+  properties:
+    value:
+      type: number
+      format: double
+      minimum: 0
+      maximum: 1
+      description: The metric's value for the current (requested) period, a 0-1 fraction.
+    comparisonValue:
+      type: [number, 'null']
+      format: double
+      minimum: 0
+      maximum: 1
+      description: |
+        The metric's value for the immediately preceding period of equal length, a 0-1
+        fraction. `null` when Semrush has no data for that period (e.g. it predates data
+        collection) — distinct from a real 0%; consumers should render this as "no
+        comparison available" rather than computing a delta against 0.
+SerenityKpiHeadlines:
+  type: object
+  description: |
+    Share of Voice + Brand Visibility KPI headline cards for Overview-SR — see
+    `SerenityKpiHeadline` for the shape of each. Source Visibility is served by
+    the separate `listSerenitySourceVisibilityHeadline` endpoint.
+  required: [shareOfVoice, brandVisibility]
+  properties:
+    shareOfVoice: { $ref: '#/SerenityKpiHeadline' }
+    brandVisibility: { $ref: '#/SerenityKpiHeadline' }
 SerenityBrandPresenceStatsValues:
   type: object
   description: The four aggregated Brand Presence KPI values, shared by the top-level `stats` and each `trends[].data.stats` entry.
@@ -11871,6 +12816,85 @@ SerenityBrandPresenceStats:
             required: [stats]
             properties:
               stats: { $ref: '#/SerenityBrandPresenceStatsValues' }
+
+SerenityUrlInspectorStatsValues:
+  type: object
+  description: The URL-derived URL Inspector KPI values, shared by the top-level `stats` and each `weeklyTrends[]` entry. The fourth KPI card (`totalPrompts`) is served by the separate `/url-inspector/prompts/count` endpoint — see `SerenityUrlInspectorPromptsCount`.
+  required: [uniqueUrls, totalCitations, totalPromptsCited, partial]
+  properties:
+    uniqueUrls:
+      type: number
+      description: Distinct owned URLs cited in range, from the Semrush Stats-per-URL element.
+    totalCitations:
+      type: number
+      description: Total citations across owned URLs in range.
+    totalPromptsCited:
+      type: number
+      description: Sum of each owned URL's `prompts_with_citation` count. An UPPER BOUND, not a true distinct-prompt count — Semrush exposes no distinct-prompts-cited element, so a prompt citing more than one owned URL is counted once per URL.
+    partial:
+      type: boolean
+      description: True when at least one of the underlying per-project Stats-per-URL calls for this range failed and was skipped — the KPI values above are computed from whichever projects succeeded, not a full failure.
+
+SerenityUrlInspectorStats:
+  type: object
+  description: |
+    URL Inspector stats KPI cards for a brand over a date range, backed by the
+    Semrush Elements API (Stats-per-URL). Split from `totalPrompts` (see
+    `/url-inspector/prompts/count`) so a brand with many Semrush projects
+    doesn't time out fetching all four cards in one request — this endpoint's
+    per-project Stats-per-URL fan-out (up to 8 weeks x N projects) is the slow
+    part; `totalPrompts` is a single, unscoped call and loads independently.
+  required: [stats, weeklyTrends]
+  properties:
+    stats:
+      allOf:
+        - $ref: '#/SerenityUrlInspectorStatsValues'
+      description: Aggregated stats for the full `[startDate, endDate]` range.
+    weeklyTrends:
+      type: array
+      description: |
+        Always present (no opt-in flag). One entry per week, split backward
+        from `endDate` into up to 8 7-day weeks — capped independently of the
+        56-day request-range cap, so a caller can never request more weeks
+        than this returns.
+      items:
+        type: object
+        required: [weekStart, weekEnd, uniqueUrls, totalCitations, totalPromptsCited, partial]
+        properties:
+          weekStart:
+            type: string
+            format: date
+            description: Start of this 7-day window. NOT necessarily Monday — these windows are built backward from `endDate`, not calendar-ISO-week-aligned.
+          weekEnd:
+            type: string
+            format: date
+            description: End of this 7-day window.
+          uniqueUrls: { type: number }
+          totalCitations: { type: number }
+          totalPromptsCited: { type: number }
+          partial:
+            type: boolean
+            description: True when at least one of the underlying per-project Stats-per-URL calls for this week failed and was skipped.
+
+SerenityUrlInspectorPromptsCount:
+  type: object
+  description: |
+    URL Inspector "total prompts" KPI card, split out from
+    `/url-inspector/stats` (LLMO-6185 timeout follow-up) — backed by a single
+    Semrush Prompts element call with no per-project fan-out.
+
+    KNOWN, PERMANENT LIMITATION: no weekly trend. The Aurora/Postgres
+    reference endpoint returns this KPI WITH a per-week trend (a time-windowed
+    count of distinct active prompts that ran each week). The Semrush PROMPTS
+    element has no date parameter at all — it's a static, currently-configured
+    roster of prompts, not an execution log — so there is no upstream data to
+    bucket by week for this metric. This is a ceiling of the Semrush data
+    source, not a gap planned for a follow-up.
+  required: [totalPrompts]
+  properties:
+    totalPrompts:
+      type: number
+      description: Total configured prompt count for the brand, from the Semrush Prompts element. NOT date-scoped (that element has no date filter), so there is no weekly breakdown.
 
 # ── Referral Traffic PG schemas ───────────────────────────────────────────────
 
@@ -12822,3 +13846,22 @@ TicketCreateRequest:
       items:
         $ref: '#/TicketAttachment'
       maxItems: 10
+OnboardingNotificationResponse:
+  type: object
+  required:
+    - notified
+    - workspaceId
+  properties:
+    notified:
+      type: boolean
+      example: true
+    workspaceId:
+      type: [string, 'null']
+      description: The org-level Semrush workspace ID, or null if the org has none.
+      example: "ws-123"
+    reason:
+      type: string
+      description: >-
+        Present only when notified is false. Explains why no notification was
+        sent (e.g. a duplicate request arrived within the per-org cooldown window).
+      example: "recently notified"

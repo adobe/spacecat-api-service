@@ -265,6 +265,11 @@ function mapDbBrandToV2(row) {
     brandContext: row.brand_context ?? null,
     mentionSentimentGuidance: row.mention_sentiment_guidance ?? null,
     vertical: row.vertical || null,
+    // Internal ops gate (LLMO-5741): opt-in flag the mystique Brand Claims
+    // consumer reads back to decide whether a BP-sheet-ready event becomes a
+    // claims run. Default false so brands stay off the automated path until an
+    // operator flips it (via the `brand-claims` Slack command).
+    brandClaimsEnabled: row.brand_claims_enabled ?? false,
     region: row.regions || [],
     urls,
     socialAccounts: (row.brand_social_accounts || []).map((s) => ({
@@ -457,9 +462,19 @@ async function syncBrandUrls(organizationId, brandId, urls, postgrestClient, upd
 
 /**
  * Syncs social accounts for a brand to the brand_social_accounts table.
+ *
+ * `socialAccounts` being `undefined` (the field was omitted) or `null`
+ * (explicitly nulled, e.g. by a JSON.stringify round-trip of an unset field)
+ * means the caller never touched this collection — skip the sync
+ * entirely rather than let `replaceChildRows` wipe existing rows (LLMO-6591).
+ * A caller that DOES want to clear the collection sends `[]` explicitly, which
+ * still reaches `replaceChildRows` and deletes as before.
  */
 // eslint-disable-next-line max-len
 async function syncSocialAccounts(brandId, organizationId, socialAccounts, postgrestClient, updatedBy) {
+  if (socialAccounts === undefined || socialAccounts === null) {
+    return;
+  }
   const rows = (socialAccounts || [])
     .filter((s) => hasText(s?.url))
     .map((s) => ({
@@ -474,9 +489,15 @@ async function syncSocialAccounts(brandId, organizationId, socialAccounts, postg
 
 /**
  * Syncs earned content sources for a brand to the brand_earned_sources table.
+ *
+ * `earnedContent` being `undefined` or `null` means the caller never touched
+ * this collection — skip the sync entirely (LLMO-6591; see syncSocialAccounts).
  */
 // eslint-disable-next-line max-len
 async function syncEarnedSources(brandId, organizationId, earnedContent, postgrestClient, updatedBy) {
+  if (earnedContent === undefined || earnedContent === null) {
+    return;
+  }
   const rows = (earnedContent || [])
     .filter((e) => hasText(e?.url) && hasText(e?.name))
     .map((e) => ({
@@ -492,8 +513,14 @@ async function syncEarnedSources(brandId, organizationId, earnedContent, postgre
 
 /**
  * Syncs aliases for a brand to the brand_aliases table.
+ *
+ * `brandAliases` being `undefined` or `null` means the caller never touched
+ * this collection — skip the sync entirely (LLMO-6591; see syncSocialAccounts).
  */
 async function syncAliases(brandId, organizationId, brandAliases, postgrestClient, updatedBy) {
+  if (brandAliases === undefined || brandAliases === null) {
+    return;
+  }
   const seen = new Set();
   const rows = (brandAliases || [])
     .map((a) => ({ alias: typeof a === 'string' ? a : a?.name, regions: a?.regions || [] }))
@@ -510,8 +537,14 @@ async function syncAliases(brandId, organizationId, brandAliases, postgrestClien
 
 /**
  * Syncs competitors for a brand to the competitors table.
+ *
+ * `competitors` being `undefined` or `null` means the caller never touched
+ * this collection — skip the sync entirely (LLMO-6591; see syncSocialAccounts).
  */
 async function syncCompetitors(brandId, organizationId, competitors, postgrestClient, updatedBy) {
+  if (competitors === undefined || competitors === null) {
+    return;
+  }
   const seen = new Set();
   const rows = (competitors || [])
     .map((c) => ({
@@ -628,6 +661,42 @@ export async function getBrandIdentity(organizationId, brandId, postgrestClient)
     throw new Error(`Failed to get brand identity: ${error.message}`);
   }
   return data ?? null;
+}
+
+/**
+ * Reads a brand's PRIMARY site id (`brands.site_id`) — the site that anchors the
+ * brand shell itself (as opposed to a market-mirror site linked via
+ * `brand_sites`). Used by the serenity market-delete cleanup (LLMO-6405 R12) to
+ * ensure the brand's primary site link is never removed when its last market is
+ * deleted. Lightweight single-column read; returns null when the brand has no
+ * primary site (a serenity shell before activation) or is not found.
+ *
+ * @param {string} organizationId - SpaceCat organization UUID.
+ * @param {string} brandId - Brand UUID.
+ * @param {object} postgrestClient - PostgREST client.
+ * @returns {Promise<string|null>} the brand's primary site id, or null.
+ */
+export async function getBrandBaseSiteId(organizationId, brandId, postgrestClient) {
+  // Can't scope the query without all three → THROW (not return null) so a
+  // best-effort caller's catch treats it as "primary unresolved" and skips
+  // primary-site-dependent cleanup. Returning null here would be ambiguous with a
+  // successfully-resolved "brand has no primary site" and would silently disable
+  // the primary-site guard in the delete-orphan-unlink path (LLMO-6405 review).
+  if (!postgrestClient?.from || !hasText(brandId) || !hasText(organizationId)) {
+    throw new Error('getBrandBaseSiteId: organizationId, brandId, and a postgrest client are all required');
+  }
+
+  const { data, error } = await postgrestClient
+    .from('brands')
+    .select('site_id')
+    .eq('organization_id', organizationId)
+    .eq('id', brandId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to get brand primary site: ${error.message}`);
+  }
+  return data?.site_id ?? null;
 }
 
 /**
@@ -798,6 +867,51 @@ export async function getBrandBySite(organizationId, siteId, postgrestClient, lo
 }
 
 /**
+ * Sets the brand-scoped `brand_claims_enabled` scheduling gate (LLMO-5741),
+ * keyed on the brand UUID (the PK), so operators can enable/disable Brand Claims
+ * for a brand directly. Returns the updated `{ id, name }` or null when no brand
+ * matches the id.
+ *
+ * @param {Object} params
+ * @param {string} params.brandId - Brand UUID.
+ * @param {boolean} params.enabled - Target flag value.
+ * @param {Object} params.postgrestClient - PostgREST client.
+ * @param {string} [params.updatedBy] - Audit actor.
+ * @returns {Promise<{id: string, name: string}|null>}
+ */
+export async function setBrandClaimsEnabled({
+  brandId,
+  enabled,
+  postgrestClient,
+  updatedBy = 'system',
+}) {
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
+  if (typeof enabled !== 'boolean') {
+    throw new Error('enabled must be a boolean');
+  }
+  if (!hasText(brandId)) {
+    return null;
+  }
+
+  const { data, error } = await postgrestClient
+    .from('brands')
+    .update({ brand_claims_enabled: enabled, updated_by: updatedBy })
+    .eq('id', brandId)
+    // Do not flip the flag on a soft-deleted brand (matches the .neq guard used
+    // across brands-storage); a deleted brand returns no row -> null.
+    .neq('status', 'deleted')
+    .select('id, name')
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to update brand claims flag: ${error.message}`);
+  }
+  return data || null;
+}
+
+/**
  * True when the site is a Semrush market mirror — i.e. it is linked to a brand
  * via a `brand_sites` row tagged `type='serenity'`. These rows are written ONLY
  * for Semrush-managed brands (see `ensureMarketSite`), so a hit means the site's
@@ -832,6 +946,53 @@ export async function isSemrushMarketMirrorSite(organizationId, siteId, postgres
   }
 
   return Array.isArray(data) && data.length > 0;
+}
+
+/**
+ * Lightweight lookup of every brand id linked to a site within an org — the
+ * union of the brand whose OWN primary site this is (`brands.site_id`) and any
+ * brand that lists it via `brand_sites`. Used by resource-aware authorization
+ * (e.g. `AccessControlUtil.hasLlmoCapabilityForSite`) to map a `:siteId` route
+ * to the LLMO ReBAC `brand` resource(s), then check state-layer grants on them.
+ *
+ * Selects ids only (no child-table joins) — cheaper than `getBrandBySite`, and
+ * returns all linked brands rather than the single primary one.
+ *
+ * @param {string} organizationId - SpaceCat organization UUID
+ * @param {string} siteId - Site UUID
+ * @param {object} postgrestClient - PostgREST client
+ * @returns {Promise<Set<string>>} brand ids linked to the site (empty when none)
+ */
+export async function listBrandIdsForSite(organizationId, siteId, postgrestClient) {
+  if (!postgrestClient?.from || !hasText(organizationId) || !hasText(siteId)) {
+    return new Set();
+  }
+
+  const [ownRes, linkedRes] = await Promise.all([
+    postgrestClient
+      .from('brands')
+      .select('id')
+      .eq('organization_id', organizationId)
+      .eq('status', 'active')
+      .eq('site_id', siteId),
+    postgrestClient
+      .from('brand_sites')
+      .select('brand_id')
+      .eq('organization_id', organizationId)
+      .eq('site_id', siteId),
+  ]);
+
+  if (ownRes.error) {
+    throw new Error(`Failed to resolve brands for site: ${ownRes.error.message}`);
+  }
+  if (linkedRes.error) {
+    throw new Error(`Failed to resolve brand-site links for site: ${linkedRes.error.message}`);
+  }
+
+  const ids = new Set();
+  (ownRes.data || []).forEach((row) => hasText(row.id) && ids.add(row.id));
+  (linkedRes.data || []).forEach((row) => hasText(row.brand_id) && ids.add(row.brand_id));
+  return ids;
 }
 
 /**
@@ -972,13 +1133,6 @@ export async function upsertBrand({
     row.pending_semrush_provisioning = pendingSemrushProvisioning;
   }
 
-  // A Semrush-anchored create (serenity-first, semrushSubWorkspaceId set) is
-  // NEVER anchored by a SpaceCat site: its primary URL is the Semrush project
-  // domain, which may coincidentally match an onboarded site. Setting site_id
-  // from that match would collide with the site's existing primary brand (409
-  // brands_base_site_unique) — so ignore baseSiteId entirely on this path.
-  const anchoredBySemrush = hasText(semrushSubWorkspaceId);
-
   // baseSiteId is immutable once persisted (mirrors updateBrand). Only set it
   // when the brand has no site_id yet — re-onboarding/re-upserting an existing
   // brand by name must NOT re-point its primary site (LLMO-5556: this silently
@@ -988,20 +1142,25 @@ export async function upsertBrand({
   // In both cases we always write an explicit site_id — or null to clear the
   // deleted brand's stale anchor so it cannot survive the ON CONFLICT UPDATE
   // and collide with whichever brand now owns that site.
-  if (!anchoredBySemrush) {
-    if (existing === null) {
-      row.site_id = hasText(brand.baseSiteId) ? brand.baseSiteId : null;
-    } else if (hasText(brand.baseSiteId) && !hasText(existing.site_id)) {
-      row.site_id = brand.baseSiteId;
-    } else if (
-      hasText(brand.baseSiteId)
-      && hasText(existing.site_id)
-      && existing.site_id !== brand.baseSiteId
-    ) {
-      log.warn(`upsertBrand: ignoring baseSiteId change for brand "${brand.name}" `
-        + `(org ${organizationId}) — primary site is immutable `
-        + `(existing=${existing.site_id}, attempted=${brand.baseSiteId})`);
-    }
+  // LLMO-6405: a Semrush-anchored (serenity-first) create now ALSO carries a
+  // primary site — the UI's primary-URL step selects an onboarded Site and sends
+  // its baseSiteId, so brands.site_id is populated on every path (a Semrush brand
+  // is anchored by BOTH its sub-workspace AND its primary site). The previous skip
+  // (which left Semrush brands' site_id NULL) is removed; a genuine collision with
+  // another brand's primary site still surfaces as the brands_base_site_unique 409
+  // handled below.
+  if (existing === null) {
+    row.site_id = hasText(brand.baseSiteId) ? brand.baseSiteId : null;
+  } else if (hasText(brand.baseSiteId) && !hasText(existing.site_id)) {
+    row.site_id = brand.baseSiteId;
+  } else if (
+    hasText(brand.baseSiteId)
+    && hasText(existing.site_id)
+    && existing.site_id !== brand.baseSiteId
+  ) {
+    log.warn(`upsertBrand: ignoring baseSiteId change for brand "${brand.name}" `
+      + `(org ${organizationId}) — primary site is immutable `
+      + `(existing=${existing.site_id}, attempted=${brand.baseSiteId})`);
   }
 
   const { data: upserted, error } = await postgrestClient
@@ -1096,12 +1255,13 @@ export async function updateBrand({
   const wantsClearBaseSite = updates.baseSiteId === null;
   const needsExistingFetch = hasText(updates.baseSiteId)
     || wantsClearBaseSite
-    || updates.status !== undefined;
+    || updates.status !== undefined
+    || updates.expectedUpdatedAt !== undefined;
   let existing = null;
   if (needsExistingFetch) {
     const { data: current, error: currentError } = await postgrestClient
       .from('brands')
-      .select('site_id, status')
+      .select('site_id, status, updated_at')
       .eq('id', brandId)
       .maybeSingle();
     // Fail closed: a swallowed read error leaves `current` null, so the guard
@@ -1112,6 +1272,41 @@ export async function updateBrand({
       throw new Error(`Failed to read current baseSiteId for brand: ${currentError.message}`);
     }
     existing = current;
+  }
+
+  // LLMO-6591: optimistic concurrency. A caller that read the brand and echoes
+  // that read's `updatedAt` back on save is telling us what it thinks the
+  // current state is; if the row moved since then (another tab/request wrote
+  // in between), a routine save must not blindly overwrite fields — including
+  // collections it never touched but whose stale, empty local copy would
+  // otherwise wipe real data on the very next PATCH. Opt-in and backward
+  // compatible: omitting `expectedUpdatedAt` skips this check entirely, so
+  // existing callers are unaffected until they start sending it.
+  //
+  // This early check is a FAST-FAIL for the common case (an obviously-stale
+  // read), not the actual concurrency guarantee — it is a plain read-then-compare
+  // and is itself racy: two requests reading the same `updated_at` within this
+  // window would both pass it. The real guarantee is the `.eq('updated_at', ...)`
+  // predicate added to the UPDATE statement below, which Postgres evaluates
+  // atomically against the row as it exists at write time. `brands` has an
+  // unconditional `BEFORE UPDATE ... update_updated_at()` trigger (every write
+  // bumps it), so that predicate reliably fails when — and only when — another
+  // write landed in between. `expectedUpdatedAtChecked` (below) lets the
+  // post-update branch tell "predicate failed because of a race" apart from
+  // "row doesn't exist", since both otherwise look identical (`data` is null).
+  let expectedUpdatedAtChecked = false;
+  if (updates.expectedUpdatedAt !== undefined && existing) {
+    expectedUpdatedAtChecked = true;
+    const expected = new Date(updates.expectedUpdatedAt).getTime();
+    const actual = new Date(existing.updated_at).getTime();
+    if (Number.isNaN(expected) || expected !== actual) {
+      const err = new Error(
+        'This brand was changed since it was loaded - reload and reapply your edit.',
+      );
+      err.status = 409;
+      err.code = 'brand_stale_write';
+      throw err;
+    }
   }
 
   // baseSiteId mutation rules (LLMO-5870):
@@ -1185,13 +1380,24 @@ export async function updateBrand({
   patch.social = [];
   patch.earned_sources = [];
 
-  const { data, error } = await postgrestClient
+  // LLMO-6591: the actual compare-and-swap. Adding the predicate directly on
+  // the UPDATE (rather than trusting the earlier read-then-compare) means
+  // Postgres evaluates it atomically against the row as it exists at write
+  // time — a concurrent write that lands between our read and this statement
+  // changes `updated_at` (the unconditional BEFORE UPDATE trigger guarantees
+  // that), so this predicate then matches zero rows instead of silently
+  // succeeding. Equality is Postgres's own timestamptz comparison, not a JS
+  // string compare, so it isn't sensitive to textual formatting differences
+  // between what the client echoes back and what's stored.
+  let updateQuery = postgrestClient
     .from('brands')
     .update(patch)
     .eq('organization_id', organizationId)
-    .eq('id', brandId)
-    .select('id')
-    .maybeSingle();
+    .eq('id', brandId);
+  if (updates.expectedUpdatedAt !== undefined) {
+    updateQuery = updateQuery.eq('updated_at', updates.expectedUpdatedAt);
+  }
+  const { data, error } = await updateQuery.select('id').maybeSingle();
 
   if (error) {
     if (error.code === '23505' && error.message?.includes('brands_base_site_unique')) {
@@ -1202,34 +1408,31 @@ export async function updateBrand({
     rethrowCheckViolation(error, `Failed to update brand: ${error.message}`);
   }
   if (!data) {
+    // The UPDATE matched zero rows. If we already confirmed via the pre-read
+    // that the row existed with a matching `updated_at`, the row must have
+    // changed between that read and this write — a genuine race the fast-fail
+    // check above could not catch on its own. Anything else (no expectedUpdatedAt,
+    // or the row never existed) is the pre-existing not-found case.
+    if (expectedUpdatedAtChecked) {
+      const err = new Error(
+        'This brand was changed since it was loaded - reload and reapply your edit.',
+      );
+      err.status = 409;
+      err.code = 'brand_stale_write';
+      throw err;
+    }
     return null;
   }
 
-  const childSyncs = [];
-
-  if (updates.brandAliases !== undefined) {
-    childSyncs.push(
-      syncAliases(brandId, organizationId, updates.brandAliases, postgrestClient, updatedBy),
-    );
-  }
-  if (updates.competitors !== undefined) {
-    childSyncs.push(
-      syncCompetitors(brandId, organizationId, updates.competitors, postgrestClient, updatedBy),
-    );
-  }
-  if (updates.socialAccounts !== undefined) {
-    // eslint-disable-next-line max-len
-    childSyncs.push(syncSocialAccounts(brandId, organizationId, updates.socialAccounts, postgrestClient, updatedBy));
-  }
-  if (updates.earnedContent !== undefined) {
-    childSyncs.push(
-      syncEarnedSources(brandId, organizationId, updates.earnedContent, postgrestClient, updatedBy),
-    );
-  }
-
-  if (childSyncs.length > 0) {
-    await Promise.all(childSyncs);
-  }
+  // Each sync function now skips itself when its collection is `undefined`
+  // (LLMO-6591), so the per-field `!== undefined` guards that used to live
+  // here are redundant — call unconditionally and let the shared guard decide.
+  await Promise.all([
+    syncAliases(brandId, organizationId, updates.brandAliases, postgrestClient, updatedBy),
+    syncCompetitors(brandId, organizationId, updates.competitors, postgrestClient, updatedBy),
+    syncSocialAccounts(brandId, organizationId, updates.socialAccounts, postgrestClient, updatedBy),
+    syncEarnedSources(brandId, organizationId, updates.earnedContent, postgrestClient, updatedBy),
+  ]);
 
   if (updates.urls !== undefined) {
     await Promise.all([

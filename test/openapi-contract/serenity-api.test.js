@@ -21,6 +21,9 @@ import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 
 import { loadBundledSpec, operationsForTag } from './_lib/openapi-loader.js';
+// Real class (not a mock) so the elements esmock block can pass it through without
+// adding a second class to this file (max-classes-per-file).
+import { SerenityTransportError } from '../../src/support/serenity/rest-transport.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -108,13 +111,22 @@ const FIXTURES = {
         geoTargetId: 2840,
         languageCode: 'en',
         text: 'sample',
-        tagMap: { 'topic-a': 't-1' },
+        tags: [{
+          id: 't-1', name: 'topic-a', parentId: null, path: null,
+        }],
+        // Authorship metadata fields (LLMO-6289) on a list item.
+        createdAt: '2026-07-01T00:00:00Z',
+        createdBy: 'user-a',
+        updatedAt: '2026-07-02T00:00:00Z',
+        updatedBy: 'unknown',
       }],
       total: 1,
       page: 1,
       limit: 50,
     },
-    query: { geoTargetId: '2840', languageCode: 'en', tagIds: ['t-1'] },
+    query: {
+      geoTargetId: '2840', languageCode: 'en', tagIds: ['t-1'], sort: 'metadata.updated_at', order: 'desc',
+    },
   },
   createSerenityPrompts: {
     expectedStatus: 200,
@@ -129,6 +141,7 @@ const FIXTURES = {
       }],
       skipped: [],
       failed: [],
+      published: true,
     },
     data: {
       prompts: [{
@@ -167,12 +180,20 @@ const FIXTURES = {
   listSerenityMarkets: {
     expectedStatus: 200,
     controllerMethod: 'listMarkets',
-    handlerName: 'handleListMarkets',
+    // Sub-workspace mode: the only producer of the additive promptsCount field
+    // (flat mode is a pure DB read that never carries it), so validate the
+    // richer shape against the schema here. The flat shape is a strict subset.
+    mode: 'subworkspace',
+    handlerName: 'handleListMarketsSubworkspace',
     handlerResult: {
       items: [{
         brandId: BRAND,
         geoTargetId: 2840,
         languageCode: 'en',
+        status: 'live',
+        semrushProjectId: 'proj-1',
+        promptsCount: 24,
+        modelsCount: 5,
       }],
     },
   },
@@ -339,8 +360,19 @@ const FIXTURES = {
       categories: [],
       page_intents: [],
       origins: [],
+      content_types: [{ id: 'owned', label: 'Owned' }],
       tags: [],
     },
+  },
+  // Also served by ElementsController (see note above) — the reliable Semrush-workspace
+  // access check (LLMO-6747). Unlike the other elements fixtures it does NOT call the
+  // elements service: checkAccess probes the Serenity User Manager transport
+  // (getWorkspaceResources, mocked in the elements esmock block). A resolved probe →
+  // the handler returns { hasAccess: true }.
+  getSerenityBrandPresenceAccess: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'checkAccess',
   },
   // Also served by ElementsController (see note above) — the Market Tracking
   // Trends endpoint backed by the two Semrush trend elements.
@@ -356,8 +388,47 @@ const FIXTURES = {
         year: 2026,
         mentions: 900,
         citations: 5000,
+        shareOfVoice: 0.42,
+        brandVisibility: 0.61,
+        sourceVisibility: 0.33,
         competitors: [{ name: 'Rival One', mentions: 150, citations: 300 }],
       }],
+    },
+  },
+  // Also served by ElementsController — the lightweight aggregate-totals
+  // counterpart to Market Tracking Trends.
+  listSerenityCompetitorSummary: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'getCompetitorSummary',
+    serviceMethod: 'getCompetitorSummary',
+    handlerResult: {
+      competitors: [
+        { name: 'Rival One', mentions: 900, citations: 5000 },
+        { name: 'Rival Two', mentions: 150, citations: 300 },
+      ],
+    },
+  },
+  // Overview-SR exact-parity KPI headlines (LLMO-6516 follow-up) — also served
+  // by ElementsController.
+  listSerenityKpiHeadlines: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'getKpiHeadlines',
+    serviceMethod: 'getKpiHeadlines',
+    handlerResult: {
+      shareOfVoice: { value: 0.3628, comparisonValue: 0.3927 },
+      brandVisibility: { value: 0.4959, comparisonValue: 0.548 },
+    },
+  },
+  listSerenitySourceVisibilityHeadline: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'getSourceVisibilityHeadline',
+    serviceMethod: 'getSourceVisibilityHeadline',
+    handlerResult: {
+      value: 0.3954,
+      comparisonValue: 0.4865,
     },
   },
   listSerenityBrandPresenceSentimentOverview: {
@@ -386,6 +457,67 @@ const FIXTURES = {
         competitors: [],
       }],
     },
+  },
+  listSerenityBrandPresenceTopics: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'listTopics',
+    serviceMethod: 'getTopics',
+    // getTopics resolves a FLAT array of per-topic aggregates; the controller wraps
+    // it into { topics, totalCount }.
+    handlerResult: [{
+      topic: 'Loveseats with Ottomans',
+      promptCount: 12,
+      brandMentions: 240,
+      brandCitations: 88,
+      volume: 67896,
+      averageVisibilityScore: 61.5,
+      averagePosition: 3.2,
+      averageSentiment: 0.64,
+      prompts: [{
+        prompt: 'best modular sofa',
+        topic: 'Loveseats with Ottomans',
+        primaryIntent: 'commercial',
+        region: 'US-en',
+        mentions: 30,
+        citations: 27,
+        visibility: 100,
+        position: 1,
+        sentiment: 0.72,
+        volume: 5658,
+      }],
+    }, {
+      topic: 'Recliners with USB Charging Ports',
+      promptCount: 4,
+      brandMentions: 0,
+      brandCitations: 0,
+      volume: 26396,
+      averageVisibilityScore: 0,
+      averagePosition: null,
+      averageSentiment: null,
+    }],
+  },
+  listSerenityBrandPresenceTopicPrompts: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'listTopicPrompts',
+    serviceMethod: 'getTopicPrompts',
+    // :topicId is the URL-encoded topic NAME (Semrush topics have no UUID).
+    params: { topicId: 'Loveseats with Ottomans' },
+    // getTopicPrompts resolves a FLAT array of prompt rows; the controller wraps
+    // it into { topicId, prompts, totalCount, page, pageSize }.
+    handlerResult: [{
+      prompt: 'best modular sofa',
+      topic: 'Loveseats with Ottomans',
+      primaryIntent: 'commercial',
+      region: 'US-en',
+      mentions: 30,
+      citations: 27,
+      visibility: 100,
+      position: 1,
+      sentiment: 0.72,
+      volume: 5658,
+    }],
   },
   // Also served by ElementsController — see the note on
   // listSerenityUrlInspectorFilterDimensions above.
@@ -416,6 +548,71 @@ const FIXTURES = {
         },
       ],
     },
+  },
+  // Also served by ElementsController — see the note on
+  // listSerenityUrlInspectorFilterDimensions above.
+  getSerenityUrlInspectorStats: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'getUrlInspectorStats',
+    serviceMethod: 'getUrlInspectorStats',
+    handlerResult: {
+      stats: {
+        uniqueUrls: 187,
+        totalCitations: 964,
+        totalPromptsCited: 312,
+        partial: false,
+      },
+      weeklyTrends: [
+        {
+          weekStart: '2026-06-25',
+          weekEnd: '2026-07-01',
+          uniqueUrls: 42,
+          totalCitations: 155,
+          totalPromptsCited: 48,
+          partial: false,
+        },
+      ],
+    },
+  },
+  // Split from getSerenityUrlInspectorStats (LLMO-6185 timeout follow-up) — the
+  // controller calls service.getPrompts (shared with listPrompts) and reports
+  // only its `count`, so the fixture mimics getPrompts's real `{count, prompts}`
+  // shape rather than stubbing a dedicated service method.
+  getSerenityUrlInspectorPromptsCount: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'getUrlInspectorPromptsCount',
+    serviceMethod: 'getPrompts',
+    handlerResult: {
+      count: 1250,
+      prompts: [],
+    },
+  },
+  // Served by ElementsController (listUrlPrompts). getUrlPrompts resolves a FLAT
+  // array of per-prompt rows; the controller wraps it into { prompts }. url +
+  // startDate + endDate are required (400 otherwise), so the fixture supplies them.
+  getSerenityUrlInspectorUrlPrompts: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'listUrlPrompts',
+    serviceMethod: 'getUrlPrompts',
+    query: {
+      url: 'https://www.lovesac.com/sactionals',
+      startDate: '2026-06-29',
+      endDate: '2026-07-26',
+    },
+    handlerResult: [{
+      prompt: 'What size Lovesac sectional is best for a studio apartment?',
+      category: '',
+      region: '',
+      topics: '',
+      citations: 0,
+      sourceTitle: 'Modular Sectional Couches | Lovesac Sactionals',
+      brandMentioned: 'mentioned',
+      brands: ['Lovesac'],
+      closestDate: '2026-07-26T00:00:00Z',
+    }],
   },
 };
 
@@ -476,11 +673,31 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             '../../src/support/access-control-util.js': {
               default: { fromContext: () => ({ hasAccess: () => Promise.resolve(true) }) },
             },
+            // authorizeBrandSubWorkspace (used by listTopicPrompts) resolves the brand
+            // UUID via prompts-storage before resolving the sub-workspace.
+            '../../src/support/prompts-storage.js': {
+              resolveBrandUuid: () => Promise.resolve(BRAND),
+            },
             '../../src/support/elements/elements-service.js': {
               createElementsService: () => ({
                 [fx.serviceMethod]: sinon.stub().resolves(fx.handlerResult),
                 resolveRegionProjectId: sinon.stub().resolves(null),
+                // Only consumed by getUrlInspectorStats's aggregate (no-region)
+                // path — without at least one project, it 404s before ever
+                // reaching the service call (mirrors getStats's BrandSemrushProject
+                // fixture above).
+                getOwnedUrlProjects: sinon.stub().resolves([{ region: 'US', projectId: 'proj-1' }]),
               }),
+            },
+            // checkAccess (getSerenityBrandPresenceAccess) probes the User Manager
+            // resource-allowance endpoint via this transport, NOT the elements service.
+            // A resolved probe makes the handler return { hasAccess: true }; inert for
+            // every other elements fixture (none call it).
+            '../../src/support/serenity/rest-transport.js': {
+              createSerenityTransport: () => ({
+                getWorkspaceResources: sinon.stub().resolves({}),
+              }),
+              SerenityTransportError,
             },
           },
         )).default;
@@ -525,6 +742,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         handleListModels: sinon.stub(),
         handleUpdateModels: sinon.stub(),
         handleCreateMarketSubworkspace: sinon.stub(),
+        handleListMarketsSubworkspace: sinon.stub(),
         ensureSubworkspace: sinon.stub().resolves(WORKSPACE),
         decommissionBrandWorkspace: sinon.stub(),
         listGlobalModelCatalog: sinon.stub(),
@@ -541,8 +759,14 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
           },
           '../../src/support/serenity/workspace-resolver.js': {
             resolveWorkspaceId: () => Promise.resolve(WORKSPACE),
+            // Mode defaults to flat; a fixture pins `mode: 'subworkspace'` when the
+            // documented shape is only produced by the subworkspace handler. The
+            // parent must differ from the workspace in subworkspace mode or the
+            // controller's misconfiguration guard 409s before reaching the handler.
             resolveBrandWorkspace: () => Promise.resolve({
-              mode: 'flat', workspaceId: WORKSPACE, parentWorkspaceId: WORKSPACE,
+              mode: fx.mode ?? 'flat',
+              workspaceId: WORKSPACE,
+              parentWorkspaceId: fx.mode === 'subworkspace' ? `parent-${WORKSPACE}` : WORKSPACE,
             }),
           },
           '../../src/support/access-control-util.js': {
@@ -575,7 +799,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             handleUpdateTagSubworkspace: sinon.stub(),
           },
           '../../src/support/serenity/handlers/markets-subworkspace.js': {
-            handleListMarketsSubworkspace: sinon.stub(),
+            handleListMarketsSubworkspace: handlerStubs.handleListMarketsSubworkspace,
             handleGetMarketSubworkspace: sinon.stub(),
             handleCreateMarketSubworkspace: handlerStubs.handleCreateMarketSubworkspace,
             handleDeleteMarketSubworkspace: sinon.stub(),

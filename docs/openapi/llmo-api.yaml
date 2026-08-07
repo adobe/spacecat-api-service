@@ -1843,6 +1843,17 @@ llmo-brand-claims:
       schema:
         type: string
         example: 'gpt-4.1'
+    - name: date
+      in: query
+      required: false
+      description: >
+        Any date (YYYY-MM-DD) within the ISO week of the run to retrieve (e.g.
+        `2026-04-22`). If omitted, the latest available run is returned. If
+        `model` is also set, `model` takes precedence for key selection.
+      schema:
+        type: string
+        format: date
+        example: '2026-04-22'
   get:
     tags:
       - llmo
@@ -1852,11 +1863,13 @@ llmo-brand-claims:
       The data files are `.json.gz` compressed and can be very large (100MB+ uncompressed),
       so this endpoint returns a presigned URL rather than the data directly.
 
-      The optional `model` query parameter selects which AI model's data to retrieve.
-      If omitted, the default model's data file is returned.
+      Runs are stored per ISO week. With no `date`, the latest available run is
+      returned; with `date`, the run for that date's ISO week is returned. The
+      optional `model` query parameter selects a legacy model-specific file.
 
       S3 key convention:
-      - Default model: `brand_claims/llmo/{siteId}/data.json.gz`
+      - Latest run: newest `brand_claims/llmo/{siteId}/{YYYY-Www}/data.json.gz` (falls back to the legacy `brand_claims/llmo/{siteId}/data.json.gz` before migration)
+      - Specific week: `brand_claims/llmo/{siteId}/{YYYY-Www}/data.json.gz`
       - Specific model: `brand_claims/llmo/{siteId}/{model}.json.gz`
     operationId: getBrandClaims
     responses:
@@ -6245,8 +6258,10 @@ site-llmo-akamai-deploy:
     operationId: deployLlmoAkamai
     summary: Create a new property version with the Edge Optimize rules
     description: |
-      Creates a NEW property version from the latest, merges the managed Edge Optimize rules into
-      it, and PUTs the rule tree with Akamai-side validation. Does NOT activate — activation is a
+      Creates a NEW property version from `baseVersion` (default: latest), merges the managed Edge
+      Optimize rules into it, and PUTs the rule tree with Akamai-side validation. Only supported for
+      properties whose default origin uses "Choose Your Own" (CUSTOM) SSL verification; a property on
+      "Use Platform Settings" is rejected with `400`. Does NOT activate — activation is a
       separate, explicit step. Guarded so the target property must serve the site's own domain on an
       active hostname. Idempotent by rule name: the merge replaces any previously-managed rules
       rather than duplicating them.
@@ -6289,6 +6304,15 @@ site-llmo-akamai-deploy:
                   items:
                     type: object
                     additionalProperties: true
+                fetcherKey:
+                  type: string
+                  description: >-
+                    The fetcher key minted server-side and baked into the deployed rule as the
+                    `x-edgeoptimize-fetcher-key` incoming request header. Show it to the customer so
+                    they can allowlist Optimize-at-Edge (with the `AdobeEdgeOptimize/1.0` user agent)
+                    in their Bot Manager / WAF. A fresh key is minted on every deploy, so
+                    re-deploying rotates it. Returned only here — never persisted server-side.
+                  example: '3b1e...'
       '400':
         $ref: './responses.yaml#/400'
       '401':
@@ -6528,7 +6552,15 @@ akamai-property-ref:
       minimum: 0
       description: >-
         Optional position among the existing (non-managed) top-level rules to insert the managed
-        wrapper at. Defaults to 0 (before everything); clamped to the number of existing children.
+        wrapper at. Defaults to appending AFTER all existing children (so the Optimize-at-Edge
+        origin/cacheId win, since Akamai is last-match-wins); an explicit value is clamped to the
+        number of existing children.
+    baseVersion:
+      type: integer
+      minimum: 1
+      description: >-
+        (deploy only) Optional property version to copy the new version from. Defaults to the
+        property's latest version.
 
 akamai-property:
   type: object

@@ -95,6 +95,22 @@ export default function opportunityTests(getHttpClient, resetData) {
         expect(res.body).to.be.an('array');
         res.body.forEach((oppty) => expectOpportunityDto(oppty));
       });
+
+      it('user: projects opportunities to requested fields with ?fields=', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${SITE_1_ID}/opportunities?fields=title,type`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(3);
+        res.body.forEach((oppty) => {
+          expect(Object.keys(oppty).sort()).to.deep.equal(['id', 'title', 'type']);
+        });
+      });
+
+      it('returns 400 when ?fields= matches no known field', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${SITE_1_ID}/opportunities?fields=nope`);
+        expect(res.status).to.equal(400);
+      });
     });
 
     describe('GET /sites/:siteId/opportunities/by-status/:status', () => {

@@ -122,14 +122,13 @@ sites:
       - site
     summary: Retrieve all sites
     description: |
-      Retrieves sites. Supports two response shapes for backwards compatibility:
+      Retrieves sites as a paginated `{ sites, pagination }` envelope.
 
-      - **Legacy (no query params):** returns a flat array of sites — a filtered subset for
-        backward compatibility. This shape is deprecated and will be removed once all
-        consumers have migrated to pagination.
-      - **Paginated (with `limit` and/or `cursor`):** returns `{ sites, pagination }` with
-        the full unfiltered result set. Iterate using `pagination.cursor` until
-        `pagination.hasMore` is `false` to fetch all sites.
+      - **Default (no query params):** returns the first page — `limit` defaults to 100,
+        no cursor — with the full unfiltered result set. Iterate using `pagination.cursor`
+        until `pagination.hasMore` is `false` to fetch all sites.
+      - **Paginated (with `limit` and/or `cursor`):** same envelope; pass
+        `pagination.cursor` back to fetch subsequent pages.
       - **Substring search (with `baseUrlContains`):** returns `{ sites, pagination }` where
         `sites` are those whose `baseURL` contains the (case-insensitive) substring.
         `pagination` is `{ limit, offset, hasMore, baseUrlContains }` (no `cursor`; this
@@ -137,18 +136,16 @@ sites:
         offset of 0. The search term must be at least 3 characters after trimming
         (otherwise 400).
 
-      Required capabilities: admin access (legacy admin path) or S2S `site:readAll`.
+      Required capabilities: admin access or S2S `site:readAll`.
     operationId: getSites
     parameters:
       - name: limit
         in: query
         required: false
         description: |
-          Maximum number of items per page. When `limit` (or `cursor`) is provided the
-          response uses the paginated envelope shape; when both are omitted the response
-          uses the legacy flat-array shape (see endpoint description). Defaults to 100
-          when the paginated shape is selected. Non-integer or non-positive values
-          (e.g. `0`, `-1`, `abc`) return 400. Values above 500 are clamped to 500.
+          Maximum number of items per page. Defaults to 100 when omitted. Non-integer or
+          non-positive values (e.g. `0`, `-1`, `abc`) return 400. Values above 500 are
+          clamped to 500.
         schema:
           type: integer
           minimum: 1
@@ -199,36 +196,26 @@ sites:
           type: integer
           minimum: 0
           example: 0
+      - $ref: './parameters.yaml#/fields'
     responses:
       '200':
         description: |
-          A list of sites. The shape depends on whether `limit`/`cursor` query parameters were provided.
+          A paginated list of sites. The `pagination` shape depends on whether
+          `baseUrlContains` was provided.
         content:
           application/json:
             schema:
               description: |
-                Three response shapes are possible, selected by the request and
-                unambiguous by JSON type/shape, so no `discriminator` is used (nor can
-                one be expressed — the legacy branch is a top-level array, which has no
-                property to discriminate on):
+                Two response shapes are possible, selected by the request and
+                unambiguous by JSON shape, so no `discriminator` is used:
                 - When `baseUrlContains` is provided → **`SiteSearchResponse`**, a JSON
                   object with `sites` and a non-cursor `pagination`
                   (`{ limit, offset, hasMore, baseUrlContains }`). The `baseUrlContains`
                   echo lets a client confirm the search ran on the deployment it hit.
-                - When `limit` and/or `cursor` is provided (without `baseUrlContains`) →
+                - Otherwise (default first page, or with `limit`/`cursor`) →
                   **`SitePagedResponse`**, a JSON object with `sites` and a
                   cursor-based `pagination`.
-                - When none are provided → **`SiteList`**, the legacy top-level
-                  JSON array.
-
-                This resolves to a single shape once the legacy path is sunset.
               oneOf:
-                # Per-usage deprecation: marks only the legacy branch of this
-                # endpoint as deprecated for codegen. The SiteList schema itself is
-                # not deprecated — it is still the active shape for
-                # getSitesByDeliveryType and getSitesForOrganization.
-                - $ref: './schemas.yaml#/SiteList'
-                  deprecated: true
                 - $ref: './schemas.yaml#/SitePagedResponse'
                 - $ref: './schemas.yaml#/SiteSearchResponse'
       '400':
@@ -244,6 +231,7 @@ sites:
 sites-by-delivery-type:
   parameters:
     - $ref: './parameters.yaml#/deliveryType'
+    - $ref: './parameters.yaml#/fields'
   get:
     tags:
       - site
@@ -266,9 +254,42 @@ sites-by-delivery-type:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
+sites-by-tier:
+  parameters:
+    - $ref: './parameters.yaml#/tier'
+    - $ref: './parameters.yaml#/productCodeQuery'
+  get:
+    tags:
+      - site
+    summary: Retrieve all sites enrolled at a given entitlement tier
+    description: |
+      Returns sites whose organization has an entitlement at the requested tier
+      (PAID, FREE_TRIAL, or PLG) and that are enrolled into that entitlement.
+      Optionally restrict to a single product via the `productCode` query
+      parameter (e.g. LLMO). Results are ordered by site ID. Not paginated -
+      admin-only, bounded use case. Admin-only.
+    operationId: getSitesByEnrollmentAndTier
+    responses:
+      '200':
+        description: A list of sites
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SiteEnrollmentList'
+      '400':
+        $ref: './responses.yaml#/400-no-tier'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
 sites-with-latest-audit:
   parameters:
     - $ref: './parameters.yaml#/auditType'
+    - $ref: './parameters.yaml#/fields'
   get:
     tags:
       - site
@@ -296,6 +317,7 @@ sites-with-latest-audit:
 sites-for-organization:
   parameters:
     - $ref: './parameters.yaml#/organizationId'
+    - $ref: './parameters.yaml#/fields'
   get:
     tags:
       - organization
@@ -432,6 +454,12 @@ sites-resolve:
                     isSummitPlgEnabled:
                       type: boolean
                       description: Whether the summit-plg audit is enabled for the resolved site
+                    asoTier:
+                      type: ['string', 'null']
+                      description: >-
+                        The resolved site's organization's ASO entitlement tier
+                        (FREE_TRIAL, PAID, PLG, PRE_ONBOARD), or null if no ASO
+                        entitlement exists.
               example:
                 data:
                   organization:
@@ -446,6 +474,7 @@ sites-resolve:
                     deliveryType: 'aem_edge'
                     isLive: true
                   isSummitPlgEnabled: true
+                  asoTier: 'PAID'
       '400':
         description: Bad request - missing required parameters or invalid input
         headers:
@@ -489,6 +518,10 @@ sites-resolve:
 
           Generic 404s (e.g. site / org not found) omit `resolveStatus` and
           `details`.
+
+          `asoTier` is always present, on every 404 (as on 200s) — it reflects
+          the org's raw ASO entitlement tier (or `null` if none exists) so the
+          UI can gate behavior off it even when resolution itself failed.
         headers:
           X-Error:
             $ref: './headers.yaml#/xError'
@@ -523,6 +556,12 @@ sites-resolve:
                       $ref: './schemas.yaml#/Id'
                     organizationId:
                       $ref: './schemas.yaml#/Id'
+                asoTier:
+                  type: ['string', 'null']
+                  description: >-
+                    The org's ASO entitlement tier (FREE_TRIAL, PAID, PLG,
+                    PRE_ONBOARD), or null if no ASO entitlement exists.
+                    Always present, regardless of resolveStatus.
             examples:
               no-entitlement-for-product:
                 summary: Org has no entitlement for the resolved product
@@ -533,6 +572,7 @@ sites-resolve:
                     productCode: 'ASO'
                     siteId: '0b4dcf79-fe5f-410b-b11f-641f0bf56da3'
                     organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28'
+                  asoTier: null
               aso-pre-onboard:
                 summary: Entitlement tier is not in CUSTOMER_VISIBLE_TIERS
                 value:
@@ -542,6 +582,7 @@ sites-resolve:
                     productCode: 'ASO'
                     siteId: '0b4dcf79-fe5f-410b-b11f-641f0bf56da3'
                     organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28'
+                  asoTier: 'PRE_ONBOARD'
               site-not-enrolled:
                 summary: Visible entitlement but site has no enrollment
                 value:
@@ -551,10 +592,12 @@ sites-resolve:
                     productCode: 'ASO'
                     siteId: '0b4dcf79-fe5f-410b-b11f-641f0bf56da3'
                     organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28'
+                  asoTier: 'PAID'
               generic-not-found:
                 summary: Generic 404 (no resolveStatus discriminator)
                 value:
                   message: 'No site found for the provided parameters'
+                  asoTier: null
       '500':
         description: Internal server error
         headers:

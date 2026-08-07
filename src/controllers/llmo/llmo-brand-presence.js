@@ -2611,7 +2611,14 @@ export function aggregateWeeklyDetailStats(rows) {
 
 /**
  * Aggregates source URLs from brand_presence_sources rows joined with source_urls.
- * @param {Array<Object>} sourceRows - Rows with url, hostname, content_type, execution_date, prompt
+ *
+ * Citation/prompt counts are deduplicated by `execution_id`: a single execution can
+ * have multiple brand_presence_sources rows for the same URL (e.g. one row per inline
+ * citation marker in that execution's answer), which would otherwise inflate a URL's
+ * citationCount past the number of executions that actually cite it. Rows without an
+ * execution_id always count (not expected in practice, but keeps this permissive).
+ * @param {Array<Object>} sourceRows - Rows with url, hostname, content_type, execution_date,
+ *   execution_id, prompt
  * @returns {Array<Object>} Deduplicated source entries
  * @internal Exported for testing
  */
@@ -2629,17 +2636,26 @@ export function aggregateDetailSources(sourceRows) {
         hostname: row.hostname || '',
         contentType: row.content_type || '',
         citationCount: 0,
+        seenExecutionIds: new Set(),
         weeks: new Set(),
         prompts: new Map(),
       });
     }
     const s = sourceMap.get(url);
-    s.citationCount += 1;
+
+    const executionId = row.execution_id;
+    const alreadyCountedForExec = Boolean(executionId) && s.seenExecutionIds.has(executionId);
+    if (!alreadyCountedForExec) {
+      s.citationCount += 1;
+      if (executionId) {
+        s.seenExecutionIds.add(executionId);
+      }
+      if (row.prompt) {
+        s.prompts.set(row.prompt, (s.prompts.get(row.prompt) || 0) + 1);
+      }
+    }
     if (row.execution_date) {
       s.weeks.add(weekFromExecDate(row.execution_date));
-    }
-    if (row.prompt) {
-      s.prompts.set(row.prompt, (s.prompts.get(row.prompt) || 0) + 1);
     }
   });
 
@@ -2842,6 +2858,7 @@ function flattenSourceRow(srcRow, execMap) {
     hostname: su.hostname || '',
     content_type: srcRow.content_type || '',
     execution_date: srcRow.execution_date || '',
+    execution_id: srcRow.execution_id || '',
     prompt: exec?.prompt || '',
   };
 }

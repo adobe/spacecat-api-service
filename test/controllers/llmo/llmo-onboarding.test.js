@@ -5873,7 +5873,7 @@ describe('LLMO Onboarding Functions', () => {
           provider_id: providerId,
           source: 'onboarding',
           priority: 'HIGH',
-          parameters: { siteId: 'site-123' },
+          parameters: { site_id: 'site-123' },
         });
         expect(result).to.deep.equal({ job_id: 'job-1' });
         expect(log.info).to.have.been.calledWithMatch(/Submitted one-time DRS/);
@@ -6067,7 +6067,7 @@ describe('LLMO Onboarding Functions', () => {
       // submitJob = 1 Brandalf + 3 one-shot pipeline runs.
       expect(instance.submitJob.callCount).to.equal(4);
       const oneShotCalls = instance.submitJob.getCalls()
-        .filter((c) => c.args[0].source === 'onboarding' && c.args[0].parameters?.siteId === 'site-123');
+        .filter((c) => c.args[0].source === 'onboarding' && c.args[0].parameters?.site_id === 'site-123');
       const providerIds = oneShotCalls.map((c) => c.args[0].provider_id);
       expect(providerIds).to.have.members([
         'prompt_generation_semrush',

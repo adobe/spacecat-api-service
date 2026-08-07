@@ -28,7 +28,7 @@ import {
  * does not exist yields an empty page, exactly as upstream does.
  *
  * The fixture deliberately carries a cross-dimension name collision: the
- * sub-category `human` under `Running Shoes` and the `source` value `human` are
+ * sub-category `human` under `Running Shoes` and the `origin` value `human` are
  * different tags with the same bare name. Any handler that keys tags by name
  * rather than id collapses them, and the tests that use this tree catch it.
  */
@@ -36,8 +36,9 @@ import {
 export const TAG_IDS = Object.freeze({
   categoryRoot: 'root-category',
   intentRoot: 'root-intent',
-  sourceRoot: 'root-source',
+  originRoot: 'root-origin',
   typeRoot: 'root-type',
+  sourceRoot: 'root-source',
 
   intentInformational: 'intent-informational',
   intentTask: 'intent-task',
@@ -45,21 +46,30 @@ export const TAG_IDS = Object.freeze({
   intentTransactional: 'intent-transactional',
   intentNavigational: 'intent-navigational',
 
-  sourceAi: 'source-ai',
-  sourceHuman: 'source-human',
+  originAi: 'origin-ai',
+  originHuman: 'origin-human',
 
   typeBranded: 'type-branded',
   typeNonBranded: 'type-non-branded',
 
   categoryRunningShoes: 'category-running-shoes',
   subCategoryHuman: 'subcategory-human',
+
+  // The producing-system `source` root carries a couple of already-minted values
+  // (`config`, the commonest producer, and `semrush`, the market generator's).
+  // `source` is OPEN so this is not a fixed enum — these are just values that
+  // happen to exist on this project, the way the server resolves-or-creates one on
+  // first use (source-dimension.md §1 item 4).
+  sourceConfig: 'source-config',
+  sourceSemrush: 'source-semrush',
 });
 
 const ROOT_IDS = Object.freeze({
   category: TAG_IDS.categoryRoot,
   intent: TAG_IDS.intentRoot,
-  source: TAG_IDS.sourceRoot,
+  origin: TAG_IDS.originRoot,
   type: TAG_IDS.typeRoot,
+  source: TAG_IDS.sourceRoot,
 });
 
 const CLOSED_VALUE_IDS = Object.freeze({
@@ -70,7 +80,7 @@ const CLOSED_VALUE_IDS = Object.freeze({
     Transactional: TAG_IDS.intentTransactional,
     Navigational: TAG_IDS.intentNavigational,
   },
-  source: { ai: TAG_IDS.sourceAi, human: TAG_IDS.sourceHuman },
+  origin: { ai: TAG_IDS.originAi, human: TAG_IDS.originHuman },
   type: { branded: TAG_IDS.typeBranded, 'non-branded': TAG_IDS.typeNonBranded },
 });
 
@@ -100,11 +110,16 @@ export function dimensionTreeLevels(extraLevels = {}) {
   const roots = DIMENSION_ROOT_NAMES.map((name) => upstreamTag({
     id: ROOT_IDS[name],
     name,
-    childrenCount: name === 'category' ? 1 : CLOSED_DIMENSION_VALUES[name].length,
+    // `category` carries one seeded sub-tree; the closed dimensions carry their
+    // enum. The open `source` root reports `children_count: 0` so tree WALKS
+    // (findTagsInTree) do not descend it, yet its level below still serves one
+    // already-minted `config` value for by-parent resolution (indexLevelByName),
+    // matching how a real project accrues `source` values on first use.
+    childrenCount: name === 'category' ? 1 : (CLOSED_DIMENSION_VALUES[name]?.length ?? 0),
   }));
 
   const closedLevels = {};
-  for (const dimension of ['intent', 'source', 'type']) {
+  for (const dimension of ['intent', 'origin', 'type']) {
     closedLevels[ROOT_IDS[dimension]] = CLOSED_DIMENSION_VALUES[dimension].map((value) => (
       upstreamTag({
         id: CLOSED_VALUE_IDS[dimension][value],
@@ -125,13 +140,28 @@ export function dimensionTreeLevels(extraLevels = {}) {
       childrenCount: 1,
       path: CATEGORY_CRUMB,
     })],
-    // Depth 3. Shares its bare name with the `source` value `human`.
+    // Depth 3. Shares its bare name with the `origin` value `human`.
     [TAG_IDS.categoryRunningShoes]: [upstreamTag({
       id: TAG_IDS.subCategoryHuman,
       name: 'human',
       parentId: TAG_IDS.categoryRunningShoes,
       path: [...CATEGORY_CRUMB, { id: TAG_IDS.categoryRunningShoes, name: 'Running Shoes' }],
     })],
+    // Already-minted producing-system values under the `source` root.
+    [TAG_IDS.sourceRoot]: [
+      upstreamTag({
+        id: TAG_IDS.sourceConfig,
+        name: 'config',
+        parentId: TAG_IDS.sourceRoot,
+        path: [{ id: TAG_IDS.sourceRoot, name: 'source' }],
+      }),
+      upstreamTag({
+        id: TAG_IDS.sourceSemrush,
+        name: 'semrush',
+        parentId: TAG_IDS.sourceRoot,
+        path: [{ id: TAG_IDS.sourceRoot, name: 'source' }],
+      }),
+    ],
     ...extraLevels,
   };
 }

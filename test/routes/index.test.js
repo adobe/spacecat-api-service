@@ -26,6 +26,7 @@ describe('getRouteHandlers', () => {
     getAll: sinon.stub(),
     getByVersion: sinon.stub(),
     getLatest: sinon.stub(),
+    listVersions: sinon.stub(),
     updateConfiguration: sinon.stub(),
     registerAudit: sinon.stub(),
     unregisterAudit: sinon.stub(),
@@ -45,6 +46,7 @@ describe('getRouteHandlers', () => {
   const mockSitesController = {
     getAll: sinon.stub(),
     getAllByDeliveryType: sinon.stub(),
+    getAllByEnrollmentAndTier: sinon.stub(),
     getAllAsCsv: sinon.stub(),
     getAllAsExcel: sinon.stub(),
     getAllWithLatestAudit: sinon.stub(),
@@ -411,6 +413,7 @@ describe('getRouteHandlers', () => {
   const mockEntitlementController = {
     getByOrganizationID: () => null,
     createEntitlement: () => null,
+    patchEntitlement: () => null,
     createSiteEntitlement: () => null,
   };
 
@@ -538,21 +541,43 @@ describe('getRouteHandlers', () => {
     getV1TopicGapTopics: sinon.stub(),
     getV1TopicGapTopicsExport: sinon.stub(),
     getV1TopicGapTopicsTotals: sinon.stub(),
+    getV1TopicMetricsByFts: sinon.stub(),
+    getV1TopicTopicsByFts: sinon.stub(),
+    getV1TopicTopicsByFtsExport: sinon.stub(),
+    getV1TopicTopicsByFtsTotals: sinon.stub(),
     getV1PromptBrandPrompts: sinon.stub(),
     getV1PromptBrandPromptsExport: sinon.stub(),
     getV1PromptGapPrompts: sinon.stub(),
     getV1PromptGapPromptsExport: sinon.stub(),
     getV1PromptGapPromptsTotals: sinon.stub(),
+    getV1PromptPromptsByTopicFts: sinon.stub(),
+    getV1PromptPromptsByTopicFtsExport: sinon.stub(),
+    getV1PromptPromptsByTopicFtsTotals: sinon.stub(),
+    getV1PromptPromptsByTopicIds: sinon.stub(),
+    getV1PromptPromptsByTopicIdsTotals: sinon.stub(),
     getV1PromptPromptResponse: sinon.stub(),
     getV1SourceGapSourceDomains: sinon.stub(),
     getV1SourceGapSourceDomainsExport: sinon.stub(),
     getV1SourceGapSourceDomainsTotals: sinon.stub(),
+    getV1SourceCitedPages: sinon.stub(),
+    getV1SourceCitedPagesExport: sinon.stub(),
+    getV1SourceCitedPagesTotals: sinon.stub(),
+    getV1SourceCitedSources: sinon.stub(),
+    getV1SourceCitedSourcesExport: sinon.stub(),
+    getV1SourceCitedSourcesTotals: sinon.stub(),
+    getV1SourceSourceDomainsByTopicFts: sinon.stub(),
+    getV1SourceSourceDomainsByTopicFtsExport: sinon.stub(),
+    getV1SourceSourceDomainsByTopicFtsTotals: sinon.stub(),
     getV1PromptResearchPromptsExport: sinon.stub(),
     getV1PromptResearchBrandsExport: sinon.stub(),
     getV1PromptResearchSourceDomainsExport: sinon.stub(),
     getV1PromptResearchTopicsExport: sinon.stub(),
     getV1BrandStatsByCountry: sinon.stub(),
     getV1BrandStatsByLlm: sinon.stub(),
+    getV1BrandCompetitorsStats: sinon.stub(),
+    getV1BrandBrandsByTopicFts: sinon.stub(),
+    getV1BrandBrandsByTopicFtsExport: sinon.stub(),
+    getV1BrandBrandsByTopicFtsTotals: sinon.stub(),
     getV1MetaMeta: sinon.stub(),
   };
 
@@ -616,8 +641,24 @@ describe('getRouteHandlers', () => {
     listIssueTypes: sinon.stub(),
   };
 
+  const mockOnboardingController = {
+    triggerOnboarding: sinon.stub(),
+  };
+
   const mockRedirectsController = {
     getRedirects: sinon.stub(),
+  };
+
+  const mockAuditPolicyController = {
+    getPolicy: sinon.stub(),
+    addExclusions: sinon.stub(),
+    removeExclusions: sinon.stub(),
+    addInclusions: sinon.stub(),
+    removeInclusions: sinon.stub(),
+    listRevisions: sinon.stub(),
+    getScopePages: sinon.stub(),
+    getScopeSummary: sinon.stub(),
+    getScopeSections: sinon.stub(),
   };
 
   const mockPromptSuggestionSchedulesController = {
@@ -690,12 +731,15 @@ describe('getRouteHandlers', () => {
       mockElementsController,
       mockProxyController,
       mockTaskManagementController,
+      mockOnboardingController,
       mockRedirectsController,
+      mockAuditPolicyController,
       mockPromptSuggestionSchedulesController,
     );
 
     expect(staticRoutes).to.have.all.keys(
       'GET /configurations/latest',
+      'GET /configurations/versions',
       'PATCH /configurations/latest',
       'POST /configurations/audits',
       'PATCH /configurations/sites/audits',
@@ -726,6 +770,7 @@ describe('getRouteHandlers', () => {
       'GET /state/access-mappings',
       'GET /state/access-mappings/history',
       'POST /state/access-mappings',
+      'POST /state/access-mappings/admin',
       'GET /product/capabilities',
       'POST /tools/import/jobs',
       'POST /tools/scrape/jobs',
@@ -759,21 +804,43 @@ describe('getRouteHandlers', () => {
       'GET /llmo/ai-visibility/v1/topic/gap-topics',
       'GET /llmo/ai-visibility/v1/topic/gap-topics-export',
       'GET /llmo/ai-visibility/v1/topic/gap-topics-totals',
+      'GET /llmo/ai-visibility/v1/topic/metrics-by-fts',
+      'GET /llmo/ai-visibility/v1/topic/topics-by-fts',
+      'GET /llmo/ai-visibility/v1/topic/topics-by-fts-export',
+      'GET /llmo/ai-visibility/v1/topic/topics-by-fts-totals',
       'GET /llmo/ai-visibility/v1/prompt/brand-prompts',
       'GET /llmo/ai-visibility/v1/prompt/brand-prompts-export',
       'GET /llmo/ai-visibility/v1/prompt/gap-prompts',
       'GET /llmo/ai-visibility/v1/prompt/gap-prompts-export',
       'GET /llmo/ai-visibility/v1/prompt/gap-prompts-totals',
+      'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts',
+      'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-export',
+      'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-totals',
+      'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids',
+      'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids-totals',
       'GET /llmo/ai-visibility/v1/prompt/prompt-response',
       'GET /llmo/ai-visibility/v1/source/gap-source-domains',
       'GET /llmo/ai-visibility/v1/source/gap-source-domains-export',
       'GET /llmo/ai-visibility/v1/source/gap-source-domains-totals',
+      'GET /llmo/ai-visibility/v1/source/cited-pages',
+      'GET /llmo/ai-visibility/v1/source/cited-pages-export',
+      'GET /llmo/ai-visibility/v1/source/cited-pages-totals',
+      'GET /llmo/ai-visibility/v1/source/cited-sources',
+      'GET /llmo/ai-visibility/v1/source/cited-sources-export',
+      'GET /llmo/ai-visibility/v1/source/cited-sources-totals',
+      'GET /llmo/ai-visibility/v1/source/source-domains-by-topic-fts',
+      'GET /llmo/ai-visibility/v1/source/source-domains-by-topic-fts-export',
+      'GET /llmo/ai-visibility/v1/source/source-domains-by-topic-fts-totals',
       'GET /llmo/ai-visibility/v1/prompt-research/prompts-export',
       'GET /llmo/ai-visibility/v1/prompt-research/brands-export',
       'GET /llmo/ai-visibility/v1/prompt-research/source-domains-export',
       'GET /llmo/ai-visibility/v1/prompt-research/topics-export',
       'GET /llmo/ai-visibility/v1/brand/stats-by-country',
       'GET /llmo/ai-visibility/v1/brand/stats-by-llm',
+      'GET /llmo/ai-visibility/v1/brand/competitors-stats',
+      'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts',
+      'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts-export',
+      'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts-totals',
       'GET /llmo/ai-visibility/v1/meta/meta',
       'GET /sites-resolve',
       'GET /trial-users/email-preferences',
@@ -785,6 +852,7 @@ describe('getRouteHandlers', () => {
     );
 
     expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);
+    expect(staticRoutes['GET /configurations/versions']).to.equal(mockConfigurationController.listVersions);
     expect(staticRoutes['PATCH /configurations/latest']).to.equal(mockConfigurationController.updateConfiguration);
     expect(staticRoutes['POST /configurations/audits']).to.equal(mockConfigurationController.registerAudit);
     expect(staticRoutes['PATCH /configurations/sites/audits']).to.equal(mockSitesAuditsToggleController.execute);
@@ -834,21 +902,43 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/gap-topics']).to.equal(mockAiVisibilityController.getV1TopicGapTopics);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/gap-topics-export']).to.equal(mockAiVisibilityController.getV1TopicGapTopicsExport);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/gap-topics-totals']).to.equal(mockAiVisibilityController.getV1TopicGapTopicsTotals);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/metrics-by-fts']).to.equal(mockAiVisibilityController.getV1TopicMetricsByFts);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/topics-by-fts']).to.equal(mockAiVisibilityController.getV1TopicTopicsByFts);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/topics-by-fts-export']).to.equal(mockAiVisibilityController.getV1TopicTopicsByFtsExport);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/topics-by-fts-totals']).to.equal(mockAiVisibilityController.getV1TopicTopicsByFtsTotals);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/brand-prompts']).to.equal(mockAiVisibilityController.getV1PromptBrandPrompts);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/brand-prompts-export']).to.equal(mockAiVisibilityController.getV1PromptBrandPromptsExport);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/gap-prompts']).to.equal(mockAiVisibilityController.getV1PromptGapPrompts);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/gap-prompts-export']).to.equal(mockAiVisibilityController.getV1PromptGapPromptsExport);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/gap-prompts-totals']).to.equal(mockAiVisibilityController.getV1PromptGapPromptsTotals);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts']).to.equal(mockAiVisibilityController.getV1PromptPromptsByTopicFts);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-export']).to.equal(mockAiVisibilityController.getV1PromptPromptsByTopicFtsExport);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-totals']).to.equal(mockAiVisibilityController.getV1PromptPromptsByTopicFtsTotals);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids']).to.equal(mockAiVisibilityController.getV1PromptPromptsByTopicIds);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids-totals']).to.equal(mockAiVisibilityController.getV1PromptPromptsByTopicIdsTotals);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt/prompt-response']).to.equal(mockAiVisibilityController.getV1PromptPromptResponse);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/source/gap-source-domains']).to.equal(mockAiVisibilityController.getV1SourceGapSourceDomains);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/source/gap-source-domains-export']).to.equal(mockAiVisibilityController.getV1SourceGapSourceDomainsExport);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/source/gap-source-domains-totals']).to.equal(mockAiVisibilityController.getV1SourceGapSourceDomainsTotals);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/source/cited-pages']).to.equal(mockAiVisibilityController.getV1SourceCitedPages);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/source/cited-pages-export']).to.equal(mockAiVisibilityController.getV1SourceCitedPagesExport);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/source/cited-pages-totals']).to.equal(mockAiVisibilityController.getV1SourceCitedPagesTotals);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/source/cited-sources']).to.equal(mockAiVisibilityController.getV1SourceCitedSources);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/source/cited-sources-export']).to.equal(mockAiVisibilityController.getV1SourceCitedSourcesExport);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/source/cited-sources-totals']).to.equal(mockAiVisibilityController.getV1SourceCitedSourcesTotals);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/source/source-domains-by-topic-fts']).to.equal(mockAiVisibilityController.getV1SourceSourceDomainsByTopicFts);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/source/source-domains-by-topic-fts-export']).to.equal(mockAiVisibilityController.getV1SourceSourceDomainsByTopicFtsExport);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/source/source-domains-by-topic-fts-totals']).to.equal(mockAiVisibilityController.getV1SourceSourceDomainsByTopicFtsTotals);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt-research/prompts-export']).to.equal(mockAiVisibilityController.getV1PromptResearchPromptsExport);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt-research/brands-export']).to.equal(mockAiVisibilityController.getV1PromptResearchBrandsExport);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt-research/source-domains-export']).to.equal(mockAiVisibilityController.getV1PromptResearchSourceDomainsExport);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt-research/topics-export']).to.equal(mockAiVisibilityController.getV1PromptResearchTopicsExport);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/brand/stats-by-country']).to.equal(mockAiVisibilityController.getV1BrandStatsByCountry);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/brand/stats-by-llm']).to.equal(mockAiVisibilityController.getV1BrandStatsByLlm);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/brand/competitors-stats']).to.equal(mockAiVisibilityController.getV1BrandCompetitorsStats);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts']).to.equal(mockAiVisibilityController.getV1BrandBrandsByTopicFts);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts-export']).to.equal(mockAiVisibilityController.getV1BrandBrandsByTopicFtsExport);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts-totals']).to.equal(mockAiVisibilityController.getV1BrandBrandsByTopicFtsTotals);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/meta/meta']).to.equal(mockAiVisibilityController.getV1MetaMeta);
     expect(staticRoutes['GET /v2/regions']).to.equal(mockLlmoMysticatController.getRegions);
     expect(staticRoutes['POST /plg/onboard']).to.equal(mockPlgOnboardingController.onboard);
@@ -919,15 +1009,25 @@ describe('getRouteHandlers', () => {
       'GET /v2/orgs/:spaceCatId/serenity/languages',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/filter-dimensions',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/access',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics/:topicId/prompts',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/domain-urls',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/url-prompts',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/market-tracking-trends',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/stats',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/stats',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/prompts/count',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/competitor-summary',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/kpi-headlines',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/source-visibility-headline',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate',
+      'POST /v2/orgs/:spaceCatId/semrush-onboarding',
       'GET /v2/orgs/:spaceCatId/sites/:siteId/brand',
       'GET /org/:spaceCatId/brands/:brandId/fanout-report',
       'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions',
@@ -972,6 +1072,8 @@ describe('getRouteHandlers', () => {
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/domain-urls',
       'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/url-prompts',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/url-prompts',
+      'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/prompts-by-url',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/prompts-by-url',
       'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/filter-dimensions',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/filter-dimensions',
       'GET /org/:spaceCatId/brands/all/brand-presence/prompt-execution-status',
@@ -1019,6 +1121,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/latest-metrics',
       'GET /sites/by-base-url/:baseURL',
       'GET /sites/by-delivery-type/:deliveryType',
+      'GET /sites/by-tier/:tier',
       'GET /sites/with-latest-audit/:auditType',
       'GET /sites/:siteId/opportunities',
       'GET /sites/:siteId/opportunities/top-paid',
@@ -1230,6 +1333,7 @@ describe('getRouteHandlers', () => {
       'POST /organizations/:organizationId/trial-user-invite',
       'GET /organizations/:organizationId/entitlements',
       'POST /organizations/:organizationId/entitlements',
+      'PATCH /organizations/:organizationId/entitlements',
       'POST /sites/:siteId/entitlements',
       'GET /organizations/:organizationId/feature-flags',
       'PUT /organizations/:organizationId/feature-flags/:product/:flagName',
@@ -1313,6 +1417,15 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/agentic-page-types',
       'PATCH /sites/:siteId/agentic-page-types/:name',
       'DELETE /sites/:siteId/agentic-page-types/:name',
+      'GET /sites/:siteId/audit-policy',
+      'POST /sites/:siteId/audit-policy/exclusions',
+      'POST /sites/:siteId/audit-policy/exclusions/delete',
+      'POST /sites/:siteId/audit-policy/inclusions',
+      'POST /sites/:siteId/audit-policy/inclusions/delete',
+      'GET /sites/:siteId/audit-policy/revisions',
+      'GET /sites/:siteId/audit-scope/pages',
+      'GET /sites/:siteId/audit-scope/summary',
+      'GET /sites/:siteId/audit-scope/sections',
       'GET /organizations/:organizationId/task-management/connections',
       'GET /organizations/:organizationId/task-management/connections/:connectionId',
       'GET /organizations/:organizationId/task-management/tickets',
@@ -1346,6 +1459,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /organizations/:organizationId/feature-flags'].paramNames).to.deep.equal(['organizationId']);
     expect(dynamicRoutes['POST /organizations/:organizationId/entitlements'].handler).to.equal(mockEntitlementController.createEntitlement);
     expect(dynamicRoutes['POST /organizations/:organizationId/entitlements'].paramNames).to.deep.equal(['organizationId']);
+    expect(dynamicRoutes['PATCH /organizations/:organizationId/entitlements'].handler).to.equal(mockEntitlementController.patchEntitlement);
+    expect(dynamicRoutes['PATCH /organizations/:organizationId/entitlements'].paramNames).to.deep.equal(['organizationId']);
     expect(dynamicRoutes['POST /sites/:siteId/entitlements'].handler).to.equal(mockEntitlementController.createSiteEntitlement);
     expect(dynamicRoutes['POST /sites/:siteId/entitlements'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['PUT /organizations/:organizationId/feature-flags/:product/:flagName'].handler).to.equal(mockFeatureFlagsController.putByOrganizationProductAndName);
@@ -1358,6 +1473,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/identity'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/by-delivery-type/:deliveryType'].handler).to.equal(mockSitesController.getAllByDeliveryType);
     expect(dynamicRoutes['GET /sites/by-delivery-type/:deliveryType'].paramNames).to.deep.equal(['deliveryType']);
+    expect(dynamicRoutes['GET /sites/by-tier/:tier'].handler).to.equal(mockSitesController.getAllByEnrollmentAndTier);
+    expect(dynamicRoutes['GET /sites/by-tier/:tier'].paramNames).to.deep.equal(['tier']);
     expect(dynamicRoutes['GET /sites/by-base-url/:baseURL'].handler).to.equal(mockSitesController.getByBaseURL);
     expect(dynamicRoutes['GET /sites/by-base-url/:baseURL'].paramNames).to.deep.equal(['baseURL']);
     expect(dynamicRoutes['GET /sites/with-latest-audit/:auditType'].handler).to.equal(mockSitesController.getAllWithLatestAudit);

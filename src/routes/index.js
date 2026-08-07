@@ -110,7 +110,9 @@ function isStaticRoute(routePattern) {
  * @param {Object} elementsController - Elements API controller (Semrush Elements wrappers).
  * @param {Object} proxyController - URL proxy controller for client-side previews.
  * @param {Object} taskManagementController - Task-management (Jira ticket creation) controller.
+ * @param {Object} onboardingController - Semrush onboarding notification controller.
  * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
+ * @param {Object} auditPolicyController - Audit policy + audit scope controller.
  * @param {Object} promptSuggestionSchedulesController - LLMO prompt-suggestion schedule controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
@@ -179,7 +181,9 @@ export default function getRouteHandlers(
   elementsController,
   proxyController,
   taskManagementController,
+  onboardingController,
   redirectsController,
+  auditPolicyController,
   promptSuggestionSchedulesController,
 ) {
   const staticRoutes = {};
@@ -189,6 +193,9 @@ export default function getRouteHandlers(
     'GET /config/:service/redirects.txt': redirectsController.getRedirects,
     'GET /audits/latest/:auditType': auditsController.getAllLatest,
     'GET /configurations/latest': configurationController.getLatest,
+    // Static route — matched before the dynamic `GET /configurations/:version`
+    // (see src/utils/route-utils.js), so "versions" is never treated as a VersionId.
+    'GET /configurations/versions': configurationController.listVersions,
     'PATCH /configurations/latest': configurationController.updateConfiguration,
     'POST /configurations/:version/restore': configurationController.restoreVersion,
     'GET /configurations/:version': configurationController.getByVersion,
@@ -249,21 +256,43 @@ export default function getRouteHandlers(
     // eslint-disable-next-line max-len
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/filter-dimensions': elementsController.listUrlInspectorFilterDimensions,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks': elementsController.listWeeks,
+    // Reliable Semrush access check for the "access needed" banner (LLMO-6747): probes the User
+    // Manager resource-allowance endpoint and returns { hasAccess }, replacing the weeks probe.
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/access': elementsController.checkAccess,
     // Brand-scoped: prompts/projects live in the brand's sub-workspace, not the org workspace.
     // eslint-disable-next-line max-len
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': elementsController.listPrompts,
     // eslint-disable-next-line max-len
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': elementsController.listCitedDomains,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview': elementsController.listSentimentOverview,
+    // Data Insights per-topic table (grouped from the prompts-by-topic element).
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics': elementsController.listTopics,
+    // Data Insights per-prompt drill-down: :topicId is the URL-encoded topic NAME.
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics/:topicId/prompts': elementsController.listTopicPrompts,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls': elementsController.listOwnedUrls,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/domain-urls': elementsController.listDomainUrls,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/url-prompts': elementsController.listUrlPrompts,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/market-tracking-trends': elementsController.getMarketTrackingTrends,
     // eslint-disable-next-line max-len
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/stats': elementsController.getStats,
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/stats': elementsController.getUrlInspectorStats,
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/prompts/count': elementsController.getUrlInspectorPromptsCount,
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/competitor-summary': elementsController.getCompetitorSummary,
+    // Overview-SR exact-parity KPI headlines (LLMO-6515 follow-up). Source Visibility is
+    // split into its own route — see getSourceVisibilityHeadline's timeout-budget rationale.
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/kpi-headlines': elementsController.getKpiHeadlines,
+    // eslint-disable-next-line max-len
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/source-visibility-headline': elementsController.getSourceVisibilityHeadline,
     // Brand-independent Semrush language catalog (add-brand wizard language picker).
     'GET /v2/orgs/:spaceCatId/serenity/languages': serenityController.listOrgLanguages,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': serenityController.activate,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate': serenityController.deactivate,
+    'POST /v2/orgs/:spaceCatId/semrush-onboarding': onboardingController.triggerOnboarding,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.listPromptsByBrand,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats': brandsController.getPromptStatsByBrand,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.createPromptsByBrand,
@@ -334,6 +363,17 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/agentic-page-types/:name': agenticPageTypesController.update,
     'DELETE /sites/:siteId/agentic-page-types/:name': agenticPageTypesController.remove,
 
+    // Audit Policy contract (SITES-47306). Static segments precede dynamic :auditType match.
+    'GET /sites/:siteId/audit-policy': auditPolicyController.getPolicy,
+    'POST /sites/:siteId/audit-policy/exclusions': auditPolicyController.addExclusions,
+    'POST /sites/:siteId/audit-policy/exclusions/delete': auditPolicyController.removeExclusions,
+    'POST /sites/:siteId/audit-policy/inclusions': auditPolicyController.addInclusions,
+    'POST /sites/:siteId/audit-policy/inclusions/delete': auditPolicyController.removeInclusions,
+    'GET /sites/:siteId/audit-policy/revisions': auditPolicyController.listRevisions,
+    'GET /sites/:siteId/audit-scope/pages': auditPolicyController.getScopePages,
+    'GET /sites/:siteId/audit-scope/summary': auditPolicyController.getScopeSummary,
+    'GET /sites/:siteId/audit-scope/sections': auditPolicyController.getScopeSections,
+
     'PATCH /sites/:siteId/:auditType': auditsController.patchAuditForSite,
     'GET /sites/:siteId/latest-audit/:auditType': auditsController.getLatestForSite,
     'GET /sites/:siteId/experiments': experimentsController.getExperiments,
@@ -342,6 +382,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/latest-metrics': sitesController.getLatestSiteMetrics,
     'GET /sites/by-base-url/:baseURL': sitesController.getByBaseURL,
     'GET /sites/by-delivery-type/:deliveryType': sitesController.getAllByDeliveryType,
+    'GET /sites/by-tier/:tier': sitesController.getAllByEnrollmentAndTier,
     'GET /sites/with-latest-audit/:auditType': sitesController.getAllWithLatestAudit,
     'GET /sites/:siteId/opportunities': opportunitiesController.getAllForSite,
     'GET /sites/:siteId/opportunities/top-paid': topPaidOpportunitiesController.getTopPaidOpportunities,
@@ -468,6 +509,11 @@ export default function getRouteHandlers(
     'GET /state/access-mappings': stateAccessMappingsController.listMappings,
     'GET /state/access-mappings/history': stateAccessMappingsController.listHistory,
     'POST /state/access-mappings': stateAccessMappingsController.createMapping,
+    // Admin-only backend provisioning: the entire binding (imsOrgId, product,
+    // subject, resource, capabilities) comes from the body — nothing from
+    // authInfo. Gated by isAdmin() in the controller; see INTERNAL_ROUTES in
+    // facs-capabilities.js (bypasses facsWrapper).
+    'POST /state/access-mappings/admin': stateAccessMappingsController.adminCreateMapping,
     'PATCH /state/access-mappings/:id': stateAccessMappingsController.patchMapping,
     'DELETE /state/access-mappings/:id': stateAccessMappingsController.deleteMapping,
     'GET /product/capabilities': stateAccessMappingsController.getProductCapabilities,
@@ -669,6 +715,8 @@ export default function getRouteHandlers(
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/domain-urls': llmoMysticatController.getUrlInspectorDomainUrls,
     'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/url-prompts': llmoMysticatController.getUrlInspectorUrlPrompts,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/url-prompts': llmoMysticatController.getUrlInspectorUrlPrompts,
+    'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/prompts-by-url': llmoMysticatController.getUrlInspectorPromptsByUrl,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/prompts-by-url': llmoMysticatController.getUrlInspectorPromptsByUrl,
     'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/filter-dimensions': llmoMysticatController.getUrlInspectorFilterDimensions,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/filter-dimensions': llmoMysticatController.getUrlInspectorFilterDimensions,
 
@@ -703,6 +751,7 @@ export default function getRouteHandlers(
     'PATCH /trial-users/email-preferences': trialUserController.updateEmailPreferences,
     'GET /organizations/:organizationId/entitlements': entitlementController.getByOrganizationID,
     'POST /organizations/:organizationId/entitlements': entitlementController.createEntitlement,
+    'PATCH /organizations/:organizationId/entitlements': entitlementController.patchEntitlement,
     'POST /sites/:siteId/entitlements': entitlementController.createSiteEntitlement,
     'GET /organizations/:organizationId/feature-flags': featureFlagsController.listByOrganization,
     'PUT /organizations/:organizationId/feature-flags/:product/:flagName':
@@ -801,17 +850,39 @@ export default function getRouteHandlers(
     'GET /llmo/ai-visibility/v1/topic/gap-topics': aiVisibilityController.getV1TopicGapTopics,
     'GET /llmo/ai-visibility/v1/topic/gap-topics-export': aiVisibilityController.getV1TopicGapTopicsExport,
     'GET /llmo/ai-visibility/v1/topic/gap-topics-totals': aiVisibilityController.getV1TopicGapTopicsTotals,
+    'GET /llmo/ai-visibility/v1/topic/metrics-by-fts': aiVisibilityController.getV1TopicMetricsByFts,
+    'GET /llmo/ai-visibility/v1/topic/topics-by-fts': aiVisibilityController.getV1TopicTopicsByFts,
+    'GET /llmo/ai-visibility/v1/topic/topics-by-fts-export': aiVisibilityController.getV1TopicTopicsByFtsExport,
+    'GET /llmo/ai-visibility/v1/topic/topics-by-fts-totals': aiVisibilityController.getV1TopicTopicsByFtsTotals,
     'GET /llmo/ai-visibility/v1/prompt/brand-prompts': aiVisibilityController.getV1PromptBrandPrompts,
     'GET /llmo/ai-visibility/v1/prompt/brand-prompts-export': aiVisibilityController.getV1PromptBrandPromptsExport,
     'GET /llmo/ai-visibility/v1/prompt/gap-prompts': aiVisibilityController.getV1PromptGapPrompts,
     'GET /llmo/ai-visibility/v1/prompt/gap-prompts-export': aiVisibilityController.getV1PromptGapPromptsExport,
     'GET /llmo/ai-visibility/v1/prompt/gap-prompts-totals': aiVisibilityController.getV1PromptGapPromptsTotals,
+    'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts': aiVisibilityController.getV1PromptPromptsByTopicFts,
+    'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-export': aiVisibilityController.getV1PromptPromptsByTopicFtsExport,
+    'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-totals': aiVisibilityController.getV1PromptPromptsByTopicFtsTotals,
+    'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids': aiVisibilityController.getV1PromptPromptsByTopicIds,
+    'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids-totals': aiVisibilityController.getV1PromptPromptsByTopicIdsTotals,
     'GET /llmo/ai-visibility/v1/prompt/prompt-response': aiVisibilityController.getV1PromptPromptResponse,
     'GET /llmo/ai-visibility/v1/source/gap-source-domains': aiVisibilityController.getV1SourceGapSourceDomains,
     'GET /llmo/ai-visibility/v1/source/gap-source-domains-export': aiVisibilityController.getV1SourceGapSourceDomainsExport,
     'GET /llmo/ai-visibility/v1/source/gap-source-domains-totals': aiVisibilityController.getV1SourceGapSourceDomainsTotals,
+    'GET /llmo/ai-visibility/v1/source/cited-pages': aiVisibilityController.getV1SourceCitedPages,
+    'GET /llmo/ai-visibility/v1/source/cited-pages-export': aiVisibilityController.getV1SourceCitedPagesExport,
+    'GET /llmo/ai-visibility/v1/source/cited-pages-totals': aiVisibilityController.getV1SourceCitedPagesTotals,
+    'GET /llmo/ai-visibility/v1/source/cited-sources': aiVisibilityController.getV1SourceCitedSources,
+    'GET /llmo/ai-visibility/v1/source/cited-sources-export': aiVisibilityController.getV1SourceCitedSourcesExport,
+    'GET /llmo/ai-visibility/v1/source/cited-sources-totals': aiVisibilityController.getV1SourceCitedSourcesTotals,
     'GET /llmo/ai-visibility/v1/brand/stats-by-country': aiVisibilityController.getV1BrandStatsByCountry,
     'GET /llmo/ai-visibility/v1/brand/stats-by-llm': aiVisibilityController.getV1BrandStatsByLlm,
+    'GET /llmo/ai-visibility/v1/brand/competitors-stats': aiVisibilityController.getV1BrandCompetitorsStats,
+    'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts': aiVisibilityController.getV1BrandBrandsByTopicFts,
+    'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts-export': aiVisibilityController.getV1BrandBrandsByTopicFtsExport,
+    'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts-totals': aiVisibilityController.getV1BrandBrandsByTopicFtsTotals,
+    'GET /llmo/ai-visibility/v1/source/source-domains-by-topic-fts': aiVisibilityController.getV1SourceSourceDomainsByTopicFts,
+    'GET /llmo/ai-visibility/v1/source/source-domains-by-topic-fts-export': aiVisibilityController.getV1SourceSourceDomainsByTopicFtsExport,
+    'GET /llmo/ai-visibility/v1/source/source-domains-by-topic-fts-totals': aiVisibilityController.getV1SourceSourceDomainsByTopicFtsTotals,
     'GET /llmo/ai-visibility/v1/meta/meta': aiVisibilityController.getV1MetaMeta,
     'GET /llmo/ai-visibility/v1/prompt-research/prompts-export': aiVisibilityController.getV1PromptResearchPromptsExport,
     'GET /llmo/ai-visibility/v1/prompt-research/brands-export': aiVisibilityController.getV1PromptResearchBrandsExport,

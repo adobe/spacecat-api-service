@@ -84,6 +84,19 @@ export const SERENITY_MOCK_PROJECT_ID = 'b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e';
 // irrelevant to its use here as a UM workspace id metered via `__quota`.
 export const SERENITY_ORG_PARENT_WS_ID = SERENITY_MOCK_PROJECT_ID;
 
+// ── Enterprise (non-trial) org member ──
+// A plain ORG_1 member with no TrialUser row — the population the prompt-library
+// authorship columns resolve. Its identifiers mirror a real spacecat session JWT:
+// the id is an IMS GUID that appears as BOTH `sub` and `email` (the auth service
+// puts the user id, not the address, in `email`), while the real address is carried
+// only by `preferred_username` / `trial_email`. Deliberately NOT seeded into
+// trial-users.js — a TrialUser row would resolve it via the trial branch and the
+// self-resolution path under test would never be reached.
+export const ENTERPRISE_USER_ID = 'C0FFEE0011223344AABBCCDD@1122334455667788990011.e';
+export const ENTERPRISE_USER_EMAIL = 'enterprise-member@example.com';
+export const ENTERPRISE_USER_FIRST_NAME = 'Enterprise';
+export const ENTERPRISE_USER_LAST_NAME = 'Member';
+
 // ── FACS state-layer managers (hybrid-model §8.3) ──
 // The brandManager persona holds state-layer `llmo/can_manage_users` on
 // MANAGED_BRAND_ID only (seeded in facs-access-mappings.js). It has an EMPTY

@@ -96,6 +96,18 @@ function EntitlementsController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
+   * Resolves the acting identity for audit-trail logging. For most auth paths
+   * `profile.email` carries the IMS user GUID (see access-control-util.js);
+   * falls back to the profile name and finally to 'system' when unauthenticated.
+   * @param {object} context - Context of the request.
+   * @returns {string} The acting identity.
+   */
+  const getActor = (context) => {
+    const profile = context.attributes?.authInfo?.getProfile?.();
+    return profile?.email || profile?.name || 'system';
+  };
+
+  /**
    * Gets entitlements by organization ID.
    * @param {object} context - Context of the request.
    * @returns {Promise<Response>} Array of entitlements response.
@@ -254,10 +266,72 @@ function EntitlementsController(ctx) {
     }
   };
 
+  /**
+   * Updates the tier of an existing entitlement for an organization.
+   *
+   * Unlike `createEntitlement`, this does NOT go through `TierClient`. It fetches
+   * the existing entitlement entity for (organization, productCode), validates the
+   * requested tier from the payload, sets it directly on the entity, and saves.
+   *
+   * S2S-admin-only (`hasS2SAdminAccess()`) — regular IMS/JWT admins are not
+   * allowed. Not exposed to S2S capability consumers either (listed in
+   * `INTERNAL_ROUTES`). Emits an audit-trail log line recording who performed
+   * the change and for which IMS org.
+   *
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Updated entitlement response.
+   */
+  const patchEntitlement = async (context) => {
+    if (!accessControlUtil.hasS2SAdminAccess()) {
+      return forbidden('Unauthorized');
+    }
+    const { organizationId } = context.params;
+    const { productCode, tier } = context.data || {};
+
+    if (!isValidUUID(organizationId)) {
+      return badRequest('Organization ID required');
+    }
+    if (typeof productCode !== 'string' || !VALID_PRODUCT_CODES.has(productCode)) {
+      return badRequest(`Invalid product code. Must be one of: ${[...VALID_PRODUCT_CODES].join(', ')}`);
+    }
+    if (typeof tier !== 'string' || !Object.values(EntitlementModel.TIERS).includes(tier)) {
+      return badRequest(`Invalid tier. Must be one of: ${Object.values(EntitlementModel.TIERS).join(', ')}`);
+    }
+
+    try {
+      const organization = await Organization.findById(organizationId);
+      if (!organization) {
+        return notFound('Organization not found');
+      }
+
+      const entitlements = await Entitlement.allByOrganizationId(organizationId);
+      const entitlement = entitlements.find((e) => e.getProductCode() === productCode);
+      if (!entitlement) {
+        return notFound(`No ${productCode} entitlement found for organization ${organizationId}`);
+      }
+
+      const actor = getActor(context);
+      const imsOrgId = organization.getImsOrgId?.();
+      const previousTier = entitlement.getTier();
+
+      entitlement.setTier(tier);
+      entitlement.setUpdatedBy(actor);
+      await entitlement.save();
+
+      context.log.info(`[entitlement-tier-update] entitlement=${entitlement.getId()} productCode=${productCode} organizationId=${organizationId} imsOrgId=${imsOrgId} tier ${previousTier} -> ${tier} by actor=${actor}`);
+
+      return ok(EntitlementDto.toJSON(entitlement));
+    } catch (e) {
+      context.log.error(`Error updating entitlement for organization ${organizationId}: ${e.message}`);
+      return internalServerError('Failed to update entitlement');
+    }
+  };
+
   return {
     getByOrganizationID,
     createEntitlement,
     createSiteEntitlement,
+    patchEntitlement,
   };
 }
 

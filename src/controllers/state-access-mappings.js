@@ -25,6 +25,7 @@ import routeFacsCapabilities, { PRODUCTS_CAPABILITIES } from '../routes/facs-cap
 import {
   createFacsAccessMappings,
   getFacsAccessMappingById,
+  getResourceImsOrgId,
   insertFacsAccessMappingAuditEvent,
   listFacsAccessMappings,
   listFacsAccessMappingHistory,
@@ -454,6 +455,47 @@ function StateAccessMappingsController(context) {
   }
 
   /**
+   * Constrains an internal admin CREATE to resources that belong to the
+   * caller's own org. An internal admin is a platform-operator bypass
+   * (`callerHasFacsManageUsers` treats `isAdmin()` as org-wide authority), so
+   * without this an admin could author a binding on ANY org's resource — the
+   * mapping row is stamped with the caller's org, but `resourceId` is
+   * caller-supplied and otherwise unchecked. We resolve the resource's owning
+   * org and require it to equal the caller's.
+   *
+   * Non-admin callers return `null` here — their scope is enforced by
+   * `gateManager` (they must hold `can_manage_users`). PATCH / DELETE need no
+   * equivalent: those operate on an existing row fetched scoped to the caller's
+   * `imsOrgId` (the RPC filters on `ims_org_id`), so an admin can only mutate
+   * rows already in their own org.
+   *
+   * Fail-closed: an unknown resource or an unresolvable owning org is denied.
+   *
+   * @param {object} ctx
+   * @param {object} args
+   * @param {string} args.imsOrgId      Caller's canonical org id.
+   * @param {string} args.resourceType  'site' | 'brand'.
+   * @param {string} args.resourceId
+   * @returns {Promise<Response|null>} `forbidden` when an admin targets a
+   *   resource outside their org; `null` when allowed.
+   */
+  async function requireAdminResourceInOrg(ctx, { imsOrgId, resourceType, resourceId }) {
+    if (!ctx.attributes?.authInfo?.isAdmin?.()) {
+      return null;
+    }
+    const { postgrestClient } = ctx.dataAccess.services;
+    const resourceImsOrgId = normalizeImsOrgId(
+      await getResourceImsOrgId(postgrestClient, { resourceType, resourceId }),
+    );
+    if (!resourceImsOrgId || resourceImsOrgId !== imsOrgId) {
+      return forbidden(
+        'Internal admins may only manage access mappings for resources in their own organization',
+      );
+    }
+    return null;
+  }
+
+  /**
    * Read-scope rule for list / history (hybrid-model §3, mac-state-layer):
    * **org-wide reads admit FACS-layer `can_manage_users` only**. An org-wide
    * manager reads anything in the org; a state-layer manager must scope the read
@@ -526,6 +568,139 @@ function StateAccessMappingsController(context) {
         },
         'Failed to write FACS access-mapping audit event (mapping operation succeeded)',
       );
+    }
+  }
+
+  /**
+   * Persists ONE subject↔resource binding and returns the HTTP response —
+   * shared by `createMapping` (customer manager flow) and `adminCreateMapping`
+   * (admin backend flow). The caller owns ALL authorization + validation before
+   * calling this; here we only insert (or, on an active duplicate,
+   * upsert-overwrite) and emit the audit event.
+   *
+   * Upsert semantics: an active duplicate (same subject + resource + org +
+   * product) has its `granted_capabilities` overwritten with `capabilitiesToStore`
+   * and returns `200`; a fresh insert returns `201`. A rare revoke race between
+   * the insert conflict and the overwrite surfaces as `409`.
+   *
+   * @param {object} ctx
+   * @param {object} args
+   * @param {string} args.imsOrgId               Canonical org id.
+   * @param {string} args.product                Uppercase product code.
+   * @param {'user'|'org'} args.subjectType
+   * @param {string} args.subjectId
+   * @param {string} args.resourceType
+   * @param {string} args.resourceId
+   * @param {string[]} args.capabilitiesToStore  Validated, deduped, can_view-baselined.
+   * @param {string|null} args.createdBy         Actor recorded as created_by / updated_by.
+   * @returns {Promise<Response>}
+   */
+  async function persistMappingBinding(ctx, {
+    imsOrgId,
+    product,
+    subjectType,
+    subjectId,
+    resourceType,
+    resourceId,
+    capabilitiesToStore,
+    createdBy,
+  }) {
+    try {
+      const { postgrestClient } = ctx.dataAccess.services;
+      const result = await createFacsAccessMappings(postgrestClient, {
+        imsOrgId,
+        product,
+        resourceType,
+        resourceId,
+        grantedCapabilities: capabilitiesToStore,
+        subjects: [{ type: subjectType, id: subjectId }],
+        createdBy,
+      });
+      if (result.created.length === 0 && result.skipped.length > 0) {
+        // Active duplicate already exists — upsert semantics: overwrite the
+        // existing binding's capabilities with the request's set rather than
+        // rejecting the call. Look the row up by its natural key, then replace
+        // its capabilities via the same capability-edit RPC PATCH uses.
+        const existing = await listFacsAccessMappings(postgrestClient, {
+          imsOrgId,
+          product,
+          subjectType,
+          subjectId,
+          resourceType,
+          resourceId,
+          limit: 1,
+        });
+        const conflictId = existing[0]?.id ?? null;
+        // Defensive: the active row vanished (revoked) between the insert
+        // conflict and this read. Nothing to update — surface the conflict.
+        if (!conflictId) {
+          return createResponse(
+            {
+              message: 'Active access mapping already exists for this subject and resource',
+              id: null,
+            },
+            409,
+          );
+        }
+        const updated = await updateFacsAccessMappingCapabilities(postgrestClient, {
+          id: conflictId,
+          imsOrgId,
+          product,
+          grantedCapabilities: capabilitiesToStore,
+          updatedBy: createdBy,
+        });
+        if (!updated) {
+          // Same race as above, observed one layer down (the RPC filters on
+          // `revoked_at IS NULL`). Surface the conflict rather than a 500.
+          return createResponse(
+            {
+              message: 'Active access mapping already exists for this subject and resource',
+              id: conflictId,
+            },
+            409,
+          );
+        }
+        await emitAuditEvent(ctx, {
+          imsOrgId,
+          product,
+          operation: 'update_capabilities',
+          outcome: 'allow',
+          statusCode: 200,
+          mappingId: updated.id,
+          bindingSubjectType: updated.subject_type,
+          bindingSubjectId: updated.subject_id,
+          resourceType: updated.resource_type,
+          resourceId: updated.resource_id,
+          grantedCapabilities: capabilitiesToStore,
+        });
+        return ok(toMappingDto(updated));
+      }
+      const createdRow = result.created[0];
+      await emitAuditEvent(ctx, {
+        imsOrgId,
+        product,
+        operation: 'create',
+        outcome: 'allow',
+        statusCode: 201,
+        mappingId: createdRow.id,
+        bindingSubjectType: subjectType,
+        bindingSubjectId: subjectId,
+        resourceType,
+        resourceId,
+        // Audit the capabilities actually persisted (incl. the auto-injected
+        // can_view baseline), not the raw request input.
+        grantedCapabilities: capabilitiesToStore,
+      });
+      return createResponse(toMappingDto(createdRow), 201);
+    } catch (error) {
+      // Log the full error (stack + any nested cause), not just the message:
+      // this shared helper fails for several reasons (PostgREST drop, constraint
+      // violation, unexpected null) and the stack is what pins the call site.
+      log.error(
+        { tag: 'state-access-mappings', err: error },
+        'Failed to create state-layer access mapping',
+      );
+      return internalServerError('Failed to create access mapping');
     }
   }
 
@@ -695,6 +870,11 @@ function StateAccessMappingsController(context) {
         `Caller may only manage resources where they hold ${product.toLowerCase()}/can_manage_users`,
       );
     }
+    // Internal admins may only create bindings for resources in their own org.
+    const adminScope = await requireAdminResourceInOrg(ctx, { imsOrgId, resourceType, resourceId });
+    if (adminScope) {
+      return adminScope;
+    }
 
     const capErr = validateGrantedCapabilities(grantedCapabilities, product);
     if (capErr) {
@@ -712,62 +892,147 @@ function StateAccessMappingsController(context) {
       product,
     );
 
-    try {
-      const { postgrestClient } = ctx.dataAccess.services;
-      const result = await createFacsAccessMappings(postgrestClient, {
-        imsOrgId,
-        product,
-        resourceType,
-        resourceId,
-        grantedCapabilities: capabilitiesToStore,
-        subjects: [{ type: subjectType, id: subjectId }],
-        createdBy,
-      });
-      if (result.created.length === 0 && result.skipped.length > 0) {
-        // Active duplicate already exists. Surface the existing row id for
-        // idempotent client handling — look it up by the natural key.
-        const existing = await listFacsAccessMappings(postgrestClient, {
-          imsOrgId,
-          product,
-          subjectType,
-          subjectId,
-          resourceType,
-          resourceId,
-          limit: 1,
-        });
-        const conflictId = existing[0]?.id ?? null;
-        return createResponse(
-          {
-            message: 'Active access mapping already exists for this subject and resource',
-            id: conflictId,
-          },
-          409,
-        );
-      }
-      const createdRow = result.created[0];
-      await emitAuditEvent(ctx, {
-        imsOrgId,
-        product,
-        operation: 'create',
-        outcome: 'allow',
-        statusCode: 201,
-        mappingId: createdRow.id,
-        bindingSubjectType: subjectType,
-        bindingSubjectId: subjectId,
-        resourceType,
-        resourceId,
-        // Audit the capabilities actually persisted (incl. the auto-injected
-        // can_view baseline), not the raw request input.
-        grantedCapabilities: capabilitiesToStore,
-      });
-      return createResponse(toMappingDto(createdRow), 201);
-    } catch (error) {
-      log.error(
-        { tag: 'state-access-mappings', err: error.message },
-        'Failed to create state-layer access mapping',
-      );
-      return internalServerError('Failed to create access mapping');
+    return persistMappingBinding(ctx, {
+      imsOrgId,
+      product,
+      subjectType,
+      subjectId,
+      resourceType,
+      resourceId,
+      capabilitiesToStore,
+      createdBy,
+    });
+  }
+
+  /**
+   * POST /state/access-mappings/admin — admin-only backend provisioning of a
+   * single binding. Unlike `createMapping`, EVERYTHING that scopes the binding
+   * is taken from the request body — `imsOrgId`, `product`, `subjectType`,
+   * `subjectId`, `resourceType`, `resourceId`, `grantedCapabilities`. Nothing is
+   * derived from `authInfo` except the actor id recorded in the audit trail.
+   *
+   * This is the backend path for provisioning a narrow, resource-scoped binding
+   * on behalf of a trial customer in THEIR org — a case the customer-facing
+   * `createMapping` cannot serve because it (a) derives the org from the caller's
+   * JWT tenant, (b) derives the product from the `x-product` header, (c) enforces
+   * the hybrid manager gate (`gateManager`), and (d) restricts internal admins to
+   * resources in their own org (`requireAdminResourceInOrg`). All four are
+   * intentionally bypassed here; the sole gate is `isAdmin()`.
+   *
+   * Body: { imsOrgId, product, subjectType, subjectId, resourceType, resourceId,
+   *         grantedCapabilities }. Capabilities are validated against the
+   *         product's catalog; the upsert + `can_view`-baseline semantics match
+   *         `createMapping`. An admin caller is trusted to grant any catalog
+   *         capability (including `can_manage_users`), so there is no
+   *         `requireFacsManageToGrant` gate here.
+   */
+  async function adminCreateMapping(ctx) {
+    // Sole authorization gate: internal admin. No FACS/manager evaluation and no
+    // org/product derivation — this is a trusted backend provisioning surface.
+    if (!ctx.attributes?.authInfo?.isAdmin?.()) {
+      return forbidden('Admin access required');
     }
+    const guard = requirePostgrestForFacsMappings(ctx);
+    if (guard) {
+      return guard;
+    }
+
+    const { data } = ctx;
+    if (!data || typeof data !== 'object') {
+      return badRequest('request body is required');
+    }
+    const {
+      imsOrgId: rawImsOrgId,
+      product: rawProduct,
+      subjectType,
+      subjectId,
+      resourceType,
+      resourceId,
+      grantedCapabilities,
+    } = data;
+
+    // Product comes from the body (NOT the x-product header). Must reference a
+    // known product so the capability-catalog + resource-type checks below have
+    // a valid basis.
+    if (!hasText(rawProduct)) {
+      return badRequest('product is required');
+    }
+    const product = rawProduct.toUpperCase();
+    if (!routeFacsCapabilities.PRODUCTS_ROUTES[product]) {
+      return badRequest('product must reference a known product');
+    }
+
+    // IMS org comes from the body. Normalize to the canonical `<ident>@<authSrc>`
+    // form so the stored row and the org-subject check below use the same shape
+    // as the rest of the table.
+    if (!hasText(rawImsOrgId)) {
+      return badRequest('imsOrgId is required');
+    }
+    const imsOrgId = normalizeImsOrgId(rawImsOrgId);
+
+    if (!ALLOWED_SUBJECT_TYPES.has(subjectType)) {
+      return badRequest("subjectType must be 'user' or 'org'");
+    }
+    if (!hasText(subjectId)) {
+      return badRequest('subjectId is required');
+    }
+    if (subjectType === 'user' && !subjectId.includes('@')) {
+      return badRequest("subjectId for type 'user' must be canonical '<ident>@<authSrc>'");
+    }
+    // An org subject binds the org to its OWN resources; the only legal org
+    // subjectId is the payload's imsOrgId. Normalize it the same way as imsOrgId
+    // so a caller may send both bare (e.g. 'FOO' / 'FOO') or both canonical — the
+    // canonical form is what gets compared and persisted.
+    const normalizedSubjectId = subjectType === 'org'
+      ? normalizeImsOrgId(subjectId)
+      : subjectId;
+    if (subjectType === 'org' && normalizedSubjectId !== imsOrgId) {
+      return badRequest("subjectId for type 'org' must equal the payload imsOrgId");
+    }
+
+    const productResourceTypes = getProductResourceTypes(product);
+    if (!productResourceTypes.includes(resourceType)) {
+      return badRequest(
+        `resourceType must be one of [${productResourceTypes.join(', ')}] for product ${product}`,
+      );
+    }
+    if (!hasText(resourceId)) {
+      return badRequest('resourceId is required');
+    }
+    // The only ReBAC resource types (brand, site) are UUID-keyed. Unlike
+    // createMapping, this endpoint performs no DB-backed resource check
+    // (canActOnResource / requireAdminResourceInOrg are bypassed), so validate
+    // the format here to avoid writing a dangling reference into the table.
+    if (!isValidUUID(resourceId)) {
+      return badRequest('resourceId must be a valid UUID');
+    }
+
+    // No requireFacsManageToGrant gate: unlike the customer flow, an internal
+    // admin is trusted to grant any capability in the product catalog (incl.
+    // can_manage_users). Catalog membership is still enforced below.
+    const capErr = validateGrantedCapabilities(grantedCapabilities, product);
+    if (capErr) {
+      return badRequest(capErr);
+    }
+    // De-duplicate, then guarantee the baseline `<product>/can_view` (see
+    // createMapping).
+    const capabilitiesToStore = ensureBaselineCanView(
+      [...new Set(grantedCapabilities)],
+      product,
+    );
+
+    return persistMappingBinding(ctx, {
+      imsOrgId,
+      product,
+      subjectType,
+      subjectId: normalizedSubjectId,
+      resourceType,
+      resourceId,
+      capabilitiesToStore,
+      // Audit trail only: record the real admin/service caller. No mapping
+      // access-scope data is derived from authInfo.
+      createdBy: resolveCallerUserIdent(ctx),
+    });
   }
 
   /**
@@ -1196,6 +1461,7 @@ function StateAccessMappingsController(context) {
     listMappings,
     listHistory,
     createMapping,
+    adminCreateMapping,
     patchMapping,
     deleteMapping,
     getProductCapabilities,

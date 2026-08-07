@@ -115,9 +115,11 @@ import AiVisibilityController from './controllers/ai-visibility.js';
 import StateAccessMappingsController from './controllers/state-access-mappings.js';
 import AgenticCategoriesController from './controllers/agentic-categories.js';
 import AgenticPageTypesController from './controllers/agentic-page-types.js';
+import AuditPolicyController from './controllers/audit-policy.js';
 import SerenityController from './controllers/serenity.js';
 import ElementsController from './controllers/elements.js';
 import ProxyController from './controllers/proxy.js';
+import OnboardingController from './controllers/onboarding.js';
 import GitHubWebhookHmacHandler from './support/github-webhook-hmac-handler.js';
 import AsoOverlayKeyHandler from './support/aso-overlay-key-handler.js';
 import ApiKeyImsHandler from './support/api-key-ims-handler.js';
@@ -295,10 +297,12 @@ async function run(request, context) {
     const stateAccessMappingsController = StateAccessMappingsController(context);
     const agenticCategoriesController = AgenticCategoriesController();
     const agenticPageTypesController = AgenticPageTypesController();
+    const auditPolicyController = AuditPolicyController();
     const serenityController = SerenityController(context, log, context.env);
     const elementsController = ElementsController(context, log, context.env);
     const proxyController = ProxyController();
     const taskManagementController = TaskManagementController(context);
+    const onboardingController = OnboardingController(context, log, context.env);
     const promptSuggestionSchedulesController = PromptSuggestionSchedulesController(context);
 
     const routeHandlers = getRouteHandlers(
@@ -366,7 +370,9 @@ async function run(request, context) {
       elementsController,
       proxyController,
       taskManagementController,
+      onboardingController,
       redirectsController,
+      auditPolicyController,
       promptSuggestionSchedulesController,
     );
 

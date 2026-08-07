@@ -15,12 +15,18 @@
 /**
  * Dynamic (just-in-time) Semrush AI resource allocation — the pure allocator.
  *
- * Replaces the up-front flat carve: before a metered op, read the sub-workspace's real headroom and
- * transfer only the delta from the parent; hand surplus back on delete. Semrush model,
- * live-verified 2026-07-02 ("Gate 0"): a transfer is ABSOLUTE (sets `total`) + idempotent; a carve
- * decrements the MASTER's `total`; `free = total − used`; over-carving the master → terminal
- * `422 "insufficient available units in subscription"`; a transfer briefly flips the child off
- * `created` and may `422 "workspace not ready"` transiently even past `status:created`.
+ * Sizes a sub-workspace on demand: before a metered op, read its real headroom and transfer only
+ * the delta from the parent; hand surplus back on delete. This is the ONLY thing that ever moves
+ * resources onto a child — the lifecycle creates one with no allocation at all
+ * (`workspace-lifecycle.js`) — and it runs only when `SERENITY_DYNAMIC_ALLOCATION` is ON, which it
+ * is not in any deployed environment today. It stands ready for a tenant whose parent workspace
+ * enforces limits (`limits_enabled: true`), where a child would genuinely need units.
+ *
+ * Semrush model, live-verified 2026-07-02 ("Gate 0"): a transfer is ABSOLUTE (sets `total`) and
+ * idempotent; a carve decrements the MASTER's `total`; `free = total − used`; over-carving the
+ * master → terminal `422 "insufficient available units in subscription"`; a transfer briefly flips
+ * the child off `created` and may `422 "workspace not ready"` transiently even past
+ * `status:created`.
  *
  * Two pure, transport-injected entry points sit between the handlers and the transport:
  * - {@link ensureAiHeadroom} BEFORE a metered op — reads child headroom, tops up in grace-sized
@@ -44,6 +50,9 @@ import {
   recordHeadroomCheck, recordTopUpLatency, recordPoolFreeRatio, recordRejection,
   recordNotReadyRetry, recordReleaseOutcome,
 } from './allocation-metrics.js';
+import { alertPoolFreeThreshold, alertQuotaRejection } from './quota-alerts.js';
+
+/** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */
 
 /** @typedef {{ used: number, drafted: number, total: number }} AiDim */
 /** @typedef {{ projects: AiDim, prompts: AiDim }} AiTotals */
@@ -55,12 +64,42 @@ import {
  * @property {number} intervalMs
  * @property {(ms: number) => Promise<void>} sleep
  */
+/**
+ * serenity-docs#72 §5 alert payload context, threaded down from the request (opt-in — most
+ * callers still omit it; see quota-alerts.js).
+ * @typedef {object} AlertContext
+ * @property {string | null | undefined} [orgId]
+ * @property {string | null | undefined} [brandId]
+ * @property {object} env
+ */
 
 /** Grace-sized top-up blocks: projects one-at-a-time (checked at publish), prompts in bulk. */
 export const PROJECT_BLOCK = 1;
 export const PROMPT_BLOCK = 100;
 /** @type {Blocks} */
 export const DEFAULT_BLOCKS = Object.freeze({ projects: PROJECT_BLOCK, prompts: PROMPT_BLOCK });
+
+/**
+ * PLACEHOLDER per-brand ceiling (LLMO-6190 item 2 — flag-flip readiness). `ensureAiHeadroom`'s
+ * `ceiling` param throws `brandAiLimit` (409) once a top-up would push a dim's `total` past the
+ * cap, but NO product/sizing number exists yet for what a brand's real ceiling should be — an
+ * explicit open item in the original design doc. This default is threaded through
+ * {@link createHeadroomGuard} (dynamic-allocation-active.js) so the flag-flip readiness criterion
+ * "a per-brand ceiling in force" is satisfied, but it is deliberately set ASTRONOMICALLY high — far
+ * above any org's whole Semrush pool — so it is *effectively non-enforcing*: the org pool
+ * exhausts (transfer's authoritative 422, mapped to `orgPoolExhausted`) long before any brand's
+ * per-dim `total` approaches these numbers. A brand cannot be spuriously 409'd by this fabricated
+ * value; it exists so the enforcement PATH is wired and covered by a test, not to cap anyone today.
+ *
+ * REPLACE with a real product/sizing number (and likely real per-brand configurability — a Brand
+ * field or config source, neither of which exists today) once product specifies one; don't invent
+ * that data-model change speculatively here.
+ * @type {Blocks}
+ */
+export const DEFAULT_BRAND_AI_CEILING = Object.freeze({
+  projects: 1_000_000,
+  prompts: 1_000_000_000,
+});
 
 /** The AI dimensions this allocator moves. */
 const DIMS = Object.freeze(/** @type {const} */ (['projects', 'prompts']));
@@ -200,14 +239,16 @@ function workspaceBusy() {
  * the transient `422 "workspace not ready"` with backoff; maps terminal pool exhaustion to
  * `orgPoolExhausted`. Idempotent, so retry after a poll timeout is safe (the poll's 504 propagates;
  * the controller maps it to a retryable `503`).
- * @param {any} transport
+ * @param {SerenityTransport} transport
  * @param {string} workspaceId
  * @param {{ projects: number, prompts: number }} totals
  * @param {PollOpts} poll
  * @param {any} [log]
+ * @param {AlertContext | null} [alertContext] - when supplied (and `alertContext.env`'s kill-switch
+ *   is on), fires the §5 hard-exhaustion Slack alert on a terminal pool-exhausted 422.
  * @returns {Promise<void>}
  */
-async function transferAndSettle(transport, workspaceId, totals, poll, log) {
+async function transferAndSettle(transport, workspaceId, totals, poll, log, alertContext = null) {
   const startedAt = Date.now();
   try {
     for (let attempt = 0; attempt <= NOT_READY_RETRIES; attempt += 1) {
@@ -221,6 +262,17 @@ async function transferAndSettle(transport, workspaceId, totals, poll, log) {
         if (isPoolExhausted(e)) {
           log?.warn?.('SERENITY_ALLOC org pool exhausted on transfer', { workspaceId });
           recordRejection('orgPoolExhausted'); // dashboard-only — expected under normal pool load
+          if (alertContext) {
+            // serenity-docs#72 §5: hard-exhaustion alert (case 2) — distinct from the advisory
+            // pool-free early-warning above, which fires BEFORE the pool is actually exhausted.
+            // eslint-disable-next-line no-await-in-loop
+            await alertQuotaRejection({
+              orgId: alertContext.orgId,
+              brandId: alertContext.brandId,
+              workspaceId,
+              caseType: 'orgPoolExhausted',
+            }, alertContext.env, log);
+          }
           throw orgPoolExhausted();
         }
         if (!isWorkspaceNotReady(e)) {
@@ -256,13 +308,15 @@ async function transferAndSettle(transport, workspaceId, totals, poll, log) {
  * finds it settled. Terminal pool exhaustion still maps to `orgPoolExhausted` (409); anything else
  * propagates for the controller to map. (The multi-second settle is a hot-path defect, not a tuning
  * knob — shrinking the poll doesn't fix it, removing it from the request does.)
- * @param {any} transport
+ * @param {SerenityTransport} transport
  * @param {string} workspaceId
  * @param {{ projects: number, prompts: number }} totals
  * @param {any} [log]
+ * @param {AlertContext | null} [alertContext] - when supplied (and `alertContext.env`'s kill-switch
+ *   is on), fires the §5 hard-exhaustion Slack alert on a terminal pool-exhausted 422.
  * @returns {Promise<void>}
  */
-async function transferOnce(transport, workspaceId, totals, log) {
+async function transferOnce(transport, workspaceId, totals, log, alertContext = null) {
   const startedAt = Date.now();
   try {
     await transport.transferWorkspaceResources(workspaceId, { ai: totals });
@@ -270,6 +324,14 @@ async function transferOnce(transport, workspaceId, totals, log) {
     if (isPoolExhausted(e)) {
       log?.warn?.('SERENITY_ALLOC org pool exhausted on transfer', { workspaceId });
       recordRejection('orgPoolExhausted'); // dashboard-only — expected under normal pool load
+      if (alertContext) {
+        await alertQuotaRejection({
+          orgId: alertContext.orgId,
+          brandId: alertContext.brandId,
+          workspaceId,
+          caseType: 'orgPoolExhausted',
+        }, alertContext.env, log);
+      }
       throw orgPoolExhausted();
     }
     if (isWorkspaceNotReady(e)) {
@@ -291,7 +353,7 @@ async function transferOnce(transport, workspaceId, totals, log) {
  * Ensure `subWorkspaceId` has headroom for `need` before a metered op. Hot path (already covered)
  * does a single read and returns without a transfer. Otherwise tops up in whole blocks, gating on
  * the per-brand ceiling and the org pool (read from the parent workspace's own `/resources`).
- * @param {any} transport
+ * @param {SerenityTransport} transport
  * @param {object} opts
  * @param {string} opts.subWorkspaceId the sub-workspace being written to
  * @param {string} opts.parentWorkspaceId the parent/master workspace (units source; the org pool)
@@ -304,12 +366,20 @@ async function transferOnce(transport, workspaceId, totals, log) {
  *   (stale-low). Sizing from `used + drafted` is staleness-immune, so a just-drafted batch has the
  *   quota it needs the instant it publishes (plan §21). Prompts only — a project has
  *   no draft-then-publish metering seam.
+ * @param {object | null} [opts.env] request env — when supplied, feeds the org-pool early-warning
+ *   Slack alert (serenity-docs#72 §5) off this function's own advisory pool-free read; omitted by
+ *   most callers today (the alert is opt-in via `SERENITY_QUOTA_ALERTS_ENABLED`, and threading
+ *   `env` this deep is not yet done everywhere — see quota-alerts.js).
+ * @param {string | null} [opts.orgId] IMS org id, for the alert payload only.
+ * @param {string | null} [opts.brandId] brand id, for the alert payload only (also gates the hard-
+ *   exhaustion §5 alert on `brandAiLimit`/`orgPoolExhausted` alongside `env`).
  * @param {any} [log]
  * @returns {Promise<{ toppedUp: boolean, newTotal: { projects: number, prompts: number } }>}
  */
 export async function ensureAiHeadroom(transport, {
   subWorkspaceId, parentWorkspaceId, need,
   ceiling = {}, blocks = DEFAULT_BLOCKS, includeDrafted = false,
+  env, orgId, brandId,
 }, log) {
   // Fail LOUD on a missing sub-/parent-workspace id: an empty id is a fronting/wiring bug (the
   // caller failed to thread auth.workspaceId / auth.parentWorkspaceId), and silently reading `''`
@@ -332,6 +402,12 @@ export async function ensureAiHeadroom(transport, {
           subWorkspaceId, dim, target, cap,
         });
         recordRejection('brandAiLimit'); // dashboard-only — expected under normal pool load
+        if (env) {
+          // eslint-disable-next-line no-await-in-loop
+          await alertQuotaRejection({
+            orgId, brandId, workspaceId: subWorkspaceId, caseType: 'brandAiLimit', dimension: dim,
+          }, env, log);
+        }
         throw brandAiLimit();
       }
       newTotal[dim] = target;
@@ -361,12 +437,22 @@ export async function ensureAiHeadroom(transport, {
         subWorkspaceId, dim, free, delta,
       });
     }
+    // serenity-docs#72 §5 early-warning: gives this ALREADY-performed advisory read a consumer —
+    // no new transport call. Fire-and-forget; a no-op unless the caller threaded `env` (opt-in,
+    // see the JSDoc above) and the kill-switch is on.
+    if (env) {
+      // eslint-disable-next-line no-await-in-loop
+      await alertPoolFreeThreshold({
+        orgId, parentWorkspaceId, dimension: dim, free, total: master[dim].total,
+      }, env, log);
+    }
   }
 
   // FAIL-FAST: one transfer attempt, no settle poll (serenity-docs#22). A still-settling child
   // returns a retryable 503 immediately rather than blocking the request on a poll.
   log?.info?.('SERENITY_ALLOC top-up', { subWorkspaceId, newTotal });
-  await transferOnce(transport, subWorkspaceId, newTotal, log);
+  const alertContext = env ? { orgId, brandId, env } : null;
+  await transferOnce(transport, subWorkspaceId, newTotal, log, alertContext);
   return { toppedUp: true, newTotal };
 }
 
@@ -384,7 +470,7 @@ export async function ensureAiHeadroom(transport, {
  * still needed"; the earlier "async/reconciler path" framing is superseded by this inline
  * best-effort decision. If/when a caller wires release into the delete / model-remove paths, keep
  * this same inline best-effort shape — do not introduce a queue or worker for it.
- * @param {any} transport
+ * @param {SerenityTransport} transport
  * @param {object} opts
  * @param {string} opts.subWorkspaceId
  * @param {Partial<Blocks>} [opts.floor] minimum `total` per dim to retain (default 0)

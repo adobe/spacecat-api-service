@@ -16,6 +16,8 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { resolveLocation } from './locations.js';
 
+/** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */
+
 /**
  * Shared helpers for the subworkspace path (serenity dual-mode). In subworkspace mode there
  * is no BrandSemrushProject mapping: a brand's markets are enumerated live
@@ -72,6 +74,40 @@ export function langOf(project) {
   return hasText(lang) ? String(lang).toLowerCase() : null;
 }
 
+/**
+ * A non-negative integer read of an upstream count field, or null when the
+ * value is unusable. Accepts a non-negative integer or its decimal-string echo
+ * ONLY — a `typeof` gate first, so falsy non-null shapes (`''`, `false`, `[]`)
+ * can never coerce to a fabricated 0.
+ * @param {unknown} raw
+ */
+function nonNegativeIntOf(raw) {
+  if (typeof raw !== 'number' && (typeof raw !== 'string' || !/^\d+$/.test(raw))) {
+    return null;
+  }
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 ? n : null;
+}
+
+/**
+ * The project's configured prompt count (`settings.ai.prompts_count`), or null
+ * when upstream reports no usable count.
+ */
+export function promptsCountOf(project) {
+  return nonNegativeIntOf(project?.settings?.ai?.prompts_count);
+}
+
+/**
+ * The number of AI models enabled on the project
+ * (`settings.ai.models_stats.models_count`), or null when upstream reports no
+ * usable value. Semrush meters prompt allocation per project as
+ * prompts × enabled models, so this is the second factor of a market's real
+ * (metered) usage — the product is deliberately left to consumers.
+ */
+export function modelsCountOf(project) {
+  return nonNegativeIntOf(project?.settings?.ai?.models_stats?.models_count);
+}
+
 // Deterministic ordering key for the duplicate-slice "oldest wins" rule. The
 // key is built from the IMMUTABLE `created_at` plus the (immutable) project id
 // ONLY — it deliberately does NOT fall back to `updated_at`. The v1 list view
@@ -93,8 +129,17 @@ function orderKey(project) {
  * elmo client binds, plus the additive `status`/`semrushProjectId` fields.
  * `createdAt`/`updatedAt` come from the project's own timestamps (also the key
  * used by the duplicate-race oldest-wins read, design §7).
+ * `promptsCount` is the project's configured prompt count
+ * (`settings.ai.prompts_count`), draft-faithful on this v1 read view (draft and
+ * live converge at rest because every ABV prompt write publishes); surfaced for
+ * the UI's cross-market usage summary and omitted when upstream reports no
+ * usable count. `modelsCount` (enabled AI models) is its metered-usage
+ * companion — a market's real allocation usage is promptsCount × modelsCount —
+ * with the same omit-when-unusable contract.
  */
 export function projectToSlice(project, brandId) {
+  const promptsCount = promptsCountOf(project);
+  const modelsCount = modelsCountOf(project);
   return {
     brandId,
     geoTargetId: geoOf(project),
@@ -109,6 +154,10 @@ export function projectToSlice(project, brandId) {
     // overview can show it. Echoed at the project's top level on the v1 read
     // view (the same field brand-urls re-sync reads back). Null when absent.
     domain: hasText(project?.domain) ? String(project.domain) : null,
+    // Omitted (not null) when absent/invalid — flat mode never carries the key,
+    // so subworkspace mode matches that contract for the no-count case.
+    ...(promptsCount === null ? {} : { promptsCount }),
+    ...(modelsCount === null ? {} : { modelsCount }),
   };
 }
 
@@ -116,6 +165,7 @@ export function projectToSlice(project, brandId) {
  * Lists a subworkspace's projects (one v1 GET) and maps each to a slice.
  * Projects whose slice cannot be resolved (no geo/lang) are dropped — they are
  * not addressable markets.
+ * @param {SerenityTransport} transport
  */
 export async function listMarkets(transport, workspaceId, brandId) {
   const listing = await transport.listProjects(workspaceId);
@@ -138,6 +188,7 @@ export function sliceKey(geoTargetId, languageCode) {
  * prompts, bulk-delete) use this to resolve every input's owning project from a
  * single upstream listing instead of one resolve per slice. Projects that don't
  * resolve to a (geo, lang) slice are skipped — they are not addressable markets.
+ * @param {SerenityTransport} transport
  */
 export async function buildSliceProjectMap(transport, workspaceId, log) {
   const listing = await transport.listProjects(workspaceId);
@@ -176,6 +227,7 @@ export async function buildSliceProjectMap(transport, workspaceId, log) {
  * matches the slice, the OLDEST (`created_at`) wins and an error-level alert
  * is logged. Returns the raw project (so callers get `id`, `publish_status`,
  * settings) or null when no project matches.
+ * @param {SerenityTransport} transport
  */
 export async function resolveProject(transport, workspaceId, geoTargetId, languageCode, log) {
   const listing = await transport.listProjects(workspaceId);

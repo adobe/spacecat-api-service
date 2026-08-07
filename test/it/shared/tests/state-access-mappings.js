@@ -38,7 +38,15 @@ function expectIsoTimestamp(value, label = 'timestamp') {
 // Literal UUIDs below identify the ReBAC resources being granted.
 const BRAND_RESOURCE_ID = 'b1111111-1111-4111-8111-111111111111';
 const BRAND_RESOURCE_ID_2 = 'b2222222-2222-4222-8222-222222222222';
+const BRAND_RESOURCE_ID_3 = 'b3333333-3333-4333-8333-333333333333';
 const SITE_RESOURCE_ID = '5a5a5a5a-5a5a-4a5a-8a5a-5a5a5a5a5a5a';
+
+// A trial customer's org, deliberately DIFFERENT from any test persona's tenant
+// so the admin-backend-create tests prove the org is taken from the payload
+// (not from the caller's JWT). `ims_org_id` is a plain text column with no FK,
+// so an org that owns no seeded resource is a valid target.
+const TRIAL_CUSTOMER_ORG = 'TRIAL-CUST-IT-ORG@AdobeOrg';
+const ADMIN_BASE = '/state/access-mappings/admin';
 
 // Canonical IMS user idents (subject_id for subject_type='user').
 const USER_SUBJECT = 'grantee123@AdobeID';
@@ -72,11 +80,18 @@ function expectMappingDto(m) {
  *
  * Exercises the full PostgREST round-trip for the hybrid-model state layer:
  * create / list / patch (including empty-to-remove-access) / history, plus
- * validation and the active-duplicate → 409 semantics. The `admin` persona is
- * used throughout because it is an
- * internal identity that bypasses `facsWrapper` — the controller logic and
- * the real `facs_access_mappings` table are what's under test here, not the
- * capability gate (covered by the facsWrapper unit suite).
+ * validation and the active-duplicate → upsert (overwrite) semantics.
+ *
+ * Persona split: **writes** (POST / PATCH / DELETE) use `facsManager` — a
+ * non-admin, org-wide FACS `can_manage_users` holder. Internal admins may
+ * CREATE only for resources that belong to their own org (`requireAdminResourceInOrg`),
+ * which these tests can't exercise without seeding real brand/site rows; a
+ * non-admin manager has no such resource-existence dependency, so it drives the
+ * write flow. **Reads** use `admin` (still permitted, and keeps admin-read
+ * coverage). Both personas share the same org, so rows written by one are
+ * visible to the other. The controller logic and the real `facs_access_mappings`
+ * table are what's under test here, not the capability gate (covered by the
+ * facsWrapper suite).
  *
  * @param {() => object} getHttpClient - Getter returning the initialized HTTP client
  * @param {() => Promise<void>} resetData - Truncates all data and re-seeds baseline
@@ -90,7 +105,7 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
 
       it('POST creates a user-scoped binding (201)', async () => {
         const http = getHttpClient();
-        const res = await http.admin.post(BASE, {
+        const res = await http.facsManager.post(BASE, {
           subjectType: 'user',
           subjectId: USER_SUBJECT,
           resourceType: 'brand',
@@ -131,22 +146,27 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
         expect(res.body.items[0].id).to.equal(created.id);
       });
 
-      it('POST a duplicate active binding returns 409 with the existing id', async () => {
+      it('POST a duplicate active binding upserts: overwrites capabilities (200)', async () => {
         const http = getHttpClient();
-        const res = await http.admin.post(BASE, {
+        const res = await http.facsManager.post(BASE, {
           subjectType: 'user',
           subjectId: USER_SUBJECT,
           resourceType: 'brand',
           resourceId: BRAND_RESOURCE_ID,
-          grantedCapabilities: ['llmo/can_view'],
+          // A distinct set from the original create (LLMO_CAPS). The upsert
+          // replaces the stored capabilities on the SAME row (same id); the
+          // baseline can_view is auto-injected.
+          grantedCapabilities: ['llmo/can_configure'],
         });
-        expect(res.status).to.equal(409);
+        expect(res.status).to.equal(200);
         expect(res.body.id).to.equal(created.id);
+        expect(res.body.grantedCapabilities)
+          .to.have.members(['llmo/can_configure', 'llmo/can_view']);
       });
 
       it('PATCH replaces the granted capabilities (200)', async () => {
         const http = getHttpClient();
-        const res = await http.admin.patch(`${BASE}/${created.id}`, {
+        const res = await http.facsManager.patch(`${BASE}/${created.id}`, {
           grantedCapabilities: LLMO_CAPS_UPDATED,
         });
         expect(res.status).to.equal(200);
@@ -165,7 +185,7 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
 
       it('PATCH with an empty array is rejected (400) — emptying is done via DELETE', async () => {
         const http = getHttpClient();
-        const res = await http.admin.patch(`${BASE}/${created.id}`, {
+        const res = await http.facsManager.patch(`${BASE}/${created.id}`, {
           grantedCapabilities: [],
         });
         expect(res.status).to.equal(400);
@@ -173,7 +193,7 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
 
       it('DELETE empties the granted capabilities (binding stays active, grants nothing)', async () => {
         const http = getHttpClient();
-        const res = await http.admin.delete(`${BASE}/${created.id}`);
+        const res = await http.facsManager.delete(`${BASE}/${created.id}`);
         expect(res.status).to.equal(200);
         expect(res.body.id).to.equal(created.id);
         expect(res.body.grantedCapabilities).to.be.an('array').with.lengthOf(0);
@@ -208,7 +228,7 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
 
       it('POST without can_view persists can_view alongside the requested capability', async () => {
         const http = getHttpClient();
-        const res = await http.admin.post(BASE, {
+        const res = await http.facsManager.post(BASE, {
           subjectType: 'user',
           subjectId: USER_SUBJECT,
           resourceType: 'brand',
@@ -241,7 +261,7 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
 
       it('POST org-scoped binding requires subjectId === caller org (403 otherwise)', async () => {
         const http = getHttpClient();
-        const res = await http.admin.post(BASE, {
+        const res = await http.facsManager.post(BASE, {
           subjectType: 'org',
           subjectId: 'SOMEOTHERORG@AdobeOrg',
           resourceType: 'brand',
@@ -255,7 +275,7 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
         const http = getHttpClient();
         // Derive the caller's canonical org id by reading it back off a
         // user-scoped create (robust to the normalizeImsOrgId rule).
-        const userRes = await http.admin.post(BASE, {
+        const userRes = await http.facsManager.post(BASE, {
           subjectType: 'user',
           subjectId: USER_SUBJECT,
           resourceType: 'brand',
@@ -265,7 +285,7 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
         expect(userRes.status).to.equal(201);
         const callerOrgId = userRes.body.imsOrgId;
 
-        const res = await http.admin.post(BASE, {
+        const res = await http.facsManager.post(BASE, {
           subjectType: 'org',
           subjectId: callerOrgId,
           resourceType: 'brand',
@@ -283,13 +303,13 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
 
       it('POST returns 400 when the body is missing', async () => {
         const http = getHttpClient();
-        const res = await http.admin.post(BASE, undefined);
+        const res = await http.facsManager.post(BASE, undefined);
         expect(res.status).to.equal(400);
       });
 
       it('POST returns 400 for an invalid subjectType', async () => {
         const http = getHttpClient();
-        const res = await http.admin.post(BASE, {
+        const res = await http.facsManager.post(BASE, {
           subjectType: 'group',
           subjectId: USER_SUBJECT,
           resourceType: 'brand',
@@ -301,7 +321,7 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
 
       it("POST returns 400 when a 'user' subjectId is not canonical (<ident>@<authSrc>)", async () => {
         const http = getHttpClient();
-        const res = await http.admin.post(BASE, {
+        const res = await http.facsManager.post(BASE, {
           subjectType: 'user',
           subjectId: 'no-at-sign',
           resourceType: 'brand',
@@ -313,7 +333,7 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
 
       it('POST returns 400 for a resourceType not valid for the product', async () => {
         const http = getHttpClient();
-        const res = await http.admin.post(BASE, {
+        const res = await http.facsManager.post(BASE, {
           subjectType: 'user',
           subjectId: USER_SUBJECT,
           resourceType: 'site', // not an LLMO resource type
@@ -325,7 +345,7 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
 
       it('POST returns 400 for a capability outside the product catalog', async () => {
         const http = getHttpClient();
-        const res = await http.admin.post(BASE, {
+        const res = await http.facsManager.post(BASE, {
           subjectType: 'user',
           subjectId: USER_SUBJECT,
           resourceType: 'brand',
@@ -337,7 +357,7 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
 
       it('POST returns 400 for a capability with the wrong product prefix', async () => {
         const http = getHttpClient();
-        const res = await http.admin.post(BASE, {
+        const res = await http.facsManager.post(BASE, {
           subjectType: 'user',
           subjectId: USER_SUBJECT,
           resourceType: 'brand',
@@ -349,7 +369,7 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
 
       it('POST returns 400 when x-product is absent / unknown', async () => {
         const http = getHttpClient();
-        const res = await http.admin.post(
+        const res = await http.facsManager.post(
           BASE,
           {
             subjectType: 'user',
@@ -371,7 +391,7 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
 
       it('PATCH returns 400 for an invalid UUID', async () => {
         const http = getHttpClient();
-        const res = await http.admin.patch(`${BASE}/not-a-uuid`, {
+        const res = await http.facsManager.patch(`${BASE}/not-a-uuid`, {
           grantedCapabilities: ['llmo/can_view'],
         });
         expect(res.status).to.equal(400);
@@ -379,10 +399,96 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
 
       it('PATCH returns 404 for an unknown id', async () => {
         const http = getHttpClient();
-        const res = await http.admin.patch(`${BASE}/${BRAND_RESOURCE_ID}`, {
+        const res = await http.facsManager.patch(`${BASE}/${BRAND_RESOURCE_ID}`, {
           grantedCapabilities: ['llmo/can_view'],
         });
         expect(res.status).to.equal(404);
+      });
+    });
+
+    describe('admin backend create (full payload, cross-org)', () => {
+      before(() => resetData());
+
+      it('403s for a non-admin caller (even a FACS manager)', async () => {
+        const http = getHttpClient();
+        const res = await http.facsManager.post(ADMIN_BASE, {
+          imsOrgId: TRIAL_CUSTOMER_ORG,
+          product: 'LLMO',
+          subjectType: 'user',
+          subjectId: USER_SUBJECT,
+          resourceType: 'brand',
+          resourceId: BRAND_RESOURCE_ID_3,
+          grantedCapabilities: ['llmo/can_view'],
+        });
+        expect(res.status).to.equal(403);
+      });
+
+      it('creates a binding scoped to the PAYLOAD org + product (201)', async () => {
+        const http = getHttpClient();
+        // The admin persona's tenant is ORG_1's IMS org and the default
+        // x-product for this route is ASO — both are ignored; the row is stamped
+        // with the payload's TRIAL_CUSTOMER_ORG / LLMO.
+        const res = await http.admin.post(ADMIN_BASE, {
+          imsOrgId: TRIAL_CUSTOMER_ORG,
+          product: 'LLMO',
+          subjectType: 'user',
+          subjectId: USER_SUBJECT,
+          resourceType: 'brand',
+          resourceId: BRAND_RESOURCE_ID_3,
+          grantedCapabilities: ['llmo/can_configure'],
+        });
+        expect(res.status).to.equal(201);
+        expectMappingDto(res.body);
+        expect(res.body.imsOrgId).to.equal(TRIAL_CUSTOMER_ORG);
+        expect(res.body.product).to.equal('LLMO');
+        expect(res.body.subjectId).to.equal(USER_SUBJECT);
+        expect(res.body.resourceId).to.equal(BRAND_RESOURCE_ID_3);
+        // can_view baseline is auto-injected alongside the requested capability.
+        expect(res.body.grantedCapabilities)
+          .to.have.members(['llmo/can_configure', 'llmo/can_view']);
+      });
+
+      it('upserts a duplicate for the same payload org/subject/resource (200)', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.post(ADMIN_BASE, {
+          imsOrgId: TRIAL_CUSTOMER_ORG,
+          product: 'LLMO',
+          subjectType: 'user',
+          subjectId: USER_SUBJECT,
+          resourceType: 'brand',
+          resourceId: BRAND_RESOURCE_ID_3,
+          grantedCapabilities: ['llmo/can_deploy'],
+        });
+        expect(res.status).to.equal(200);
+        expect(res.body.imsOrgId).to.equal(TRIAL_CUSTOMER_ORG);
+        expect(res.body.grantedCapabilities)
+          .to.have.members(['llmo/can_deploy', 'llmo/can_view']);
+      });
+
+      it('400s when the payload is missing product', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.post(ADMIN_BASE, {
+          imsOrgId: TRIAL_CUSTOMER_ORG,
+          subjectType: 'user',
+          subjectId: USER_SUBJECT,
+          resourceType: 'brand',
+          resourceId: BRAND_RESOURCE_ID_3,
+          grantedCapabilities: ['llmo/can_view'],
+        });
+        expect(res.status).to.equal(400);
+      });
+
+      it('400s when the payload is missing imsOrgId', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.post(ADMIN_BASE, {
+          product: 'LLMO',
+          subjectType: 'user',
+          subjectId: USER_SUBJECT,
+          resourceType: 'brand',
+          resourceId: BRAND_RESOURCE_ID_3,
+          grantedCapabilities: ['llmo/can_view'],
+        });
+        expect(res.status).to.equal(400);
       });
     });
 
@@ -401,7 +507,7 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
 
       it('POST create emits an allow/create audit event', async () => {
         const http = getHttpClient();
-        const created = await http.admin.post(BASE, {
+        const created = await http.facsManager.post(BASE, {
           subjectType: 'user',
           subjectId: USER_SUBJECT,
           resourceType: 'brand',
@@ -425,7 +531,7 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
 
       it('PATCH emits an allow/update_capabilities audit event', async () => {
         const http = getHttpClient();
-        const patched = await http.admin.patch(`${BASE}/${mappingId}`, {
+        const patched = await http.facsManager.patch(`${BASE}/${mappingId}`, {
           grantedCapabilities: LLMO_CAPS_UPDATED,
         });
         expect(patched.status).to.equal(200);
@@ -564,7 +670,7 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
 
       it('POST creates a site-scoped ASO binding when x-product=aso', async () => {
         const http = getHttpClient();
-        const res = await http.admin.post(
+        const res = await http.facsManager.post(
           BASE,
           {
             subjectType: 'user',
