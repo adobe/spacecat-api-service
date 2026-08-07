@@ -11106,7 +11106,27 @@ describe('Suggestions Controller', () => {
       expect(mockSqs.sendMessage).to.not.have.been.called;
     });
 
-    it('returns 400 when the experiment already advanced past post-analysis (impact_measurement_started)', async () => {
+    it('returns 400 when the experiment is failed, regardless of eligible phase', async () => {
+      const eligiblePhases = [
+        PHASES.POST_ANALYSIS_DONE,
+        PHASES.IMPACT_MEASUREMENT_STARTED,
+        PHASES.IMPACT_MEASUREMENT_DONE,
+      ];
+      await Promise.all(eligiblePhases.map(async (phase) => {
+        mockSuggestionDataAccess.GeoExperiment.findById.resolves(createMockGeoExperiment({
+          phase,
+          status: STATUSES.FAILED,
+        }));
+        const response = await suggestionsController.triggerImpactMeasurement({
+          ...context,
+          params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+        });
+        expect(response.status).to.equal(400);
+      }));
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('sends the message for an experiment genuinely in flight at impact_measurement_started', async () => {
       mockSuggestionDataAccess.GeoExperiment.findById.resolves(createMockGeoExperiment({
         phase: PHASES.IMPACT_MEASUREMENT_STARTED,
         status: STATUSES.IN_PROGRESS,
@@ -11116,11 +11136,11 @@ describe('Suggestions Controller', () => {
         ...context,
         params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
       });
-      expect(response.status).to.equal(400);
-      expect(mockSqs.sendMessage).to.not.have.been.called;
+      expect(response.status).to.equal(202);
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
     });
 
-    it('returns 400 when the experiment already advanced past post-analysis (impact_measurement_done)', async () => {
+    it('re-arms a completed experiment at impact_measurement_done for re-measurement', async () => {
       mockSuggestionDataAccess.GeoExperiment.findById.resolves(createMockGeoExperiment({
         phase: PHASES.IMPACT_MEASUREMENT_DONE,
         status: STATUSES.COMPLETED,
@@ -11130,21 +11150,8 @@ describe('Suggestions Controller', () => {
         ...context,
         params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
       });
-      expect(response.status).to.equal(400);
-      expect(mockSqs.sendMessage).to.not.have.been.called;
-    });
-
-    it('returns 400 when the experiment is at post_analysis_done but failed', async () => {
-      mockSuggestionDataAccess.GeoExperiment.findById.resolves(createMockGeoExperiment({
-        phase: PHASES.POST_ANALYSIS_DONE,
-        status: STATUSES.FAILED,
-      }));
-      const response = await suggestionsController.triggerImpactMeasurement({
-        ...context,
-        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
-      });
-      expect(response.status).to.equal(400);
-      expect(mockSqs.sendMessage).to.not.have.been.called;
+      expect(response.status).to.equal(202);
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
     });
 
     it('sends a TRIGGER_IMPACT_MEASUREMENT message for an experiment ready for measurement', async () => {

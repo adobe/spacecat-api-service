@@ -2595,9 +2595,9 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   /**
-   * Manually (re-)triggers Mystique impact measurement for a GeoExperiment. Only allowed when
-   * the experiment is sitting at phase post_analysis_done with status in_progress or completed
-   * (see isImpactMeasurementEligible). Sends a TRIGGER_IMPACT_MEASUREMENT message to the
+   * Manually (re-)triggers Mystique impact measurement for a GeoExperiment. Only allowed once
+   * the experiment has reached post-analysis, with status in_progress or completed (see
+   * isImpactMeasurementEligible). Sends a TRIGGER_IMPACT_MEASUREMENT message to the
    * llmo-experimentation-engine-queue; the engine re-validates eligibility and re-arms the
    * experiment before resubmitting via its normal handlePostAnalysisCompleted path.
    * See llmo-experimentation-engine's docs/decisions/004-manual-impact-measurement-retrigger.md.
@@ -2628,7 +2628,7 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     if (!isImpactMeasurementEligible(geoExperiment)) {
-      return badRequest(`GeoExperiment ${geoExperimentId} is at phase '${geoExperiment.getPhase()}' / status '${geoExperiment.getStatus()}' - impact measurement can only be triggered at phase 'post_analysis_done' with status 'in_progress' or 'completed'.`);
+      return badRequest(`GeoExperiment ${geoExperimentId} is at phase '${geoExperiment.getPhase()}' / status '${geoExperiment.getStatus()}' - impact measurement can only be triggered at phase 'post_analysis_done', 'impact_measurement_started', or 'impact_measurement_done' with status 'in_progress' or 'completed'.`);
     }
 
     const triggeredBy = profile?.email || profile?.name || 'unknown';

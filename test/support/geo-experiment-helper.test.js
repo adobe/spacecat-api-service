@@ -252,22 +252,28 @@ describe('geo-experiment-helper', () => {
   });
 
   describe('isImpactMeasurementEligible', () => {
-    it('returns true for post_analysis_done with status in_progress or completed', () => {
-      [STATUSES.IN_PROGRESS, STATUSES.COMPLETED].forEach((status) => {
-        const geoExperiment = {
-          getPhase: () => PHASES.POST_ANALYSIS_DONE,
-          getStatus: () => status,
-        };
-        expect(isImpactMeasurementEligible(geoExperiment)).to.be.true;
+    it('returns true for post_analysis_done, impact_measurement_started, and impact_measurement_done with status in_progress or completed', () => {
+      [
+        PHASES.POST_ANALYSIS_DONE,
+        PHASES.IMPACT_MEASUREMENT_STARTED,
+        PHASES.IMPACT_MEASUREMENT_DONE,
+      ].forEach((phase) => {
+        [STATUSES.IN_PROGRESS, STATUSES.COMPLETED].forEach((status) => {
+          const geoExperiment = { getPhase: () => phase, getStatus: () => status };
+          expect(isImpactMeasurementEligible(geoExperiment)).to.be.true;
+        });
       });
     });
 
-    it('returns false for post_analysis_done with a failed status', () => {
-      const geoExperiment = {
-        getPhase: () => PHASES.POST_ANALYSIS_DONE,
-        getStatus: () => STATUSES.FAILED,
-      };
-      expect(isImpactMeasurementEligible(geoExperiment)).to.be.false;
+    it('returns false for a failed status at any eligible phase', () => {
+      [
+        PHASES.POST_ANALYSIS_DONE,
+        PHASES.IMPACT_MEASUREMENT_STARTED,
+        PHASES.IMPACT_MEASUREMENT_DONE,
+      ].forEach((phase) => {
+        const geoExperiment = { getPhase: () => phase, getStatus: () => STATUSES.FAILED };
+        expect(isImpactMeasurementEligible(geoExperiment)).to.be.false;
+      });
     });
 
     it('returns false for earlier phases', () => {
@@ -276,16 +282,6 @@ describe('geo-experiment-helper', () => {
         getStatus: () => STATUSES.GENERATING_BASELINE,
       };
       expect(isImpactMeasurementEligible(geoExperiment)).to.be.false;
-    });
-
-    it('returns false once the experiment has advanced past post_analysis_done', () => {
-      [PHASES.IMPACT_MEASUREMENT_STARTED, PHASES.IMPACT_MEASUREMENT_DONE].forEach((phase) => {
-        const geoExperiment = {
-          getPhase: () => phase,
-          getStatus: () => STATUSES.IN_PROGRESS,
-        };
-        expect(isImpactMeasurementEligible(geoExperiment)).to.be.false;
-      });
     });
   });
 });

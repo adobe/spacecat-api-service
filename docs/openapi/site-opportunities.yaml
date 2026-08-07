@@ -831,10 +831,11 @@ site-geo-experiment-trigger-impact-measurement:
     operationId: triggerImpactMeasurement
     summary: Manually (re-)trigger impact measurement for a geo experiment
     description: |
-      Manually (re-)triggers Mystique impact measurement for a GeoExperiment. Only allowed when
-      the experiment is at phase `post_analysis_done` with status `in_progress` or `completed`.
-      Sends a message to the llmo-experimentation-engine, which re-validates eligibility and
-      re-arms the experiment before resubmitting.
+      Manually (re-)triggers Mystique impact measurement for a GeoExperiment. Only allowed once
+      the experiment has reached `post_analysis_done` (or later: `impact_measurement_started`,
+      `impact_measurement_done`), with status `in_progress` or `completed`. Sends a message to
+      the llmo-experimentation-engine, which re-validates eligibility and re-arms the experiment
+      before resubmitting.
     tags:
       - geo-experiments
     responses:

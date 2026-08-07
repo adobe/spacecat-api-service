@@ -14,13 +14,23 @@ import { GeoExperiment } from '@adobe/spacecat-shared-data-access';
 
 const { STATUSES, PHASES } = GeoExperiment;
 
+// Phases at which the experiment has reached (or passed) post-analysis, i.e. there is DRS
+// post-analysis data for Mystique to measure. Earlier phases have nothing to measure yet.
+const MEASUREMENT_ELIGIBLE_PHASES = [
+  PHASES.POST_ANALYSIS_DONE,
+  PHASES.IMPACT_MEASUREMENT_STARTED,
+  PHASES.IMPACT_MEASUREMENT_DONE,
+];
+
 /**
- * Whether a GeoExperiment can have impact measurement (re-)triggered: it must be sitting
- * *exactly* at POST_ANALYSIS_DONE with a status of IN_PROGRESS (the organic pending-submission
- * state, e.g. stuck on a Mystique 429 retry budget) or COMPLETED (re-arming an experiment that
- * was closed out before measurement ran). An experiment that already advanced to
- * IMPACT_MEASUREMENT_STARTED/DONE, an earlier phase, or a FAILED status at POST_ANALYSIS_DONE,
- * is not eligible.
+ * Whether a GeoExperiment can have impact measurement (re-)triggered: it must have reached (or
+ * passed) POST_ANALYSIS_DONE, with a status of IN_PROGRESS or COMPLETED. An earlier phase, or a
+ * FAILED status at any eligible phase, is not eligible.
+ *
+ * Deliberately includes IMPACT_MEASUREMENT_STARTED + IN_PROGRESS — an experiment with a Mystique
+ * task genuinely in flight. Re-triggering it discards the in-flight task's stored taskId and
+ * submits a new one, orphaning the original poll — an accepted, explicit tradeoff, not an
+ * oversight.
  *
  * This mirrors llmo-experimentation-engine's own eligibility check (which is authoritative — the
  * engine re-validates on receipt) — checked here only so the API response is immediate and
@@ -31,7 +41,7 @@ const { STATUSES, PHASES } = GeoExperiment;
  */
 export function isImpactMeasurementEligible(geoExperiment) {
   const status = geoExperiment.getStatus();
-  return geoExperiment.getPhase() === PHASES.POST_ANALYSIS_DONE
+  return MEASUREMENT_ELIGIBLE_PHASES.includes(geoExperiment.getPhase())
     && (status === STATUSES.COMPLETED || status === STATUSES.IN_PROGRESS);
 }
 
