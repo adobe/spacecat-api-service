@@ -258,6 +258,7 @@ sites-by-tier:
   parameters:
     - $ref: './parameters.yaml#/tier'
     - $ref: './parameters.yaml#/productCodeQuery'
+    - $ref: './parameters.yaml#/fields'
   get:
     tags:
       - site
@@ -267,7 +268,8 @@ sites-by-tier:
       (PAID, FREE_TRIAL, or PLG) and that are enrolled into that entitlement.
       Optionally restrict to a single product via the `productCode` query
       parameter (e.g. LLMO). Results are ordered by site ID. Not paginated -
-      admin-only, bounded use case. Admin-only.
+      admin-only, bounded use case. Supports the `fields` query parameter to
+      project a subset of fields per site. Admin-only.
     operationId: getSitesByEnrollmentAndTier
     responses:
       '200':
