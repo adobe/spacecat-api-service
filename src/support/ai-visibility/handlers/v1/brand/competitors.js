@@ -23,7 +23,7 @@ import {
 
 /* c8 ignore start */
 export async function handleCompetitors(sp, clients) {
-  const domain = sp.get('domain')?.trim();
+  const domain = sp.get('domain');
   if (!domain) {
     return {
       status: 400,
