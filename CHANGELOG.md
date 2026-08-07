@@ -1,3 +1,44 @@
+# [1.726.0](https://github.com/adobe/spacecat-api-service/compare/v1.725.0...v1.726.0) (2026-08-07)
+
+
+### Features
+
+* fix competitors metrics ([#3011](https://github.com/adobe/spacecat-api-service/issues/3011)) ([db46c4a](https://github.com/adobe/spacecat-api-service/commit/db46c4a6f23aee4579f6e2e99c5c9af81efbe9d3))
+
+# [1.725.0](https://github.com/adobe/spacecat-api-service/compare/v1.724.0...v1.725.0) (2026-08-06)
+
+
+### Bug Fixes
+
+* optimize edge deploy/rollback apis ([#3009](https://github.com/adobe/spacecat-api-service/issues/3009)) ([8f877a6](https://github.com/adobe/spacecat-api-service/commit/8f877a680b81f4f4af2898cfccc54993c002e6a8))
+
+
+### Features
+
+* **llmo:** serve brand-claims history by ISO week (LLMO-6808) ([#3006](https://github.com/adobe/spacecat-api-service/issues/3006)) ([d9318e4](https://github.com/adobe/spacecat-api-service/commit/d9318e4e3636796f56316fa465a7d4f34ae96209))
+
+# [1.724.0](https://github.com/adobe/spacecat-api-service/compare/v1.723.0...v1.724.0) (2026-08-06)
+
+
+### Features
+
+* **llmo:** add caller + host to O@E onboarding logs and log the journey start ([#2990](https://github.com/adobe/spacecat-api-service/issues/2990)) ([97fc270](https://github.com/adobe/spacecat-api-service/commit/97fc27038576a251f062c7f4f7cbe4544c423fe1))
+
+# [1.723.0](https://github.com/adobe/spacecat-api-service/compare/v1.722.0...v1.723.0) (2026-08-06)
+
+
+### Features
+
+* **ai-seo:** AI SEO API revision  ([#2996](https://github.com/adobe/spacecat-api-service/issues/2996)) ([aa0b8b5](https://github.com/adobe/spacecat-api-service/commit/aa0b8b5e6ac8d108ce51b839f24ec9772953ccea))
+
+# [1.722.0](https://github.com/adobe/spacecat-api-service/compare/v1.721.1...v1.722.0) (2026-08-06)
+
+
+### Features
+
+* **llmo:** add wrapper endpoint for URL Inspector prompts-by-url (LLMO-5789) ([#2999](https://github.com/adobe/spacecat-api-service/issues/2999)) ([93d731e](https://github.com/adobe/spacecat-api-service/commit/93d731e756e36ed271a8c2c05f87962ad297e727)), closes [mystique#3848](https://github.com/mystique/issues/3848) [adobe/mysticat-data-service#882](https://github.com/adobe/mysticat-data-service/issues/882) [adobe/mysticat-data-service#882](https://github.com/adobe/mysticat-data-service/issues/882) [adobe/mysticat-data-service#883](https://github.com/adobe/mysticat-data-service/issues/883)
+* **serenity:** accept strategy-chat as a Semrush prompt source | LLMO-6670 ([#3007](https://github.com/adobe/spacecat-api-service/issues/3007)) ([f55c8b7](https://github.com/adobe/spacecat-api-service/commit/f55c8b7e730f0c7aa52190873c61589c4634e360))
+
 ## [1.721.1](https://github.com/adobe/spacecat-api-service/compare/v1.721.0...v1.721.1) (2026-08-05)
 
 

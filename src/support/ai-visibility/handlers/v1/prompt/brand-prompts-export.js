@@ -36,6 +36,7 @@ import {
   PROTO_FROM_JSON,
   PROTO_TO_JSON,
 } from '../../../grpc-utils.js';
+import { buildBrandPromptsDimensionFilterQl } from './brand-prompts.js';
 
 /* c8 ignore start */
 export async function handleBrandPromptsExport(sp, clients) {
@@ -44,7 +45,6 @@ export async function handleBrandPromptsExport(sp, clients) {
   const country = resolveCountry(sp) || COUNTRY_ENUM.US;
   const sortBy = sp.get('sortBy') || PROMPTS_REQUEST_ORDER_BY_ENUM.MENTIONED_BRANDS_COUNT;
   const sortDirection = sp.get('sortDirection') || ORDER_DIRECTION_ENUM.DESC;
-  const topicId = sp.get('topicId');
   const date = sp.get('date');
   const { limit, offset } = parseLimitOffset(sp);
 
@@ -67,7 +67,7 @@ export async function handleBrandPromptsExport(sp, clients) {
         },
         range: { limit, offset },
         categories,
-        dimension_filter_ql: topicId ? `topic_hash = ${topicId}` : '',
+        dimension_filter_ql: buildBrandPromptsDimensionFilterQl(sp),
         target_date: date,
       },
       PROTO_FROM_JSON,

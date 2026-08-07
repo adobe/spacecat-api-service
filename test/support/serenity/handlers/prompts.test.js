@@ -2885,6 +2885,12 @@ describe('handlers/prompts.js — per-item source override (LLMO-6556)', () => {
       expect(value.source).to.equal('semrush');
     });
 
+    it('accepts strategy-chat (chat-originated Track prompts)', () => {
+      const { value, reason } = normalizePromptInput({ ...base, source: 'strategy-chat' });
+      expect(reason).to.equal(null);
+      expect(value.source).to.equal('strategy-chat');
+    });
+
     it('rejects an unknown source (closed vocabulary — select, never invent)', () => {
       const { value, reason } = normalizePromptInput({ ...base, source: 'not-a-producer' });
       expect(value).to.equal(null);

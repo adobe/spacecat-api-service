@@ -838,6 +838,8 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-stats-by-llm'
   /llmo/ai-visibility/v1/brand/stats-by-country:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-stats-by-country'
+  /llmo/ai-visibility/v1/brand/competitors-stats:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-competitors-stats'
   /llmo/ai-visibility/v1/topic/brand-topics:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-brand-topics'
   /llmo/ai-visibility/v1/topic/brand-topics-export:
@@ -850,6 +852,14 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-gap-topics-export'
   /llmo/ai-visibility/v1/topic/gap-topics-totals:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-gap-topics-totals'
+  /llmo/ai-visibility/v1/topic/metrics-by-fts:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-metrics-by-fts'
+  /llmo/ai-visibility/v1/topic/topics-by-fts:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-topics-by-fts'
+  /llmo/ai-visibility/v1/topic/topics-by-fts-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-topics-by-fts-export'
+  /llmo/ai-visibility/v1/topic/topics-by-fts-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-topics-by-fts-totals'
   /llmo/ai-visibility/v1/prompt/brand-prompts:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-brand-prompts'
   /llmo/ai-visibility/v1/prompt/brand-prompts-export:
@@ -860,6 +870,16 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-gap-prompts-export'
   /llmo/ai-visibility/v1/prompt/gap-prompts-totals:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-gap-prompts-totals'
+  /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompts-by-topic-ids'
+  /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompts-by-topic-ids-totals'
+  /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompts-by-topic-fts'
+  /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompts-by-topic-fts-export'
+  /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompts-by-topic-fts-totals'
   /llmo/ai-visibility/v1/prompt/prompt-response:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompt-response'
   /llmo/ai-visibility/v1/source/gap-source-domains:
@@ -868,6 +888,30 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-gap-source-domains-export'
   /llmo/ai-visibility/v1/source/gap-source-domains-totals:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-gap-source-domains-totals'
+  /llmo/ai-visibility/v1/source/cited-pages:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-cited-pages'
+  /llmo/ai-visibility/v1/source/cited-pages-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-cited-pages-export'
+  /llmo/ai-visibility/v1/source/cited-pages-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-cited-pages-totals'
+  /llmo/ai-visibility/v1/source/cited-sources:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-cited-sources'
+  /llmo/ai-visibility/v1/source/cited-sources-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-cited-sources-export'
+  /llmo/ai-visibility/v1/source/cited-sources-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-cited-sources-totals'
+  /llmo/ai-visibility/v1/source/source-domains-by-topic-fts:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-source-domains-by-topic-fts'
+  /llmo/ai-visibility/v1/source/source-domains-by-topic-fts-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-source-domains-by-topic-fts-export'
+  /llmo/ai-visibility/v1/source/source-domains-by-topic-fts-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-source-domains-by-topic-fts-totals'
+  /llmo/ai-visibility/v1/brand/brands-by-topic-fts:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-brands-by-topic-fts'
+  /llmo/ai-visibility/v1/brand/brands-by-topic-fts-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-brands-by-topic-fts-export'
+  /llmo/ai-visibility/v1/brand/brands-by-topic-fts-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-brands-by-topic-fts-totals'
   /llmo/ai-visibility/v1/prompt-research/prompts-export:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-research-prompts-export'
   /llmo/ai-visibility/v1/prompt-research/brands-export:
