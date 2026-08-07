@@ -388,7 +388,12 @@ export const triggerA11yCodefixForOpportunity = async (
  * Sends a message to the llmo-experimentation-engine-queue to manually (re-)trigger Mystique
  * impact measurement for a GeoExperiment (see adobe/spacecat-infrastructure#655 for the queue,
  * llmo-experimentation-engine's docs/decisions/004-manual-impact-measurement-retrigger.md for the
- * handler contract). The engine re-validates eligibility itself before resubmitting.
+ * handler contract).
+ *
+ * NOTE: this does NOT create or start an experiment. It only requests the impact-measurement
+ * report for an already-existing GeoExperiment that is ongoing or completed. The experiment must
+ * already exist; the engine re-validates eligibility itself before resubmitting and no-ops if the
+ * experiment is not in a measurable state.
  *
  * @param {string} geoExperimentId - The GeoExperiment ID to trigger measurement for.
  * @param {string} triggeredBy - Identity of the caller, for the engine's log line
