@@ -376,6 +376,25 @@ describe('LlmoAkamaiController', () => {
       expect(mockAkamaiClient.createVersion).to.not.have.been.called;
     });
 
+    it('resumes into retryVersion instead of minting a new version', async () => {
+      const res = await controller.deploy(withData({ ...propertyRef, retryVersion: 9 }));
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      // Guard against version pileup: no new version is created — we write into the existing one.
+      expect(mockAkamaiClient.createVersion).to.not.have.been.called;
+      expect(body.newVersion).to.equal(9);
+      // The PUT targets the resumed version.
+      const [, putVersion] = mockAkamaiClient.updateRuleTree.firstCall.args;
+      expect(putVersion).to.equal(9);
+    });
+
+    it('rejects a non-positive-integer retryVersion', async () => {
+      const res = await controller.deploy(withData({ ...propertyRef, retryVersion: '0' }));
+      expect(res.status).to.equal(400);
+      expect(mockAkamaiClient.createVersion).to.not.have.been.called;
+      expect(mockAkamaiClient.updateRuleTree).to.not.have.been.called;
+    });
+
     it('always injects a server-minted x-edgeoptimize-fetcher-key header and returns it', async () => {
       const res = await controller.deploy(withData({ ...propertyRef }));
       expect(res.status).to.equal(200);

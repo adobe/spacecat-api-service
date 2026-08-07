@@ -6630,6 +6630,13 @@ akamai-property-ref:
       description: >-
         (deploy only) Optional property version to copy the new version from. Defaults to the
         property's latest version.
+    retryVersion:
+      type: integer
+      minimum: 1
+      description: >-
+        (deploy only) A version a PRIOR attempt already created but failed to write rules into.
+        When supplied, deploy RESUMES into it (writes directly, skipping createVersion) instead of
+        minting a fresh version — the guard against piling up empty versions on repeated retries.
 
 akamai-property:
   type: object

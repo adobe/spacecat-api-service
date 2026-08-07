@@ -576,13 +576,20 @@ function LlmoAkamaiController(ctx) {
 
   /**
    * POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy
-   * Body: { propertyId, contractId, groupId, insertIndex?, baseVersion? }
+   * Body: { propertyId, contractId, groupId, insertIndex?, baseVersion?, retryVersion? }
    * Creates a NEW property version from `baseVersion` (default: latest) and applies the managed
    * rules via a full-tree PUT with PAPI-side validation, pinning the base version's ruleFormat.
    * Supported only for properties whose default origin uses CUSTOM SSL verification (scope gate).
    * Does NOT activate (a separate, explicit step). Guarded so the target property must serve the
    * site's own domain. Idempotent by rule name (trimmed): re-running replaces prior managed rules
    * rather than duplicating them.
+   *
+   * `retryVersion`: if a PRIOR attempt already created a property version but failed to write the
+   * rules into it (e.g. the write was cut by the CDN timeout), the caller passes that version back
+   * here to RESUME — we skip `createVersion` and write directly into it. This is what stops a
+   * repeated Retry from minting a fresh, permanently-empty version every time (478 → 479 → 480 …):
+   * the caller checks deploy-status first, and if a version was already created it sends it as
+   * `retryVersion` instead of letting us clone the base again.
    */
   const deploy = async (context) => {
     const result = await getSiteAndCheckAccess(context);
@@ -602,7 +609,9 @@ function LlmoAkamaiController(ctx) {
     }
 
     const { propertyId, contractId, groupId } = ref;
-    const { insertIndex, baseVersion: rawBaseVersion } = context.data;
+    const {
+      insertIndex, baseVersion: rawBaseVersion, retryVersion: rawRetryVersion,
+    } = context.data;
     const insertIndexError = validateInsertIndex(insertIndex);
     if (insertIndexError) {
       return insertIndexError;
@@ -617,6 +626,14 @@ function LlmoAkamaiController(ctx) {
       && (!DECIMAL_INT_RE.test(String(rawBaseVersion)) || Number(rawBaseVersion) < 1)) {
       return badRequest('baseVersion must be a positive integer');
     }
+    // Optional: resume into a version a prior attempt already created instead of minting a new one.
+    if (rawRetryVersion !== undefined && rawRetryVersion !== null && rawRetryVersion !== ''
+      && (!DECIMAL_INT_RE.test(String(rawRetryVersion)) || Number(rawRetryVersion) < 1)) {
+      return badRequest('retryVersion must be a positive integer');
+    }
+    const retryVersion = (rawRetryVersion !== undefined && rawRetryVersion !== null && rawRetryVersion !== '')
+      ? Number(rawRetryVersion)
+      : undefined;
     const siteId = site.getId();
 
     // Guard before fetching the metaconfig — no point resolving the API key for a call we will
@@ -670,7 +687,11 @@ function LlmoAkamaiController(ctx) {
       // threshold from one synthetic test property.
       const complexity = estimateRuleTreeComplexity(merged);
 
-      newVersion = await client.createVersion(propertyId, baseVersion, contractId, groupId);
+      // Resume into the version a prior attempt already created (retryVersion) instead of minting
+      // another one — this is the guard against piling up empty versions (478 → 479 → 480 …) when a
+      // deploy is retried. Otherwise clone baseVersion into a fresh version as usual.
+      newVersion = retryVersion
+        ?? await client.createVersion(propertyId, baseVersion, contractId, groupId);
       const putStart = Date.now();
       const putResult = await client.updateRuleTree(
         propertyId,
@@ -709,6 +730,8 @@ function LlmoAkamaiController(ctx) {
         propertyId,
         baseVersion,
         newVersion,
+        // true when we wrote into a version a prior attempt created (no new version minted).
+        resumed: retryVersion !== undefined,
         warningCount: warnings.length,
         complexity,
         putMs,
