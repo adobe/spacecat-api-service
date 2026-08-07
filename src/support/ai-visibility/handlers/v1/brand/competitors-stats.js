@@ -13,7 +13,7 @@
 /* c8 ignore start */
 
 import { fromJson, toJson } from '@bufbuild/protobuf';
-import { COUNTRY_ENUM } from '@quazar/ai-seo-ts/common/types_pb.js';
+import { COUNTRY_ENUM, LLM_ENUM } from '@quazar/ai-seo-ts/common/types_pb.js';
 import {
   StatsRequestSchema,
   StatsResponseSchema,
@@ -29,7 +29,7 @@ import {
 export async function handleCompetitorsStats(sp, clients) {
   const domain = sp.get('domain');
   const country = resolveCountry(sp) || COUNTRY_ENUM.US;
-  const engine = engineToLlm(sp.get('engine'));
+  const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const competitors = sp.get('competitors')?.split(',') || [];
 
   let statsRequest;
