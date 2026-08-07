@@ -10112,6 +10112,52 @@ AiVisibilitySemrushBrand:
       type: string
   additionalProperties: true
 
+AiVisibilityV1BrandCompetitorsResponse:
+  type: object
+  description: |
+    Native Semrush v2 `BrandCompetitorsResponse` protobuf JSON from
+    `GET /llmo/ai-visibility/v1/brand/competitors`, plus `srFilters` from the API layer.
+  properties:
+    competitors:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySemrushBrand'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [competitors]
+  additionalProperties: true
+
+AiVisibilityV1BrandTopBrand:
+  type: object
+  description: Native Semrush v2 `TopBrandsByDomainResponse.BrandEntry` protobuf JSON.
+  properties:
+    brandName:
+      type: string
+    count:
+      description: Number of mentions (`uint64`, serialized as a JSON string)
+      oneOf:
+        - type: string
+        - type: integer
+  required: [brandName, count]
+  additionalProperties: true
+
+AiVisibilityV1BrandTopBrandsResponse:
+  type: object
+  description: |
+    Native Semrush v2 `TopBrandsByDomainResponse` protobuf JSON from
+    `GET /llmo/ai-visibility/v1/brand/top-brands`, plus `srFilters` from the API layer.
+  properties:
+    date:
+      $ref: '#/AiVisibilitySemrushDate'
+    brands:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1BrandTopBrand'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [brands]
+  additionalProperties: true
+
 AiVisibilitySemrushSource:
   type: object
   description: Source from ai-seo-ts common/types_pb
