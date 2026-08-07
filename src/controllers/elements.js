@@ -25,7 +25,8 @@ import { fetchOwnedUrlsTraffic, mergeOwnedUrlsTraffic } from '../support/element
 import { mapWithConcurrency } from '../support/elements/concurrency.js';
 import { addDaysToDate } from '../support/elements/week-utils.js';
 import { resolveBrandWorkspace } from '../support/serenity/workspace-resolver.js';
-import { createSerenityTransport, SerenityTransportError } from '../support/serenity/rest-transport.js';
+import { createSerenityTransport } from '../support/serenity/rest-transport.js';
+import { SerenityTransportError } from '../support/serenity/serenity-transport-error.js';
 import { cachedOk } from '../support/cached-response.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { ErrorWithStatusCode, resolveSemrushImsToken } from '../support/utils.js';

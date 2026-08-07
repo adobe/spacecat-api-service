@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { resolveElementModel } from '../constants.js';
+import { isAllPlatforms, resolveElementModel } from '../constants.js';
 
 /* c8 ignore start -- LLMO-6160 POC endpoint; unit tests intentionally deferred */
 
@@ -38,12 +38,15 @@ import { resolveElementModel } from '../constants.js';
 export function buildDomainUrlsPayload({
   model, platform, startDate, endDate, category, projectId,
 } = {}) {
-  const resolvedModel = resolveElementModel(model || platform);
+  const requestedModel = model || platform;
   const advancedFilters = [
-    { op: 'or', filters: [{ op: 'eq', val: resolvedModel, col: 'CBF_model' }] },
     { op: 'gte', val: startDate, col: 'CBF_date__start' },
     { op: 'lte', val: endDate, col: 'CBF_date__end' },
   ];
+  if (!isAllPlatforms(requestedModel)) {
+    const resolvedModel = resolveElementModel(requestedModel);
+    advancedFilters.unshift({ op: 'or', filters: [{ op: 'eq', val: resolvedModel, col: 'CBF_model' }] });
+  }
   if (category) {
     advancedFilters.push({ op: 'eq', val: category, col: 'CBF_tags' });
   }

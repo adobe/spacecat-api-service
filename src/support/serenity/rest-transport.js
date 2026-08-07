@@ -20,6 +20,10 @@ import {
 } from '@adobe/spacecat-shared-project-engine-client';
 import { createSerenityUserManagerApiClient } from '@adobe/spacecat-shared-user-manager-client';
 import { ErrorWithStatusCode } from '../utils.js';
+import { SerenityTransportError } from './serenity-transport-error.js';
+
+export { SerenityTransportError } from './serenity-transport-error.js';
+
 // Two typed Semrush clients back this transport, each owning its own gateway
 // prefix, IMS-Bearer auth, and request shaping:
 //  - Project Engine ('/enterprise/projects/api') — project / prompt / benchmark ops.
@@ -101,26 +105,6 @@ const DEFAULT_TIMEOUT_MS = 15_000;
  */
 
 /**
- * Error thrown when the Semrush upstream returns a non-2xx response or refuses
- * the auth header. `status` carries the upstream status; `body` is the parsed
- * JSON (or raw text when not valid JSON). The controller's `mapError` does
- * NOT leak `.body` to clients — it is kept here only for server-side logging.
- */
-export class SerenityTransportError extends Error {
-  /**
-   * @param {number} status - the upstream HTTP status.
-   * @param {string} message
-   * @param {any} [body] - parsed JSON, raw text, or null for an empty body.
-   */
-  constructor(status, message, body) {
-    super(message);
-    this.name = 'SerenityTransportError';
-    this.status = status;
-    this.body = body;
-  }
-}
-
-/**
  * Returns a client-safe message for an error that may be a Semrush transport error. Both the
  * User Manager / brand-topics `SerenityTransportError` (message embeds the gateway URL — internal
  * host + workspace/project UUIDs) and the Project Engine `ProjectEngineApiError` (message embeds
@@ -139,8 +123,7 @@ export class SerenityTransportError extends Error {
  */
 export function redactUpstreamMessage(e) {
   // NOTE: this mirrors errors.js `unwrapTransportCause` inline ON PURPOSE — importing it here
-  // would create an errors.js ↔ rest-transport.js cycle (errors.js imports SerenityTransportError
-  // from this file). Extracting the shared helper to a leaf module is a follow-up. Keep in sync.
+  // would create an errors.js ↔ rest-transport.js cycle. Keep in sync.
   const err = e instanceof ProjectEngineApiError && e.status === undefined && e.cause != null
     ? e.cause
     : e;
