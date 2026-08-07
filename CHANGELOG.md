@@ -1,3 +1,10 @@
+# [1.727.0](https://github.com/adobe/spacecat-api-service/compare/v1.726.0...v1.727.0) (2026-08-07)
+
+
+### Features
+
+* **entitlements:** add admin-only PATCH to update entitlement tier ([#3005](https://github.com/adobe/spacecat-api-service/issues/3005)) ([bb04edf](https://github.com/adobe/spacecat-api-service/commit/bb04edfba24305477dc704848f3bcb19f7ec1000))
+
 # [1.726.0](https://github.com/adobe/spacecat-api-service/compare/v1.725.0...v1.726.0) (2026-08-07)
 
 
