@@ -6468,6 +6468,100 @@ site-llmo-akamai-activation-status:
     security:
       - ims_key: [ ]
 
+site-llmo-akamai-deploy-status:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/akamaiHost'
+    - $ref: './parameters.yaml#/akamaiClientToken'
+    - $ref: './parameters.yaml#/akamaiClientSecret'
+    - $ref: './parameters.yaml#/akamaiAccessToken'
+    - $ref: './parameters.yaml#/akamaiAccountSwitchKey'
+    - name: propertyId
+      in: query
+      required: true
+      description: Akamai property ID (e.g. `prp_1253269`).
+      schema:
+        type: string
+        pattern: '^prp_[A-Za-z0-9]+$'
+    - name: contractId
+      in: query
+      required: true
+      description: Akamai contract ID (e.g. `ctr_1-ABC123`).
+      schema:
+        type: string
+        pattern: '^ctr_[A-Za-z0-9-]+$'
+    - name: groupId
+      in: query
+      required: true
+      description: Akamai group ID (e.g. `grp_18385`).
+      schema:
+        type: string
+        pattern: '^grp_[A-Za-z0-9]+$'
+    - name: version
+      in: query
+      required: false
+      description: >-
+        Specific property version to check (e.g. a prior deploy's `newVersion`). When omitted, the
+        latest version is checked — which is the version a deploy's createVersion produced.
+      schema:
+        type: integer
+        minimum: 1
+  get:
+    operationId: getLlmoAkamaiDeployStatus
+    summary: Check whether the Optimize-at-Edge rule landed in a property version
+    description: |
+      Read-only. Re-reads live Akamai state to report whether the managed Optimize-at-Edge rule is
+      present in a property version. This is the source of truth when a deploy's own HTTP response
+      was lost to the CDN first-byte timeout: the backend keeps running and the write may have
+      completed after the caller received a 503, so the caller polls this to learn the real outcome.
+      Cheap by design (a version lookup plus one rule-tree read), so it never itself times out.
+
+      **Note:** This endpoint requires LLMO administrator access for the site.
+    tags:
+      - llmo
+    responses:
+      '200':
+        description: The deploy status
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                propertyId:
+                  type: string
+                version:
+                  type: integer
+                  description: The version that was checked.
+                latestVersion:
+                  type: integer
+                  description: >-
+                    The property's latest version. When `deployed` is false, this is the version to
+                    resume the write into.
+                deployed:
+                  type: boolean
+                  description: >-
+                    True when the Optimize-at-Edge rule is present in `version` — the definitive
+                    answer after a deploy whose HTTP response was not received.
+                managedRulesPresent:
+                  type: array
+                  items:
+                    type: string
+                  description: The managed rule names found at the top level of the checked version.
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '502':
+        $ref: './responses.yaml#/502'
+    security:
+      - ims_key: [ ]
+
 akamai-property-ref:
   type: object
   required:

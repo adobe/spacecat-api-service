@@ -22,6 +22,8 @@ import {
   mergeIntoTree,
   buildRuleTreePatch,
   managedRuleNames,
+  detectManagedRuleNames,
+  estimateRuleTreeComplexity,
   redactSecrets,
 } from '../../../src/controllers/llmo/llmo-akamai-utils.js';
 
@@ -196,6 +198,65 @@ describe('llmo-akamai-utils', () => {
         cfg.ruleNames.routing,
         cfg.ruleNames.failoverTest,
       ]);
+    });
+  });
+
+  describe('detectManagedRuleNames', () => {
+    it('returns [] for a tree with no managed rules', () => {
+      const tree = { rules: { children: [{ name: 'Existing' }, { name: 'Other' }] } };
+      expect(detectManagedRuleNames(tree)).to.deep.equal([]);
+    });
+
+    it('detects the wrapped layout (parent at top level)', () => {
+      const tree = { rules: { children: [{ name: 'Existing' }, { name: 'Optimize at Edge' }] } };
+      expect(detectManagedRuleNames(tree)).to.deep.equal(['Optimize at Edge']);
+    });
+
+    it('detects the legacy flat layout and a trailing-space name, deduped', () => {
+      const tree = {
+        rules: {
+          children: [
+            { name: 'Optimize at Edge Routing' },
+            { name: 'EdgeOptimize Failover - Test Header' },
+            { name: 'Optimize at Edge ' }, // legacy trailing space
+          ],
+        },
+      };
+      const found = detectManagedRuleNames(tree);
+      expect(found).to.include.members([
+        'Optimize at Edge',
+        'Optimize at Edge Routing',
+        'EdgeOptimize Failover - Test Header',
+      ]);
+      expect(found).to.have.length(3);
+    });
+
+    it('is safe on a missing/empty tree', () => {
+      expect(detectManagedRuleNames(undefined)).to.deep.equal([]);
+      expect(detectManagedRuleNames({})).to.deep.equal([]);
+      expect(detectManagedRuleNames({ rules: {} })).to.deep.equal([]);
+    });
+  });
+
+  describe('estimateRuleTreeComplexity', () => {
+    it('sums behaviors + criteria recursively across the tree', () => {
+      const tree = {
+        rules: {
+          behaviors: [{ name: 'a' }, { name: 'b' }], // 2
+          criteria: [{ name: 'c' }], // 1
+          children: [
+            { behaviors: [{ name: 'd' }], criteria: [], children: [] }, // 1
+            { behaviors: [], criteria: [{ name: 'e' }, { name: 'f' }] }, // 2
+          ],
+        },
+      };
+      expect(estimateRuleTreeComplexity(tree)).to.equal(6);
+    });
+
+    it('is safe on empty/missing input', () => {
+      expect(estimateRuleTreeComplexity(undefined)).to.equal(0);
+      expect(estimateRuleTreeComplexity({})).to.equal(0);
+      expect(estimateRuleTreeComplexity({ rules: {} })).to.equal(0);
     });
   });
 

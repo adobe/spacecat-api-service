@@ -23,6 +23,7 @@ import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
 import {
   buildRuleConfig, mergeIntoTree, managedRuleNames, redactSecrets,
+  detectManagedRuleNames, estimateRuleTreeComplexity,
 } from './llmo-akamai-utils.js';
 
 // EdgeGrid credentials are CLIENT-SUPPLIED per request (never persisted, never logged): the caller
@@ -521,38 +522,16 @@ function LlmoAkamaiController(ctx) {
       }
       const merged = mergeIntoTree(ruleTree, cfg, insertIndex);
 
-      // Validate the exact change deploy will make: dry-run the full-tree PUT. PAPI validates the
-      // submitted tree and returns errors/warnings without persisting. A dry-run PUT still needs an
-      // EDITABLE version, so if `version` is activated it 403s — fall back to the base tree's
-      // warnings and flag the preview unvalidated (deploy validates on its own new version anyway).
-      let errors = [];
-      let warnings = [];
-      let validated = true;
-      try {
-        const dryRun = await client.updateRuleTree(
-          propertyId,
-          version,
-          contractId,
-          groupId,
-          merged,
-          ruleFormat,
-          { dryRun: true },
-        );
-        errors = dryRun?.errors || [];
-        warnings = dryRun?.warnings || [];
-      } catch (dryRunError) {
-        // A dry-run is best-effort: never fail the read-only preview because validation couldn't be
-        // performed. Fall back to the base tree's own warnings and flag that this preview is
-        // unvalidated so the UI can say so.
-        validated = false;
-        warnings = ruleTree.warnings || [];
-        log.warn(auditLine(context, 'plan', 'dry-run-failed', {
-          siteId: site.getId(), propertyId, version, error: dryRunError.message,
-        }));
-      }
-
+      // plan is a fast, read-only PREVIEW: getLatestVersion + getRuleTree + an in-memory merge,
+      // with NO Akamai validation call. We deliberately don't dry-run the change here. PAPI's
+      // validateRules pass scales with total rule-tree size and on a large property runs 45-60s —
+      // well past the ~15s CDN first-byte timeout in front of this Lambda — so the old dry-run made
+      // Review hang and then fail with an opaque 503 HTML page instead of our JSON. deploy() is now
+      // the sole validator (its real PUT keeps validateRules=true and surfaces any papiErrors), and
+      // the CUSTOM-SSL scope gate — the only common failure detectable before deploy — is already
+      // enforced above, in memory, with no Akamai round-trip. So the preview stays honest and fast.
       log.info(auditLine(context, 'plan', 'ok', {
-        siteId: site.getId(), propertyId, version, validated, errorCount: errors.length,
+        siteId: site.getId(), propertyId, version,
       }));
       return ok({
         propertyId,
@@ -563,11 +542,11 @@ function LlmoAkamaiController(ctx) {
         // only its children may be absent. merge always writes a children array.
         currentChildRules: (ruleTree.rules.children || []).map((c) => c.name),
         mergedChildRules: merged.rules.children.map((c) => c.name),
-        // PAPI validation of the exact change deploy will make (see the dry-run above). `validated`
-        // is false only when the dry-run itself couldn't run.
-        validated,
-        errors,
-        warnings,
+        // No pre-deploy Akamai validation is performed (see above) — deploy validates for real.
+        // Kept in the response shape (validated:false, empty errors/warnings) for FE compatibility.
+        validated: false,
+        errors: [],
+        warnings: [],
         // Redact the injected LLMO API key before returning the preview — plan is read-only and
         // the real key is only needed server-side at deploy; the merged tree ends up in browser
         // devtools / HAR exports / proxy logs otherwise.
@@ -666,8 +645,14 @@ function LlmoAkamaiController(ctx) {
         return gateError;
       }
       const merged = mergeIntoTree(ruleTree, cfg, insertIndex);
+      // Telemetry (NOT a gate): the rule-tree complexity PAPI's validateRules cost scales with,
+      // logged next to the measured write duration below so we can build a real
+      // complexity-vs-latency curve from production across every customer, instead of guessing a
+      // threshold from one synthetic test property.
+      const complexity = estimateRuleTreeComplexity(merged);
 
       newVersion = await client.createVersion(propertyId, baseVersion, contractId, groupId);
+      const putStart = Date.now();
       const putResult = await client.updateRuleTree(
         propertyId,
         newVersion,
@@ -676,12 +661,13 @@ function LlmoAkamaiController(ctx) {
         merged,
         ruleFormat,
       );
+      const putMs = Date.now() - putStart;
 
       const papiErrors = putResult?.errors || [];
       const warnings = putResult?.warnings || [];
       if (papiErrors.length > 0) {
         log.error(auditLine(context, 'deploy', 'papi-rejected', {
-          siteId, propertyId, newVersion, errorCount: papiErrors.length,
+          siteId, propertyId, newVersion, errorCount: papiErrors.length, complexity, putMs,
         }));
         return createResponse({
           message: 'Akamai rejected the rule tree',
@@ -692,7 +678,13 @@ function LlmoAkamaiController(ctx) {
       }
 
       log.info(auditLine(context, 'deploy', 'deployed', {
-        siteId, propertyId, baseVersion, newVersion, warningCount: warnings.length,
+        siteId,
+        propertyId,
+        baseVersion,
+        newVersion,
+        warningCount: warnings.length,
+        complexity,
+        putMs,
       }));
       return ok({
         propertyId,
@@ -706,6 +698,75 @@ function LlmoAkamaiController(ctx) {
       });
     } catch (e) {
       return papiErrorResponse(e, 'deploy', context, { siteId, propertyId, newVersion });
+    }
+  };
+
+  /**
+   * GET /sites/:siteId/llmo/cdn-onboard/akamai/deploy-status
+   * Query: { propertyId, contractId, groupId, version? }
+   * Read-only: re-reads live Akamai state to answer "did the Optimize-at-Edge rule actually land?".
+   * This is the source of truth when a deploy's own HTTP response was lost to the ~15s CDN
+   * first-byte timeout in front of this Lambda: the Lambda keeps running (900s budget) and the
+   * write may well have completed AFTER the customer's browser got a 503, so the browser can't tell
+   * success from failure on its own. It polls this instead. Cheap by design (getLatestVersion + one
+   * getRuleTree ≈ a few seconds, comfortably inside the CDN window), so it never itself times out.
+   *
+   * `version` (optional): check a specific version (e.g. a prior deploy's newVersion). Default:
+   * the latest version — which is what deploy's createVersion produced, so if the write finished
+   * the OAE rule is there; if it was cut mid-write the latest is an empty clone (deployed:false),
+   * and `latestVersion` tells the caller which version to resume into.
+   */
+  const deployStatus = async (context) => {
+    const result = await getSiteAndCheckAccess(context);
+    if (result.status) {
+      return result;
+    }
+    const { site } = result;
+
+    const { client, error } = requireClient(context);
+    if (error) {
+      return error;
+    }
+
+    const { ref, error: refError } = requirePropertyRef(context);
+    if (refError) {
+      return refError;
+    }
+
+    const { propertyId, contractId, groupId } = ref;
+    const { version: rawVersion } = context.data;
+    const siteId = site.getId();
+
+    // Optional explicit version, validated like deploy/activate (reject 0 and non-decimal input).
+    let requestedVersion;
+    if (rawVersion !== undefined && rawVersion !== null && rawVersion !== '') {
+      if (!DECIMAL_INT_RE.test(String(rawVersion)) || Number(rawVersion) < 1) {
+        return badRequest('version must be a positive integer');
+      }
+      requestedVersion = Number(rawVersion);
+    }
+
+    try {
+      const latestVersion = await client.getLatestVersion(propertyId, contractId, groupId);
+      const version = requestedVersion ?? latestVersion;
+      const { ruleTree } = await client.getRuleTree(propertyId, version, contractId, groupId);
+      const managedRulesPresent = detectManagedRuleNames(ruleTree);
+      const deployed = managedRulesPresent.length > 0;
+
+      log.info(auditLine(context, 'deploy-status', 'ok', {
+        siteId, propertyId, version, latestVersion, deployed,
+      }));
+      return ok({
+        propertyId,
+        version,
+        latestVersion,
+        // true when the Optimize-at-Edge rule is present in `version` — the definitive answer a
+        // caller needs after a deploy whose response it never received.
+        deployed,
+        managedRulesPresent,
+      });
+    } catch (e) {
+      return papiErrorResponse(e, 'deploy status', context, { siteId, propertyId });
     }
   };
 
@@ -915,6 +976,7 @@ function LlmoAkamaiController(ctx) {
     listProperties,
     plan,
     deploy,
+    deployStatus,
     activate,
     activationStatus,
   };
