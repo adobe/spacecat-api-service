@@ -1148,6 +1148,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/geo-experiments/:geoExperimentId',
       'PATCH /sites/:siteId/geo-experiments/:geoExperimentId',
       'DELETE /sites/:siteId/geo-experiments/:geoExperimentId',
+      'POST /sites/:siteId/geo-experiments/:geoExperimentId/trigger-impact-measurement',
       'GET /sites/:siteId/traffic/paid',
       'GET /sites/:siteId/traffic/paid/page-type-platform-campaign',
       'GET /sites/:siteId/traffic/paid/url-page-type',

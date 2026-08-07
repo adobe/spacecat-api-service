@@ -49,6 +49,7 @@ import {
   getScheduleParams,
   buildExperimentMetadata,
   presignInsightsRawData,
+  isImpactMeasurementEligible,
 } from '../support/geo-experiment-helper.js';
 import { FixDto } from '../dto/fix.js';
 import { GeoExperimentDto } from '../dto/geo-experiment.js';
@@ -59,6 +60,7 @@ import {
   getHostName,
   getIsSummitPlgEnabled,
   isViewAsTrialRequest,
+  triggerGeoExperimentImpactMeasurement,
 } from '../support/utils.js';
 import AccessControlUtil, { X_PRODUCT_HEADER } from '../support/access-control-util.js';
 import { redactFeedbackContent } from '../support/feedback-redaction.js';
@@ -2592,6 +2594,53 @@ function SuggestionsController(ctx, sqs, env) {
     return noContent();
   };
 
+  /**
+   * Manually (re-)triggers Mystique impact measurement for a GeoExperiment. Only allowed once
+   * the experiment has reached post-analysis, with status in_progress or completed (see
+   * isImpactMeasurementEligible). Sends a TRIGGER_IMPACT_MEASUREMENT message to the
+   * llmo-experimentation-engine-queue; the engine re-validates eligibility and re-arms the
+   * experiment before resubmitting via its normal handlePostAnalysisCompleted path.
+   * See llmo-experimentation-engine's docs/decisions/004-manual-impact-measurement-retrigger.md.
+   */
+  const triggerImpactMeasurement = async (context) => {
+    const { siteId, geoExperimentId } = context.params;
+    const { authInfo: { profile } } = context.attributes;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(geoExperimentId)) {
+      return badRequest('GeoExperiment ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
+    }
+
+    const geoExperiment = await GeoExperiment.findById(geoExperimentId);
+    if (!geoExperiment || geoExperiment.getSiteId() !== siteId) {
+      return notFound('GeoExperiment not found');
+    }
+
+    if (!isImpactMeasurementEligible(geoExperiment)) {
+      return badRequest(`GeoExperiment ${geoExperimentId} is at phase '${geoExperiment.getPhase()}' / status '${geoExperiment.getStatus()}' - impact measurement can only be triggered at phase 'post_analysis_done', 'impact_measurement_started', or 'impact_measurement_done' with status 'in_progress' or 'completed'.`);
+    }
+
+    const triggeredBy = profile?.email || profile?.name || 'unknown';
+    await triggerGeoExperimentImpactMeasurement(geoExperimentId, triggeredBy, { sqs, env });
+
+    context.log.info(`[geo-experiment] Sent manual impact-measurement trigger for GeoExperiment ${geoExperimentId} (siteId: ${siteId}, phase: ${geoExperiment.getPhase()}, status: ${geoExperiment.getStatus()}, triggeredBy: ${triggeredBy})`);
+
+    return accepted({
+      message: `Triggered impact measurement for GeoExperiment ${geoExperimentId}. The experimentation engine will process it shortly.`,
+    });
+  };
+
   const rollbackSuggestionFromEdge = async (context) => {
     const { siteId, opportunityId } = context.params;
     const { authInfo: { profile } } = context.attributes;
@@ -3103,6 +3152,7 @@ function SuggestionsController(ctx, sqs, env) {
     getGeoExperiment,
     patchGeoExperiment,
     deleteGeoExperiment,
+    triggerImpactMeasurement,
     rollbackSuggestionFromEdge,
     previewSuggestions,
     fetchFromEdge,
