@@ -987,6 +987,28 @@ function LlmoAkamaiController(ctx) {
           }));
         }
       }
+      // Akamai refuses to activate a version that has BLOCKING validation errors, returning a 400
+      // on the activations endpoint (a well-formed activate request only 400s for this reason). No
+      // activation gets created, so the recovery probe above found nothing. Surface it as a
+      // specific, actionable block — the version must be fixed / re-created first — instead of a
+      // generic upstream 502 the UI might retry into a loop. This is the activation-time gate that
+      // stops a rule tree with errors (e.g. deploy-status reported the rule present, but the tree
+      // still fails validation) from being pushed live.
+      const activateStatus = Number((e?.message || '').match(/-> (\d{3}):/)?.[1]);
+      if (activateStatus === 400) {
+        const papiDetail = (e?.message || '').replace(/^.*?-> \d{3}:\s*/, '').slice(0, 2000);
+        log.error(auditLine(context, 'activate', 'validation-rejected', {
+          severity: 'error', siteId, host: auditHostname(site), propertyId, version, network,
+        }));
+        return createResponse({
+          message: 'This property version can’t be activated because it has validation errors. '
+            + 'Review the version in Akamai Property Manager (or create a new version) to fix them, '
+            + 'then try activating again.',
+          code: 'version_has_validation_errors',
+          version,
+          papiErrors: papiDetail,
+        }, 422);
+      }
       return papiErrorResponse(e, 'activation', context, { siteId, propertyId });
     }
   };

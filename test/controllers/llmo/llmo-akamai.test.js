@@ -743,6 +743,21 @@ describe('LlmoAkamaiController', () => {
       expect(res.status).to.equal(502);
     });
 
+    it('blocks activation with a specific 422 when the version has validation errors (Akamai 400)', async () => {
+      // Akamai refuses to activate a version with blocking errors: 400 on the activations endpoint.
+      mockAkamaiClient.activate.rejects(
+        new Error('PAPI POST /papi/v1/properties/prp_1253269/activations -> 400: '
+          + '{"errors":[{"detail":"rule X is invalid"}]}'),
+      );
+      // No activation was created, so the recovery probe finds nothing for this version.
+      mockAkamaiClient.latestActivation.resolves(undefined);
+      const res = await controller.activate(withData(propertyRef));
+      const body = await res.json();
+      expect(res.status).to.equal(422);
+      expect(body.code).to.equal('version_has_validation_errors');
+      expect(body.message).to.contain('validation errors');
+    });
+
     it('does not recover when the in-flight activation is for a different version', async () => {
       mockAkamaiClient.activate.rejects(
         new Error('PAPI POST /papi/v1/properties/prp_1253269/activations -> 422: already-activated'),
