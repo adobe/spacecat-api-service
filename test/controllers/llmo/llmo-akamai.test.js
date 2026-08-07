@@ -252,6 +252,7 @@ describe('LlmoAkamaiController', () => {
       expect(body.mergedChildRules[body.mergedChildRules.length - 1]).to.equal('Optimize at Edge');
       // plan dry-runs the exact full-tree PUT it would deploy, without creating a version.
       expect(mockAkamaiClient.createVersion).to.not.have.been.called;
+      expect(mockAkamaiClient.patchRuleTree).to.not.have.been.called;
       expect(mockAkamaiClient.updateRuleTree).to.have.been.calledOnce;
       expect(mockAkamaiClient.updateRuleTree.firstCall.args[6]).to.deep.equal({ dryRun: true });
       expect(body.validated).to.equal(true);
@@ -337,13 +338,13 @@ describe('LlmoAkamaiController', () => {
       // The tree is read from the BASE version (for the scope gate + merge), then the merged tree
       // is PUT into the NEW version, pinning the base version's ruleFormat.
       expect(mockAkamaiClient.getRuleTree).to.have.been.calledWith(PROPERTY_ID, 7);
+      expect(mockAkamaiClient.patchRuleTree).to.not.have.been.called;
       expect(mockAkamaiClient.updateRuleTree).to.have.been.calledOnce;
       const [, version, , , merged, ruleFormat] = mockAkamaiClient.updateRuleTree.firstCall.args;
       expect(version).to.equal(8);
       expect(ruleFormat).to.equal('v2024-01-01');
       const parent = merged.rules.children.find((c) => c.name === 'Optimize at Edge');
       expect(parent).to.exist;
-      expect(mockAkamaiClient.patchRuleTree).to.not.have.been.called;
     });
 
     it('blocks deploy when the property does not serve the site domain', async () => {
@@ -361,6 +362,8 @@ describe('LlmoAkamaiController', () => {
       const body = await res.json();
       expect(res.status).to.equal(422);
       expect(body.papiErrors).to.have.length(1);
+      // Full detail, not just a count, is logged for future diagnosis.
+      expect(mockContext.log.error).to.have.been.calledWithMatch(/papiErrors=.*"bad"/);
     });
 
     it('maps a PAPI 403 to a 403 response', async () => {
@@ -390,6 +393,32 @@ describe('LlmoAkamaiController', () => {
 
     it('rejects a non-integer baseVersion', async () => {
       const res = await controller.deploy(withData({ ...propertyRef, baseVersion: '1e3' }));
+      expect(res.status).to.equal(400);
+      expect(mockAkamaiClient.createVersion).to.not.have.been.called;
+    });
+
+    it('resumes into retryVersion instead of minting a new version', async () => {
+      const res = await controller.deploy(withData({ ...propertyRef, retryVersion: 8 }));
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.baseVersion).to.equal(7);
+      expect(body.newVersion).to.equal(8);
+      // No fresh version is created — the retry writes into the one already there.
+      expect(mockAkamaiClient.createVersion).to.not.have.been.called;
+      // The full merged tree is PUT into retryVersion (8) directly.
+      const [, version] = mockAkamaiClient.updateRuleTree.firstCall.args;
+      expect(version).to.equal(8);
+    });
+
+    it('rejects a non-integer retryVersion', async () => {
+      const res = await controller.deploy(withData({ ...propertyRef, retryVersion: '1e3' }));
+      expect(res.status).to.equal(400);
+      expect(mockAkamaiClient.createVersion).to.not.have.been.called;
+      expect(mockAkamaiClient.updateRuleTree).to.not.have.been.called;
+    });
+
+    it('rejects retryVersion 0 (PAPI versions start at 1)', async () => {
+      const res = await controller.deploy(withData({ ...propertyRef, retryVersion: 0 }));
       expect(res.status).to.equal(400);
       expect(mockAkamaiClient.createVersion).to.not.have.been.called;
     });
