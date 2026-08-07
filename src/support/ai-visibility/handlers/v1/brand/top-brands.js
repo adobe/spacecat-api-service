@@ -26,7 +26,7 @@ import {
 
 /* c8 ignore start */
 export async function handleTopBrands(sp, clients) {
-  const domain = sp.get('domain')?.trim();
+  const domain = sp.get('domain');
   if (!domain) {
     return {
       status: 400,
@@ -43,7 +43,7 @@ export async function handleTopBrands(sp, clients) {
       TopBrandsByDomainRequestSchema,
       {
         country,
-        brand_domain: domain.replace(/^www\./i, '').toLowerCase(),
+        brand_domain: domain,
         llm,
         limit,
       },
