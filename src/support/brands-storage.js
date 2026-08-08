@@ -996,6 +996,55 @@ export async function listBrandIdsForSite(organizationId, siteId, postgrestClien
 }
 
 /**
+ * Inverse of {@link listBrandIdsForSite}: given a set of brand ids, resolve
+ * every site within the org linked to at least one of them — the union of the
+ * brands' OWN primary sites (`brands.site_id`) and any `brand_sites` links.
+ *
+ * Used by ReBAC-filtered collection endpoints (list-sites, list-projects) under
+ * a `brand`-scoped product (LLMO) to narrow the org's sites to those the caller
+ * may view, by first resolving the caller's viewable brands then mapping those
+ * brands back to sites. Two org-scoped reads regardless of collection size —
+ * scales with the (small) set of viewable brands, never a per-site N+1.
+ *
+ * @param {string} organizationId - SpaceCat organization UUID
+ * @param {Set<string>|string[]} brandIds - brand ids the caller may view
+ * @param {object} postgrestClient - PostgREST client
+ * @returns {Promise<Set<string>>} site ids linked to any of `brandIds` (empty when none)
+ */
+export async function listSiteIdsForBrands(organizationId, brandIds, postgrestClient) {
+  const ids = [...(brandIds ?? [])].filter(hasText);
+  if (!postgrestClient?.from || !hasText(organizationId) || ids.length === 0) {
+    return new Set();
+  }
+
+  const [ownRes, linkedRes] = await Promise.all([
+    postgrestClient
+      .from('brands')
+      .select('site_id')
+      .eq('organization_id', organizationId)
+      .eq('status', 'active')
+      .in('id', ids),
+    postgrestClient
+      .from('brand_sites')
+      .select('site_id')
+      .eq('organization_id', organizationId)
+      .in('brand_id', ids),
+  ]);
+
+  if (ownRes.error) {
+    throw new Error(`Failed to resolve sites for brands: ${ownRes.error.message}`);
+  }
+  if (linkedRes.error) {
+    throw new Error(`Failed to resolve brand-site links for brands: ${linkedRes.error.message}`);
+  }
+
+  const siteIds = new Set();
+  (ownRes.data || []).forEach((row) => hasText(row.site_id) && siteIds.add(row.site_id));
+  (linkedRes.data || []).forEach((row) => hasText(row.site_id) && siteIds.add(row.site_id));
+  return siteIds;
+}
+
+/**
  * Creates or updates a brand in the normalized brands table,
  * including all nested child tables (aliases, competitors, social, earned, sites).
  *
