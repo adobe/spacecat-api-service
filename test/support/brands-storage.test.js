@@ -25,6 +25,7 @@ import {
   getBrandCompetitors,
   getBrandBySite,
   listBrandIdsForSite,
+  listSiteIdsForBrands,
   isSemrushMarketMirrorSite,
   upsertBrand,
   updateBrand,
@@ -760,6 +761,53 @@ describe('brands-storage', () => {
       from.withArgs('brand_sites').returns(createChainableQuery({ data: null, error: { message: 'nope' } }));
       await expect(listBrandIdsForSite(ORG_ID, SITE_ID, { from }))
         .to.be.rejectedWith(/Failed to resolve brand-site links for site: nope/);
+    });
+  });
+
+  describe('listSiteIdsForBrands', () => {
+    const BRAND_IDS = new Set(['brand-A', 'brand-B']);
+
+    it('returns empty set when postgrestClient / org / brandIds are missing or empty', async () => {
+      expect(await listSiteIdsForBrands(ORG_ID, BRAND_IDS, null)).to.deep.equal(new Set());
+      expect(await listSiteIdsForBrands(ORG_ID, BRAND_IDS, {})).to.deep.equal(new Set());
+      expect(await listSiteIdsForBrands('', BRAND_IDS, { from: () => {} })).to.deep.equal(new Set());
+      const noop = { from: () => {} };
+      expect(await listSiteIdsForBrands(ORG_ID, new Set(), noop)).to.deep.equal(new Set());
+      expect(await listSiteIdsForBrands(ORG_ID, null, noop)).to.deep.equal(new Set());
+    });
+
+    it('unions primary sites (brands.site_id) and linked sites (brand_sites.site_id)', async () => {
+      const from = sinon.stub();
+      from.withArgs('brands').returns(createChainableQuery({ data: [{ site_id: 'site-1' }], error: null }));
+      from.withArgs('brand_sites').returns(createChainableQuery({
+        data: [{ site_id: 'site-1' }, { site_id: 'site-2' }], error: null,
+      }));
+      const result = await listSiteIdsForBrands(ORG_ID, BRAND_IDS, { from });
+      expect(result).to.deep.equal(new Set(['site-1', 'site-2']));
+    });
+
+    it('accepts an array of brand ids', async () => {
+      const from = sinon.stub();
+      from.withArgs('brands').returns(createChainableQuery({ data: [{ site_id: 'site-1' }], error: null }));
+      from.withArgs('brand_sites').returns(createChainableQuery({ data: [], error: null }));
+      const result = await listSiteIdsForBrands(ORG_ID, ['brand-A'], { from });
+      expect(result).to.deep.equal(new Set(['site-1']));
+    });
+
+    it('throws when the brands query errors', async () => {
+      const from = sinon.stub();
+      from.withArgs('brands').returns(createChainableQuery({ data: null, error: { message: 'boom' } }));
+      from.withArgs('brand_sites').returns(createChainableQuery({ data: [], error: null }));
+      await expect(listSiteIdsForBrands(ORG_ID, BRAND_IDS, { from }))
+        .to.be.rejectedWith(/Failed to resolve sites for brands: boom/);
+    });
+
+    it('throws when the brand_sites query errors', async () => {
+      const from = sinon.stub();
+      from.withArgs('brands').returns(createChainableQuery({ data: [], error: null }));
+      from.withArgs('brand_sites').returns(createChainableQuery({ data: null, error: { message: 'nope' } }));
+      await expect(listSiteIdsForBrands(ORG_ID, BRAND_IDS, { from }))
+        .to.be.rejectedWith(/Failed to resolve brand-site links for brands: nope/);
     });
   });
 

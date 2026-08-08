@@ -27,8 +27,30 @@ describe('resolveViewableSiteIds', () => {
     return { from: () => builder };
   }
 
-  function orgWith(imsOrgId) {
-    return { getImsOrgId: () => imsOrgId };
+  // Per-table fake: resolves different rows for facs_access_mappings (grants),
+  // brands, and brand_sites — needed for the LLMO brand→site path which chains
+  // all three. Supports the `.in()` filter the brand→site lookup uses.
+  function fakeMultiTablePostgrest(rowsByTable) {
+    return {
+      from: (table) => {
+        const rows = rowsByTable[table] ?? [];
+        const builder = {
+          select: () => builder,
+          eq: () => builder,
+          in: () => builder,
+          is: () => builder,
+          order: () => builder,
+          range: () => builder,
+          limit: () => builder,
+          then: (onF, onR) => Promise.resolve({ data: rows, error: null }).then(onF, onR),
+        };
+        return builder;
+      },
+    };
+  }
+
+  function orgWith(imsOrgId, id = 'org-uuid') {
+    return { getImsOrgId: () => imsOrgId, getId: () => id };
   }
 
   it('returns null when facs is not enabled', async () => {
@@ -48,12 +70,13 @@ describe('resolveViewableSiteIds', () => {
     expect(result).to.equal(null);
   });
 
-  it('returns null for a product that does not ReBAC-scope site (LLMO)', async () => {
+  it('returns null for LLMO when the brand-filter env flag is off (ships dark)', async () => {
     const context = {
       attributes: {
         facs: { enabled: true, product: 'LLMO', subjectId: 'user@AdobeID' },
         authInfo: { hasFacsPermission: () => false },
       },
+      env: {}, // ENABLE_LLMO_SITES_BRAND_FILTER not set
     };
     const result = await resolveViewableSiteIds(context, orgWith('org1'));
     expect(result).to.equal(null);
@@ -102,5 +125,63 @@ describe('resolveViewableSiteIds', () => {
     };
     const result = await resolveViewableSiteIds(context, orgWith('org1'));
     expect(result.size).to.equal(0);
+  });
+
+  describe('LLMO brand-scoped narrowing (flag on)', () => {
+    function llmoContext(rowsByTable) {
+      return {
+        attributes: {
+          facs: { enabled: true, product: 'LLMO', subjectId: 'user@AdobeID' },
+          authInfo: { hasFacsPermission: () => false },
+        },
+        env: { ENABLE_LLMO_SITES_BRAND_FILTER: 'true' },
+        dataAccess: { services: { postgrestClient: fakeMultiTablePostgrest(rowsByTable) } },
+      };
+    }
+
+    it('derives viewable sites from the caller viewable brands (brands ∪ brand_sites)', async () => {
+      const context = llmoContext({
+        facs_access_mappings: [{ resource_id: 'brand-A', granted_capabilities: ['llmo/can_view'] }],
+        brands: [{ site_id: 'site1' }],
+        brand_sites: [{ site_id: 'site2' }],
+      });
+      const result = await resolveViewableSiteIds(context, orgWith('org1'));
+      expect(result.has('site1')).to.equal(true);
+      expect(result.has('site2')).to.equal(true);
+      expect(result.has('site3')).to.equal(false);
+    });
+
+    it('returns an empty Set when the caller holds no viewable brands (excludes brand-less sites)', async () => {
+      const context = llmoContext({
+        facs_access_mappings: [], // no brand grants
+        brands: [{ site_id: 'site1' }],
+        brand_sites: [{ site_id: 'site2' }],
+      });
+      const result = await resolveViewableSiteIds(context, orgWith('org1'));
+      expect(result.size).to.equal(0);
+    });
+
+    it('ignores brand grants that lack llmo/can_view', async () => {
+      const context = llmoContext({
+        facs_access_mappings: [{ resource_id: 'brand-A', granted_capabilities: ['llmo/can_configure'] }],
+        brands: [{ site_id: 'site1' }],
+        brand_sites: [],
+      });
+      const result = await resolveViewableSiteIds(context, orgWith('org1'));
+      expect(result.size).to.equal(0);
+    });
+
+    it('returns a 503 Response when PostgREST is unavailable (flag on)', async () => {
+      const context = {
+        attributes: {
+          facs: { enabled: true, product: 'LLMO', subjectId: 'user@AdobeID' },
+          authInfo: { hasFacsPermission: () => false },
+        },
+        env: { ENABLE_LLMO_SITES_BRAND_FILTER: 'true' },
+        dataAccess: { services: {} },
+      };
+      const result = await resolveViewableSiteIds(context, orgWith('org1'));
+      expect(result).to.have.property('status', 503);
+    });
   });
 });
