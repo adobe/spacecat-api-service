@@ -1902,14 +1902,28 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Tier required');
   });
 
-  it('returns bad request when tier is not customer-visible on getAllByEnrollmentAndTier', async () => {
+  it('returns bad request when tier is not a known Entitlement tier on getAllByEnrollmentAndTier', async () => {
     const result = await sitesController.getAllByEnrollmentAndTier({
-      params: { tier: 'PRE_ONBOARD' },
+      params: { tier: 'NOT_A_TIER' },
     });
     const error = await result.json();
 
     expect(result.status).to.equal(400);
     expect(error.message).to.match(/^Tier must be one of:/);
+  });
+
+  it('allows PRE_ONBOARD (internal-only, not customer-visible) since this endpoint is admin-gated', async () => {
+    mockDataAccess.Site.allByEnrollmentAndTier.resolves(sites);
+
+    const result = await sitesController.getAllByEnrollmentAndTier({
+      params: { tier: 'PRE_ONBOARD' },
+    });
+    const body = await result.json();
+
+    expect(result.status).to.equal(200);
+    expect(mockDataAccess.Site.allByEnrollmentAndTier)
+      .to.have.been.calledOnceWithExactly('PRE_ONBOARD', undefined);
+    expect(body.sites).to.be.an('array').with.lengthOf(2);
   });
 
   it('returns bad request when productCode is invalid on getAllByEnrollmentAndTier', async () => {

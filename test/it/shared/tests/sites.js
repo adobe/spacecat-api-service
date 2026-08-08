@@ -527,8 +527,15 @@ export default function siteTests(getHttpClient, resetData) {
 
       it('admin: returns 400 for an invalid tier', async () => {
         const http = getHttpClient();
-        const res = await http.admin.get('/sites/by-tier/PRE_ONBOARD?productCode=LLMO');
+        const res = await http.admin.get('/sites/by-tier/NOT_A_TIER?productCode=LLMO');
         expect(res.status).to.equal(400);
+      });
+
+      it('admin: accepts PRE_ONBOARD (internal-only tier, not customer-visible)', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites/by-tier/PRE_ONBOARD?productCode=LLMO');
+        expect(res.status).to.equal(200);
+        expect(res.body.sites).to.be.an('array');
       });
 
       it('user: returns 403', async () => {

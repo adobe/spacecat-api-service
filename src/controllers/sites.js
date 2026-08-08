@@ -688,8 +688,13 @@ function SitesController(ctx, log, env) {
 
   /**
    * Gets all sites enrolled at a given entitlement tier (e.g. 'PAID',
-   * 'FREE_TRIAL', 'PLG'). Optionally narrows the result to a single product
-   * code via the `productCode` query parameter (e.g. 'LLMO').
+   * 'FREE_TRIAL', 'PLG', 'PRE_ONBOARD'). Optionally narrows the result to a
+   * single product code via the `productCode` query parameter (e.g. 'LLMO').
+   *
+   * Accepts any Entitlement.TIERS value, not just CUSTOMER_VISIBLE_TIERS -
+   * this endpoint is already admin-gated below, so PRE_ONBOARD (internal-only,
+   * not customer-visible) is a legitimate admin query, e.g. to find sites
+   * still awaiting onboarding.
    *
    * Returns the full result set (no pagination) - acceptable for a
    * bounded admin-only use case. Sites are ordered by ID. Supports the
@@ -708,8 +713,9 @@ function SitesController(ctx, log, env) {
     if (!hasText(tier)) {
       return badRequest('Tier required');
     }
-    if (!CUSTOMER_VISIBLE_TIERS.includes(tier)) {
-      return badRequest(`Tier must be one of: ${CUSTOMER_VISIBLE_TIERS.join(', ')}`);
+    const validTiers = Object.values(EntitlementModel.TIERS);
+    if (!validTiers.includes(tier)) {
+      return badRequest(`Tier must be one of: ${validTiers.join(', ')}`);
     }
     const validProductCodes = Object.values(EntitlementModel.PRODUCT_CODES);
     if (productCode !== undefined && !validProductCodes.includes(productCode)) {

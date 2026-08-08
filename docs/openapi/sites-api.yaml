@@ -265,7 +265,7 @@ sites-by-tier:
     summary: Retrieve all sites enrolled at a given entitlement tier
     description: |
       Returns sites whose organization has an entitlement at the requested tier
-      (PAID, FREE_TRIAL, or PLG) and that are enrolled into that entitlement.
+      (PAID, FREE_TRIAL, PLG, or PRE_ONBOARD) and that are enrolled into that entitlement.
       Optionally restrict to a single product via the `productCode` query
       parameter (e.g. LLMO). Results are ordered by site ID. Not paginated -
       admin-only, bounded use case. Supports the `fields` query parameter to
