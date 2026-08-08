@@ -1,3 +1,10 @@
+# [1.732.0](https://github.com/adobe/spacecat-api-service/compare/v1.731.0...v1.732.0) (2026-08-08)
+
+
+### Features
+
+* **sites:** allow PRE_ONBOARD tier on GET /sites/by-tier/:tier ([#3019](https://github.com/adobe/spacecat-api-service/issues/3019)) ([330b77f](https://github.com/adobe/spacecat-api-service/commit/330b77ff356cf70ee5397e31188a7e964e768704)), closes [#3017](https://github.com/adobe/spacecat-api-service/issues/3017)
+
 # [1.731.0](https://github.com/adobe/spacecat-api-service/compare/v1.730.0...v1.731.0) (2026-08-07)
 
 
