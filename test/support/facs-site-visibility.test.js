@@ -70,13 +70,12 @@ describe('resolveViewableSiteIds', () => {
     expect(result).to.equal(null);
   });
 
-  it('returns null for LLMO when the brand-filter env flag is off (ships dark)', async () => {
+  it('returns null when the caller holds an org-wide can_view grant (LLMO)', async () => {
     const context = {
       attributes: {
         facs: { enabled: true, product: 'LLMO', subjectId: 'user@AdobeID' },
-        authInfo: { hasFacsPermission: () => false },
+        authInfo: { hasFacsPermission: () => true },
       },
-      env: {}, // ENABLE_LLMO_SITES_BRAND_FILTER not set
     };
     const result = await resolveViewableSiteIds(context, orgWith('org1'));
     expect(result).to.equal(null);
@@ -127,14 +126,13 @@ describe('resolveViewableSiteIds', () => {
     expect(result.size).to.equal(0);
   });
 
-  describe('LLMO brand-scoped narrowing (flag on)', () => {
+  describe('LLMO brand-scoped narrowing', () => {
     function llmoContext(rowsByTable) {
       return {
         attributes: {
           facs: { enabled: true, product: 'LLMO', subjectId: 'user@AdobeID' },
           authInfo: { hasFacsPermission: () => false },
         },
-        env: { ENABLE_LLMO_SITES_BRAND_FILTER: 'true' },
         dataAccess: { services: { postgrestClient: fakeMultiTablePostgrest(rowsByTable) } },
       };
     }
@@ -171,13 +169,12 @@ describe('resolveViewableSiteIds', () => {
       expect(result.size).to.equal(0);
     });
 
-    it('returns a 503 Response when PostgREST is unavailable (flag on)', async () => {
+    it('returns a 503 Response when PostgREST is unavailable', async () => {
       const context = {
         attributes: {
           facs: { enabled: true, product: 'LLMO', subjectId: 'user@AdobeID' },
           authInfo: { hasFacsPermission: () => false },
         },
-        env: { ENABLE_LLMO_SITES_BRAND_FILTER: 'true' },
         dataAccess: { services: {} },
       };
       const result = await resolveViewableSiteIds(context, orgWith('org1'));

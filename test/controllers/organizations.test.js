@@ -1121,22 +1121,6 @@ describe('Organizations Controller', () => {
       expect(resultSites).to.be.an('array').with.lengthOf(2);
     });
 
-    it('skips the site filter under LLMO (site is not a ReBAC resource for LLMO)', async () => {
-      setupBothSitesPass();
-      // LLMO ReBAC-scopes `brand`, not `site` — listing sites must NOT be
-      // filtered even though a resource-scoped facs session is active.
-      context.attributes.facs = { enabled: true, product: 'LLMO', subjectId: 'user@AdobeID' };
-      // No postgrestClient: if the filter wrongly engaged it would 503; the
-      // cross-product bypass must skip the state-layer query entirely.
-      const result = await organizationsController.getSitesForOrganization({
-        params: { organizationId: '5f3b3626-029c-476e-924b-0c1bba2e871f' },
-        ...context,
-      });
-      expect(result.status).to.equal(200);
-      const resultSites = await result.json();
-      expect(resultSites).to.be.an('array').with.lengthOf(2);
-    });
-
     // Per-table PostgREST stub: facs_access_mappings (brand grants), brands, and
     // brand_sites resolve to distinct rows — needed for the LLMO brand→site path.
     function fakeBrandScopedPostgrest(rowsByTable) {
@@ -1157,10 +1141,9 @@ describe('Organizations Controller', () => {
       };
     }
 
-    it('narrows LLMO sites to those linked to a viewable brand when the flag is on', async () => {
+    it('narrows LLMO sites to those linked to a viewable brand', async () => {
       setupBothSitesPass();
       context.attributes.facs = { enabled: true, product: 'LLMO', subjectId: 'user@AdobeID' };
-      context.env = { ENABLE_LLMO_SITES_BRAND_FILTER: 'true' };
       context.dataAccess.services = {
         postgrestClient: fakeBrandScopedPostgrest({
           // Caller can view brand-A ...
@@ -1180,10 +1163,9 @@ describe('Organizations Controller', () => {
       expect(resultSites[0]).to.have.property('id', 'site1');
     });
 
-    it('returns an empty list under LLMO when the caller has no viewable brands (flag on)', async () => {
+    it('returns an empty list under LLMO when the caller has no viewable brands', async () => {
       setupBothSitesPass();
       context.attributes.facs = { enabled: true, product: 'LLMO', subjectId: 'user@AdobeID' };
-      context.env = { ENABLE_LLMO_SITES_BRAND_FILTER: 'true' };
       context.dataAccess.services = {
         postgrestClient: fakeBrandScopedPostgrest({
           facs_access_mappings: [], brands: [], brand_sites: [],
@@ -1197,20 +1179,6 @@ describe('Organizations Controller', () => {
       // No viewable brand => brand-less/other sites are excluded, fail closed to [].
       expect(result.status).to.equal(200);
       expect(resultSites).to.be.an('array').with.lengthOf(0);
-    });
-
-    it('does NOT narrow LLMO sites when the brand-filter flag is off (ships dark)', async () => {
-      setupBothSitesPass();
-      context.attributes.facs = { enabled: true, product: 'LLMO', subjectId: 'user@AdobeID' };
-      // context.env unset → flag off. No postgrestClient: if the filter wrongly
-      // engaged it would 503.
-      const result = await organizationsController.getSitesForOrganization({
-        params: { organizationId: '5f3b3626-029c-476e-924b-0c1bba2e871f' },
-        ...context,
-      });
-      const resultSites = await result.json();
-      expect(result.status).to.equal(200);
-      expect(resultSites).to.be.an('array').with.lengthOf(2);
     });
   });
 
@@ -1552,29 +1520,11 @@ describe('Organizations Controller', () => {
       expect(response).to.be.an('array').with.lengthOf(0);
     });
 
-    it('skips the project filter under LLMO when the brand-filter flag is off (ships dark)', async () => {
-      mockDataAccess.Organization.findById.resolves(organizations[1]);
-      mockDataAccess.Project.allByOrganizationId.resolves(projects);
-      // LLMO brand narrowing is flag-gated; with the flag off it must not engage.
-      // No postgrestClient — if it wrongly engaged this would 503.
-      context.attributes.facs = { enabled: true, product: 'LLMO', subjectId: 'user@AdobeID' };
-
-      const result = await organizationsController.getProjectsByOrganizationId({
-        params: { organizationId: organizations[1].getId() },
-        ...context,
-      });
-      const response = await result.json();
-
-      expect(result.status).to.equal(200);
-      expect(response).to.be.an('array').with.lengthOf(2);
-    });
-
-    it('narrows LLMO projects to those with a brand-viewable site when the flag is on', async () => {
+    it('narrows LLMO projects to those with a brand-viewable site', async () => {
       mockDataAccess.Organization.findById.resolves(organizations[1]);
       mockDataAccess.Project.allByOrganizationId.resolves(projects);
       mockDataAccess.Site.allByOrganizationId.resolves(sites);
       context.attributes.facs = { enabled: true, product: 'LLMO', subjectId: 'user@AdobeID' };
-      context.env = { ENABLE_LLMO_SITES_BRAND_FILTER: 'true' };
       // Per-table stub: caller can view brand-A → brand-A's primary site is site1.
       context.dataAccess.services = {
         postgrestClient: {
