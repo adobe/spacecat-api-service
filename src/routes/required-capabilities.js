@@ -15,6 +15,7 @@ import {
   CAP_CONFIGURATION_WRITE,
   CAP_FIX_ENTITY_CREATE,
   CAP_ORG_READ_ALL,
+  CAP_PROMPT_SUGGESTION_SCHEDULE_WRITE,
   CAP_SITE_CREATE,
   CAP_SITE_READ_ALL,
   CAP_SUGGESTION_WRITE,
@@ -769,7 +770,9 @@ const routeRequiredCapabilities = {
   'GET /llmo/ai-visibility/v1/prompt-research/topics-export': 'report:read',
   'GET /llmo/ai-visibility/v1/brand/stats-by-country': 'report:read',
   'GET /llmo/ai-visibility/v1/brand/stats-by-llm': 'report:read',
+  'GET /llmo/ai-visibility/v1/brand/competitors': 'report:read',
   'GET /llmo/ai-visibility/v1/brand/competitors-stats': 'report:read',
+  'GET /llmo/ai-visibility/v1/brand/top-brands': 'report:read',
   'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts': 'report:read',
   'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts-export': 'report:read',
   'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts-totals': 'report:read',
@@ -826,6 +829,13 @@ const routeRequiredCapabilities = {
 
   // Suggestion grants
   'DELETE /sites/:siteId/suggestions/grants/:grantId': CAP_SUGGESTION_WRITE,
+
+  // Prompt-suggestion schedules — per-site (re-)provisioning of the recurring DRS
+  // prompt-suggestion pipelines. Admin-or-S2S: reachable by the fulfillment-worker
+  // (after a Commerce trial→paid flip) and a reconciler, so it is exposed to S2S
+  // consumers under a dedicated capability rather than left admin-only. The tier
+  // is re-derived server-side; the caller cannot supply it.
+  'POST /sites/:siteId/prompt-suggestion-schedules': CAP_PROMPT_SUGGESTION_SCHEDULE_WRITE,
 };
 
 export default routeRequiredCapabilities;

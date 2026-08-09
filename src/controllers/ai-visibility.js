@@ -69,7 +69,9 @@ import { handleCitedSourcesExport as handleCitedSourcesExportV1 } from '../suppo
 import { handleCitedSourcesTotals as handleCitedSourcesTotalsV1 } from '../support/ai-visibility/handlers/v1/source/cited-sources-totals.js';
 import { handleStatsByCountry as handleBrandStatsByCountryV1 } from '../support/ai-visibility/handlers/v1/brand/stats-by-country.js';
 import { handleStatsByLLM as handleBrandStatsByLLMV1 } from '../support/ai-visibility/handlers/v1/brand/stats-by-llm.js';
+import { handleCompetitors as handleBrandCompetitorsV1 } from '../support/ai-visibility/handlers/v1/brand/competitors.js';
 import { handleCompetitorsStats as handleBrandCompetitorsStatsV1 } from '../support/ai-visibility/handlers/v1/brand/competitors-stats.js';
+import { handleTopBrands as handleBrandTopBrandsV1 } from '../support/ai-visibility/handlers/v1/brand/top-brands.js';
 import { handleBrandsByTopicFts as handleBrandsByTopicFtsV1 } from '../support/ai-visibility/handlers/v1/brand/brands-by-topic-fts.js';
 import { handleBrandsByTopicFtsExport as handleBrandsByTopicFtsExportV1 } from '../support/ai-visibility/handlers/v1/brand/brands-by-topic-fts-export.js';
 import { handleBrandsByTopicFtsTotals as handleBrandsByTopicFtsTotalsV1 } from '../support/ai-visibility/handlers/v1/brand/brands-by-topic-fts-totals.js';
@@ -139,7 +141,9 @@ const ROUTE_MAP = [
   ['/v1/source/cited-sources-totals', handleCitedSourcesTotalsV1],
   ['/v1/brand/stats-by-country', handleBrandStatsByCountryV1],
   ['/v1/brand/stats-by-llm', handleBrandStatsByLLMV1],
+  ['/v1/brand/competitors', handleBrandCompetitorsV1],
   ['/v1/brand/competitors-stats', handleBrandCompetitorsStatsV1],
+  ['/v1/brand/top-brands', handleBrandTopBrandsV1],
   ['/v1/topic/metrics-by-fts', handleMetricsByFtsV1],
   ['/v1/topic/topics-by-fts', handleTopicsByFtsV1],
   ['/v1/topic/topics-by-fts-export', handleTopicsByFtsExportV1],

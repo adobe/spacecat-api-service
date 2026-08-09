@@ -1347,6 +1347,50 @@ llmo-offboard:
     security:
       - api_key: [ ]
 
+llmo-prompt-suggestion-schedules:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
+    tags:
+      - llmo
+    summary: Provision recurring prompt-suggestion schedules for a site
+    description: |
+      (Re)provisions the recurring DRS prompt-suggestion pipelines for a site,
+      keyed off the site's CURRENT LLMO tier (re-derived server-side — the caller
+      cannot supply a tier). Only PAID sites get recurring schedules; a non-paying
+      site is a no-op (skipped), because the trial one-shot run is an
+      onboarding-only behavior. The underlying schedule creation is idempotent, so
+      repeat calls are safe and already-existing schedules count as success.
+
+      Admin-or-S2S: reachable by admin `x-api-key` callers and by S2S consumers
+      holding the `promptSuggestionSchedule:write` capability (used by the
+      fulfillment-worker after a Commerce trial→paid flip and by a backfill
+      reconciler — both follow-ups).
+    operationId: createPromptSuggestionSchedules
+    responses:
+      '200':
+        description: >-
+          Provisioning completed. For a paying site the per-pipeline results are
+          returned; for a non-paying site the response indicates it was skipped.
+          `allSucceeded` reflects whether every pipeline succeeded (already-existing
+          schedules count as success); inspect `results` for per-pipeline status.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/PromptSuggestionSchedulesResult'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
 llmo-questions:
   parameters:
     - $ref: './parameters.yaml#/siteId'

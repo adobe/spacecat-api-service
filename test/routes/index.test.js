@@ -574,7 +574,9 @@ describe('getRouteHandlers', () => {
     getV1PromptResearchTopicsExport: sinon.stub(),
     getV1BrandStatsByCountry: sinon.stub(),
     getV1BrandStatsByLlm: sinon.stub(),
+    getV1BrandCompetitors: sinon.stub(),
     getV1BrandCompetitorsStats: sinon.stub(),
+    getV1BrandTopBrands: sinon.stub(),
     getV1BrandBrandsByTopicFts: sinon.stub(),
     getV1BrandBrandsByTopicFtsExport: sinon.stub(),
     getV1BrandBrandsByTopicFtsTotals: sinon.stub(),
@@ -661,6 +663,10 @@ describe('getRouteHandlers', () => {
     getScopeSections: sinon.stub(),
   };
 
+  const mockPromptSuggestionSchedulesController = {
+    createSchedules: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -730,6 +736,7 @@ describe('getRouteHandlers', () => {
       mockOnboardingController,
       mockRedirectsController,
       mockAuditPolicyController,
+      mockPromptSuggestionSchedulesController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -832,7 +839,9 @@ describe('getRouteHandlers', () => {
       'GET /llmo/ai-visibility/v1/prompt-research/topics-export',
       'GET /llmo/ai-visibility/v1/brand/stats-by-country',
       'GET /llmo/ai-visibility/v1/brand/stats-by-llm',
+      'GET /llmo/ai-visibility/v1/brand/competitors',
       'GET /llmo/ai-visibility/v1/brand/competitors-stats',
+      'GET /llmo/ai-visibility/v1/brand/top-brands',
       'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts',
       'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts-export',
       'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts-totals',
@@ -930,7 +939,9 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /llmo/ai-visibility/v1/prompt-research/topics-export']).to.equal(mockAiVisibilityController.getV1PromptResearchTopicsExport);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/brand/stats-by-country']).to.equal(mockAiVisibilityController.getV1BrandStatsByCountry);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/brand/stats-by-llm']).to.equal(mockAiVisibilityController.getV1BrandStatsByLlm);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/brand/competitors']).to.equal(mockAiVisibilityController.getV1BrandCompetitors);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/brand/competitors-stats']).to.equal(mockAiVisibilityController.getV1BrandCompetitorsStats);
+    expect(staticRoutes['GET /llmo/ai-visibility/v1/brand/top-brands']).to.equal(mockAiVisibilityController.getV1BrandTopBrands);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts']).to.equal(mockAiVisibilityController.getV1BrandBrandsByTopicFts);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts-export']).to.equal(mockAiVisibilityController.getV1BrandBrandsByTopicFtsExport);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts-totals']).to.equal(mockAiVisibilityController.getV1BrandBrandsByTopicFtsTotals);
@@ -1281,6 +1292,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/llmo/strategy/demo/brand-presence',
       'GET /sites/:siteId/llmo/strategy/demo/recommendations',
       'POST /sites/:siteId/llmo/offboard',
+      'POST /sites/:siteId/prompt-suggestion-schedules',
       'POST /v2/orgs/:spaceCatId/llmo/onboard-site',
       'POST /sites/:siteId/llmo/edge-optimize-config',
       'GET /sites/:siteId/llmo/edge-optimize-config',
@@ -1646,6 +1658,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['PATCH /sites/:siteId/llmo/customer-intent/:intentKey'].paramNames).to.deep.equal(['siteId', 'intentKey']);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/offboard'].handler).to.equal(mockLlmoController.offboardCustomer);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/offboard'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['POST /sites/:siteId/prompt-suggestion-schedules'].handler).to.equal(mockPromptSuggestionSchedulesController.createSchedules);
+    expect(dynamicRoutes['POST /sites/:siteId/prompt-suggestion-schedules'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['POST /v2/orgs/:spaceCatId/llmo/onboard-site'].handler).to.equal(mockLlmoController.onboardSiteOnly);
     expect(dynamicRoutes['POST /v2/orgs/:spaceCatId/llmo/onboard-site'].paramNames).to.deep.equal(['spaceCatId']);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/edge-optimize-config'].handler).to.equal(mockLlmoController.createOrUpdateEdgeConfig);
