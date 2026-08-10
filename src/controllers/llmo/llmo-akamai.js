@@ -51,9 +51,9 @@ const NETWORKS = ['STAGING', 'PRODUCTION'];
 // new value to their allowlist. The value never leaves the rule tree except in the deploy response.
 const generateFetcherKey = () => randomBytes(32).toString('hex');
 
-// A non-secret constant used ONLY in the read-only plan preview: it makes the merged tree carry the
-// same x-edgeoptimize-fetcher-key header deploy adds (so the dry-run validates the exact change),
-// and is redacted from the returned tree. Not random — the real key is minted at deploy.
+// A non-secret constant used ONLY in the read-only plan preview: it makes the merged tree carry
+// the same x-edgeoptimize-fetcher-key header deploy adds (redacted from the returned tree). Not
+// random — the real key is minted at deploy.
 const PLAN_FETCHER_KEY_PLACEHOLDER = 'preview-only-not-a-secret';
 
 // Akamai activation statuses that mean the submit actually succeeded (in flight or already live).
@@ -135,7 +135,7 @@ const auditLine = (context, action, outcome, fields = {}) => {
  * Controller for the Akamai "Optimize at Edge" onboarding wizard. Mirrors the structure of the
  * Cloudflare/CloudFront onboarding controllers: it owns the multi-step control-plane flow the LLMO
  * UI uses to wire a customer's Akamai property (via Property Manager / PAPI) to Edge Optimize —
- * find property → plan (dry-run merge) → deploy (new version + rules) → activate → poll status.
+ * find property → plan (in-memory merge preview) → deploy (new version + rules) → activate → poll.
  * Every endpoint is gated on site access + LLMO admin. EdgeGrid credentials are client-supplied
  * per request via x-akamai-* headers (never persisted, never logged), mirroring the Cloudflare
  * controller's x-cloudflare-token model.
@@ -204,14 +204,11 @@ function LlmoAkamaiController(ctx) {
     if (hasText(creds.accountSwitchKey) && !ACCOUNT_SWITCH_KEY_RE.test(creds.accountSwitchKey)) {
       return { error: badRequest(`${CRED_HEADERS.accountSwitchKey} contains invalid characters`) };
     }
-    // The rule-tree calls (the getRuleTree read + the PATCH write, which runs validateRules) scale
-    // with tree size and can exceed the shared client's 60s default on a large property — the PATCH
-    // write measured ~30s on a ~1300-complexity tree, and Akamai's whole-tree validation would run
-    // longer nearer its ~3000-complexity ceiling. The browser is already released at the ~15s CDN
-    // cutoff and polling deploy-status, so the Lambda can wait past that; a 300s budget gives ~10x
-    // headroom over the measured write, comfortably covers a max-size property, and lines up with
-    // the FE's ~300s poll window (the Lambda stops waiting about when the FE stops polling). Env-
-    // overridable via AKAMAI_RULE_TREE_TIMEOUT_MS.
+    // getRuleTree + the PATCH write run PAPI's validateRules, whose latency scales with tree size
+    // (measured ~30s at ~1300 complexity, ~55-65s near Akamai's ~3000 ceiling) — past the shared
+    // client's 60s default. The browser already dropped at the ~15s CDN cutoff and is polling
+    // deploy-status, so the Lambda can wait: 300s gives ample headroom and matches the FE poll
+    // window. Env-overridable via AKAMAI_RULE_TREE_TIMEOUT_MS.
     const ruleTreeTimeoutMs = Number(context.env?.AKAMAI_RULE_TREE_TIMEOUT_MS) || 300000;
     try {
       return { client: new AkamaiClient({ ...creds, notifyEmails, ruleTreeTimeoutMs }, log) };
@@ -240,7 +237,7 @@ function LlmoAkamaiController(ctx) {
     // "-> 404" and mis-map a genuine 5xx. Take the FIRST such token, which is the real status.
     const status = Number(message.match(/-> (\d{3}):/)?.[1]);
     // Surface a version the operation may have already created before a later call threw (e.g.
-    // deploy created a new version, then updateRuleTree failed) so the caller can find/clean it up.
+    // deploy created a new version, then the rule-tree write failed) so the caller can clean it up.
     const extra = fields.newVersion !== undefined ? { newVersion: fields.newVersion } : {};
     if (status === 401) {
       return unauthorized('Akamai authentication failed');
@@ -662,12 +659,10 @@ function LlmoAkamaiController(ctx) {
         ? Number(rawBaseVersion)
         : await client.getLatestVersion(propertyId, contractId, groupId);
 
-      // Read the base version's tree first so we can enforce the CUSTOM-default scope gate and
-      // decide caching BEFORE creating a version — a rejected onboarding then leaves no orphan
-      // version behind. The new version is a byte-exact clone of baseVersion, so a JSON-Patch delta
-      // built from the base tree applies cleanly to it, and the clone keeps baseVersion's frozen
-      // ruleFormat (PATCH sends only the ops, never re-serializing the whole tree, so there's no
-      // GET→PUT round-trip re-expansion of untouched rules).
+      // Read the base version's tree first to enforce the CUSTOM-default scope gate and decide
+      // caching BEFORE creating a version (a rejected onboarding then leaves no orphan behind). The
+      // new version is a byte-exact clone, so a JSON-Patch delta built from the base tree applies
+      // cleanly and inherits baseVersion's frozen ruleFormat.
       const { ruleTree } = await client.getRuleTree(
         propertyId,
         baseVersion,
@@ -686,10 +681,8 @@ function LlmoAkamaiController(ctx) {
         return gateError;
       }
       const merged = mergeIntoTree(ruleTree, cfg, insertIndex);
-      // Telemetry (NOT a gate): the rule-tree complexity PAPI's validateRules cost scales with,
-      // logged next to the measured write duration below so we can build a real
-      // complexity-vs-latency curve from production across every customer, instead of guessing a
-      // threshold from one synthetic test property.
+      // Telemetry (not a gate): rule-tree complexity, logged with the measured write duration below
+      // to build a real complexity-vs-latency curve from production.
       const complexity = estimateRuleTreeComplexity(merged);
 
       // Resume into the version a prior attempt already created (retryVersion) instead of minting
@@ -698,19 +691,13 @@ function LlmoAkamaiController(ctx) {
       newVersion = retryVersion
         ?? await client.createVersion(propertyId, baseVersion, contractId, groupId);
 
-      // Write the OAE rule as a small JSON-Patch DELTA instead of PUTting the whole merged tree. A
-      // full-tree PUT uploads the entire rule tree as its body (~324 KB on a large property), and
-      // proven this session that upload is what makes the write exceed 300s from the api-service
-      // Lambda even though the byte-identical PUT is ~31s direct — the 324 KB egress, not Akamai's
-      // (server-side, size-independent ~31s) validation, is the bottleneck. patchRuleTree sends
-      // only the OAE ops (~4 KB) for Akamai to apply to newVersion's STORED tree (the byte-exact
-      // clone of baseVersion), running the SAME validateRules pass, so the committed result is
-      // identical but the request body is ~74x smaller. buildRuleTreePatch is idempotent (removes
-      // any existing managed rule first) and newVersion always mirrors baseVersion here — a fresh
-      // clone, or a retryVersion that never landed OAE (the wizard only retries a deploy that
-      // reconciled deployed:false) — so ops built from the baseVersion tree apply cleanly. No
-      // If-Match is sent: the version is freshly created and single-writer, so optimistic
-      // concurrency gains nothing (PAPI accepts the omission — verified against the live property).
+      // Write the OAE rule as a small JSON-Patch DELTA (~4 KB), not a full-tree PUT (~324 KB+).
+      // Proven this session: the full-tree upload — not Akamai's (size-independent) validateRules —
+      // is what pushed the Lambda write past 300s (the identical PUT is ~31s direct); the delta
+      // removes that egress. patchRuleTree applies the ops to newVersion's stored tree (a byte-
+      // exact clone of baseVersion) under the same validateRules, so the committed result is same.
+      // buildRuleTreePatch is idempotent (strips any existing managed rule first); no If-Match sent
+      // (freshly-created, single-writer version).
       const ops = buildRuleTreePatch(ruleTree, cfg, insertIndex);
       const putStart = Date.now();
       const putResult = await client.patchRuleTree(
