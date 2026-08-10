@@ -49,6 +49,24 @@ function createChainableQuery(resolveWith = { data: [], error: null }) {
   return new Proxy({}, handler);
 }
 
+/**
+ * A `from` stub that answers every table with `query` EXCEPT `feature_flags`,
+ * which resolves to `flagRows`.
+ *
+ * The brand read paths also read the org's `LLMO/serenity` rows, to derive
+ * `serenityActive` / `serenityActivatedAt` on the payload. A fake that answered
+ * every table with the same brand-shaped result would feed a brand row into that
+ * resolution, so the flag table needs its own answer.
+ *
+ * @param {object} query - Result for the brands (and child-table) queries.
+ * @param {object[]} [flagRows] - Rows the `feature_flags` query resolves with.
+ * @returns {object} sinon stub suitable for `postgrestClient.from`.
+ */
+function brandsOnly(query, flagRows = []) {
+  const flagQuery = createChainableQuery({ data: flagRows, error: null });
+  return sinon.stub().callsFake((table) => (table === 'feature_flags' ? flagQuery : query));
+}
+
 describe('brands-storage', () => {
   const ORG_ID = '11111111-1111-4111-8111-111111111111';
   const BRAND_ID = '22222222-2222-4222-8222-222222222222';
@@ -105,7 +123,7 @@ describe('brands-storage', () => {
       });
 
       const query = createChainableQuery({ data: [dbRow], error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       const result = await listBrands(ORG_ID, postgrestClient);
 
@@ -139,7 +157,7 @@ describe('brands-storage', () => {
       });
 
       const query = createChainableQuery({ data: [dbRow], error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       const result = await listBrands(ORG_ID, postgrestClient);
       expect(result[0].urls).to.deep.equal([
@@ -159,7 +177,7 @@ describe('brands-storage', () => {
       });
 
       const query = createChainableQuery({ data: [dbRow], error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       const result = await listBrands(ORG_ID, postgrestClient);
       expect(result[0].urls).to.deep.equal([
@@ -180,7 +198,7 @@ describe('brands-storage', () => {
       });
 
       const query = createChainableQuery({ data: [dbRow], error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       const result = await listBrands(ORG_ID, postgrestClient);
       expect(result[0].urls).to.deep.equal([
@@ -202,7 +220,7 @@ describe('brands-storage', () => {
       });
 
       const query = createChainableQuery({ data: [dbRow], error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       const result = await listBrands(ORG_ID, postgrestClient);
       expect(result[0].status).to.equal('active');
@@ -214,7 +232,7 @@ describe('brands-storage', () => {
 
     it('returns empty array when data is null', async () => {
       const query = createChainableQuery({ data: null, error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       const result = await listBrands(ORG_ID, postgrestClient);
       expect(result).to.deep.equal([]);
@@ -222,7 +240,7 @@ describe('brands-storage', () => {
 
     it('throws on database error', async () => {
       const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       await expect(listBrands(ORG_ID, postgrestClient)).to.be.rejectedWith('Failed to list brands');
     });
@@ -234,7 +252,7 @@ describe('brands-storage', () => {
       });
 
       const query = createChainableQuery({ data: [dbRow], error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       const result = await listBrands(ORG_ID, postgrestClient);
       expect(result[0].brandContext).to.equal('Context for this brand');
@@ -248,7 +266,7 @@ describe('brands-storage', () => {
       });
 
       const query = createChainableQuery({ data: [dbRow], error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       const result = await listBrands(ORG_ID, postgrestClient);
       expect(result[0].brandContext).to.equal('');
@@ -258,7 +276,7 @@ describe('brands-storage', () => {
     it('maps brand_claims_enabled to brandClaimsEnabled', async () => {
       const dbRow = makeBrandRow({ brand_claims_enabled: true });
       const query = createChainableQuery({ data: [dbRow], error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       const result = await listBrands(ORG_ID, postgrestClient);
       expect(result[0].brandClaimsEnabled).to.equal(true);
@@ -266,7 +284,7 @@ describe('brands-storage', () => {
 
     it('defaults brandClaimsEnabled to false when the column is absent', async () => {
       const query = createChainableQuery({ data: [makeBrandRow()], error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       const result = await listBrands(ORG_ID, postgrestClient);
       expect(result[0].brandClaimsEnabled).to.equal(false);
@@ -294,7 +312,7 @@ describe('brands-storage', () => {
       });
 
       const query = createChainableQuery({ data: dbRow, error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       const result = await getBrandById(ORG_ID, BRAND_ID, postgrestClient);
 
@@ -326,7 +344,7 @@ describe('brands-storage', () => {
         ],
       });
       const query = createChainableQuery({ data: dbRow, error: null });
-      const result = await getBrandById(ORG_ID, BRAND_ID, { from: sinon.stub().returns(query) });
+      const result = await getBrandById(ORG_ID, BRAND_ID, { from: brandsOnly(query) });
 
       // market-site excluded from siteIds; its domain absent from urls[].
       expect(result.siteIds).to.deep.equal(['own-site']);
@@ -350,7 +368,7 @@ describe('brands-storage', () => {
         ],
       });
       const query = createChainableQuery({ data: dbRow, error: null });
-      const result = await getBrandById(ORG_ID, BRAND_ID, { from: sinon.stub().returns(query) });
+      const result = await getBrandById(ORG_ID, BRAND_ID, { from: brandsOnly(query) });
 
       // The brand URL stays onboarded and the site appears in siteIds.
       expect(result.siteIds).to.deep.equal(['shared-site']);
@@ -366,7 +384,7 @@ describe('brands-storage', () => {
       const subWsResult = await getBrandById(
         ORG_ID,
         BRAND_ID,
-        { from: sinon.stub().returns(subWsQuery) },
+        { from: brandsOnly(subWsQuery) },
       );
       expect(subWsResult.semrushWorkspaceId).to.equal('ws-sub-123');
 
@@ -375,7 +393,7 @@ describe('brands-storage', () => {
       const flatResult = await getBrandById(
         ORG_ID,
         BRAND_ID,
-        { from: sinon.stub().returns(flatQuery) },
+        { from: brandsOnly(flatQuery) },
       );
       expect(flatResult.semrushWorkspaceId).to.equal(null);
     });
@@ -386,7 +404,7 @@ describe('brands-storage', () => {
       const mirroredResult = await getBrandById(
         ORG_ID,
         BRAND_ID,
-        { from: sinon.stub().returns(mirroredQuery) },
+        { from: brandsOnly(mirroredQuery) },
       );
       expect(mirroredResult.semrushSubWorkspaceId).to.equal('ws-sub-123');
 
@@ -394,7 +412,7 @@ describe('brands-storage', () => {
       const flatResult = await getBrandById(
         ORG_ID,
         BRAND_ID,
-        { from: sinon.stub().returns(flatQuery) },
+        { from: brandsOnly(flatQuery) },
       );
       expect(flatResult.semrushSubWorkspaceId).to.equal(null);
     });
@@ -406,7 +424,7 @@ describe('brands-storage', () => {
       const draftResult = await getBrandById(
         ORG_ID,
         BRAND_ID,
-        { from: sinon.stub().returns(draftQuery) },
+        { from: brandsOnly(draftQuery) },
       );
       expect(draftResult.pendingSemrushProvisioning).to.deep.equal(draft);
 
@@ -415,7 +433,7 @@ describe('brands-storage', () => {
       const flatResult = await getBrandById(
         ORG_ID,
         BRAND_ID,
-        { from: sinon.stub().returns(flatQuery) },
+        { from: brandsOnly(flatQuery) },
       );
       expect(flatResult.pendingSemrushProvisioning).to.equal(null);
     });
@@ -426,7 +444,7 @@ describe('brands-storage', () => {
       });
 
       const query = createChainableQuery({ data: dbRow, error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       const result = await getBrandById(ORG_ID, BRAND_ID, postgrestClient);
       expect(result.competitors).to.deep.equal([{
@@ -447,7 +465,7 @@ describe('brands-storage', () => {
       });
 
       const query = createChainableQuery({ data: dbRow, error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       const result = await getBrandById(ORG_ID, BRAND_ID, postgrestClient);
       expect(result.origin).to.equal('human');
@@ -467,7 +485,7 @@ describe('brands-storage', () => {
       });
 
       const query = createChainableQuery({ data: dbRow, error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       const result = await getBrandById(ORG_ID, BRAND_ID, postgrestClient);
       expect(result.baseSiteId).to.equal('joined-site-id');
@@ -476,7 +494,7 @@ describe('brands-storage', () => {
 
     it('returns null when brand not found', async () => {
       const query = createChainableQuery({ data: null, error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       const result = await getBrandById(ORG_ID, BRAND_ID, postgrestClient);
       expect(result).to.be.null;
@@ -484,7 +502,7 @@ describe('brands-storage', () => {
 
     it('throws on database error', async () => {
       const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       await expect(getBrandById(ORG_ID, BRAND_ID, postgrestClient)).to.be.rejectedWith('Failed to get brand');
     });
@@ -501,7 +519,7 @@ describe('brands-storage', () => {
 
     it('returns the { id, name } identity unchanged, without mapping through the full brand DTO', async () => {
       const query = createChainableQuery({ data: { id: BRAND_ID, name: 'TestBrand' }, error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       const result = await getBrandIdentity(ORG_ID, BRAND_ID, postgrestClient);
 
@@ -510,7 +528,7 @@ describe('brands-storage', () => {
 
     it('returns null when the brand does not exist in the org', async () => {
       const query = createChainableQuery({ data: null, error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       const result = await getBrandIdentity(ORG_ID, BRAND_ID, postgrestClient);
       expect(result).to.be.null;
@@ -518,7 +536,7 @@ describe('brands-storage', () => {
 
     it('throws on database error', async () => {
       const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       await expect(getBrandIdentity(ORG_ID, BRAND_ID, postgrestClient))
         .to.be.rejectedWith('Failed to get brand identity');
@@ -546,22 +564,22 @@ describe('brands-storage', () => {
 
     it('returns the brand primary site_id', async () => {
       const query = createChainableQuery({ data: { site_id: 'primary-site-1' }, error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
       expect(await getBrandBaseSiteId(ORG_ID, BRAND_ID, postgrestClient)).to.equal('primary-site-1');
     });
 
     it('returns null when the brand has no primary site (or is not found)', async () => {
       const noRow = createChainableQuery({ data: null, error: null });
-      expect(await getBrandBaseSiteId(ORG_ID, BRAND_ID, { from: sinon.stub().returns(noRow) }))
+      expect(await getBrandBaseSiteId(ORG_ID, BRAND_ID, { from: brandsOnly(noRow) }))
         .to.be.null;
       const nullSite = createChainableQuery({ data: { site_id: null }, error: null });
-      expect(await getBrandBaseSiteId(ORG_ID, BRAND_ID, { from: sinon.stub().returns(nullSite) }))
+      expect(await getBrandBaseSiteId(ORG_ID, BRAND_ID, { from: brandsOnly(nullSite) }))
         .to.be.null;
     });
 
     it('throws on database error', async () => {
       const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
       await expect(getBrandBaseSiteId(ORG_ID, BRAND_ID, postgrestClient))
         .to.be.rejectedWith('Failed to get brand primary site');
     });
@@ -587,7 +605,7 @@ describe('brands-storage', () => {
         ],
         error: null,
       });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
       const result = await getBrandAliases(BRAND_ID, postgrestClient);
       expect(postgrestClient.from).to.have.been.calledOnceWith('brand_aliases');
       expect(result).to.deep.equal([
@@ -598,13 +616,13 @@ describe('brands-storage', () => {
 
     it('returns [] when the brand has no aliases (null data)', async () => {
       const query = createChainableQuery({ data: null, error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
       expect(await getBrandAliases(BRAND_ID, postgrestClient)).to.deep.equal([]);
     });
 
     it('throws on database error', async () => {
       const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
       await expect(getBrandAliases(BRAND_ID, postgrestClient))
         .to.be.rejectedWith('Failed to get brand aliases');
     });
@@ -630,7 +648,7 @@ describe('brands-storage', () => {
         },
         error: null,
       });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
       const result = await getBrandUrlSources(BRAND_ID, postgrestClient);
       expect(postgrestClient.from).to.have.been.calledOnceWith('brands');
       expect(result).to.deep.equal({
@@ -651,26 +669,26 @@ describe('brands-storage', () => {
         },
         error: null,
       });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
       const result = await getBrandUrlSources(BRAND_ID, postgrestClient);
       expect(result.socialAccounts).to.deep.equal([{ url: 'https://x.com/acme', regions: [] }]);
     });
 
     it('returns empty collections when the brand row is not found (null data)', async () => {
       const query = createChainableQuery({ data: null, error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
       expect(await getBrandUrlSources(BRAND_ID, postgrestClient)).to.deep.equal(EMPTY);
     });
 
     it('defaults missing child arrays to empty', async () => {
       const query = createChainableQuery({ data: {}, error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
       expect(await getBrandUrlSources(BRAND_ID, postgrestClient)).to.deep.equal(EMPTY);
     });
 
     it('throws on database error', async () => {
       const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
       await expect(getBrandUrlSources(BRAND_ID, postgrestClient))
         .to.be.rejectedWith('Failed to get brand URL sources');
     });
@@ -699,7 +717,7 @@ describe('brands-storage', () => {
         ],
         error: null,
       });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
       const result = await getBrandCompetitors(BRAND_ID, postgrestClient);
       expect(postgrestClient.from).to.have.been.calledOnceWith('competitors');
       expect(result).to.deep.equal([
@@ -714,13 +732,13 @@ describe('brands-storage', () => {
 
     it('returns [] when null data', async () => {
       const query = createChainableQuery({ data: null, error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
       expect(await getBrandCompetitors(BRAND_ID, postgrestClient)).to.deep.equal([]);
     });
 
     it('throws on database error', async () => {
       const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
       await expect(getBrandCompetitors(BRAND_ID, postgrestClient))
         .to.be.rejectedWith('Failed to get brand competitors');
     });
@@ -788,7 +806,7 @@ describe('brands-storage', () => {
         brand_sites: [{ site_id: SITE_ID, paths: [], sites: { base_url: 'https://site.com' } }],
       });
       const query = createChainableQuery({ data: [dbRow], error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       const result = await getBrandBySite(ORG_ID, SITE_ID, postgrestClient);
       expect(result).to.include({ id: BRAND_ID, name: 'TestBrand', status: 'active' });
@@ -798,7 +816,7 @@ describe('brands-storage', () => {
       // brand_sites is intentionally NOT used as a fallback (it stores
       // citation entries too), so a brand with site_id=NULL never matches.
       const query = createChainableQuery({ data: [], error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       expect(await getBrandBySite(ORG_ID, SITE_ID, postgrestClient)).to.be.null;
     });
@@ -807,7 +825,7 @@ describe('brands-storage', () => {
       const r1 = makeBrandRow({ id: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', name: 'A-Brand' });
       const r2 = makeBrandRow({ id: 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb', name: 'B-Brand' });
       const query = createChainableQuery({ data: [r1, r2], error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
       const log = { warn: sinon.stub() };
 
       const result = await getBrandBySite(ORG_ID, SITE_ID, postgrestClient, log);
@@ -819,7 +837,7 @@ describe('brands-storage', () => {
     it('logs nothing when log has no warn method (single match)', async () => {
       const dbRow = makeBrandRow({ site_id: SITE_ID });
       const query = createChainableQuery({ data: [dbRow], error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       // No log argument at all — must not throw.
       const result = await getBrandBySite(ORG_ID, SITE_ID, postgrestClient);
@@ -828,7 +846,7 @@ describe('brands-storage', () => {
 
     it('throws on database error', async () => {
       const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       await expect(getBrandBySite(ORG_ID, SITE_ID, postgrestClient))
         .to.be.rejectedWith('Failed to resolve brand for site');
@@ -847,20 +865,20 @@ describe('brands-storage', () => {
 
     it('returns true when a serenity-typed brand_sites row exists for the site', async () => {
       const query = createChainableQuery({ data: [{ site_id: SITE_ID }], error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
       expect(await isSemrushMarketMirrorSite(ORG_ID, SITE_ID, postgrestClient)).to.equal(true);
       expect(postgrestClient.from).to.have.been.calledOnceWith('brand_sites');
     });
 
     it('returns false when no serenity brand_sites row matches', async () => {
       const query = createChainableQuery({ data: [], error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
       expect(await isSemrushMarketMirrorSite(ORG_ID, SITE_ID, postgrestClient)).to.equal(false);
     });
 
     it('throws on database error (so the caller can fail closed)', async () => {
       const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
       await expect(isSemrushMarketMirrorSite(ORG_ID, SITE_ID, postgrestClient))
         .to.be.rejectedWith('Failed to resolve market-mirror link for site');
     });
@@ -871,7 +889,7 @@ describe('brands-storage', () => {
       const dbRow = makeBrandRow({ status: 'pending' });
 
       const query = createChainableQuery({ data: [dbRow], error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       const result = await listBrands(ORG_ID, postgrestClient, { status: 'pending' });
       expect(result).to.have.length(1);
@@ -880,7 +898,7 @@ describe('brands-storage', () => {
 
     it('uses neq deleted filter when no status option provided', async () => {
       const query = createChainableQuery({ data: [], error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       await listBrands(ORG_ID, postgrestClient);
       expect(postgrestClient.from).to.have.been.calledWith('brands');
@@ -895,7 +913,7 @@ describe('brands-storage', () => {
     it('returns regions from database', async () => {
       const regions = [{ code: 'US', name: 'United States' }];
       const query = createChainableQuery({ data: regions, error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       const result = await listRegions(postgrestClient);
       expect(result).to.deep.equal(regions);
@@ -904,7 +922,7 @@ describe('brands-storage', () => {
 
     it('returns empty array when data is null', async () => {
       const query = createChainableQuery({ data: null, error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       const result = await listRegions(postgrestClient);
       expect(result).to.deep.equal([]);
@@ -912,7 +930,7 @@ describe('brands-storage', () => {
 
     it('throws on database error', async () => {
       const query = createChainableQuery({ data: null, error: { message: 'DB error' } });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       await expect(listRegions(postgrestClient)).to.be.rejectedWith('Failed to list regions');
     });
@@ -3145,7 +3163,7 @@ describe('brands-storage', () => {
 
     it('returns true when brand is found and soft-deleted', async () => {
       const query = createChainableQuery({ data: { id: BRAND_ID }, error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       const result = await deleteBrand(ORG_ID, BRAND_ID, postgrestClient, 'user@test.com');
       expect(result).to.be.true;
@@ -3153,7 +3171,7 @@ describe('brands-storage', () => {
 
     it('returns false when brand not found', async () => {
       const query = createChainableQuery({ data: null, error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       const result = await deleteBrand(ORG_ID, BRAND_ID, postgrestClient);
       expect(result).to.be.false;
@@ -3161,7 +3179,7 @@ describe('brands-storage', () => {
 
     it('throws on database error', async () => {
       const query = createChainableQuery({ data: null, error: { message: 'delete failed' } });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+      const postgrestClient = { from: brandsOnly(query) };
 
       await expect(deleteBrand(ORG_ID, BRAND_ID, postgrestClient)).to.be.rejectedWith('Failed to delete brand: delete failed');
     });
@@ -3612,6 +3630,110 @@ describe('brands-storage', () => {
       });
 
       expect(result).to.be.null;
+    });
+  });
+
+  describe('derived serenity state on the brand payload', () => {
+    const OTHER_BRAND_ID = '33333333-3333-4333-8333-333333333333';
+    const ORG_STAMP = '2026-08-01T10:00:00Z';
+    const BRAND_STAMP = '2026-08-10T09:00:00Z';
+
+    const orgFlagRow = { flag_value: true, brand_id: null, updated_at: ORG_STAMP };
+    const brandFlagRow = (brandId, value) => ({
+      flag_value: value, brand_id: brandId, updated_at: BRAND_STAMP,
+    });
+
+    it('inherits an active organization when the brand has no override', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: { data: makeBrandRow(), error: null },
+        feature_flags: { data: [orgFlagRow], error: null },
+      });
+      const brand = await getBrandById(ORG_ID, BRAND_ID, postgrestClient);
+      expect(brand.serenityActive).to.equal(true);
+      expect(brand.serenityActivatedAt).to.equal(ORG_STAMP);
+      expect(postgrestClient.from).to.have.been.calledWith('feature_flags');
+    });
+
+    it('reports a brand held back by a false override under an active organization', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: { data: makeBrandRow(), error: null },
+        feature_flags: { data: [orgFlagRow, brandFlagRow(BRAND_ID, false)], error: null },
+      });
+      const brand = await getBrandById(ORG_ID, BRAND_ID, postgrestClient);
+      expect(brand.serenityActive).to.equal(false);
+      // Nothing went live for this brand, so there is no activation moment.
+      expect(brand.serenityActivatedAt).to.be.null;
+    });
+
+    it('reports a released brand while its organization has no row, stamped from the brand row', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: { data: makeBrandRow(), error: null },
+        feature_flags: { data: [brandFlagRow(BRAND_ID, true)], error: null },
+      });
+      const brand = await getBrandById(ORG_ID, BRAND_ID, postgrestClient);
+      expect(brand.serenityActive).to.equal(true);
+      expect(brand.serenityActivatedAt).to.equal(BRAND_STAMP);
+    });
+
+    it('is inactive with no activation stamp when the flag is unset entirely', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: { data: makeBrandRow(), error: null },
+        feature_flags: { data: [], error: null },
+      });
+      const brand = await getBrandById(ORG_ID, BRAND_ID, postgrestClient);
+      expect(brand.serenityActive).to.equal(false);
+      expect(brand.serenityActivatedAt).to.be.null;
+    });
+
+    it('resolves a mixed organization per brand in ONE flag read', async () => {
+      // The whole point of the mid-migration state: two brands in one org, one
+      // released and one not, from a single feature_flags query.
+      const postgrestClient = createTableMockClient({
+        brands: {
+          data: [
+            makeBrandRow({ id: BRAND_ID, name: 'Released' }),
+            makeBrandRow({ id: OTHER_BRAND_ID, name: 'Unreleased' }),
+          ],
+          error: null,
+        },
+        feature_flags: { data: [brandFlagRow(BRAND_ID, true)], error: null },
+      });
+
+      const brands = await listBrands(ORG_ID, postgrestClient);
+
+      expect(brands.map((b) => [b.name, b.serenityActive]))
+        .to.deep.equal([['Released', true], ['Unreleased', false]]);
+      expect(postgrestClient.from.getCalls().filter((c) => c.args[0] === 'feature_flags'))
+        .to.have.lengthOf(1);
+    });
+
+    it('does not read the flag at all when the org has no brands', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: { data: [], error: null },
+      });
+      expect(await listBrands(ORG_ID, postgrestClient)).to.deep.equal([]);
+      expect(postgrestClient.from).to.not.have.been.calledWith('feature_flags');
+    });
+
+    it('carries the fields on the by-site lookup too', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: { data: [makeBrandRow({ site_id: 'site-1' })], error: null },
+        feature_flags: { data: [orgFlagRow], error: null },
+      });
+      const brand = await getBrandBySite(ORG_ID, 'site-1', postgrestClient);
+      expect(brand.serenityActive).to.equal(true);
+      expect(brand.serenityActivatedAt).to.equal(ORG_STAMP);
+    });
+
+    it('propagates a flag-read failure rather than reporting the brand inactive', async () => {
+      // The rows live in the same database as the brands query that just
+      // succeeded, so an error here is a real fault, not a default-off signal.
+      const postgrestClient = createTableMockClient({
+        brands: { data: makeBrandRow(), error: null },
+        feature_flags: { data: null, error: { message: 'boom' } },
+      });
+      await expect(getBrandById(ORG_ID, BRAND_ID, postgrestClient))
+        .to.be.rejectedWith('Failed to read feature flag serenity: boom');
     });
   });
 });

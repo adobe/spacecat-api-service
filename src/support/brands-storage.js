@@ -13,6 +13,11 @@
 import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
 
 import { SERENITY_BRAND_SITE_TYPE } from './serenity/site-linkage.js';
+import { readFeatureFlagScopes, resolveFlagRowForBrand } from './feature-flags-storage.js';
+import {
+  SERENITY_FEATURE_FLAG_NAME,
+  SERENITY_FEATURE_FLAG_PRODUCT,
+} from './serenity/serenity-active.js';
 
 /**
  * PostgREST select string — joins all normalized child tables.
@@ -145,6 +150,34 @@ function parseUrlParts(urlString) {
 }
 
 /**
+ * Reads the organization's `LLMO/serenity` rows — its own and every brand's
+ * override — in one query, for the derived per-brand fields in
+ * {@link mapDbBrandToV2}.
+ *
+ * Called once per brand read rather than once per brand, so a 16-brand list
+ * costs one extra query, not sixteen. Read fresh rather than through
+ * `serenity-active.js`'s cache: that cache exists to keep request-time gates off
+ * the DB, whereas this value is payload the UI renders, and a brand shown as
+ * active seconds after its wave released it is worth one indexed read.
+ *
+ * A failure propagates. The rows live in the same database as the brands query
+ * that just succeeded, so an error here is a real fault, not a reason to report
+ * every brand as inactive.
+ *
+ * @param {string} organizationId - SpaceCat organization UUID.
+ * @param {object} postgrestClient - PostgREST client.
+ * @returns {Promise<{orgRow: object|null, brandRows: Map<string, object>}>}
+ */
+async function readSerenityScopes(organizationId, postgrestClient) {
+  return readFeatureFlagScopes({
+    organizationId,
+    product: SERENITY_FEATURE_FLAG_PRODUCT,
+    flagName: SERENITY_FEATURE_FLAG_NAME,
+    postgrestClient,
+  });
+}
+
+/**
  * Maps a DB brand row (with all joined child tables) to the V2 config shape
  * the UI expects.
  *
@@ -153,8 +186,19 @@ function parseUrlParts(urlString) {
  * URL's base resolves to a site row in the org — and `siteId` for onboarded
  * entries. Legacy brands with no `brand_urls` rows fall back to the
  * `brand_sites` expansion, where every entry is by definition onboarded.
+ *
+ * `serenityScopes` carries the organization's `LLMO/serenity` rows, read once per
+ * request by {@link readSerenityScopes}, and yields the derived `serenityActive`
+ * / `serenityActivatedAt` fields. It is required, and deliberately not defaulted:
+ * a call site that omitted it would report every brand as inactive, which for an
+ * already-migrated customer silently sends the UI back to the legacy read path.
+ * Resolving it unconditionally turns that mistake into an immediate TypeError.
+ *
+ * @param {object} row - DB brand row with joined child tables.
+ * @param {{orgRow: object|null, brandRows: Map<string, object>}} serenityScopes
+ * @returns {object} Brand in V2 config shape.
  */
-function mapDbBrandToV2(row) {
+function mapDbBrandToV2(row, serenityScopes) {
   // The set of base URLs the brand explicitly lists as its own (brand_urls).
   const brandUrlBases = new Set(
     (row.brand_urls || [])
@@ -236,6 +280,15 @@ function mapDbBrandToV2(row) {
 
   const urls = brandUrlsEntries.length > 0 ? brandUrlsEntries : brandSitesUrls;
 
+  // Per-brand serenity state, resolved from the brand's own override row falling
+  // back to the organization's. Derived here so no consumer re-implements the
+  // resolution rule: project-elmo-ui reads `serenityActive` to decide whether a
+  // brand is on the Semrush read path and whether its classic-UI editors are
+  // locked, and a mixed organization mid-migration has both answers among its
+  // brands.
+  const serenityRow = resolveFlagRowForBrand(serenityScopes, row.id);
+  const serenityActive = serenityRow?.flag_value === true;
+
   return {
     id: row.id,
     name: row.name,
@@ -253,6 +306,14 @@ function mapDbBrandToV2(row) {
     // sub-workspace minted yet). Consumers use it to scope per-brand Semrush
     // views to the sub-workspace.
     semrushSubWorkspaceId: row.semrush_sub_workspace_id || null,
+    // Read-only, derived: is the Semrush-backed serenity experience live for THIS
+    // brand? Independent of `semrushSubWorkspaceId`, which is set when the brand
+    // is provisioned — a brand can be bound for waves before it is released.
+    serenityActive,
+    // Read-only, derived: when that scope went live — the resolved row's
+    // `updated_at`, the same timestamp operator tooling reads as the migration
+    // date. Null while the brand is not active, since nothing has gone live.
+    serenityActivatedAt: serenityActive ? (serenityRow.updated_at ?? null) : null,
     // Read-only: deferred Semrush provisioning data for a pending (draft) brand
     // (serenity dual-mode). Object { primaryUrl, markets: [{ market,
     // languageCode }] } the wizard collected before provisioning; null once
@@ -598,7 +659,14 @@ export async function listBrands(organizationId, postgrestClient, options = {}) 
     throw new Error(`Failed to list brands: ${error.message}`);
   }
 
-  return (data || []).map(mapDbBrandToV2);
+  // NOT `.map(mapDbBrandToV2)` — `Array.prototype.map` passes the element index
+  // as the second argument, which would land in `serenityScopes`.
+  const rows = data || [];
+  if (rows.length === 0) {
+    return [];
+  }
+  const serenityScopes = await readSerenityScopes(organizationId, postgrestClient);
+  return rows.map((row) => mapDbBrandToV2(row, serenityScopes));
 }
 
 /**
@@ -628,7 +696,7 @@ export async function getBrandById(organizationId, brandId, postgrestClient) {
     return null;
   }
 
-  return mapDbBrandToV2(data);
+  return mapDbBrandToV2(data, await readSerenityScopes(organizationId, postgrestClient));
 }
 
 /**
@@ -863,7 +931,7 @@ export async function getBrandBySite(organizationId, siteId, postgrestClient, lo
       + `(LLMO-4592 invariant violation): picking ${data[0].id} deterministically`,
     );
   }
-  return mapDbBrandToV2(data[0]);
+  return mapDbBrandToV2(data[0], await readSerenityScopes(organizationId, postgrestClient));
 }
 
 /**

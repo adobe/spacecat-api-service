@@ -56,6 +56,78 @@ export function isValidFeatureFlagName(flagName) {
 const isOrgRow = (row) => (row.brand_id ?? null) === null;
 
 /**
+ * Reads both scopes of one flag for an organization in a single query: the
+ * organization's own row, and every brand's override of it keyed by brand id.
+ *
+ * One query serves any number of brands, so a caller resolving a whole brand
+ * list does not read per brand. Pair it with {@link resolveFlagRowForBrand}.
+ *
+ * @param {object} params
+ * @param {string} params.organizationId
+ * @param {'ASO'|'LLMO'} params.product
+ * @param {string} params.flagName
+ * @param {object} params.postgrestClient
+ * @returns {Promise<{orgRow: object|null, brandRows: Map<string, object>}>}
+ */
+export async function readFeatureFlagScopes({
+  organizationId,
+  product,
+  flagName,
+  postgrestClient,
+}) {
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required for feature flags');
+  }
+
+  // Wildcard projection is required — see `isOrgRow`.
+  const { data, error } = await postgrestClient
+    .from('feature_flags')
+    .select('*')
+    .eq('organization_id', organizationId)
+    .eq('product', product)
+    .eq('flag_name', flagName);
+
+  if (error) {
+    throw new Error(`Failed to read feature flag ${flagName}: ${error.message}`);
+  }
+
+  const rows = data ?? [];
+  const brandRows = new Map();
+  for (const row of rows) {
+    const brandId = row.brand_id ?? null;
+    if (brandId !== null) {
+      brandRows.set(brandId, row);
+    }
+  }
+  return { orgRow: rows.find(isOrgRow) ?? null, brandRows };
+}
+
+/**
+ * Resolves which row governs a flag for one brand: the brand's own override
+ * when it has one, otherwise the organization's row.
+ *
+ * The brand row is an override rather than a second condition ANDed with the
+ * organization's, so a brand is on under an organization that is off — which is
+ * what every migration wave before the last one looks like, and why the
+ * organization's row is the last step of a rollout rather than the first. A
+ * brand row of `false` likewise holds one brand back from an organization that
+ * is on.
+ *
+ * Before the brand-scope migration no row carries a `brand_id`, so `brandRows`
+ * is always empty and this resolves to the organization's row for every brand —
+ * i.e. exactly the pre-migration behaviour, under either schema.
+ *
+ * @param {{orgRow: object|null, brandRows: Map<string, object>}} scopes - From
+ *   {@link readFeatureFlagScopes}.
+ * @param {string} [brandId] - Brand UUID to resolve for.
+ * @returns {object|null} The governing row, or null when the flag is unset for
+ *   that brand.
+ */
+export function resolveFlagRowForBrand(scopes, brandId) {
+  return scopes.brandRows.get(brandId) ?? scopes.orgRow ?? null;
+}
+
+/**
  * Writes an organization's boolean feature flag, creating the row when it does
  * not exist yet and updating it in place when it does. A brand's override of the
  * same flag is left untouched.
@@ -144,24 +216,13 @@ export async function readFeatureFlag({
   flagName,
   postgrestClient,
 }) {
-  if (!postgrestClient?.from) {
-    throw new Error('PostgREST client is required for feature flags');
-  }
-
-  // Wildcard projection is required — see `isOrgRow`.
-  const { data, error } = await postgrestClient
-    .from('feature_flags')
-    .select('*')
-    .eq('organization_id', organizationId)
-    .eq('product', product)
-    .eq('flag_name', flagName);
-
-  if (error) {
-    throw new Error(`Failed to read feature flag ${flagName}: ${error.message}`);
-  }
-
-  const row = (data ?? []).find(isOrgRow);
-  return typeof row?.flag_value === 'boolean' ? row.flag_value : null;
+  const { orgRow } = await readFeatureFlagScopes({
+    organizationId,
+    product,
+    flagName,
+    postgrestClient,
+  });
+  return typeof orgRow?.flag_value === 'boolean' ? orgRow.flag_value : null;
 }
 
 /**

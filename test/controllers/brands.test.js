@@ -6163,9 +6163,11 @@ describe('Brands Controller', () => {
       syncBrandAliasesAcrossMarkets = sinon.stub().resolves({ rejected: [] }),
       getBrandCompetitors = sinon.stub().resolves([]),
       getBrandById,
-      // Serenity active by default so a sync-field edit reaches the re-sync block.
-      // The inactive case overrides this to assert the gate rejects.
-      isSerenityActiveForOrg = sinon.stub().resolves(true),
+      // Serenity active for the brand by default so a sync-field edit reaches the
+      // re-sync block. The inactive case overrides this to assert the gate rejects.
+      // The edit path resolves PER BRAND, so one org can hold a released brand and
+      // an unreleased one at the same time.
+      isSerenityActiveForBrand = sinon.stub().resolves(true),
       // Serenity-UI OFF by default: the org is mid-migration, so Semrush failures
       // are absorbed. Tests that assert failures propagate override this to true.
       isSerenityUiActiveForOrg = sinon.stub().resolves(false),
@@ -6189,7 +6191,7 @@ describe('Brands Controller', () => {
         '../../src/support/serenity/competitor-benchmarks.js': { syncCompetitorBenchmarksAcrossMarkets },
         '../../src/support/serenity/brand-aliases.js': { syncBrandAliasesAcrossMarkets },
         '../../src/support/serenity/serenity-active.js': {
-          isSerenityActiveForOrg,
+          isSerenityActiveForBrand,
           isSerenityUiActiveForOrg,
         },
       };
@@ -6288,9 +6290,10 @@ describe('Brands Controller', () => {
         updateBrand: updateBrandStub,
         syncBrandUrlsAcrossMarkets: syncStub,
         createSerenityTransport: createTransportStub,
-        // Inactive org, but the brand still carries a backfilled workspace pointer.
+        // Inactive brand, but it still carries a backfilled workspace pointer —
+        // provisioned by an earlier wave, not yet released.
         getBrandById: sinon.stub().resolves({ id: BRAND_UUID, semrushSubWorkspaceId: 'ws-9' }),
-        isSerenityActiveForOrg: serenityActiveStub,
+        isSerenityActiveForBrand: serenityActiveStub,
       });
 
       const response = await controller.updateBrandForOrg({
@@ -6306,10 +6309,13 @@ describe('Brands Controller', () => {
       expect(updateBrandStub.called).to.equal(false);
       expect(syncStub.called).to.equal(false);
       expect(createTransportStub.called).to.equal(false);
-      // The gate must be asked about THIS org (2nd positional arg = spaceCatId).
+      // The gate must be asked about THIS org AND THIS brand (2nd and 3rd
+      // positional args) — asking about the org alone would give every brand it
+      // owns the same answer, which is what this change exists to end.
       expect(serenityActiveStub).to.have.been.calledWith(
         sinon.match.any,
         ORGANIZATION_ID,
+        BRAND_UUID,
         sinon.match.any,
       );
     });
@@ -6324,7 +6330,7 @@ describe('Brands Controller', () => {
         syncBrandUrlsAcrossMarkets: syncStub,
         createSerenityTransport: createTransportStub,
         getBrandById: sinon.stub().resolves({ id: BRAND_UUID }), // no semrushSubWorkspaceId → flat
-        isSerenityActiveForOrg: sinon.stub().resolves(false),
+        isSerenityActiveForBrand: sinon.stub().resolves(false),
       });
 
       const response = await controller.updateBrandForOrg({

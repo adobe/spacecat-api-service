@@ -72,7 +72,11 @@ import { isSemrushTransportError, unwrapTransportCause } from '../support/sereni
 import { syncBrandUrlsAcrossMarkets } from '../support/serenity/brand-urls.js';
 import { syncBrandAliasesAcrossMarkets } from '../support/serenity/brand-aliases.js';
 import { resolveProjects } from '../support/serenity/resolve-projects.js';
-import { isSerenityActiveForOrg, isSerenityUiActiveForOrg } from '../support/serenity/serenity-active.js';
+import {
+  isSerenityActiveForBrand,
+  isSerenityActiveForOrg,
+  isSerenityUiActiveForOrg,
+} from '../support/serenity/serenity-active.js';
 import {
   buildReservedDomains,
   dropReservedCompetitors,
@@ -1955,24 +1959,30 @@ function BrandsController(ctx, log, env) {
       // market's project brand_names + own-brand benchmark on edit.
       const aliasesTouched = updates.brandAliases !== undefined;
 
-      // Serenity rollout gate. An edit that changes URL sources / competitors /
-      // aliases re-syncs onto the brand's Semrush projects (the block near the end
-      // of this handler), but ONLY for a sub-workspace brand. While serenity is
-      // inactive for the org that re-sync must not run — even if a
-      // semrush_sub_workspace_id was backfilled for rollout prep — so reject the edit
-      // (rather than silently skip the sync and let the brand drift) when it would
-      // touch Semrush. A flat-mode brand (no workspace) edits the same fields as
-      // plain backend data and is unaffected; the brand read only happens on the
-      // inactive path, so the common active path pays nothing extra.
+      // Per-brand serenity rollout gate. An edit that changes URL sources /
+      // competitors / aliases re-syncs onto the brand's Semrush projects (the
+      // block near the end of this handler), but ONLY for a sub-workspace brand.
+      // While serenity is inactive for THIS BRAND that re-sync must not run —
+      // even if a semrush_sub_workspace_id was backfilled for rollout prep — so
+      // reject the edit (rather than silently skip the sync and let the brand
+      // drift) when it would touch Semrush. Resolving per brand is what lets one
+      // org migrate in waves: an unreleased brand keeps its editable classic UI
+      // while a released sibling is locked, where the org-wide predecessor of
+      // this gate gave all of them the same answer.
+      //
+      // A brand that was never migrated (no sub-workspace) edits the same fields
+      // as plain backend data and is unaffected; the brand read only happens on
+      // the inactive path, so the common active path pays nothing extra.
       const touchesSemrushSync = updates.urls !== undefined
         || updates.socialAccounts !== undefined
         || updates.earnedContent !== undefined
         || competitorsTouched
         || aliasesTouched;
-      if (touchesSemrushSync && !await isSerenityActiveForOrg(context, spaceCatId, log)) {
+      if (touchesSemrushSync
+        && !await isSerenityActiveForBrand(context, spaceCatId, brandUuid, log)) {
         const current = await getBrandById(spaceCatId, brandUuid, postgrestClient);
         if (hasText(current?.semrushSubWorkspaceId)) {
-          return forbidden('Serenity is not active for this organization');
+          return forbidden('Serenity is not active for this brand');
         }
       }
 
@@ -2177,6 +2187,13 @@ function BrandsController(ctx, log, env) {
       // Aliases Semrush silently refused on this re-sync (own-brand or competitor
       // benchmarks), surfaced on the response so the UI can warn the operator.
       const rejectedAliases = [];
+      // No serenity check here, deliberately. A PROVISIONED-but-unreleased brand
+      // must never fan out — its sub-workspace is bound at migration time, well
+      // before the wave that releases it — and the per-brand gate earlier in this
+      // handler is what guarantees that: its condition is this same set of
+      // touched fields, and it rejects an inactive brand outright with 403
+      // whenever a sub-workspace is bound. Repeating the check here would guard a
+      // state that cannot be reached.
       if ((urlsTouched || competitorsTouched || aliasesTouched)
         && hasText(updated.semrushSubWorkspaceId)) {
         try {

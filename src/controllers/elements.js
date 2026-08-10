@@ -25,6 +25,7 @@ import { fetchOwnedUrlsTraffic, mergeOwnedUrlsTraffic } from '../support/element
 import { mapWithConcurrency } from '../support/elements/concurrency.js';
 import { addDaysToDate } from '../support/elements/week-utils.js';
 import { resolveBrandWorkspace } from '../support/serenity/workspace-resolver.js';
+import { isSerenityActiveForBrand } from '../support/serenity/serenity-active.js';
 import { createSerenityTransport, SerenityTransportError } from '../support/serenity/rest-transport.js';
 import { cachedOk } from '../support/cached-response.js';
 import AccessControlUtil from '../support/access-control-util.js';
@@ -376,6 +377,14 @@ async function authorizeOrg(ctx) {
   if (!brand) {
     return { error: notFound('Brand not found for this organization') };
   }
+  // Per-brand serenity gate. Without it an unmigrated brand falls through to
+  // `resolveBrandWorkspace`'s flat mode and every read here — the brand-presence
+  // stats and the workspace-access probe — runs against the org's shared PARENT
+  // workspace, answering for the org instead of for the brand. A brand that has
+  // not been released to Semrush has no business on this surface at all.
+  if (!await isSerenityActiveForBrand(ctx, spaceCatId, brandIdParam, ctx?.log)) {
+    return { error: notFound('Serenity is not active for this brand') };
+  }
   const { workspaceId } = await resolveBrandWorkspace(ctx, spaceCatId, brandIdParam);
   if (!hasText(workspaceId)) {
     return { error: notFound('Brand has no resolvable Semrush workspace') };
@@ -417,6 +426,18 @@ async function authorizeBrandSubWorkspace(ctx, log) {
   const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
   if (!brandUuid) {
     return { error: notFound(`Brand not found for organization: ${brandId}`) };
+  }
+  // Per-brand serenity gate, ahead of the sub-workspace requirement below: a
+  // brand can be provisioned (sub-workspace bound, so mode is 'subworkspace')
+  // long before its wave releases it, and until then its prompts must be read
+  // from the legacy corpus rather than from Semrush.
+  if (!await isSerenityActiveForBrand(ctx, spaceCatId, brandUuid, log)) {
+    return {
+      error: createResponse(
+        { error: 'serenityInactive', message: 'Serenity is not active for this brand' },
+        404,
+      ),
+    };
   }
   const { mode, workspaceId, parentWorkspaceId } = await resolveBrandWorkspace(
     ctx,

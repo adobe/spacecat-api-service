@@ -3888,6 +3888,27 @@ Brand:
         to the sub-workspace.
       type: [string, 'null']
       readOnly: true
+    serenityActive:
+      description: >-
+        Read-only, derived. Whether the Semrush-backed Serenity experience is
+        live for THIS brand: the brand's own LLMO/serenity override if it has
+        one, otherwise its organization's value. Independent of
+        semrushSubWorkspaceId, which is set when the brand is provisioned — a
+        brand can be bound to a sub-workspace for some time before it is
+        released. An organization migrating in waves has both answers among its
+        brands, so consumers must read this per brand rather than deriving one
+        answer for the organization.
+      type: boolean
+      readOnly: true
+    serenityActivatedAt:
+      description: >-
+        Read-only, derived. When Serenity went live for this brand, taken from
+        the resolved flag row's updated_at — the same timestamp operator tooling
+        reports as the migration date. Null while serenityActive is false, since
+        nothing has gone live.
+      type: [string, 'null']
+      format: date-time
+      readOnly: true
     pendingSemrushProvisioning:
       description: >-
         Read-only. Deferred Semrush provisioning data for a pending (draft)
