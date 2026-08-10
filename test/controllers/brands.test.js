@@ -3193,7 +3193,13 @@ describe('Brands Controller', () => {
 
       expect(response.status).to.equal(200);
       const body = await response.json();
-      expect(body).to.deep.equal(SAMPLE_BRAND);
+      // The handler derives the per-brand serenity fields onto the payload; the
+      // stubbed reader supplies everything else.
+      expect(body).to.deep.equal({
+        ...SAMPLE_BRAND,
+        serenityActive: false,
+        serenityActivatedAt: null,
+      });
       expect(resolveLlmoOnboardingModeStub).to.have.been.calledOnce;
       const [orgArg, , optsArg] = resolveLlmoOnboardingModeStub.firstCall.args;
       expect(orgArg).to.equal(ORGANIZATION_ID);
@@ -9492,6 +9498,10 @@ describe('Brands Controller — region removal consistency guard (LLMO-5645)', (
       '../../src/support/brands-storage.js': {
         getBrandById: stub().resolves({ id: BRAND_UUID, region: oldRegion }),
         updateBrand: updateStub,
+        // The handler resolves the serenity rollout rows for the response payload.
+        // Irrelevant to the region guard, but the real one would query the stub
+        // client here.
+        readSerenityFlagScopes: stub().resolves({ orgRow: null, brandRows: new Map() }),
       },
       '../../src/support/access-control-util.js': {
         default: {

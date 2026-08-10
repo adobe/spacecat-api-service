@@ -174,12 +174,17 @@ The same helpers gate the Semrush **side-effects** on the v2 brand endpoints
   serenity check of its own — the gate above already rejects an inactive bound
   brand on exactly the same set of touched fields, so a provisioned-but-unreleased
   brand can never reach it.
-- The brand **read** payload exposes the resolved state so no consumer
-  re-implements the rule: `serenityActive` (boolean) and `serenityActivatedAt`
-  (the resolved row's `updated_at`, null while inactive), alongside the unchanged
-  `semrushSubWorkspaceId` / `pendingSemrushProvisioning` mirrors. Read
-  `serenityActive` per brand — a mid-migration org returns both answers in one
-  list.
+- Every brand payload — the list, the by-id and by-site reads, and the create,
+  update and status-transition responses — exposes the resolved state so no
+  consumer re-implements the rule: `serenityActive` (boolean) and
+  `serenityActivatedAt` (the resolved row's `updated_at`, null while inactive),
+  alongside the unchanged `semrushSubWorkspaceId` / `pendingSemrushProvisioning`
+  mirrors. Read `serenityActive` per brand — a mid-migration org returns both
+  answers in one list. The handler returning the payload derives the fields from
+  one flag read per response, so the brand readers stay free of that query and the
+  internal callers which never surface these fields do not pay for it; on a write
+  handler the read is issued before the write, so a flag-read fault cannot turn an
+  edit that already committed into a 500.
 - `DELETE` and status-transition have no Semrush side-effect, so they are
   ungated.
 

@@ -60,6 +60,8 @@ import {
   getBrandById,
   getBrandBySite,
   getBrandCompetitors,
+  readSerenityFlagScopes,
+  withSerenityState,
 } from '../support/brands-storage.js';
 import { listViewableResourceIds } from '../support/state-access-mapping-utils.js';
 import { isFacsRebacResource } from '../routes/facs-capabilities.js';
@@ -1015,7 +1017,8 @@ function BrandsController(ctx, log, env) {
         return notFound(`Brand not found: ${brandId}`);
       }
 
-      return ok(brand);
+      const serenityScopes = await readSerenityFlagScopes(spaceCatId, postgrestClient);
+      return ok(withSerenityState(brand, serenityScopes));
     } catch (error) {
       log.error(`Error getting brand ${brandId} for organization ${spaceCatId}:`, error);
       return createErrorResponse(error);
@@ -1083,7 +1086,8 @@ function BrandsController(ctx, log, env) {
         return notFound(`No active brand for site ${siteId}`);
       }
 
-      return ok(brand);
+      const serenityScopes = await readSerenityFlagScopes(spaceCatId, postgrestClient);
+      return ok(withSerenityState(brand, serenityScopes));
     } catch (error) {
       log.error(
         `Error resolving brand for org ${spaceCatId} site ${siteId}:`,
@@ -1119,7 +1123,11 @@ function BrandsController(ctx, log, env) {
       }
 
       const { postgrestClient } = context.dataAccess.services;
-      const brands = await listBrands(spaceCatId, postgrestClient, { status });
+      const rows = await listBrands(spaceCatId, postgrestClient, { status });
+      // One flag read for the whole page — a mid-migration organization returns
+      // both answers in one list, so consumers must read it per brand.
+      const serenityScopes = await readSerenityFlagScopes(spaceCatId, postgrestClient);
+      const brands = rows.map((brand) => withSerenityState(brand, serenityScopes));
 
       // ReBAC collection filter. When facsWrapper marks this session as
       // FACS-enrolled and resource-scoped (no org-wide can_view — see
@@ -1808,6 +1816,10 @@ function BrandsController(ctx, log, env) {
         }
       }
 
+      // Resolved before the write, so a failure reading the rollout flag cannot
+      // report a brand that did get created as a 500.
+      const serenityScopes = await readSerenityFlagScopes(spaceCatId, postgrestClient);
+
       const created = await upsertBrand({
         organizationId: spaceCatId,
         brand: brandData,
@@ -1855,7 +1867,7 @@ function BrandsController(ctx, log, env) {
         await linkSiteToLiveRows(context.dataAccess, provisionedBrandId, linkedSiteId, log);
       }
 
-      return createResponse(created, 201);
+      return createResponse(withSerenityState(created, serenityScopes), 201);
     } catch (error) {
       if (error.code === 'brand_status_demotion_not_allowed') {
         emitBrandDemotionBlocked(context, 'createBrand');
@@ -2148,7 +2160,13 @@ function BrandsController(ctx, log, env) {
         }
       }
 
-      const updated = await updateBrand({
+      // Resolved before the write. This handler never 5xxes an edit that already
+      // committed — the Semrush re-sync below absorbs its own failures for exactly
+      // that reason — so the rollout-flag read for the response must not be the one
+      // exception.
+      const serenityScopes = await readSerenityFlagScopes(spaceCatId, postgrestClient);
+
+      const updatedRow = await updateBrand({
         organizationId: spaceCatId,
         brandId: brandUuid,
         updates,
@@ -2156,9 +2174,10 @@ function BrandsController(ctx, log, env) {
         updatedBy,
       });
 
-      if (!updated) {
+      if (!updatedRow) {
         return notFound(`Brand not found: ${brandId}`);
       }
+      const updated = withSerenityState(updatedRow, serenityScopes);
 
       if (beforeForWipeCheck) {
         for (const field of emptiedCollections) {
@@ -2761,6 +2780,10 @@ function BrandsController(ctx, log, env) {
         return notFound(`Brand not found: ${brandId}`);
       }
 
+      // Resolved before the write, so a failure reading the rollout flag cannot
+      // report a transition that did persist as a 500.
+      const serenityScopes = await readSerenityFlagScopes(spaceCatId, postgrestClient);
+
       const updated = await setBrandStatus({
         organizationId: spaceCatId,
         brandId: brandUuid,
@@ -2772,7 +2795,7 @@ function BrandsController(ctx, log, env) {
       if (!updated) {
         return notFound(`Brand not found: ${brandId}`);
       }
-      return ok(updated);
+      return ok(withSerenityState(updated, serenityScopes));
     } catch (error) {
       log.error(`Error transitioning status for brand ${brandId} in organization ${spaceCatId}:`, error);
       return createErrorResponse(error);
