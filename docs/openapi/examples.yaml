@@ -909,6 +909,38 @@ AiVisibilityV1SourceCitedSourcesExport:
       marketsCatalog: [WW, AE, AR, US]
       modelsCatalog: [all, chatgpt, gemini, googleAiMode, googleAiOverview]
 
+AiVisibilityV1BrandCompetitors:
+  description: Native competitors returned by CompetitorService
+  value:
+    competitors:
+      - domain: example.com
+        name: Example
+      - domain: competitor.test
+        name: Competitor
+    srFilters:
+      markets: [US]
+      models: [all, chatgpt, gemini, googleAiMode, googleAiOverview]
+      marketsCatalog: [WW, AE, AR, US]
+      modelsCatalog: [all, chatgpt, gemini, googleAiMode, googleAiOverview]
+
+AiVisibilityV1BrandTopBrands:
+  description: Native top brands returned by BrandService
+  value:
+    date:
+      year: 2026
+      month: 7
+      day: 1
+    brands:
+      - brandName: Adobe
+        count: '125'
+      - brandName: Canva
+        count: '87'
+    srFilters:
+      markets: [US]
+      models: [chatgpt]
+      marketsCatalog: [WW, AE, AR, US]
+      modelsCatalog: [all, chatgpt, gemini, googleAiMode, googleAiOverview]
+
 AiVisibilityV1BrandCompetitorsStats:
   description: Native competitor time-series statistics with API search-result filters
   value:

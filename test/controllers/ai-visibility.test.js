@@ -67,7 +67,9 @@ describe('AiVisibilityController', () => {
   let mockHandleV1SourceCitedSourcesTotals;
   let mockHandleV1BrandStatsByCountry;
   let mockHandleV1BrandStatsByLlm;
+  let mockHandleV1BrandCompetitors;
   let mockHandleV1BrandCompetitorsStats;
+  let mockHandleV1BrandTopBrands;
   let mockHandleV1BrandBrandsByTopicFts;
   let mockHandleV1BrandBrandsByTopicFtsExport;
   let mockHandleV1BrandBrandsByTopicFtsTotals;
@@ -231,7 +233,9 @@ describe('AiVisibilityController', () => {
     mockHandleV1BrandStatsByLlm = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
+    mockHandleV1BrandCompetitors = sandbox.stub().resolves({ status: 200, body: {} });
     mockHandleV1BrandCompetitorsStats = sandbox.stub().resolves({ status: 200, body: {} });
+    mockHandleV1BrandTopBrands = sandbox.stub().resolves({ status: 200, body: {} });
     mockHandleV1BrandBrandsByTopicFts = sandbox.stub().resolves({ status: 200, body: {} });
     mockHandleV1BrandBrandsByTopicFtsExport = sandbox.stub().resolves({ status: 200, body: {} });
     mockHandleV1BrandBrandsByTopicFtsTotals = sandbox.stub().resolves({ status: 200, body: {} });
@@ -369,8 +373,14 @@ describe('AiVisibilityController', () => {
       '../../src/support/ai-visibility/handlers/v1/brand/stats-by-llm.js': {
         handleStatsByLLM: mockHandleV1BrandStatsByLlm,
       },
+      '../../src/support/ai-visibility/handlers/v1/brand/competitors.js': {
+        handleCompetitors: mockHandleV1BrandCompetitors,
+      },
       '../../src/support/ai-visibility/handlers/v1/brand/competitors-stats.js': {
         handleCompetitorsStats: mockHandleV1BrandCompetitorsStats,
+      },
+      '../../src/support/ai-visibility/handlers/v1/brand/top-brands.js': {
+        handleTopBrands: mockHandleV1BrandTopBrands,
       },
       '../../src/support/ai-visibility/handlers/v1/brand/brands-by-topic-fts.js': {
         handleBrandsByTopicFts: mockHandleV1BrandBrandsByTopicFts,
@@ -758,7 +768,9 @@ describe('AiVisibilityController', () => {
       getV1SourceCitedSourcesTotals: mockHandleV1SourceCitedSourcesTotals,
       getV1BrandStatsByCountry: mockHandleV1BrandStatsByCountry,
       getV1BrandStatsByLlm: mockHandleV1BrandStatsByLlm,
+      getV1BrandCompetitors: mockHandleV1BrandCompetitors,
       getV1BrandCompetitorsStats: mockHandleV1BrandCompetitorsStats,
+      getV1BrandTopBrands: mockHandleV1BrandTopBrands,
       getV1BrandBrandsByTopicFts: mockHandleV1BrandBrandsByTopicFts,
       getV1BrandBrandsByTopicFtsExport: mockHandleV1BrandBrandsByTopicFtsExport,
       getV1BrandBrandsByTopicFtsTotals: mockHandleV1BrandBrandsByTopicFtsTotals,
