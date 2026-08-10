@@ -40,7 +40,26 @@ export function isValidFeatureFlagName(flagName) {
 }
 
 /**
- * Upserts a boolean feature flag row (org + product + flag_name unique).
+ * The organization's own row, not a brand's override of it. `brand_id` is absent
+ * from every row before the brand-scope migration and NULL on the organization's
+ * row after it, so this selects correctly under both schemas.
+ *
+ * @param {object} row - Raw PostgREST `feature_flags` row.
+ * @returns {boolean} `true` for the organization-level row.
+ */
+const isOrgRow = (row) => (row.brand_id ?? null) === null;
+
+/**
+ * Writes an organization's boolean feature flag, creating the row when it does
+ * not exist yet and updating it in place when it does. A brand's override of the
+ * same flag is left untouched.
+ *
+ * Keyed on the row's primary key rather than a composite `ON CONFLICT` target,
+ * so it does not depend on the shape of the table's unique key. That costs
+ * atomicity: two concurrent creates of the *same* flag leave one hitting the
+ * unique constraint as a retryable duplicate-key error. The write callers are
+ * the admin endpoint, onboarding and mode remediation, which carry essentially
+ * no concurrency.
  *
  * @param {object} params
  * @param {string} params.organizationId - SpaceCat org id (matches mysticat organizations.id)
@@ -63,19 +82,36 @@ export async function upsertFeatureFlag({
     throw new Error('PostgREST client is required for feature flags');
   }
 
-  const row = {
-    organization_id: organizationId,
-    product,
-    flag_name: flagName,
-    flag_value: value,
-    updated_by: updatedBy,
-  };
-
-  const { data, error } = await postgrestClient
+  const { data: existing, error: readError } = await postgrestClient
     .from('feature_flags')
-    .upsert(row, { onConflict: 'organization_id,product,flag_name' })
-    .select()
-    .single();
+    .select('*')
+    .eq('organization_id', organizationId)
+    .eq('product', product)
+    .eq('flag_name', flagName);
+
+  if (readError) {
+    throw new Error(`Failed to upsert feature flag: ${readError.message}`);
+  }
+
+  const current = (existing ?? []).find(isOrgRow);
+  const { data, error } = current
+    ? await postgrestClient
+      .from('feature_flags')
+      .update({ flag_value: value, updated_by: updatedBy })
+      .eq('id', current.id)
+      .select()
+      .single()
+    : await postgrestClient
+      .from('feature_flags')
+      .insert({
+        organization_id: organizationId,
+        product,
+        flag_name: flagName,
+        flag_value: value,
+        updated_by: updatedBy,
+      })
+      .select()
+      .single();
 
   if (error) {
     throw new Error(`Failed to upsert feature flag: ${error.message}`);
@@ -85,7 +121,8 @@ export async function upsertFeatureFlag({
 }
 
 /**
- * Reads a single feature flag value by org, product, and flag name.
+ * Reads an organization's own value for a feature flag, ignoring any brand's
+ * override of it.
  *
  * @param {object} params
  * @param {string} params.organizationId
@@ -106,20 +143,23 @@ export async function readFeatureFlag({
 
   const { data, error } = await postgrestClient
     .from('feature_flags')
-    .select('flag_value')
+    .select('*')
     .eq('organization_id', organizationId)
     .eq('product', product)
-    .eq('flag_name', flagName)
-    .maybeSingle();
+    .eq('flag_name', flagName);
 
   if (error) {
     throw new Error(`Failed to read feature flag ${flagName}: ${error.message}`);
   }
 
-  return typeof data?.flag_value === 'boolean' ? data.flag_value : null;
+  const row = (data ?? []).find(isOrgRow);
+  return typeof row?.flag_value === 'boolean' ? row.flag_value : null;
 }
 
 /**
+ * Lists an organization's own enabled flags for a product. Brand overrides are
+ * excluded, so the endpoint built on this describes the organization's state.
+ *
  * @param {object} params
  * @param {string} params.organizationId
  * @param {'ASO'|'LLMO'} params.product
@@ -147,5 +187,5 @@ export async function listFeatureFlagsByOrgAndProduct({
     throw new Error(`Failed to list feature flags: ${error.message}`);
   }
 
-  return data ?? [];
+  return (data ?? []).filter(isOrgRow);
 }
