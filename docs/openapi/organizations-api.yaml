@@ -87,7 +87,7 @@ organization-projects:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 
 organization-project-by-id:
@@ -128,7 +128,7 @@ organization-project-by-id:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 
 organization-project-sites:
@@ -173,7 +173,7 @@ organization-project-sites:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 
 organization-project-sites-by-name:
@@ -218,5 +218,5 @@ organization-project-sites-by-name:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
