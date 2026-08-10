@@ -150,7 +150,7 @@ site-cdn-logs-config:
       This endpoint allows updating the CDN logs configuration for a specific site.
     operationId: updateSiteCdnLogsConfig
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
     requestBody:
       required: true
@@ -191,7 +191,7 @@ site-scraper-config:
       separate "missing" case.
     operationId: getSiteScraperConfig
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
     responses:
       '200':
@@ -236,7 +236,7 @@ site-scraper-config:
       1024-char values.
     operationId: updateSiteScraperConfig
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
     requestBody:
       required: true
@@ -285,7 +285,7 @@ site-page-relationships-search:
       of the requested page to grandparent, and so on toward the root.
     operationId: searchSitePageRelationships
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
     requestBody:
       required: true
       content:
@@ -424,7 +424,7 @@ site-reports:
                   description: Error message describing the server error
                   example: "Failed to get reports: [specific error message]"
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
   post:
     tags:
@@ -610,7 +610,7 @@ site-reports:
                     - "Failed to create report job: SQS error"
                     - "Failed to create report job: [specific error message]"
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 
 site-report:
@@ -708,7 +708,7 @@ site-report:
                   description: Error message describing the server error
                   example: "Failed to get report: [specific error message]"
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
   patch:
     tags:
@@ -806,7 +806,7 @@ site-report:
                     - "Failed to update report in S3: [specific S3 error message]"
                     - "Failed to update report: [specific error message]"
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
   delete:
     tags:
@@ -872,7 +872,7 @@ site-report:
                   description: Error message describing the server error
                   example: "Failed to delete report: [specific error message]"
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 
 site-graph:
@@ -1197,7 +1197,7 @@ site-graph:
                   description: Error message describing the server error
                   example: "Failed to retrieve graph data"
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 site-identity:
   parameters:

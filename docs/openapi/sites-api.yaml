@@ -35,7 +35,7 @@ site-brand-profile:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
   post:
     tags:
@@ -345,7 +345,7 @@ sites-for-organization:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 
 sites-by-organization-and-project-name:
@@ -386,7 +386,7 @@ sites-by-organization-and-project-name:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 
 sites-resolve:
@@ -606,5 +606,5 @@ sites-resolve:
           X-Error:
             $ref: './headers.yaml#/xError'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
