@@ -58,17 +58,20 @@ describe('LLMO Onboarding Functions', () => {
 
     // Default feature_flags stub so all v2-path tests get a working postgrestClient.
     // Individual tests can override with .withArgs('feature_flags') for specific assertions.
-    const defaultUpsertSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
-    const defaultUpsertSelect = sinon.stub().returns({ single: defaultUpsertSingle });
-    const defaultUpsert = sinon.stub().returns({ select: defaultUpsertSelect });
-    const defaultMaybeSingle = sinon.stub().resolves({ data: null, error: null });
-    const defaultEq3 = sinon.stub().returns({ maybeSingle: defaultMaybeSingle });
+    const defaultWriteSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
+    const defaultWriteSelect = sinon.stub().returns({ single: defaultWriteSingle });
+    const defaultInsert = sinon.stub().returns({ select: defaultWriteSelect });
+    const defaultUpdate = sinon.stub().returns({
+      eq: sinon.stub().returns({ select: defaultWriteSelect }),
+    });
+    const defaultEq3 = sinon.stub().resolves({ data: [], error: null });
     const defaultEq2 = sinon.stub().returns({ eq: defaultEq3 });
     const defaultEq1 = sinon.stub().returns({ eq: defaultEq2 });
     const defaultSelect = sinon.stub().returns({ eq: defaultEq1 });
     mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
       select: defaultSelect,
-      upsert: defaultUpsert,
+      insert: defaultInsert,
+      update: defaultUpdate,
     });
 
     // Default brands lookup (LLMO-5556 collision check) — no existing brand,
@@ -1558,8 +1561,7 @@ describe('LLMO Onboarding Functions', () => {
       mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
       // feature_flags: read (mode resolution) + upsert (brandalf enable) tracking
-      const maybeSingle = sinon.stub().resolves({ data: null, error: null });
-      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqFlag = sinon.stub().resolves({ data: [], error: null });
       const eqProduct = sinon.stub().returns({ eq: eqFlag });
       const eqOrg = sinon.stub().returns({ eq: eqProduct });
       const selectRead = sinon.stub().returns({ eq: eqOrg });
@@ -1568,7 +1570,7 @@ describe('LLMO Onboarding Functions', () => {
       const upsertStub = sinon.stub().returns({ select: upsertSelect });
       mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
         select: selectRead,
-        upsert: upsertStub,
+        insert: upsertStub,
       });
 
       const mockConfig = createMockConfig();
@@ -1875,8 +1877,7 @@ describe('LLMO Onboarding Functions', () => {
 
       // Stub postgrestClient for feature flag read (resolveLlmoOnboardingMode)
       // and upsert (enabling brandalf during v2 onboarding)
-      const maybeSingle = sinon.stub().resolves({ data: null, error: null });
-      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqFlag = sinon.stub().resolves({ data: [], error: null });
       const eqProduct = sinon.stub().returns({ eq: eqFlag });
       const eqOrg = sinon.stub().returns({ eq: eqProduct });
       const selectRead = sinon.stub().returns({ eq: eqOrg });
@@ -1890,7 +1891,7 @@ describe('LLMO Onboarding Functions', () => {
       const upsertStub = sinon.stub().returns({ select: upsertSelect });
       mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
         select: selectRead,
-        upsert: upsertStub,
+        insert: upsertStub,
       });
 
       // Use helper functions for common mocks
@@ -2107,8 +2108,7 @@ describe('LLMO Onboarding Functions', () => {
       mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
       // Feature flag postgrest mock
-      const maybeSingle = sinon.stub().resolves({ data: null, error: null });
-      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqFlag = sinon.stub().resolves({ data: [], error: null });
       const eqProduct = sinon.stub().returns({ eq: eqFlag });
       const eqOrg = sinon.stub().returns({ eq: eqProduct });
       const selectRead = sinon.stub().returns({ eq: eqOrg });
@@ -2117,7 +2117,7 @@ describe('LLMO Onboarding Functions', () => {
       const upsertStub = sinon.stub().returns({ select: upsertSelect });
       mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
         select: selectRead,
-        upsert: upsertStub,
+        insert: upsertStub,
       });
 
       // upsertBrand throws — should not block onboarding
@@ -2213,8 +2213,7 @@ describe('LLMO Onboarding Functions', () => {
       mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
       // Feature flag postgrest mock
-      const maybeSingle = sinon.stub().resolves({ data: null, error: null });
-      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqFlag = sinon.stub().resolves({ data: [], error: null });
       const eqProduct = sinon.stub().returns({ eq: eqFlag });
       const eqOrg = sinon.stub().returns({ eq: eqProduct });
       const selectRead = sinon.stub().returns({ eq: eqOrg });
@@ -2223,7 +2222,7 @@ describe('LLMO Onboarding Functions', () => {
       const upsertStub = sinon.stub().returns({ select: upsertSelect });
       mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
         select: selectRead,
-        upsert: upsertStub,
+        insert: upsertStub,
       });
 
       // Existing brand with the same name already points at a DIFFERENT site.
@@ -2320,8 +2319,7 @@ describe('LLMO Onboarding Functions', () => {
       mockDataAccess.Site.create.resolves(mockSite);
       mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
-      const maybeSingle = sinon.stub().resolves({ data: null, error: null });
-      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqFlag = sinon.stub().resolves({ data: [], error: null });
       const eqProduct = sinon.stub().returns({ eq: eqFlag });
       const eqOrg = sinon.stub().returns({ eq: eqProduct });
       const selectRead = sinon.stub().returns({ eq: eqOrg });
@@ -2330,7 +2328,7 @@ describe('LLMO Onboarding Functions', () => {
       const upsertStub = sinon.stub().returns({ select: upsertSelect });
       mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
         select: selectRead,
-        upsert: upsertStub,
+        insert: upsertStub,
       });
 
       // Brand lookup returns a PostgREST error (does not throw).
@@ -2425,8 +2423,7 @@ describe('LLMO Onboarding Functions', () => {
       mockDataAccess.Site.create.resolves(mockSite);
       mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
-      const maybeSingle = sinon.stub().resolves({ data: null, error: null });
-      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqFlag = sinon.stub().resolves({ data: [], error: null });
       const eqProduct = sinon.stub().returns({ eq: eqFlag });
       const eqOrg = sinon.stub().returns({ eq: eqProduct });
       const selectRead = sinon.stub().returns({ eq: eqOrg });
@@ -2435,7 +2432,7 @@ describe('LLMO Onboarding Functions', () => {
       const upsertStub = sinon.stub().returns({ select: upsertSelect });
       mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
         select: selectRead,
-        upsert: upsertStub,
+        insert: upsertStub,
       });
 
       // Existing brand exists by name but has no primary site (site_id null) —
@@ -2529,8 +2526,7 @@ describe('LLMO Onboarding Functions', () => {
       mockDataAccess.Site.create.resolves(mockSite);
       mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
-      const maybeSingle = sinon.stub().resolves({ data: null, error: null });
-      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqFlag = sinon.stub().resolves({ data: [], error: null });
       const eqProduct = sinon.stub().returns({ eq: eqFlag });
       const eqOrg = sinon.stub().returns({ eq: eqProduct });
       const selectRead = sinon.stub().returns({ eq: eqOrg });
@@ -2539,7 +2535,7 @@ describe('LLMO Onboarding Functions', () => {
       const upsertStub = sinon.stub().returns({ select: upsertSelect });
       mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
         select: selectRead,
-        upsert: upsertStub,
+        insert: upsertStub,
       });
 
       // Existing brand already points at THIS site (same-site re-onboard) — no
@@ -2630,15 +2626,23 @@ describe('LLMO Onboarding Functions', () => {
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
 
-      const maybeSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
-      const eqFlag = sinon.stub().returns({ maybeSingle });
+      // The org already carries the brandalf row, so the flag write updates it.
+      const eqFlag = sinon.stub().resolves({
+        data: [{ id: 'flag-row-1', flag_value: true }],
+        error: null,
+      });
       const eqProduct = sinon.stub().returns({ eq: eqFlag });
       const eqOrg = sinon.stub().returns({ eq: eqProduct });
       const select = sinon.stub().returns({ eq: eqOrg });
       const upsertSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
       const upsertSelect = sinon.stub().returns({ single: upsertSingle });
-      const upsertStub = sinon.stub().returns({ select: upsertSelect });
-      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({ select, upsert: upsertStub });
+      const upsertStub = sinon.stub().returns({
+        eq: sinon.stub().returns({ select: upsertSelect }),
+      });
+      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
+        select,
+        update: upsertStub,
+      });
 
       mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
       mockDataAccess.Site.findByBaseURL.resolves(null);
@@ -2721,15 +2725,23 @@ describe('LLMO Onboarding Functions', () => {
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
 
-      const maybeSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
-      const eqFlag = sinon.stub().returns({ maybeSingle });
+      // The org already carries the brandalf row, so the flag write updates it.
+      const eqFlag = sinon.stub().resolves({
+        data: [{ id: 'flag-row-1', flag_value: true }],
+        error: null,
+      });
       const eqProduct = sinon.stub().returns({ eq: eqFlag });
       const eqOrg = sinon.stub().returns({ eq: eqProduct });
       const select = sinon.stub().returns({ eq: eqOrg });
       const upsertSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
       const upsertSelect = sinon.stub().returns({ single: upsertSingle });
-      const upsertStub = sinon.stub().returns({ select: upsertSelect });
-      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({ select, upsert: upsertStub });
+      const upsertStub = sinon.stub().returns({
+        eq: sinon.stub().returns({ select: upsertSelect }),
+      });
+      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
+        select,
+        update: upsertStub,
+      });
 
       mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
       mockDataAccess.Site.findByBaseURL.resolves(null);
@@ -2811,15 +2823,23 @@ describe('LLMO Onboarding Functions', () => {
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
 
-      const maybeSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
-      const eqFlag = sinon.stub().returns({ maybeSingle });
+      // The org already carries the brandalf row, so the flag write updates it.
+      const eqFlag = sinon.stub().resolves({
+        data: [{ id: 'flag-row-1', flag_value: true }],
+        error: null,
+      });
       const eqProduct = sinon.stub().returns({ eq: eqFlag });
       const eqOrg = sinon.stub().returns({ eq: eqProduct });
       const select = sinon.stub().returns({ eq: eqOrg });
       const upsertSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
       const upsertSelect = sinon.stub().returns({ single: upsertSingle });
-      const upsertStub = sinon.stub().returns({ select: upsertSelect });
-      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({ select, upsert: upsertStub });
+      const upsertStub = sinon.stub().returns({
+        eq: sinon.stub().returns({ select: upsertSelect }),
+      });
+      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
+        select,
+        update: upsertStub,
+      });
 
       mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
       mockDataAccess.Site.findByBaseURL.resolves(null);
