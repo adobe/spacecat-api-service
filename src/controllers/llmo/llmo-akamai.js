@@ -207,9 +207,10 @@ function LlmoAkamaiController(ctx) {
     // The rule-tree PUT on a large property can take longer than the shared client's 60s default
     // (the deploy PUT holds the connection open while Akamai runs its whole-tree validation before
     // responding). The browser is already released at the ~15s CDN cutoff and polling
-    // deploy-status, so the Lambda can afford to wait longer — give the size-scaling calls a bigger
-    // budget so a slow-but-succeeding write isn't aborted before Akamai commits. Env-overridable.
-    const ruleTreeTimeoutMs = Number(context.env?.AKAMAI_RULE_TREE_TIMEOUT_MS) || 120000;
+    // deploy-status, so the Lambda can afford to wait much longer — give the size-scaling calls a
+    // 300s budget (still well under the 900s Lambda cap) so a slow-but-succeeding write isn't
+    // aborted before Akamai commits. Env-overridable via AKAMAI_RULE_TREE_TIMEOUT_MS.
+    const ruleTreeTimeoutMs = Number(context.env?.AKAMAI_RULE_TREE_TIMEOUT_MS) || 300000;
     try {
       return { client: new AkamaiClient({ ...creds, notifyEmails, ruleTreeTimeoutMs }, log) };
     } catch (e) {
