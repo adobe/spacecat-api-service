@@ -23,7 +23,7 @@ import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { auditHostname } from './llmo-utils.js';
 import {
-  buildRuleConfig, mergeIntoTree, managedRuleNames, redactSecrets,
+  buildRuleConfig, mergeIntoTree, buildRuleTreePatch, managedRuleNames, redactSecrets,
   detectManagedRuleNames, estimateRuleTreeComplexity, getManagedFetcherKey,
 } from './llmo-akamai-utils.js';
 
@@ -208,9 +208,9 @@ function LlmoAkamaiController(ctx) {
     // (the deploy PUT holds the connection open while Akamai runs its whole-tree validation before
     // responding). The browser is already released at the ~15s CDN cutoff and polling
     // deploy-status, so the Lambda can afford to wait much longer — give the size-scaling calls a
-    // 300s budget (still well under the 900s Lambda cap) so a slow-but-succeeding write isn't
-    // aborted before Akamai commits. Env-overridable via AKAMAI_RULE_TREE_TIMEOUT_MS.
-    const ruleTreeTimeoutMs = Number(context.env?.AKAMAI_RULE_TREE_TIMEOUT_MS) || 300000;
+    // 600s budget (still under the 900s Lambda cap) so a slow-but-succeeding write isn't aborted
+    // before Akamai commits. Env-overridable via AKAMAI_RULE_TREE_TIMEOUT_MS.
+    const ruleTreeTimeoutMs = Number(context.env?.AKAMAI_RULE_TREE_TIMEOUT_MS) || 600000;
     try {
       return { client: new AkamaiClient({ ...creds, notifyEmails, ruleTreeTimeoutMs }, log) };
     } catch (e) {
@@ -662,9 +662,11 @@ function LlmoAkamaiController(ctx) {
 
       // Read the base version's tree first so we can enforce the CUSTOM-default scope gate and
       // decide caching BEFORE creating a version — a rejected onboarding then leaves no orphan
-      // version behind. The new version is a clone of baseVersion, so merging the base tree and
-      // PUTting it into the new version is equivalent, and pins the base version's ruleFormat.
-      const { ruleTree, ruleFormat } = await client.getRuleTree(
+      // version behind. The new version is a byte-exact clone of baseVersion, so a JSON-Patch delta
+      // built from the base tree applies cleanly to it, and the clone keeps baseVersion's frozen
+      // ruleFormat (PATCH sends only the ops, never re-serializing the whole tree, so there's no
+      // GET→PUT round-trip re-expansion of untouched rules).
+      const { ruleTree } = await client.getRuleTree(
         propertyId,
         baseVersion,
         contractId,
@@ -693,14 +695,28 @@ function LlmoAkamaiController(ctx) {
       // deploy is retried. Otherwise clone baseVersion into a fresh version as usual.
       newVersion = retryVersion
         ?? await client.createVersion(propertyId, baseVersion, contractId, groupId);
+
+      // Write the OAE rule as a small JSON-Patch DELTA instead of PUTting the whole merged tree. A
+      // full-tree PUT uploads the entire rule tree as its body (~324 KB on a large property), and
+      // proven this session that upload is what makes the write exceed 300s from the api-service
+      // Lambda even though the byte-identical PUT is ~31s direct — the 324 KB egress, not Akamai's
+      // (server-side, size-independent ~31s) validation, is the bottleneck. patchRuleTree sends
+      // only the OAE ops (~4 KB) for Akamai to apply to newVersion's STORED tree (the byte-exact
+      // clone of baseVersion), running the SAME validateRules pass, so the committed result is
+      // identical but the request body is ~74x smaller. buildRuleTreePatch is idempotent (removes
+      // any existing managed rule first) and newVersion always mirrors baseVersion here — a fresh
+      // clone, or a retryVersion that never landed OAE (the wizard only retries a deploy that
+      // reconciled deployed:false) — so ops built from the baseVersion tree apply cleanly. No
+      // If-Match is sent: the version is freshly created and single-writer, so optimistic
+      // concurrency gains nothing (PAPI accepts the omission — verified against the live property).
+      const ops = buildRuleTreePatch(ruleTree, cfg, insertIndex);
       const putStart = Date.now();
-      const putResult = await client.updateRuleTree(
+      const putResult = await client.patchRuleTree(
         propertyId,
         newVersion,
         contractId,
         groupId,
-        merged,
-        ruleFormat,
+        ops,
       );
       const putMs = Date.now() - putStart;
 
