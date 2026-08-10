@@ -1701,6 +1701,18 @@ describe('ElementsController', () => {
       const [, params] = serviceStub.getDomainUrls.firstCall.args;
       expect(params.hostname).to.equal('reddit.com');
     });
+
+    it('collapses a whitespace-only hostname to undefined (no filter)', async () => {
+      const ctx = fakeContext({
+        url: domainUrlsUrl('?startDate=2026-07-01&endDate=2026-07-14&hostname=%20%20'),
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listDomainUrls(ctx);
+
+      expect(res.status).to.equal(200);
+      const [, params] = serviceStub.getDomainUrls.firstCall.args;
+      expect(params.hostname).to.be.undefined;
+    });
   });
 
   // The 4th URL Inspector KPI card, split out of getUrlInspectorStats — shares

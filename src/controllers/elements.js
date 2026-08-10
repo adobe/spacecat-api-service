@@ -1236,12 +1236,11 @@ export default function ElementsController(context, log, env) {
   /**
    * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence
    *     /url-inspector/domain-urls
-    * Phase 2 of the Cited Third-Party tree: expand a cited domain → its URLs.
-    * Same Semrush element as owned-urls (Stats-per-URL 9af5ed83) minus the trend
-    * element and the Postgres traffic hybrid, optionally filtered to a single
-    * domain (`hostname`) client-side instead of `domain_type='Owned'`.
+   * Phase 2 of the Cited Third-Party tree: expand a cited domain → its URLs.
+   * Same Semrush element as owned-urls (Stats-per-URL 9af5ed83) minus the trend
+   * element and the Postgres traffic hybrid, optionally filtered to a single
+   * domain (`hostname`) client-side instead of `domain_type='Owned'`.
    */
-  /* c8 ignore start -- LLMO-6160 POC endpoint; unit tests intentionally deferred */
   const listDomainUrls = async (ctx) => {
     try {
       const auth = await authorizeOrg(ctx);
@@ -1294,7 +1293,9 @@ export default function ElementsController(context, log, env) {
       } else {
         projects = await service.getOwnedUrlProjects(workspaceId, { brandSemrushProjects });
       }
-      const hostname = query.hostname || query.domain;
+      // Normalize whitespace-only hostname to "no filter" explicitly at the API
+      // boundary, rather than relying on the transform's downstream `.trim()`.
+      const hostname = (query.hostname || query.domain || '').trim() || undefined;
 
       // The transform optionally host-filters, sorts by citations desc, and slices
       // client-side (Semrush has no server-side pagination); totalCount is the full
@@ -1316,7 +1317,6 @@ export default function ElementsController(context, log, env) {
       return mapError(e, log);
     }
   };
-  /* c8 ignore stop */
 
   /**
    * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/market-tracking-trends

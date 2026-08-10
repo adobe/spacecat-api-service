@@ -104,5 +104,56 @@ describe('domain-urls definitions', () => {
         'https://help.adobe.com/b',
       ]);
     });
+
+    it('treats a whitespace-only hostname as no filter', () => {
+      const result = transformDomainUrlsResponse([
+        {
+          region: 'US',
+          stats: {
+            blocks: {
+              data: [
+                {
+                  source: 'https://reddit.com/a', citations: 9, prompts_with_citation: 4, domain_type: 'Other',
+                },
+                {
+                  source: 'https://adobe.com/b', citations: 5, prompts_with_citation: 3, domain_type: 'Owned',
+                },
+              ],
+            },
+          },
+        },
+      ], { hostname: '   ' });
+
+      expect(result.totalCount).to.equal(2);
+      expect(result.urls.map((url) => url.url)).to.deep.equal([
+        'https://reddit.com/a',
+        'https://adobe.com/b',
+      ]);
+    });
+
+    it('applies the channel filter on top of the hostname-omitted (all hosts) mode', () => {
+      const result = transformDomainUrlsResponse([
+        {
+          region: 'US',
+          stats: {
+            blocks: {
+              data: [
+                {
+                  source: 'https://reddit.com/a', citations: 9, prompts_with_citation: 4, domain_type: 'Other',
+                },
+                {
+                  source: 'https://adobe.com/b', citations: 5, prompts_with_citation: 3, domain_type: 'Owned',
+                },
+              ],
+            },
+          },
+        },
+      ], { channel: 'Owned' });
+
+      expect(result.totalCount).to.equal(1);
+      expect(result.urls.map((url) => url.url)).to.deep.equal([
+        'https://adobe.com/b',
+      ]);
+    });
   });
 });
