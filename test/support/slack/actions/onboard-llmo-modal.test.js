@@ -124,20 +124,30 @@ describe('onboard-llmo-modal', () => {
     sendMessage: sinonSandbox.stub(),
   });
 
-  const createDefaultMockPostgrestClient = (sinonSandbox) => ({
-    from: sinonSandbox.stub().callsFake(() => ({
+  const createDefaultMockPostgrestClient = (sinonSandbox) => {
+    // One chain link that is both further-chainable and awaitable, so a single
+    // fake serves the brands lookup (which ends in `.maybeSingle()`) and the
+    // feature-flags org-row lookup (three `.eq()`s, awaited directly). Both
+    // resolve to "no row", so the flag write lands as an insert.
+    const link = {
+      eq: sinonSandbox.stub().callsFake(() => link),
+      maybeSingle: sinonSandbox.stub().resolves({ data: null, error: null }),
+      then: (onFulfilled) => Promise.resolve({ data: [], error: null }).then(onFulfilled),
+    };
+    const writeResult = () => sinonSandbox.stub().returns({
       select: sinonSandbox.stub().returns({
-        eq: sinonSandbox.stub().returns({
-          maybeSingle: sinonSandbox.stub().resolves({ data: null, error: null }),
-        }),
+        single: sinonSandbox.stub().resolves({ data: { flag_value: true }, error: null }),
       }),
-      upsert: sinonSandbox.stub().returns({
-        select: sinonSandbox.stub().returns({
-          single: sinonSandbox.stub().resolves({ data: { flag_value: true }, error: null }),
-        }),
-      }),
-    })),
-  });
+    });
+    return {
+      from: sinonSandbox.stub().callsFake(() => ({
+        select: sinonSandbox.stub().returns(link),
+        // `upsert` is the brand write (upsertBrand); `insert` is the flag write.
+        upsert: writeResult(),
+        insert: writeResult(),
+      })),
+    };
+  };
 
   const createDefaultMockLambdaCtx = (sinonSandbox, overrides = {}) => {
     const mockSite = overrides.mockSite || createDefaultMockSite(sinonSandbox);
