@@ -26,6 +26,7 @@ import {
   estimateRuleTreeComplexity,
   getManagedFetcherKey,
   redactSecrets,
+  redactPapiErrors,
 } from '../../../src/controllers/llmo/llmo-akamai-utils.js';
 
 const HOSTNAME = 'www.example.com';
@@ -610,6 +611,47 @@ describe('llmo-akamai-utils', () => {
       expect(byHeader('x-edgeoptimize-fetcher-key').options.headerValue).to.equal('***');
       // a tree without a rules root is returned unchanged
       expect(redactSecrets({})).to.deep.equal({});
+    });
+  });
+
+  describe('redactPapiErrors', () => {
+    const KEY = 'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789';
+
+    it('returns null/undefined unchanged', () => {
+      expect(redactPapiErrors(null)).to.equal(null);
+      expect(redactPapiErrors(undefined)).to.equal(undefined);
+    });
+
+    it('redacts an explicitly-known secret value from a string detail', () => {
+      const detail = `origin header set to ${KEY} rejected`;
+      expect(redactPapiErrors(detail, [KEY])).to.equal('origin header set to *** rejected');
+    });
+
+    it('redacts a 64-hex minted key with no explicit secret hint', () => {
+      expect(redactPapiErrors(`value ${KEY}`, [])).to.equal('value ***');
+    });
+
+    it('redacts a value following a secret header name', () => {
+      const detail = 'behavior modifyOutgoingRequestHeader x-edgeoptimize-api-key: sk-live-9f2b bad';
+      expect(redactPapiErrors(detail, [])).to.contain('x-edgeoptimize-api-key: ***');
+      expect(redactPapiErrors(detail, [])).to.not.contain('sk-live-9f2b');
+    });
+
+    it('scrubs secrets inside an errors array, preserving shape', () => {
+      const errors = [{ type: 'x', detail: `set ${KEY} here`, errorLocation: '#/rules' }];
+      const out = redactPapiErrors(errors, [KEY]);
+      expect(out).to.be.an('array').with.length(1);
+      expect(out[0].detail).to.equal('set *** here');
+      expect(out[0].errorLocation).to.equal('#/rules');
+    });
+
+    it('bounds a large errors array to the max entries', () => {
+      const errors = Array.from({ length: 40 }, (_, i) => ({ detail: `e${i}` }));
+      expect(redactPapiErrors(errors, [], 25)).to.have.length(25);
+    });
+
+    it('ignores short/non-string extra secrets', () => {
+      expect(redactPapiErrors('a=1', ['a', 123, null])).to.equal('a=1');
     });
   });
 });

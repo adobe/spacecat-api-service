@@ -611,6 +611,44 @@ export function redactSecrets(tree) {
   return clone;
 }
 
+// PAPI validation errors/details echo back the rules we sent, so they can carry the injected
+// x-edgeoptimize-api-key / x-edgeoptimize-fetcher-key header values — scrub those before returning
+// them to a client. Redacts any explicitly-known secret value, any value following a secret header
+// name, and any 32-byte hex token (the shape of a minted fetcher key).
+const SECRET_HEADER_VALUE_RE = /(x-edgeoptimize-(?:api|fetcher)-key["'\s]*[:=]["'\s]*)([^"'\s,}\]]+)/gi;
+const MINTED_FETCHER_KEY_RE = /\b[0-9a-f]{64}\b/gi;
+
+function scrubSecretText(text, extraSecrets) {
+  let out = String(text);
+  extraSecrets.forEach((v) => {
+    if (typeof v === 'string' && v.length >= 4) {
+      out = out.split(v).join(REDACTED);
+    }
+  });
+  return out.replace(SECRET_HEADER_VALUE_RE, `$1${REDACTED}`).replace(MINTED_FETCHER_KEY_RE, REDACTED);
+}
+
+/**
+ * Redacts injected secrets from PAPI errors before they leave the server. Accepts the errors array
+ * (deploy's validateRules result) or the raw detail string (activation's 400 body) and returns the
+ * same shape — arrays bounded to `max` entries. Pass any secret values known at the call site (e.g.
+ * the deploy's apiKey/fetcherKey); header-name and hex-token patterns catch the rest.
+ * @param {Array|string|null} errors
+ * @param {string[]} [extraSecrets] - explicit secret values to redact
+ * @param {number} [max] - max array entries to keep
+ * @returns {Array|string|null} the redacted errors, same shape as the input
+ */
+export function redactPapiErrors(errors, extraSecrets = [], max = 25) {
+  if (errors == null) {
+    return errors;
+  }
+  if (typeof errors === 'string') {
+    return scrubSecretText(errors, extraSecrets);
+  }
+  const bounded = Array.isArray(errors) ? errors.slice(0, max) : errors;
+  return JSON.parse(scrubSecretText(JSON.stringify(bounded), extraSecrets));
+}
+
 /**
  * Returns the fetcher-key value (the x-edgeoptimize-fetcher-key incoming-request header the managed
  * routing rule injects) from a rule tree, or null if absent. A fresh fetcher key is minted on every

@@ -24,7 +24,7 @@ import AccessControlUtil from '../../support/access-control-util.js';
 import { auditHostname } from './llmo-utils.js';
 import {
   buildRuleConfig, mergeIntoTree, buildRuleTreePatch, managedRuleNames, redactSecrets,
-  detectManagedRuleNames, estimateRuleTreeComplexity, getManagedFetcherKey,
+  redactPapiErrors, detectManagedRuleNames, estimateRuleTreeComplexity, getManagedFetcherKey,
 } from './llmo-akamai-utils.js';
 
 // EdgeGrid credentials are CLIENT-SUPPLIED per request (never persisted, never logged): the caller
@@ -544,7 +544,7 @@ function LlmoAkamaiController(ctx) {
       // validateRules pass scales with total rule-tree size and on a large property runs 45-60s —
       // well past the ~15s CDN first-byte timeout in front of this Lambda — so the old dry-run made
       // Review hang and then fail with an opaque 503 HTML page instead of our JSON. deploy() is now
-      // the sole validator (its real PUT keeps validateRules=true and surfaces any papiErrors), and
+      // the sole validator (its JSON-Patch write runs validateRules=true, surfacing papiErrors) and
       // the CUSTOM-SSL scope gate — the only common failure detectable before deploy — is already
       // enforced above, in memory, with no Akamai round-trip. So the preview stays honest and fast.
       log.info(auditLine(context, 'plan', 'ok', {
@@ -578,7 +578,7 @@ function LlmoAkamaiController(ctx) {
    * POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy
    * Body: { propertyId, contractId, groupId, insertIndex?, baseVersion?, retryVersion? }
    * Creates a NEW property version from `baseVersion` (default: latest) and applies the managed
-   * rules via a full-tree PUT with PAPI-side validation, pinning the base version's ruleFormat.
+   * rules as a JSON-Patch delta with PAPI-side validation, pinning the base version's ruleFormat.
    * Supported only for properties whose default origin uses CUSTOM SSL verification (scope gate).
    * Does NOT activate (a separate, explicit step). Guarded so the target property must serve the
    * site's own domain. Idempotent by rule name (trimmed): re-running replaces prior managed rules
@@ -659,6 +659,14 @@ function LlmoAkamaiController(ctx) {
         ? Number(rawBaseVersion)
         : await client.getLatestVersion(propertyId, contractId, groupId);
 
+      // retryVersion must be a version created AFTER baseVersion. The wizard only ever sends back a
+      // version a prior attempt cloned from THIS base (to resume its unwritten write), and a clone
+      // always gets a higher number than its source, so a value <= baseVersion can't be that clone.
+      // Reject it rather than apply a base-derived JSON-Patch delta into an unrelated version.
+      if (retryVersion !== undefined && retryVersion <= baseVersion) {
+        return badRequest(`retryVersion (${retryVersion}) must be greater than baseVersion (${baseVersion})`);
+      }
+
       // Read the base version's tree first to enforce the CUSTOM-default scope gate and decide
       // caching BEFORE creating a version (a rejected onboarding then leaves no orphan behind). The
       // new version is a byte-exact clone, so a JSON-Patch delta built from the base tree applies
@@ -725,8 +733,10 @@ function LlmoAkamaiController(ctx) {
         return createResponse({
           message: 'Akamai rejected the rule tree',
           newVersion,
-          papiErrors,
-          warnings,
+          // PAPI echoes the rules we sent back in its errors/warnings, so scrub the injected
+          // LLMO API key / minted fetcher key before returning them to the browser.
+          papiErrors: redactPapiErrors(papiErrors, [apiKey, fetcherKey]),
+          warnings: redactPapiErrors(warnings, [apiKey, fetcherKey]),
         }, 422);
       }
 
@@ -1062,12 +1072,14 @@ function LlmoAkamaiController(ctx) {
           severity: 'error', siteId, host: auditHostname(site), propertyId, version, network,
         }));
         return createResponse({
-          message: 'This property version can’t be activated because it has validation errors. '
+          message: "This property version can't be activated because it has validation errors. "
             + 'Review the version in Akamai Property Manager (or create a new version) to fix them, '
             + 'then try activating again.',
           code: 'version_has_validation_errors',
           version,
-          papiErrors: papiDetail,
+          // The detail is a raw PAPI message that can echo the rules we sent; scrub any injected
+          // secret (header-name + minted-key patterns catch it — no secrets are in scope here).
+          papiErrors: redactPapiErrors(papiDetail, []),
         }, 422);
       }
       return papiErrorResponse(e, 'activation', context, { siteId, propertyId });
