@@ -776,6 +776,12 @@ function LlmoAkamaiController(ctx) {
    * DIFFERS from the base's proves this deploy's write actually persisted (`freshWrite: true`); an
    * identical key means the version is an unwritten clone (`freshWrite: false`). The key value is
    * only compared server-side, never returned.
+   *
+   * `validate` (optional, 'true'): also run PAPI validation on the checked version and return
+   * `activatable` (no blocking errors), `errorCount`, a bounded `errors` array, and `warningCount`.
+   * Off by default (the deploy reconciliation poll wants the cheap presence read); the Activate
+   * step turns it on once to disable activation and show the errors up front. Its latency scales
+   * with tree size, so callers should time-box the request.
    */
   const deployStatus = async (context) => {
     const result = await getSiteAndCheckAccess(context);
@@ -795,8 +801,14 @@ function LlmoAkamaiController(ctx) {
     }
 
     const { propertyId, contractId, groupId } = ref;
-    const { version: rawVersion, baseVersion: rawBaseVersion } = context.data;
+    const {
+      version: rawVersion, baseVersion: rawBaseVersion, validate: rawValidate,
+    } = context.data;
     const siteId = site.getId();
+    // Opt-in: also run PAPI's validation on the checked version and report whether it can be
+    // activated. Off by default (a plain presence read is cheap and used by the deploy poll); the
+    // Activate step turns it on once, to disable activation up front when the version has errors.
+    const validate = rawValidate === 'true' || rawValidate === true;
 
     // Optional explicit version, validated like deploy/activate (reject 0 and non-decimal input).
     let requestedVersion;
@@ -817,9 +829,20 @@ function LlmoAkamaiController(ctx) {
     try {
       const latestVersion = await client.getLatestVersion(propertyId, contractId, groupId);
       const version = requestedVersion ?? latestVersion;
-      const { ruleTree } = await client.getRuleTree(propertyId, version, contractId, groupId);
+      const { ruleTree, errors, warnings } = await client.getRuleTree(
+        propertyId,
+        version,
+        contractId,
+        groupId,
+        { validateRules: validate },
+      );
       const managedRulesPresent = detectManagedRuleNames(ruleTree);
       const deployed = managedRulesPresent.length > 0;
+      // When validating: a version with zero blocking errors is activatable. Akamai enforces this
+      // at activation anyway (see activate()); surfacing it here lets the UI disable Activate and
+      // show the errors up front instead of after a failed attempt.
+      const errorCount = validate ? (errors?.length ?? 0) : undefined;
+      const activatable = validate ? errorCount === 0 : undefined;
 
       // Re-onboard disambiguation: compare the per-deploy fetcher key against the base version the
       // deploy cloned from. A fresh key proves THIS deploy's write persisted (not just an inherited
@@ -835,7 +858,7 @@ function LlmoAkamaiController(ctx) {
       }
 
       log.info(auditLine(context, 'deploy-status', 'ok', {
-        siteId, propertyId, version, latestVersion, deployed, freshWrite,
+        siteId, propertyId, version, latestVersion, deployed, freshWrite, errorCount,
       }));
       return ok({
         propertyId,
@@ -849,6 +872,15 @@ function LlmoAkamaiController(ctx) {
         // (fetcher key differs from the base clone); false ⇒ the version is an unwritten clone.
         // undefined ⇒ not checked (first-onboard case, where `deployed` is already unambiguous).
         ...(freshWrite !== undefined ? { freshWrite } : {}),
+        // Present only when validate=true: whether the version can be activated + its error detail.
+        // `errors` is bounded (PAPI can return hundreds); errors describe rules by name/path, not
+        // the injected secret header values, so they're safe to surface.
+        ...(validate ? {
+          activatable,
+          errorCount,
+          errors: (errors ?? []).slice(0, 25),
+          warningCount: warnings?.length ?? 0,
+        } : {}),
       });
     } catch (e) {
       return papiErrorResponse(e, 'deploy status', context, { siteId, propertyId });

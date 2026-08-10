@@ -6531,6 +6531,17 @@ site-llmo-akamai-deploy-status:
       schema:
         type: integer
         minimum: 1
+    - name: validate
+      in: query
+      required: false
+      description: >-
+        When 'true', also run PAPI validation on the checked version and add `activatable`,
+        `errorCount`, a bounded `errors` array, and `warningCount` to the response — so the caller
+        can block activation and show the errors up front. Off by default (a plain presence read is
+        cheap); validation latency scales with rule-tree size, so time-box the request.
+      schema:
+        type: string
+        enum: ['true']
   get:
     operationId: getLlmoAkamaiDeployStatus
     summary: Check whether the Optimize-at-Edge rule landed in a property version
@@ -6579,6 +6590,27 @@ site-llmo-akamai-deploy-status:
                     confirmed (the per-deploy fetcher key differs from the base clone). False ⇒ the
                     version is an unwritten clone still carrying a previous onboard's rule. Absent ⇒
                     not checked (first-onboard case, where `deployed` is already unambiguous).
+                activatable:
+                  type: boolean
+                  description: >-
+                    Present only when `validate=true`: whether the version has zero blocking
+                    validation errors (i.e. Akamai will accept it for activation).
+                errorCount:
+                  type: integer
+                  description: >-
+                    Present only when `validate=true` — the number of blocking validation errors.
+                errors:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: true
+                  description: >-
+                    Present only when `validate=true`: the validation errors (bounded to 25). Errors
+                    describe rules by name/path and never include injected secret header values.
+                warningCount:
+                  type: integer
+                  description: >-
+                    Present only when `validate=true` — the number of non-blocking warnings.
       '400':
         $ref: './responses.yaml#/400'
       '401':

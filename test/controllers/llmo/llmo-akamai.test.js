@@ -602,6 +602,48 @@ describe('LlmoAkamaiController', () => {
       expect(res.status).to.equal(400);
     });
 
+    it('with validate=true, reports activatable:false + errors when the version has validation errors', async () => {
+      mockAkamaiClient.getRuleTree.withArgs(PROPERTY_ID, 7)
+        .resolves({
+          ruleTree: DEPLOYED_TREE,
+          ruleFormat: 'v',
+          errors: [{ detail: 'rule X invalid' }, { detail: 'rule Y invalid' }],
+          warnings: [{ detail: 'w' }],
+        });
+      const res = await controller.deployStatus(withData({ ...propertyRef, validate: 'true' }));
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.deployed).to.equal(true);
+      expect(body.activatable).to.equal(false);
+      expect(body.errorCount).to.equal(2);
+      expect(body.errors).to.have.length(2);
+      expect(body.warningCount).to.equal(1);
+      // The validated read must ask PAPI to validate.
+      expect(mockAkamaiClient.getRuleTree)
+        .to.have.been.calledWith(PROPERTY_ID, 7, CONTRACT_ID, GROUP_ID, { validateRules: true });
+    });
+
+    it('with validate=true, reports activatable:true when the version has no errors', async () => {
+      mockAkamaiClient.getRuleTree.withArgs(PROPERTY_ID, 7)
+        .resolves({
+          ruleTree: DEPLOYED_TREE, ruleFormat: 'v', errors: [], warnings: [],
+        });
+      const res = await controller.deployStatus(withData({ ...propertyRef, validate: 'true' }));
+      const body = await res.json();
+      expect(body.activatable).to.equal(true);
+      expect(body.errorCount).to.equal(0);
+    });
+
+    it('omits activatable/errorCount when validate is not requested', async () => {
+      const res = await controller.deployStatus(withData(propertyRef));
+      const body = await res.json();
+      expect(body).to.not.have.property('activatable');
+      expect(body).to.not.have.property('errorCount');
+      // Cheap read: validateRules not requested.
+      expect(mockAkamaiClient.getRuleTree)
+        .to.have.been.calledWith(PROPERTY_ID, 7, CONTRACT_ID, GROUP_ID, { validateRules: false });
+    });
+
     it('maps a PAPI error through the shared error mapper', async () => {
       mockAkamaiClient.getRuleTree.rejects(new Error('PAPI GET /x -> 500: boom'));
       const res = await controller.deployStatus(withData(propertyRef));
