@@ -668,20 +668,56 @@ describe('Organizations Controller', () => {
     expect(response.status).to.equal(200);
   });
 
-  it('returns forbidden when non-admin tries to update config.defaults', async () => {
+  it('allows non-admin to update config.defaults with siteId', async () => {
+    const siteId = '550e8400-e29b-41d4-a716-446655440001';
     sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
     sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+    organizations[0].save = sinon.stub().resolves(organizations[0]);
+    organizations[0].setConfig = sinon.stub();
+    mockDataAccess.Organization.findById.resolves(organizations[0]);
+    mockDataAccess.Site.findById.resolves({ getOrganizationId: () => orgId });
+    sandbox.stub(TierClient, 'createForSite').resolves({
+      checkValidEntitlement: sinon.stub().resolves({
+        entitlement: { getTier: () => 'PAID' },
+        siteEnrollment: { getTier: () => 'PAID' },
+      }),
+    });
+
+    const response = await organizationsController.updateOrganization({
+      params: { organizationId: orgId },
+      data: { config: { defaults: { ASO: { siteId } } } },
+      ...context,
+    });
+
+    expect(response.status).to.equal(200);
+    expect(organizations[0].setConfig).to.have.been.calledOnce;
+    expect(organizations[0].save).to.have.been.calledOnce;
+  });
+
+  it('allows non-admin to update config.defaults without siteId (e.g. taskManagement)', async () => {
+    sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+    organizations[0].save = sinon.stub().resolves(organizations[0]);
+    organizations[0].setConfig = sinon.stub();
     mockDataAccess.Organization.findById.resolves(organizations[0]);
 
     const response = await organizationsController.updateOrganization({
       params: { organizationId: orgId },
-      data: { config: { defaults: { ASO: { siteId: '550e8400-e29b-41d4-a716-446655440001' } } } },
+      data: {
+        config: {
+          defaults: {
+            ASO: {
+              taskManagement: { project: { key: 'PROJ', id: '10000', name: 'My Project' }, issueType: { name: 'Story', id: '10001' } },
+            },
+          },
+        },
+      },
       ...context,
     });
 
-    expect(response.status).to.equal(403);
-    const error = await response.json();
-    expect(error.message).to.include('Only admins can update config.defaults');
+    expect(response.status).to.equal(200);
+    expect(organizations[0].setConfig).to.have.been.calledOnce;
+    expect(organizations[0].save).to.have.been.calledOnce;
   });
 
   it('returns bad request for an unknown product code in config.defaults', async () => {
