@@ -44,6 +44,12 @@ export function isValidFeatureFlagName(flagName) {
  * from every row before the brand-scope migration and NULL on the organization's
  * row after it, so this selects correctly under both schemas.
  *
+ * Every query feeding this predicate selects the full row, and must keep doing
+ * so. Naming `brand_id` in a projection fails against the current schema, where
+ * the column does not exist yet; omitting it once it does exist makes every
+ * override row arrive with `brand_id: undefined` and read as the organization's
+ * own. A wildcard projection is the only shape that is correct under both.
+ *
  * @param {object} row - Raw PostgREST `feature_flags` row.
  * @returns {boolean} `true` for the organization-level row.
  */
@@ -82,6 +88,7 @@ export async function upsertFeatureFlag({
     throw new Error('PostgREST client is required for feature flags');
   }
 
+  // Wildcard projection is required — see `isOrgRow`.
   const { data: existing, error: readError } = await postgrestClient
     .from('feature_flags')
     .select('*')
@@ -141,6 +148,7 @@ export async function readFeatureFlag({
     throw new Error('PostgREST client is required for feature flags');
   }
 
+  // Wildcard projection is required — see `isOrgRow`.
   const { data, error } = await postgrestClient
     .from('feature_flags')
     .select('*')
@@ -175,6 +183,7 @@ export async function listFeatureFlagsByOrgAndProduct({
     throw new Error('PostgREST client is required for feature flags');
   }
 
+  // Wildcard projection is required — see `isOrgRow`.
   const { data, error } = await postgrestClient
     .from('feature_flags')
     .select('*')
