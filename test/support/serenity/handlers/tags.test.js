@@ -1196,12 +1196,13 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       );
     });
 
-    // A closed-dimension value is a descendant too, so it is renameable through
-    // the same path — the dimension root above it is what is protected.
-    // The vocabulary is fixed. Every resolve-or-create keys on the bare name under
-    // the root, so renaming `human` would make the next write mint a SECOND `human`
-    // and silently orphan every prompt still carrying the first.
-    it('400s a rename of a closed-dimension value', async () => {
+    // A server-owned value is a descendant too, so it is renameable through
+    // the same path — the dimension root above it is what is protected. The
+    // vocabulary is authored by the server. Every resolve-or-create keys on the
+    // bare name under the root, so renaming `human` would make the next write
+    // mint a SECOND `human` and silently orphan every prompt still carrying the
+    // first.
+    it('400s a rename of a closed server-owned value (origin)', async () => {
       const transport = makeTransport();
       const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
       const err = await handler.handleUpdateTag(
@@ -1215,7 +1216,70 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       ).then(() => null, (e) => e);
 
       expect(err.status).to.equal(400);
-      expect(err.message).to.match(/closed "origin" dimension cannot be renamed or re-parented/);
+      expect(err.message).to.match(/server-owned "origin" dimension cannot be renamed or re-parented/);
+      expect(transport.updateProjectTag).to.not.have.been.called;
+    });
+
+    // LLMO-6665 regression. `source` is server-owned but OPEN, so it is
+    // deliberately absent from CLOSED_DIMENSIONS — the guard must key on the
+    // OWNERSHIP axis (isServerOwnedDimension), not the closed-vocabulary one, or
+    // a client can rename/re-parent a server-owned `source` value once its root
+    // is seeded on live projects. Renaming `config` would hide it, not move it,
+    // and the next server write would mint a SECOND `config` under the same root,
+    // splitting prompts across two ids for one producing system.
+    //
+    // The default fixture reports children_count:0 on the `source` root so tree
+    // walks skip it; bump it so findTagsInTree descends and resolves the value —
+    // the reachable state after WP-S5 / the reconciles seed the root live.
+    function makeSourceDescendableTransport(overrides = {}) {
+      const levels = dimensionTreeLevels();
+      levels[''] = levels[''].map(
+        (r) => (r.name === 'source' ? { ...r, children_count: 2 } : r),
+      );
+      return makeTransport({
+        listProjectTags: makeListProjectTagsStub(levels),
+        ...overrides,
+      });
+    }
+
+    it('400s a rename of a source value — server-owned though OPEN (LLMO-6665)', async () => {
+      const transport = makeSourceDescendableTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const err = await handler.handleUpdateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        TAG_IDS.sourceConfig,
+        { name: 'config-renamed', geoTargetId: 2840, languageCode: 'en' },
+        fakeLog(),
+      ).then(() => null, (e) => e);
+
+      expect(err.status).to.equal(400);
+      expect(err.message).to.match(/server-owned "source" dimension cannot be renamed or re-parented/);
+      expect(transport.updateProjectTag).to.not.have.been.called;
+    });
+
+    it('400s a re-parent of a source value (LLMO-6665)', async () => {
+      const transport = makeSourceDescendableTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const err = await handler.handleUpdateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        TAG_IDS.sourceConfig,
+        {
+          name: 'config',
+          parentId: TAG_IDS.sourceSemrush,
+          geoTargetId: 2840,
+          languageCode: 'en',
+        },
+        fakeLog(),
+      ).then(() => null, (e) => e);
+
+      expect(err.status).to.equal(400);
+      expect(err.message).to.match(/server-owned "source" dimension cannot be renamed or re-parented/);
       expect(transport.updateProjectTag).to.not.have.been.called;
     });
 
