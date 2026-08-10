@@ -40,40 +40,48 @@ function makeSite(createdAt, id = 'site-id') {
 /**
  * Builds a postgrestClient stub whose feature_flags read returns the given value.
  * Pass `null` to simulate a missing row, `'throw'` to simulate a DB error.
- * Also supports the upsert chain used by `upsertFeatureFlag`.
+ * Also supports the write chain used by `upsertFeatureFlag`.
  */
 function makePostgrestClient(brandalfValue) {
   if (brandalfValue === undefined) {
     return undefined;
   }
-  const maybeSingle = brandalfValue === 'throw'
-    ? sinon.stub().resolves({ data: null, error: { message: 'boom' } })
-    : sinon.stub().resolves({
-      data: brandalfValue === null ? null : { flag_value: brandalfValue },
+  // Org-row lookup: from().select().eq().eq().eq() resolves to the matching rows.
+  const flagRows = brandalfValue === 'throw'
+    ? { data: null, error: { message: 'boom' } }
+    : {
+      data: brandalfValue === null ? [] : [{ id: 'flag-row-1', flag_value: brandalfValue }],
       error: null,
-    });
-
-  // Upsert chain: from().upsert().select().single()
-  const upsertSingle = sinon.stub().resolves({ data: { flag_value: false }, error: null });
-  const upsertSelect = sinon.stub().returns({ single: upsertSingle });
-  const upsert = sinon.stub().returns({ select: upsertSelect });
-
-  // Read chain: from().select().eq().eq().eq().maybeSingle()
+    };
   const readSelect = sinon.stub().returns({
     eq: sinon.stub().returns({
       eq: sinon.stub().returns({
-        eq: sinon.stub().returns({ maybeSingle }),
+        eq: sinon.stub().resolves(flagRows),
       }),
     }),
   });
 
+  // Write branches: from().update().eq().select().single() when the org already
+  // has a row, from().insert().select().single() when it does not.
+  const writeSingle = sinon.stub().resolves({ data: { flag_value: false }, error: null });
+  const writeSelect = sinon.stub().returns({ single: writeSingle });
+  const update = sinon.stub().returns({ eq: sinon.stub().returns({ select: writeSelect }) });
+  const insert = sinon.stub().returns({ select: writeSelect });
+
   const client = {
     from: sinon.stub().returns({
       select: readSelect,
-      upsert,
+      update,
+      insert,
     }),
   };
-  client.getUpsertStub = () => upsert;
+  // The remediation path only ever runs on an org whose brandalf row exists, so
+  // the flag write is always the update branch.
+  client.getUpsertStub = () => update;
+  client.failWrite = () => writeSingle.resolves({
+    data: null,
+    error: { message: 'upsert failed' },
+  });
   return client;
 }
 
@@ -105,13 +113,12 @@ describe('llmo-onboarding-mode', () => {
 
   describe('readBrandalfFlagOverride', () => {
     it('reads the brandalf flag from feature_flags', async () => {
-      const maybeSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
       const postgrestClient = {
         from: sinon.stub().returns({
           select: sinon.stub().returns({
             eq: sinon.stub().returns({
               eq: sinon.stub().returns({
-                eq: sinon.stub().returns({ maybeSingle }),
+                eq: sinon.stub().resolves({ data: [{ flag_value: true }], error: null }),
               }),
             }),
           }),
@@ -132,13 +139,12 @@ describe('llmo-onboarding-mode', () => {
     });
 
     it('returns null when flag_value is not a boolean', async () => {
-      const maybeSingle = sinon.stub().resolves({ data: { flag_value: 'true' }, error: null });
       const postgrestClient = {
         from: sinon.stub().returns({
           select: sinon.stub().returns({
             eq: sinon.stub().returns({
               eq: sinon.stub().returns({
-                eq: sinon.stub().returns({ maybeSingle }),
+                eq: sinon.stub().resolves({ data: [{ flag_value: 'true' }], error: null }),
               }),
             }),
           }),
@@ -149,13 +155,12 @@ describe('llmo-onboarding-mode', () => {
     });
 
     it('throws when the DB returns an error', async () => {
-      const maybeSingle = sinon.stub().resolves({ data: null, error: { message: 'boom' } });
       const postgrestClient = {
         from: sinon.stub().returns({
           select: sinon.stub().returns({
             eq: sinon.stub().returns({
               eq: sinon.stub().returns({
-                eq: sinon.stub().returns({ maybeSingle }),
+                eq: sinon.stub().resolves({ data: null, error: { message: 'boom' } }),
               }),
             }),
           }),
@@ -171,9 +176,7 @@ describe('llmo-onboarding-mode', () => {
 
   describe('readBrandalfMigrationFlagOverride', () => {
     it('reads the brandalf_migration flag from feature_flags', async () => {
-      const eqStub3 = sinon.stub();
-      const maybeSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
-      eqStub3.returns({ maybeSingle });
+      const eqStub3 = sinon.stub().resolves({ data: [{ flag_value: true }], error: null });
       const eqStub2 = sinon.stub().returns({ eq: eqStub3 });
       const eqStub1 = sinon.stub().returns({ eq: eqStub2 });
       const postgrestClient = {
@@ -345,12 +348,8 @@ describe('llmo-onboarding-mode', () => {
           env: { LLMO_ONBOARDING_DEFAULT_VERSION: 'v1' },
           brandalfValue: true,
         });
-        // Make upsert fail
-        ctx.dataAccess.services.postgrestClient.getUpsertStub().returns({
-          select: sinon.stub().returns({
-            single: sinon.stub().resolves({ data: null, error: { message: 'upsert failed' } }),
-          }),
-        });
+        // Make the flag write fail
+        ctx.dataAccess.services.postgrestClient.failWrite();
         const mode = await resolveLlmoOnboardingMode('org-1', ctx);
         expect(mode).to.equal('v1');
         expect(ctx.log.error).to.have.been.calledWithMatch(/Failed to revert brandalf flag.*Flag may still be true/);
@@ -572,17 +571,12 @@ describe('llmo-onboarding-mode', () => {
      * brandalf and brandalf_migration independently.
      */
     function makeMultiFlagContext(flags, sites = []) {
-      const maybeSingle = sinon.stub();
       const flagNameEq = sinon.stub().callsFake((field, flagName) => {
-        if (field === 'flag_name' && flagName in flags) {
-          maybeSingle.onCall(maybeSingle.callCount).resolves({
-            data: flags[flagName] === null ? null : { flag_value: flags[flagName] },
-            error: null,
-          });
-        } else {
-          maybeSingle.onCall(maybeSingle.callCount).resolves({ data: null, error: null });
-        }
-        return { maybeSingle };
+        const value = field === 'flag_name' ? flags[flagName] : undefined;
+        return Promise.resolve({
+          data: value === null || value === undefined ? [] : [{ flag_value: value }],
+          error: null,
+        });
       });
       const productEq = sinon.stub().returns({ eq: flagNameEq });
       const orgEq = sinon.stub().returns({ eq: productEq });
@@ -646,12 +640,11 @@ describe('llmo-onboarding-mode', () => {
       });
 
       it('warns and falls through when brandalf_migration read throws', async () => {
-        const maybeSingle = sinon.stub();
-        // First call: brandalf read returns null
-        maybeSingle.onFirstCall().resolves({ data: null, error: null });
+        const flagNameEq = sinon.stub();
+        // First call: brandalf read finds no row
+        flagNameEq.onFirstCall().resolves({ data: [], error: null });
         // Second call: brandalf_migration read returns a DB error
-        maybeSingle.onSecondCall().resolves({ data: null, error: { message: 'boom' } });
-        const flagNameEq = sinon.stub().returns({ maybeSingle });
+        flagNameEq.onSecondCall().resolves({ data: null, error: { message: 'boom' } });
         const productEq = sinon.stub().returns({ eq: flagNameEq });
         const orgEq = sinon.stub().returns({ eq: productEq });
         const select = sinon.stub().returns({ eq: orgEq });

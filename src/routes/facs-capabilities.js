@@ -188,11 +188,15 @@ const routeFacsCapabilities = {
     'PATCH /sites/:siteId/:auditType', // hasAdminAccess (sites-audits-toggle)
     'POST /sites/:siteId/site-enrollments', // hasAdminAccess
     'POST /sites/:siteId/entitlements', // hasAdminAccess
+    // Prompt-suggestion schedule (re-)provisioning — admin-or-S2S (dedicated
+    // promptSuggestionSchedule:write capability); not a customer FACS surface.
+    'POST /sites/:siteId/prompt-suggestion-schedules', // authorizeWrite (admin || S2S cap)
     'POST /projects', // hasAdminAccess
     'DELETE /projects/:projectId', // hasAdminAccess
     'POST /organizations', // hasAdminAccess
     'DELETE /organizations/:organizationId', // restricted (always 403)
     'POST /organizations/:organizationId/entitlements', // hasAdminAccess
+    'PATCH /organizations/:organizationId/entitlements', // hasAdminAccess
     'PUT /organizations/:organizationId/feature-flags/:product/:flagName', // hasAdminAccess
     'DELETE /organizations/:organizationId/feature-flags/:product/:flagName', // hasAdminAccess
     'POST /plg/records', // hasAdminAccess
@@ -365,7 +369,9 @@ const routeFacsCapabilities = {
       'GET /llmo/ai-visibility/brands/competitors': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/brand/stats-by-country': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/brand/stats-by-llm': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/brand/competitors': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/brand/competitors-stats': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/brand/top-brands': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/meta/meta': 'llmo/can_view',
       'GET /llmo/ai-visibility/competitors/metrics': 'llmo/can_view',
       'GET /llmo/ai-visibility/meta': 'llmo/can_view',

@@ -11,7 +11,10 @@
  */
 
 import { expect } from 'chai';
-import { buildDomainUrlsPayload } from '../../../../src/support/elements/definitions/domain-urls.js';
+import {
+  buildDomainUrlsPayload,
+  transformDomainUrlsResponse,
+} from '../../../../src/support/elements/definitions/domain-urls.js';
 import { DEFAULT_ELEMENT_MODEL } from '../../../../src/support/elements/constants.js';
 
 function modelFilter(payload) {
@@ -56,6 +59,125 @@ describe('domain-urls definitions', () => {
       const payload = buildDomainUrlsPayload({ model: 'all', platform: 'openai' });
 
       expect(modelFilter(payload)).to.be.undefined;
+    });
+  });
+
+  describe('transformDomainUrlsResponse', () => {
+    it('returns all hostnames sorted by citations when hostname is omitted', () => {
+      const result = transformDomainUrlsResponse([
+        {
+          region: 'US',
+          stats: {
+            blocks: {
+              data: [
+                {
+                  source: 'https://low.example.com/a', citations: 2, prompts_with_citation: 1, domain_type: 'Other',
+                },
+                {
+                  source: 'https://reddit.com/b', citations: 9, prompts_with_citation: 4, domain_type: 'Other',
+                },
+                {
+                  source: 'https://adobe.com/c', citations: 5, prompts_with_citation: 3, domain_type: 'Owned',
+                },
+              ],
+            },
+          },
+        },
+      ], { pageSize: 2 });
+
+      expect(result.totalCount).to.equal(3);
+      expect(result.urls.map((url) => url.url)).to.deep.equal([
+        'https://reddit.com/b',
+        'https://adobe.com/c',
+      ]);
+    });
+
+    it('filters by a single hostname while preserving subdomain matching', () => {
+      const result = transformDomainUrlsResponse([
+        {
+          region: 'US',
+          stats: {
+            blocks: {
+              data: [
+                {
+                  source: 'https://www.reddit.com/a',
+                  citations: 12,
+                  prompts_with_citation: 6,
+                  domain_type: 'Other',
+                },
+                {
+                  source: 'https://help.adobe.com/b',
+                  citations: 10,
+                  prompts_with_citation: 4,
+                  domain_type: 'Owned',
+                },
+                {
+                  source: 'https://example.com/c',
+                  citations: 99,
+                  prompts_with_citation: 8,
+                  domain_type: 'Other',
+                },
+              ],
+            },
+          },
+        },
+      ], { hostname: 'adobe.com' });
+
+      expect(result.totalCount).to.equal(1);
+      expect(result.urls.map((url) => url.url)).to.deep.equal([
+        'https://help.adobe.com/b',
+      ]);
+    });
+
+    it('treats a whitespace-only hostname as no filter', () => {
+      const result = transformDomainUrlsResponse([
+        {
+          region: 'US',
+          stats: {
+            blocks: {
+              data: [
+                {
+                  source: 'https://reddit.com/a', citations: 9, prompts_with_citation: 4, domain_type: 'Other',
+                },
+                {
+                  source: 'https://adobe.com/b', citations: 5, prompts_with_citation: 3, domain_type: 'Owned',
+                },
+              ],
+            },
+          },
+        },
+      ], { hostname: '   ' });
+
+      expect(result.totalCount).to.equal(2);
+      expect(result.urls.map((url) => url.url)).to.deep.equal([
+        'https://reddit.com/a',
+        'https://adobe.com/b',
+      ]);
+    });
+
+    it('applies the channel filter on top of the hostname-omitted (all hosts) mode', () => {
+      const result = transformDomainUrlsResponse([
+        {
+          region: 'US',
+          stats: {
+            blocks: {
+              data: [
+                {
+                  source: 'https://reddit.com/a', citations: 9, prompts_with_citation: 4, domain_type: 'Other',
+                },
+                {
+                  source: 'https://adobe.com/b', citations: 5, prompts_with_citation: 3, domain_type: 'Owned',
+                },
+              ],
+            },
+          },
+        },
+      ], { channel: 'Owned' });
+
+      expect(result.totalCount).to.equal(1);
+      expect(result.urls.map((url) => url.url)).to.deep.equal([
+        'https://adobe.com/b',
+      ]);
     });
   });
 });

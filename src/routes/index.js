@@ -113,6 +113,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} onboardingController - Semrush onboarding notification controller.
  * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
  * @param {Object} auditPolicyController - Audit policy + audit scope controller.
+ * @param {Object} promptSuggestionSchedulesController - LLMO prompt-suggestion schedule controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -183,6 +184,7 @@ export default function getRouteHandlers(
   onboardingController,
   redirectsController,
   auditPolicyController,
+  promptSuggestionSchedulesController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -588,6 +590,7 @@ export default function getRouteHandlers(
     'POST /v2/orgs/:spaceCatId/llmo/onboard-site': llmoController.onboardSiteOnly,
     'POST /llmo/onboard/update-query-index': llmoController.updateQueryIndex,
     'POST /sites/:siteId/llmo/offboard': llmoController.offboardCustomer,
+    'POST /sites/:siteId/prompt-suggestion-schedules': promptSuggestionSchedulesController.createSchedules,
     'POST /sites/:siteId/llmo/edge-optimize-config': llmoController.createOrUpdateEdgeConfig,
     'GET /sites/:siteId/llmo/edge-optimize-config': llmoController.getEdgeConfig,
     'POST /sites/:siteId/llmo/edge-optimize-config/stage': llmoController.createOrUpdateStageEdgeConfig,
@@ -748,6 +751,7 @@ export default function getRouteHandlers(
     'PATCH /trial-users/email-preferences': trialUserController.updateEmailPreferences,
     'GET /organizations/:organizationId/entitlements': entitlementController.getByOrganizationID,
     'POST /organizations/:organizationId/entitlements': entitlementController.createEntitlement,
+    'PATCH /organizations/:organizationId/entitlements': entitlementController.patchEntitlement,
     'POST /sites/:siteId/entitlements': entitlementController.createSiteEntitlement,
     'GET /organizations/:organizationId/feature-flags': featureFlagsController.listByOrganization,
     'PUT /organizations/:organizationId/feature-flags/:product/:flagName':
@@ -872,7 +876,9 @@ export default function getRouteHandlers(
     'GET /llmo/ai-visibility/v1/source/cited-sources-totals': aiVisibilityController.getV1SourceCitedSourcesTotals,
     'GET /llmo/ai-visibility/v1/brand/stats-by-country': aiVisibilityController.getV1BrandStatsByCountry,
     'GET /llmo/ai-visibility/v1/brand/stats-by-llm': aiVisibilityController.getV1BrandStatsByLlm,
+    'GET /llmo/ai-visibility/v1/brand/competitors': aiVisibilityController.getV1BrandCompetitors,
     'GET /llmo/ai-visibility/v1/brand/competitors-stats': aiVisibilityController.getV1BrandCompetitorsStats,
+    'GET /llmo/ai-visibility/v1/brand/top-brands': aiVisibilityController.getV1BrandTopBrands,
     'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts': aiVisibilityController.getV1BrandBrandsByTopicFts,
     'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts-export': aiVisibilityController.getV1BrandBrandsByTopicFtsExport,
     'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts-totals': aiVisibilityController.getV1BrandBrandsByTopicFtsTotals,

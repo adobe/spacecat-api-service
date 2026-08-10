@@ -10,14 +10,12 @@
  * governing permissions and limitations under the License.
  */
 
-/* c8 ignore start */
-
 import { fromJson, toJson } from '@bufbuild/protobuf';
 import { COUNTRY_ENUM, LLM_ENUM } from '@quazar/ai-seo-ts/common/types_pb.js';
 import {
-  StatsRequestSchema,
-  StatsResponseSchema,
-} from '@quazar/ai-seo-ts/ai-cr/messages_pb.js';
+  TopBrandsByDomainRequestSchema,
+  TopBrandsByDomainResponseSchema,
+} from '@quazar/ai-seo-ts/v2/brand/messages_pb.js';
 import {
   engineToLlm,
   PROTO_FROM_JSON,
@@ -26,31 +24,33 @@ import {
   responseFromGrpcError,
 } from '../../../grpc-utils.js';
 
-export async function handleCompetitorsStats(sp, clients) {
+/* c8 ignore start */
+export async function handleTopBrands(sp, clients) {
   const domain = sp.get('domain');
+  if (!domain) {
+    return {
+      status: 400,
+      body: { error: 'invalid_request', message: 'domain is required' },
+    };
+  }
   const country = resolveCountry(sp) || COUNTRY_ENUM.US;
-  const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
-  const competitors = sp.get('competitors')?.split(',') || [];
+  const llm = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
+  const limit = sp.get('limit') || '10';
 
-  let statsRequest;
+  let request;
   try {
-    statsRequest = fromJson(
-      StatsRequestSchema,
+    request = fromJson(
+      TopBrandsByDomainRequestSchema,
       {
         country,
-        llm: engine,
-        target: { domain, name: domain },
-        competitors: competitors.map((competitor) => ({
-          domain: competitor,
-          name: competitor,
-        })),
+        brand_domain: domain,
+        llm,
+        limit,
       },
       PROTO_FROM_JSON,
     );
   } catch (error) {
-    const message = error instanceof Error
-      ? error.message
-      : 'Invalid competitors stats request';
+    const message = error instanceof Error ? error.message : 'Invalid top brands request';
     return {
       status: 400,
       body: { error: 'invalid_request', message },
@@ -58,15 +58,10 @@ export async function handleCompetitorsStats(sp, clients) {
   }
 
   try {
-    const statsMessage = await clients.crMetricsClient.stats(statsRequest);
-    const statsJson = toJson(
-      StatsResponseSchema,
-      statsMessage,
-      PROTO_TO_JSON,
-    );
+    const response = await clients.brandClient.topBrandsByDomain(request);
     return {
       status: 200,
-      body: statsJson,
+      body: toJson(TopBrandsByDomainResponseSchema, response, PROTO_TO_JSON),
     };
   } catch (error) {
     const mapped = responseFromGrpcError(error);
@@ -76,5 +71,4 @@ export async function handleCompetitorsStats(sp, clients) {
     throw error;
   }
 }
-
 /* c8 ignore stop */

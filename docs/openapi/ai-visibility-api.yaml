@@ -1449,6 +1449,38 @@ ai-visibility-v1-brand-stats-by-llm:
     security:
       - api_key: []
 
+ai-visibility-v1-brand-competitors:
+  get:
+    tags: [ai-visibility]
+    summary: Get competitors for a brand (Competitor v2 JSON)
+    description: |
+      Returns competitors for a target brand using Semrush v2
+      `CompetitorService/BrandCompetitors`. The response is native protobuf JSON
+      (camelCase) with an API-added `srFilters` block.
+    operationId: getAiVisibilityV1BrandCompetitors
+    parameters:
+      - *domainParam
+      - name: count
+        in: query
+        required: false
+        description: Optional number of competitors to retrieve. Semrush defaults to 4.
+        schema:
+          type: integer
+          minimum: 1
+    responses:
+      '200':
+        description: Brand competitors retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1BrandCompetitorsResponse'
+            examples:
+              competitors:
+                $ref: './examples.yaml#/AiVisibilityV1BrandCompetitors'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
 ai-visibility-v1-brand-competitors-stats:
   get:
     tags: [ai-visibility]
@@ -1481,6 +1513,38 @@ ai-visibility-v1-brand-competitors-stats:
             examples:
               competitorsStats:
                 $ref: './examples.yaml#/AiVisibilityV1BrandCompetitorsStats'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-v1-brand-top-brands:
+  get:
+    tags: [ai-visibility]
+    summary: Get top brands for a domain (Brand v2 JSON)
+    description: |
+      Returns the brands most frequently associated with a domain using Semrush v2
+      `BrandService/TopBrandsByDomain`. The response is native protobuf JSON
+      (camelCase); uint64 counts are serialized as strings.
+
+      Semrush supports a bounded top-N `limit`, not offset pagination or arbitrary
+      sorting. Results are returned in upstream order.
+    operationId: getAiVisibilityV1BrandTopBrands
+    parameters:
+      - *domainParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *limitParam
+    responses:
+      '200':
+        description: Top brands retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityV1BrandTopBrandsResponse'
+            examples:
+              topBrands:
+                $ref: './examples.yaml#/AiVisibilityV1BrandTopBrands'
       <<: *errorResponses
     security:
       - api_key: []
