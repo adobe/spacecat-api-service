@@ -57,6 +57,27 @@ function makeEmptyTreeTransport(overrides = {}) {
   });
 }
 
+// A transport whose `source` root is DESCENDABLE. The default fixture reports
+// children_count:0 on the `source` root so tree walks (findTagsInTree) skip it;
+// this bumps it so the walk descends and resolves a `source` value — the state
+// reachable after WP-S5 / the reconciles seed the root on live projects, and the
+// only state in which the LLMO-6665 guard is exercised. Shared by the flat-mode
+// and subworkspace update describes.
+function makeSourceDescendableTransport(overrides = {}) {
+  const levels = dimensionTreeLevels();
+  // Derive the count from the fixture's own source level rather than hardcoding a
+  // literal, so it can't drift if the fixture gains/loses a seeded `source` value
+  // (mysticatbot suggestion).
+  const sourceChildCount = (levels[TAG_IDS.sourceRoot] ?? []).length;
+  levels[''] = levels[''].map(
+    (r) => (r.name === 'source' ? { ...r, children_count: sourceChildCount } : r),
+  );
+  return makeTransport({
+    listProjectTags: makeListProjectTagsStub(levels),
+    ...overrides,
+  });
+}
+
 function makeDataAccess(findBySliceResult) {
   return {
     BrandSemrushProject: {
@@ -1226,22 +1247,8 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
     // a client can rename/re-parent a server-owned `source` value once its root
     // is seeded on live projects. Renaming `config` would hide it, not move it,
     // and the next server write would mint a SECOND `config` under the same root,
-    // splitting prompts across two ids for one producing system.
-    //
-    // The default fixture reports children_count:0 on the `source` root so tree
-    // walks skip it; bump it so findTagsInTree descends and resolves the value —
-    // the reachable state after WP-S5 / the reconciles seed the root live.
-    function makeSourceDescendableTransport(overrides = {}) {
-      const levels = dimensionTreeLevels();
-      levels[''] = levels[''].map(
-        (r) => (r.name === 'source' ? { ...r, children_count: 2 } : r),
-      );
-      return makeTransport({
-        listProjectTags: makeListProjectTagsStub(levels),
-        ...overrides,
-      });
-    }
-
+    // splitting prompts across two ids for one producing system. The descendable
+    // `source` root comes from the shared makeSourceDescendableTransport helper.
     it('400s a rename of a source value — server-owned though OPEN (LLMO-6665)', async () => {
       const transport = makeSourceDescendableTransport();
       const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
@@ -1623,6 +1630,25 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
 
       expect(err.status).to.equal(400);
       expect(err.message).to.match(/must not be a descendant of the tag/);
+      expect(transport.updateProjectTag).to.not.have.been.called;
+    });
+
+    // Defense-in-depth for LLMO-6665: the source guard lives in the shared
+    // buildUpdatePayload, so it must refuse a server-owned `source` rename on the
+    // subworkspace route too, not only in flat mode (self-review should-fix).
+    it('400s a rename of a source value — shared server-owned guard (LLMO-6665)', async () => {
+      const handler = await loadHandler(sinon.stub().resolves({ id: 'proj-sub-1' }));
+      const transport = makeSourceDescendableTransport();
+      const err = await handler.handleUpdateTagSubworkspace(
+        transport,
+        WORKSPACE,
+        TAG_IDS.sourceConfig,
+        { name: 'config-renamed', geoTargetId: 2840, languageCode: 'en' },
+        fakeLog(),
+      ).then(() => null, (e) => e);
+
+      expect(err.status).to.equal(400);
+      expect(err.message).to.match(/server-owned "source" dimension cannot be renamed or re-parented/);
       expect(transport.updateProjectTag).to.not.have.been.called;
     });
 

@@ -162,7 +162,7 @@ function parseUpdateParentId(body) {
  * The two flags answer two independent questions. `isClosed`
  * ({@link isClosedDimension}) drives VOCABULARY validation: a closed value's
  * `name` must be one of that dimension's fixed values ({@link closedValuesOf}).
- * `isServerOwned` ({@link SERVER_OWNED_DIMENSIONS}) drives the WRITE GUARD and
+ * `isServerOwned` ({@link isServerOwnedDimension}) drives the WRITE GUARD and
  * CREATE SEMANTICS: it forbids a `parentId` (server-owned values hang directly off
  * their root) and routes the create through resolve-or-create. `source` is
  * server-owned yet open — a `parentId` is refused and the value is resolved-or-
@@ -659,15 +659,14 @@ async function resolveUpdateTargets(
  * Three targets are refused. A DIMENSION ROOT is not editable — the root level is
  * reserved for the registered dimension roots ({@link ALL_DIMENSIONS}), and
  * renaming or moving one would leave its whole subtree without a dimension. A
- * SERVER-OWNED dimension's value ({@link SERVER_OWNED_DIMENSIONS}: `intent`,
- * `origin`, `type`, `source`) is not editable either: its vocabulary is authored by
- * the server, and since every resolve-or-create keys on the bare name under the
- * root, renaming a value — a closed `branded`, or a `source` value such as `gsc` —
- * would not move it, it would hide it, so the next server write mints a second value
+ * SERVER-OWNED dimension's value ({@link SERVER_OWNED_DIMENSIONS}) is not editable
+ * either: its vocabulary is authored by the server, and since every
+ * resolve-or-create keys on the bare name under the root, renaming a value would
+ * not move it, it would hide it — the next server write then mints a second value
  * under the same root and every prompt still carrying the first splits across two
- * ids for one dimension value. This is why the guard keys on the OWNERSHIP axis
- * ({@link isServerOwnedDimension}), not the closed/open vocabulary axis — `source`
- * is open yet server-owned, and was reachable here once its root seeded live
+ * ids for one dimension value. The guard therefore keys on the OWNERSHIP axis
+ * ({@link isServerOwnedDimension}), not the open/closed vocabulary axis: `source`
+ * is open yet server-owned, and became reachable here once its root seeded live
  * projects (LLMO-6665). An UNRESOLVABLE id is refused rather than forwarded: without
  * the target's current parent there is no body that preserves it, and guessing would
  * promote the tag.
