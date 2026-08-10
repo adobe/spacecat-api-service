@@ -248,7 +248,7 @@ Capability constants live in `src/routes/capability-constants.js`. Both the rout
 
 **Authentication precedence** (checked in order):
 1. JWT with scopes
-2. Adobe IMS
+2. Route-scoped IMS (`ApiKeyImsHandler`) — `/tools/api-keys/*` only, for IaaS-only orgs that cannot mint a JWT session token. The global direct-IMS-token handler has been removed; all other routes require a JWT session token.
 3. Scoped API Key (fine-grained permissions)
 4. Route-Scoped Legacy API Key (`POST /event/fulfillment` and `POST /slack/channels/invite-by-user-id` only — frozen list, SITES-34224)
 
