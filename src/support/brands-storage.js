@@ -160,6 +160,14 @@ function parseUrlParts(urlString) {
  * the DB, whereas this value is payload the UI renders, and a brand shown as
  * active seconds after its wave released it is worth one indexed read.
  *
+ * Consequence, accepted deliberately: for up to one cache TTL after a flip this
+ * payload and the request-time gates can disagree — a brand can report
+ * `serenityActive: true` here while a gate reading a not-yet-expired cache entry
+ * still refuses it. The window is bounded by `BRAND_CACHE_TTL_MS`, the gates fail
+ * closed, and no write is half-applied by it, so the alternative (routing this
+ * read through the gate cache, which is keyed on a request context rather than a
+ * PostgREST client) is not worth the coupling.
+ *
  * A failure propagates. The rows live in the same database as the brands query
  * that just succeeded, so an error here is a real fault, not a reason to report
  * every brand as inactive.

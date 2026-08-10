@@ -15,6 +15,7 @@ import {
   ORG_1_ID,
   ORG_2_ID,
   BRAND_1_ID,
+  NON_EXISTENT_BRAND_ID,
   NON_EXISTENT_ORG_ID,
 } from '../seed-ids.js';
 import {
@@ -294,6 +295,14 @@ export default function featureFlagsTests(
     // composite FK keeps an override from naming another org's brand.
     describe('brand-scoped overrides', () => {
       before(() => resetData());
+      // Also per test, unlike every other describe in the IT suites, which reset
+      // once. These tests each insert an override on the SAME
+      // (organization, product, flag_name, brand) key, and the widened unique
+      // constraint is real here — without a reset between them the second insert
+      // would collide on a row the first left behind, and the collision is the
+      // very thing one of them asserts. Using a different brand per test is not
+      // an option: the composite foreign key requires a brand the organization
+      // actually owns, and ORG_1 owns exactly one.
       afterEach(() => resetData());
 
       /** Inserts a raw override row, returning the PostgREST error (or null). */
@@ -348,8 +357,9 @@ export default function featureFlagsTests(
         // The overridden brand is held back from an organization that is on.
         expect(resolveFlagRowForBrand(scopes, BRAND_1_ID).flag_value).to.equal(false);
         // A sibling brand with no override of its own inherits the org's value.
-        const UNOVERRIDDEN_BRAND = 'ab999999-9999-4999-b999-999999999999';
-        expect(resolveFlagRowForBrand(scopes, UNOVERRIDDEN_BRAND).flag_value).to.equal(true);
+        // Any id absent from `brandRows` demonstrates that, and this resolution is
+        // pure — the id is a Map key here, never a database lookup.
+        expect(resolveFlagRowForBrand(scopes, NON_EXISTENT_BRAND_ID).flag_value).to.equal(true);
       });
 
       it('keeps readFeatureFlag and the GET endpoint reporting the ORG value only', async () => {

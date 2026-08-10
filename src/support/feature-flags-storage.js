@@ -56,6 +56,39 @@ export function isValidFeatureFlagName(flagName) {
 const isOrgRow = (row) => (row.brand_id ?? null) === null;
 
 /**
+ * Every row of one flag for an organization — its own and each brand's override.
+ *
+ * The single place this query is built. Callers differ only in how they report a
+ * failure, so the raw `{ data, error }` is handed back rather than thrown on
+ * here: the read path names the flag in its message, the write path does not.
+ *
+ * @param {object} params
+ * @param {string} params.organizationId
+ * @param {'ASO'|'LLMO'} params.product
+ * @param {string} params.flagName
+ * @param {object} params.postgrestClient
+ * @returns {Promise<{data: object[]|null, error: {message: string}|null}>}
+ */
+async function fetchFeatureFlagRows({
+  organizationId,
+  product,
+  flagName,
+  postgrestClient,
+}) {
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required for feature flags');
+  }
+
+  // Wildcard projection is required — see `isOrgRow`.
+  return postgrestClient
+    .from('feature_flags')
+    .select('*')
+    .eq('organization_id', organizationId)
+    .eq('product', product)
+    .eq('flag_name', flagName);
+}
+
+/**
  * Reads both scopes of one flag for an organization in a single query: the
  * organization's own row, and every brand's override of it keyed by brand id.
  *
@@ -75,17 +108,12 @@ export async function readFeatureFlagScopes({
   flagName,
   postgrestClient,
 }) {
-  if (!postgrestClient?.from) {
-    throw new Error('PostgREST client is required for feature flags');
-  }
-
-  // Wildcard projection is required — see `isOrgRow`.
-  const { data, error } = await postgrestClient
-    .from('feature_flags')
-    .select('*')
-    .eq('organization_id', organizationId)
-    .eq('product', product)
-    .eq('flag_name', flagName);
+  const { data, error } = await fetchFeatureFlagRows({
+    organizationId,
+    product,
+    flagName,
+    postgrestClient,
+  });
 
   if (error) {
     throw new Error(`Failed to read feature flag ${flagName}: ${error.message}`);
@@ -156,17 +184,12 @@ export async function upsertFeatureFlag({
   updatedBy,
   postgrestClient,
 }) {
-  if (!postgrestClient?.from) {
-    throw new Error('PostgREST client is required for feature flags');
-  }
-
-  // Wildcard projection is required — see `isOrgRow`.
-  const { data: existing, error: readError } = await postgrestClient
-    .from('feature_flags')
-    .select('*')
-    .eq('organization_id', organizationId)
-    .eq('product', product)
-    .eq('flag_name', flagName);
+  const { data: existing, error: readError } = await fetchFeatureFlagRows({
+    organizationId,
+    product,
+    flagName,
+    postgrestClient,
+  });
 
   if (readError) {
     throw new Error(`Failed to upsert feature flag: ${readError.message}`);
