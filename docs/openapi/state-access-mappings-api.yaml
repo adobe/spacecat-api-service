@@ -54,7 +54,7 @@ state-access-mappings:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: []
+      - session_token: []
 
   post:
     tags:
@@ -122,7 +122,7 @@ state-access-mappings:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: []
+      - session_token: []
 
 state-access-mappings-history:
   get:
@@ -170,7 +170,7 @@ state-access-mappings-history:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: []
+      - session_token: []
 
 state-access-mapping-by-id:
   parameters:
@@ -216,7 +216,7 @@ state-access-mapping-by-id:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: []
+      - session_token: []
   delete:
     tags:
       - state-access-mappings
@@ -249,7 +249,7 @@ state-access-mapping-by-id:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: []
+      - session_token: []
 
 product-capabilities:
   get:
@@ -282,7 +282,7 @@ product-capabilities:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - ims_key: []
+      - session_token: []
 
 user-capabilities-by-resource:
   get:
@@ -326,7 +326,7 @@ user-capabilities-by-resource:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: []
+      - session_token: []
 
 permission-audit-logs:
   parameters:
@@ -412,4 +412,4 @@ permission-audit-logs:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: []
+      - session_token: []
