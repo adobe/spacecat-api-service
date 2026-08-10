@@ -22,6 +22,9 @@ import { createSerenityUserManagerApiClient } from '@adobe/spacecat-shared-user-
 import { ErrorWithStatusCode } from '../utils.js';
 import { SerenityTransportError } from './serenity-transport-error.js';
 
+// Compatibility re-export: internal callers now import SerenityTransportError directly from
+// the leaf module (`./serenity-transport-error.js`); this only exists for any external consumer
+// still importing it from here.
 export { SerenityTransportError } from './serenity-transport-error.js';
 
 // Two typed Semrush clients back this transport, each owning its own gateway
@@ -122,8 +125,11 @@ const DEFAULT_TIMEOUT_MS = 15_000;
  * @param {any} e - a caught value, arbitrary by nature (anything can be thrown).
  */
 export function redactUpstreamMessage(e) {
-  // NOTE: this mirrors errors.js `unwrapTransportCause` inline ON PURPOSE — importing it here
-  // would create an errors.js ↔ rest-transport.js cycle. Keep in sync.
+  // NOTE: this mirrors errors.js `unwrapTransportCause` inline ON PURPOSE. The two no longer
+  // form an import cycle (errors.js imports SerenityTransportError from the leaf module, not
+  // from here), but importing `unwrapTransportCause` here would pull errors.js into this file's
+  // `// @ts-check` strict closure (see tsconfig.strict.json's own note on that cost) for a
+  // one-line dedup — not worth it. Keep in sync.
   const err = e instanceof ProjectEngineApiError && e.status === undefined && e.cause != null
     ? e.cause
     : e;

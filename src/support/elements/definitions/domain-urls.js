@@ -12,8 +12,6 @@
 
 import { isAllPlatforms, resolveElementModel } from '../constants.js';
 
-/* c8 ignore start -- LLMO-6160 POC endpoint; unit tests intentionally deferred */
-
 /**
  * Builds the payload for the Stats-per-URL element (9af5ed83, `table`) scoped to a
  * single (project, date, model). Identical shape to the owned-urls stats payload
@@ -59,6 +57,8 @@ export function buildDomainUrlsPayload({
     },
   };
 }
+
+/* c8 ignore start -- LLMO-6160 POC endpoint; unit tests intentionally deferred */
 
 /**
  * Extracts the registrable-domain-agnostic host of a URL: lowercased, `www.`-stripped.

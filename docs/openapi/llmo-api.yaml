@@ -4762,7 +4762,12 @@ url-inspector-domain-urls:
       - name: platform
         in: query
         required: false
-        schema: { type: string }
+        description: |
+          AI platform/model to filter by. Defaults to `search-gpt` when omitted.
+          `all` omits the model filter entirely, returning URLs across all platforms.
+        schema:
+          type: string
+          example: 'google-ai-mode'
       - name: channel
         in: query
         required: false
