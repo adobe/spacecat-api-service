@@ -1,3 +1,31 @@
+# [1.732.0](https://github.com/adobe/spacecat-api-service/compare/v1.731.0...v1.732.0) (2026-08-08)
+
+
+### Features
+
+* **sites:** allow PRE_ONBOARD tier on GET /sites/by-tier/:tier ([#3019](https://github.com/adobe/spacecat-api-service/issues/3019)) ([330b77f](https://github.com/adobe/spacecat-api-service/commit/330b77ff356cf70ee5397e31188a7e964e768704)), closes [#3017](https://github.com/adobe/spacecat-api-service/issues/3017)
+
+# [1.731.0](https://github.com/adobe/spacecat-api-service/compare/v1.730.0...v1.731.0) (2026-08-07)
+
+
+### Features
+
+* **sites:** support field projection on GET /sites/by-tier/:tier ([#3017](https://github.com/adobe/spacecat-api-service/issues/3017)) ([e745fe4](https://github.com/adobe/spacecat-api-service/commit/e745fe4fb173c7da226b93a7b446ffd0414334ae))
+
+# [1.730.0](https://github.com/adobe/spacecat-api-service/compare/v1.729.0...v1.730.0) (2026-08-07)
+
+
+### Features
+
+* **ai-seo:** v1 for top-brands and brand competitors ([#3015](https://github.com/adobe/spacecat-api-service/issues/3015)) ([8349f2b](https://github.com/adobe/spacecat-api-service/commit/8349f2b88c33421d0f3c3259626f6f04087fae3d))
+
+# [1.729.0](https://github.com/adobe/spacecat-api-service/compare/v1.728.0...v1.729.0) (2026-08-07)
+
+
+### Features
+
+* **llmo:** prompt-suggestion-schedules provisioning endpoint + trial→paid admin reaction ([#2848](https://github.com/adobe/spacecat-api-service/issues/2848)) ([5a41ca6](https://github.com/adobe/spacecat-api-service/commit/5a41ca6c69a0c9bb64234201bd40446cfd736b0d)), closes [#2847](https://github.com/adobe/spacecat-api-service/issues/2847) [#2847](https://github.com/adobe/spacecat-api-service/issues/2847) [#2847](https://github.com/adobe/spacecat-api-service/issues/2847) [#2725](https://github.com/adobe/spacecat-api-service/issues/2725)
+
 # [1.728.0](https://github.com/adobe/spacecat-api-service/compare/v1.727.0...v1.728.0) (2026-08-07)
 
 
