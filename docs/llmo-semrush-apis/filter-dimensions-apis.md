@@ -409,7 +409,7 @@ Only `domain_type='Owned'` rows are kept (client-side — the element has no ser
 
 **`GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/domain-urls`**
 
-Phase 2 of the URL Inspector **"Cited Third Party URLs"** expandable tree: expand a cited domain (from [Cited Domains](#4-list-cited-domains)) → the URLs within it. **Drop-in compatible with the legacy `url-inspector/domain-urls` contract.** Same Semrush element as [Owned URLs](#5-list-owned-urls) (`STATS_PER_URL` 9af5ed83) **minus** the trend element and the Postgres traffic hybrid, filtered to a single domain (required `hostname`) instead of `domain_type='Owned'`.
+Phase 2 of the URL Inspector **"Cited Third Party URLs"** expandable tree: expand a cited domain (from [Cited Domains](#4-list-cited-domains)) → the URLs within it. **Drop-in compatible with the legacy `url-inspector/domain-urls` contract.** Same Semrush element as [Owned URLs](#5-list-owned-urls) (`STATS_PER_URL` 9af5ed83) **minus** the trend element and the Postgres traffic hybrid. When `hostname` is present, results are filtered to that domain after the Semrush response is fetched; when omitted, the endpoint returns all source hosts for the requested page.
 
 ### Parameters
 
@@ -417,7 +417,7 @@ Phase 2 of the URL Inspector **"Cited Third Party URLs"** expandable tree: expan
 |---|---|---|---|
 | `spaceCatId` | path | ✅ | SpaceCat organisation UUID |
 | `brandId` | path | ✅ | SpaceCat brand UUID. Selects the brand's Semrush **sub-workspace** (flat-mode falls back to the org parent). LLMO ReBAC `brand` resource (FACS `llmo/can_view`); requires `brand:read`. `404` if not in the org |
-| `hostname` / `domain` | query | ✅ | The (registered) domain to drill into, as returned by Cited Domains. `400` if missing. Matched host-or-subdomain (see below) |
+| `hostname` / `domain` | query | ❌ | Optional registered domain to drill into, as returned by Cited Domains. Matched host-or-subdomain (see below). When omitted, all source hosts are returned before pagination. |
 | `model` / `platform` | query | ❌ | AI model filter (`model` wins). Default `search-gpt` |
 | `startDate` / `start_date` | query | ✅ | `YYYY-MM-DD`. `400` if missing, malformed, or after `endDate` |
 | `endDate` / `end_date` | query | ✅ | `YYYY-MM-DD`. `400` if missing or malformed |
@@ -437,7 +437,7 @@ Scoped by top-level `project_id` + date + `CBF_model`. The endpoint fans out **p
 
 ### What it returns
 
-The element has **no server-side domain filter** (verified live: `CBF_domain`/`cbf_domain`/`CBF_source`, `eq` + `contains`, all return the full project table), so `hostname` is applied **client-side** — the same pattern Owned URLs uses for `domain_type='Owned'`. Cited Domains reports the **registered domain** (e.g. `openai.com`), but `source` hosts are often subdomains (`help.openai.com`), so a row matches when its host **equals `hostname` or is a subdomain of it** (`host === hostname || host.endsWith('.'+hostname)`, `www.`-stripped, lowercased). Exact-host matching would miss most URLs — e.g. `cambridge.org` is only ever cited via `dictionary.cambridge.org`. An optional `channel` (content-type) filter is then applied client-side on `contentType`. URLs are sorted by `citations` **descending** and sliced client-side; `totalCount` is the full post-filter count. Field mapping:
+The element has **no server-side domain filter** (verified live: `CBF_domain`/`cbf_domain`/`CBF_source`, `eq` + `contains`, all return the full project table), so `hostname` is applied **client-side** — the same pattern Owned URLs uses for `domain_type='Owned'`. Cited Domains reports the **registered domain** (e.g. `openai.com`), but `source` hosts are often subdomains (`help.openai.com`), so a row matches when its host **equals `hostname` or is a subdomain of it** (`host === hostname || host.endsWith('.'+hostname)`, `www.`-stripped, lowercased). Exact-host matching would miss most URLs — e.g. `cambridge.org` is only ever cited via `dictionary.cambridge.org`. When `hostname` is omitted, all source hosts are retained before applying `channel`, sorting, and pagination. An optional `channel` (content-type) filter is then applied client-side on `contentType`. URLs are sorted by `citations` **descending** and sliced client-side; `totalCount` is the full post-filter count. Field mapping:
 
 - **`url`** ← `source`; **`citations`** ← `citations`; **`promptsCited`** ← `prompts_with_citation`
 - **`contentType`** ← `domain_type`

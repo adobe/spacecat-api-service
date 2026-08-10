@@ -4794,7 +4794,9 @@ url-inspector-domain-urls:
     description: |
       Returns paginated URLs within a specific domain. Used as a Phase 2 drilldown
       from the cited-domains view. The underlying RPC does not accept brand, category,
-      or region filters — domain-level drilldown is already scoped by hostname.
+      or region filters — domain-level drilldown is already scoped by hostname when
+      provided. `hostname` is optional: when omitted, URLs across all source hosts
+      for the requested page are returned instead of a single-domain drilldown.
     operationId: getUrlInspectorDomainUrls
     parameters:
       - name: siteId
@@ -4803,8 +4805,8 @@ url-inspector-domain-urls:
         schema: { type: string, format: uuid }
       - name: hostname
         in: query
-        required: true
-        description: Domain hostname to drill into
+        required: false
+        description: Domain hostname to drill into. When omitted, URLs across all source hosts are returned.
         schema:
           type: string
           example: 'competitor.com'

@@ -220,6 +220,7 @@ describe('ElementsController', () => {
       getWeeks: sinon.stub().resolves(WEEKS_RESULT),
       getBrandPresenceStats: sinon.stub().resolves(STATS_RESULT),
       getUrlInspectorStats: sinon.stub().resolves(URL_INSPECTOR_STATS_RESULT),
+      getDomainUrls: sinon.stub().resolves({ urls: [], totalCount: 0 }),
       getOwnedUrlProjects: sinon.stub().resolves([{ region: 'US', projectId: 'proj-1' }]),
     };
     createElementsServiceStub = sinon.stub().returns(serviceStub);
@@ -1670,6 +1671,47 @@ describe('ElementsController', () => {
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.getUrlInspectorStats(ctx);
       expect(res.status).to.equal(502);
+    });
+  });
+
+  describe('listDomainUrls', () => {
+    const domainUrlsUrl = (qs = '') => `https://api.example.com/v2/orgs/${ORG_ID}`
+      + `/brands/${BRAND_ID}/serenity/brand-presence/url-inspector/domain-urls${qs}`;
+
+    it('allows hostname to be omitted', async () => {
+      const ctx = fakeContext({
+        url: domainUrlsUrl('?startDate=2026-07-01&endDate=2026-07-14'),
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listDomainUrls(ctx);
+
+      expect(res.status).to.equal(200);
+      const [, params] = serviceStub.getDomainUrls.firstCall.args;
+      expect(params.hostname).to.be.undefined;
+    });
+
+    it('keeps a single domain query param as a string', async () => {
+      const ctx = fakeContext({
+        url: domainUrlsUrl('?startDate=2026-07-01&endDate=2026-07-14&domain=reddit.com'),
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listDomainUrls(ctx);
+
+      expect(res.status).to.equal(200);
+      const [, params] = serviceStub.getDomainUrls.firstCall.args;
+      expect(params.hostname).to.equal('reddit.com');
+    });
+
+    it('collapses a whitespace-only hostname to undefined (no filter)', async () => {
+      const ctx = fakeContext({
+        url: domainUrlsUrl('?startDate=2026-07-01&endDate=2026-07-14&hostname=%20%20'),
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listDomainUrls(ctx);
+
+      expect(res.status).to.equal(200);
+      const [, params] = serviceStub.getDomainUrls.firstCall.args;
+      expect(params.hostname).to.be.undefined;
     });
   });
 
