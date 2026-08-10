@@ -1124,10 +1124,14 @@ function BrandsController(ctx, log, env) {
 
       const { postgrestClient } = context.dataAccess.services;
       const rows = await listBrands(spaceCatId, postgrestClient, { status });
-      // One flag read for the whole page — a mid-migration organization returns
-      // both answers in one list, so consumers must read it per brand.
-      const serenityScopes = await readSerenityFlagScopes(spaceCatId, postgrestClient);
-      const brands = rows.map((brand) => withSerenityState(brand, serenityScopes));
+      let brands = rows;
+      if (rows.length > 0) {
+        // One flag read for the whole page — a mid-migration organization returns
+        // both answers in one list, so consumers must read it per brand. Skipped
+        // when the organization has no brands to describe.
+        const serenityScopes = await readSerenityFlagScopes(spaceCatId, postgrestClient);
+        brands = rows.map((brand) => withSerenityState(brand, serenityScopes));
+      }
 
       // ReBAC collection filter. When facsWrapper marks this session as
       // FACS-enrolled and resource-scoped (no org-wide can_view — see

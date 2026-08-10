@@ -9490,6 +9490,7 @@ describe('Brands Controller — region removal consistency guard (LLMO-5645)', (
   async function mountController({ blocking = {}, oldRegion = ['US', 'DE'], updateBrand } = {}) {
     const findStub = stub().resolves(blocking);
     const updateStub = updateBrand || stub().resolves({ id: BRAND_UUID, region: ['US'] });
+    const scopesStub = stub().resolves({ orgRow: null, brandRows: new Map() });
     const Mocked = await esmock('../../src/controllers/brands.js', {
       '../../src/support/prompts-storage.js': {
         resolveBrandUuid: stub().resolves(BRAND_UUID),
@@ -9501,7 +9502,7 @@ describe('Brands Controller — region removal consistency guard (LLMO-5645)', (
         // The handler resolves the serenity rollout rows for the response payload.
         // Irrelevant to the region guard, but the real one would query the stub
         // client here.
-        readSerenityFlagScopes: stub().resolves({ orgRow: null, brandRows: new Map() }),
+        readSerenityFlagScopes: scopesStub,
       },
       '../../src/support/access-control-util.js': {
         default: {
@@ -9509,8 +9510,30 @@ describe('Brands Controller — region removal consistency guard (LLMO-5645)', (
         },
       },
     });
-    return { Mocked, findStub, updateStub };
+    return {
+      Mocked, findStub, updateStub, scopesStub,
+    };
   }
+
+  it('reads the serenity rollout rows BEFORE the write, so a flag-read fault cannot 500 a committed edit', async () => {
+    // Load-bearing ordering. updateBrand commits the row and its child syncs, and
+    // the Semrush re-sync that follows deliberately absorbs its own failures so a
+    // persisted edit is never reported as a 500. Resolving these rows afterwards
+    // would reintroduce exactly that: a throw between the commit and the response,
+    // which also skips the re-sync.
+    const { Mocked, updateStub, scopesStub } = await mountController({ blocking: {} });
+    const ctx = buildContext();
+    const controller = Mocked(ctx, loggerStub, mockEnv);
+
+    const response = await controller.updateBrandForOrg({
+      ...ctx,
+      params: { spaceCatId: ORG_ID, brandId: BRAND_UUID },
+      data: { region: ['US'] },
+    });
+
+    expect(response.status).to.equal(200);
+    expect(scopesStub.calledBefore(updateStub)).to.be.true;
+  });
 
   it('allows the region change and updates the brand when no prompt blocks removal', async () => {
     const { Mocked, findStub, updateStub } = await mountController({ blocking: {} });
