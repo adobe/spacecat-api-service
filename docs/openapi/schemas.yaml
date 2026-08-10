@@ -4728,6 +4728,71 @@ LlmoQuestion:
       example: ['product', 'pricing', 'features']
   additionalProperties: true
 
+PromptSuggestionScheduleResult:
+  type: object
+  description: Outcome of provisioning a single prompt-suggestion pipeline for a site.
+  properties:
+    providerId:
+      type: string
+      description: The DRS provider id of the prompt-suggestion pipeline.
+      example: 'prompt_generation_semrush'
+    status:
+      type: string
+      enum: ['created', 'already-existed', 'submitted', 'failed']
+      description: >-
+        Per-pipeline outcome. `created` — a new recurring schedule was registered;
+        `already-existed` — an idempotent no-op (treated as success); `submitted` —
+        a one-shot run was submitted (trial path); `failed` — provisioning failed
+        (see `error`).
+      example: 'created'
+    error:
+      type: string
+      description: Failure message, present only when `status` is `failed`.
+      example: 'DRS POST /schedules failed: 500'
+  required:
+    - providerId
+    - status
+
+PromptSuggestionSchedulesResult:
+  type: object
+  description: >-
+    Result of (re)provisioning a site's recurring prompt-suggestion schedules.
+    When the site is not on the paying tier, `skipped` is true and no schedules
+    are created.
+  properties:
+    siteId:
+      type: string
+      format: uuid
+      description: The site the schedules were provisioned for.
+      example: '48656b02-62cb-46c0-b3fe-4a1a0f0c3b2f'
+    isPaying:
+      type: boolean
+      description: Whether the site is currently on the paying LLMO tier (re-derived server-side).
+      example: true
+    skipped:
+      type: boolean
+      description: True when no work was done because the site is not on the paying tier.
+      example: false
+    reason:
+      type: string
+      description: Why provisioning was skipped, present only when `skipped` is true.
+      example: 'not-paying'
+    allSucceeded:
+      type: boolean
+      description: True iff every pipeline succeeded (already-existing schedules count as success).
+      example: true
+    results:
+      type: array
+      description: Per-pipeline provisioning outcomes (empty when skipped).
+      items:
+        $ref: '#/PromptSuggestionScheduleResult'
+  required:
+    - siteId
+    - isPaying
+    - skipped
+    - allSucceeded
+    - results
+
 LlmoQuestions:
   type: object
   description: LLMO questions configuration containing both human and AI questions
@@ -10110,6 +10175,52 @@ AiVisibilitySemrushBrand:
       type: string
     name:
       type: string
+  additionalProperties: true
+
+AiVisibilityV1BrandCompetitorsResponse:
+  type: object
+  description: |
+    Native Semrush v2 `BrandCompetitorsResponse` protobuf JSON from
+    `GET /llmo/ai-visibility/v1/brand/competitors`, plus `srFilters` from the API layer.
+  properties:
+    competitors:
+      type: array
+      items:
+        $ref: '#/AiVisibilitySemrushBrand'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [competitors]
+  additionalProperties: true
+
+AiVisibilityV1BrandTopBrand:
+  type: object
+  description: Native Semrush v2 `TopBrandsByDomainResponse.BrandEntry` protobuf JSON.
+  properties:
+    brandName:
+      type: string
+    count:
+      description: Number of mentions (`uint64`, serialized as a JSON string)
+      oneOf:
+        - type: string
+        - type: integer
+  required: [brandName, count]
+  additionalProperties: true
+
+AiVisibilityV1BrandTopBrandsResponse:
+  type: object
+  description: |
+    Native Semrush v2 `TopBrandsByDomainResponse` protobuf JSON from
+    `GET /llmo/ai-visibility/v1/brand/top-brands`, plus `srFilters` from the API layer.
+  properties:
+    date:
+      $ref: '#/AiVisibilitySemrushDate'
+    brands:
+      type: array
+      items:
+        $ref: '#/AiVisibilityV1BrandTopBrand'
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  required: [brands]
   additionalProperties: true
 
 AiVisibilitySemrushSource:

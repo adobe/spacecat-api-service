@@ -7997,7 +7997,22 @@ describe('Brands Controller', () => {
         listJobs: sinon.stub().resolves([]),
         submitPromptGenerationJob: sinon.stub().resolves({ job_id: 'pg-1' }),
         createBrandPresenceSchedule: sinon.stub().resolves({ scheduleId: 'sch-1' }),
+        submitJob: sinon.stub().resolves({ job_id: 'ps-1' }),
+        createSchedule: sinon.stub().resolves({ scheduleId: 'ps-sch-1' }),
       },
+      // Recurring prompt-suggestion provisioning (the shared module) is stubbed at
+      // its boundary so activation tests exercise the wiring, not the real
+      // TierClient/DRS tier logic (covered by the support module's own tests).
+      isPayingLlmoSiteStub = sinon.stub().resolves(false),
+      // Default: empty results (as if DRS returned nothing) so existing exact-body
+      // assertions are unaffected; wiring tests override this to assert the call.
+      ensurePromptSuggestionSchedulesStub = sinon.stub().resolves({
+        results: [],
+        allSucceeded: true,
+      }),
+      // Default: returns null (as if the brand-profile agent isn't configured / autorun off),
+      // so existing exact-body assertions are unaffected; wiring tests override this.
+      triggerBrandProfileAgentStub = sinon.stub().resolves(null),
     } = {}) {
       const getBrandByIdStub = typeof getBrandByIdResult === 'function'
         ? getBrandByIdResult
@@ -8051,6 +8066,13 @@ describe('Brands Controller', () => {
         '../../src/controllers/llmo/llmo-onboarding.js': {
           postLlmoAlert: postLlmoAlertStub,
         },
+        '../../src/support/prompt-suggestion-schedules.js': {
+          isPayingLlmoSite: isPayingLlmoSiteStub,
+          ensurePromptSuggestionSchedules: ensurePromptSuggestionSchedulesStub,
+        },
+        '../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: triggerBrandProfileAgentStub,
+        },
       });
 
       return {
@@ -8061,6 +8083,9 @@ describe('Brands Controller', () => {
         resolveBrandUuidStub,
         postLlmoAlertStub,
         fakeDrsClient,
+        isPayingLlmoSiteStub,
+        ensurePromptSuggestionSchedulesStub,
+        triggerBrandProfileAgentStub,
       };
     }
 
@@ -8880,6 +8905,136 @@ describe('Brands Controller', () => {
 
       const response = await controller.activateBrandForOrg(buildActivateRequest());
       expect(response.status).to.equal(409);
+    });
+
+    // -------------------------------------------------------------------------
+    // Recurring prompt-suggestion provisioning (Path C wiring) — the gap that
+    // left brands added to an existing org via activate with no auto-generated
+    // prompt strategies. Mirrors onboarding's activateBrandAndGeneratePrompts.
+    // -------------------------------------------------------------------------
+
+    it('provisions recurring prompt-suggestion pipelines on activation', async () => {
+      const {
+        controller, ensurePromptSuggestionSchedulesStub, isPayingLlmoSiteStub,
+      } = await buildActivateController({
+        ensurePromptSuggestionSchedulesStub: sinon.stub().resolves({
+          results: [
+            { providerId: 'prompt_generation_semrush', status: 'submitted' },
+            { providerId: 'prompt_generation_agentic_traffic', status: 'submitted' },
+            { providerId: 'prompt_generation_synthetic_personas', status: 'submitted' },
+          ],
+          allSucceeded: true,
+        }),
+      });
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: true }),
+      );
+
+      expect(response.status).to.equal(200);
+      expect(isPayingLlmoSiteStub).to.have.been.calledOnce;
+      expect(ensurePromptSuggestionSchedulesStub).to.have.been.calledOnce;
+      const args = ensurePromptSuggestionSchedulesStub.firstCall.args[0];
+      expect(args.siteId).to.equal(SITE_ID);
+      expect(args.isPaying).to.equal(false);
+      expect(args.drsClient).to.exist;
+      const body = await response.json();
+      expect(body.promptSuggestionSchedules).to.have.lengthOf(3);
+    });
+
+    it('provisions prompt-suggestion pipelines even when generatePrompts is false', async () => {
+      // Unconditional: every active brand is monitored, unlike the one-shot
+      // base_url job which is generatePrompts-gated.
+      const { controller, ensurePromptSuggestionSchedulesStub } = await buildActivateController();
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: false }),
+      );
+
+      expect(response.status).to.equal(200);
+      expect(ensurePromptSuggestionSchedulesStub).to.have.been.calledOnce;
+    });
+
+    it('passes isPaying=true through for a paying site (recurring schedules)', async () => {
+      const { controller, ensurePromptSuggestionSchedulesStub } = await buildActivateController({
+        isPayingLlmoSiteStub: sinon.stub().resolves(true),
+      });
+
+      await controller.activateBrandForOrg(buildActivateRequest({ generatePrompts: true }));
+
+      expect(ensurePromptSuggestionSchedulesStub.firstCall.args[0].isPaying).to.equal(true);
+    });
+
+    it('keeps the activation a 200 when prompt-suggestion provisioning reports failures', async () => {
+      const { controller } = await buildActivateController({
+        ensurePromptSuggestionSchedulesStub: sinon.stub().resolves({
+          results: [{ providerId: 'prompt_generation_semrush', status: 'failed', error: 'boom' }],
+          allSucceeded: false,
+        }),
+      });
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: true }),
+      );
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.status).to.equal('active');
+    });
+
+    // -------------------------------------------------------------------------
+    // Brand-profile agent ("Brandaid") trigger — closes the gap where a brand
+    // added via activate had no brand profile, hard-failing Semrush/Synthetic
+    // prompt-gen. (#3014)
+    // -------------------------------------------------------------------------
+
+    it('triggers the brand-profile agent on activation', async () => {
+      const { controller, triggerBrandProfileAgentStub } = await buildActivateController({
+        triggerBrandProfileAgentStub: sinon.stub().resolves('brand-profile-site-123-brand-activation-abc'),
+      });
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: true }),
+      );
+
+      expect(response.status).to.equal(200);
+      expect(triggerBrandProfileAgentStub).to.have.been.calledOnce;
+      const args = triggerBrandProfileAgentStub.firstCall.args[0];
+      expect(args.site).to.exist;
+      expect(args.reason).to.equal('brand-activation');
+      const body = await response.json();
+      expect(body.brandProfileExecutionName).to.equal('brand-profile-site-123-brand-activation-abc');
+    });
+
+    it('triggers brand-profile even when generatePrompts is false', async () => {
+      const { controller, triggerBrandProfileAgentStub } = await buildActivateController({
+        triggerBrandProfileAgentStub: sinon.stub().resolves('exec-1'),
+      });
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: false }),
+      );
+
+      expect(response.status).to.equal(200);
+      expect(triggerBrandProfileAgentStub).to.have.been.calledOnce;
+    });
+
+    it('keeps activation a 200 (and still provisions schedules) when the brand-profile trigger throws', async () => {
+      const ensureStub = sinon.stub().resolves({ results: [], allSucceeded: true });
+      const { controller } = await buildActivateController({
+        triggerBrandProfileAgentStub: sinon.stub().rejects(new Error('sfn boom')),
+        ensurePromptSuggestionSchedulesStub: ensureStub,
+      });
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: true }),
+      );
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.status).to.equal('active');
+      // Its own try/catch means the throw doesn't skip prompt-suggestion provisioning.
+      expect(ensureStub).to.have.been.calledOnce;
     });
   });
 
