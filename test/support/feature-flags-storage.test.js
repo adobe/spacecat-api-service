@@ -19,6 +19,8 @@ import {
   listFeatureFlagsByOrgAndProduct,
   normalizeFeatureFlagProduct,
   readFeatureFlag,
+  readFeatureFlagScopes,
+  resolveFlagRowForBrand,
   upsertFeatureFlag,
 } from '../../src/support/feature-flags-storage.js';
 
@@ -434,6 +436,132 @@ describe('feature-flags-storage', () => {
           postgrestClient: { from: fromStub },
         }),
       ).to.be.rejectedWith('Failed to list feature flags');
+    });
+  });
+
+  describe('readFeatureFlagScopes', () => {
+    it('splits the rows into the org row and a brand-keyed override map', async () => {
+      const orgRow = { id: 'r1', flag_value: true, brand_id: null };
+      const brandRow = { id: 'r2', flag_value: false, brand_id: BRAND };
+      const chain = makeSelectChain({ data: [orgRow, brandRow], error: null });
+      const fromStub = sandbox.stub().returns({ select: chain.select });
+
+      const scopes = await readFeatureFlagScopes({
+        organizationId: ORG,
+        product: 'LLMO',
+        flagName: 'serenity',
+        postgrestClient: { from: fromStub },
+      });
+
+      expect(scopes.orgRow).to.deep.equal(orgRow);
+      expect(scopes.brandRows.get(BRAND)).to.deep.equal(brandRow);
+      expect(scopes.brandRows.size).to.equal(1);
+      expect(fromStub).to.have.been.calledOnceWith('feature_flags');
+      // Wildcard projection: naming brand_id fails before the migration adds it.
+      expect(chain.select).to.have.been.calledOnceWith('*');
+    });
+
+    it('treats rows with no brand_id key at all as the org row (pre-migration schema)', async () => {
+      // Before the brand-scope migration the column does not exist, so PostgREST
+      // returns rows without the key. There is exactly one row, and it is the org's.
+      const chain = makeSelectChain({ data: [{ id: 'r1', flag_value: true }], error: null });
+      const scopes = await readFeatureFlagScopes({
+        organizationId: ORG,
+        product: 'LLMO',
+        flagName: 'serenity',
+        postgrestClient: { from: sandbox.stub().returns({ select: chain.select }) },
+      });
+      expect(scopes.orgRow.flag_value).to.equal(true);
+      expect(scopes.brandRows.size).to.equal(0);
+    });
+
+    it('returns an empty result when the flag is unset for the org', async () => {
+      const chain = makeSelectChain({ data: [], error: null });
+      const scopes = await readFeatureFlagScopes({
+        organizationId: ORG,
+        product: 'LLMO',
+        flagName: 'serenity',
+        postgrestClient: { from: sandbox.stub().returns({ select: chain.select }) },
+      });
+      expect(scopes.orgRow).to.be.null;
+      expect(scopes.brandRows.size).to.equal(0);
+    });
+
+    it('tolerates a null data payload', async () => {
+      const chain = makeSelectChain({ data: null, error: null });
+      const scopes = await readFeatureFlagScopes({
+        organizationId: ORG,
+        product: 'LLMO',
+        flagName: 'serenity',
+        postgrestClient: { from: sandbox.stub().returns({ select: chain.select }) },
+      });
+      expect(scopes.orgRow).to.be.null;
+      expect(scopes.brandRows.size).to.equal(0);
+    });
+
+    it('keeps a brand override for a DIFFERENT brand out of the org row', async () => {
+      const other = '323e4567-e89b-42d3-a456-426614174002';
+      const chain = makeSelectChain({
+        data: [{ flag_value: true, brand_id: other }],
+        error: null,
+      });
+      const scopes = await readFeatureFlagScopes({
+        organizationId: ORG,
+        product: 'LLMO',
+        flagName: 'serenity',
+        postgrestClient: { from: sandbox.stub().returns({ select: chain.select }) },
+      });
+      expect(scopes.orgRow).to.be.null;
+      expect(scopes.brandRows.get(other).flag_value).to.equal(true);
+    });
+
+    it('throws without a postgrest client', async () => {
+      await expect(readFeatureFlagScopes({
+        organizationId: ORG,
+        product: 'LLMO',
+        flagName: 'serenity',
+        postgrestClient: null,
+      })).to.be.rejectedWith('PostgREST client is required for feature flags');
+    });
+
+    it('throws on postgrest error, naming the flag', async () => {
+      const chain = makeSelectChain({ data: null, error: { message: 'boom' } });
+      await expect(readFeatureFlagScopes({
+        organizationId: ORG,
+        product: 'LLMO',
+        flagName: 'serenity',
+        postgrestClient: { from: sandbox.stub().returns({ select: chain.select }) },
+      })).to.be.rejectedWith('Failed to read feature flag serenity: boom');
+    });
+  });
+
+  describe('resolveFlagRowForBrand', () => {
+    const orgRow = { id: 'org', flag_value: true, brand_id: null };
+    const brandRow = { id: 'brand', flag_value: false, brand_id: BRAND };
+
+    it('prefers the brand override over the org row', () => {
+      const scopes = { orgRow, brandRows: new Map([[BRAND, brandRow]]) };
+      expect(resolveFlagRowForBrand(scopes, BRAND)).to.equal(brandRow);
+    });
+
+    it('falls back to the org row for a brand with no override', () => {
+      const scopes = { orgRow, brandRows: new Map([[BRAND, brandRow]]) };
+      expect(resolveFlagRowForBrand(scopes, 'some-other-brand')).to.equal(orgRow);
+    });
+
+    it('resolves the brand override even when the org has no row — the wave case', () => {
+      const on = { id: 'brand', flag_value: true, brand_id: BRAND };
+      const scopes = { orgRow: null, brandRows: new Map([[BRAND, on]]) };
+      expect(resolveFlagRowForBrand(scopes, BRAND)).to.equal(on);
+    });
+
+    it('returns null when neither scope has a row', () => {
+      expect(resolveFlagRowForBrand({ orgRow: null, brandRows: new Map() }, BRAND)).to.be.null;
+    });
+
+    it('falls back to the org row when no brand id is given', () => {
+      const scopes = { orgRow, brandRows: new Map([[BRAND, brandRow]]) };
+      expect(resolveFlagRowForBrand(scopes, undefined)).to.equal(orgRow);
     });
   });
 });
