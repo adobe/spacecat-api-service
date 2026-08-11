@@ -1,3 +1,15 @@
+# [1.737.0](https://github.com/adobe/spacecat-api-service/compare/v1.736.0...v1.737.0) (2026-08-11)
+
+
+### Bug Fixes
+
+* add on-demand opportunity validation API ([#2982](https://github.com/adobe/spacecat-api-service/issues/2982)) ([e7c916e](https://github.com/adobe/spacecat-api-service/commit/e7c916e70462ac17b4571ae5c5d3e8f1e2a5e308))
+
+
+### Features
+
+* **llmo-6818:** Add option all to platform param ([#3010](https://github.com/adobe/spacecat-api-service/issues/3010)) ([d32d126](https://github.com/adobe/spacecat-api-service/commit/d32d126b01904fc126cc661df1fe9e3c45dd0cd1))
+
 # [1.736.0](https://github.com/adobe/spacecat-api-service/compare/v1.735.0...v1.736.0) (2026-08-11)
 
 
