@@ -36,7 +36,11 @@ describe('visibility-filters', () => {
         .filter((code) => /^[A-Z]{2}$/.test(code))
         .sort((a, b) => a.localeCompare(b));
       expect(SR_AI_SEO_SUPPORTED_MARKET_CODES).to.deep.equal(countryEnumCodes);
-      expect(SR_AI_SEO_SUPPORTED_MARKET_CODES).to.include.members(['NZ', 'AF']);
+      expect(SR_AI_SEO_SUPPORTED_MARKET_CODES).to.include.members([
+        'US', 'UK', 'DE', 'FR', 'JP',
+        'HK', 'ID', 'KR', 'MY', 'PH', 'SG', 'TH', 'TR', 'TW', 'VN',
+        'NZ', 'AF',
+      ]);
     });
   });
 
