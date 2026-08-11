@@ -26,7 +26,7 @@ entitlements-by-organization:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 ensure-entitlement-for-site:
   parameters:
@@ -72,4 +72,4 @@ ensure-entitlement-for-site:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]

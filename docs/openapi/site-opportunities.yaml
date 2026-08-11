@@ -28,7 +28,7 @@ site-opportunities:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
   post:
     operationId: createSiteOpportunity
     summary: |
@@ -64,7 +64,7 @@ site-opportunities:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunities-by-status:
   parameters:
@@ -103,7 +103,7 @@ site-opportunities-by-status:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity:
   parameters:
@@ -137,7 +137,7 @@ site-opportunity:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
   patch:
     operationId: updateSiteOpportunity
@@ -174,7 +174,7 @@ site-opportunity:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
   delete:
     operationId: deleteSiteOpportunity
@@ -196,7 +196,7 @@ site-opportunity:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-suggestions:
   parameters:
@@ -246,7 +246,7 @@ site-opportunity-suggestions:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
   post:
     operationId: createSiteOpportunitySuggestions
@@ -276,7 +276,7 @@ site-opportunity-suggestions:
               broken-backlinks-suggestion-create-list-response:
                 $ref: './examples.yaml#/broken-backlinks-suggestion-create-list-response'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-suggestions-by-status:
   parameters:
@@ -319,7 +319,7 @@ site-opportunity-suggestions-by-status:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-suggestions-paged:
   parameters:
@@ -360,7 +360,7 @@ site-opportunity-suggestions-paged:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-suggestions-paged-with-cursor:
   parameters:
@@ -402,7 +402,7 @@ site-opportunity-suggestions-paged-with-cursor:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-suggestions-by-status-paged:
   parameters:
@@ -447,7 +447,7 @@ site-opportunity-suggestions-by-status-paged:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-suggestions-by-status-paged-with-cursor:
   parameters:
@@ -493,7 +493,7 @@ site-opportunity-suggestions-by-status-paged-with-cursor:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-suggestions-status:
   parameters:
@@ -535,7 +535,7 @@ site-opportunity-suggestions-status:
               broken-backlinks-suggestions-status-update-response:
                 $ref: './examples.yaml#/broken-backlinks-suggestions-status-update-response'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-suggestions-edge-deploy:
   parameters:
@@ -702,7 +702,7 @@ site-opportunity-suggestions-edge-deploy:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-geo-experiments:
   parameters:
@@ -734,7 +734,7 @@ site-geo-experiments:
       '404':
         $ref: './responses.yaml#/404'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-geo-experiment:
   parameters:
@@ -815,7 +815,7 @@ site-geo-experiment:
       '404':
         $ref: './responses.yaml#/404'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-geo-experiment-trigger-impact-measurement:
   parameters:
@@ -1179,7 +1179,7 @@ site-opportunity-suggestions-auto-fix:
               broken-backlinks-suggestions-status-update-response:
                 $ref: './examples.yaml#/broken-backlinks-suggestions-status-update-response'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-suggestion:
   parameters:
@@ -1217,7 +1217,7 @@ site-opportunity-suggestion:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
   patch:
     operationId: updateSiteOpportunitySuggestion
     summary: |
@@ -1256,7 +1256,7 @@ site-opportunity-suggestion:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
   delete:
     operationId: deleteSiteOpportunitySuggestion
@@ -1278,7 +1278,7 @@ site-opportunity-suggestion:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-suggestion-backoffice-reviews:
   parameters:
@@ -1378,7 +1378,7 @@ site-opportunity-suggestion-backoffice-reviews:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-suggestions-edge-live-preview:
   parameters:
@@ -1455,7 +1455,7 @@ site-opportunity-suggestions-edge-live-preview:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-suggestion-fixes:
   parameters:
@@ -1486,7 +1486,7 @@ site-opportunity-suggestion-fixes:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-fixes:
   parameters:
@@ -1543,7 +1543,7 @@ site-fixes:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-fixes:
   parameters:
@@ -1576,7 +1576,7 @@ site-opportunity-fixes:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
   post:
     operationId: createSiteOpportunityFixes
     summary: |
@@ -1609,7 +1609,7 @@ site-opportunity-fixes:
               fix-create-list-response:
                 $ref: './examples.yaml#/fix-create-list-response'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-fixes-by-status:
   parameters:
@@ -1646,7 +1646,7 @@ site-opportunity-fixes-by-status:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-fix:
   parameters:
@@ -1677,7 +1677,7 @@ site-opportunity-fix:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
   patch:
     operationId: updateSiteOpportunityFix
     summary: |
@@ -1714,7 +1714,7 @@ site-opportunity-fix:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
   delete:
     operationId: deleteSiteOpportunityFix
     summary: |
@@ -1735,7 +1735,7 @@ site-opportunity-fix:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 
 site-opportunity-fix-suggestions:
@@ -1770,7 +1770,7 @@ site-opportunity-fix-suggestions:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-fix-rollback:
   parameters:
@@ -1814,7 +1814,7 @@ site-opportunity-fix-rollback:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-status:
   parameters:
@@ -1842,4 +1842,4 @@ site-opportunity-status:
             schema:
               $ref: './schemas.yaml#/FixStatusUpdateListResponse'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]

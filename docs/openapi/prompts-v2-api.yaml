@@ -117,7 +117,7 @@ v2-prompts-by-brand:
       Upsert uniqueness: match by id or by (text, regions).
     operationId: listPromptsByBrand
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - api_key: [ ]
     responses:
       '200':
@@ -145,7 +145,7 @@ v2-prompts-by-brand:
       (counted as skipped, not returned in the response).
     operationId: createPromptsByBrand
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - api_key: [ ]
     requestBody:
       required: true
@@ -240,7 +240,7 @@ v2-prompts-by-brand-and-id:
     summary: Get a single prompt
     operationId: getPromptByBrandAndId
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - api_key: [ ]
     responses:
       '200':
@@ -266,7 +266,7 @@ v2-prompts-by-brand-and-id:
       leaving the stored value untouched.
     operationId: updatePromptByBrandAndId
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - api_key: [ ]
     requestBody:
       content:
@@ -293,7 +293,7 @@ v2-prompts-by-brand-and-id:
     description: Sets status to 'deleted'.
     operationId: deletePromptByBrandAndId
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - api_key: [ ]
     responses:
       '204':
@@ -330,7 +330,7 @@ v2-prompts-by-brand-bulk-delete:
       See ADR-001 for details.
     operationId: bulkDeletePromptsByBrand
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - api_key: [ ]
     requestBody:
       required: true
@@ -381,7 +381,7 @@ v2-prompts-by-brand-check:
       Region values are normalized to lowercase 2-char codes before comparison.
     operationId: checkPromptsByBrand
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - api_key: [ ]
     requestBody:
       required: true

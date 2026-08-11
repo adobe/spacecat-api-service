@@ -13,6 +13,11 @@
 import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
 
 import { SERENITY_BRAND_SITE_TYPE } from './serenity/site-linkage.js';
+import { readFeatureFlagScopes, resolveFlagRowForBrand } from './feature-flags-storage.js';
+import {
+  SERENITY_FEATURE_FLAG_NAME,
+  SERENITY_FEATURE_FLAG_PRODUCT,
+} from './serenity/serenity-active.js';
 
 /**
  * PostgREST select string — joins all normalized child tables.
@@ -145,6 +150,79 @@ function parseUrlParts(urlString) {
 }
 
 /**
+ * Reads the organization's `LLMO/serenity` rows — its own and every brand's
+ * override — in one query, for {@link withSerenityState}.
+ *
+ * One query serves a whole response: a 16-brand list resolves from a single read,
+ * not sixteen. Read fresh rather than through `serenity-active.js`'s cache: that
+ * cache exists to keep request-time gates off the DB, whereas this value is
+ * payload the UI renders, and a brand shown as active seconds after its wave
+ * released it is worth one indexed read.
+ *
+ * Consequence, accepted deliberately: for up to one cache TTL after a flip this
+ * payload and the request-time gates can disagree, in whichever direction the flip
+ * went. A brand released mid-TTL reports `serenityActive: true` while a gate on a
+ * not-yet-expired entry still refuses it; a brand rolled back reports `false` while
+ * a gate still admits it. The window is bounded by `BRAND_CACHE_TTL_MS`, the gates
+ * are the authority and fail closed, and no write is half-applied by it, so the
+ * alternative (routing this read through the gate cache, which is keyed on a
+ * request context rather than a PostgREST client) is not worth the coupling.
+ *
+ * A failure propagates: the rows live in the same database as the brand read that
+ * just succeeded, so an error here is a real fault, not a reason to report every
+ * brand as inactive. On a write path, resolve BEFORE the write, so that fault
+ * cannot turn an edit that already committed into a 500.
+ *
+ * @param {string} organizationId - SpaceCat organization UUID.
+ * @param {object} postgrestClient - PostgREST client.
+ * @returns {Promise<{orgRow: object|null, brandRows: Map<string, object>}>}
+ */
+export async function readSerenityFlagScopes(organizationId, postgrestClient) {
+  return readFeatureFlagScopes({
+    organizationId,
+    product: SERENITY_FEATURE_FLAG_PRODUCT,
+    flagName: SERENITY_FEATURE_FLAG_NAME,
+    postgrestClient,
+  });
+}
+
+/**
+ * Adds the derived per-brand serenity fields to a brand payload: whether the
+ * Semrush-backed experience is live for THIS brand, and when it went live.
+ *
+ * Resolved from the brand's own override row falling back to the organization's,
+ * so no consumer re-implements the resolution rule — project-elmo-ui reads
+ * `serenityActive` to decide whether a brand is on the Semrush read path and
+ * whether its classic-UI editors are locked, and an organization mid-migration
+ * has both answers among its brands.
+ *
+ * Applied by the handlers that return a brand payload rather than inside the
+ * readers, so that the internal reads which never surface these fields — the
+ * brand-claims Slack commands, the elements authorizers, site attach, the
+ * opportunities controller, and the edit handler's own pre-write guards — neither
+ * pay for the flag query nor inherit its failure mode.
+ *
+ * @param {object} brand - Brand in V2 config shape, from {@link mapDbBrandToV2}.
+ * @param {{orgRow: object|null, brandRows: Map<string, object>}} scopes - From
+ *   {@link readSerenityFlagScopes}.
+ * @returns {object} The brand, with the two derived fields set.
+ */
+export function withSerenityState(brand, scopes) {
+  const row = resolveFlagRowForBrand(scopes, brand.id);
+  const serenityActive = row?.flag_value === true;
+  return {
+    ...brand,
+    // Independent of `semrushSubWorkspaceId`, which is set when the brand is
+    // provisioned — a brand can be bound for waves before it is released.
+    serenityActive,
+    // The resolved row's `updated_at`, the same timestamp operator tooling reads
+    // as the migration date — the column is NOT NULL, so an active brand always
+    // has one. Null while inactive, since nothing has gone live.
+    serenityActivatedAt: serenityActive ? row.updated_at : null,
+  };
+}
+
+/**
  * Maps a DB brand row (with all joined child tables) to the V2 config shape
  * the UI expects.
  *
@@ -153,6 +231,12 @@ function parseUrlParts(urlString) {
  * URL's base resolves to a site row in the org — and `siteId` for onboarded
  * entries. Legacy brands with no `brand_urls` rows fall back to the
  * `brand_sites` expansion, where every entry is by definition onboarded.
+ *
+ * The derived per-brand serenity fields are NOT set here — a handler returning
+ * this payload to a client adds them with {@link withSerenityState}.
+ *
+ * @param {object} row - DB brand row with joined child tables.
+ * @returns {object} Brand in V2 config shape.
  */
 function mapDbBrandToV2(row) {
   // The set of base URLs the brand explicitly lists as its own (brand_urls).

@@ -6,7 +6,7 @@ preflight-jobs:
       - preflight
     security:
       - api_key: [ ]
-      - ims_key: [ ]
+      - session_token: [ ]
     summary: Submit a new preflight async job
     description: |
       Submits a new preflight async job. The job processes the provided URL(s); use the
@@ -65,7 +65,7 @@ preflight-job-status:
       - preflight
     security:
       - api_key: [ ]
-      - ims_key: [ ]
+      - session_token: [ ]
     summary: Get preflight job status and result
     description: |
       This endpoint is used to retrieve the status and results of a preflight async job.

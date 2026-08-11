@@ -32,6 +32,8 @@ import {
   setBrandStatus,
   listRegions,
   setBrandClaimsEnabled,
+  readSerenityFlagScopes,
+  withSerenityState,
 } from '../../src/support/brands-storage.js';
 
 use(sinonChai);
@@ -3612,6 +3614,87 @@ describe('brands-storage', () => {
       });
 
       expect(result).to.be.null;
+    });
+  });
+
+  describe('derived serenity state on the brand payload', () => {
+    const OTHER_BRAND_ID = '33333333-3333-4333-8333-333333333333';
+    const ORG_STAMP = '2026-08-01T10:00:00Z';
+    const BRAND_STAMP = '2026-08-10T09:00:00Z';
+
+    const orgFlagRow = { flag_value: true, brand_id: null, updated_at: ORG_STAMP };
+    const brandFlagRow = (brandId, value) => ({
+      flag_value: value, brand_id: brandId, updated_at: BRAND_STAMP,
+    });
+
+    const flagClient = (flagRows, error = null) => createTableMockClient({
+      feature_flags: { data: flagRows, error },
+    });
+    const scopesFrom = (flagRows) => readSerenityFlagScopes(ORG_ID, flagClient(flagRows));
+    const someBrand = (id = BRAND_ID) => ({ id, name: 'TestBrand' });
+
+    it('inherits an active organization when the brand has no override', async () => {
+      const brand = withSerenityState(someBrand(), await scopesFrom([orgFlagRow]));
+      expect(brand.serenityActive).to.equal(true);
+      expect(brand.serenityActivatedAt).to.equal(ORG_STAMP);
+      // The rest of the payload passes through untouched.
+      expect(brand.name).to.equal('TestBrand');
+    });
+
+    it('reports a brand held back by a false override under an active organization', async () => {
+      const scopes = await scopesFrom([orgFlagRow, brandFlagRow(BRAND_ID, false)]);
+      const brand = withSerenityState(someBrand(), scopes);
+      expect(brand.serenityActive).to.equal(false);
+      // Nothing went live for this brand, so there is no activation moment.
+      expect(brand.serenityActivatedAt).to.be.null;
+    });
+
+    it('reports a released brand while its organization has no row, stamped from the brand row', async () => {
+      const scopes = await scopesFrom([brandFlagRow(BRAND_ID, true)]);
+      const brand = withSerenityState(someBrand(), scopes);
+      expect(brand.serenityActive).to.equal(true);
+      expect(brand.serenityActivatedAt).to.equal(BRAND_STAMP);
+    });
+
+    it('is inactive with no activation stamp when the flag is unset entirely', async () => {
+      const brand = withSerenityState(someBrand(), await scopesFrom([]));
+      expect(brand.serenityActive).to.equal(false);
+      expect(brand.serenityActivatedAt).to.be.null;
+    });
+
+    it('resolves a mixed organization per brand from ONE flag read', async () => {
+      // The whole point of the mid-migration state: two brands in one org, one
+      // released and one not, answered from a single feature_flags query.
+      const client = flagClient([brandFlagRow(BRAND_ID, true)]);
+      const scopes = await readSerenityFlagScopes(ORG_ID, client);
+
+      expect([someBrand(BRAND_ID), someBrand(OTHER_BRAND_ID)]
+        .map((b) => withSerenityState(b, scopes).serenityActive))
+        .to.deep.equal([true, false]);
+      expect(client.from.getCalls().filter((c) => c.args[0] === 'feature_flags'))
+        .to.have.lengthOf(1);
+    });
+
+    it('propagates a flag-read failure rather than reporting the brand inactive', async () => {
+      // The rows live in the same database as the brand read beside them, so an
+      // error here is a real fault, not a default-off signal.
+      await expect(readSerenityFlagScopes(ORG_ID, flagClient(null, { message: 'boom' })))
+        .to.be.rejectedWith('Failed to read feature flag serenity: boom');
+    });
+
+    it('leaves the brand readers free of the flag query, so internal reads do not pay for it', async () => {
+      // The derivation belongs to the handlers that return a brand payload. The
+      // readers are shared with ~20 internal call sites that never surface these
+      // fields, and must neither issue the query nor inherit its failure mode.
+      const postgrestClient = createTableMockClient({
+        brands: { data: makeBrandRow(), error: null },
+      });
+
+      const brand = await getBrandById(ORG_ID, BRAND_ID, postgrestClient);
+
+      expect(brand.id).to.equal(BRAND_ID);
+      expect(brand).to.not.have.property('serenityActive');
+      expect(postgrestClient.from).to.not.have.been.calledWith('feature_flags');
     });
   });
 });

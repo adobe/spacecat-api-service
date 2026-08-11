@@ -1,3 +1,25 @@
+# [1.734.0](https://github.com/adobe/spacecat-api-service/compare/v1.733.0...v1.734.0) (2026-08-10)
+
+
+### Features
+
+* **llmo-6844:** Make hostname param optional ([#3016](https://github.com/adobe/spacecat-api-service/issues/3016)) ([cbe496f](https://github.com/adobe/spacecat-api-service/commit/cbe496ff0b41571a965296ca0f0264eb57c94cb0))
+* **serenity:** resolve the LLMO/serenity flag per brand, so an org migrates in waves ([#3024](https://github.com/adobe/spacecat-api-service/issues/3024)) ([dc9fe1b](https://github.com/adobe/spacecat-api-service/commit/dc9fe1b06844dc8163627e8dda0fa76d0db03525)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+# [1.733.0](https://github.com/adobe/spacecat-api-service/compare/v1.732.1...v1.733.0) (2026-08-10)
+
+
+### Features
+
+* remove global IMS token auth handler from API service ([#3022](https://github.com/adobe/spacecat-api-service/issues/3022)) ([7e3f59e](https://github.com/adobe/spacecat-api-service/commit/7e3f59ea95c73bffd9e72ec1f37881785a5f5622))
+
+## [1.732.1](https://github.com/adobe/spacecat-api-service/compare/v1.732.0...v1.732.1) (2026-08-10)
+
+
+### Bug Fixes
+
+* **feature-flags:** resolve the organization's own flag row independent of the unique key ([#3021](https://github.com/adobe/spacecat-api-service/issues/3021)) ([9aa1183](https://github.com/adobe/spacecat-api-service/commit/9aa118353f1d0318fab05daefd277baae45f6970)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 # [1.732.0](https://github.com/adobe/spacecat-api-service/compare/v1.731.0...v1.732.0) (2026-08-08)
 
 
