@@ -516,25 +516,6 @@ describe('getRouteHandlers', () => {
   };
 
   const mockAiVisibilityController = {
-    getBrandsStats: sinon.stub(),
-    getBrandsTopics: sinon.stub(),
-    getBrandsPrompts: sinon.stub(),
-    getBrandsCitedPages: sinon.stub(),
-    getBrandsTopicOpportunities: sinon.stub(),
-    getBrandsTopBrands: sinon.stub(),
-    getBrandsCitedSources: sinon.stub(),
-    getBrandsSourceOpportunities: sinon.stub(),
-    getBrandsCompetitors: sinon.stub(),
-    getCompetitorsMetrics: sinon.stub(),
-    getMeta: sinon.stub(),
-    getPromptsResponsesLatest: sinon.stub(),
-    getPromptsResponses: sinon.stub(),
-    getTopicsResearchStats: sinon.stub(),
-    getTopicsResearchPrompts: sinon.stub(),
-    getTopicsResearchBrands: sinon.stub(),
-    getTopicsResearchSourceDomains: sinon.stub(),
-    getTopicsResearch: sinon.stub(),
-    getTopicsStats: sinon.stub(),
     getV1TopicBrandTopics: sinon.stub(),
     getV1TopicBrandTopicsExport: sinon.stub(),
     getV1TopicBrandTopicsTotals: sinon.stub(),
@@ -781,25 +762,6 @@ describe('getRouteHandlers', () => {
       'POST /llmo/onboard/update-query-index',
       'GET /llmo/agentic-traffic/global',
       'POST /llmo/agentic-traffic/global',
-      'GET /llmo/ai-visibility/brands/stats',
-      'GET /llmo/ai-visibility/brands/topics',
-      'GET /llmo/ai-visibility/brands/prompts',
-      'GET /llmo/ai-visibility/brands/cited-pages',
-      'GET /llmo/ai-visibility/brands/topic-opportunities',
-      'GET /llmo/ai-visibility/brands/top-brands',
-      'GET /llmo/ai-visibility/brands/cited-sources',
-      'GET /llmo/ai-visibility/brands/source-opportunities',
-      'GET /llmo/ai-visibility/brands/competitors',
-      'GET /llmo/ai-visibility/competitors/metrics',
-      'GET /llmo/ai-visibility/meta',
-      'GET /llmo/ai-visibility/prompts/responses/latest',
-      'GET /llmo/ai-visibility/prompts/responses',
-      'GET /llmo/ai-visibility/topics/research/stats',
-      'GET /llmo/ai-visibility/topics/research/prompts',
-      'GET /llmo/ai-visibility/topics/research/brands',
-      'GET /llmo/ai-visibility/topics/research/source-domains',
-      'GET /llmo/ai-visibility/topics/research',
-      'GET /llmo/ai-visibility/topics/stats',
       'GET /llmo/ai-visibility/v1/topic/brand-topics',
       'GET /llmo/ai-visibility/v1/topic/brand-topics-export',
       'GET /llmo/ai-visibility/v1/topic/brand-topics-totals',
@@ -881,25 +843,6 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['POST /llmo/onboard/update-query-index']).to.equal(mockLlmoController.updateQueryIndex);
     expect(staticRoutes['GET /llmo/agentic-traffic/global']).to.equal(mockLlmoMysticatController.getAgenticTrafficGlobal);
     expect(staticRoutes['POST /llmo/agentic-traffic/global']).to.equal(mockLlmoMysticatController.postAgenticTrafficGlobal);
-    expect(staticRoutes['GET /llmo/ai-visibility/brands/stats']).to.equal(mockAiVisibilityController.getBrandsStats);
-    expect(staticRoutes['GET /llmo/ai-visibility/brands/topics']).to.equal(mockAiVisibilityController.getBrandsTopics);
-    expect(staticRoutes['GET /llmo/ai-visibility/brands/prompts']).to.equal(mockAiVisibilityController.getBrandsPrompts);
-    expect(staticRoutes['GET /llmo/ai-visibility/brands/cited-pages']).to.equal(mockAiVisibilityController.getBrandsCitedPages);
-    expect(staticRoutes['GET /llmo/ai-visibility/brands/topic-opportunities']).to.equal(mockAiVisibilityController.getBrandsTopicOpportunities);
-    expect(staticRoutes['GET /llmo/ai-visibility/brands/top-brands']).to.equal(mockAiVisibilityController.getBrandsTopBrands);
-    expect(staticRoutes['GET /llmo/ai-visibility/brands/cited-sources']).to.equal(mockAiVisibilityController.getBrandsCitedSources);
-    expect(staticRoutes['GET /llmo/ai-visibility/brands/source-opportunities']).to.equal(mockAiVisibilityController.getBrandsSourceOpportunities);
-    expect(staticRoutes['GET /llmo/ai-visibility/brands/competitors']).to.equal(mockAiVisibilityController.getBrandsCompetitors);
-    expect(staticRoutes['GET /llmo/ai-visibility/competitors/metrics']).to.equal(mockAiVisibilityController.getCompetitorsMetrics);
-    expect(staticRoutes['GET /llmo/ai-visibility/meta']).to.equal(mockAiVisibilityController.getMeta);
-    expect(staticRoutes['GET /llmo/ai-visibility/prompts/responses/latest']).to.equal(mockAiVisibilityController.getPromptsResponsesLatest);
-    expect(staticRoutes['GET /llmo/ai-visibility/prompts/responses']).to.equal(mockAiVisibilityController.getPromptsResponses);
-    expect(staticRoutes['GET /llmo/ai-visibility/topics/research/stats']).to.equal(mockAiVisibilityController.getTopicsResearchStats);
-    expect(staticRoutes['GET /llmo/ai-visibility/topics/research/prompts']).to.equal(mockAiVisibilityController.getTopicsResearchPrompts);
-    expect(staticRoutes['GET /llmo/ai-visibility/topics/research/brands']).to.equal(mockAiVisibilityController.getTopicsResearchBrands);
-    expect(staticRoutes['GET /llmo/ai-visibility/topics/research/source-domains']).to.equal(mockAiVisibilityController.getTopicsResearchSourceDomains);
-    expect(staticRoutes['GET /llmo/ai-visibility/topics/research']).to.equal(mockAiVisibilityController.getTopicsResearch);
-    expect(staticRoutes['GET /llmo/ai-visibility/topics/stats']).to.equal(mockAiVisibilityController.getTopicsStats);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/brand-topics']).to.equal(mockAiVisibilityController.getV1TopicBrandTopics);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/brand-topics-export']).to.equal(mockAiVisibilityController.getV1TopicBrandTopicsExport);
     expect(staticRoutes['GET /llmo/ai-visibility/v1/topic/brand-topics-totals']).to.equal(mockAiVisibilityController.getV1TopicBrandTopicsTotals);

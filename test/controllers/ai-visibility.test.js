@@ -20,30 +20,10 @@ describe('AiVisibilityController', () => {
   let sandbox;
   let AiVisibilityController;
   let mockGetGrpcClients;
-  let mockNormalize;
   let mockAttachFilters;
   let mockOk;
   let mockCreateResponse;
   let mockInternalServerError;
-  let mockHandleBrandStats;
-  let mockHandleBrandTopics;
-  let mockHandleBrandPrompts;
-  let mockHandleBrandCitedPages;
-  let mockHandleBrandTopicOpportunities;
-  let mockHandleBrandTopBrands;
-  let mockHandleBrandCitedSources;
-  let mockHandleBrandSourceOpportunities;
-  let mockHandleBrandCompetitors;
-  let mockHandleCompetitorsMetrics;
-  let mockHandleMeta;
-  let mockHandlePromptsResponses;
-  let mockHandlePromptsResponsesLatest;
-  let mockHandleTopicsResearchStats;
-  let mockHandleTopicsResearch;
-  let mockHandleTopicsStats;
-  let mockHandleTopicsResearchPrompts;
-  let mockHandleTopicsResearchBrands;
-  let mockHandleTopicsResearchSourceDomains;
   let mockHandleV1TopicBrandTopics;
   let mockHandleV1TopicBrandTopicsExport;
   let mockHandleV1TopicBrandTopicsTotals;
@@ -105,7 +85,6 @@ describe('AiVisibilityController', () => {
     sandbox = sinon.createSandbox();
 
     mockGetGrpcClients = sandbox.stub().returns(fakeClients);
-    mockNormalize = sandbox.stub().callsFake((_, body) => body);
     mockAttachFilters = sandbox.stub().callsFake((_, body) => body);
     mockOk = sandbox.stub().callsFake((body) => ({ status: 200, body }));
     mockCreateResponse = sandbox
@@ -115,55 +94,6 @@ describe('AiVisibilityController', () => {
       .stub()
       .callsFake((msg) => ({ status: 500, body: { error: msg } }));
 
-    mockHandleBrandStats = sandbox
-      .stub()
-      .resolves({ status: 200, body: { ok: true } });
-    mockHandleBrandTopics = sandbox.stub().resolves({ status: 200, body: {} });
-    mockHandleBrandPrompts = sandbox.stub().resolves({ status: 200, body: {} });
-    mockHandleBrandCitedPages = sandbox
-      .stub()
-      .resolves({ status: 200, body: {} });
-    mockHandleBrandTopicOpportunities = sandbox
-      .stub()
-      .resolves({ status: 200, body: {} });
-    mockHandleBrandTopBrands = sandbox
-      .stub()
-      .resolves({ status: 200, body: {} });
-    mockHandleBrandCitedSources = sandbox
-      .stub()
-      .resolves({ status: 200, body: {} });
-    mockHandleBrandSourceOpportunities = sandbox
-      .stub()
-      .resolves({ status: 200, body: {} });
-    mockHandleBrandCompetitors = sandbox
-      .stub()
-      .resolves({ status: 200, body: {} });
-    mockHandleCompetitorsMetrics = sandbox
-      .stub()
-      .resolves({ status: 200, body: {} });
-    mockHandleMeta = sandbox.stub().resolves({ status: 200, body: {} });
-    mockHandlePromptsResponses = sandbox
-      .stub()
-      .resolves({ status: 200, body: {} });
-    mockHandlePromptsResponsesLatest = sandbox
-      .stub()
-      .resolves({ status: 200, body: {} });
-    mockHandleTopicsResearchStats = sandbox
-      .stub()
-      .resolves({ status: 200, body: {} });
-    mockHandleTopicsResearch = sandbox
-      .stub()
-      .resolves({ status: 200, body: {} });
-    mockHandleTopicsStats = sandbox.stub().resolves({ status: 200, body: {} });
-    mockHandleTopicsResearchPrompts = sandbox
-      .stub()
-      .resolves({ status: 200, body: {} });
-    mockHandleTopicsResearchBrands = sandbox
-      .stub()
-      .resolves({ status: 200, body: {} });
-    mockHandleTopicsResearchSourceDomains = sandbox
-      .stub()
-      .resolves({ status: 200, body: {} });
     mockHandleV1TopicBrandTopics = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
@@ -261,41 +191,8 @@ describe('AiVisibilityController', () => {
       '../../src/support/ai-visibility/grpc-transport.js': {
         getGrpcClients: mockGetGrpcClients,
       },
-      '../../src/support/ai-visibility/visibility-normalize.js': {
-        normalizeVisibilityV1SuccessfulBody: mockNormalize,
-      },
       '../../src/support/ai-visibility/visibility-filters.js': {
         attachSrFiltersToSuccessfulBody: mockAttachFilters,
-      },
-      '../../src/support/ai-visibility/handlers/brands.js': {
-        handleBrandStats: mockHandleBrandStats,
-        handleBrandTopics: mockHandleBrandTopics,
-        handleBrandPrompts: mockHandleBrandPrompts,
-        handleBrandCitedPages: mockHandleBrandCitedPages,
-        handleBrandTopicOpportunities: mockHandleBrandTopicOpportunities,
-        handleBrandTopBrands: mockHandleBrandTopBrands,
-        handleBrandCitedSources: mockHandleBrandCitedSources,
-        handleBrandSourceOpportunities: mockHandleBrandSourceOpportunities,
-        handleBrandCompetitors: mockHandleBrandCompetitors,
-      },
-      '../../src/support/ai-visibility/handlers/competitors.js': {
-        handleCompetitorsMetrics: mockHandleCompetitorsMetrics,
-      },
-      '../../src/support/ai-visibility/handlers/prompts.js': {
-        handlePromptsResponses: mockHandlePromptsResponses,
-        handlePromptsResponsesLatest: mockHandlePromptsResponsesLatest,
-      },
-      '../../src/support/ai-visibility/handlers/topics.js': {
-        handleTopicsResearchStats: mockHandleTopicsResearchStats,
-        handleTopicsResearch: mockHandleTopicsResearch,
-        handleTopicsStats: mockHandleTopicsStats,
-        handleTopicsResearchPrompts: mockHandleTopicsResearchPrompts,
-        handleTopicsResearchBrands: mockHandleTopicsResearchBrands,
-        handleTopicsResearchSourceDomains:
-          mockHandleTopicsResearchSourceDomains,
-      },
-      '../../src/support/ai-visibility/handlers/meta.js': {
-        handleMeta: mockHandleMeta,
       },
       '../../src/support/ai-visibility/handlers/v1/topic/brand-topics.js': {
         handleBrandTopics: mockHandleV1TopicBrandTopics,
@@ -509,37 +406,31 @@ describe('AiVisibilityController', () => {
   });
 
   describe('wrapHandler – successful call', () => {
-    it('calls handler → normalize → attachFilters → ok', async () => {
+    it('calls handler → attachFilters → ok', async () => {
       const handlers = AiVisibilityController({ some: 'data' }, log, env);
       const handlerBody = { data: [1, 2, 3] };
-      mockHandleBrandStats.resolves({ status: 200, body: handlerBody });
+      mockHandleV1TopicBrandTopics.resolves({ status: 200, body: handlerBody });
 
-      const normalizedBody = { data: [1, 2, 3], normalized: true };
-      mockNormalize.returns(normalizedBody);
-
-      const withFilters = { data: [1, 2, 3], normalized: true, sr_filters: {} };
+      const withFilters = { data: [1, 2, 3], sr_filters: {} };
       mockAttachFilters.returns(withFilters);
 
       const context = {
         env,
-        request: { url: 'https://example.com/brands/stats?domain=test.com' },
+        request: { url: 'https://example.com/v1/topic/brand-topics?domain=test.com' },
       };
-      const result = await handlers.getBrandsStats(context);
+      const result = await handlers.getV1TopicBrandTopics(context);
 
       expect(mockGetGrpcClients.calledOnce).to.be.true;
       expect(mockGetGrpcClients.calledWith(env)).to.be.true;
 
-      expect(mockHandleBrandStats.calledOnce).to.be.true;
-      const [sp, clients] = mockHandleBrandStats.firstCall.args;
+      expect(mockHandleV1TopicBrandTopics.calledOnce).to.be.true;
+      const [sp, clients] = mockHandleV1TopicBrandTopics.firstCall.args;
       expect(sp).to.be.instanceOf(URLSearchParams);
       expect(sp.get('domain')).to.equal('test.com');
       expect(clients).to.equal(fakeClients);
 
-      expect(mockNormalize.calledOnce).to.be.true;
-      expect(mockNormalize.calledWith('/brands/stats', handlerBody)).to.be.true;
-
       expect(mockAttachFilters.calledOnce).to.be.true;
-      expect(mockAttachFilters.calledWith(200, normalizedBody)).to.be.true;
+      expect(mockAttachFilters.calledWith(200, handlerBody)).to.be.true;
 
       expect(mockOk.calledWith(withFilters)).to.be.true;
       expect(result.status).to.equal(200);
@@ -547,15 +438,14 @@ describe('AiVisibilityController', () => {
 
     it('returns createResponse when handler returns non-200', async () => {
       const handlers = AiVisibilityController({ some: 'data' }, log, env);
-      mockHandleBrandStats.resolves({
+      mockHandleV1TopicBrandTopics.resolves({
         status: 400,
         body: { error: 'bad_request', message: 'no' },
       });
       const context = { env, data: {} };
-      const result = await handlers.getBrandsStats(context);
+      const result = await handlers.getV1TopicBrandTopics(context);
       expect(mockCreateResponse.calledOnce).to.be.true;
       expect(mockCreateResponse.firstCall.args[1]).to.equal(400);
-      expect(mockNormalize.called).to.be.false;
       expect(mockOk.called).to.be.false;
       expect(result.status).to.equal(400);
     });
@@ -564,9 +454,9 @@ describe('AiVisibilityController', () => {
       const handlers = AiVisibilityController({ some: 'data' }, log, env);
       const context = {
         env,
-        request: { url: 'https://example.com/meta?country=US' },
+        request: { url: 'https://example.com/v1/meta/meta?country=US' },
       };
-      await handlers.getMeta(context);
+      await handlers.getV1MetaMeta(context);
 
       const attachCall = mockAttachFilters.firstCall;
       expect(attachCall.args[2]).to.be.instanceOf(URLSearchParams);
@@ -580,7 +470,7 @@ describe('AiVisibilityController', () => {
       const handlers = AiVisibilityController({ some: 'data' }, log, env);
 
       const context = { env, data: { domain: 'test.com' } };
-      const result = await handlers.getBrandsStats(context);
+      const result = await handlers.getV1TopicBrandTopics(context);
 
       expect(mockCreateResponse.calledOnce).to.be.true;
       const [body, status] = mockCreateResponse.firstCall.args;
@@ -590,7 +480,7 @@ describe('AiVisibilityController', () => {
         message: 'AI Visibility is not configured.',
       });
 
-      expect(mockHandleBrandStats.called).to.be.false;
+      expect(mockHandleV1TopicBrandTopics.called).to.be.false;
       expect(result.status).to.equal(503);
     });
 
@@ -600,7 +490,7 @@ describe('AiVisibilityController', () => {
       const handlers = AiVisibilityController({ some: 'data' }, log, env);
 
       const context = { env, data: {} };
-      await handlers.getCompetitorsMetrics(context);
+      await handlers.getV1BrandCompetitorsStats(context);
 
       expect(
         log.error.calledWith('AI Visibility gRPC transport init failed', err),
@@ -610,11 +500,11 @@ describe('AiVisibilityController', () => {
 
   describe('wrapHandler – handler error', () => {
     it('returns internalServerError when handler throws', async () => {
-      mockHandleBrandTopics.rejects(new Error('upstream timeout'));
+      mockHandleV1TopicBrandTopics.rejects(new Error('upstream timeout'));
       const handlers = AiVisibilityController({ some: 'data' }, log, env);
 
       const context = { env, data: {} };
-      const result = await handlers.getBrandsTopics(context);
+      const result = await handlers.getV1TopicBrandTopics(context);
 
       expect(mockInternalServerError.calledOnce).to.be.true;
       expect(mockInternalServerError.calledWith('AI Visibility request failed'))
@@ -624,15 +514,15 @@ describe('AiVisibilityController', () => {
 
     it('logs the handler error with relPath', async () => {
       const err = new Error('parse failure');
-      mockHandleTopicsStats.rejects(err);
+      mockHandleV1TopicBrandTopics.rejects(err);
       const handlers = AiVisibilityController({ some: 'data' }, log, env);
 
       const context = { env, data: {} };
-      await handlers.getTopicsStats(context);
+      await handlers.getV1TopicBrandTopics(context);
 
       expect(
         log.error.calledWith(
-          'AI Visibility handler error [/topics/stats]',
+          'AI Visibility handler error [/v1/topic/brand-topics]',
           err,
         ),
       ).to.be.true;
@@ -646,9 +536,9 @@ describe('AiVisibilityController', () => {
         env,
         request: { url: 'https://example.com/path?foo=bar&baz=42' },
       };
-      await handlers.getBrandsStats(context);
+      await handlers.getV1TopicBrandTopics(context);
 
-      const [sp] = mockHandleBrandStats.firstCall.args;
+      const [sp] = mockHandleV1TopicBrandTopics.firstCall.args;
       expect(sp.get('foo')).to.equal('bar');
       expect(sp.get('baz')).to.equal('42');
     });
@@ -659,9 +549,9 @@ describe('AiVisibilityController', () => {
         env,
         data: { domain: 'example.com', limit: 10 },
       };
-      await handlers.getBrandsStats(context);
+      await handlers.getV1TopicBrandTopics(context);
 
-      const [sp] = mockHandleBrandStats.firstCall.args;
+      const [sp] = mockHandleV1TopicBrandTopics.firstCall.args;
       expect(sp.get('domain')).to.equal('example.com');
       expect(sp.get('limit')).to.equal('10');
     });
@@ -669,9 +559,9 @@ describe('AiVisibilityController', () => {
     it('falls back to context.data when request is undefined', async () => {
       const handlers = AiVisibilityController({ some: 'data' }, log, env);
       const context = { env, data: { key: 'value' } };
-      await handlers.getBrandsStats(context);
+      await handlers.getV1TopicBrandTopics(context);
 
-      const [sp] = mockHandleBrandStats.firstCall.args;
+      const [sp] = mockHandleV1TopicBrandTopics.firstCall.args;
       expect(sp.get('key')).to.equal('value');
     });
 
@@ -681,9 +571,9 @@ describe('AiVisibilityController', () => {
         env,
         data: { tags: ['a', 'b', 'c'] },
       };
-      await handlers.getBrandsStats(context);
+      await handlers.getV1TopicBrandTopics(context);
 
-      const [sp] = mockHandleBrandStats.firstCall.args;
+      const [sp] = mockHandleV1TopicBrandTopics.firstCall.args;
       expect(sp.getAll('tags')).to.deep.equal(['a', 'b', 'c']);
     });
 
@@ -693,9 +583,9 @@ describe('AiVisibilityController', () => {
         env,
         data: { present: 'yes', absent: null, missing: undefined },
       };
-      await handlers.getBrandsStats(context);
+      await handlers.getV1TopicBrandTopics(context);
 
-      const [sp] = mockHandleBrandStats.firstCall.args;
+      const [sp] = mockHandleV1TopicBrandTopics.firstCall.args;
       expect(sp.get('present')).to.equal('yes');
       expect(sp.has('absent')).to.be.false;
       expect(sp.has('missing')).to.be.false;
@@ -704,9 +594,9 @@ describe('AiVisibilityController', () => {
     it('produces empty params when both request.url and data are absent', async () => {
       const handlers = AiVisibilityController({ some: 'data' }, log, env);
       const context = { env };
-      await handlers.getBrandsStats(context);
+      await handlers.getV1TopicBrandTopics(context);
 
-      const [sp] = mockHandleBrandStats.firstCall.args;
+      const [sp] = mockHandleV1TopicBrandTopics.firstCall.args;
       expect([...sp.entries()]).to.have.lengthOf(0);
     });
 
@@ -717,34 +607,15 @@ describe('AiVisibilityController', () => {
         request: { url: 'not-a-valid-url' },
         data: { fallback: 'works' },
       };
-      await handlers.getBrandsStats(context);
+      await handlers.getV1TopicBrandTopics(context);
 
-      const [sp] = mockHandleBrandStats.firstCall.args;
+      const [sp] = mockHandleV1TopicBrandTopics.firstCall.args;
       expect(sp.get('fallback')).to.equal('works');
     });
   });
 
   describe('all handler routes are wired', () => {
     const handlerMap = () => ({
-      getBrandsStats: mockHandleBrandStats,
-      getBrandsTopics: mockHandleBrandTopics,
-      getBrandsPrompts: mockHandleBrandPrompts,
-      getBrandsCitedPages: mockHandleBrandCitedPages,
-      getBrandsTopicOpportunities: mockHandleBrandTopicOpportunities,
-      getBrandsTopBrands: mockHandleBrandTopBrands,
-      getBrandsCitedSources: mockHandleBrandCitedSources,
-      getBrandsSourceOpportunities: mockHandleBrandSourceOpportunities,
-      getBrandsCompetitors: mockHandleBrandCompetitors,
-      getCompetitorsMetrics: mockHandleCompetitorsMetrics,
-      getMeta: mockHandleMeta,
-      getPromptsResponsesLatest: mockHandlePromptsResponsesLatest,
-      getPromptsResponses: mockHandlePromptsResponses,
-      getTopicsResearchStats: mockHandleTopicsResearchStats,
-      getTopicsResearchPrompts: mockHandleTopicsResearchPrompts,
-      getTopicsResearchBrands: mockHandleTopicsResearchBrands,
-      getTopicsResearchSourceDomains: mockHandleTopicsResearchSourceDomains,
-      getTopicsResearch: mockHandleTopicsResearch,
-      getTopicsStats: mockHandleTopicsStats,
       getV1TopicBrandTopics: mockHandleV1TopicBrandTopics,
       getV1TopicBrandTopicsExport: mockHandleV1TopicBrandTopicsExport,
       getV1TopicBrandTopicsTotals: mockHandleV1TopicBrandTopicsTotals,

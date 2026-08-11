@@ -17,7 +17,7 @@ import {
 import { PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/prompt/enums_pb.js';
 import { runFtsResearchExport } from './fts-research-export.js';
 
-// Mirrors `PROMPTS_SORT_BY` in handlers/topics.js (the list endpoint).
+// Keep aligned with the prompt list endpoint's supported sort values.
 const SORT_BY = {
   PROMPT: PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.PROMPT,
   MENTIONED_BRANDS_COUNT: PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.MENTIONED_BRANDS_COUNT,
@@ -27,7 +27,7 @@ const SORT_BY = {
 
 /**
  * CSV export for the Prompt Research "Prompts" tab.
- * Mirrors `GET /topics/research/prompts` (`handleTopicsResearchPrompts`).
+ * Exports the same prompt-research data represented by the v1 prompt list endpoints.
  */
 /* c8 ignore start */
 export async function handlePromptsResearchExport(sp, clients) {

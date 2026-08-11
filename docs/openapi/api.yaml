@@ -798,44 +798,6 @@ paths:
     $ref: './tokens-api.yaml#/site-token-by-type'
 
   # AI Visibility
-  /llmo/ai-visibility/brands/stats:
-    $ref: './ai-visibility-api.yaml#/ai-visibility-brands-stats'
-  /llmo/ai-visibility/brands/topics:
-    $ref: './ai-visibility-api.yaml#/ai-visibility-brands-topics'
-  /llmo/ai-visibility/brands/prompts:
-    $ref: './ai-visibility-api.yaml#/ai-visibility-brands-prompts'
-  /llmo/ai-visibility/brands/cited-pages:
-    $ref: './ai-visibility-api.yaml#/ai-visibility-brands-cited-pages'
-  /llmo/ai-visibility/brands/topic-opportunities:
-    $ref: './ai-visibility-api.yaml#/ai-visibility-brands-topic-opportunities'
-  /llmo/ai-visibility/brands/top-brands:
-    $ref: './ai-visibility-api.yaml#/ai-visibility-brands-top-brands'
-  /llmo/ai-visibility/brands/cited-sources:
-    $ref: './ai-visibility-api.yaml#/ai-visibility-brands-cited-sources'
-  /llmo/ai-visibility/brands/source-opportunities:
-    $ref: './ai-visibility-api.yaml#/ai-visibility-brands-source-opportunities'
-  /llmo/ai-visibility/brands/competitors:
-    $ref: './ai-visibility-api.yaml#/ai-visibility-brands-competitors'
-  /llmo/ai-visibility/competitors/metrics:
-    $ref: './ai-visibility-api.yaml#/ai-visibility-competitors-metrics'
-  /llmo/ai-visibility/meta:
-    $ref: './ai-visibility-api.yaml#/ai-visibility-meta'
-  /llmo/ai-visibility/prompts/responses/latest:
-    $ref: './ai-visibility-api.yaml#/ai-visibility-prompts-responses-latest'
-  /llmo/ai-visibility/prompts/responses:
-    $ref: './ai-visibility-api.yaml#/ai-visibility-prompts-responses'
-  /llmo/ai-visibility/topics/research/stats:
-    $ref: './ai-visibility-api.yaml#/ai-visibility-topics-research-stats'
-  /llmo/ai-visibility/topics/research:
-    $ref: './ai-visibility-api.yaml#/ai-visibility-topics-research'
-  /llmo/ai-visibility/topics/stats:
-    $ref: './ai-visibility-api.yaml#/ai-visibility-topics-stats'
-  /llmo/ai-visibility/topics/research/prompts:
-    $ref: './ai-visibility-api.yaml#/ai-visibility-topics-research-prompts'
-  /llmo/ai-visibility/topics/research/brands:
-    $ref: './ai-visibility-api.yaml#/ai-visibility-topics-research-brands'
-  /llmo/ai-visibility/topics/research/source-domains:
-    $ref: './ai-visibility-api.yaml#/ai-visibility-topics-research-source-domains'
   /llmo/ai-visibility/v1/brand/stats-by-llm:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-stats-by-llm'
   /llmo/ai-visibility/v1/brand/stats-by-country:
