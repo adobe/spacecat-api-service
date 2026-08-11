@@ -512,14 +512,14 @@ describe('LlmoCloudFrontController', () => {
       expect(result.status).to.equal(403);
     });
 
-    it('returns 400 for a subpath site (not eligible for CDN auto-routing)', async () => {
+    it('returns 501 for a subpath site (CDN auto-routing not supported)', async () => {
       mockSite.getBaseURL.returns('https://www.example.com/blog');
 
       const result = await controller.connect(connectContext);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(501);
       const body = await result.json();
-      expect(body.message).to.include('Subpath sites');
+      expect(body.message).to.include('not supported');
     });
 
     it('returns 500 with a generic message when an unexpected error occurs', async () => {

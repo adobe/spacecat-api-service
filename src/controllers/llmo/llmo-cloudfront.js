@@ -11,7 +11,7 @@
  */
 
 import {
-  ok, badRequest, forbidden, notFound, internalServerError,
+  ok, badRequest, forbidden, notFound, internalServerError, createResponse,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
@@ -210,7 +210,7 @@ function LlmoCloudFrontController(ctx) {
       return { error: forbidden(`Only LLMO administrators can ${action}`) };
     }
     if (hasSubpath(site.getBaseURL())) {
-      return { error: badRequest('Subpath sites are not eligible for CDN auto-routing') };
+      return { error: createResponse({ message: 'CDN auto-routing is not supported for subpath sites' }, 501) };
     }
     // Server-derived external ID (site's IMS org id); never accepted from the client. Matches what
     // bootstrap baked into the role's trust policy. See resolveConnectorExternalId.

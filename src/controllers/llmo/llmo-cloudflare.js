@@ -146,7 +146,7 @@ function LlmoCloudflareController(ctx) {
       return forbidden('Only LLMO administrators can access Cloudflare onboarding endpoints');
     }
     if (hasSubpath(site.getBaseURL())) {
-      return badRequest('Subpath sites are not eligible for CDN auto-routing');
+      return createResponse({ message: 'CDN auto-routing is not supported for subpath sites' }, 501);
     }
     return { site };
   };
