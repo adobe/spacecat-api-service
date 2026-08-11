@@ -178,6 +178,19 @@ describe('edge-routing-auth', () => {
       ).to.be.fulfilled;
     });
 
+    it('paid + FACS-enabled: allows without consulting the IMS product profile (wrapper enforced)', async () => {
+      const ctx = baseCtx();
+      ctx.attributes = { authInfo: { getProfile: () => ({ facs_enabled: true }) } };
+      await expect(
+        authorizeEdgeCdnRouting(ctx, {
+          org, imsOrgId: 'x@AdobeOrg', imsUserToken: 't', siteId: 's1',
+        }, log),
+      ).to.be.fulfilled;
+      // FACS-enrolled paid orgs are authorized upstream by facsWrapper; the legacy
+      // IMS product-context profile must NOT be consulted for them.
+      expect(ctx.imsClient.getImsUserProfile).to.not.have.been.called;
+    });
+
     // NOTE: the former "paid + FACS deferred" tests were removed together with the
     // FACS-deferred branch in edge-routing-auth.js (PR #2947, now superseded).
     // Site-scoped LLMO enforcement moved into facsWrapper's secondary resource path;
