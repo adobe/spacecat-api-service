@@ -622,6 +622,23 @@ describe('LlmoAkamaiController', () => {
         .to.have.been.calledWith(PROPERTY_ID, 7, CONTRACT_ID, GROUP_ID, { validateRules: true });
     });
 
+    it('with validate=true, redacts injected secrets echoed in the errors detail', async () => {
+      const KEY = 'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789';
+      mockAkamaiClient.getRuleTree.withArgs(PROPERTY_ID, 7)
+        .resolves({
+          ruleTree: DEPLOYED_TREE,
+          ruleFormat: 'v',
+          errors: [{
+            detail: `x-edgeoptimize-fetcher-key: ${KEY} in modifyIncomingRequestHeader`,
+          }],
+          warnings: [],
+        });
+      const res = await controller.deployStatus(withData({ ...propertyRef, validate: 'true' }));
+      const body = await res.json();
+      expect(body.errors[0].detail).to.not.contain(KEY);
+      expect(body.errors[0].detail).to.contain('***');
+    });
+
     it('with validate=true, reports activatable:true when the version has no errors', async () => {
       mockAkamaiClient.getRuleTree.withArgs(PROPERTY_ID, 7)
         .resolves({

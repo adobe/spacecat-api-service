@@ -888,12 +888,13 @@ function LlmoAkamaiController(ctx) {
         // undefined ⇒ not checked (first-onboard case, where `deployed` is already unambiguous).
         ...(freshWrite !== undefined ? { freshWrite } : {}),
         // Present only when validate=true: whether the version can be activated + its error detail.
-        // `errors` is bounded (PAPI can return hundreds); errors describe rules by name/path, not
-        // the injected secret header values, so they're safe to surface.
+        // `errors` is bounded (PAPI can return hundreds) and redacted: PAPI can echo a behavior's
+        // option values (e.g. headerValue) in structured detail on certain validation errors, so a
+        // rejection referencing the managed rule could otherwise leak the baked-in api/fetcher key.
         ...(validate ? {
           activatable,
           errorCount,
-          errors: (errors ?? []).slice(0, 25),
+          errors: redactPapiErrors((errors ?? []).slice(0, 25), []),
           warningCount: warnings?.length ?? 0,
         } : {}),
       });
