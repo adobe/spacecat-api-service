@@ -1033,6 +1033,29 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
+     * POST /v1/workspaces/{ws}/members — grant one or more users a role on the
+     * workspace (Semrush RBAC). Body: `{ members: string[], role: string }`
+     * (e.g. role `role/workspace/viewer`). ADR-draft-2/3: RBAC write slice that
+     * reuses the already-wired User Manager client. The bearer this transport is
+     * built with is the DEDICATED Semrush IMS technical-account token (minted by
+     * the controller via SEMRUSH_IMS_TECH_*), NOT the calling user's token — so it
+     * can provision a user who is not yet a member of the workspace.
+     *
+     * `/v1/workspaces/{id}/members` (op `workspace-add-members`) is present in the
+     * user-manager-client generated spec with body `{ members: string[]; role: string }`.
+     *
+     * @param {string} workspaceId
+     * @param {string[]} members - user identifiers (emails) to grant the role.
+     * @param {string} role - Semrush role, e.g. `role/workspace/viewer`.
+     */
+    async addWorkspaceMembers(workspaceId, members, role) {
+      return unwrap('POST', await users.POST(
+        '/v1/workspaces/{id}/members',
+        { params: { path: { id: workspaceId } }, body: { members, role } },
+      ));
+    },
+
+    /**
      * GET /v1/workspaces/{ws}/status — poll until `created` after a subworkspace
      * create (creating projects against `not ready` can 500).
      *

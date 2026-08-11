@@ -24,6 +24,8 @@ import {
   resolveBrandWorkspace,
   clearBrandWorkspaceCache,
 } from '../support/serenity/workspace-resolver.js';
+import { mintSemrushImsToken } from '../support/serenity/semrush-ims-token.js';
+import { withMemberAutoProvision } from '../support/serenity/member-autoprovision.js';
 import {
   handleListPrompts,
   handleCreatePrompts,
@@ -80,7 +82,7 @@ import { resolveBrandUuid } from '../support/prompts-storage.js';
 import {
   getBrandAliases, getBrandUrlSources, getBrandCompetitors, updateBrand, getBrandBaseSiteId,
 } from '../support/brands-storage.js';
-import { ErrorWithStatusCode, resolveSemrushImsToken as resolveImsTokenViaPromise } from '../support/utils.js';
+import { ErrorWithStatusCode, resolveSemrushImsToken as resolveImsTokenViaPromise, resolveCallerEmail } from '../support/utils.js';
 import { hostnameFromUrlString } from '../support/url-utils.js';
 import { ensureMarketSite, resolveSiteDomain, unlinkMarketSiteIfOrphaned } from '../support/serenity/site-linkage.js';
 import { X_PROMISE_TOKEN_HEADER, PROMISE_TOKEN_REQUIRED_ERROR_CODE } from '../utils/constants.js';
@@ -198,6 +200,17 @@ function mapError(e, log) {
       return createResponse(
         { error: errorTokenForStatus(err.status), message: 'Upstream rejected the request as a conflict' },
         err.status,
+      );
+    }
+    if (err.status === 422) {
+      // An upstream unprocessable-entity refusal (e.g. member add rejected with
+      // "corporate account does not have enough user units" / limit_exceeded) is the
+      // caller's to act on, not an outage. Surface 422 with a specific token instead of
+      // flattening to a generic 502; the body (limit flag + emails) stays server-side only
+      // (logged above), consistent with the 401/403 redaction.
+      return createResponse(
+        { error: 'unprocessableEntity', message: 'Upstream rejected the request as unprocessable (quota or validation)' },
+        422,
       );
     }
     return createResponse({
@@ -459,6 +472,28 @@ function SerenityController(context, log, env) {
     return createSerenityTransport({ env: ctx.env || env, imsToken });
   }
 
+  // Auto-provision-on-401/403 flag (env/Vault boolean, default OFF). When a brand-scoped
+  // Semrush READ fails because the caller is not yet a member of the workspace, provision
+  // them on the fly (dedicated IMS token → add member, viewer) and retry the read once.
+  // Only meaningful when Semrush is integrated for the org (serenity active + a workspace
+  // resolves) — which `authorize` already guarantees before any read handler runs.
+  const memberAutoProvisionEnabled = (ctx) => (ctx?.env || env)?.SERENITY_MEMBER_AUTOPROVISION === 'true';
+
+  /**
+   * Wraps a Semrush read so a "caller not yet a member" 401/403 self-heals: on that
+   * upstream denial (and only when the flag is on and we have a workspace + caller email),
+   * the calling user is granted viewer access and the read is retried once. Best-effort —
+   * see member-autoprovision.js. `run` must be idempotent (it may execute twice).
+   */
+  const readWithProvision = (ctx, auth, run) => withMemberAutoProvision({
+    run,
+    env: ctx.env || env,
+    log,
+    enabled: memberAutoProvisionEnabled(ctx),
+    workspaceId: auth.workspaceId,
+    memberEmail: resolveCallerEmail(ctx),
+  });
+
   // Global dynamic-allocation kill-switch for this request (env/Vault boolean, default OFF). Read
   // per request off ctx.env, mirroring buildTransport's env resolution. When OFF the metered
   // handlers front through a no-op guard (byte-for-byte pre-PR behavior).
@@ -520,15 +555,15 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      const result = auth.mode === 'subworkspace'
-        ? await handleListPromptsSubworkspace(transport, auth.workspaceId, parsedQuery(ctx), log)
-        : await handleListPrompts(
+      const result = await readWithProvision(ctx, auth, () => (auth.mode === 'subworkspace'
+        ? handleListPromptsSubworkspace(transport, auth.workspaceId, parsedQuery(ctx), log)
+        : handleListPrompts(
           transport,
           ctx.dataAccess,
           auth.brandUuid,
           auth.workspaceId,
           parsedQuery(ctx),
-        );
+        )));
       return createResponse(result, 200);
     } catch (e) {
       return mapError(e, log);
@@ -715,8 +750,8 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      const result = auth.mode === 'subworkspace'
-        ? await handleListMarketsSubworkspace(
+      const result = await readWithProvision(ctx, auth, () => (auth.mode === 'subworkspace'
+        ? handleListMarketsSubworkspace(
           transport,
           /** @type {string} */ (auth.brandUuid),
           /** @type {string} */ (auth.workspaceId),
@@ -725,12 +760,12 @@ function SerenityController(context, log, env) {
           ctx.dataAccess,
           log,
         )
-        : await handleListMarkets(
+        : handleListMarkets(
           transport,
           ctx.dataAccess,
           auth.brandUuid,
           auth.workspaceId,
-        );
+        )));
       return createResponse(result, 200);
     } catch (e) {
       return mapError(e, log);
@@ -752,8 +787,8 @@ function SerenityController(context, log, env) {
       // coerce '2840abc' → 2840 and silently resolve a different slice.
       const geoTargetId = /^\d+$/.test(String(pGeo || '')) ? Number(pGeo) : null;
       const languageCode = pLang ? String(pLang).toLowerCase() : null;
-      const result = auth.mode === 'subworkspace'
-        ? await handleGetMarketSubworkspace(
+      const result = await readWithProvision(ctx, auth, () => (auth.mode === 'subworkspace'
+        ? handleGetMarketSubworkspace(
           buildTransport(ctx, imsToken),
           auth.brandUuid,
           auth.workspaceId,
@@ -763,7 +798,7 @@ function SerenityController(context, log, env) {
           // Enrich the resolved slice with its siteId (LLMO-6405 Phase 2).
           ctx.dataAccess,
         )
-        : await handleGetMarket(ctx.dataAccess, auth.brandUuid, geoTargetId, languageCode);
+        : handleGetMarket(ctx.dataAccess, auth.brandUuid, geoTargetId, languageCode)));
       return createResponse(result, 200);
     } catch (e) {
       return mapError(e, log);
@@ -1006,16 +1041,16 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      const result = auth.mode === 'subworkspace'
-        ? await handleListTagsSubworkspace(transport, auth.workspaceId, parsedQuery(ctx), log)
-        : await handleListTags(
+      const result = await readWithProvision(ctx, auth, () => (auth.mode === 'subworkspace'
+        ? handleListTagsSubworkspace(transport, auth.workspaceId, parsedQuery(ctx), log)
+        : handleListTags(
           transport,
           ctx.dataAccess,
           auth.brandUuid,
           auth.workspaceId,
           parsedQuery(ctx),
           log,
-        );
+        )));
       return createResponse(result, 200);
     } catch (e) {
       return mapError(e, log);
@@ -1115,15 +1150,15 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      const result = auth.mode === 'subworkspace'
-        ? await handleListModelsSubworkspace(transport, auth.workspaceId, parsedQuery(ctx), log)
-        : await handleListModels(
+      const result = await readWithProvision(ctx, auth, () => (auth.mode === 'subworkspace'
+        ? handleListModelsSubworkspace(transport, auth.workspaceId, parsedQuery(ctx), log)
+        : handleListModels(
           transport,
           ctx.dataAccess,
           auth.brandUuid,
           auth.workspaceId,
           parsedQuery(ctx),
-        );
+        )));
       return createResponse(result, 200);
     } catch (e) {
       return mapError(e, log);
@@ -1236,6 +1271,53 @@ function SerenityController(context, log, env) {
           { orgId: ctx?.params?.spaceCatId, env: ctx.env || env },
         );
       return createResponse(result, 200);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
+  /**
+   * POST /serenity/members — grant one or more users a Semrush workspace role
+   * (RBAC write slice; ADR-draft-2/3). Resolves the brand's workspace via
+   * `authorize` (the brand's sub-workspace in subworkspace mode, else the org's
+   * flat parent workspace) and calls Semrush's User Manager
+   * `POST /v1/workspaces/{ws}/members`. Body: `{ members: string[], role?: string }`;
+   * `role` defaults to `role/workspace/viewer`.
+   *
+   * Auth: the Adobe caller is authorized here at the ORG level (`authorize` →
+   * AccessControlUtil), but the OUTBOUND Semrush call is authenticated with a token
+   * minted for the DEDICATED Semrush IMS technical account (SEMRUSH_IMS_TECH_*),
+   * NOT the caller's own token. This is what lets the grant provision a user who is
+   * not yet a member of the workspace — the mint identity holds the member-management
+   * rights, so the "user hits 401/403 → provision them" flow can succeed.
+   */
+  const addMembers = async (ctx) => {
+    try {
+      const auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const body = ctx.data || {};
+      const members = Array.isArray(body.members)
+        ? body.members.filter((m) => hasText(m))
+        : [];
+      if (members.length === 0) {
+        throw new ErrorWithStatusCode('members must be a non-empty array of user identifiers', 400);
+      }
+      const role = hasText(body.role) ? body.role : 'role/workspace/viewer';
+      // Mint the dedicated Semrush IMS technical-account token (NOT the caller's) so a
+      // not-yet-a-member user can still be provisioned. Minted only after the org-level
+      // authorize gate + input validation pass, so a bad request never mints a token.
+      const imsToken = await mintSemrushImsToken(ctx.env || env, log);
+      const transport = buildTransport(ctx, imsToken);
+      const result = await transport.addWorkspaceMembers(
+        /** @type {string} */ (auth.workspaceId),
+        members,
+        role,
+      );
+      // Semrush may answer 2xx with an empty body; echo the grant so the spike
+      // caller sees what landed.
+      return createResponse(isNonEmptyObject(result) ? result : { members, role }, 200);
     } catch (e) {
       return mapError(e, log);
     }
@@ -1805,6 +1887,7 @@ function SerenityController(context, log, env) {
     listOrgModels,
     listOrgLanguages,
     updateModels,
+    addMembers,
     activate,
     deactivate,
   };

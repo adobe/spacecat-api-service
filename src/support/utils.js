@@ -902,6 +902,22 @@ export function resolveCallerImsUserId(context) {
 }
 
 /**
+ * Resolves the caller's human email address (NOT the opaque IMS user id) from the
+ * authenticated profile — the address to add as a Semrush workspace member. Prefers
+ * `email`, then `preferred_username` (IMS typically sets this to the email), then
+ * `trial_email`. Returns null when none resolve, in which case callers must skip any
+ * member-provisioning rather than guess.
+ *
+ * @param {object} context - The request context.
+ * @returns {string|null} The caller's email, or null when unresolvable.
+ */
+export function resolveCallerEmail(context) {
+  const profile = context?.attributes?.authInfo?.getProfile?.();
+  const raw = profile?.email ?? profile?.preferred_username ?? profile?.trial_email;
+  return hasText(raw) ? String(raw) : null;
+}
+
+/**
  * Resolves the IMS access token to forward to the Semrush gateway for a request.
  *
  * Preferred path: the caller sends `x-promise-token` (minted by POST /auth/v2/promise).
