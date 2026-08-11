@@ -1,3 +1,17 @@
+# [1.735.0](https://github.com/adobe/spacecat-api-service/compare/v1.734.1...v1.735.0) (2026-08-11)
+
+
+### Features
+
+* **llmo:** narrow org sites/projects list to brands the caller can view ([#3018](https://github.com/adobe/spacecat-api-service/issues/3018)) ([a8af69d](https://github.com/adobe/spacecat-api-service/commit/a8af69dab086209208d65c84918816fb13ab644d)), closes [#2947](https://github.com/adobe/spacecat-api-service/issues/2947)
+
+## [1.734.1](https://github.com/adobe/spacecat-api-service/compare/v1.734.0...v1.734.1) (2026-08-11)
+
+
+### Bug Fixes
+
+* **organizations:** remove admin gate from config.defaults updates ([#3026](https://github.com/adobe/spacecat-api-service/issues/3026)) ([959c139](https://github.com/adobe/spacecat-api-service/commit/959c139ea197e36a03d0f928adf047fd3d0bee89))
+
 # [1.734.0](https://github.com/adobe/spacecat-api-service/compare/v1.733.0...v1.734.0) (2026-08-10)
 
 
