@@ -68,7 +68,7 @@ import {
   handleUpdateTagSubworkspace,
 } from '../support/serenity/handlers/tags.js';
 import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
-import { isSerenityActiveForOrg } from '../support/serenity/serenity-active.js';
+import { isSerenityActiveForBrand } from '../support/serenity/serenity-active.js';
 import { isDynamicAllocationEnabled, resolveBrandAiCeiling } from '../support/serenity/dynamic-allocation-active.js';
 import { MAX_TOPICS_ON_CREATE } from '../support/serenity/brand-provisioning.js';
 import { resolveDefaultModelIds } from '../support/serenity/default-models.js';
@@ -389,21 +389,31 @@ function SerenityController(context, log, env) {
         ),
       };
     }
-    // Org-wide serenity rollout gate. Serenity is "active" for an org only when
-    // its `LLMO/serenity` feature flag is ON *and* a Semrush workspace resolves
-    // for the brand (the workspace half is enforced below by
-    // resolveBrandWorkspace). While the flag is OFF the org's UI keeps reading
-    // the normal backend data — even if a `semrush_sub_workspace_id` has
-    // already been backfilled for rollout prep — so reject the serenity
-    // surface with a 404 (the same "no serenity for this org" contract the UI already handles
-    // for an org without a workspace). Checked before brand resolution so an
-    // inactive org never leaks brand existence.
-    if (!await isSerenityActiveForOrg(ctx, spaceCatId, log)) {
-      return { error: notFound('Serenity is not active for this organization') };
-    }
+    // Per-brand serenity rollout gate. Serenity is "active" for a brand only
+    // when its resolved `LLMO/serenity` value is ON *and* a Semrush workspace
+    // resolves for it (the workspace half is enforced below by
+    // resolveBrandWorkspace). The value resolves the brand's own override row
+    // first and falls back to the organization's row, so an org that activated
+    // everything at once still answers for all of its brands, while a
+    // mid-migration org serves only the brands its waves have released. While a
+    // brand is inactive its UI keeps reading the normal backend data — even if a
+    // `semrush_sub_workspace_id` has already been backfilled for rollout prep —
+    // so reject the serenity surface with a 404 (the same "no serenity here"
+    // contract the UI already handles for a brand without a workspace).
+    //
+    // This resolves AFTER brand resolution, where the org-wide gate it replaces
+    // ran before it to avoid leaking brand existence. That ordering is no longer
+    // load-bearing: every caller reaching this point has passed
+    // `hasAccess(organization)` above and can already enumerate the org's brands
+    // via `GET /organizations/:id/brands`, so keeping the precise "brand not
+    // found" body reveals nothing a shared 404 would hide, and it stays
+    // diagnosable mid-wave.
     const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
     if (!brandUuid) {
       return { error: notFound(`Brand not found for organization: ${brandId}`) };
+    }
+    if (!await isSerenityActiveForBrand(ctx, spaceCatId, brandUuid, log)) {
+      return { error: notFound('Serenity is not active for this brand') };
     }
     // resolveBrandWorkspace resolves the parent workspace once and returns it
     // alongside the mode, so activate can mint a sub-workspace without a second

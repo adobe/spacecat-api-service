@@ -33,7 +33,7 @@ v2-topics-for-org:
       to filter by specific status or include deleted topics.
     operationId: listTopicsForOrgV2
     security:
-      - ims_key: []
+      - session_token: []
       - api_key: []
     responses:
       '200':
@@ -62,7 +62,7 @@ v2-topics-for-org:
       (upsert on `organization_id, topic_id` conflict).
     operationId: createTopicForOrgV2
     security:
-      - ims_key: []
+      - session_token: []
       - api_key: []
     requestBody:
       required: true
@@ -121,7 +121,7 @@ v2-topic-for-org:
       Updates an existing topic. Only provided fields are updated.
     operationId: updateTopicForOrgV2
     security:
-      - ims_key: []
+      - session_token: []
       - api_key: []
     requestBody:
       required: true
@@ -155,7 +155,7 @@ v2-topic-for-org:
       The topic remains queryable with `?status=deleted`.
     operationId: deleteTopicForOrgV2
     security:
-      - ims_key: []
+      - session_token: []
       - api_key: []
     responses:
       '204':

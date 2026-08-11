@@ -10,9 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { resolveElementModel } from '../constants.js';
-
-/* c8 ignore start -- LLMO-6160 POC endpoint; unit tests intentionally deferred */
+import { isAllPlatforms, resolveElementModel } from '../constants.js';
 
 /**
  * Builds the payload for the Stats-per-URL element (9af5ed83, `table`) scoped to a
@@ -38,12 +36,15 @@ import { resolveElementModel } from '../constants.js';
 export function buildDomainUrlsPayload({
   model, platform, startDate, endDate, category, projectId,
 } = {}) {
-  const resolvedModel = resolveElementModel(model || platform);
+  const requestedModel = model || platform;
   const advancedFilters = [
-    { op: 'or', filters: [{ op: 'eq', val: resolvedModel, col: 'CBF_model' }] },
     { op: 'gte', val: startDate, col: 'CBF_date__start' },
     { op: 'lte', val: endDate, col: 'CBF_date__end' },
   ];
+  if (!isAllPlatforms(requestedModel)) {
+    const resolvedModel = resolveElementModel(requestedModel);
+    advancedFilters.unshift({ op: 'or', filters: [{ op: 'eq', val: resolvedModel, col: 'CBF_model' }] });
+  }
   if (category) {
     advancedFilters.push({ op: 'eq', val: category, col: 'CBF_tags' });
   }
@@ -56,6 +57,8 @@ export function buildDomainUrlsPayload({
     },
   };
 }
+
+/* c8 ignore start -- LLMO-6160 POC endpoint; unit tests intentionally deferred */
 
 /**
  * Extracts the registrable-domain-agnostic host of a URL: lowercased, `www.`-stripped.
@@ -114,20 +117,22 @@ function parsePagination({ page, pageSize } = {}) {
  * `regions`/`categories` are STRINGS here (the legacy contract + the UI `DomainUrlRow`
  * type), NOT arrays like owned-urls.
  *
- * Only rows whose `source` host matches `hostname` (host-or-subdomain, see
- * {@link hostMatches}) are kept. An optional `channel` (content-type) filter is then
- * applied client-side on `contentType` (case-insensitive) — the element has no
- * server-side content-type filter, so this mirrors cited-domains + the legacy RPC's
- * `p_channel`. Semrush has no server-side pagination, so after filtering we sort by
- * citations desc and slice client-side; `totalCount` is the post-filter, pre-slice count.
+ * When `hostname` is supplied, only rows whose `source` host matches it
+ * (host-or-subdomain, see {@link hostMatches}) are kept. When omitted, all source
+ * hosts are kept. An optional `channel` (content-type) filter is then applied
+ * client-side on `contentType` (case-insensitive) — the element has no server-side
+ * content-type filter, so this mirrors cited-domains + the legacy RPC's `p_channel`.
+ * Semrush has no server-side pagination, so after filtering we sort by citations
+ * desc and slice client-side; `totalCount` is the post-filter, pre-slice count.
  *
  * @param {Array<{region?: string, stats: object}>} projectResults
- * @param {object} params - { hostname (required), channel, page, pageSize }.
+ * @param {object} params - { hostname, channel, page, pageSize }.
  * @returns {{ urls: Array<object>, totalCount: number }}
  */
 export function transformDomainUrlsResponse(projectResults = [], params = {}) {
   const { page, pageSize } = parsePagination(params);
-  const hostname = String(params.hostname ?? '').replace(/^www\./, '').toLowerCase();
+  const hostname = String(params.hostname ?? '').trim().replace(/^www\./, '').toLowerCase();
+  const filterByHostname = hostname !== '';
   const channel = typeof params.channel === 'string' ? params.channel.trim() : '';
   const byUrl = new Map();
 
@@ -138,7 +143,7 @@ export function transformDomainUrlsResponse(projectResults = [], params = {}) {
         continue;
       }
       const host = hostOf(row.source);
-      if (!host || !hostMatches(host, hostname)) {
+      if (!host || (filterByHostname && !hostMatches(host, hostname))) {
         // eslint-disable-next-line no-continue
         continue;
       }
