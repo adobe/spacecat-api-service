@@ -288,7 +288,7 @@ describe('SerenityController', () => {
         decommissionBrandWorkspace: decommissionStub,
       },
       '../../src/support/serenity/serenity-active.js': {
-        isSerenityActiveForOrg: isSerenityActiveStub,
+        isSerenityActiveForBrand: isSerenityActiveStub,
       },
       '../../src/support/access-control-util.js': MockAccessControlUtil,
       '../../src/support/prompts-storage.js': {
@@ -526,23 +526,32 @@ describe('SerenityController', () => {
       expect(response.status).to.equal(404);
     });
 
-    it('404s when serenity is not active for the org (rollout flag OFF), before brand resolution', async () => {
-      // Org-wide LLMO/serenity flag OFF → the serenity surface is inactive and
-      // the UI falls back to the normal backend. The gate fires BEFORE brand
-      // resolution, so an inactive org never leaks brand existence.
+    it('404s when serenity is not active for the BRAND, without resolving a workspace', async () => {
+      // The brand resolves LLMO/serenity OFF — its own override, or the org's row
+      // in the absence of one — so the serenity surface is inactive for it and the
+      // UI falls back to the normal backend. A sibling brand in the same org can
+      // resolve ON, which is what a migration wave looks like mid-flight.
       isSerenityActiveStub.resolves(false);
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.listPrompts(fakeContext());
       expect(response.status).to.equal(404);
       const body = await readBody(response);
       expect(body.message).to.match(/serenity is not active/i);
-      expect(isSerenityActiveStub).to.have.been.calledWith(sinon.match.any, ORG);
-      expect(resolveBrandUuidStub).to.not.have.been.called;
       expect(resolveBrandWorkspaceStub).to.not.have.been.called;
     });
 
-    it('reaches the handler when serenity is active (flag ON) and a workspace resolves', async () => {
-      // The happy-path composition: flag ON (default stub) + a resolved
+    it('gates on the RESOLVED brand uuid, not the org alone', async () => {
+      // The brand must be resolved first and its uuid passed to the predicate:
+      // gating on the org alone would give all of an org's brands one answer.
+      isSerenityActiveStub.resolves(false);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      await controller.listPrompts(fakeContext());
+      expect(resolveBrandUuidStub).to.have.been.calledOnce;
+      expect(isSerenityActiveStub).to.have.been.calledWith(sinon.match.any, ORG, BRAND);
+    });
+
+    it('reaches the handler when serenity is active for the brand and a workspace resolves', async () => {
+      // The happy-path composition: brand resolves ON (default stub) + a resolved
       // workspace ⇒ the route is served.
       handlers.handleListPrompts.resolves({ items: [], total: 0 });
       const controller = SerenityController({ env: {} }, fakeLog(), {});

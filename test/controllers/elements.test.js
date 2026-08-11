@@ -193,6 +193,7 @@ describe('ElementsController', () => {
   let getBrandIdentityStub;
   let getBrandBySiteStub;
   let resolveBrandWorkspaceStub;
+  let isSerenityActiveForBrandStub;
   let accessControlHasAccessStub;
   let serviceStub;
   let createElementsServiceStub;
@@ -209,6 +210,9 @@ describe('ElementsController', () => {
     resolveBrandWorkspaceStub = sinon.stub().resolves({
       mode: 'subworkspace', workspaceId: SUB_WORKSPACE_ID, parentWorkspaceId: WORKSPACE_ID,
     });
+    // Both authorizers gate on the brand resolving serenity-active; default ON so
+    // the existing cases exercise the surface rather than the gate.
+    isSerenityActiveForBrandStub = sinon.stub().resolves(true);
     accessControlHasAccessStub = sinon.stub().resolves(true);
 
     getBrandIdentityStub = sinon.stub().resolves({ id: BRAND_ID, name: 'Adobe Brand' });
@@ -267,6 +271,9 @@ describe('ElementsController', () => {
       },
       '../../src/support/serenity/workspace-resolver.js': {
         resolveBrandWorkspace: resolveBrandWorkspaceStub,
+      },
+      '../../src/support/serenity/serenity-active.js': {
+        isSerenityActiveForBrand: isSerenityActiveForBrandStub,
       },
       '../../src/support/serenity/rest-transport.js': {
         createSerenityTransport: createSerenityTransportStub,
@@ -335,6 +342,32 @@ describe('ElementsController', () => {
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
       expect(res.status).to.equal(404);
+    });
+
+    it('returns 404 when serenity is not active for the brand, before resolving a workspace', async () => {
+      // Without this gate an unmigrated brand falls through to flat mode and the
+      // read runs against the org's shared PARENT workspace, answering for the
+      // organization instead of for the brand.
+      isSerenityActiveForBrandStub.resolves(false);
+      const ctx = fakeContext();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(404);
+      const body = await readBody(res);
+      expect(body.message).to.match(/serenity is not active for this brand/i);
+      expect(resolveBrandWorkspaceStub).to.not.have.been.called;
+    });
+
+    it('asks the serenity gate about the brand, not the org alone', async () => {
+      isSerenityActiveForBrandStub.resolves(false);
+      const ctx = fakeContext();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(isSerenityActiveForBrandStub).to.have.been.calledWith(
+        sinon.match.any,
+        ORG_ID,
+        BRAND_ID,
+      );
     });
 
     it('returns 403 when access control denies access', async () => {
@@ -815,6 +848,21 @@ describe('ElementsController', () => {
       expect(res.status).to.equal(503);
       const body = await readBody(res);
       expect(body.error).to.equal('configurationError');
+      expect(serviceStub.getPrompts).to.not.have.been.called;
+    });
+
+    it('404s (serenityInactive) when the brand is not serenity-active, even in sub-workspace mode', async () => {
+      // A brand's sub-workspace is bound when it is provisioned, which can be
+      // waves before it is released — until then its prompts come from the legacy
+      // corpus, so the gate must fire ahead of the sub-workspace requirement.
+      isSerenityActiveForBrandStub.resolves(false);
+      const ctx = fakeContext({ url: promptsUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listPrompts(ctx);
+      expect(res.status).to.equal(404);
+      const body = await readBody(res);
+      expect(body.error).to.equal('serenityInactive');
+      expect(resolveBrandWorkspaceStub).to.not.have.been.called;
       expect(serviceStub.getPrompts).to.not.have.been.called;
     });
 
