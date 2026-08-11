@@ -17,9 +17,12 @@ import {
   parseScheduleConfig,
   getScheduleParams,
   buildExperimentMetadata,
+  isImpactMeasurementEligible,
 } from '../../src/support/geo-experiment-helper.js';
 
-const { TYPES, METADATA_KEYS, SCHEDULE_CONFIG_ENV_VAR } = GeoExperiment;
+const {
+  TYPES, METADATA_KEYS, SCHEDULE_CONFIG_ENV_VAR, PHASES, STATUSES,
+} = GeoExperiment;
 const ONSITE = TYPES.ONSITE_OPPORTUNITY_DEPLOYMENT;
 const OPP_TYPE = 'recover-content-visibility';
 
@@ -245,6 +248,40 @@ describe('geo-experiment-helper', () => {
       const base = { urls: ['https://example.com'] };
       buildExperimentMetadata(scheduleContext({}), base, ONSITE, OPP_TYPE);
       expect(base).to.not.have.key(METADATA_KEYS.SCHEDULE_CONFIG);
+    });
+  });
+
+  describe('isImpactMeasurementEligible', () => {
+    it('returns true for post_analysis_done, impact_measurement_started, and impact_measurement_done with status in_progress or completed', () => {
+      [
+        PHASES.POST_ANALYSIS_DONE,
+        PHASES.IMPACT_MEASUREMENT_STARTED,
+        PHASES.IMPACT_MEASUREMENT_DONE,
+      ].forEach((phase) => {
+        [STATUSES.IN_PROGRESS, STATUSES.COMPLETED].forEach((status) => {
+          const geoExperiment = { getPhase: () => phase, getStatus: () => status };
+          expect(isImpactMeasurementEligible(geoExperiment)).to.be.true;
+        });
+      });
+    });
+
+    it('returns false for a failed status at any eligible phase', () => {
+      [
+        PHASES.POST_ANALYSIS_DONE,
+        PHASES.IMPACT_MEASUREMENT_STARTED,
+        PHASES.IMPACT_MEASUREMENT_DONE,
+      ].forEach((phase) => {
+        const geoExperiment = { getPhase: () => phase, getStatus: () => STATUSES.FAILED };
+        expect(isImpactMeasurementEligible(geoExperiment)).to.be.false;
+      });
+    });
+
+    it('returns false for earlier phases', () => {
+      const geoExperiment = {
+        getPhase: () => PHASES.PRE_ANALYSIS_STARTED,
+        getStatus: () => STATUSES.GENERATING_BASELINE,
+      };
+      expect(isImpactMeasurementEligible(geoExperiment)).to.be.false;
     });
   });
 });
