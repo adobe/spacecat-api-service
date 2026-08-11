@@ -11,7 +11,7 @@
  */
 
 import {
-  ok, badRequest, forbidden, notFound, internalServerError,
+  ok, badRequest, forbidden, notFound, internalServerError, createResponse,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
@@ -23,6 +23,7 @@ import TokowakaClient, {
   CloudFrontEdgeClient,
 } from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
+import { hasSubpath } from '../../support/edge-routing-utils.js';
 import { auditHostname } from './llmo-utils.js';
 
 // CloudFormation templates use intrinsic-function tags (!Ref/!Sub/!GetAtt/...) that plain YAML
@@ -207,6 +208,9 @@ function LlmoCloudFrontController(ctx) {
     }
     if (!accessControlUtil.isLLMOAdministrator()) {
       return { error: forbidden(`Only LLMO administrators can ${action}`) };
+    }
+    if (hasSubpath(site.getBaseURL())) {
+      return { error: createResponse({ message: 'CDN auto-routing is not supported for subpath sites' }, 501) };
     }
     // Server-derived external ID (site's IMS org id); never accepted from the client. Matches what
     // bootstrap baked into the role's trust policy. See resolveConnectorExternalId.

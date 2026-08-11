@@ -60,6 +60,7 @@ export const INTERNAL_ROUTES = [
   // Geo experiment — write/delete endpoints used by DRS/UI
   'PATCH /sites/:siteId/geo-experiments/:geoExperimentId',
   'DELETE /sites/:siteId/geo-experiments/:geoExperimentId',
+  'POST /sites/:siteId/geo-experiments/:geoExperimentId/trigger-impact-measurement',
 
   // Slack - event subscriptions and commands use Slack's signature verification
   'GET /slack/events',
@@ -510,6 +511,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/experiments': 'experiment:read',
   'GET /sites/:siteId/geo-experiments': 'site:read',
   'GET /sites/:siteId/geo-experiments/:geoExperimentId': 'site:read', // detail includes prompts
+  'GET /sites/:siteId/geo-experiments/:geoExperimentId/results': 'site:read', // impact-measurement insights
   'GET /sites/:siteId/metrics/:metric/:source': 'site:read',
   'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl': 'site:read',
   'GET /sites/:siteId/latest-metrics': 'site:read',
@@ -526,6 +528,7 @@ const routeRequiredCapabilities = {
   'POST /sites/:siteId/opportunities': 'opportunity:write',
   'PATCH /sites/:siteId/opportunities/:opportunityId': 'opportunity:write',
   'DELETE /sites/:siteId/opportunities/:opportunityId': 'opportunity:write',
+  'POST /sites/:siteId/opportunities/:opportunityId/validate': 'opportunity:write',
 
   // Suggestions
   'GET /sites/:siteId/opportunities/:opportunityId/suggestions': 'suggestion:read',

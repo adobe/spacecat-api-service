@@ -25,6 +25,7 @@ scripts/*
 !scripts/serenity-rightsizing-sweep.mjs
 !scripts/generate-insomnia-collection.mjs
 !scripts/serenity-job-runner-ops.mjs
+!scripts/serenity-retype-backfill.mjs
 docs/index.html
 mcp-server.log
 # Scout MCP local config (per-developer, never commit)

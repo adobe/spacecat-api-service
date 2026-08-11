@@ -331,6 +331,8 @@ paths:
     $ref: './site-opportunities.yaml#/site-opportunities-by-status'
   /sites/{siteId}/opportunities/{opportunityId}:
     $ref: './site-opportunities.yaml#/site-opportunity'
+  /sites/{siteId}/opportunities/{opportunityId}/validate:
+    $ref: './site-opportunities.yaml#/site-opportunity-validate'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/paged/{limit}:
@@ -359,6 +361,10 @@ paths:
     $ref: './site-opportunities.yaml#/site-geo-experiments'
   /sites/{siteId}/geo-experiments/{geoExperimentId}:
     $ref: './site-opportunities.yaml#/site-geo-experiment'
+  /sites/{siteId}/geo-experiments/{geoExperimentId}/results:
+    $ref: './site-opportunities.yaml#/site-geo-experiment-results'
+  /sites/{siteId}/geo-experiments/{geoExperimentId}/trigger-impact-measurement:
+    $ref: './site-opportunities.yaml#/site-geo-experiment-trigger-impact-measurement'
   /sites/{siteId}/site-enrollments:
     $ref: './site-enrollments-api.yaml#/site-enrollments-by-site'
   /sites/{siteId}/user-activities:

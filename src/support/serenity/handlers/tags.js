@@ -21,7 +21,7 @@ import {
 } from '../validation.js';
 import { resolveProject } from '../subworkspace-projects.js';
 import {
-  ALL_DIMENSIONS, CLOSED_DIMENSIONS, SERVER_OWNED_DIMENSIONS,
+  ALL_DIMENSIONS, SERVER_OWNED_DIMENSIONS,
   isClosedDimension, isServerOwnedDimension, closedValuesOf, isDimensionRootName,
   MAX_TAG_NAME_LEN,
 } from '../prompt-tags.js';
@@ -160,9 +160,9 @@ function parseUpdateParentId(body) {
  * direct children of its root.
  *
  * The two flags answer two independent questions. `isClosed`
- * ({@link CLOSED_DIMENSIONS}) drives VOCABULARY validation: a closed value's
+ * ({@link isClosedDimension}) drives VOCABULARY validation: a closed value's
  * `name` must be one of that dimension's fixed values ({@link closedValuesOf}).
- * `isServerOwned` ({@link SERVER_OWNED_DIMENSIONS}) drives the WRITE GUARD and
+ * `isServerOwned` ({@link isServerOwnedDimension}) drives the WRITE GUARD and
  * CREATE SEMANTICS: it forbids a `parentId` (server-owned values hang directly off
  * their root) and routes the create through resolve-or-create. `source` is
  * server-owned yet open — a `parentId` is refused and the value is resolved-or-
@@ -657,13 +657,19 @@ async function resolveUpdateTargets(
  * requested one.
  *
  * Three targets are refused. A DIMENSION ROOT is not editable — the root level is
- * reserved for the four roots, and renaming or moving one would leave its whole
- * subtree without a dimension. A CLOSED dimension's value is not editable either:
- * the vocabulary is fixed, and since every resolve-or-create keys on the bare name
- * under the root, renaming `branded` would make the next prompt write mint a
- * second `branded` and silently orphan every prompt still carrying the first. An
- * UNRESOLVABLE id is refused rather than forwarded: without the target's current
- * parent there is no body that preserves it, and guessing would promote the tag.
+ * reserved for the registered dimension roots ({@link ALL_DIMENSIONS}), and
+ * renaming or moving one would leave its whole subtree without a dimension. A
+ * SERVER-OWNED dimension's value ({@link SERVER_OWNED_DIMENSIONS}) is not editable
+ * either: its vocabulary is authored by the server, and since every
+ * resolve-or-create keys on the bare name under the root, renaming a value would
+ * not move it, it would hide it — the next server write then mints a second value
+ * under the same root and every prompt still carrying the first splits across two
+ * ids for one dimension value. The guard therefore keys on the OWNERSHIP axis
+ * ({@link isServerOwnedDimension}), not the open/closed vocabulary axis: `source`
+ * is open yet server-owned, and became reachable here once its root seeded live
+ * projects (LLMO-6665). An UNRESOLVABLE id is refused rather than forwarded: without
+ * the target's current parent there is no body that preserves it, and guessing would
+ * promote the tag.
  *
  * @param {{ value: string, parentId: string | undefined }} parsed
  * @param {{ kind: 'root' | 'descendant' | 'unknown', parentId: string | null,
@@ -684,11 +690,9 @@ function buildUpdatePayload(parsed, target, tagId) {
     err.code = ERROR_CODES.TAG_NOT_FOUND;
     throw err;
   }
-  if ((/** @type {readonly string[]} */ (CLOSED_DIMENSIONS)).includes(
-    /** @type {string} */ (target.rootName),
-  )) {
+  if (isServerOwnedDimension(/** @type {string} */ (target.rootName))) {
     throw new ErrorWithStatusCode(
-      `a value of the closed "${target.rootName}" dimension cannot be renamed or re-parented`,
+      `a value of the server-owned "${target.rootName}" dimension cannot be renamed or re-parented`,
       400,
     );
   }

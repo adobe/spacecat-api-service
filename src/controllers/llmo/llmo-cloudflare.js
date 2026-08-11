@@ -17,6 +17,7 @@ import { hasText, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import CloudflareClient from '@adobe/spacecat-shared-cloudflare-client';
 import AccessControlUtil from '../../support/access-control-util.js';
+import { hasSubpath } from '../../support/edge-routing-utils.js';
 import { auditHostname } from './llmo-utils.js';
 import {
   deriveWorkerName, hostInSiteDomain, registrableDomain, routePatternHost, routePatternHostGlob,
@@ -144,7 +145,9 @@ function LlmoCloudflareController(ctx) {
     if (!accessControlUtil.isLLMOAdministrator()) {
       return forbidden('Only LLMO administrators can access Cloudflare onboarding endpoints');
     }
-
+    if (hasSubpath(site.getBaseURL())) {
+      return createResponse({ message: 'CDN auto-routing is not supported for subpath sites' }, 501);
+    }
     return { site };
   };
 
