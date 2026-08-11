@@ -1902,14 +1902,28 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Tier required');
   });
 
-  it('returns bad request when tier is not customer-visible on getAllByEnrollmentAndTier', async () => {
+  it('returns bad request when tier is not a known Entitlement tier on getAllByEnrollmentAndTier', async () => {
     const result = await sitesController.getAllByEnrollmentAndTier({
-      params: { tier: 'PRE_ONBOARD' },
+      params: { tier: 'NOT_A_TIER' },
     });
     const error = await result.json();
 
     expect(result.status).to.equal(400);
     expect(error.message).to.match(/^Tier must be one of:/);
+  });
+
+  it('allows PRE_ONBOARD (internal-only, not customer-visible) since this endpoint is admin-gated', async () => {
+    mockDataAccess.Site.allByEnrollmentAndTier.resolves(sites);
+
+    const result = await sitesController.getAllByEnrollmentAndTier({
+      params: { tier: 'PRE_ONBOARD' },
+    });
+    const body = await result.json();
+
+    expect(result.status).to.equal(200);
+    expect(mockDataAccess.Site.allByEnrollmentAndTier)
+      .to.have.been.calledOnceWithExactly('PRE_ONBOARD', undefined);
+    expect(body.sites).to.be.an('array').with.lengthOf(2);
   });
 
   it('returns bad request when productCode is invalid on getAllByEnrollmentAndTier', async () => {
@@ -1922,6 +1936,32 @@ describe('Sites Controller', () => {
     expect(result.status).to.equal(400);
     expect(error.message).to.match(/^productCode must be one of:/);
     expect(mockDataAccess.Site.allByEnrollmentAndTier).to.have.not.been.called;
+  });
+
+  it('projects sites by enrollment tier when ?fields= is passed', async () => {
+    mockDataAccess.Site.allByEnrollmentAndTier.resolves(sites);
+
+    const result = await sitesController.getAllByEnrollmentAndTier({
+      params: { tier: 'PAID' },
+      data: { fields: 'baseURL' },
+    });
+    const body = await result.json();
+
+    expect(result.status).to.equal(200);
+    expect(Object.keys(body.sites[0]).sort()).to.deep.equal(['baseURL', 'id']);
+  });
+
+  it('returns 400 when ?fields= matches no known field on getAllByEnrollmentAndTier', async () => {
+    mockDataAccess.Site.allByEnrollmentAndTier.resolves(sites);
+
+    const result = await sitesController.getAllByEnrollmentAndTier({
+      params: { tier: 'PAID' },
+      data: { fields: 'nope' },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'Invalid fields: nope');
   });
 
   it('returns bad request if audit type is not provided', async () => {
@@ -6872,6 +6912,44 @@ describe('Sites Controller', () => {
       context.pathInfo.headers = {};
       context.data = {};
       const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.include('Product code required');
+    });
+
+    it('defaults a missing x-product to ASO under SKIP_AUTH (local dev) so resolution proceeds', async () => {
+      // Local-dev-only affordance: with auth skipped, a missing x-product header
+      // must NOT short-circuit with "Product code required" - it defaults to ASO
+      // and resolution continues (failing here at the next guard instead).
+      const localController = SitesControllerMocked(
+        context,
+        loggerStub,
+        { ...context.env, SKIP_AUTH: 'true' },
+      );
+      context.pathInfo.headers = {};
+      context.data = {};
+
+      const response = await localController.resolveSite(context);
+
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.not.include('Product code required');
+      expect(body.message).to.include('Either organizationId or imsOrg must be provided');
+    });
+
+    it('still requires x-product when SKIP_AUTH is not exactly "true"', async () => {
+      // The default is strictly gated on SKIP_AUTH === 'true'; any other value
+      // (i.e. every deployed env) keeps enforcing the header contract.
+      const nonLocalController = SitesControllerMocked(
+        context,
+        loggerStub,
+        { ...context.env, SKIP_AUTH: 'false' },
+      );
+      context.pathInfo.headers = {};
+      context.data = {};
+
+      const response = await nonLocalController.resolveSite(context);
 
       expect(response.status).to.equal(400);
       const body = await response.json();

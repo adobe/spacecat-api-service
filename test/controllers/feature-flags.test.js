@@ -33,6 +33,24 @@ describe('FeatureFlagsController', () => {
   let mockHasAdmin;
   let baseCtx;
 
+  /**
+   * Wires `postgrestClient.from` for a flag write: the org-row lookup finds
+   * nothing, so the write lands as an insert that resolves to `row`.
+   *
+   * @param {object} row - The row the write returns.
+   * @returns {object} The `insert` stub, for asserting the written payload.
+   */
+  function stubFlagWrite(row) {
+    const eq3 = sandbox.stub().resolves({ data: [], error: null });
+    const eq2 = sandbox.stub().returns({ eq: eq3 });
+    const eq1 = sandbox.stub().returns({ eq: eq2 });
+    const select = sandbox.stub().returns({ eq: eq1 });
+    const single = sandbox.stub().resolves({ data: row, error: null });
+    const insert = sandbox.stub().returns({ select: sandbox.stub().returns({ single }) });
+    mockDataAccess.services.postgrestClient.from = sandbox.stub().returns({ select, insert });
+    return insert;
+  }
+
   beforeEach(() => {
     sandbox.restore();
 
@@ -281,10 +299,7 @@ describe('FeatureFlagsController', () => {
         updated_at: 'u',
         updated_by: 'user-1',
       };
-      const singleStub = sandbox.stub().resolves({ data: cleanRow, error: null });
-      const selectStub = sandbox.stub().returns({ single: singleStub });
-      const upsertStub = sandbox.stub().returns({ select: selectStub });
-      mockDataAccess.services.postgrestClient.from = sandbox.stub().returns({ upsert: upsertStub });
+      const insertStub = stubFlagWrite(cleanRow);
 
       const res = await controller.putByOrganizationProductAndName({
         ...baseCtx,
@@ -294,7 +309,7 @@ describe('FeatureFlagsController', () => {
       expect(res.status).to.equal(200);
       const body = await res.json();
       expect(body.flagValue).to.equal(true);
-      expect(upsertStub.firstCall.args[0]).to.deep.include({
+      expect(insertStub.firstCall.args[0]).to.deep.include({
         flag_name: 'beta',
         flag_value: true,
         updated_by: 'user-1',
@@ -331,17 +346,14 @@ describe('FeatureFlagsController', () => {
         updated_at: 'u',
         updated_by: 'sub-9',
       };
-      const singleStub = sandbox.stub().resolves({ data: cleanRow, error: null });
-      const selectStub = sandbox.stub().returns({ single: singleStub });
-      const upsertStub = sandbox.stub().returns({ select: selectStub });
-      mockDataAccess.services.postgrestClient.from = sandbox.stub().returns({ upsert: upsertStub });
+      const insertStub = stubFlagWrite(cleanRow);
       mockDataAccess.Organization.findById = sandbox.stub().resolves(mockOrganization);
 
       await controller.putByOrganizationProductAndName({
         ...baseCtx,
         params: { organizationId, product: 'LLMO', flagName: 'gamma' },
       });
-      expect(upsertStub.firstCall.args[0].updated_by).to.equal('sub-9');
+      expect(insertStub.firstCall.args[0].updated_by).to.equal('sub-9');
     });
 
     it('reads profile from authInfo.profile when getProfile is absent', async () => {
@@ -371,17 +383,14 @@ describe('FeatureFlagsController', () => {
         updated_at: 'u',
         updated_by: 'plain-profile',
       };
-      const singleStub = sandbox.stub().resolves({ data: cleanRow, error: null });
-      const selectStub = sandbox.stub().returns({ single: singleStub });
-      const upsertStub = sandbox.stub().returns({ select: selectStub });
-      mockDataAccess.services.postgrestClient.from = sandbox.stub().returns({ upsert: upsertStub });
+      const insertStub = stubFlagWrite(cleanRow);
       mockDataAccess.Organization.findById = sandbox.stub().resolves(mockOrganization);
 
       await controller.putByOrganizationProductAndName({
         ...baseCtx,
         params: { organizationId, product: 'LLMO', flagName: 'eta' },
       });
-      expect(upsertStub.firstCall.args[0].updated_by).to.equal('plain-profile');
+      expect(insertStub.firstCall.args[0].updated_by).to.equal('plain-profile');
     });
 
     it('uses service fallback for updatedBy when profile has no ids', async () => {
@@ -414,17 +423,14 @@ describe('FeatureFlagsController', () => {
         updated_at: 'u',
         updated_by: 'spacecat-api-service',
       };
-      const singleStub = sandbox.stub().resolves({ data: cleanRow, error: null });
-      const selectStub = sandbox.stub().returns({ single: singleStub });
-      const upsertStub = sandbox.stub().returns({ select: selectStub });
-      mockDataAccess.services.postgrestClient.from = sandbox.stub().returns({ upsert: upsertStub });
+      const insertStub = stubFlagWrite(cleanRow);
       mockDataAccess.Organization.findById = sandbox.stub().resolves(mockOrganization);
 
       await controller.putByOrganizationProductAndName({
         ...baseCtx,
         params: { organizationId, product: 'LLMO', flagName: 'delta' },
       });
-      expect(upsertStub.firstCall.args[0].updated_by).to.equal('spacecat-api-service');
+      expect(insertStub.firstCall.args[0].updated_by).to.equal('spacecat-api-service');
     });
 
     it('returns 500 when upsert throws', async () => {
@@ -458,10 +464,7 @@ describe('FeatureFlagsController', () => {
         updated_at: 'u',
         updated_by: 'user-1',
       };
-      const singleStub = sandbox.stub().resolves({ data: cleanRow, error: null });
-      const selectStub = sandbox.stub().returns({ single: singleStub });
-      const upsertStub = sandbox.stub().returns({ select: selectStub });
-      mockDataAccess.services.postgrestClient.from = sandbox.stub().returns({ upsert: upsertStub });
+      const insertStub = stubFlagWrite(cleanRow);
 
       const res = await controller.deleteByOrganizationProductAndName({
         ...baseCtx,
@@ -471,7 +474,7 @@ describe('FeatureFlagsController', () => {
       expect(res.status).to.equal(200);
       const body = await res.json();
       expect(body.flagValue).to.equal(false);
-      expect(upsertStub.firstCall.args[0].flag_value).to.equal(false);
+      expect(insertStub.firstCall.args[0].flag_value).to.equal(false);
     });
 
     it('returns 500 when upsert throws', async () => {

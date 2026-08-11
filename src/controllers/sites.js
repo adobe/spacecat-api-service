@@ -688,11 +688,17 @@ function SitesController(ctx, log, env) {
 
   /**
    * Gets all sites enrolled at a given entitlement tier (e.g. 'PAID',
-   * 'FREE_TRIAL', 'PLG'). Optionally narrows the result to a single product
-   * code via the `productCode` query parameter (e.g. 'LLMO').
+   * 'FREE_TRIAL', 'PLG', 'PRE_ONBOARD'). Optionally narrows the result to a
+   * single product code via the `productCode` query parameter (e.g. 'LLMO').
+   *
+   * Accepts any Entitlement.TIERS value, not just CUSTOMER_VISIBLE_TIERS -
+   * this endpoint is already admin-gated below, so PRE_ONBOARD (internal-only,
+   * not customer-visible) is a legitimate admin query, e.g. to find sites
+   * still awaiting onboarding.
    *
    * Returns the full result set (no pagination) - acceptable for a
-   * bounded admin-only use case. Sites are ordered by ID.
+   * bounded admin-only use case. Sites are ordered by ID. Supports the
+   * `fields` query parameter to project a subset of fields per site.
    *
    * @param {object} context - Context of the request.
    * @returns {Promise<Response>} Sites response.
@@ -707,8 +713,9 @@ function SitesController(ctx, log, env) {
     if (!hasText(tier)) {
       return badRequest('Tier required');
     }
-    if (!CUSTOMER_VISIBLE_TIERS.includes(tier)) {
-      return badRequest(`Tier must be one of: ${CUSTOMER_VISIBLE_TIERS.join(', ')}`);
+    const validTiers = Object.values(EntitlementModel.TIERS);
+    if (!validTiers.includes(tier)) {
+      return badRequest(`Tier must be one of: ${validTiers.join(', ')}`);
     }
     const validProductCodes = Object.values(EntitlementModel.PRODUCT_CODES);
     if (productCode !== undefined && !validProductCodes.includes(productCode)) {
@@ -718,8 +725,14 @@ function SitesController(ctx, log, env) {
     const all = (await Site.allByEnrollmentAndTier(tier, productCode))
       .sort((a, b) => a.getId().localeCompare(b.getId()));
 
+    const sites = all.map((site) => SiteDto.toJSON(site));
+    const { list, error } = applyFieldProjection(sites, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+
     return ok({
-      sites: all.map((site) => SiteDto.toJSON(site)),
+      sites: list,
     });
   };
 
@@ -1835,7 +1848,16 @@ function SitesController(ctx, log, env) {
     } = context.data;
     const { pathInfo } = context;
     const X_PRODUCT_HEADER = 'x-product';
-    const productCode = pathInfo.headers[X_PRODUCT_HEADER];
+    let productCode = pathInfo.headers[X_PRODUCT_HEADER];
+    // Local-dev affordance (SKIP_AUTH only): the local UI harness may run a UI
+    // build that predates the x-product requirement on /sites-resolve and so omits
+    // the header. When auth is skipped (local only; SKIP_AUTH is never 'true' in a
+    // deployed env), default the product to ASO so the local UI ⇄ local api-service
+    // e2e can resolve a site. Prod keeps enforcing the header contract below.
+    if (!hasText(productCode) && env.SKIP_AUTH === 'true') {
+      productCode = ASO_PRODUCT_CODE;
+      log.info('[resolveSite] SKIP_AUTH local-dev: defaulting missing x-product to ASO');
+    }
     if (!hasText(productCode)) {
       return badRequest('Product code required in x-product header');
     }

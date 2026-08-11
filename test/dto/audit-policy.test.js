@@ -11,7 +11,9 @@
  */
 
 import { expect } from 'chai';
-import { AuditPolicyDto, AuditPolicyRevisionDto } from '../../src/dto/audit-policy.js';
+import {
+  AuditPolicyDto, AuditPolicyRevisionDto, AuditScopePageDto,
+} from '../../src/dto/audit-policy.js';
 
 const SITE_ID = '7b2e3f9c-0000-4000-8000-000000000001';
 
@@ -206,5 +208,38 @@ describe('AuditPolicyDto', () => {
     const dto = AuditPolicyRevisionDto.toJSON(row);
     expect(dto.effectiveAt).to.equal('2026-01-01T00:00:00.123Z');
     expect(dto.supersededAt).to.equal(null);
+  });
+
+  it('scope page toJSON maps snake_case row to camelCase', () => {
+    const row = {
+      site_id: SITE_ID,
+      url: 'https://x/a',
+      url_path: '/a',
+      discovery_source: ['sitemap'],
+      last_modified: '2026-01-01T00:00:00Z',
+      lifecycle_state: 'active',
+    };
+    const dto = AuditScopePageDto.toJSON(row);
+    expect(dto).to.deep.equal({
+      url: 'https://x/a',
+      urlPath: '/a',
+      discoverySource: ['sitemap'],
+      lastModified: '2026-01-01T00:00:00.000Z',
+      lifecycleState: 'active',
+    });
+    expect(dto).to.not.have.any.keys('site_id', 'url_path', 'discovery_source', 'last_modified', 'lifecycle_state');
+  });
+
+  it('scope page toJSON normalizes raw Postgres timestamptz text to Z-suffixed ISO8601', () => {
+    const row = {
+      site_id: SITE_ID,
+      url: 'https://x/a',
+      url_path: '/a',
+      discovery_source: ['manual'],
+      last_modified: '2026-01-01T00:00:00.123456+00:00',
+      lifecycle_state: 'active',
+    };
+    const dto = AuditScopePageDto.toJSON(row);
+    expect(dto.lastModified).to.equal('2026-01-01T00:00:00.123Z');
   });
 });

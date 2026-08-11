@@ -227,6 +227,40 @@ async function revokeGrants(SuggestionGrant, grantIds) {
   }
 }
 
+/**
+ * Revokes outstanding grants for an opportunity's suggestions that are still
+ * in NEW status (i.e. never applied/approved) — used when an opportunity
+ * moves to a terminal RESOLVED state so a superseding opportunity of the
+ * same type doesn't inherit stale, un-revoked grants (SITES-49175).
+ *
+ * Only NEW suggestions are considered, so grants tied to suggestions in any
+ * other status (APPROVED, FIXED, etc.) are left untouched.
+ *
+ * @param {Object} dataAccess - Data access collections.
+ * @param {Object} opportunity - Opportunity model (getId()).
+ * @returns {Promise<void>}
+ */
+export async function revokeExistingGrants(dataAccess, opportunity) {
+  const { Suggestion, SuggestionGrant } = dataAccess ?? {};
+  const opptyId = opportunity?.getId();
+
+  if (!Suggestion || !SuggestionGrant || !opptyId) {
+    return;
+  }
+
+  const newSuggestions = await Suggestion
+    .allByOpportunityIdAndStatus(opptyId, SuggestionModel.STATUSES.NEW);
+  const newSuggestionIds = newSuggestions.map((s) => s.getId());
+
+  if (!newSuggestionIds.length) {
+    return;
+  }
+
+  const splitResult = await SuggestionGrant.splitSuggestionsByGrantStatus(newSuggestionIds);
+  const { grantIds } = splitResult ?? {};
+  await revokeGrants(SuggestionGrant, grantIds);
+}
+
 const STALE_STATUSES = new Set([
   SuggestionModel.STATUSES.OUTDATED,
   SuggestionModel.STATUSES.REJECTED,

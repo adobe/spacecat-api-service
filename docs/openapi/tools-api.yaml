@@ -230,6 +230,7 @@ api-keys:
       including it in the x-api-key header.
     operationId: createApiKey
     security:
+      - session_token: [ ]
       - ims_key: [ ]
     requestBody:
       content:
@@ -267,6 +268,7 @@ api-keys:
       This endpoint can be used to list all the API keys created by the client.
     operationId: getApiKeys
     security:
+      - session_token: [ ]
       - ims_key: [ ]
     parameters:
       - in: header
@@ -302,6 +304,7 @@ api-key-deletion:
       will no longer be valid for authentication. Only keys created by this IMS client can be deleted by it.
     operationId: deleteApiKey
     security:
+      - session_token: [ ]
       - ims_key: [ ]
     parameters:
       - $ref: './parameters.yaml#/apiKeyId'

@@ -18,6 +18,7 @@ import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import CloudflareClient from '@adobe/spacecat-shared-cloudflare-client';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { hasSubpath } from '../../support/edge-routing-utils.js';
+import { auditHostname } from './llmo-utils.js';
 import {
   deriveWorkerName, hostInSiteDomain, registrableDomain, routePatternHost, routePatternHostGlob,
   routePatternsOverlap,
@@ -162,7 +163,9 @@ function LlmoCloudflareController(ctx) {
    */
   const cfErrorResponse = (error, action, context, fields = {}) => {
     const message = error?.message || String(error);
-    log.error(auditLine(context, 'cf-call', 'error', { op: action, ...fields, error: message }));
+    log.error(auditLine(context, 'cf-call', 'error', {
+      severity: 'error', op: action, ...fields, error: message,
+    }));
     if (/returned 401\b/.test(message)) {
       return unauthorized('Cloudflare authentication failed');
     }
@@ -223,17 +226,27 @@ function LlmoCloudflareController(ctx) {
    * Builds a handler for a parameter-less Cloudflare list call (accounts, zones, ...): runs
    * access control + token resolution, invokes `cfClient[method]()`, and maps failures.
    */
-  const cfListProxy = (method, action) => async (context) => {
+  const cfListProxy = (method, action, auditAction) => async (context) => {
     const result = await getSiteAndCheckAccess(context);
     if (result.status) {
       return result;
     }
+    const { site } = result;
     const { client, error } = requireCfClient(context);
     if (error) {
       return error;
     }
     try {
-      return ok(await client[method]());
+      const listed = await client[method]();
+      // Runs with the customer's own Cloudflare API token, so this is the earliest server-side
+      // evidence that a Cloudflare onboarding is under way — every preceding wizard step is
+      // client-side only and `deploy-worker` is the last step. Onboarding alerts key off this.
+      log.info(auditLine(context, auditAction, 'ok', {
+        siteId: site.getId(),
+        host: auditHostname(site),
+        count: Array.isArray(listed) ? listed.length : undefined,
+      }));
+      return ok(listed);
     } catch (e) {
       return cfErrorResponse(e, action, context, { siteId: context.params?.siteId });
     }
@@ -258,7 +271,7 @@ function LlmoCloudflareController(ctx) {
   };
 
   // GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts
-  const listAccounts = cfListProxy('listAccounts', 'account listing');
+  const listAccounts = cfListProxy('listAccounts', 'account listing', 'list-accounts');
 
   /**
    * GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones?accountId=<id>
@@ -295,6 +308,15 @@ function LlmoCloudflareController(ctx) {
       const matching = (zones || []).filter(
         (zone) => hasText(zone?.name) && !!siteApex && registrableDomain(zone.name) === siteApex,
       );
+      // matched=0 with listed>0 means the token works but no zone is on the site's apex — the
+      // most common Cloudflare onboarding dead end, and invisible without this line.
+      log.info(auditLine(context, 'list-zones', 'ok', {
+        siteId: site.getId(),
+        host: auditHostname(site),
+        accountId,
+        listed: (zones || []).length,
+        matched: matching.length,
+      }));
       return ok(matching);
     } catch (e) {
       return cfErrorResponse(e, 'zone listing', context, {
@@ -371,12 +393,18 @@ function LlmoCloudflareController(ctx) {
       llmoApiKey = await getLlmoApiKey(site, context);
     } catch (e) {
       log.error(auditLine(context, 'deploy-worker', 'metaconfig-failed', {
-        siteId, accountId, scriptName, error: e.message,
+        severity: 'error',
+        siteId,
+        accountId,
+        scriptName,
+        error: e.message,
       }));
       return createResponse({ message: 'Failed to fetch site metaconfig' }, 502);
     }
     if (!hasText(llmoApiKey)) {
-      log.error(auditLine(context, 'deploy-worker', 'no-api-key', { siteId, accountId, scriptName }));
+      log.error(auditLine(context, 'deploy-worker', 'no-api-key', {
+        severity: 'error', siteId, accountId, scriptName,
+      }));
       return internalServerError('LLMO API key not configured for this site');
     }
 
@@ -438,6 +466,7 @@ function LlmoCloudflareController(ctx) {
       // log the partial state explicitly and return a structured response the caller can
       // act on (re-deploy to set the secret).
       log.error(auditLine(context, 'deploy-worker', 'secret-failed', {
+        severity: 'error',
         siteId,
         accountId,
         scriptName,
