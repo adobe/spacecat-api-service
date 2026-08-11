@@ -1,3 +1,11 @@
+## [1.737.1](https://github.com/adobe/spacecat-api-service/compare/v1.737.0...v1.737.1) (2026-08-11)
+
+
+### Bug Fixes
+
+* **serenity:** classify branded prompts in scripts without word spaces ([#3028](https://github.com/adobe/spacecat-api-service/issues/3028)) ([c0f43c9](https://github.com/adobe/spacecat-api-service/commit/c0f43c95477d0d04826949e86ba36efcd17fdeb9)), closes [Hi#level](https://github.com/Hi/issues/level)
+* **serenity:** guard PATCH on the server-owned source dimension (LLMO-6665) ([#3025](https://github.com/adobe/spacecat-api-service/issues/3025)) ([47123e4](https://github.com/adobe/spacecat-api-service/commit/47123e4284b219942d3583d9720a0ac5e0ff83ae))
+
 # [1.737.0](https://github.com/adobe/spacecat-api-service/compare/v1.736.0...v1.737.0) (2026-08-11)
 
 
