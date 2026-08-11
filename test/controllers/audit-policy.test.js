@@ -1075,9 +1075,9 @@ describe('AuditPolicyController — listRevisions updatedBy identity resolution'
   });
 });
 
-describe('AuditPolicyController — E4-E6 scope-read 501 stubs', () => {
+describe('AuditPolicyController — E6 scope-read 501 stub', () => {
   afterEach(() => sinon.restore());
-  for (const fn of ['getScopeSummary', 'getScopeSections']) {
+  for (const fn of ['getScopeSections']) {
     it(`${fn} returns 501 for an authorized caller`, async () => {
       const controller = loadController();
       const res = await controller[fn](buildContext());
@@ -1089,6 +1089,99 @@ describe('AuditPolicyController — E4-E6 scope-read 501 stubs', () => {
       expect(res.status).to.equal(403);
     });
   }
+});
+
+describe('AuditPolicyController — E5 getScopeSummary', () => {
+  afterEach(() => sinon.restore());
+
+  const buildRow = () => ({
+    in_list: 1400,
+    audited: 950,
+    excluded: 120,
+    lifecycle_suppressed: 80,
+    kept_stale_detection: 5,
+    not_yet_scanned: 245,
+    budget: 5000,
+    strategy_name: 'tiered',
+  });
+
+  // Real PostgREST client chaining: select/eq are synchronous and chainable (returnsThis);
+  // only the terminal maybeSingle() call resolves { data, error } — mirrors the E4
+  // getScopePages fake client above.
+  function buildSummaryClient({ row = null, error = null } = {}) {
+    const maybeSingleSpy = sinon.stub().resolves({ data: row, error });
+    const eqSpy = sinon.stub().returns({ maybeSingle: maybeSingleSpy });
+    const client = {
+      from: () => ({ select: () => ({ eq: eqSpy }) }),
+      rpc: sinon.stub(),
+    };
+    return { client, eqSpy, maybeSingleSpy };
+  }
+
+  it('returns the DTO-mapped summary for the site', async () => {
+    const { client } = buildSummaryClient({ row: buildRow() });
+    const controller = loadController();
+    const res = await controller.getScopeSummary(buildContext({ client }));
+    expect(res.status).to.equal(200);
+    const body = await res.json();
+    expect(body).to.deep.equal({
+      inList: 1400,
+      audited: 950,
+      excluded: 120,
+      lifecycleSuppressed: 80,
+      keptStaleDetection: 5,
+      notYetScanned: 245,
+      budget: 5000,
+      strategyName: 'tiered',
+    });
+    expect(body.inList).to.equal(
+      body.audited + body.excluded + body.lifecycleSuppressed
+      + body.keptStaleDetection + body.notYetScanned,
+    );
+  });
+
+  it('applies the site_id filter', async () => {
+    const { client, eqSpy } = buildSummaryClient({ row: buildRow() });
+    const controller = loadController();
+    await controller.getScopeSummary(buildContext({ client }));
+    expect(eqSpy).to.have.been.calledWith('site_id', SITE_ID);
+  });
+
+  it('falls back to the zeroed default document when no row exists for the site', async () => {
+    const { client } = buildSummaryClient({ row: null });
+    const controller = loadController();
+    const res = await controller.getScopeSummary(buildContext({ client }));
+    expect(res.status).to.equal(200);
+    const body = await res.json();
+    expect(body).to.deep.equal({
+      inList: 0,
+      audited: 0,
+      excluded: 0,
+      lifecycleSuppressed: 0,
+      keptStaleDetection: 0,
+      notYetScanned: 0,
+      budget: 5000,
+      strategyName: 'tiered',
+    });
+  });
+
+  it('returns 403 when the caller fails read authorization, without querying the view', async () => {
+    const { client } = buildSummaryClient({ row: buildRow() });
+    const fromSpy = sinon.spy(client, 'from');
+    const controller = loadController(sinon.stub().resolves(false));
+    const res = await controller.getScopeSummary(buildContext({ client }));
+    expect(res.status).to.equal(403);
+    expect(fromSpy).to.not.have.been.called;
+  });
+
+  it('returns 500 and logs the PostgREST error when the read fails', async () => {
+    const { client } = buildSummaryClient({ row: null, error: { code: '500', message: 'boom' } });
+    const controller = loadController();
+    const ctx = buildContext({ client });
+    const res = await controller.getScopeSummary(ctx);
+    expect(ctx.log.error).to.have.been.calledWith(sinon.match(/500.*boom/));
+    expect(res.status).to.equal(500);
+  });
 });
 
 describe('AuditPolicyController — E4 getScopePages', () => {

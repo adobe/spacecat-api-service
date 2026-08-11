@@ -16,11 +16,14 @@ import {
 import { hasText, isObject, isValidUUID } from '@adobe/spacecat-shared-utils';
 import AccessControlUtil from '../support/access-control-util.js';
 import { UnauthorizedProductError } from '../support/errors.js';
-import { AuditPolicyDto, AuditPolicyRevisionDto, AuditScopePageDto } from '../dto/audit-policy.js';
+import {
+  AuditPolicyDto, AuditPolicyRevisionDto, AuditScopePageDto, AuditScopeSummaryDto,
+} from '../dto/audit-policy.js';
 
 const POLICY_TABLE = 'audit_policy';
 const REVISION_TABLE = 'audit_policy_revision';
 const SCOPE_PAGES_VIEW = 'v_audit_scope_pages';
+const SCOPE_SUMMARY_VIEW = 'v_audit_scope_summary';
 const UPSERT_RPC = 'wrpc_upsert_audit_policy';
 
 // getAuthor() stamps updated_by with an IMS user GUID for most auth paths (profile.email is
@@ -409,6 +412,21 @@ export default function AuditPolicyController() {
     return ok({ items, ...(nextCursor ? { cursor: nextCursor } : {}) });
   }
 
+  async function getScopeSummary(context) {
+    const auth = await authorizeRead(context);
+    if (auth.error) {
+      return auth.error;
+    }
+    const { siteId, client } = auth;
+    const { data, error } = await client
+      .from(SCOPE_SUMMARY_VIEW).select('*').eq('site_id', siteId).maybeSingle();
+    if (error) {
+      context.log?.error?.(`audit-policy getScopeSummary failed: ${error.code} ${error.message}`);
+      return internalServerError('Failed to read audit scope summary');
+    }
+    return ok(data ? AuditScopeSummaryDto.toJSON(data) : AuditScopeSummaryDto.defaultDocument());
+  }
+
   async function notImplemented(context) {
     const auth = await authorizeRead(context);
     if (auth.error) {
@@ -416,7 +434,6 @@ export default function AuditPolicyController() {
     }
     return createResponse({ message: 'Not implemented yet.' }, 501);
   }
-  const getScopeSummary = notImplemented;
   const getScopeSections = notImplemented;
 
   return {

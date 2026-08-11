@@ -1,9 +1,9 @@
 # Audit Policy CRUD + scope reconciliation stubs.
 # `audit-policy` / `audit-policy-revisions` are fully implemented (SITES-47301
 # write-seam + SITES-47306 contract). `audit-scope-pages` is fully implemented
-# (B4, SITES-46351, page list). `audit-scope-summary` / `audit-scope-sections`
-# are 501 stubs pending B7 (SITES-47089, reconciliation counts + section
-# aggregation).
+# (B4, SITES-46351, page list). `audit-scope-summary` is fully implemented
+# (B7, SITES-47089, R8 reconciliation counts). `audit-scope-sections` is a
+# 501 stub pending the rest of B7 (SITES-47089, R14 section aggregation).
 
 audit-policy:
   parameters:
@@ -273,12 +273,32 @@ audit-scope-summary:
     tags:
       - site
       - audit policy
-    summary: |
-      Not implemented yet. R8 reconciliation counts (B7 / SITES-47089).
+    summary: R8 reconciliation counts (B7 / SITES-47089)
+    description: >-
+      No query parameters. Example request: `GET
+      /sites/7b2e3f9c-0000-4000-8000-000000000001/audit-scope/summary`.
     operationId: getAuditScopeSummary
     responses:
-      '501':
-        description: Not implemented yet.
+      '200':
+        description: Scope reconciliation summary
+        content:
+          application/json:
+            schema:
+              $ref: '#/AuditScopeSummary'
+            example:
+              inList: 1400
+              audited: 950
+              excluded: 120
+              lifecycleSuppressed: 80
+              keptStaleDetection: 5
+              notYetScanned: 245
+              budget: 5000
+              strategyName: tiered
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '404': { $ref: './responses.yaml#/404-site-not-found-with-id' }
+      '500': { $ref: './responses.yaml#/500' }
     security:
       - session_token: [ ]
       - scoped_api_key: [ ]
@@ -382,3 +402,16 @@ AuditScopePageList:
   properties:
     items: { type: array, items: { $ref: '#/AuditScopePage' } }
     cursor: { type: string }
+
+AuditScopeSummary:
+  type: object
+  required: [inList, audited, excluded, lifecycleSuppressed, keptStaleDetection, notYetScanned, budget, strategyName]
+  properties:
+    inList: { type: integer, description: 'Total pages in the inventory list; equals the sum of the five buckets below.' }
+    audited: { type: integer }
+    excluded: { type: integer }
+    lifecycleSuppressed: { type: integer }
+    keptStaleDetection: { type: integer }
+    notYetScanned: { type: integer }
+    budget: { type: integer }
+    strategyName: { type: string, enum: [tiered] }

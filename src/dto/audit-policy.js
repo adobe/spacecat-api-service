@@ -94,3 +94,30 @@ export const AuditScopePageDto = {
     };
   },
 };
+
+export const AuditScopeSummaryDto = {
+  toJSON(row) {
+    return {
+      inList: row.in_list,
+      audited: row.audited,
+      excluded: row.excluded,
+      lifecycleSuppressed: row.lifecycle_suppressed,
+      keptStaleDetection: row.kept_stale_detection,
+      notYetScanned: row.not_yet_scanned,
+      budget: row.budget,
+      strategyName: row.strategy_name,
+    };
+  },
+  defaultDocument() {
+    return {
+      inList: 0,
+      audited: 0,
+      excluded: 0,
+      lifecycleSuppressed: 0,
+      keptStaleDetection: 0,
+      notYetScanned: 0,
+      budget: DEFAULTS.budget,
+      strategyName: DEFAULTS.strategyName,
+    };
+  },
+};

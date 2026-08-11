@@ -37,6 +37,12 @@ import { SITE_1_ID, SITE_1_BASE_URL, SITE_3_ID } from '../seed-ids.js';
  * at or above that tag for this describe block to pass. See seedAuditScopePages
  * in test/it/postgres/seed.js.
  *
+ * The `GET /audit-scope/summary` (E5, B7 / SITES-47089) describe block below reads
+ * `v_audit_scope_summary`, added in mysticat-data-service migration
+ * `20260811193840_audit_scope_summary_view.sql` — not yet in a released data-service
+ * image as of this writing, so that block is `describe.skip`'d until the docker-compose.yml
+ * pin bumps to a release containing it.
+ *
  * @param {() => object} getHttpClient - Getter returning the initialized HTTP client
  * @param {() => Promise<void>} resetData - Truncates all data and re-seeds baseline
  * @param {(siteId: string, pages: Array<{ url: string, urlPath: string,
@@ -121,10 +127,52 @@ export default function auditPolicyTests(getHttpClient, resetData, seedAuditScop
       expect(secondPage.body.items[0].version).to.be.lessThan(firstPage.body.items[0].version);
     });
 
-    it('API-15: scope-read endpoints return 501 pre-implementation', async () => {
+    it('API-15: /audit-scope/sections returns 501 pre-implementation', async () => {
       const http = getHttpClient();
-      const res = await http.admin.get(`/sites/${SITE_1_ID}/audit-scope/summary`);
+      const res = await http.admin.get(`/sites/${SITE_1_ID}/audit-scope/sections`);
       expect(res.status).to.equal(501);
+    });
+
+    // Gated the same way the E4 describe block above was: the pinned mysticat-data-service
+    // image in test/it/postgres/docker-compose.yml (v5.90.0 as of this writing) predates the
+    // v_audit_scope_summary view added in migration 20260811193840_audit_scope_summary_view.sql
+    // (B7, SITES-47089). Un-skip once that pin is bumped to a release containing this view.
+    describe.skip('GET /audit-scope/summary (E5, B7 / SITES-47089)', () => {
+      const inScopePage = { url: `${SITE_1_BASE_URL}/audit-scope-summary-in`, urlPath: '/audit-scope-summary-in', inScope: true };
+      const notYetScannedPage = { url: `${SITE_1_BASE_URL}/audit-scope-summary-out`, urlPath: '/audit-scope-summary-out', inScope: false };
+
+      before(() => seedAuditScopePages(SITE_1_ID, [inScopePage, notYetScannedPage]));
+
+      it('API-13: summary identity reconciles (inList = audited + excluded + lifecycleSuppressed + keptStaleDetection + notYetScanned)', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get(`/sites/${SITE_1_ID}/audit-scope/summary`);
+        expect(res.status).to.equal(200);
+        const {
+          inList, audited, excluded, lifecycleSuppressed, keptStaleDetection, notYetScanned,
+        } = res.body;
+        expect(inList).to.equal(
+          audited + excluded + lifecycleSuppressed + keptStaleDetection + notYetScanned,
+        );
+        // excluded_reason (B5) and cms_type (B4 v1.1) are not written by any wrpc yet, so both
+        // buckets are correctly 0 today - only audited/notYetScanned carry real counts.
+        expect(excluded).to.equal(0);
+        expect(keptStaleDetection).to.equal(0);
+        expect(audited).to.be.at.least(1);
+        expect(notYetScanned).to.be.at.least(1);
+      });
+
+      it('surfaces budget/strategyName from the site\'s audit_policy row', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get(`/sites/${SITE_1_ID}/audit-scope/summary`);
+        expect(res.body.budget).to.equal(5000);
+        expect(res.body.strategyName).to.equal('tiered');
+      });
+
+      it('user: denied for a cross-org site', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${SITE_3_ID}/audit-scope/summary`);
+        expect(res.status).to.equal(403);
+      });
     });
 
     describe('GET /audit-scope/pages (E4)', () => {
