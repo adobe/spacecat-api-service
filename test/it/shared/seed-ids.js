@@ -275,6 +275,7 @@ export const TRIAL_USER_2_EMAIL = 'test-delegate@example.com'; // matches delega
 
 export const NON_EXISTENT_ORG_ID = '99999999-9999-4999-b999-999999999999';
 export const NON_EXISTENT_SITE_ID = '88888888-8888-4888-a888-888888888888';
+export const NON_EXISTENT_BRAND_ID = 'ab999999-9999-4999-b999-999999999999';
 
 // ── LLMO onboarding mode resolution — dedicated test org/sites ──
 // TEMPORARY: remove with the legacy-customer check in resolveLlmoOnboardingMode

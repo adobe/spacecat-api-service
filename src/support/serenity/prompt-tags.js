@@ -196,6 +196,7 @@ export const SOURCE_VALUES = Object.freeze([
   'personalized',
   'agentic-traffic',
   'brand-concierge',
+  'strategy-chat',
 ]);
 
 /**

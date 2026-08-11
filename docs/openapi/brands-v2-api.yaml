@@ -27,7 +27,7 @@ v2-brands-for-org:
       to filter by specific status or include deleted brands.
     operationId: listBrandsForOrgV2
     security:
-      - ims_key: []
+      - session_token: []
       - api_key: []
     responses:
       '200':
@@ -64,7 +64,7 @@ v2-brands-for-org:
       create vs update. Per HTTP semantics, upsert-update should return 200.
     operationId: createBrandForOrgV2
     security:
-      - ims_key: []
+      - session_token: []
       - api_key: []
     requestBody:
       required: true
@@ -131,7 +131,7 @@ v2-brand-for-org:
       Retrieves a single brand by its UUID for the given organization.
     operationId: getBrandForOrgV2
     security:
-      - ims_key: []
+      - session_token: []
       - api_key: []
     responses:
       '200':
@@ -160,7 +160,7 @@ v2-brand-for-org:
       Nested arrays use full-replace semantics on each write.
     operationId: updateBrandForOrgV2
     security:
-      - ims_key: []
+      - session_token: []
       - api_key: []
     requestBody:
       required: true
@@ -240,7 +240,7 @@ v2-brand-for-org:
       The brand remains queryable with `?status=deleted`.
     operationId: deleteBrandForOrgV2
     security:
-      - ims_key: []
+      - session_token: []
       - api_key: []
     responses:
       '204':
@@ -297,7 +297,7 @@ v2-brand-for-org-activate:
       `scheduleId`.
     operationId: activateBrandForOrg
     security:
-      - ims_key: []
+      - session_token: []
       - api_key: []
     requestBody:
       required: true
@@ -356,7 +356,7 @@ v2-brand-status-for-org:
       `PATCH /v2/orgs/{spaceCatId}/brands/{brandId}` will refuse that transition.
     operationId: transitionBrandStatusForOrgV2
     security:
-      - ims_key: []
+      - session_token: []
       - api_key: []
     requestBody:
       required: true
@@ -438,7 +438,7 @@ v2-brand-for-org-site:
       (deterministic by name) is returned and a warning logged.
     operationId: getBrandForOrgSite
     security:
-      - ims_key: []
+      - session_token: []
       - api_key: []
     responses:
       '200':

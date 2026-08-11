@@ -23,7 +23,6 @@ import {
   authWrapper,
   enrichPathInfo,
   ScopedApiKeyHandler,
-  AdobeImsHandler,
   JwtHandler,
   s2sAuthWrapper,
   readOnlyAdminWrapper,
@@ -86,6 +85,7 @@ import LlmoAkamaiController from './controllers/llmo/llmo-akamai.js';
 import LlmoMysticatController from './controllers/llmo/llmo-mysticat-controller.js';
 import LlmoOpportunitiesController from './controllers/llmo/opportunities/llmo-opportunities-controller.js';
 import OpportunityValidationController from './controllers/llmo/opportunities/opportunity-validation-controller.js';
+import PromptSuggestionSchedulesController from './controllers/llmo/prompt-suggestion-schedules.js';
 import FanoutReportController from './controllers/llmo/fanout-report.js';
 import UserActivitiesController from './controllers/user-activities.js';
 import SiteEnrollmentsController from './controllers/site-enrollments.js';
@@ -304,6 +304,7 @@ async function run(request, context) {
     const taskManagementController = TaskManagementController(context);
     const onboardingController = OnboardingController(context, log, context.env);
     const opportunityValidationController = OpportunityValidationController();
+    const promptSuggestionSchedulesController = PromptSuggestionSchedulesController(context);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -374,6 +375,7 @@ async function run(request, context) {
       redirectsController,
       auditPolicyController,
       opportunityValidationController,
+      promptSuggestionSchedulesController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
@@ -444,7 +446,7 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 //  - GitHubWebhookHmacHandler next: path-scoped to /webhooks/* and returns null
 //    for any other path, so non-webhook requests fall through cheaply. Must run
 //    BEFORE path-agnostic handlers so a webhook request does not reach JwtHandler
-//    / AdobeImsHandler and fail with a misleading 401 on a missing JWT.
+//    and fail with a misleading 401 on a missing JWT.
 //  - AsoOverlayKeyHandler: path-scoped to GET /config/.../redirects.txt; validates
 //    the inbound X-ASO-API-Key (the ASO dispatcher-overlay read path). Returns null
 //    for any other route. Same early-bail rationale as the webhook handler. Interim
@@ -452,13 +454,15 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 //  - JwtHandler: tried first for token-bearing requests (JWT path is the target
 //    end-state for all consumers). S2S consumers use s2sAuthWrapper; all new
 //    service integrations must onboard via S2S (SITES-34224).
-//  - ApiKeyImsHandler: route-scoped IMS handler (/tools/api-keys/*) for IaaS-only
-//    orgs that cannot acquire a JWT session token. Returns null for other paths,
-//    falling through to AdobeImsHandler. Once Auto-Fix (ASO-607) migrates and
-//    AdobeImsHandler is removed, this scoped handler keeps IaaS key management
-//    working without re-introducing a global IMS auth backdoor.
-//  - AdobeImsHandler: legacy global IMS path; kept for routes still on IMS auth
-//    (e.g. Auto-Fix). To be removed once all consumers are JWT-migrated.
+//  - ApiKeyImsHandler: the ONLY remaining IMS auth surface. Route-scoped to
+//    /tools/api-keys/* for IaaS-only orgs that cannot acquire a JWT session
+//    token (their org may carry neither ASO nor LLMO product context, both of
+//    which /auth/login requires). Returns null for every other path. The global
+//    AdobeImsHandler that formerly backed direct `Authorization: Bearer <IMS
+//    token>` on all routes has been removed — all consumers migrated to JWT
+//    session tokens (see the SpaceCat Authentication wiki / IMS-removal
+//    announcement). Keeping this scoped handler does not re-introduce a global
+//    IMS backdoor; it stays until IaaS callers move to JWT (ASO-607).
 //  - ScopedApiKeyHandler: scoped API-key auth for Import-as-a-Service.
 //  - RouteScopedLegacyApiKeyHandler: the only remaining legacy-key surface. Owns
 //    exactly two routes whose external callers cannot be onboarded as IMS S2S
@@ -475,7 +479,6 @@ const AUTH_HANDLERS = [
   AsoOverlayKeyHandler,
   JwtHandler,
   ApiKeyImsHandler,
-  AdobeImsHandler,
   ScopedApiKeyHandler,
   RouteScopedLegacyApiKeyHandler,
 ];

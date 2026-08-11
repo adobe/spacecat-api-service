@@ -15,6 +15,7 @@ import {
   CAP_CONFIGURATION_WRITE,
   CAP_FIX_ENTITY_CREATE,
   CAP_ORG_READ_ALL,
+  CAP_PROMPT_SUGGESTION_SCHEDULE_WRITE,
   CAP_SITE_CREATE,
   CAP_SITE_READ_ALL,
   CAP_SUGGESTION_WRITE,
@@ -59,6 +60,7 @@ export const INTERNAL_ROUTES = [
   // Geo experiment — write/delete endpoints used by DRS/UI
   'PATCH /sites/:siteId/geo-experiments/:geoExperimentId',
   'DELETE /sites/:siteId/geo-experiments/:geoExperimentId',
+  'POST /sites/:siteId/geo-experiments/:geoExperimentId/trigger-impact-measurement',
 
   // Slack - event subscriptions and commands use Slack's signature verification
   'GET /slack/events',
@@ -136,6 +138,7 @@ export const INTERNAL_ROUTES = [
 
   // Entitlement upsert + PLG site enrollment - admin/manual provisioning only, not S2S
   'POST /organizations/:organizationId/entitlements',
+  'PATCH /organizations/:organizationId/entitlements',
   'POST /sites/:siteId/site-enrollments',
   'POST /sites/:siteId/entitlements',
   // Feature flags write - admin only, mysticat-backed org config
@@ -381,6 +384,8 @@ const routeRequiredCapabilities = {
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/domain-urls': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/url-prompts': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/url-prompts': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/prompts-by-url': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/prompts-by-url': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/filter-dimensions': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/filter-dimensions': 'brand:read',
 
@@ -506,6 +511,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/experiments': 'experiment:read',
   'GET /sites/:siteId/geo-experiments': 'site:read',
   'GET /sites/:siteId/geo-experiments/:geoExperimentId': 'site:read', // detail includes prompts
+  'GET /sites/:siteId/geo-experiments/:geoExperimentId/results': 'site:read', // impact-measurement insights
   'GET /sites/:siteId/metrics/:metric/:source': 'site:read',
   'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl': 'site:read',
   'GET /sites/:siteId/latest-metrics': 'site:read',
@@ -734,21 +740,45 @@ const routeRequiredCapabilities = {
   'GET /llmo/ai-visibility/v1/topic/gap-topics': 'report:read',
   'GET /llmo/ai-visibility/v1/topic/gap-topics-export': 'report:read',
   'GET /llmo/ai-visibility/v1/topic/gap-topics-totals': 'report:read',
+  'GET /llmo/ai-visibility/v1/topic/metrics-by-fts': 'report:read',
+  'GET /llmo/ai-visibility/v1/topic/topics-by-fts': 'report:read',
+  'GET /llmo/ai-visibility/v1/topic/topics-by-fts-export': 'report:read',
+  'GET /llmo/ai-visibility/v1/topic/topics-by-fts-totals': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/brand-prompts': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/brand-prompts-export': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/gap-prompts': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/gap-prompts-export': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/gap-prompts-totals': 'report:read',
+  'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts': 'report:read',
+  'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-export': 'report:read',
+  'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-totals': 'report:read',
+  'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids': 'report:read',
+  'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids-totals': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt/prompt-response': 'report:read',
   'GET /llmo/ai-visibility/v1/source/gap-source-domains': 'report:read',
   'GET /llmo/ai-visibility/v1/source/gap-source-domains-export': 'report:read',
   'GET /llmo/ai-visibility/v1/source/gap-source-domains-totals': 'report:read',
+  'GET /llmo/ai-visibility/v1/source/cited-pages': 'report:read',
+  'GET /llmo/ai-visibility/v1/source/cited-pages-export': 'report:read',
+  'GET /llmo/ai-visibility/v1/source/cited-pages-totals': 'report:read',
+  'GET /llmo/ai-visibility/v1/source/cited-sources': 'report:read',
+  'GET /llmo/ai-visibility/v1/source/cited-sources-export': 'report:read',
+  'GET /llmo/ai-visibility/v1/source/cited-sources-totals': 'report:read',
+  'GET /llmo/ai-visibility/v1/source/source-domains-by-topic-fts': 'report:read',
+  'GET /llmo/ai-visibility/v1/source/source-domains-by-topic-fts-export': 'report:read',
+  'GET /llmo/ai-visibility/v1/source/source-domains-by-topic-fts-totals': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt-research/prompts-export': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt-research/brands-export': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt-research/source-domains-export': 'report:read',
   'GET /llmo/ai-visibility/v1/prompt-research/topics-export': 'report:read',
   'GET /llmo/ai-visibility/v1/brand/stats-by-country': 'report:read',
   'GET /llmo/ai-visibility/v1/brand/stats-by-llm': 'report:read',
+  'GET /llmo/ai-visibility/v1/brand/competitors': 'report:read',
+  'GET /llmo/ai-visibility/v1/brand/competitors-stats': 'report:read',
+  'GET /llmo/ai-visibility/v1/brand/top-brands': 'report:read',
+  'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts': 'report:read',
+  'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts-export': 'report:read',
+  'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts-totals': 'report:read',
   'GET /llmo/ai-visibility/v1/meta/meta': 'report:read',
 
   // User Activities
@@ -802,6 +832,13 @@ const routeRequiredCapabilities = {
 
   // Suggestion grants
   'DELETE /sites/:siteId/suggestions/grants/:grantId': CAP_SUGGESTION_WRITE,
+
+  // Prompt-suggestion schedules — per-site (re-)provisioning of the recurring DRS
+  // prompt-suggestion pipelines. Admin-or-S2S: reachable by the fulfillment-worker
+  // (after a Commerce trial→paid flip) and a reconciler, so it is exposed to S2S
+  // consumers under a dedicated capability rather than left admin-only. The tier
+  // is re-derived server-side; the caller cannot supply it.
+  'POST /sites/:siteId/prompt-suggestion-schedules': CAP_PROMPT_SUGGESTION_SCHEDULE_WRITE,
 };
 
 export default routeRequiredCapabilities;

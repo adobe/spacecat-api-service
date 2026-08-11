@@ -361,6 +361,10 @@ paths:
     $ref: './site-opportunities.yaml#/site-geo-experiments'
   /sites/{siteId}/geo-experiments/{geoExperimentId}:
     $ref: './site-opportunities.yaml#/site-geo-experiment'
+  /sites/{siteId}/geo-experiments/{geoExperimentId}/results:
+    $ref: './site-opportunities.yaml#/site-geo-experiment-results'
+  /sites/{siteId}/geo-experiments/{geoExperimentId}/trigger-impact-measurement:
+    $ref: './site-opportunities.yaml#/site-geo-experiment-trigger-impact-measurement'
   /sites/{siteId}/site-enrollments:
     $ref: './site-enrollments-api.yaml#/site-enrollments-by-site'
   /sites/{siteId}/user-activities:
@@ -700,6 +704,8 @@ paths:
     $ref: './onboarding-api.yaml#/trigger-onboarding'
   /sites/{siteId}/llmo/offboard:
     $ref: './llmo-api.yaml#/llmo-offboard'
+  /sites/{siteId}/prompt-suggestion-schedules:
+    $ref: './llmo-api.yaml#/llmo-prompt-suggestion-schedules'
   /sites/{siteId}/llmo/opportunities-reviewed:
     $ref: './llmo-api.yaml#/llmo-opportunities-reviewed'
   /sites/{siteId}/llmo/brand-claims:
@@ -840,6 +846,12 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-stats-by-llm'
   /llmo/ai-visibility/v1/brand/stats-by-country:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-stats-by-country'
+  /llmo/ai-visibility/v1/brand/competitors:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-competitors'
+  /llmo/ai-visibility/v1/brand/competitors-stats:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-competitors-stats'
+  /llmo/ai-visibility/v1/brand/top-brands:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-top-brands'
   /llmo/ai-visibility/v1/topic/brand-topics:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-brand-topics'
   /llmo/ai-visibility/v1/topic/brand-topics-export:
@@ -852,6 +864,14 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-gap-topics-export'
   /llmo/ai-visibility/v1/topic/gap-topics-totals:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-gap-topics-totals'
+  /llmo/ai-visibility/v1/topic/metrics-by-fts:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-metrics-by-fts'
+  /llmo/ai-visibility/v1/topic/topics-by-fts:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-topics-by-fts'
+  /llmo/ai-visibility/v1/topic/topics-by-fts-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-topics-by-fts-export'
+  /llmo/ai-visibility/v1/topic/topics-by-fts-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-topics-by-fts-totals'
   /llmo/ai-visibility/v1/prompt/brand-prompts:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-brand-prompts'
   /llmo/ai-visibility/v1/prompt/brand-prompts-export:
@@ -862,6 +882,16 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-gap-prompts-export'
   /llmo/ai-visibility/v1/prompt/gap-prompts-totals:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-gap-prompts-totals'
+  /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompts-by-topic-ids'
+  /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompts-by-topic-ids-totals'
+  /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompts-by-topic-fts'
+  /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompts-by-topic-fts-export'
+  /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompts-by-topic-fts-totals'
   /llmo/ai-visibility/v1/prompt/prompt-response:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompt-response'
   /llmo/ai-visibility/v1/source/gap-source-domains:
@@ -870,6 +900,30 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-gap-source-domains-export'
   /llmo/ai-visibility/v1/source/gap-source-domains-totals:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-gap-source-domains-totals'
+  /llmo/ai-visibility/v1/source/cited-pages:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-cited-pages'
+  /llmo/ai-visibility/v1/source/cited-pages-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-cited-pages-export'
+  /llmo/ai-visibility/v1/source/cited-pages-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-cited-pages-totals'
+  /llmo/ai-visibility/v1/source/cited-sources:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-cited-sources'
+  /llmo/ai-visibility/v1/source/cited-sources-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-cited-sources-export'
+  /llmo/ai-visibility/v1/source/cited-sources-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-cited-sources-totals'
+  /llmo/ai-visibility/v1/source/source-domains-by-topic-fts:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-source-domains-by-topic-fts'
+  /llmo/ai-visibility/v1/source/source-domains-by-topic-fts-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-source-domains-by-topic-fts-export'
+  /llmo/ai-visibility/v1/source/source-domains-by-topic-fts-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-source-domains-by-topic-fts-totals'
+  /llmo/ai-visibility/v1/brand/brands-by-topic-fts:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-brands-by-topic-fts'
+  /llmo/ai-visibility/v1/brand/brands-by-topic-fts-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-brands-by-topic-fts-export'
+  /llmo/ai-visibility/v1/brand/brands-by-topic-fts-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-brands-by-topic-fts-totals'
   /llmo/ai-visibility/v1/prompt-research/prompts-export:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-research-prompts-export'
   /llmo/ai-visibility/v1/prompt-research/brands-export:
@@ -900,22 +954,27 @@ components:
       type: apiKey
       in: header
       name: x-api-key
-      description: 'DEPRECATED, use scoped_api_key or ims_key. (Used for read-only operations.)'
+      description: 'DEPRECATED, use scoped_api_key or session_token. (Used for read-only operations.)'
     scoped_api_key:
       type: apiKey
       in: header
       name: x-api-key
       description: 'For endpoints which authenticate with scoped API keys'
+    session_token:
+      type: apiKey
+      in: header
+      name: authorization
+      description: 'SpaceCat JWT session token obtained from POST /auth/login. Send it as `Authorization: Bearer <token>`. This is the standard authorization scheme for authenticated user/consumer requests.'
     ims_key:
       type: apiKey
       in: header
       name: authorization
-      description: 'Value must be a valid IMS user token which will be offline-validated.'
+      description: 'Raw IMS user token, offline-validated, sent as `Authorization: Bearer <token>`. Accepted ONLY on the /tools/api-keys endpoints, for IaaS-only orgs that cannot mint a JWT session token. Direct IMS-token authorization has been removed from every other endpoint — use session_token instead.'
     admin_key:
       type: apiKey
       in: header
       name: x-api-key
-      description: 'DEPRECATED, use scoped_api_key or ims_key. (Used for read and write operations.)'
+      description: 'DEPRECATED, use scoped_api_key or session_token. (Used for read and write operations.)'
     cookie_auth:
       type: apiKey
       in: cookie
