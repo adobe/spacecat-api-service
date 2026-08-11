@@ -67,6 +67,11 @@
  *                             after). The script leaves no AsyncJob record, so this is the only
  *                             durable audit trail of what was rewritten.
  *
+ * Exit status:
+ *   0  No unexpected failure. Projects skipped for lack of authorization are reported and leave
+ *      the sweep partial for those workspaces, but do not fail the run.
+ *   1  At least one unexpected failure, or a bad invocation.
+ *
  * Examples:
  *   # Confirm the expected delta without writing anything
  *   POSTGREST_URL=... SEMRUSH_IMS_TOKEN=... node scripts/serenity-retype-backfill.mjs \
@@ -97,6 +102,7 @@ import { DIMENSION, TYPE_VALUE } from '../src/support/serenity/prompt-tags.js';
 
 const DEFAULT_RATE_LIMIT_MS = 300;
 const DEFAULT_MAX_CONSECUTIVE_ERRORS = 5;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Upstream's own page size for `listPromptsByTags`. */
 const PAGE_SIZE = 200;
 /**
@@ -159,6 +165,10 @@ const changeLogFile = values['change-log'];
 
 if (!brandId) {
   console.error('ERROR: --brand-id is required');
+  exit(1);
+}
+if (!UUID_RE.test(brandId)) {
+  console.error(`ERROR: --brand-id must be a UUID, got "${brandId}"`);
   exit(1);
 }
 if (!env.POSTGREST_URL) {
@@ -449,6 +459,7 @@ const totals = {
   brandedAfter: 0,
   changed: 0,
   failed: 0,
+  authSkipped: 0,
   skipped: 0,
 };
 
@@ -483,9 +494,15 @@ for (const project of projects) {
       saveCheckpoint(processedProjectIds);
     }
   } catch (e) {
-    totals.failed += 1;
     const status = e?.status ?? e?.statusCode;
     const expected = status === 403;
+    // Counted apart from `failed` so the exit code reflects only actionable failures: a token
+    // that does not span every workspace is the documented normal case, not a broken sweep.
+    if (expected) {
+      totals.authSkipped += 1;
+    } else {
+      totals.failed += 1;
+    }
     log.error(`  ${projectId}: FAILED${expected ? ' (authorization — expected on a token that does not span this workspace)' : ''}: ${e.message}`);
     if (!expected) {
       consecutiveErrors += 1;
@@ -500,7 +517,7 @@ for (const project of projects) {
 }
 
 log.info('---');
-log.info(`${dryRun ? 'DRY RUN — ' : ''}projects swept: ${totals.projects}, skipped (checkpointed): ${totals.skipped}, failed: ${totals.failed}`);
+log.info(`${dryRun ? 'DRY RUN — ' : ''}projects swept: ${totals.projects}, skipped (checkpointed): ${totals.skipped}, skipped (no authorization): ${totals.authSkipped}, failed: ${totals.failed}`);
 log.info(`prompts: ${totals.prompts} read, ${totals.considered} classified, branded ${totals.brandedBefore} -> ${totals.brandedAfter}, rewritten: ${totals.changed}`);
 if (totals.unclassifiable > 0) {
   log.info(`  ${totals.unclassifiable} prompt(s) had no text and were not classified`);
@@ -508,4 +525,9 @@ if (totals.unclassifiable > 0) {
 if (totals.unresolvableTags > 0) {
   log.warn(`  ${totals.unresolvableTags} prompt(s) REFUSED: a tag arrived without an id, so the full tag set could not be rewritten safely. These were left untouched — investigate before assuming the sweep is complete.`);
 }
+if (totals.authSkipped > 0) {
+  log.warn(`  ${totals.authSkipped} project(s) were NOT swept because this token lacks standing on their workspace. The sweep is incomplete for them — re-run with a token that spans them.`);
+}
+// Only unexpected failures are actionable; a 403 leaves the run partial, which the warning
+// above reports, but does not mean the sweep itself went wrong.
 exit(totals.failed > 0 ? 1 : 0);
