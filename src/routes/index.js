@@ -113,6 +113,8 @@ function isStaticRoute(routePattern) {
  * @param {Object} onboardingController - Semrush onboarding notification controller.
  * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
  * @param {Object} auditPolicyController - Audit policy + audit scope controller.
+ * @param {Object} opportunityValidationController - On-demand opportunity validation
+ *   controller.
  * @param {Object} promptSuggestionSchedulesController - LLMO prompt-suggestion schedule controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
@@ -184,6 +186,7 @@ export default function getRouteHandlers(
   onboardingController,
   redirectsController,
   auditPolicyController,
+  opportunityValidationController,
   promptSuggestionSchedulesController,
 ) {
   const staticRoutes = {};
@@ -392,6 +395,7 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/opportunities': opportunitiesController.createOpportunity,
     'PATCH /sites/:siteId/opportunities/:opportunityId': opportunitiesController.patchOpportunity,
     'DELETE /sites/:siteId/opportunities/:opportunityId': opportunitiesController.removeOpportunity,
+    'POST /sites/:siteId/opportunities/:opportunityId/validate': opportunityValidationController.triggerValidation,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions': suggestionsController.getAllForOpportunity,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit/:cursor': suggestionsController.getAllForOpportunityPaged,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit': suggestionsController.getAllForOpportunityPaged,
