@@ -21,6 +21,12 @@ function modelFilter(payload) {
   return payload.filters.advanced.filters.find((filter) => filter.filters?.[0]?.col === 'CBF_model');
 }
 
+function dateFilters(payload) {
+  return payload.filters.advanced.filters.filter(
+    (filter) => filter.col === 'CBF_date__start' || filter.col === 'CBF_date__end',
+  );
+}
+
 describe('domain-urls definitions', () => {
   describe('buildDomainUrlsPayload', () => {
     it('defaults the model to DEFAULT_ELEMENT_MODEL when no platform is provided', () => {
@@ -31,10 +37,28 @@ describe('domain-urls definitions', () => {
       });
     });
 
+    it('omits the CBF_model filter for platform=all while keeping the date filters', () => {
+      const payload = buildDomainUrlsPayload({
+        platform: 'all', startDate: '2026-01-01', endDate: '2026-01-31',
+      });
+
+      expect(modelFilter(payload)).to.be.undefined;
+      expect(dateFilters(payload)).to.deep.equal([
+        { op: 'gte', val: '2026-01-01', col: 'CBF_date__start' },
+        { op: 'lte', val: '2026-01-31', col: 'CBF_date__end' },
+      ]);
+    });
+
     it('keeps the existing platform translation for non-all values', () => {
       const payload = buildDomainUrlsPayload({ platform: 'openai' });
 
       expect(modelFilter(payload).filters[0].val).to.equal('chatgpt-paid');
+    });
+
+    it('uses model over platform when both are provided', () => {
+      const payload = buildDomainUrlsPayload({ model: 'all', platform: 'openai' });
+
+      expect(modelFilter(payload)).to.be.undefined;
     });
   });
 

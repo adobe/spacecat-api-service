@@ -57,6 +57,27 @@ function makeEmptyTreeTransport(overrides = {}) {
   });
 }
 
+// A transport whose `source` root is DESCENDABLE. The default fixture reports
+// children_count:0 on the `source` root so tree walks (findTagsInTree) skip it;
+// this bumps it so the walk descends and resolves a `source` value — the state
+// reachable after WP-S5 / the reconciles seed the root on live projects, and the
+// only state in which the LLMO-6665 guard is exercised. Shared by the flat-mode
+// and subworkspace update describes.
+function makeSourceDescendableTransport(overrides = {}) {
+  const levels = dimensionTreeLevels();
+  // Derive the count from the fixture's own source level rather than hardcoding a
+  // literal, so it can't drift if the fixture gains/loses a seeded `source` value
+  // (mysticatbot suggestion).
+  const sourceChildCount = (levels[TAG_IDS.sourceRoot] ?? []).length;
+  levels[''] = levels[''].map(
+    (r) => (r.name === 'source' ? { ...r, children_count: sourceChildCount } : r),
+  );
+  return makeTransport({
+    listProjectTags: makeListProjectTagsStub(levels),
+    ...overrides,
+  });
+}
+
 function makeDataAccess(findBySliceResult) {
   return {
     BrandSemrushProject: {
@@ -1196,12 +1217,13 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       );
     });
 
-    // A closed-dimension value is a descendant too, so it is renameable through
-    // the same path — the dimension root above it is what is protected.
-    // The vocabulary is fixed. Every resolve-or-create keys on the bare name under
-    // the root, so renaming `human` would make the next write mint a SECOND `human`
-    // and silently orphan every prompt still carrying the first.
-    it('400s a rename of a closed-dimension value', async () => {
+    // A server-owned value is a descendant too, so it is renameable through
+    // the same path — the dimension root above it is what is protected. The
+    // vocabulary is authored by the server. Every resolve-or-create keys on the
+    // bare name under the root, so renaming `human` would make the next write
+    // mint a SECOND `human` and silently orphan every prompt still carrying the
+    // first.
+    it('400s a rename of a closed server-owned value (origin)', async () => {
       const transport = makeTransport();
       const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
       const err = await handler.handleUpdateTag(
@@ -1215,7 +1237,56 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       ).then(() => null, (e) => e);
 
       expect(err.status).to.equal(400);
-      expect(err.message).to.match(/closed "origin" dimension cannot be renamed or re-parented/);
+      expect(err.message).to.match(/server-owned "origin" dimension cannot be renamed or re-parented/);
+      expect(transport.updateProjectTag).to.not.have.been.called;
+    });
+
+    // LLMO-6665 regression. `source` is server-owned but OPEN, so it is
+    // deliberately absent from CLOSED_DIMENSIONS — the guard must key on the
+    // OWNERSHIP axis (isServerOwnedDimension), not the closed-vocabulary one, or
+    // a client can rename/re-parent a server-owned `source` value once its root
+    // is seeded on live projects. Renaming `config` would hide it, not move it,
+    // and the next server write would mint a SECOND `config` under the same root,
+    // splitting prompts across two ids for one producing system. The descendable
+    // `source` root comes from the shared makeSourceDescendableTransport helper.
+    it('400s a rename of a source value — server-owned though OPEN (LLMO-6665)', async () => {
+      const transport = makeSourceDescendableTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const err = await handler.handleUpdateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        TAG_IDS.sourceConfig,
+        { name: 'config-renamed', geoTargetId: 2840, languageCode: 'en' },
+        fakeLog(),
+      ).then(() => null, (e) => e);
+
+      expect(err.status).to.equal(400);
+      expect(err.message).to.match(/server-owned "source" dimension cannot be renamed or re-parented/);
+      expect(transport.updateProjectTag).to.not.have.been.called;
+    });
+
+    it('400s a re-parent of a source value (LLMO-6665)', async () => {
+      const transport = makeSourceDescendableTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const err = await handler.handleUpdateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        TAG_IDS.sourceConfig,
+        {
+          name: 'config',
+          parentId: TAG_IDS.sourceSemrush,
+          geoTargetId: 2840,
+          languageCode: 'en',
+        },
+        fakeLog(),
+      ).then(() => null, (e) => e);
+
+      expect(err.status).to.equal(400);
+      expect(err.message).to.match(/server-owned "source" dimension cannot be renamed or re-parented/);
       expect(transport.updateProjectTag).to.not.have.been.called;
     });
 
@@ -1559,6 +1630,49 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
 
       expect(err.status).to.equal(400);
       expect(err.message).to.match(/must not be a descendant of the tag/);
+      expect(transport.updateProjectTag).to.not.have.been.called;
+    });
+
+    // Defense-in-depth for LLMO-6665: the source guard lives in the shared
+    // buildUpdatePayload, so it must refuse a server-owned `source` rename on the
+    // subworkspace route too, not only in flat mode (self-review should-fix).
+    it('400s a rename of a source value — shared server-owned guard (LLMO-6665)', async () => {
+      const handler = await loadHandler(sinon.stub().resolves({ id: 'proj-sub-1' }));
+      const transport = makeSourceDescendableTransport();
+      const err = await handler.handleUpdateTagSubworkspace(
+        transport,
+        WORKSPACE,
+        TAG_IDS.sourceConfig,
+        { name: 'config-renamed', geoTargetId: 2840, languageCode: 'en' },
+        fakeLog(),
+      ).then(() => null, (e) => e);
+
+      expect(err.status).to.equal(400);
+      expect(err.message).to.match(/server-owned "source" dimension cannot be renamed or re-parented/);
+      expect(transport.updateProjectTag).to.not.have.been.called;
+    });
+
+    // Completes the flat/subworkspace symmetry for LLMO-6665: the server-owned
+    // guard fires before the placement check in buildUpdatePayload, so a source
+    // RE-PARENT is refused on the subworkspace route too, same as flat mode.
+    it('400s a re-parent of a source value — shared server-owned guard (LLMO-6665)', async () => {
+      const handler = await loadHandler(sinon.stub().resolves({ id: 'proj-sub-1' }));
+      const transport = makeSourceDescendableTransport();
+      const err = await handler.handleUpdateTagSubworkspace(
+        transport,
+        WORKSPACE,
+        TAG_IDS.sourceConfig,
+        {
+          name: 'config',
+          parentId: TAG_IDS.sourceSemrush,
+          geoTargetId: 2840,
+          languageCode: 'en',
+        },
+        fakeLog(),
+      ).then(() => null, (e) => e);
+
+      expect(err.status).to.equal(400);
+      expect(err.message).to.match(/server-owned "source" dimension cannot be renamed or re-parented/);
       expect(transport.updateProjectTag).to.not.have.been.called;
     });
 
