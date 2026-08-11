@@ -663,6 +663,10 @@ describe('getRouteHandlers', () => {
     getScopeSections: sinon.stub(),
   };
 
+  const mockOpportunityValidationController = {
+    triggerValidation: sinon.stub(),
+  };
+
   const mockPromptSuggestionSchedulesController = {
     createSchedules: sinon.stub(),
   };
@@ -736,6 +740,7 @@ describe('getRouteHandlers', () => {
       mockOnboardingController,
       mockRedirectsController,
       mockAuditPolicyController,
+      mockOpportunityValidationController,
       mockPromptSuggestionSchedulesController,
     );
 
@@ -1137,6 +1142,7 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/opportunities',
       'PATCH /sites/:siteId/opportunities/:opportunityId',
       'DELETE /sites/:siteId/opportunities/:opportunityId',
+      'POST /sites/:siteId/opportunities/:opportunityId/validate',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit/:cursor',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit',
@@ -1518,6 +1524,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['PATCH /sites/:siteId/opportunities/:opportunityId'].paramNames).to.deep.equal(['siteId', 'opportunityId']);
     expect(dynamicRoutes['DELETE /sites/:siteId/opportunities/:opportunityId'].handler).to.equal(mockOpportunitiesController.removeOpportunity);
     expect(dynamicRoutes['DELETE /sites/:siteId/opportunities/:opportunityId'].paramNames).to.deep.equal(['siteId', 'opportunityId']);
+    expect(dynamicRoutes['POST /sites/:siteId/opportunities/:opportunityId/validate'].handler).to.equal(mockOpportunityValidationController.triggerValidation);
+    expect(dynamicRoutes['POST /sites/:siteId/opportunities/:opportunityId/validate'].paramNames).to.deep.equal(['siteId', 'opportunityId']);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions'].handler).to.equal(mockSuggestionsController.getAllForOpportunity);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit/:cursor'].handler).to.equal(mockSuggestionsController.getAllForOpportunityPaged);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit/:cursor'].paramNames).to.deep.equal(['siteId', 'opportunityId', 'limit', 'cursor']);

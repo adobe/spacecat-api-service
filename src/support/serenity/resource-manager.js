@@ -41,7 +41,7 @@
  */
 
 import { ErrorWithStatusCode } from '../utils.js';
-import { SerenityTransportError } from './rest-transport.js';
+import { SerenityTransportError } from './serenity-transport-error.js';
 import { pollUntilCreated } from './workspace-lifecycle.js';
 import {
   ERROR_CODES, isPoolExhausted, isWorkspaceNotReady,

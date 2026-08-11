@@ -56,11 +56,17 @@ const MAX_REQUEUE_DEPTH = 5;
  * and cheap (serenity-docs#31), so the worker just re-derives it rather than
  * threading it through job metadata.
  *
+ * Exported so the one-off re-classification sweep
+ * (`scripts/serenity-retype-backfill.mjs`) classifies through the SAME closure the
+ * write paths use, rather than reassembling needles itself. A second assembly is
+ * how the four-way classifier divergence started; the sweep exists precisely to
+ * correct that class of drift, so it must not introduce a fifth.
+ *
  * @param {object} dataAccess - `context.dataAccess`.
  * @param {string} brandId - SpaceCat brand uuid.
  * @returns {Promise<(text: string, geoTargetId: number) => string>}
  */
-async function buildPromptTypeClassifier(dataAccess, brandId) {
+export async function buildPromptTypeClassifier(dataAccess, brandId) {
   const brand = await dataAccess.Brand.findById(brandId);
   const brandName = brand?.getName?.() || '';
   const brandAliases = await getBrandAliases(brandId, dataAccess.services.postgrestClient);
