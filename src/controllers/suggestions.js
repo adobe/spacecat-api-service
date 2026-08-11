@@ -2496,6 +2496,75 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   /**
+   * Returns the impact-measurement insights ("results") for a geo experiment.
+   *
+   * Read-only counterpart to POST .../trigger-impact-measurement: that endpoint asks the
+   * engine to (re-)run measurement, this one just fetches the already-computed report. The
+   * insights JSON is written by Mystique/the engine to the Mystique assets bucket
+   * (S3_MYSTIQUE_BUCKET) at the key stored on the experiment as insightsLocation (see the
+   * spacecat-shared GeoExperiment model); each analysis's rawDataUrl is presigned so the UI
+   * can download the S3 detail blobs directly. Returns 404 when the experiment has no
+   * insights yet (impact measurement not complete).
+   */
+  const getGeoExperimentResults = async (context) => {
+    const { siteId, geoExperimentId } = context.params;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(geoExperimentId)) {
+      return badRequest('GeoExperiment ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
+    }
+
+    const geoExperiment = await GeoExperiment.findById(geoExperimentId);
+    if (!geoExperiment || geoExperiment.getSiteId() !== siteId) {
+      return notFound('GeoExperiment not found');
+    }
+
+    const notReadyMessage = `No results available for GeoExperiment ${geoExperimentId} yet `
+      + `(phase '${geoExperiment.getPhase()}', status '${geoExperiment.getStatus()}'). `
+      + 'Impact measurement has not produced insights.';
+
+    const insightsS3Key = geoExperiment.getInsightsLocation?.();
+    const { S3_MYSTIQUE_BUCKET: mystiqueBucket } = context.env;
+    if (!insightsS3Key || !mystiqueBucket) {
+      return notFound(notReadyMessage);
+    }
+
+    let insights;
+    try {
+      const { s3Client, GetObjectCommand } = context.s3;
+      const response = await s3Client.send(
+        new GetObjectCommand({ Bucket: mystiqueBucket, Key: insightsS3Key }),
+      );
+      const body = await response.Body.transformToString();
+      insights = JSON.parse(body);
+      // Presign each analysis's rawDataUrl so the UI can download the S3 detail blobs directly.
+      insights = await presignInsightsRawData(insights, context.s3, context.log);
+    } catch (s3Error) {
+      // Insights may not exist yet (e.g. impact measurement not yet complete).
+      context.log.info(`[geo-experiment] Could not fetch results for ${geoExperimentId}: ${s3Error.message}`);
+      return notFound(notReadyMessage);
+    }
+
+    return ok({
+      geoExperimentId,
+      status: geoExperiment.getStatus(),
+      phase: geoExperiment.getPhase(),
+      insights,
+    });
+  };
+
+  /**
    * Patches a geo experiment. All fields are patchable except
    * createdAt, updatedAt, and updatedBy (managed automatically).
    */
@@ -3150,6 +3219,7 @@ function SuggestionsController(ctx, sqs, env) {
     deploySuggestionToEdge,
     listGeoExperiments,
     getGeoExperiment,
+    getGeoExperimentResults,
     patchGeoExperiment,
     deleteGeoExperiment,
     triggerImpactMeasurement,

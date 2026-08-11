@@ -168,6 +168,7 @@ describe('Suggestions Controller', () => {
     'deploySuggestionToEdge',
     'listGeoExperiments',
     'getGeoExperiment',
+    'getGeoExperimentResults',
     'patchGeoExperiment',
     'deleteGeoExperiment',
     'triggerImpactMeasurement',
@@ -10680,7 +10681,144 @@ describe('Suggestions Controller', () => {
     });
   });
 
+  describe('getGeoExperimentResults', () => {
+    const GEO_EXP_ID = 'b1b2c3d4-e5f6-7890-abcd-ef1234567890';
+    const MYSTIQUE_BUCKET = 'test-mystique-bucket';
+    const INSIGHTS_KEY = `geo-experiments/${SITE_ID}/${GEO_EXP_ID}-insights.json`;
 
+    let mockGeoExperiment;
+
+    beforeEach(() => {
+      class StubGetObjectCommand {
+        constructor(input) {
+          Object.assign(this, input);
+        }
+      }
+      context.s3 = {
+        s3Client: { send: sandbox.stub() },
+        s3Bucket: 'test-bucket',
+        GetObjectCommand: StubGetObjectCommand,
+        getSignedUrl: sandbox.stub().resolves('https://presigned.example/blob'),
+      };
+      context.env = { S3_MYSTIQUE_BUCKET: MYSTIQUE_BUCKET };
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+
+      mockGeoExperiment = {
+        getId: () => GEO_EXP_ID,
+        getSiteId: () => SITE_ID,
+        getStatus: () => 'COMPLETED',
+        getPhase: () => 'impact_measurement_done',
+        getInsightsLocation: () => INSIGHTS_KEY,
+      };
+
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(mockGeoExperiment);
+    });
+
+    it('returns badRequest for invalid siteId', async () => {
+      const response = await suggestionsController.getGeoExperimentResults({
+        ...context,
+        params: { siteId: 'not-a-uuid', geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns badRequest for invalid geoExperimentId', async () => {
+      const response = await suggestionsController.getGeoExperimentResults({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: 'bad' },
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns notFound when site missing', async () => {
+      const response = await suggestionsController.getGeoExperimentResults({
+        ...context,
+        params: { siteId: SITE_ID_NOT_FOUND, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns forbidden without site access', async () => {
+      AccessControlUtil.prototype.hasAccess.restore();
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
+      const response = await suggestionsController.getGeoExperimentResults({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns notFound when GeoExperiment is missing', async () => {
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(null);
+      const response = await suggestionsController.getGeoExperimentResults({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns notFound when GeoExperiment belongs to another site', async () => {
+      mockGeoExperiment.getSiteId = () => 'other-site-id';
+      const response = await suggestionsController.getGeoExperimentResults({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns notFound (not ready) when insightsLocation is not set', async () => {
+      mockGeoExperiment.getInsightsLocation = () => undefined;
+      const response = await suggestionsController.getGeoExperimentResults({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.match(/No results available/);
+    });
+
+    it('returns notFound (not ready) when the insights S3 fetch fails', async () => {
+      context.s3.s3Client.send.rejects(new Error('NoSuchKey'));
+      const response = await suggestionsController.getGeoExperimentResults({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(404);
+      expect(context.log.info.calledWithMatch(/Could not fetch results/)).to.equal(true);
+    });
+
+    it('returns the insights report on success', async () => {
+      const insightsPayload = { analyses: [{ kind: 'cited_text' }] };
+      context.s3.s3Client.send.resolves({
+        Body: { transformToString: sandbox.stub().resolves(JSON.stringify(insightsPayload)) },
+      });
+      const response = await suggestionsController.getGeoExperimentResults({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.geoExperimentId).to.equal(GEO_EXP_ID);
+      expect(body.status).to.equal('COMPLETED');
+      expect(body.phase).to.equal('impact_measurement_done');
+      expect(body.insights).to.deep.equal(insightsPayload);
+    });
+
+    it('presigns each analysis rawDataUrl in the returned insights', async () => {
+      const rawUri = `s3://${MYSTIQUE_BUCKET}/geo-experiments/${SITE_ID}/${GEO_EXP_ID}/cited_text.json`;
+      const insightsPayload = { analyses: [{ kind: 'cited_text', rawDataUrl: rawUri }] };
+      context.s3.s3Client.send.resolves({
+        Body: { transformToString: sandbox.stub().resolves(JSON.stringify(insightsPayload)) },
+      });
+      const response = await suggestionsController.getGeoExperimentResults({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.insights.analyses[0].rawDataUrl).to.equal('https://presigned.example/blob');
+    });
+  });
 
   describe('patchGeoExperiment', () => {
     const GEO_EXP_ID = 'b1b2c3d4-e5f6-7890-abcd-ef1234567890';

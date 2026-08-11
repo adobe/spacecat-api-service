@@ -412,6 +412,7 @@ export default function getRouteHandlers(
     'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.removeSuggestion,
     'GET /sites/:siteId/geo-experiments': suggestionsController.listGeoExperiments,
     'GET /sites/:siteId/geo-experiments/:geoExperimentId': suggestionsController.getGeoExperiment,
+    'GET /sites/:siteId/geo-experiments/:geoExperimentId/results': suggestionsController.getGeoExperimentResults,
     'PATCH /sites/:siteId/geo-experiments/:geoExperimentId': suggestionsController.patchGeoExperiment,
     'DELETE /sites/:siteId/geo-experiments/:geoExperimentId': suggestionsController.deleteGeoExperiment,
     'POST /sites/:siteId/geo-experiments/:geoExperimentId/trigger-impact-measurement': suggestionsController.triggerImpactMeasurement,
