@@ -115,6 +115,8 @@ describe('LlmoAkamaiController', () => {
     mockAccessControlUtil = {
       hasAccess: sandbox.stub().resolves(true),
       isLLMOAdministrator: sandbox.stub().returns(true),
+      hasLlmoCapabilityForSite: sandbox.stub().resolves(true),
+      llmoForbiddenMessage: (m) => m,
     };
 
     mockContext = {
@@ -159,7 +161,7 @@ describe('LlmoAkamaiController', () => {
     });
 
     it('returns 403 when the caller is not an LLMO administrator', async () => {
-      mockAccessControlUtil.isLLMOAdministrator.returns(false);
+      mockAccessControlUtil.hasLlmoCapabilityForSite.resolves(false);
       const res = await controller.getConfig(mockContext);
       expect(res.status).to.equal(403);
     });

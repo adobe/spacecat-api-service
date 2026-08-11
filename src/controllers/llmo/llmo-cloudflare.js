@@ -141,8 +141,10 @@ function LlmoCloudflareController(ctx) {
       return forbidden('User does not have access to this site');
     }
 
-    if (!accessControlUtil.isLLMOAdministrator()) {
-      return forbidden('Only LLMO administrators can access Cloudflare onboarding endpoints');
+    if (!await accessControlUtil.hasLlmoCapabilityForSite(site)) {
+      return forbidden(accessControlUtil.llmoForbiddenMessage(
+        'Only LLMO administrators can access Cloudflare onboarding endpoints',
+      ));
     }
 
     return { site };

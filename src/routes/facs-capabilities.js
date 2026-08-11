@@ -143,40 +143,9 @@ const routeFacsCapabilities = {
     // no product capability check), fires a Slack webhook; not a product-scoped
     // FACS surface today.
     'POST /v2/orgs/:spaceCatId/semrush-onboarding',
-    // LLMO CloudFront "Optimize at Edge" onboarding wizard — admin-only
-    // (gateEdgeOptimizeWizard requires LLMO admin); cross-account control-plane, not a
-    // customer FACS surface.
-    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/bootstrap-url',
-    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/connect',
-    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/distributions',
-    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/prerequisites',
-    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/origins',
-    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/behaviors',
-    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/create-origin',
-    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/create-function',
-    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/apply-cache',
-    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/create-lambda',
-    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/lambda-status',
-    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/apply-associations',
-    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/verify',
-    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/deploy',
-    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/plan',
-    'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/permissions',
-    // LLMO Cloudflare onboarding — LLMO-admin manual provisioning, gated by
-    // isLLMOAdministrator() with a caller-supplied x-cloudflare-token; not a FACS surface.
-    'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config',
-    'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts',
-    'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
-    'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
-    'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes',
-    // LLMO Akamai onboarding — LLMO-admin manual provisioning, gated by
-    // isLLMOAdministrator() with caller-supplied x-akamai-* credentials; not a FACS surface.
-    'GET /sites/:siteId/llmo/cdn-onboard/akamai/config',
-    'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties',
-    'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan',
-    'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy',
-    'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate',
-    'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status',
+    // (LLMO "Optimize at Edge" CDN onboarding — cloudfront/cloudflare/akamai, all
+    // :siteId — moved to PRODUCTS_ROUTES.LLMO under llmo/can_configure; they are now
+    // FACS-governed customer site routes, enforced via the secondary resource param.)
     // Admin-only writes
     // State-layer backend provisioning — admin-only (isAdmin() in the
     // state-access-mappings controller). Full payload (imsOrgId, product,
@@ -516,6 +485,39 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/agentic-page-types': 'llmo/can_configure',
       'PATCH /sites/:siteId/agentic-page-types/:name': 'llmo/can_configure',
       'DELETE /sites/:siteId/agentic-page-types/:name': 'llmo/can_configure',
+
+      // LLMO "Optimize at Edge" CDN onboarding (CloudFront / Cloudflare / Akamai).
+      // Moved out of INTERNAL_ROUTES: now customer-reachable under the ReBAC model —
+      // a caller with llmo/can_configure on the site's brand (FACS), or an LLMO admin
+      // (non-FACS fallback via hasLlmoCapabilityForSite). Site-scoped (:siteId), so
+      // facsWrapper enforces them through the secondary resource param (site → brands).
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/bootstrap-url': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/connect': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/distributions': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/prerequisites': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/origins': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/behaviors': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/create-origin': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/create-function': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/apply-cache': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/create-lambda': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/lambda-status': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/apply-associations': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/verify': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/deploy': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/plan': 'llmo/can_configure',
+      'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/permissions': 'llmo/can_configure',
+      'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config': 'llmo/can_configure',
+      'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts': 'llmo/can_configure',
+      'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes': 'llmo/can_configure',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/config': 'llmo/can_configure',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate': 'llmo/can_configure',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status': 'llmo/can_configure',
 
       // Referral traffic (site-scoped)
       'GET /sites/:siteId/referral-traffic/kpis': 'llmo/can_view',

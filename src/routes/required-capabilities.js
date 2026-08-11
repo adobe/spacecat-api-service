@@ -97,16 +97,18 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/permissions',
   'PUT /sites/:siteId/llmo/opportunities-reviewed',
 
-  // LLMO Cloudflare onboarding - LLMO-admin self-service, gated by isLLMOAdministrator();
-  // uses a caller-supplied x-cloudflare-token, not S2S JWT
+  // LLMO Cloudflare onboarding - not S2S (uses a caller-supplied x-cloudflare-token,
+  // not an S2S JWT). Customer gate is now FACS llmo/can_configure via
+  // hasLlmoCapabilityForSite (isLLMOAdministrator fallback for non-FACS orgs).
   'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config',
   'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts',
   'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
   'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
   'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes',
 
-  // LLMO Akamai onboarding - LLMO-admin self-service, gated by isLLMOAdministrator();
-  // uses caller-supplied EdgeGrid credentials via x-akamai-* headers, not S2S JWT
+  // LLMO Akamai onboarding - not S2S (uses caller-supplied EdgeGrid credentials via
+  // x-akamai-* headers, not an S2S JWT). Customer gate is now FACS llmo/can_configure
+  // via hasLlmoCapabilityForSite (isLLMOAdministrator fallback for non-FACS orgs).
   'GET /sites/:siteId/llmo/cdn-onboard/akamai/config',
   'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties',
   'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan',

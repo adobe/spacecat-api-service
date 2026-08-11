@@ -62,6 +62,8 @@ const createMockAccessControlUtil = (
     hasAccess: async () => accessResult,
     hasAdminAccess: () => hasAdminAccessResult,
     isLLMOAdministrator: () => isLLMOAdministratorResult,
+    hasLlmoCapabilityForSite: async () => isLLMOAdministratorResult,
+    llmoForbiddenMessage: (m) => m,
     isOwnerOfSite: async () => accessResult,
   }),
 });
