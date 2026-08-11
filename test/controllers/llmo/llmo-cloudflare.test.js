@@ -14,6 +14,7 @@ import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
+import { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
 
 use(sinonChai);
 
@@ -52,6 +53,8 @@ describe('LlmoCloudflareController', () => {
         default: {
           createFrom: () => mockTokowakaClient,
         },
+        // Use the real host-derivation helper so tests exercise the actual apex→www normalization.
+        calculateForwardedHost,
       },
       '@adobe/spacecat-shared-utils': {
         hasText: (v) => typeof v === 'string' && v.trim().length > 0,
@@ -106,6 +109,7 @@ describe('LlmoCloudflareController', () => {
 
     mockContext = {
       log: {
+        debug: sandbox.stub(),
         info: sandbox.stub(),
         warn: sandbox.stub(),
         error: sandbox.stub(),
@@ -319,7 +323,9 @@ describe('LlmoCloudflareController', () => {
   describe('deployWorker', () => {
     beforeEach(() => {
       mockContext.params = { siteId: SITE_ID };
-      mockContext.data = { accountId: ACCOUNT_ID, targetHost: TARGET_HOST };
+      // targetHost is no longer client-supplied; it is derived from the site base URL
+      // (https://www.example.com → www.example.com === TARGET_HOST).
+      mockContext.data = { accountId: ACCOUNT_ID };
     });
 
     it('deploys worker script with a derived name and sets secret', async () => {
@@ -465,50 +471,46 @@ describe('LlmoCloudflareController', () => {
     });
 
     it('returns 400 when accountId is missing', async () => {
-      mockContext.data = { targetHost: TARGET_HOST };
+      mockContext.data = {};
       const res = await controller.deployWorker(mockContext);
       expect(res.status).to.equal(400);
     });
 
     it('returns 400 when accountId is not a 32-char hex id', async () => {
-      mockContext.data = { accountId: 'acc-123', targetHost: TARGET_HOST };
+      mockContext.data = { accountId: 'acc-123' };
       const res = await controller.deployWorker(mockContext);
       expect(res.status).to.equal(400);
     });
 
-    it('returns 400 when targetHost is missing', async () => {
-      mockContext.data = { accountId: ACCOUNT_ID };
-      const res = await controller.deployWorker(mockContext);
-      expect(res.status).to.equal(400);
-    });
-
-    it('returns 400 when targetHost is not a valid hostname', async () => {
-      mockContext.data = { accountId: ACCOUNT_ID, targetHost: 'not a host' };
-      const res = await controller.deployWorker(mockContext);
-      expect(res.status).to.equal(400);
-    });
-
-    it('returns 400 when targetHost does not belong to the site domain', async () => {
+    it('derives targetHost from the site base URL (apex → www) and ignores any client value', async () => {
+      mockSite.getBaseURL = () => 'https://example.com';
+      // A client-supplied targetHost must be ignored — the worker only ever forwards to the
+      // canonical host derived from the site's own base URL.
       mockContext.data = { accountId: ACCOUNT_ID, targetHost: 'evil.com' };
-      const res = await controller.deployWorker(mockContext);
-      expect(res.status).to.equal(400);
-      expect(mockCfClient.deployWorkerScript).to.not.have.been.called;
-    });
-
-    it('accepts the canonical site host as targetHost', async () => {
-      mockContext.data = { accountId: ACCOUNT_ID, targetHost: 'example.com' };
       mockCfClient.deployWorkerScript.resolves();
       mockCfClient.setWorkerSecret.resolves();
+
       const res = await controller.deployWorker(mockContext);
       expect(res.status).to.equal(200);
+
+      const binding = mockCfClient.deployWorkerScript.getCall(0).args[3];
+      expect(binding).to.deep.equal([
+        { name: 'EDGE_OPTIMIZE_TARGET_HOST', type: 'plain_text', text: 'www.example.com' },
+      ]);
     });
 
-    it('accepts a subdomain of the site domain as targetHost', async () => {
-      mockContext.data = { accountId: ACCOUNT_ID, targetHost: 'cdn.example.com' };
+    it('preserves an existing subdomain host when deriving targetHost', async () => {
+      mockSite.getBaseURL = () => 'https://cdn.example.com';
       mockCfClient.deployWorkerScript.resolves();
       mockCfClient.setWorkerSecret.resolves();
+
       const res = await controller.deployWorker(mockContext);
       expect(res.status).to.equal(200);
+
+      const binding = mockCfClient.deployWorkerScript.getCall(0).args[3];
+      expect(binding).to.deep.equal([
+        { name: 'EDGE_OPTIMIZE_TARGET_HOST', type: 'plain_text', text: 'cdn.example.com' },
+      ]);
     });
 
     it('returns 400 when CF token is missing', async () => {

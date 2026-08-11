@@ -14,7 +14,7 @@ import {
   ok, badRequest, notFound, forbidden, unauthorized, internalServerError, createResponse,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
-import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
+import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
 import CloudflareClient from '@adobe/spacecat-shared-cloudflare-client';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { auditHostname } from './llmo-utils.js';
@@ -53,7 +53,6 @@ const WORKER_SCRIPT_FETCH_TIMEOUT_MS = 10_000;
 
 // Boundary input validation (defense-in-depth, independent of CloudflareClient behaviour).
 const CF_ID_RE = /^[0-9a-f]{32}$/; // Cloudflare account/zone IDs are 32-char lowercase hex
-const HOSTNAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/i;
 
 /**
  * Identifies the API caller for audit logging and worker tagging. profile.email is an IMS user
@@ -325,7 +324,10 @@ function LlmoCloudflareController(ctx) {
 
   /**
    * POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy
-   * Body: { accountId, targetHost }
+   * Body: { accountId }
+   * The target host is NOT client-supplied — it is derived server-side from the site's own base
+   * URL (see calculateForwardedHost) so the worker always forwards to the canonical host for the
+   * site, consistent with how the other CDN integrations resolve the origin.
    * Fetches the Edge Optimize worker script from GitHub and deploys it under a name derived
    * from the site (see deriveWorkerName), tagging it with CF_WORKER_OWNER_TAG (+ the caller's
    * IMS identity), then sets the LLMO API key as the EDGE_OPTIMIZE_API_KEY secret on the worker.
@@ -353,7 +355,7 @@ function LlmoCloudflareController(ctx) {
       return nameError;
     }
 
-    const { accountId, targetHost } = context.data || {};
+    const { accountId } = context.data || {};
 
     if (!hasText(accountId)) {
       return badRequest('Missing accountId in request body');
@@ -361,17 +363,24 @@ function LlmoCloudflareController(ctx) {
     if (!CF_ID_RE.test(accountId)) {
       return badRequest('accountId must be a 32-character hexadecimal Cloudflare account ID');
     }
-    if (!hasText(targetHost)) {
-      return badRequest('Missing targetHost in request body');
-    }
-    if (!HOSTNAME_RE.test(targetHost)) {
-      return badRequest('targetHost must be a valid hostname');
-    }
-    if (!hostInSiteDomain(targetHost, site.getBaseURL())) {
-      return badRequest('targetHost must belong to the site\'s domain');
-    }
 
     const siteId = site.getId();
+
+    // targetHost is derived server-side from the site's own base URL — never taken from the client
+    // — so the worker always forwards to the canonical host for the site. calculateForwardedHost
+    // normalizes a bare apex (example.com) to its www host, matching how audits/crawls resolve the
+    // origin and keeping host derivation consistent across CDNs (CloudFront uses the same helper).
+    // Known gap: sites served from the apex without a www record still resolve to www here; that
+    // is tracked as a follow-up enhancement.
+    let targetHost;
+    try {
+      targetHost = calculateForwardedHost(site.getBaseURL(), log);
+    } catch (e) {
+      log.error(auditLine(context, 'deploy-worker', 'target-host-failed', {
+        severity: 'error', siteId, accountId, error: e.message,
+      }));
+      return internalServerError('Could not derive target host from site base URL');
+    }
 
     // Tags attached to the worker. CF_WORKER_OWNER_TAG is always present and always first so the
     // client's idempotency match (tags.some((t) => settings.tags?.includes(t))) recognizes any
