@@ -40,6 +40,7 @@ describe('LlmoCloudflareController', () => {
   let mockCfClient;
   let mockTokowakaClient;
   let mockFetch;
+  let mockCalculateForwardedHost;
 
   before(async () => {
     // esmock is expensive, so wire it once. The mock factories deliberately read the mutable
@@ -53,8 +54,9 @@ describe('LlmoCloudflareController', () => {
         default: {
           createFrom: () => mockTokowakaClient,
         },
-        // Use the real host-derivation helper so tests exercise the actual apex→www normalization.
-        calculateForwardedHost,
+        // Routed through a mutable stub (default: the real impl, set in beforeEach) so tests
+        // exercise the actual apex→www normalization but can also force a derivation failure.
+        calculateForwardedHost: (...args) => mockCalculateForwardedHost(...args),
       },
       '@adobe/spacecat-shared-utils': {
         hasText: (v) => typeof v === 'string' && v.trim().length > 0,
@@ -85,6 +87,9 @@ describe('LlmoCloudflareController', () => {
     mockTokowakaClient = {
       fetchMetaconfig: sandbox.stub().resolves({ apiKeys: [LLMO_API_KEY] }),
     };
+
+    // Default to the real host-derivation helper; individual tests may override to force a throw.
+    mockCalculateForwardedHost = calculateForwardedHost;
 
     mockFetch = sandbox.stub().resolves({
       ok: true,
@@ -511,6 +516,15 @@ describe('LlmoCloudflareController', () => {
       expect(binding).to.deep.equal([
         { name: 'EDGE_OPTIMIZE_TARGET_HOST', type: 'plain_text', text: 'cdn.example.com' },
       ]);
+    });
+
+    it('returns 500 when the target host cannot be derived from the site base URL', async () => {
+      mockCalculateForwardedHost = () => {
+        throw new Error('cannot derive host');
+      };
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(500);
+      expect(mockCfClient.deployWorkerScript).to.not.have.been.called;
     });
 
     it('returns 400 when CF token is missing', async () => {
