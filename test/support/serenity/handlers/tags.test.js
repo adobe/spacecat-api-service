@@ -1652,6 +1652,30 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       expect(transport.updateProjectTag).to.not.have.been.called;
     });
 
+    // Completes the flat/subworkspace symmetry for LLMO-6665: the server-owned
+    // guard fires before the placement check in buildUpdatePayload, so a source
+    // RE-PARENT is refused on the subworkspace route too, same as flat mode.
+    it('400s a re-parent of a source value — shared server-owned guard (LLMO-6665)', async () => {
+      const handler = await loadHandler(sinon.stub().resolves({ id: 'proj-sub-1' }));
+      const transport = makeSourceDescendableTransport();
+      const err = await handler.handleUpdateTagSubworkspace(
+        transport,
+        WORKSPACE,
+        TAG_IDS.sourceConfig,
+        {
+          name: 'config',
+          parentId: TAG_IDS.sourceSemrush,
+          geoTargetId: 2840,
+          languageCode: 'en',
+        },
+        fakeLog(),
+      ).then(() => null, (e) => e);
+
+      expect(err.status).to.equal(400);
+      expect(err.message).to.match(/server-owned "source" dimension cannot be renamed or re-parented/);
+      expect(transport.updateProjectTag).to.not.have.been.called;
+    });
+
     it('404s (marketNotFound) when the slice has no live project', async () => {
       const handler = await loadHandler(sinon.stub().resolves(null));
       const transport = makeTransport();
