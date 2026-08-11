@@ -1554,6 +1554,61 @@ describe('Sites Controller', () => {
 
       expect(loggerStub.error).to.have.been.calledWithMatch(/\[sites\]\[baseUrlContains\] query failed/);
     });
+
+    it('filters by deliveryType alone using an eq where and the offset envelope', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+      const res = await sitesController.getAll({ ...context, data: { deliveryType: 'aem_edge', limit: '10' } });
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.pagination).to.include({ limit: 10, offset: 0, deliveryType: 'aem_edge' });
+      const [, opts] = mockDataAccess.Site.all.firstCall.args;
+      const op = { eq: (f, v) => ({ type: 'eq', field: f, value: v }), and: (...c) => ({ type: 'and', conditions: c }) };
+      const expr = opts.where({ deliveryType: 'delivery_type' }, op);
+      expect(expr).to.deep.equal({ type: 'eq', field: 'delivery_type', value: 'aem_edge' });
+    });
+
+    it('composes baseUrlContains AND isLive via op.and', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+      await sitesController.getAll({ ...context, data: { baseUrlContains: 'sem', isLive: 'true' } });
+      const [, opts] = mockDataAccess.Site.all.firstCall.args;
+      const op = {
+        ilike: (f, v) => ({ type: 'ilike', field: f, value: v }),
+        eq: (f, v) => ({ type: 'eq', field: f, value: v }),
+        and: (...c) => ({ type: 'and', conditions: c }),
+      };
+      const expr = opts.where({ baseURL: 'base_url', isLive: 'is_live' }, op);
+      expect(expr.type).to.equal('and');
+      expect(expr.conditions).to.deep.equal([
+        { type: 'ilike', field: 'base_url', value: '%sem%' },
+        { type: 'eq', field: 'is_live', value: true },
+      ]);
+    });
+
+    it('passes orderBy from a valid sort param and echoes it', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+      const res = await sitesController.getAll({ ...context, data: { sort: 'updatedAt:desc' } });
+      const body = await res.json();
+      const [, opts] = mockDataAccess.Site.all.firstCall.args;
+      expect(opts.orderBy).to.deep.equal({ attribute: 'updatedAt', direction: 'desc' });
+      expect(body.pagination.sort).to.equal('updatedAt:desc');
+    });
+
+    it('rejects invalid deliveryType, isLive, sort field, and sort direction with 400', async () => {
+      for (const data of [
+        { deliveryType: 'nope' }, { isLive: 'maybe' },
+        { sort: 'bogus:desc' }, { sort: 'updatedAt:sideways' },
+      ]) {
+        // eslint-disable-next-line no-await-in-loop
+        const res = await sitesController.getAll({ ...context, data });
+        expect(res.status, JSON.stringify(data)).to.equal(400);
+      }
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+    });
+
+    it('returns 400 when cursor is combined with any filter/sort', async () => {
+      const res = await sitesController.getAll({ ...context, data: { cursor: 'c', deliveryType: 'aem_edge' } });
+      expect(res.status).to.equal(400);
+    });
   });
 
   describe('GET /sites - S2S readAll capability', () => {

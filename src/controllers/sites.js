@@ -174,6 +174,8 @@ const BRAND_PROFILE_AGENT_ID = 'brand-profile';
 const DEFAULT_LIMIT = 100;
 const SEARCH_DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 500;
+// Allowlisted `sort` fields for the GET /sites filtered/sorted mode.
+const SORT_FIELDS = new Set(['baseURL', 'updatedAt', 'createdAt', 'deliveryType', 'isLive']);
 
 /**
  * Filters Ahrefs top pages by site base URL
@@ -489,12 +491,19 @@ function SitesController(ctx, log, env) {
    * 100, no cursor) as the `{ sites, pagination }` envelope - the same shape as an
    * explicit paginated request.
    *
-   * Optional `baseUrlContains` query param: when provided (3-256 chars after trim),
-   * performs a case-insensitive substring search on `baseURL` and returns a non-cursor
-   * `{ sites, pagination: { limit, offset, hasMore, baseUrlContains } }` response. The
-   * trimmed query is echoed back in `pagination.baseUrlContains` so a client can confirm
-   * its search was applied even if it hits an older deployment that ignores the param.
-   * LIKE wildcards in the input are escaped so callers cannot inject their own wildcards.
+   * Filtered/sorted mode: triggered when ANY of `baseUrlContains`, `deliveryType`,
+   * `isLive`, `sort` is present. Returns a non-cursor, offset-paginated response:
+   * `{ sites, pagination: { limit, offset, hasMore, baseUrlContains?, deliveryType?,
+   * isLive?, sort? } }` - only the filters/sort actually applied are echoed back, so a
+   * client can confirm what was applied even if it hits an older deployment that ignores
+   * some of the params. `baseUrlContains` (3-256 chars after trim) performs a
+   * case-insensitive substring search on `baseURL`; LIKE wildcards in the input are
+   * escaped so callers cannot inject their own wildcards. `deliveryType` and `isLive`
+   * are exact-match filters; when more than one filter is present they compose with AND.
+   * `sort` (`<field>:<asc|desc>`, field one of `baseURL`/`updatedAt`/`createdAt`/
+   * `deliveryType`/`isLive`) sets the result order. `cursor` is not supported together
+   * with any filter/sort (use `offset` instead) - accepting both would silently discard
+   * the cursor and mislead the client into thinking cursor pagination is active.
    * @returns {Promise<Response>} Paginated sites response
    */
   const getAll = async (context) => {
@@ -513,22 +522,55 @@ function SitesController(ctx, log, env) {
     const limitParam = context?.data?.limit;
     const cursor = context?.data?.cursor || null;
 
-    // Optional substring search by base URL. Runs after the authz check (so
-    // unauthorized callers still get 403) and before the cursor/legacy branches.
+    // Optional filtered/sorted mode: triggered when ANY of baseUrlContains, deliveryType,
+    // isLive, sort is present. Runs after the authz check (so unauthorized callers still
+    // get 403) and before the cursor/legacy branches. Offset-paginated (not cursor-based).
     const baseUrlContains = context?.data?.baseUrlContains;
-    if (hasText(baseUrlContains) && hasText(cursor)) {
+    const deliveryType = context?.data?.deliveryType;
+    const isLiveParam = context?.data?.isLive;
+    const sortParam = context?.data?.sort;
+
+    // Validate facets/sort up front (after authz, before branching) so invalid input is
+    // always rejected the same way, whether or not it's combined with other filters.
+    let isLiveBool;
+    if (hasText(isLiveParam)) {
+      if (isLiveParam !== 'true' && isLiveParam !== 'false') {
+        return badRequest('isLive must be "true" or "false"');
+      }
+      isLiveBool = isLiveParam === 'true';
+    }
+    if (hasText(deliveryType) && !Object.values(SiteModel.DELIVERY_TYPES).includes(deliveryType)) {
+      return badRequest(`Invalid deliveryType: ${deliveryType}`);
+    }
+    let orderBy;
+    if (hasText(sortParam)) {
+      const [sortField, sortDirection = 'asc'] = sortParam.split(':');
+      if (!SORT_FIELDS.has(sortField)) {
+        return badRequest(`Invalid sort field: ${sortField}`);
+      }
+      if (sortDirection !== 'asc' && sortDirection !== 'desc') {
+        return badRequest(`Invalid sort direction: ${sortDirection}`);
+      }
+      orderBy = { attribute: sortField, direction: sortDirection };
+    }
+
+    const hasFilters = hasText(baseUrlContains) || hasText(deliveryType)
+      || hasText(isLiveParam) || hasText(sortParam);
+    if (hasFilters && hasText(cursor)) {
       // The public search path paginates via offset, not the client cursor;
       // accepting both would silently discard the cursor and mislead the client
       // into thinking cursor pagination is active. Reject the combination explicitly.
       return badRequest('cursor is not supported with baseUrlContains; use offset');
     }
-    if (hasText(baseUrlContains)) {
-      const q = baseUrlContains.trim();
-      if (q.length < 3) {
-        return badRequest('baseUrlContains must be at least 3 characters');
-      }
-      if (q.length > 256) {
-        return badRequest('baseUrlContains exceeds maximum length');
+    if (hasFilters) {
+      if (hasText(baseUrlContains)) {
+        const q = baseUrlContains.trim();
+        if (q.length < 3) {
+          return badRequest('baseUrlContains must be at least 3 characters');
+        }
+        if (q.length > 256) {
+          return badRequest('baseUrlContains exceeds maximum length');
+        }
       }
 
       const parsedLimit = hasText(limitParam) ? parseInt(limitParam, 10) : SEARCH_DEFAULT_LIMIT;
@@ -544,24 +586,45 @@ function SitesController(ctx, log, env) {
       }
 
       // Escape LIKE special chars so user input cannot inject its own wildcards.
-      const escaped = q.replace(/([\\%_])/g, '\\$1');
+      const trimmedQuery = hasText(baseUrlContains) ? baseUrlContains.trim() : null;
+      const escaped = trimmedQuery !== null ? trimmedQuery.replace(/([\\%_])/g, '\\$1') : null;
 
       // The data-access layer paginates by an offset-encoded cursor (postgrest.utils
       // encodeCursor); it exposes no public `offset` option, so we build the same
       // shape here. If a direct offset option is ever added upstream, switch to it.
       const offsetCursor = Buffer.from(JSON.stringify({ offset }), 'utf-8').toString('base64');
 
+      // The data-access `where` builder passes (attrs, op): `attrs` maps model fields to
+      // DB columns, `op` carries the operators (NOT `s => s.ilike(...)`). Conditions
+      // compose with AND; a single condition is returned bare (not wrapped in `op.and`).
+      const hasWhereConditions = escaped !== null
+        || hasText(deliveryType) || isLiveBool !== undefined;
+      const where = (attr, op) => {
+        const conds = [];
+        if (escaped !== null) {
+          conds.push(op.ilike(attr.baseURL, `%${escaped}%`));
+        }
+        if (hasText(deliveryType)) {
+          conds.push(op.eq(attr.deliveryType, deliveryType));
+        }
+        if (isLiveBool !== undefined) {
+          conds.push(op.eq(attr.isLive, isLiveBool));
+        }
+        return conds.length === 1 ? conds[0] : op.and(...conds);
+      };
+
       // Fetch one extra row to detect whether more results exist beyond the limit.
-      // The data-access `where` builder passes (attrs, op): `attrs` maps model
-      // fields to DB columns, `op` carries the operators. (NOT `s => s.ilike(...)`.)
+      const allOpts = { limit: effectiveLimit + 1, cursor: offsetCursor, order: 'asc' };
+      if (hasWhereConditions) {
+        allOpts.where = where;
+      }
+      if (orderBy) {
+        allOpts.orderBy = orderBy;
+      }
+
       let rows;
       try {
-        rows = await Site.all({}, {
-          where: (attr, op) => op.ilike(attr.baseURL, `%${escaped}%`),
-          limit: effectiveLimit + 1,
-          cursor: offsetCursor,
-          order: 'asc',
-        });
+        rows = await Site.all({}, allOpts);
       } catch (e) {
         // Re-throw so the framework still returns a 500 — the point here is a
         // searchable, prefixed log line, not swallowing the error.
@@ -586,7 +649,7 @@ function SitesController(ctx, log, env) {
 
       // Unconditional observability for both admin and S2S paths. Never log the raw
       // query value (URLs may be sensitive) — only its length and result counts.
-      log.info(`[sites][baseUrlContains] qlen=${q.length} count=${sites.length} hasMore=${hasMore} requestId=${requestId}`);
+      log.info(`[sites][baseUrlContains] qlen=${trimmedQuery !== null ? trimmedQuery.length : 0} count=${sites.length} hasMore=${hasMore} requestId=${requestId}`);
 
       const { list: projectedSites, error: fieldsError } = applyFieldProjection(
         sites,
@@ -596,14 +659,21 @@ function SitesController(ctx, log, env) {
         return badRequest(fieldsError);
       }
 
-      // Echo the trimmed query in the pagination so a new client can confirm its
-      // search was actually applied. An older deployment that ignores `baseUrlContains`
-      // but still honors `limit` would return the cursor envelope with unfiltered
-      // sites and no `baseUrlContains` echo — letting clients detect the version skew.
+      // Echo only the filters/sort actually applied, so a client can confirm what was
+      // applied even if it hits an older deployment that ignores some of the params.
+      // An older deployment that ignores a param but still honors `limit` would return
+      // the offset envelope with unfiltered sites and no echo for that param — letting
+      // clients detect the version skew.
       return ok({
         sites: projectedSites,
         pagination: {
-          limit: effectiveLimit, offset, hasMore, baseUrlContains: q,
+          limit: effectiveLimit,
+          offset,
+          hasMore,
+          ...(trimmedQuery !== null && { baseUrlContains: trimmedQuery }),
+          ...(hasText(deliveryType) && { deliveryType }),
+          ...(isLiveBool !== undefined && { isLive: isLiveBool }),
+          ...(orderBy && { sort: sortParam }),
         },
       });
     }
