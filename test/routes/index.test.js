@@ -1157,6 +1157,7 @@ describe('getRouteHandlers', () => {
       'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
       'GET /sites/:siteId/geo-experiments',
       'GET /sites/:siteId/geo-experiments/:geoExperimentId',
+      'GET /sites/:siteId/geo-experiments/:geoExperimentId/results',
       'PATCH /sites/:siteId/geo-experiments/:geoExperimentId',
       'DELETE /sites/:siteId/geo-experiments/:geoExperimentId',
       'POST /sites/:siteId/geo-experiments/:geoExperimentId/trigger-impact-measurement',
