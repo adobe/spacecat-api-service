@@ -238,4 +238,56 @@ describe('serenity branded-classifier', () => {
         .to.equal(TYPE_VALUE.NON_BRANDED);
     });
   });
+
+  /**
+   * Cross-implementation conformance cases. The identical table is asserted by
+   * the Python mirror (`mysticat-data-service` `tests/unit/test_serenity_migration.py`,
+   * `TestBrandClassifier.test_spaceless_script_conformance`) and by the SQL mirror
+   * (`tests/api/test_rpc_brand_prompt_stats.py`), and is published as the
+   * normative table in serenity-docs `branded-classification.md`. The three
+   * engines express the boundary rule differently — JavaScript tokenizes
+   * space-less scripts, Python and PostgreSQL use a Latin-alphanumeric
+   * lookaround — so this table is what makes their agreement testable rather
+   * than merely asserted. Change a row here and the other two suites must move
+   * with it.
+   */
+  describe('conformance: space-less scripts', () => {
+    const CASES = [
+      // [needles, prompt text, expected, why]
+      [['au'], 'auのSIMロック解除に手数料はかかりますか？', TYPE_VALUE.BRANDED,
+        'Latin brand followed directly by kana — the KDDI case (LLMO-6900)'],
+      [['au'], '各キャリアの人口カバー率を比較して教えて', TYPE_VALUE.NON_BRANDED,
+        'Japanese prompt that never names the brand'],
+      [['au'], 'is autopay available?', TYPE_VALUE.NON_BRANDED,
+        'the needle inside a longer Latin word still must not match'],
+      [['au'], 'au 5G はどこで使える', TYPE_VALUE.BRANDED,
+        'Latin brand space-delimited inside Japanese text'],
+      [['楽天'], '楽天モバイルの料金プランは？', TYPE_VALUE.BRANDED,
+        'CJK-native brand matches as a contiguous character run'],
+      [['ソニー'], 'ソニーのカメラを比較して', TYPE_VALUE.BRANDED,
+        'katakana brand including the prolonged sound mark'],
+      [['ソニー'], 'パナソニックの製品について', TYPE_VALUE.NON_BRANDED,
+        'Panasonic must not match Sony — the prolonged sound mark is load-bearing'],
+      [['ゾニー'], 'ソニーのカメラを比較して', TYPE_VALUE.NON_BRANDED,
+        'dakuten distinguishes ゾ from ソ and must survive normalization'],
+      [['華為'], '華為手機值得買嗎', TYPE_VALUE.BRANDED, 'Chinese brand in Chinese text'],
+      [['ทรู'], 'แพ็กเกจของทรูดีไหม', TYPE_VALUE.BRANDED, 'Thai brand in Thai text'],
+      [['삼성'], '삼성 전자는 어떤가요', TYPE_VALUE.BRANDED,
+        'Korean DOES use word spaces, so the whole-word match still applies'],
+      [['삼성'], '삼성전자는 어떤가요', TYPE_VALUE.NON_BRANDED,
+        'and Hangul is therefore NOT split per character — no substring match'],
+    ];
+
+    CASES.forEach(([names, text, expected, why]) => {
+      it(`${expected}: ${why}`, () => {
+        expect(classifyBrandedTag(text, needlesFromNames(names))).to.equal(expected);
+      });
+    });
+
+    it('keeps a kana brand distinguishable from its voiced counterpart', () => {
+      // NFD decomposes パ to ハ + U+309A; a blanket Diacritic strip would merge them.
+      expect(normalizeMatch('パナソニック')).to.equal('パ ナ ソ ニ ッ ク');
+      expect(normalizeMatch('ソニー')).to.equal('ソ ニ ー');
+    });
+  });
 });
