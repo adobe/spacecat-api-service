@@ -1253,6 +1253,22 @@ const routeFacsCapabilities = {
   },
 
   /**
+   * Per-product SECONDARY resource param (opt-in), consumed by `facsWrapper`
+   * when a route resolves no PRIMARY resource. A route whose path declares the
+   * secondary alias delegates the grant/deny decision to the named resolver in
+   * `secondaryResolvers` (see `src/support/facs-secondary-resolvers.js`).
+   *
+   * LLMO: many site-scoped routes (`:siteId`) must be authorized against the
+   * site's BRANDS (LLMO's ReBAC resource is `brand`, not `site`). `siteId` stays
+   * the ASO primary anchor above and is not an LLMO primary alias; here it is
+   * LLMO's secondary, resolved cross-resource (site → brands) by `llmoSiteToBrands`.
+   * See mysticat-architecture/platform/decisions/facs-wrapper-secondary-resource-param.md.
+   */
+  PRODUCTS_FACS_SECONDARY_RESOURCE: {
+    LLMO: { resourceType: 'site', aliases: ['siteId'], resolver: 'llmoSiteToBrands' },
+  },
+
+  /**
    * Every `:param` from `src/routes/index.js` that no product currently
    * treats as a FACS resource. Together with the union of every product's
    * resource aliases above, this exhaustively classifies every `:param`
