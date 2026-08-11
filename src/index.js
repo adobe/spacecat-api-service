@@ -84,6 +84,7 @@ import LlmoCloudFrontController from './controllers/llmo/llmo-cloudfront.js';
 import LlmoAkamaiController from './controllers/llmo/llmo-akamai.js';
 import LlmoMysticatController from './controllers/llmo/llmo-mysticat-controller.js';
 import LlmoOpportunitiesController from './controllers/llmo/opportunities/llmo-opportunities-controller.js';
+import OpportunityValidationController from './controllers/llmo/opportunities/opportunity-validation-controller.js';
 import PromptSuggestionSchedulesController from './controllers/llmo/prompt-suggestion-schedules.js';
 import FanoutReportController from './controllers/llmo/fanout-report.js';
 import UserActivitiesController from './controllers/user-activities.js';
@@ -302,6 +303,7 @@ async function run(request, context) {
     const proxyController = ProxyController();
     const taskManagementController = TaskManagementController(context);
     const onboardingController = OnboardingController(context, log, context.env);
+    const opportunityValidationController = OpportunityValidationController();
     const promptSuggestionSchedulesController = PromptSuggestionSchedulesController(context);
 
     const routeHandlers = getRouteHandlers(
@@ -372,6 +374,7 @@ async function run(request, context) {
       onboardingController,
       redirectsController,
       auditPolicyController,
+      opportunityValidationController,
       promptSuggestionSchedulesController,
     );
 

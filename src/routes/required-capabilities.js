@@ -528,6 +528,7 @@ const routeRequiredCapabilities = {
   'POST /sites/:siteId/opportunities': 'opportunity:write',
   'PATCH /sites/:siteId/opportunities/:opportunityId': 'opportunity:write',
   'DELETE /sites/:siteId/opportunities/:opportunityId': 'opportunity:write',
+  'POST /sites/:siteId/opportunities/:opportunityId/validate': 'opportunity:write',
 
   // Suggestions
   'GET /sites/:siteId/opportunities/:opportunityId/suggestions': 'suggestion:read',
