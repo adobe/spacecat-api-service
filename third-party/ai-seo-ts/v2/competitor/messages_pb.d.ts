@@ -5,6 +5,7 @@
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import type { Message } from "@bufbuild/protobuf";
 import type { Brand, BrandJson } from "../../common/types_pb.js";
+import type { SEARCH_TYPE_ENUM, SEARCH_TYPE_ENUMJson } from "../source/enums_pb.js";
 
 /**
  * Describes the file v2/competitor/messages.proto.
@@ -28,6 +29,16 @@ export declare type BrandCompetitorsRequest = Message<"semrush.services.ai_seo.v
    * @generated from field: uint32 count = 2;
    */
   count: number;
+
+  /**
+   * search_type controls how target is scoped when picking the top country and
+   * extracting competitors: as a whole root domain, a specific subdomain, a
+   * subfolder path, or an exact URL. Unset / UNSPECIFIED is treated as DOMAIN,
+   * so existing callers see no behavior change.
+   *
+   * @generated from field: semrush.services.ai_seo.v2.source.SEARCH_TYPE.ENUM search_type = 3;
+   */
+  searchType: SEARCH_TYPE_ENUM;
 };
 
 /**
@@ -47,6 +58,16 @@ export declare type BrandCompetitorsRequestJson = {
    * @generated from field: uint32 count = 2;
    */
   count?: number;
+
+  /**
+   * search_type controls how target is scoped when picking the top country and
+   * extracting competitors: as a whole root domain, a specific subdomain, a
+   * subfolder path, or an exact URL. Unset / UNSPECIFIED is treated as DOMAIN,
+   * so existing callers see no behavior change.
+   *
+   * @generated from field: semrush.services.ai_seo.v2.source.SEARCH_TYPE.ENUM search_type = 3;
+   */
+  searchType?: SEARCH_TYPE_ENUMJson;
 };
 
 /**

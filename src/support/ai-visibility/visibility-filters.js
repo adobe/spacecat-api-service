@@ -10,15 +10,13 @@
  * governing permissions and limitations under the License.
  */
 
+import { COUNTRY_ENUM } from '@quazar/ai-seo-ts/common/types_pb.js';
+
 /* eslint-disable max-statements-per-line -- filter walk helpers */
 
-export const SR_AI_SEO_SUPPORTED_MARKET_CODES = [
-  'AE', 'AR', 'AT', 'AU', 'BE', 'BR', 'CA', 'CH', 'CL', 'CO',
-  'DE', 'DK', 'ES', 'FI', 'FR', 'HK', 'ID', 'IE', 'IL', 'IN',
-  'IT', 'JP', 'KR', 'MX', 'MY', 'NL', 'NO', 'PA', 'PE', 'PH',
-  'PL', 'SA', 'SE', 'SG', 'TH', 'TR', 'TW', 'UK', 'US', 'UY',
-  'VN', 'ZA',
-];
+export const SR_AI_SEO_SUPPORTED_MARKET_CODES = Object.keys(COUNTRY_ENUM)
+  .filter((code) => /^[A-Z]{2}$/.test(code))
+  .sort((a, b) => a.localeCompare(b));
 
 const SUPPORTED_MARKET = new Set(SR_AI_SEO_SUPPORTED_MARKET_CODES);
 
