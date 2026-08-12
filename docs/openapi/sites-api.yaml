@@ -135,6 +135,16 @@ sites:
         branch paginates by `offset`). Defaults to a limit of 50 (clamped to 500) and an
         offset of 0. The search term must be at least 3 characters after trimming
         (otherwise 400).
+      - **Server-side filter/sort (with `deliveryType`, `isLive`, and/or `sort`, alone or
+        combined with `baseUrlContains`):** same non-cursor, offset-paginated envelope as
+        substring search — `{ sites, pagination }` where `pagination` is
+        `{ limit, offset, hasMore, baseUrlContains?, deliveryType?, isLive?, sort? }`
+        (only the filters/sort actually applied are echoed back). `deliveryType` filters
+        on an exact match; `isLive` filters by live status (`"true"`/`"false"`); `sort` is
+        `<field>:<direction>` (field ∈ `baseURL`, `updatedAt`, `createdAt`,
+        `deliveryType`, `isLive`; direction ∈ `asc`/`desc`, defaults to `asc`). Multiple
+        filters combine with AND. Defaults to a limit of 50 (clamped to 500) and an
+        offset of 0. Not combinable with `cursor` (400; use `offset` instead).
 
       Required capabilities: admin access or S2S `site:readAll`.
     operationId: getSites
@@ -188,30 +198,88 @@ sites:
         in: query
         required: false
         description: |
-          Zero-based offset into the `baseUrlContains` search results, used to page
+          Zero-based offset into the filtered/sorted search results, used to page
           through matches (e.g. `offset=2&limit=2` returns the second page of 2).
-          Only honored on the `baseUrlContains` search path. Defaults to 0. Negative
+          Only honored on the filtered/sorted search path (i.e. when `baseUrlContains`,
+          `deliveryType`, `isLive`, and/or `sort` is present). Defaults to 0. Negative
           or non-integer values return 400.
         schema:
           type: integer
           minimum: 0
           example: 0
+      - name: deliveryType
+        in: query
+        required: false
+        description: |
+          Server-side filter: only return sites whose `deliveryType` equals this value.
+          When provided — alone, or combined with `baseUrlContains`, `isLive`, and/or
+          `sort` — the response uses the non-cursor, offset-paginated envelope
+          (`{ sites, pagination: { limit, offset, hasMore, deliveryType, ... } }`),
+          where `pagination.deliveryType` echoes the applied value. An unrecognized
+          value returns 400. Not combinable with `cursor` (400; use `offset` instead).
+          The `limit` parameter (default 50, clamped to 500) bounds the page size and
+          `offset` (default 0) selects the page.
+        schema:
+          type: string
+          enum:
+            - aem_cs
+            - aem_edge
+            - aem_ams
+            - aem_headless
+            - other
+          example: aem_edge
+      - name: isLive
+        in: query
+        required: false
+        description: |
+          Server-side filter: only return sites whose `isLive` flag equals this value.
+          Accepts only the literal strings `"true"` or `"false"` (any other value
+          returns 400). When provided — alone, or combined with `baseUrlContains`,
+          `deliveryType`, and/or `sort` — the response uses the non-cursor,
+          offset-paginated envelope, where `pagination.isLive` echoes the applied
+          value as a boolean. Not combinable with `cursor` (400; use `offset` instead).
+        schema:
+          type: string
+          enum:
+            - 'true'
+            - 'false'
+          example: 'true'
+      - name: sort
+        in: query
+        required: false
+        description: |
+          Server-side sort for the filtered/offset-paginated `GET /sites` mode, in
+          `<field>:<direction>` form (e.g. `updatedAt:desc`). Providing `sort` alone,
+          with no other filter, is enough to enter the offset-paginated envelope.
+          `<field>` must be one of `baseURL`, `updatedAt`, `createdAt`, `deliveryType`,
+          `isLive`; `<direction>` is optional and must be `asc` or `desc` (defaults to
+          `asc` when omitted). An unrecognized field or direction returns 400.
+          `pagination.sort` echoes the applied value verbatim. Not combinable with
+          `cursor` (400; use `offset` instead).
+        schema:
+          type: string
+          example: "updatedAt:desc"
       - $ref: './parameters.yaml#/fields'
     responses:
       '200':
         description: |
-          A paginated list of sites. The `pagination` shape depends on whether
-          `baseUrlContains` was provided.
+          A paginated list of sites. The `pagination` shape depends on whether any of
+          `baseUrlContains`, `deliveryType`, `isLive`, or `sort` was provided.
         content:
           application/json:
             schema:
               description: |
                 Two response shapes are possible, selected by the request and
                 unambiguous by JSON shape, so no `discriminator` is used:
-                - When `baseUrlContains` is provided → **`SiteSearchResponse`**, a JSON
-                  object with `sites` and a non-cursor `pagination`
-                  (`{ limit, offset, hasMore, baseUrlContains }`). The `baseUrlContains`
-                  echo lets a client confirm the search ran on the deployment it hit.
+                - When any of `baseUrlContains`, `deliveryType`, `isLive`, or `sort` is
+                  provided → **`SiteSearchResponse`**, a JSON object with `sites` and a
+                  non-cursor `pagination`
+                  (`{ limit, offset, hasMore, baseUrlContains?, deliveryType?, isLive?,
+                  sort? }`). Only the filters/sort actually applied are echoed back, so
+                  a client can confirm what ran on the deployment it hit (e.g. an older
+                  deployment that ignores `deliveryType` but honors `limit` would
+                  return this envelope with unfiltered sites and no `deliveryType`
+                  echo).
                 - Otherwise (default first page, or with `limit`/`cursor`) →
                   **`SitePagedResponse`**, a JSON object with `sites` and a
                   cursor-based `pagination`.
