@@ -111,6 +111,7 @@
     "@adobe/spacecat-shared-utils": "1.125.1",
     "@adobe/spacecat-shared-vault-secrets": "1.4.1",
     "@aws-sdk/client-cloudfront": "3.1045.0",
+    "@aws-sdk/client-cloudwatch-logs": "3.1045.0",
     "@aws-sdk/client-iam": "3.1045.0",
     "@aws-sdk/client-lambda": "3.1045.0",
     "@aws-sdk/client-s3": "3.1045.0",
