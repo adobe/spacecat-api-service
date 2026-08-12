@@ -891,6 +891,15 @@ export declare type GapTopicsRequest = Message<"semrush.services.ai_seo.v2.topic
    * @generated from field: optional string target_date = 11;
    */
   targetDate?: string;
+
+  /**
+   * search_type defines how target.domain is interpreted when scoping target mentions:
+   * as a whole root domain, a specific subdomain, a subfolder path, or an exact URL.
+   * The scope item is the target.domain. Unset / UNSPECIFIED is treated as DOMAIN for backward compatibility.
+   *
+   * @generated from field: semrush.services.ai_seo.v2.source.SEARCH_TYPE.ENUM search_type = 12;
+   */
+  searchType: SEARCH_TYPE_ENUM;
 };
 
 /**
@@ -972,6 +981,15 @@ export declare type GapTopicsRequestJson = {
    * @generated from field: optional string target_date = 11;
    */
   targetDate?: string;
+
+  /**
+   * search_type defines how target.domain is interpreted when scoping target mentions:
+   * as a whole root domain, a specific subdomain, a subfolder path, or an exact URL.
+   * The scope item is the target.domain. Unset / UNSPECIFIED is treated as DOMAIN for backward compatibility.
+   *
+   * @generated from field: semrush.services.ai_seo.v2.source.SEARCH_TYPE.ENUM search_type = 12;
+   */
+  searchType?: SEARCH_TYPE_ENUMJson;
 };
 
 /**
@@ -1343,6 +1361,15 @@ export declare type GapTopicsTotalsRequest = Message<"semrush.services.ai_seo.v2
    * @generated from field: optional string target_date = 8;
    */
   targetDate?: string;
+
+  /**
+   * search_type defines how target.domain is interpreted when scoping target mentions:
+   * as a whole root domain, a specific subdomain, a subfolder path, or an exact URL.
+   * The scope item is the target.domain. Unset / UNSPECIFIED is treated as DOMAIN for backward compatibility.
+   *
+   * @generated from field: semrush.services.ai_seo.v2.source.SEARCH_TYPE.ENUM search_type = 9;
+   */
+  searchType: SEARCH_TYPE_ENUM;
 };
 
 /**
@@ -1406,6 +1433,15 @@ export declare type GapTopicsTotalsRequestJson = {
    * @generated from field: optional string target_date = 8;
    */
   targetDate?: string;
+
+  /**
+   * search_type defines how target.domain is interpreted when scoping target mentions:
+   * as a whole root domain, a specific subdomain, a subfolder path, or an exact URL.
+   * The scope item is the target.domain. Unset / UNSPECIFIED is treated as DOMAIN for backward compatibility.
+   *
+   * @generated from field: semrush.services.ai_seo.v2.source.SEARCH_TYPE.ENUM search_type = 9;
+   */
+  searchType?: SEARCH_TYPE_ENUMJson;
 };
 
 /**
