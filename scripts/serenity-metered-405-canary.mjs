@@ -139,6 +139,22 @@ async function main() {
     ai: { projects: before.product_resources.ai.resources.projects.total, prompts: prompts.used },
   });
 
+  // Re-read AFTER the drain and print the post-drain totals. Without this, "did the drain land?"
+  // is an open confounder on the premise-confirming reading (a publish that succeeds against
+  // GENUINELY zero headroom confirms Semrush is not enforcing — but a publish that succeeds because
+  // the drain silently no-op'd proves nothing). This is the "after" half the header advertises.
+  const after = await transport.getWorkspaceResources(subWorkspaceId);
+  const promptsAfter = after?.product_resources?.ai?.resources?.prompts;
+  const zeroHeadroom = promptsAfter && typeof promptsAfter.used === 'number'
+    && typeof promptsAfter.total === 'number' && promptsAfter.total <= promptsAfter.used;
+  console.log(
+    'prompts.used:',
+    promptsAfter?.used,
+    ' prompts.total (after drain):',
+    promptsAfter?.total,
+    zeroHeadroom ? ' — zero headroom confirmed' : ' — ⚠ HEADROOM REMAINS: the drain did not land; the publish result below is inconclusive either way',
+  );
+
   let projectId = opts['project-id'];
   if (!projectId) {
     console.log('Resolving a real language_id from the Semrush language catalog...');
@@ -188,11 +204,17 @@ async function main() {
   );
 
   try {
-    console.log('Publishing with zero prompt headroom — expecting the disguised metered-quota 405...');
+    console.log('Publishing with zero prompt headroom — LLMO-6190 fixture capture expects the disguised metered-quota 405...');
     await transport.publishProject(subWorkspaceId, projectId);
-    console.log('\nUNEXPECTED: publish succeeded. The workspace may not actually be at zero headroom, or the disguised-405 only fires with drafted prompts present — try creating a prompt on the project before publishing.');
+    console.log('\npublish SUCCEEDED at zero headroom. Read this against the "after drain" totals printed above:');
+    console.log('  • if zero headroom was confirmed there — this is the ADR-009 premise-confirming result: Semrush is NOT enforcing AI limits (no allocator needed).');
+    console.log('  • if HEADROOM REMAINS was printed — inconclusive: the drain did not land (or the disguised-405 only fires with drafted prompts present — try a prompt first).');
+    console.log('(The legacy label for this branch was "UNEXPECTED"; that reflects the LLMO-6190 fixture-capture goal, not the ADR-009 premise check — see the header.)');
   } catch (e) {
     printError('publishProject result (this is what isMeteredQuota must match)', e);
+    if (e instanceof SerenityTransportError && e.status === 405) {
+      console.log('\nA disguised 405 at confirmed-zero headroom is the LLMO-6190 fixture; under the ADR-009 premise it ALSO means Semrush is enforcing AI limits again — the signal to re-introduce the allocator from history (ADR-009).');
+    }
   }
 
   console.log('\nDone. This script did NOT restore the drained allocation or delete the canary project — clean up the throwaway workspace manually.');
