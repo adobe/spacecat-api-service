@@ -1265,6 +1265,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/suggestions',
       'POST /sites/:siteId/opportunities/:opportunityId/fixes',
+      'POST /sites/:siteId/permissions/check',
       'POST /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/actions/rolled_back',
       'PATCH /sites/:siteId/opportunities/:opportunityId/status',
       'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId',

@@ -216,6 +216,9 @@ export const INTERNAL_ROUTES = [
   'GET /organizations/:organizationId/permission/audit-logs',
   'GET /product/capabilities',
   'GET /user/capabilities/:resourceId',
+  // LLMO-6848: authz introspection, sibling of /user/capabilities (FACS-gated
+  // via facs-capabilities.js can_view; not one of this registry's capabilities).
+  'POST /sites/:siteId/permissions/check',
 ];
 
 /**
