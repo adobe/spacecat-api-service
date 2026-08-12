@@ -77,6 +77,22 @@ function expectSiteListDto(site) {
 }
 
 /**
+ * Returns true if every element is <= the previous one (ties allowed) — used to
+ * assert `sort=<field>:desc` ordering without hardcoding the expected sequence.
+ */
+function isNonIncreasing(values) {
+  return values.every((v, i) => i === 0 || v <= values[i - 1]);
+}
+
+/**
+ * Returns true if every element is >= the previous one (ties allowed) — used to
+ * assert `sort=<field>:asc` ordering without hardcoding the expected sequence.
+ */
+function isNonDecreasing(values) {
+  return values.every((v, i) => i === 0 || v >= values[i - 1]);
+}
+
+/**
  * Shared Site endpoint tests.
  * Runs identically against both DynamoDB (v2) and PostgreSQL (v3).
  *
@@ -245,6 +261,104 @@ export default function siteTests(getHttpClient, resetData) {
       it('user: baseUrlContains still returns 403 (authz parity with the list endpoint)', async () => {
         const http = getHttpClient();
         const res = await http.user.get('/sites?baseUrlContains=semrush');
+        expect(res.status).to.equal(403);
+      });
+
+      // ── deliveryType / isLive / sort (server-side filter/sort mode) ──
+      // Like baseUrlContains, these enter the offset-paginated envelope and exercise
+      // the REAL PostgREST `eq`/`and`/`order` path end-to-end: exact-match facet
+      // filtering, AND-combination across facets, and real ORDER BY for sort —
+      // against actual seeded rows (not a stub).
+      it('admin: deliveryType filters to only matching sites and echoes the value', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?deliveryType=aem_edge');
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('object').that.has.all.keys('sites', 'pagination');
+        expect(res.body.pagination).to.include({ hasMore: false, deliveryType: 'aem_edge' });
+        // Seed has 5 aem_edge sites (SITE_1, SITE_3, SITE_4, and the two LLMO
+        // fixtures); the rest are aem_cs (1, site2) and other (1, the market mirror).
+        expect(res.body.sites).to.be.an('array').with.lengthOf(5);
+        res.body.sites.forEach((s) => expect(s.deliveryType).to.equal('aem_edge'));
+      });
+
+      it('admin: deliveryType + baseUrlContains combine with AND, not OR', async () => {
+        const http = getHttpClient();
+        const res = await http
+          .admin.get('/sites?deliveryType=aem_edge&baseUrlContains=example.com');
+        expect(res.status).to.equal(200);
+        expect(res.body.pagination).to.include({
+          hasMore: false, deliveryType: 'aem_edge', baseUrlContains: 'example.com',
+        });
+        // All 5 aem_edge sites happen to be *.example.com, so AND yields the same 5
+        // as deliveryType alone; if the where-builder ever regressed to OR this would
+        // instead be 6 (also picking up the aem_cs site2.example.com).
+        expect(res.body.sites).to.be.an('array').with.lengthOf(5);
+        res.body.sites.forEach((s) => {
+          expect(s.deliveryType).to.equal('aem_edge');
+          expect(s.baseURL.toLowerCase()).to.include('example.com');
+        });
+      });
+
+      it('admin: isLive=true returns only live sites', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?isLive=true');
+        expect(res.status).to.equal(200);
+        expect(res.body.pagination).to.include({ hasMore: false, isLive: true });
+        // 6 of the 7 seeded sites are live; only site2.example.com is not.
+        expect(res.body.sites).to.be.an('array').with.lengthOf(6);
+        res.body.sites.forEach((s) => expect(s.isLive).to.equal(true));
+      });
+
+      it('admin: isLive=false returns only non-live sites', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?isLive=false');
+        expect(res.status).to.equal(200);
+        expect(res.body.pagination).to.include({ hasMore: false, isLive: false });
+        expect(res.body.sites).to.be.an('array').with.lengthOf(1);
+        res.body.sites.forEach((s) => expect(s.isLive).to.equal(false));
+      });
+
+      it('admin: sort=updatedAt:desc orders sites by non-increasing updatedAt', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?sort=updatedAt:desc');
+        expect(res.status).to.equal(200);
+        expect(res.body.pagination).to.include({ hasMore: false, sort: 'updatedAt:desc' });
+        expect(res.body.sites).to.be.an('array').with.lengthOf(7);
+        const updatedAts = res.body.sites.map((s) => new Date(s.updatedAt).getTime());
+        expect(isNonIncreasing(updatedAts)).to.equal(true);
+      });
+
+      it('admin: sort=baseURL:asc orders sites by non-decreasing baseURL', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?sort=baseURL:asc');
+        expect(res.status).to.equal(200);
+        expect(res.body.pagination).to.include({ hasMore: false, sort: 'baseURL:asc' });
+        expect(res.body.sites).to.be.an('array').with.lengthOf(7);
+        const baseUrls = res.body.sites.map((s) => s.baseURL);
+        expect(isNonDecreasing(baseUrls)).to.equal(true);
+      });
+
+      it('admin: deliveryType is rejected with 400 when not a recognized value', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?deliveryType=nope');
+        expect(res.status).to.equal(400);
+      });
+
+      it('admin: sort is rejected with 400 when the field is not recognized', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?sort=bogus:desc');
+        expect(res.status).to.equal(400);
+      });
+
+      it('admin: isLive is rejected with 400 when not "true" or "false"', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?isLive=maybe');
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: deliveryType still returns 403 (authz parity with the list endpoint)', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get('/sites?deliveryType=aem_edge');
         expect(res.status).to.equal(403);
       });
     });
