@@ -1,3 +1,31 @@
+# [1.740.0](https://github.com/adobe/spacecat-api-service/compare/v1.739.0...v1.740.0) (2026-08-12)
+
+
+### Features
+
+* **llmo:** CloudFront CDN log delivery with assume-role setup (LLMO-5566) ([#2680](https://github.com/adobe/spacecat-api-service/issues/2680)) ([d68f8a5](https://github.com/adobe/spacecat-api-service/commit/d68f8a5c3ab48fbc7fadb96244f6931e4a983cb1)), closes [#2654](https://github.com/adobe/spacecat-api-service/issues/2654) [#2671](https://github.com/adobe/spacecat-api-service/issues/2671)
+
+# [1.739.0](https://github.com/adobe/spacecat-api-service/compare/v1.738.2...v1.739.0) (2026-08-12)
+
+
+### Features
+
+* **ai-seo:** AISEODT-134 added new countries ([#3029](https://github.com/adobe/spacecat-api-service/issues/3029)) ([f357d28](https://github.com/adobe/spacecat-api-service/commit/f357d28f90fe9fdb9b29891f16980a0608fafb6f))
+
+## [1.738.2](https://github.com/adobe/spacecat-api-service/compare/v1.738.1...v1.738.2) (2026-08-12)
+
+
+### Bug Fixes
+
+* **brand-claims:** select latest Monday sheet for daily cadence ([#3031](https://github.com/adobe/spacecat-api-service/issues/3031)) ([00bb5a7](https://github.com/adobe/spacecat-api-service/commit/00bb5a7f11f73a72eb53c07a9572c5b3704f3de5))
+
+## [1.738.1](https://github.com/adobe/spacecat-api-service/compare/v1.738.0...v1.738.1) (2026-08-12)
+
+
+### Bug Fixes
+
+* **llmo:** derive Cloudflare worker targetHost from site base URL ([#3027](https://github.com/adobe/spacecat-api-service/issues/3027)) ([ec525d5](https://github.com/adobe/spacecat-api-service/commit/ec525d5a8c95547e27ff5d2575f71b91c8d87f62))
+
 # [1.738.0](https://github.com/adobe/spacecat-api-service/compare/v1.737.1...v1.738.0) (2026-08-11)
 
 

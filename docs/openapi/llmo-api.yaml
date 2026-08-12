@@ -3508,6 +3508,107 @@ site-llmo-cloudfront-permissions:
     security:
       - api_key: [ ]
 
+site-llmo-cloudfront-log-delivery:
+  post:
+    tags:
+      - llmo
+    summary: Enable CDN access-log forwarding for one CloudFront distribution
+    description: |
+      Enables CloudWatch Logs delivery of the selected CloudFront distribution's access logs to
+      Adobe's cross-account cdn-logs destination, via the customer's connector role. Idempotent —
+      returns `alreadyExisted: true` and mutates nothing when forwarding is already set up. The
+      assume-role `externalId` is the per-session value from bootstrap; the delivery destination is
+      org-scoped, resolved server-side from the site's IMS organization.
+    operationId: enableLlmoCloudFrontLogDelivery
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/cloudfront-distribution-request'
+    responses:
+      '200':
+        description: The CDN log-delivery result for the distribution.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                created:
+                  type: boolean
+                alreadyExisted:
+                  type: boolean
+                deliverySourceName:
+                  type: string
+                deliveryId:
+                  type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-llmo-cloudfront-log-rescan:
+  post:
+    tags:
+      - llmo
+    summary: Re-scan and enable CDN log forwarding for all distributions
+    description: |
+      Idempotently enables CloudWatch Logs delivery for every CloudFront distribution in the
+      customer account. Intended for recovery/re-scan: e.g. after a new distribution is added or
+      a missed setup. Each distribution is attempted independently — one failure never aborts the
+      rest — and the response summarizes per-distribution outcomes.
+    operationId: rescanLlmoCloudFrontLogDelivery
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/cloudfront-connector-request'
+    responses:
+      '200':
+        description: Summary of the log-delivery re-scan across all distributions.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scanned:
+                  type: integer
+                created:
+                  type: integer
+                alreadyExisted:
+                  type: integer
+                failed:
+                  type: integer
+                distributions:
+                  type: array
+                  items:
+                    type: object
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
 cloudfront-connector-request:
   type: object
   required:
@@ -5821,8 +5922,9 @@ site-llmo-cloudflare-deploy:
       account. The worker name is derived server-side from the site's base URL
       (`edge-optimize-router-<canonical-host>`, e.g. `edge-optimize-router-example-com`) and is
       not client-supplied. The worker is tagged with `adobe-llmo` plus the caller's identity, and
-      the `EDGE_OPTIMIZE_TARGET_HOST` plain-text binding is set to `targetHost`, and the site's
-      LLMO API key is set as the `EDGE_OPTIMIZE_API_KEY` secret.
+      the `EDGE_OPTIMIZE_TARGET_HOST` plain-text binding is set to the host derived server-side
+      from the site's base URL (a bare apex such as `example.com` is normalized to its `www` host),
+      and the site's LLMO API key is set as the `EDGE_OPTIMIZE_API_KEY` secret.
 
       The deploy is idempotent: if a worker we previously deployed (carrying the `adobe-llmo` tag)
       already exists, the response is `200` with `alreadyDeployed: true` and the secret is not
@@ -5844,20 +5946,12 @@ site-llmo-cloudflare-deploy:
             type: object
             required:
               - accountId
-              - targetHost
             properties:
               accountId:
                 type: string
                 description: Cloudflare account ID (32-character lowercase hex)
                 pattern: '^[0-9a-f]{32}$'
                 example: '0123456789abcdef0123456789abcdef'
-              targetHost:
-                type: string
-                description: >-
-                  Origin host the worker forwards optimized traffic to. Must belong to the
-                  site's domain — it has to equal the site's canonical host (base URL host
-                  minus a leading `www.`) or be a subdomain of it.
-                example: 'www.example.com'
     responses:
       '200':
         description: >-
@@ -5874,6 +5968,9 @@ site-llmo-cloudflare-deploy:
                   type: string
                 targetHost:
                   type: string
+                  description: >-
+                    The origin host the worker forwards to, derived server-side from the site's
+                    base URL and set as the `EDGE_OPTIMIZE_TARGET_HOST` binding.
                 alreadyDeployed:
                   type: boolean
                   description: >-
