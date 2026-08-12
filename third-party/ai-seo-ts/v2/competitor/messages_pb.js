@@ -5,12 +5,13 @@
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import { file_common_types } from "../../common/types_pb.js";
 import { file_deps_buf_validate_validate } from "../../deps/buf/validate/validate_pb.js";
+import { file_v2_source_enums } from "../source/enums_pb.js";
 
 /**
  * Describes the file v2/competitor/messages.proto.
  */
 export const file_v2_competitor_messages = /*@__PURE__*/
-  fileDesc("Chx2Mi9jb21wZXRpdG9yL21lc3NhZ2VzLnByb3RvEiVzZW1ydXNoLnNlcnZpY2VzLmFpX3Nlby52Mi5jb21wZXRpdG9yImoKF0JyYW5kQ29tcGV0aXRvcnNSZXF1ZXN0EkAKBnRhcmdldBgBIAEoCzIoLnNlbXJ1c2guc2VydmljZXMuYWlfc2VvLmNvbW1vbi52MS5CcmFuZEIGukgDyAEBEg0KBWNvdW50GAIgASgNIlkKGEJyYW5kQ29tcGV0aXRvcnNSZXNwb25zZRI9Cgtjb21wZXRpdG9ycxgBIAMoCzIoLnNlbXJ1c2guc2VydmljZXMuYWlfc2VvLmNvbW1vbi52MS5CcmFuZEJAWj5naXRsYWIuc2VtcnVzaC5uZXQvcXVhemFyL2FpLXNlby1nby1zZGsvcHJvdG9jb2wvdjIvY29tcGV0aXRvcmIGcHJvdG8z", [file_common_types, file_deps_buf_validate_validate]);
+  fileDesc("Chx2Mi9jb21wZXRpdG9yL21lc3NhZ2VzLnByb3RvEiVzZW1ydXNoLnNlcnZpY2VzLmFpX3Nlby52Mi5jb21wZXRpdG9yIr4BChdCcmFuZENvbXBldGl0b3JzUmVxdWVzdBJACgZ0YXJnZXQYASABKAsyKC5zZW1ydXNoLnNlcnZpY2VzLmFpX3Nlby5jb21tb24udjEuQnJhbmRCBrpIA8gBARINCgVjb3VudBgCIAEoDRJSCgtzZWFyY2hfdHlwZRgDIAEoDjIzLnNlbXJ1c2guc2VydmljZXMuYWlfc2VvLnYyLnNvdXJjZS5TRUFSQ0hfVFlQRS5FTlVNQgi6SAWCAQIQASJZChhCcmFuZENvbXBldGl0b3JzUmVzcG9uc2USPQoLY29tcGV0aXRvcnMYASADKAsyKC5zZW1ydXNoLnNlcnZpY2VzLmFpX3Nlby5jb21tb24udjEuQnJhbmRCQFo+Z2l0bGFiLnNlbXJ1c2gubmV0L3F1YXphci9haS1zZW8tZ28tc2RrL3Byb3RvY29sL3YyL2NvbXBldGl0b3JiBnByb3RvMw", [file_common_types, file_deps_buf_validate_validate, file_v2_source_enums]);
 
 /**
  * Describes the message semrush.services.ai_seo.v2.competitor.BrandCompetitorsRequest.
