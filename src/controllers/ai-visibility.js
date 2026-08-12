@@ -17,35 +17,8 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import { isNonEmptyObject } from '@adobe/spacecat-shared-utils';
 import { getGrpcClients } from '../support/ai-visibility/grpc-transport.js';
-import { normalizeVisibilityV1SuccessfulBody } from '../support/ai-visibility/visibility-normalize.js';
 import { attachSrFiltersToSuccessfulBody } from '../support/ai-visibility/visibility-filters.js';
 
-import {
-  handleBrandStats,
-  handleBrandTopics,
-  handleBrandPrompts,
-  handleBrandCitedPages,
-  handleBrandTopicOpportunities,
-  handleBrandTopBrands,
-  handleBrandCitedSources,
-  handleBrandSourceOpportunities,
-  handleBrandCompetitors,
-} from '../support/ai-visibility/handlers/brands.js';
-import {
-  handleCompetitorsMetrics,
-} from '../support/ai-visibility/handlers/competitors.js';
-import {
-  handlePromptsResponses,
-  handlePromptsResponsesLatest,
-} from '../support/ai-visibility/handlers/prompts.js';
-import {
-  handleTopicsResearchStats,
-  handleTopicsResearch,
-  handleTopicsStats,
-  handleTopicsResearchPrompts,
-  handleTopicsResearchBrands,
-  handleTopicsResearchSourceDomains,
-} from '../support/ai-visibility/handlers/topics.js';
 import { handleBrandTopics as handleBrandTopicsV1 } from '../support/ai-visibility/handlers/v1/topic/brand-topics.js';
 import { handleBrandTopicsExport as handleBrandTopicsExportV1 } from '../support/ai-visibility/handlers/v1/topic/brand-topics-export.js';
 import { handleBrandTopicsTotals as handleBrandTopicsTotalsV1 } from '../support/ai-visibility/handlers/v1/topic/brand-topics-totals.js';
@@ -92,28 +65,8 @@ import { handlePromptsResearchExport as handlePromptsResearchExportV1 } from '..
 import { handleBrandsResearchExport as handleBrandsResearchExportV1 } from '../support/ai-visibility/handlers/v1/prompt-research/brands-export.js';
 import { handleSourceDomainsResearchExport as handleSourceDomainsResearchExportV1 } from '../support/ai-visibility/handlers/v1/prompt-research/source-domains-export.js';
 import { handleTopicsResearchExport as handleTopicsResearchExportV1 } from '../support/ai-visibility/handlers/v1/prompt-research/topics-export.js';
-import { handleMeta } from '../support/ai-visibility/handlers/meta.js';
 
 const ROUTE_MAP = [
-  ['/brands/stats', handleBrandStats],
-  ['/brands/topics', handleBrandTopics],
-  ['/brands/prompts', handleBrandPrompts],
-  ['/brands/cited-pages', handleBrandCitedPages],
-  ['/brands/topic-opportunities', handleBrandTopicOpportunities],
-  ['/brands/top-brands', handleBrandTopBrands],
-  ['/brands/cited-sources', handleBrandCitedSources],
-  ['/brands/source-opportunities', handleBrandSourceOpportunities],
-  ['/brands/competitors', handleBrandCompetitors],
-  ['/competitors/metrics', handleCompetitorsMetrics],
-  ['/meta', handleMeta],
-  ['/prompts/responses/latest', handlePromptsResponsesLatest],
-  ['/prompts/responses', handlePromptsResponses],
-  ['/topics/research/stats', handleTopicsResearchStats],
-  ['/topics/research/prompts', handleTopicsResearchPrompts],
-  ['/topics/research/brands', handleTopicsResearchBrands],
-  ['/topics/research/source-domains', handleTopicsResearchSourceDomains],
-  ['/topics/research', handleTopicsResearch],
-  ['/topics/stats', handleTopicsStats],
   ['/v1/prompt-research/prompts-export', handlePromptsResearchExportV1],
   ['/v1/prompt-research/brands-export', handleBrandsResearchExportV1],
   ['/v1/prompt-research/source-domains-export', handleSourceDomainsResearchExportV1],
@@ -205,13 +158,9 @@ function wrapHandler(handlerFn, relPath, log) {
       if (result.status !== 200) {
         return createResponse(result.body, result.status);
       }
-      const normalized = normalizeVisibilityV1SuccessfulBody(
-        relPath,
-        result.body,
-      );
       const withFilters = attachSrFiltersToSuccessfulBody(
         result.status,
-        normalized,
+        result.body,
         sp,
       );
       return ok(withFilters);

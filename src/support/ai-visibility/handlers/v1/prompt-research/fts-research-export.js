@@ -28,8 +28,8 @@ import {
 
 /**
  * Shared runner for the Prompt Research CSV export endpoints (prompts, brands,
- * source-domains, topics). Each of these mirrors its `/topics/research/*` list
- * handler but returns a server-generated CSV (base64) the UI pages and stitches.
+ * source-domains, topics). Each returns a server-generated CSV (base64) that
+ * the UI pages and stitches.
  *
  * The FTS request shape is identical across the four datasets
  * (`country / llm / query / order / range`), so only the proto schemas, the

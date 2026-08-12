@@ -17,7 +17,7 @@ import {
 import { TOPICS_BY_FTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/topic/enums_pb.js';
 import { runFtsResearchExport } from './fts-research-export.js';
 
-// Mirrors `TOPICS_SORT_BY` in handlers/topics.js (the list endpoint).
+// Keep aligned with the topic list endpoint's supported sort values.
 const SORT_BY = {
   RELEVANCE_SCORE: TOPICS_BY_FTS_REQUEST_ORDER_BY_ENUM.RELEVANCE_SCORE,
   VOLUME: TOPICS_BY_FTS_REQUEST_ORDER_BY_ENUM.VOLUME,
@@ -25,7 +25,7 @@ const SORT_BY = {
 
 /**
  * CSV export for the Prompt Research "Related Topics" tab.
- * Mirrors `GET /topics/research` (`handleTopicsResearch`).
+ * Exports the same prompt-research data represented by the v1 topic list endpoints.
  */
 /* c8 ignore start */
 export async function handleTopicsResearchExport(sp, clients) {

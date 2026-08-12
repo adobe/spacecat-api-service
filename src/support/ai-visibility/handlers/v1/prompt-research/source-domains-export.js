@@ -17,7 +17,7 @@ import {
 import { SOURCE_DOMAINS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/source/enums_pb.js';
 import { runFtsResearchExport } from './fts-research-export.js';
 
-// Mirrors `SOURCE_DOMAINS_SORT_BY` in handlers/topics.js (the list endpoint).
+// Keep aligned with the source-domain list endpoint's supported sort values.
 const SORT_BY = {
   DOMAIN: SOURCE_DOMAINS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.DOMAIN,
   SOURCES_COUNT: SOURCE_DOMAINS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM.SOURCES_COUNT,
@@ -27,7 +27,7 @@ const SORT_BY = {
 
 /**
  * CSV export for the Prompt Research "Source Domains" tab.
- * Mirrors `GET /topics/research/source-domains` (`handleTopicsResearchSourceDomains`).
+ * Exports the same prompt-research data represented by the v1 source-domain list endpoints.
  */
 /* c8 ignore start */
 export async function handleSourceDomainsResearchExport(sp, clients) {
