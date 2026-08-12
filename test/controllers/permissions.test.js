@@ -159,5 +159,41 @@ describe('PermissionsController', () => {
       const body = await res.json();
       expect(body.capability).to.equal('llmo/can_configure');
     });
+
+    it('qualifies a bare capability with the product prefix', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ body: { capability: 'can_configure' } });
+      const res = await Controller(ctx).checkSitePermission(ctx);
+      const body = await res.json();
+      expect(body.capability).to.equal('llmo/can_configure');
+    });
+
+    it('400 when x-product is present but not a known product', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ product: 'NOPE' });
+      const res = await Controller(ctx).checkSitePermission(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('404 when the site has no organization', async () => {
+      const { Controller } = await loadController();
+      const siteNoOrg = {
+        getId: () => SITE_ID,
+        getOrganizationId: () => 'org-internal-id',
+        getOrganization: async () => null,
+      };
+      const ctx = makeContext({ site: siteNoOrg });
+      const res = await Controller(ctx).checkSitePermission(ctx);
+      expect(res.status).to.equal(404);
+    });
+
+    it('resolves with only the org subject scope when the caller has no sub', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ callerSub: null });
+      const res = await Controller(ctx).checkSitePermission(ctx);
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.allowed).to.equal(true);
+    });
   });
 });
