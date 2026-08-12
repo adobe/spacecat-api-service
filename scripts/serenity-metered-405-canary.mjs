@@ -51,9 +51,10 @@
  *      SerenityTransportError captured — everything needed to pin a fixture.
  *
  * Cleanup: this script does NOT delete the project or restore the drained allocation — it's meant
- * to run against a disposable dev/throwaway sub-workspace. Re-run `ensureAiHeadroom`/an ordinary
- * API top-up (or just re-activate the brand) afterwards if the workspace needs to keep working, or
- * decommission the throwaway workspace entirely.
+ * to run against a disposable dev/throwaway sub-workspace. To restore headroom afterwards, transfer
+ * `prompts.total` back up (the inverse of step 2 — a `transferWorkspaceResources` call, or just
+ * re-activate the brand) if the workspace needs to keep working, or decommission the throwaway
+ * workspace entirely.
  *
  * If the captured body's SHAPE ever changes (e.g. the gateway starts returning JSON for this
  * rejection too), `isMeteredQuota` and its pinned fixture in `test/support/serenity/errors.test.js`

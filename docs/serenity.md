@@ -457,7 +457,10 @@ project creation.
 The parent-pool premise is re-checked, not assumed: `scripts/serenity-metered-405-canary.mjs`
 drives the real transport against a throwaway sub-workspace and publishes into zero headroom, so a
 future re-tightening upstream surfaces as a failed canary rather than a silent customer-facing
-error. Run it per environment when validating the premise.
+error. It is a **manual** per-environment run (live IMS token + a real sub-workspace id; nothing
+schedules it), and serenity-docs#72 §10.7 retires it together with the §10.6 quota classifier — so
+it is the interim re-check, not the durable one. The durable re-check beyond §10.6 is an open
+question that §10.6 must settle (see [ADR-009](decisions/009-remove-dormant-jit-allocator.md)).
 
 > **Removed (SITES-49206):** the just-in-time (JIT) top-up allocator
 > (`SERENITY_DYNAMIC_ALLOCATION`, `resource-manager.js`, `dynamic-allocation-active.js`,

@@ -1053,8 +1053,10 @@ export function createSerenityTransport({ env, imsToken }) {
      * OWN allocation, not the master pool (live-verified 2026-07-02).
      *
      * NOTE (SITES-49206): the just-in-time allocator that read this before a metered op was removed
-     * once Semrush stopped enforcing AI limits for proxy-routed LLMO workspaces; this read has no
-     * in-repo caller today but is kept as part of the transport's workspace-resource surface.
+     * once Semrush stopped enforcing AI limits for proxy-routed LLMO workspaces. Its one remaining
+     * caller is the retained metered-405 canary (`scripts/serenity-metered-405-canary.mjs`, step
+     * 1), paired with `transferWorkspaceResources` below; kept until serenity-docs#72 §10.6/§10.7
+     * retire the canary together.
      *
      * @param {string} workspaceId
      */
@@ -1062,6 +1064,35 @@ export function createSerenityTransport({ env, imsToken }) {
       return unwrap('GET', await users.GET(
         '/v1/workspaces/{id}/resources',
         { params: { path: { id: workspaceId } } },
+      ));
+    },
+
+    /**
+     * POST /v2/workspaces/{ws}/resources/transfer — set a sub-workspace's AI resource totals
+     * (ABSOLUTE, not a delta), drawing the difference from / returning it to the parent pool.
+     * A public user-token endpoint (workspace doc §5/§7).
+     *
+     * NOTE (SITES-49206): the just-in-time allocator that used to call this — `transferOnce` /
+     * `transferAndSettle` in the removed `resource-manager.js` — is gone. The sole remaining caller
+     * is the retained metered-405 canary (`scripts/serenity-metered-405-canary.mjs`, step 2), which
+     * drains a throwaway sub-workspace to zero prompt headroom to provoke the disguised 405. Kept —
+     * like its `getWorkspaceResources` read pair above — until serenity-docs#72 §10.6/§10.7 retire
+     * the canary together ("delete last"). No production lifecycle path calls this: a child is
+     * created with no allocation and never carries one (see `workspace-lifecycle.js`).
+     *
+     * V2 wraps the resources under a `resources` key (WorkspaceResourcesTransferV2Form
+     * → createWorkspaceV2Resources); `payload` is the bare resources object
+     * (`{ ai: { projects, prompts } }`, the aiProductResources shape), so wrap it here. That `ai`
+     * shape is the SAME one proven live as the v2 child-create `resources` body
+     * (createSubworkspace).
+     *
+     * @param {string} workspaceId
+     * @param {WorkspaceResources} payload - bare resources object, wrapped here.
+     */
+    async transferWorkspaceResources(workspaceId, payload) {
+      return unwrap('POST', await users.POST(
+        '/v2/workspaces/{id}/resources/transfer',
+        { params: { path: { id: workspaceId } }, body: { resources: payload } },
       ));
     },
 

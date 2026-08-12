@@ -477,8 +477,9 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  *
  * @param {SerenityTransport} transport
  * @param {object} brand - brand record/stub being provisioned.
- * @param {string} parentWorkspaceId - the org parent workspace: the `assertNotParent` guard
- *   input, and the units pool when JIT allocation is on. Nothing is carved from it.
+ * @param {string} parentWorkspaceId - the org parent workspace, used as the `assertNotParent` guard
+ *   input. Nothing is carved from it (the JIT allocator that once drew a pool from it is removed —
+ *   SITES-49206).
  * @param {object} body - request body ({ market, languageCode, brandDomain, ... }).
  * @param {object} log - logger.
  * @param {string|null} [preResolvedWorkspaceId] - when set (the activate batch

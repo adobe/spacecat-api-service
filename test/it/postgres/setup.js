@@ -197,7 +197,12 @@ async function dumpMock(mockBase, label) {
 
 /**
  * Reads the User Manager mock's full store snapshot — to assert mock-side state (e.g. a
- * workspace's resource `total` did/didn't change) after a flag-ON request.
+ * workspace's resource `total` did/didn't change) after a request.
+ *
+ * Like `setUmMockQuota` above, this has no shared-test consumer today: the flag-ON block that read
+ * it went with the allocator removal (SITES-49206). Kept and still threaded through `mockControls`
+ * (serenity.test.js) as the UM-side counterpart of the consumed `dumpPeMock`, for the
+ * spacecat-shared §10.5 metered-write assertions.
  * @returns {Promise<any>}
  */
 export const dumpUmMock = () => dumpMock(UM_MOCK_BASE, 'UM');

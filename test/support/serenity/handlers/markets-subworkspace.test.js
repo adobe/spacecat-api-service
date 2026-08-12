@@ -1016,8 +1016,8 @@ describe('markets-subworkspace handlers', () => {
         'preset-ws',
       );
       expect(res.status).to.equal(201);
-      // ensure was skipped: no settle/transfer was performed for this call.
-      // the draft is created against the pre-resolved workspace.
+      // The activate-batch path skips the per-call ensure and creates the draft directly
+      // against the pre-resolved workspace.
       expect(transport.createProject).to.have.been.calledWith('preset-ws');
     });
   });

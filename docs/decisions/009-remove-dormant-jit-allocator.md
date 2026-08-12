@@ -41,18 +41,26 @@ Delete the JIT allocator and everything that exists only to serve it:
   re-meter sizing, both of which had the allocator as their only caller;
 - the flag-ON integration path.
 
-The publish-retry injection seam (`wrapPublish`) and the disguised-405 quota classification /
-alerting are **kept** — they belong to the metered-write boundary that serenity-docs#72 §10.6
-governs, not to the allocator. The no-carve behaviour from ADR-008 is now the only behaviour,
-unconditional.
+Three things at the metered-write boundary are **kept**, none belonging to the allocator any more:
+the publish-retry injection seam (`wrapPublish`, left at its identity default) is retained for
+serenity-docs#72 **§10.3** (quota-405 handling); the disguised-405 quota classification / alerting is
+retained for **§10.6**; and the transport's `getWorkspaceResources` / `transferWorkspaceResources`
+methods stay, because they are no longer allocator-only — the retained §10.7 canary
+(`scripts/serenity-metered-405-canary.mjs`) reads then drains a throwaway sub-workspace through them.
+Those two methods are therefore retired *with the canary* under the same delete-last sequencing, not
+now; deleting either here would break the canary at runtime (it sits outside `tsconfig`/CI, so no
+gate catches it). The no-carve behaviour from ADR-008 is now the only behaviour, unconditional.
 
 This adopts the alternative ADR-008 recorded as **"Delete the JIT allocator alongside the carve.
 Rejected."** The two grounds for that earlier rejection have resolved:
 
 1. *"The evidence supports 'our parents are unmetered', not 'no tenant is ever metered'."* Semrush's
-   confirmation plus the soak now support the stronger claim. The standing check that it still holds
-   is the `scripts/serenity-metered-405-canary.mjs` probe (serenity-docs#72 §10), run per
-   environment — **not** a flag to flip back on.
+   confirmation plus the soak now support the stronger claim. It is re-checked, *for now*, by the
+   `scripts/serenity-metered-405-canary.mjs` probe (serenity-docs#72 §10) — a **manual** per-env run
+   (it needs a live IMS token and a real sub-workspace id, so a human runs it; nothing schedules it),
+   **not** a flag to flip back on. §10.7 marks the probe itself *delete-last*, retired together with
+   the §10.6 classifier — so the durable re-check beyond that point is an open question §10.6 must
+   settle before deleting both (see Consequences).
 2. *"Deleting is a one-way door and re-deriving the allocator is substantial work."* Accepted. The
    design is preserved in git history and in ADR-007 / ADR-008 as records; if a metered tenant ever
    appears, the allocator is re-introduced from history rather than re-enabled by a dead flag.
@@ -66,9 +74,14 @@ Rejected."** The two grounds for that earlier rejection have resolved:
   that the reclaim tool it pointed at no longer exists — reclamation would have to be re-built.
 - **A tenant whose parent enforces limits would get no sizing, and there is no longer a flip
   procedure.** ADR-008 pointed operators at a "when to turn the JIT allocator on" runbook; that
-  section and the allocator it armed are both removed. The `serenity-metered-405-canary.mjs` probe is
-  the replacement signal — it verifies the no-carve premise per environment; a failure is the trigger
-  to re-introduce the allocator from history, not to re-enable a flag.
+  section and the allocator it armed are both removed. *For now* the `serenity-metered-405-canary.mjs`
+  probe is the re-check — a **manual** per-environment run whose failure is the trigger to
+  re-introduce the allocator from history, not to re-enable a flag. It is **not** a standing signal:
+  serenity-docs#72 §10.7 retires the probe *together with* the §10.6 classifier ("delete last"), and
+  nothing schedules it. The **durable** re-check of the limits-unenforced premise beyond that point is
+  an open question that **§10.6 must settle before deleting both** — otherwise every canary pointer
+  here (and the matching ADR-008 bullet) becomes a reference to a script that no longer exists, the
+  same defect class ADR-008 was repaired for last round.
 - **The cross-container race in ADR-007 no longer exists in the tree.** Its lock is deleted; the
   sub-workspace lifecycle transfers no resources, so there is nothing to serialize.
 

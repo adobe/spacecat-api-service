@@ -31,13 +31,15 @@
  * later one in the same window is silently tallied (no re-post) — "a customer clicking retry
  * five times is one sales signal, not five pages." This is warm-Lambda-container-scoped state
  * (no DynamoDB/persistent store), the same shape as this codebase's existing per-container caches
- * (markets.js's language cache, resource-lock.js's in-process lock) — sufficient for collapsing a
+ * (markets.js's language cache) — sufficient for collapsing a
  * rapid retry burst, not a cross-invocation guarantee.
  */
 
 import { postSlackMessage } from '../../utils/slack/base.js';
 
-/** @typedef {'brandCarveExhausted'|'orgPoolExhausted'|'brandAiLimit'} QuotaCase */
+// `orgPoolExhausted` / `brandAiLimit` were produced only by the removed allocator (SITES-49206);
+// every producer at head passes `brandCarveExhausted`.
+/** @typedef {'brandCarveExhausted'} QuotaCase */
 
 export const DEDUP_WINDOW_MS = 15 * 60 * 1000;
 
@@ -65,7 +67,7 @@ function evictExpired(now) {
   }
 }
 
-/** Test-only reset — mirrors `clearLanguageCache` / `clearResourceLocks` in this module family. */
+/** Test-only reset — mirrors `clearLanguageCache` in this module family. */
 export function clearQuotaAlertDedup() {
   seen.clear();
 }

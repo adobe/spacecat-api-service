@@ -83,8 +83,11 @@ Every real customer parent read that day carried `limits_enabled: false` with a 
 - **A tenant whose parent enforces limits would get no sizing at all.** _(SITES-49206: this was the
   risk the retained allocator covered. The allocator, and the "when to turn the JIT allocator on"
   flip procedure this line pointed at in `docs/serenity.md`, are both removed — see ADR-009. The
-  standing signal is now the `scripts/serenity-metered-405-canary.mjs` per-environment probe; a
-  failure is the trigger to re-introduce the allocator from history, not to flip a flag.)_
+  re-check, for now, is the `scripts/serenity-metered-405-canary.mjs` probe — a **manual**
+  per-environment run whose failure is the trigger to re-introduce the allocator from history, not to
+  flip a flag. It is not a standing signal: serenity-docs#72 §10.7 retires it together with the §10.6
+  classifier, so the durable re-check beyond that point is an open question §10.6 must settle — see
+  ADR-009 Consequences.)_
 
 ## Alternatives considered
 
@@ -102,4 +105,6 @@ integration suite drives the flag-on path end-to-end from a child seeded at `{us
 > **Subsequently adopted (SITES-49206, ADR-009).** Semrush's confirmation that it no longer enforces
 > AI limits for proxy-routed workspaces, plus the soak, resolved the first objection; the one-way-door
 > cost is accepted, with the design preserved in git history and the `serenity-metered-405-canary.mjs`
-> probe as the standing per-environment check. See [ADR-009](009-remove-dormant-jit-allocator.md).
+> probe as the interim (manual, per-environment) re-check — itself retired with the §10.6 classifier,
+> beyond which the durable re-check is an open question §10.6 must settle. See
+> [ADR-009](009-remove-dormant-jit-allocator.md).
