@@ -106,7 +106,10 @@ export async function createAndEnqueueJob(
     dataAccess, sqs, env, log,
   } = context;
 
-  const pair = promisePair ?? resolvePromisePair(context);
+  // When a pre-minted token is supplied (worker self-requeue), the pair must come
+  // from the explicit promisePair only — never re-derived from the request context,
+  // which could diverge from the pair that actually minted that token.
+  const pair = promisePair ?? (promiseToken ? undefined : resolvePromisePair(context));
   const promiseTokenResponse = promiseToken ?? await getIMSPromiseToken(context, pair);
 
   const job = await dataAccess.AsyncJob.create({

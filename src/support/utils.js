@@ -13,6 +13,7 @@ import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { ImsPromiseClient } from '@adobe/spacecat-shared-ims-client';
+import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import URI from 'urijs';
 import {
   hasText,
@@ -813,6 +814,34 @@ export function getImsUserTokenStrict(context) {
 }
 
 /**
+ * Resolves which IMS promise-token pair a request selects, from the optional
+ * `x-promise-audience` header. Absent/empty => `undefined` (the default pair,
+ * unchanged behavior); `semrush` => the dedicated Semrush pair. Any other value
+ * throws 400 (fail closed) rather than silently minting/exchanging on the wrong
+ * pair. The pair selector is forwarded to `ImsPromiseClient.createFrom`.
+ * @param {object} context - The request context.
+ * @returns {string|undefined} The ImsPromiseClient pair selector, or undefined.
+ * @throws {ErrorWithStatusCode} 400 when the header carries an unknown audience.
+ */
+export function resolvePromisePair(context) {
+  const raw = context?.pathInfo?.headers?.[X_PROMISE_AUDIENCE_HEADER];
+  if (!hasText(raw)) {
+    return undefined;
+  }
+  const audience = raw.trim();
+  if (audience.toLowerCase() === 'semrush') {
+    return ImsPromiseClient.PROMISE_PAIR.SEMRUSH;
+  }
+  // Reflect the rejected value back, but sanitize (strip CR/LF and non-ASCII, per
+  // the repo's header-hygiene convention) and bound its length so a hostile header
+  // cannot inject into or bloat the 400 body / logs.
+  throw new ErrorWithStatusCode(
+    `Unknown promise audience: ${cleanupHeaderValue(audience).slice(0, 40)}`,
+    STATUS_BAD_REQUEST,
+  );
+}
+
+/**
  * Get an IMS promise token from the authorization header in context.
  * @param {object} context - The context of the request.
  * @param {string} [pair] - Optional IMS promise-pair selector (see
@@ -825,29 +854,6 @@ export function getImsUserTokenStrict(context) {
  * }>} - The promise token response.
  * @throws {ErrorWithStatusCode} - If the Authorization header is missing.
  */
-/**
- * Resolves which IMS promise-token pair a request selects, from the optional
- * `x-promise-audience` header. Absent/empty => `undefined` (the default pair,
- * unchanged behavior); `semrush` => the dedicated Semrush pair. Any other value
- * throws 400 (fail closed) rather than silently minting/exchanging on the wrong
- * pair. The pair selector is forwarded to `ImsPromiseClient.createFrom`.
- * @param {object} context - The request context.
- * @returns {string|undefined} The ImsPromiseClient pair selector, or undefined.
- * @throws {ErrorWithStatusCode} 400 when the header carries an unknown audience.
- */
-export function resolvePromisePair(context) {
-  const audience = context?.pathInfo?.headers?.[X_PROMISE_AUDIENCE_HEADER];
-  if (!hasText(audience)) {
-    return undefined;
-  }
-  if (audience.toLowerCase() === 'semrush') {
-    return ImsPromiseClient.PROMISE_PAIR.SEMRUSH;
-  }
-  // Truncate the reflected header value so a long/hostile header cannot bloat the
-  // 400 body or logs.
-  throw new ErrorWithStatusCode(`Unknown promise audience: ${audience.slice(0, 40)}`, STATUS_BAD_REQUEST);
-}
-
 export async function getIMSPromiseToken(context, pair) {
   // get IMS promise token and attach to queue message
   let userToken;

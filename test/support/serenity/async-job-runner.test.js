@@ -131,6 +131,8 @@ describe('async-job-runner', () => {
       });
 
       expect(getPromiseTokenStub).to.not.have.been.called;
+      // A pre-minted token must not re-derive the pair from the request header.
+      expect(resolvePromisePairStub).to.not.have.been.called;
       expect(createStub).to.have.been.calledWith({
         status: 'IN_PROGRESS',
         metadata: {

@@ -1965,6 +1965,10 @@ describe('utils', () => {
       expect(resolvePromisePair(ctx('SemRush'))).to.equal('SEMRUSH');
     });
 
+    it('trims surrounding whitespace before matching', () => {
+      expect(resolvePromisePair(ctx('  semrush  '))).to.equal('SEMRUSH');
+    });
+
     it('throws 400 on an unknown audience', () => {
       let err;
       try {
@@ -1975,6 +1979,18 @@ describe('utils', () => {
       expect(err).to.exist;
       expect(err.message).to.contain('Unknown promise audience: bogus');
       expect(err.status).to.equal(400);
+    });
+
+    it('sanitizes CR/LF from the reflected value in the 400 message', () => {
+      let err;
+      try {
+        resolvePromisePair(ctx('bad\r\ninjected'));
+      } catch (e) {
+        err = e;
+      }
+      expect(err.status).to.equal(400);
+      expect(err.message).to.not.contain('\n');
+      expect(err.message).to.not.contain('\r');
     });
   });
 
