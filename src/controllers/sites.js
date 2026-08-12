@@ -481,9 +481,13 @@ function SitesController(ctx, log, env) {
   };
 
   /**
-   * Gets all sites with cursor-based pagination. Accessible to admin callers (legacy admin path)
-   * and to S2S consumers that hold the `site:readAll` capability - see
+   * Gets all sites with cursor-based pagination. Accessible to admin callers and to
+   * S2S consumers that hold the `site:readAll` capability - see
    * `docs/s2s/READALL_CAPABILITY_DESIGN.md`.
+   *
+   * When called without `limit`/`cursor`, returns the first page (limit defaults to
+   * 100, no cursor) as the `{ sites, pagination }` envelope - the same shape as an
+   * explicit paginated request.
    *
    * Optional `baseUrlContains` query param: when provided (3-256 chars after trim),
    * performs a case-insensitive substring search on `baseURL` and returns a non-cursor
@@ -604,8 +608,6 @@ function SitesController(ctx, log, env) {
       });
     }
 
-    const paginated = hasText(limitParam) || hasText(cursor);
-
     if (cursor !== null) {
       if (typeof cursor !== 'string') {
         return badRequest('cursor must be a string');
@@ -615,53 +617,36 @@ function SitesController(ctx, log, env) {
       }
     }
 
+    // No limit/cursor defaults to the first page (DEFAULT_LIMIT, no cursor).
     let sites;
     let responseBody;
 
-    if (paginated) {
-      const parsedLimit = hasText(limitParam) ? parseInt(limitParam, 10) : DEFAULT_LIMIT;
-      if (!Number.isInteger(parsedLimit) || parsedLimit <= 0) {
-        return badRequest('limit must be a positive integer');
-      }
-      const effectiveLimit = Math.min(parsedLimit, MAX_LIMIT);
+    const parsedLimit = hasText(limitParam) ? parseInt(limitParam, 10) : DEFAULT_LIMIT;
+    if (!Number.isInteger(parsedLimit) || parsedLimit <= 0) {
+      return badRequest('limit must be a positive integer');
+    }
+    const effectiveLimit = Math.min(parsedLimit, MAX_LIMIT);
 
-      const results = await Site.all({}, { limit: effectiveLimit, cursor, returnCursor: true });
-      if (!Array.isArray(results?.data)) {
-        log.error(`[sites] Site.all returned unexpected shape with returnCursor=true; hasResults=${!!results}`);
-        sites = [];
-        responseBody = {
-          sites,
-          pagination: { limit: effectiveLimit, cursor: null, hasMore: false },
-        };
-      } else {
-        sites = results.data.map((site) => SiteDto.toListJSON(site));
-        responseBody = {
-          sites,
-          pagination: {
-            limit: effectiveLimit,
-            // `|| null` (not `??`) so an empty-string cursor normalizes to null,
-            // staying consistent with `hasMore: !!results.cursor` below.
-            cursor: results.cursor || null,
-            hasMore: !!results.cursor,
-          },
-        };
-      }
+    const results = await Site.all({}, { limit: effectiveLimit, cursor, returnCursor: true });
+    if (!Array.isArray(results?.data)) {
+      log.error(`[sites] Site.all returned unexpected shape with returnCursor=true; hasResults=${!!results}`);
+      sites = [];
+      responseBody = {
+        sites,
+        pagination: { limit: effectiveLimit, cursor: null, hasMore: false },
+      };
     } else {
-      // TODO: remove this legacy branch once Coralogix shows zero hits on
-      // [sites][legacy-shape] for 30 consecutive days.
-      // legacy: no limit/cursor params -> flat array for backwards comp.
-      // keep the default + friends-and-family exclusion on this path to stay
-      // under the 6MB Lambda response limit until consumers migrate to pagination.
-      log.info(`[sites][legacy-shape] GET /sites called without limit/cursor requestId=${requestId} clientId=${s2sResult.clientId || (isAdmin ? 'admin-bypass' : 'unknown-s2s')}`);
-      const excludedOrgIds = [
-        env.DEFAULT_ORGANIZATION_ID,
-        env.ORGANIZATION_ID_FRIENDS_FAMILY,
-      ];
-      const all = await Site.all({}, { fetchAllPages: true });
-      sites = all
-        .filter((site) => !excludedOrgIds.includes(site.getOrganizationId()))
-        .map((site) => SiteDto.toListJSON(site));
-      responseBody = sites;
+      sites = results.data.map((site) => SiteDto.toListJSON(site));
+      responseBody = {
+        sites,
+        pagination: {
+          limit: effectiveLimit,
+          // `|| null` (not `??`) so an empty-string cursor normalizes to null,
+          // staying consistent with `hasMore: !!results.cursor` below.
+          cursor: results.cursor || null,
+          hasMore: !!results.cursor,
+        },
+      };
     }
 
     if (s2sResult.allowed) {
@@ -672,7 +657,7 @@ function SitesController(ctx, log, env) {
     if (error) {
       return badRequest(error);
     }
-    responseBody = Array.isArray(responseBody) ? list : { ...responseBody, sites: list };
+    responseBody = { ...responseBody, sites: list };
 
     return ok(responseBody);
   };
@@ -703,11 +688,17 @@ function SitesController(ctx, log, env) {
 
   /**
    * Gets all sites enrolled at a given entitlement tier (e.g. 'PAID',
-   * 'FREE_TRIAL', 'PLG'). Optionally narrows the result to a single product
-   * code via the `productCode` query parameter (e.g. 'LLMO').
+   * 'FREE_TRIAL', 'PLG', 'PRE_ONBOARD'). Optionally narrows the result to a
+   * single product code via the `productCode` query parameter (e.g. 'LLMO').
+   *
+   * Accepts any Entitlement.TIERS value, not just CUSTOMER_VISIBLE_TIERS -
+   * this endpoint is already admin-gated below, so PRE_ONBOARD (internal-only,
+   * not customer-visible) is a legitimate admin query, e.g. to find sites
+   * still awaiting onboarding.
    *
    * Returns the full result set (no pagination) - acceptable for a
-   * bounded admin-only use case. Sites are ordered by ID.
+   * bounded admin-only use case. Sites are ordered by ID. Supports the
+   * `fields` query parameter to project a subset of fields per site.
    *
    * @param {object} context - Context of the request.
    * @returns {Promise<Response>} Sites response.
@@ -722,8 +713,9 @@ function SitesController(ctx, log, env) {
     if (!hasText(tier)) {
       return badRequest('Tier required');
     }
-    if (!CUSTOMER_VISIBLE_TIERS.includes(tier)) {
-      return badRequest(`Tier must be one of: ${CUSTOMER_VISIBLE_TIERS.join(', ')}`);
+    const validTiers = Object.values(EntitlementModel.TIERS);
+    if (!validTiers.includes(tier)) {
+      return badRequest(`Tier must be one of: ${validTiers.join(', ')}`);
     }
     const validProductCodes = Object.values(EntitlementModel.PRODUCT_CODES);
     if (productCode !== undefined && !validProductCodes.includes(productCode)) {
@@ -733,8 +725,14 @@ function SitesController(ctx, log, env) {
     const all = (await Site.allByEnrollmentAndTier(tier, productCode))
       .sort((a, b) => a.getId().localeCompare(b.getId()));
 
+    const sites = all.map((site) => SiteDto.toJSON(site));
+    const { list, error } = applyFieldProjection(sites, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+
     return ok({
-      sites: all.map((site) => SiteDto.toJSON(site)),
+      sites: list,
     });
   };
 
@@ -1850,7 +1848,16 @@ function SitesController(ctx, log, env) {
     } = context.data;
     const { pathInfo } = context;
     const X_PRODUCT_HEADER = 'x-product';
-    const productCode = pathInfo.headers[X_PRODUCT_HEADER];
+    let productCode = pathInfo.headers[X_PRODUCT_HEADER];
+    // Local-dev affordance (SKIP_AUTH only): the local UI harness may run a UI
+    // build that predates the x-product requirement on /sites-resolve and so omits
+    // the header. When auth is skipped (local only; SKIP_AUTH is never 'true' in a
+    // deployed env), default the product to ASO so the local UI ⇄ local api-service
+    // e2e can resolve a site. Prod keeps enforcing the header contract below.
+    if (!hasText(productCode) && env.SKIP_AUTH === 'true') {
+      productCode = ASO_PRODUCT_CODE;
+      log.info('[resolveSite] SKIP_AUTH local-dev: defaulting missing x-product to ASO');
+    }
     if (!hasText(productCode)) {
       return badRequest('Product code required in x-product header');
     }

@@ -18,6 +18,10 @@ import esmock from 'esmock';
 import { ErrorWithStatusCode } from '../../src/support/utils.js';
 import { parseShowTrends, parseUserIntent } from '../../src/controllers/elements.js';
 import { addDaysToDate } from '../../src/support/elements/week-utils.js';
+// Real error class (not a mock) so the controller's `instanceof SerenityTransportError`
+// check in checkAccess matches errors thrown by these tests — and so this file keeps a
+// single mock class (max-classes-per-file).
+import { SerenityTransportError } from '../../src/support/serenity/rest-transport.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -189,6 +193,7 @@ describe('ElementsController', () => {
   let getBrandIdentityStub;
   let getBrandBySiteStub;
   let resolveBrandWorkspaceStub;
+  let isSerenityActiveForBrandStub;
   let accessControlHasAccessStub;
   let serviceStub;
   let createElementsServiceStub;
@@ -196,6 +201,8 @@ describe('ElementsController', () => {
   let exchangePromiseTokenStub;
   let resolveBrandUuidStub;
   let MockElementsTransportError;
+  let getWorkspaceResourcesStub;
+  let createSerenityTransportStub;
   let ElementsController;
 
   beforeEach(async () => {
@@ -203,6 +210,9 @@ describe('ElementsController', () => {
     resolveBrandWorkspaceStub = sinon.stub().resolves({
       mode: 'subworkspace', workspaceId: SUB_WORKSPACE_ID, parentWorkspaceId: WORKSPACE_ID,
     });
+    // Both authorizers gate on the brand resolving serenity-active; default ON so
+    // the existing cases exercise the surface rather than the gate.
+    isSerenityActiveForBrandStub = sinon.stub().resolves(true);
     accessControlHasAccessStub = sinon.stub().resolves(true);
 
     getBrandIdentityStub = sinon.stub().resolves({ id: BRAND_ID, name: 'Adobe Brand' });
@@ -214,6 +224,7 @@ describe('ElementsController', () => {
       getWeeks: sinon.stub().resolves(WEEKS_RESULT),
       getBrandPresenceStats: sinon.stub().resolves(STATS_RESULT),
       getUrlInspectorStats: sinon.stub().resolves(URL_INSPECTOR_STATS_RESULT),
+      getDomainUrls: sinon.stub().resolves({ urls: [], totalCount: 0 }),
       getOwnedUrlProjects: sinon.stub().resolves([{ region: 'US', projectId: 'proj-1' }]),
     };
     createElementsServiceStub = sinon.stub().returns(serviceStub);
@@ -228,6 +239,12 @@ describe('ElementsController', () => {
         this.body = body;
       }
     };
+
+    // Serenity (User Manager) transport used by checkAccess for the resource-allowance probe.
+    getWorkspaceResourcesStub = sinon.stub().resolves({ product_resources: {} });
+    createSerenityTransportStub = sinon.stub().returns({
+      getWorkspaceResources: getWorkspaceResourcesStub,
+    });
 
     const MockAccessControlUtil = {
       default: {
@@ -254,6 +271,13 @@ describe('ElementsController', () => {
       },
       '../../src/support/serenity/workspace-resolver.js': {
         resolveBrandWorkspace: resolveBrandWorkspaceStub,
+      },
+      '../../src/support/serenity/serenity-active.js': {
+        isSerenityActiveForBrand: isSerenityActiveForBrandStub,
+      },
+      '../../src/support/serenity/rest-transport.js': {
+        createSerenityTransport: createSerenityTransportStub,
+        SerenityTransportError,
       },
       '../../src/support/access-control-util.js': MockAccessControlUtil,
       '../../src/support/utils.js': {
@@ -318,6 +342,32 @@ describe('ElementsController', () => {
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
       expect(res.status).to.equal(404);
+    });
+
+    it('returns 404 when serenity is not active for the brand, before resolving a workspace', async () => {
+      // Without this gate an unmigrated brand falls through to flat mode and the
+      // read runs against the org's shared PARENT workspace, answering for the
+      // organization instead of for the brand.
+      isSerenityActiveForBrandStub.resolves(false);
+      const ctx = fakeContext();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(404);
+      const body = await readBody(res);
+      expect(body.message).to.match(/serenity is not active for this brand/i);
+      expect(resolveBrandWorkspaceStub).to.not.have.been.called;
+    });
+
+    it('asks the serenity gate about the brand, not the org alone', async () => {
+      isSerenityActiveForBrandStub.resolves(false);
+      const ctx = fakeContext();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(isSerenityActiveForBrandStub).to.have.been.calledWith(
+        sinon.match.any,
+        ORG_ID,
+        BRAND_ID,
+      );
     });
 
     it('returns 403 when access control denies access', async () => {
@@ -801,6 +851,21 @@ describe('ElementsController', () => {
       expect(serviceStub.getPrompts).to.not.have.been.called;
     });
 
+    it('404s (serenityInactive) when the brand is not serenity-active, even in sub-workspace mode', async () => {
+      // A brand's sub-workspace is bound when it is provisioned, which can be
+      // waves before it is released — until then its prompts come from the legacy
+      // corpus, so the gate must fire ahead of the sub-workspace requirement.
+      isSerenityActiveForBrandStub.resolves(false);
+      const ctx = fakeContext({ url: promptsUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listPrompts(ctx);
+      expect(res.status).to.equal(404);
+      const body = await readBody(res);
+      expect(body.error).to.equal('serenityInactive');
+      expect(resolveBrandWorkspaceStub).to.not.have.been.called;
+      expect(serviceStub.getPrompts).to.not.have.been.called;
+    });
+
     it('404s (subWorkspaceRequired) when the brand is in flat mode (no sub-workspace)', async () => {
       resolveBrandWorkspaceStub.resolves({
         mode: 'flat', workspaceId: WORKSPACE_ID, parentWorkspaceId: WORKSPACE_ID,
@@ -972,6 +1037,98 @@ describe('ElementsController', () => {
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.listWeeks(ctx);
       expect(res.status).to.equal(502);
+    });
+  });
+
+  // ─── checkAccess ──────────────────────────────────────────────────────────
+
+  describe('checkAccess', () => {
+    const accessUrl = () => `https://api.example.com/v2/orgs/${ORG_ID}`
+      + `/brands/${BRAND_ID}/serenity/brand-presence/access`;
+
+    it('returns 200 { hasAccess: true } when the resource-allowance probe succeeds', async () => {
+      const ctx = fakeContext({ url: accessUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.checkAccess(ctx);
+      expect(res.status).to.equal(200);
+      const body = await readBody(res);
+      expect(body).to.deep.equal({ hasAccess: true });
+      expect(getWorkspaceResourcesStub).to.have.been.calledOnce;
+    });
+
+    it('forwards the resolved workspace id and the caller IMS token to the transport', async () => {
+      const ctx = fakeContext({ url: accessUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.checkAccess(ctx);
+      // Dual-mode resolution → the brand's sub-workspace (see resolveBrandWorkspaceStub).
+      expect(getWorkspaceResourcesStub).to.have.been.calledWith(SUB_WORKSPACE_ID);
+      const transportArgs = createSerenityTransportStub.firstCall.args[0];
+      expect(transportArgs.env).to.equal(ENV);
+      expect(transportArgs.imsToken).to.equal(IMS_TOKEN);
+    });
+
+    it('returns 200 { hasAccess: false } when upstream returns 401', async () => {
+      getWorkspaceResourcesStub.rejects(new SerenityTransportError(401, 'unauthorized'));
+      const ctx = fakeContext({ url: accessUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.checkAccess(ctx);
+      expect(res.status).to.equal(200);
+      const body = await readBody(res);
+      expect(body).to.deep.equal({ hasAccess: false });
+    });
+
+    it('returns 200 { hasAccess: false } when upstream returns 403', async () => {
+      getWorkspaceResourcesStub.rejects(new SerenityTransportError(403, 'forbidden'));
+      const ctx = fakeContext({ url: accessUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.checkAccess(ctx);
+      expect(res.status).to.equal(200);
+      const body = await readBody(res);
+      expect(body).to.deep.equal({ hasAccess: false });
+    });
+
+    it('returns 502 (indeterminate, not a denial) when the upstream fails with a 5xx', async () => {
+      getWorkspaceResourcesStub.rejects(new SerenityTransportError(500, 'upstream down'));
+      const ctx = fakeContext({ url: accessUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.checkAccess(ctx);
+      expect(res.status).to.equal(502);
+      const body = await readBody(res);
+      expect(body.error).to.equal('serenityUpstreamError');
+    });
+
+    it('returns 502 when the upstream request times out (504)', async () => {
+      getWorkspaceResourcesStub.rejects(new SerenityTransportError(504, 'timed out'));
+      const ctx = fakeContext({ url: accessUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.checkAccess(ctx);
+      expect(res.status).to.equal(502);
+    });
+
+    it('returns 403 (auth error) and never probes upstream when SpaceCat access is denied', async () => {
+      accessControlHasAccessStub.resolves(false);
+      const ctx = fakeContext({ url: accessUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.checkAccess(ctx);
+      expect(res.status).to.equal(403);
+      expect(getWorkspaceResourcesStub).to.not.have.been.called;
+    });
+
+    it('returns 404 when the brand has no resolvable workspace', async () => {
+      resolveBrandWorkspaceStub.resolves({ mode: 'flat', workspaceId: null });
+      const ctx = fakeContext({ url: accessUrl() });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.checkAccess(ctx);
+      expect(res.status).to.equal(404);
+      expect(getWorkspaceResourcesStub).to.not.have.been.called;
+    });
+
+    it('returns 401 and never probes upstream when the caller is not authenticated', async () => {
+      const ctx = fakeContext({ url: accessUrl(), bearer: null });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.checkAccess(ctx);
+      expect(res.status).to.equal(401);
+      expect(getWorkspaceResourcesStub).to.not.have.been.called;
     });
   });
 
@@ -1562,6 +1719,47 @@ describe('ElementsController', () => {
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.getUrlInspectorStats(ctx);
       expect(res.status).to.equal(502);
+    });
+  });
+
+  describe('listDomainUrls', () => {
+    const domainUrlsUrl = (qs = '') => `https://api.example.com/v2/orgs/${ORG_ID}`
+      + `/brands/${BRAND_ID}/serenity/brand-presence/url-inspector/domain-urls${qs}`;
+
+    it('allows hostname to be omitted', async () => {
+      const ctx = fakeContext({
+        url: domainUrlsUrl('?startDate=2026-07-01&endDate=2026-07-14'),
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listDomainUrls(ctx);
+
+      expect(res.status).to.equal(200);
+      const [, params] = serviceStub.getDomainUrls.firstCall.args;
+      expect(params.hostname).to.be.undefined;
+    });
+
+    it('keeps a single domain query param as a string', async () => {
+      const ctx = fakeContext({
+        url: domainUrlsUrl('?startDate=2026-07-01&endDate=2026-07-14&domain=reddit.com'),
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listDomainUrls(ctx);
+
+      expect(res.status).to.equal(200);
+      const [, params] = serviceStub.getDomainUrls.firstCall.args;
+      expect(params.hostname).to.equal('reddit.com');
+    });
+
+    it('collapses a whitespace-only hostname to undefined (no filter)', async () => {
+      const ctx = fakeContext({
+        url: domainUrlsUrl('?startDate=2026-07-01&endDate=2026-07-14&hostname=%20%20'),
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listDomainUrls(ctx);
+
+      expect(res.status).to.equal(200);
+      const [, params] = serviceStub.getDomainUrls.firstCall.args;
+      expect(params.hostname).to.be.undefined;
     });
   });
 

@@ -180,16 +180,25 @@ const routeFacsCapabilities = {
     'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate',
     'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status',
     // Admin-only writes
+    // State-layer backend provisioning — admin-only (isAdmin() in the
+    // state-access-mappings controller). Full payload (imsOrgId, product,
+    // subject, resource, capabilities); nothing derived from authInfo. Not a
+    // customer FACS surface, so it bypasses facsWrapper entirely.
+    'POST /state/access-mappings/admin', // hasAdminAccess (adminCreateMapping)
     'POST /sites', // hasAdminAccess
     'DELETE /sites/:siteId', // restricted (always 403)
     'PATCH /sites/:siteId/:auditType', // hasAdminAccess (sites-audits-toggle)
     'POST /sites/:siteId/site-enrollments', // hasAdminAccess
     'POST /sites/:siteId/entitlements', // hasAdminAccess
+    // Prompt-suggestion schedule (re-)provisioning — admin-or-S2S (dedicated
+    // promptSuggestionSchedule:write capability); not a customer FACS surface.
+    'POST /sites/:siteId/prompt-suggestion-schedules', // authorizeWrite (admin || S2S cap)
     'POST /projects', // hasAdminAccess
     'DELETE /projects/:projectId', // hasAdminAccess
     'POST /organizations', // hasAdminAccess
     'DELETE /organizations/:organizationId', // restricted (always 403)
     'POST /organizations/:organizationId/entitlements', // hasAdminAccess
+    'PATCH /organizations/:organizationId/entitlements', // hasAdminAccess
     'PUT /organizations/:organizationId/feature-flags/:product/:flagName', // hasAdminAccess
     'DELETE /organizations/:organizationId/feature-flags/:product/:flagName', // hasAdminAccess
     'POST /plg/records', // hasAdminAccess
@@ -362,6 +371,9 @@ const routeFacsCapabilities = {
       'GET /llmo/ai-visibility/brands/competitors': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/brand/stats-by-country': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/brand/stats-by-llm': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/brand/competitors': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/brand/competitors-stats': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/brand/top-brands': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/meta/meta': 'llmo/can_view',
       'GET /llmo/ai-visibility/competitors/metrics': 'llmo/can_view',
       'GET /llmo/ai-visibility/meta': 'llmo/can_view',
@@ -382,12 +394,33 @@ const routeFacsCapabilities = {
       'GET /llmo/ai-visibility/v1/topic/brand-topics-totals': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/topic/gap-topics-export': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/topic/gap-topics-totals': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/topic/metrics-by-fts': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/topic/topics-by-fts': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/topic/topics-by-fts-export': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/topic/topics-by-fts-totals': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/prompt/brand-prompts-export': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/prompt/gap-prompts-export': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/prompt/gap-prompts-totals': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-export': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-totals': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids-totals': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/source/gap-source-domains': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/source/gap-source-domains-export': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/source/gap-source-domains-totals': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/source/cited-pages': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/source/cited-pages-export': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/source/cited-pages-totals': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/source/cited-sources': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/source/cited-sources-export': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/source/cited-sources-totals': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/source/source-domains-by-topic-fts': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/source/source-domains-by-topic-fts-export': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/source/source-domains-by-topic-fts-totals': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts-export': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts-totals': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/prompt-research/prompts-export': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/prompt-research/brands-export': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/prompt-research/source-domains-export': 'llmo/can_view',
@@ -444,6 +477,8 @@ const routeFacsCapabilities = {
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/domain-urls': 'llmo/can_view',
       'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/url-prompts': 'llmo/can_view',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/url-prompts': 'llmo/can_view',
+      'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/prompts-by-url': 'llmo/can_view',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/prompts-by-url': 'llmo/can_view',
       'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/filter-dimensions': 'llmo/can_view',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/filter-dimensions': 'llmo/can_view',
 
@@ -572,6 +607,7 @@ const routeFacsCapabilities = {
       'PATCH /sites/:siteId': 'llmo/can_configure',
       'PATCH /sites/:siteId/geo-experiments/:geoExperimentId': 'llmo/can_configure',
       'PATCH /sites/:siteId/opportunities/:opportunityId': 'llmo/can_configure',
+      'POST /sites/:siteId/opportunities/:opportunityId/validate': 'llmo/can_configure',
       'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'llmo/can_configure',
       'PATCH /sites/:siteId/opportunities/:opportunityId/status': 'llmo/can_configure',
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'llmo/can_configure',
@@ -594,6 +630,7 @@ const routeFacsCapabilities = {
       'POST /organizations/:organizationId/trial-user-invite': 'llmo/can_configure',
       'POST /preflight/jobs': 'llmo/can_configure',
       'POST /sites/:siteId/graph': 'llmo/can_configure',
+      'POST /sites/:siteId/geo-experiments/:geoExperimentId/trigger-impact-measurement': 'llmo/can_configure',
       'POST /sites/:siteId/ims-org-access': 'llmo/can_configure',
       'POST /sites/:siteId/opportunities': 'llmo/can_configure',
       'POST /sites/:siteId/opportunities/:opportunityId/fixes': 'llmo/can_configure',
@@ -699,6 +736,7 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/fixes': 'llmo/can_view',
       'GET /sites/:siteId/geo-experiments': 'llmo/can_view',
       'GET /sites/:siteId/geo-experiments/:geoExperimentId': 'llmo/can_view',
+      'GET /sites/:siteId/geo-experiments/:geoExperimentId/results': 'llmo/can_view',
       'GET /sites/:siteId/ims-org-access': 'llmo/can_view',
       'GET /sites/:siteId/ims-org-access/:accessId': 'llmo/can_view',
       'GET /sites/:siteId/latest-audit/:auditType': 'llmo/can_view',
@@ -835,6 +873,7 @@ const routeFacsCapabilities = {
       'GET /v2/orgs/:spaceCatId/serenity/languages': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/filter-dimensions': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/access': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview': 'llmo/can_view',
@@ -842,6 +881,7 @@ const routeFacsCapabilities = {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics/:topicId/prompts': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/domain-urls': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/url-prompts': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/market-tracking-trends': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/stats': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/stats': 'llmo/can_view',
@@ -915,6 +955,7 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/opportunities': 'aso/can_edit',
       'PATCH /sites/:siteId/opportunities/:opportunityId': 'aso/can_edit',
       'DELETE /sites/:siteId/opportunities/:opportunityId': 'aso/can_edit',
+      'POST /sites/:siteId/opportunities/:opportunityId/validate': 'aso/can_edit',
       'PATCH /sites/:siteId/opportunities/:opportunityId/status': 'aso/can_edit',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions': 'aso/can_edit',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/backoffice-reviews': 'aso/can_edit',
@@ -939,6 +980,7 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/url-store/delete': 'aso/can_edit',
       'PATCH /sites/:siteId/geo-experiments/:geoExperimentId': 'aso/can_edit',
       'DELETE /sites/:siteId/geo-experiments/:geoExperimentId': 'aso/can_edit',
+      'POST /sites/:siteId/geo-experiments/:geoExperimentId/trigger-impact-measurement': 'aso/can_edit',
       'POST /sites/:siteId/sandbox/audit': 'aso/can_edit',
       'POST /preflight/jobs': 'aso/can_edit',
       'POST /sites/:siteId/preflights': 'aso/can_edit',
@@ -1057,6 +1099,7 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/url-store/by-audit/:auditType': 'aso/can_view',
       'GET /sites/:siteId/geo-experiments': 'aso/can_view',
       'GET /sites/:siteId/geo-experiments/:geoExperimentId': 'aso/can_view',
+      'GET /sites/:siteId/geo-experiments/:geoExperimentId/results': 'aso/can_view',
       'GET /sites/:siteId/ims-org-access': 'aso/can_view',
       'GET /sites/:siteId/ims-org-access/:accessId': 'aso/can_view',
       'POST /sites/:siteId/graph': 'aso/can_view',

@@ -356,6 +356,28 @@ describe('LlmoCloudFrontController', () => {
       expect(getSignedUrlStub.calledOnce).to.equal(true);
     });
 
+    it('emits a bootstrap-url audit line carrying caller and host (onboarding-started signal)', async () => {
+      await controller.createBootstrapUrl(bootstrapContext);
+      const logged = bootstrapContext.log.info.getCalls().map((c) => c.args[0]).join('\n');
+      expect(logged).to.contain('[cdn-onboard-cloudfront] action=bootstrap-url outcome=generated');
+      expect(logged).to.contain('accountId=682033462621');
+      expect(logged).to.contain('caller=');
+      // host must be the SITE hostname, identical to what the Akamai/Cloudflare controllers log,
+      // so a single `host=` query matches all three. calculateForwardedHost is NOT usable here:
+      // it rewrites a bare apex (example.com -> www.example.com) and would silently exclude
+      // CloudFront rows from that query.
+      expect(logged).to.contain('host=www.example.com');
+    });
+
+    it('logs the site host, not the forwarded host, for a bare apex site', async () => {
+      mockSite.getBaseURL.returns('https://example.com');
+
+      await controller.createBootstrapUrl(bootstrapContext);
+      const logged = bootstrapContext.log.info.getCalls().map((c) => c.args[0]).join('\n');
+      expect(logged).to.contain('host=example.com');
+      expect(logged).to.not.contain('host=www.example.com');
+    });
+
     it('returns 400 for an invalid account id', async () => {
       const result = await controller.createBootstrapUrl({ ...bootstrapContext, data: { accountId: '123' } });
 
@@ -506,6 +528,16 @@ describe('LlmoCloudFrontController', () => {
       const result = await LlmoControllerNoAdmin(mockContext).connect(connectContext);
 
       expect(result.status).to.equal(403);
+    });
+
+    it('returns 501 for a subpath site (CDN auto-routing not supported)', async () => {
+      mockSite.getBaseURL.returns('https://www.example.com/blog');
+
+      const result = await controller.connect(connectContext);
+
+      expect(result.status).to.equal(501);
+      const body = await result.json();
+      expect(body.message).to.include('not supported');
     });
 
     it('returns 500 with a generic message when an unexpected error occurs', async () => {

@@ -918,7 +918,7 @@ llmo-agentic-traffic-global:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: [ ]
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
   post:
     tags:
@@ -956,7 +956,7 @@ llmo-agentic-traffic-global:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: [ ]
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 
 llmo-config:
@@ -1283,7 +1283,7 @@ llmo-onboard-site:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - ims_key: []
+      - session_token: []
       - api_key: []
 
 llmo-offboard:
@@ -1334,6 +1334,50 @@ llmo-offboard:
                 - message
                 - siteId
                 - status
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+llmo-prompt-suggestion-schedules:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
+    tags:
+      - llmo
+    summary: Provision recurring prompt-suggestion schedules for a site
+    description: |
+      (Re)provisions the recurring DRS prompt-suggestion pipelines for a site,
+      keyed off the site's CURRENT LLMO tier (re-derived server-side — the caller
+      cannot supply a tier). Only PAID sites get recurring schedules; a non-paying
+      site is a no-op (skipped), because the trial one-shot run is an
+      onboarding-only behavior. The underlying schedule creation is idempotent, so
+      repeat calls are safe and already-existing schedules count as success.
+
+      Admin-or-S2S: reachable by admin `x-api-key` callers and by S2S consumers
+      holding the `promptSuggestionSchedule:write` capability (used by the
+      fulfillment-worker after a Commerce trial→paid flip and by a backfill
+      reconciler — both follow-ups).
+    operationId: createPromptSuggestionSchedules
+    responses:
+      '200':
+        description: >-
+          Provisioning completed. For a paying site the per-pipeline results are
+          returned; for a non-paying site the response indicates it was skipped.
+          `allSucceeded` reflects whether every pipeline succeeded (already-existing
+          schedules count as success); inspect `results` for per-pipeline status.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/PromptSuggestionSchedulesResult'
       '400':
         $ref: './responses.yaml#/400'
       '401':
@@ -1799,6 +1843,17 @@ llmo-brand-claims:
       schema:
         type: string
         example: 'gpt-4.1'
+    - name: date
+      in: query
+      required: false
+      description: >
+        Any date (YYYY-MM-DD) within the ISO week of the run to retrieve (e.g.
+        `2026-04-22`). If omitted, the latest available run is returned. If
+        `model` is also set, `model` takes precedence for key selection.
+      schema:
+        type: string
+        format: date
+        example: '2026-04-22'
   get:
     tags:
       - llmo
@@ -1808,11 +1863,13 @@ llmo-brand-claims:
       The data files are `.json.gz` compressed and can be very large (100MB+ uncompressed),
       so this endpoint returns a presigned URL rather than the data directly.
 
-      The optional `model` query parameter selects which AI model's data to retrieve.
-      If omitted, the default model's data file is returned.
+      Runs are stored per ISO week. With no `date`, the latest available run is
+      returned; with `date`, the run for that date's ISO week is returned. The
+      optional `model` query parameter selects a legacy model-specific file.
 
       S3 key convention:
-      - Default model: `brand_claims/llmo/{siteId}/data.json.gz`
+      - Latest run: newest `brand_claims/llmo/{siteId}/{YYYY-Www}/data.json.gz` (falls back to the legacy `brand_claims/llmo/{siteId}/data.json.gz` before migration)
+      - Specific week: `brand_claims/llmo/{siteId}/{YYYY-Www}/data.json.gz`
       - Specific model: `brand_claims/llmo/{siteId}/{model}.json.gz`
     operationId: getBrandClaims
     responses:
@@ -1988,7 +2045,7 @@ site-llmo-edge-optimize-config:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
   get:
     operationId: getSiteLlmoEdgeConfig
@@ -2027,7 +2084,7 @@ site-llmo-edge-optimize-config:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-llmo-edge-optimize-config-stage:
   parameters:
@@ -2079,7 +2136,7 @@ site-llmo-edge-optimize-config-stage:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-llmo-edge-optimize-routing:
   parameters:
@@ -2192,7 +2249,7 @@ site-llmo-edge-optimize-routing:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 llmo-strategy:
   parameters:
@@ -3817,7 +3874,7 @@ llmo-probe-edge-optimize:
         $ref: './responses.yaml#/500'
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-agentic-traffic-url-brand-presence:
@@ -3892,7 +3949,7 @@ llmo-agentic-traffic-url-brand-presence:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: [ ]
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 
 # ── Common parameter fragment (referenced inline below) ───────────────────────
@@ -3933,7 +3990,7 @@ llmo-agentic-traffic-kpis:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-agentic-traffic-kpis-trend:
@@ -3978,7 +4035,7 @@ llmo-agentic-traffic-kpis-trend:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-agentic-traffic-by-region:
@@ -4013,7 +4070,7 @@ llmo-agentic-traffic-by-region:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-agentic-traffic-by-category:
@@ -4047,7 +4104,7 @@ llmo-agentic-traffic-by-category:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-agentic-traffic-by-page-type:
@@ -4082,7 +4139,7 @@ llmo-agentic-traffic-by-page-type:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-agentic-traffic-by-status:
@@ -4117,7 +4174,7 @@ llmo-agentic-traffic-by-status:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-agentic-traffic-by-user-agent:
@@ -4165,7 +4222,7 @@ llmo-agentic-traffic-by-user-agent:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-agentic-traffic-by-url:
@@ -4250,7 +4307,7 @@ llmo-agentic-traffic-by-url:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-agentic-traffic-hits-by-urls:
@@ -4346,7 +4403,7 @@ llmo-agentic-traffic-hits-by-urls:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-agentic-traffic-urls-export:
@@ -4398,7 +4455,7 @@ llmo-agentic-traffic-urls-export:
         description: PostgREST, S3, or export queue not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-agentic-traffic-urls-export-status:
@@ -4435,7 +4492,7 @@ llmo-agentic-traffic-urls-export-status:
         description: S3 not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-agentic-traffic-filter-dimensions:
@@ -4473,7 +4530,7 @@ llmo-agentic-traffic-filter-dimensions:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-agentic-traffic-weeks:
@@ -4502,7 +4559,7 @@ llmo-agentic-traffic-weeks:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 # ── URL Inspector endpoints ────────────────────────────────────────────────────
@@ -4616,7 +4673,7 @@ url-inspector-stats:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
 
 url-inspector-owned-urls:
   parameters: *url-inspector-common-params
@@ -4684,7 +4741,7 @@ url-inspector-owned-urls:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
 
 url-inspector-trending-urls:
   parameters: *url-inspector-common-params
@@ -4757,7 +4814,7 @@ url-inspector-trending-urls:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
 
 url-inspector-cited-domains:
   parameters: *url-inspector-common-params
@@ -4827,7 +4884,7 @@ url-inspector-cited-domains:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
 
 url-inspector-domain-urls:
   parameters: *url-inspector-common-params
@@ -4838,7 +4895,9 @@ url-inspector-domain-urls:
     description: |
       Returns paginated URLs within a specific domain. Used as a Phase 2 drilldown
       from the cited-domains view. The underlying RPC does not accept brand, category,
-      or region filters — domain-level drilldown is already scoped by hostname.
+      or region filters — domain-level drilldown is already scoped by hostname when
+      provided. `hostname` is optional: when omitted, URLs across all source hosts
+      for the requested page are returned instead of a single-domain drilldown.
     operationId: getUrlInspectorDomainUrls
     parameters:
       - name: siteId
@@ -4847,8 +4906,8 @@ url-inspector-domain-urls:
         schema: { type: string, format: uuid }
       - name: hostname
         in: query
-        required: true
-        description: Domain hostname to drill into
+        required: false
+        description: Domain hostname to drill into. When omitted, URLs across all source hosts are returned.
         schema:
           type: string
           example: 'competitor.com'
@@ -4897,7 +4956,7 @@ url-inspector-domain-urls:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
 
 url-inspector-url-prompts:
   parameters: *url-inspector-common-params
@@ -4947,7 +5006,7 @@ url-inspector-url-prompts:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
 
 url-inspector-filter-dimensions:
   parameters: *url-inspector-common-params
@@ -5019,7 +5078,7 @@ url-inspector-filter-dimensions:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
 
 llmo-agentic-traffic-movers:
   parameters:
@@ -5065,7 +5124,7 @@ llmo-agentic-traffic-movers:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 brand-presence-filter-dimensions:
@@ -5112,7 +5171,7 @@ brand-presence-filter-dimensions:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 brand-presence-prompt-execution-status:
@@ -5165,7 +5224,7 @@ brand-presence-prompt-execution-status:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 # ============ Referral Traffic PG (mysticat PostgREST) ============
@@ -5209,7 +5268,7 @@ llmo-referral-traffic-has-data:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-referral-traffic-filter-dimensions:
@@ -5243,7 +5302,7 @@ llmo-referral-traffic-filter-dimensions:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-referral-traffic-kpis:
@@ -5283,7 +5342,7 @@ llmo-referral-traffic-kpis:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-referral-traffic-trend:
@@ -5323,7 +5382,7 @@ llmo-referral-traffic-trend:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-referral-traffic-by-platform:
@@ -5362,7 +5421,7 @@ llmo-referral-traffic-by-platform:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-referral-traffic-by-region:
@@ -5398,7 +5457,7 @@ llmo-referral-traffic-by-region:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-referral-traffic-by-page-intent:
@@ -5434,7 +5493,7 @@ llmo-referral-traffic-by-page-intent:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-referral-traffic-by-url:
@@ -5510,7 +5569,7 @@ llmo-referral-traffic-by-url:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-referral-traffic-by-url-trend:
@@ -5565,7 +5624,7 @@ llmo-referral-traffic-by-url-trend:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-referral-traffic-by-device:
@@ -5604,7 +5663,7 @@ llmo-referral-traffic-by-device:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-referral-traffic-business-impact:
@@ -5656,7 +5715,7 @@ llmo-referral-traffic-business-impact:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-referral-traffic-weeks:
@@ -5687,7 +5746,7 @@ llmo-referral-traffic-weeks:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -5729,7 +5788,7 @@ site-llmo-cloudflare-config:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-llmo-cloudflare-accounts:
   parameters:
@@ -5780,7 +5839,7 @@ site-llmo-cloudflare-accounts:
       '502':
         $ref: './responses.yaml#/502'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-llmo-cloudflare-zones:
   parameters:
@@ -5844,7 +5903,7 @@ site-llmo-cloudflare-zones:
       '502':
         $ref: './responses.yaml#/502'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-llmo-cloudflare-deploy:
   parameters:
@@ -5863,8 +5922,9 @@ site-llmo-cloudflare-deploy:
       account. The worker name is derived server-side from the site's base URL
       (`edge-optimize-router-<canonical-host>`, e.g. `edge-optimize-router-example-com`) and is
       not client-supplied. The worker is tagged with `adobe-llmo` plus the caller's identity, and
-      the `EDGE_OPTIMIZE_TARGET_HOST` plain-text binding is set to `targetHost`, and the site's
-      LLMO API key is set as the `EDGE_OPTIMIZE_API_KEY` secret.
+      the `EDGE_OPTIMIZE_TARGET_HOST` plain-text binding is set to the host derived server-side
+      from the site's base URL (a bare apex such as `example.com` is normalized to its `www` host),
+      and the site's LLMO API key is set as the `EDGE_OPTIMIZE_API_KEY` secret.
 
       The deploy is idempotent: if a worker we previously deployed (carrying the `adobe-llmo` tag)
       already exists, the response is `200` with `alreadyDeployed: true` and the secret is not
@@ -5886,20 +5946,12 @@ site-llmo-cloudflare-deploy:
             type: object
             required:
               - accountId
-              - targetHost
             properties:
               accountId:
                 type: string
                 description: Cloudflare account ID (32-character lowercase hex)
                 pattern: '^[0-9a-f]{32}$'
                 example: '0123456789abcdef0123456789abcdef'
-              targetHost:
-                type: string
-                description: >-
-                  Origin host the worker forwards optimized traffic to. Must belong to the
-                  site's domain — it has to equal the site's canonical host (base URL host
-                  minus a leading `www.`) or be a subdomain of it.
-                example: 'www.example.com'
     responses:
       '200':
         description: >-
@@ -5916,6 +5968,9 @@ site-llmo-cloudflare-deploy:
                   type: string
                 targetHost:
                   type: string
+                  description: >-
+                    The origin host the worker forwards to, derived server-side from the site's
+                    base URL and set as the `EDGE_OPTIMIZE_TARGET_HOST` binding.
                 alreadyDeployed:
                   type: boolean
                   description: >-
@@ -5969,7 +6024,7 @@ site-llmo-cloudflare-deploy:
                   type: boolean
                   description: True when the worker is live but its API key secret was not set
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-llmo-cloudflare-routes:
   parameters:
@@ -6083,7 +6138,7 @@ site-llmo-cloudflare-routes:
       '502':
         $ref: './responses.yaml#/502'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-llmo-akamai-config:
   parameters:
@@ -6143,7 +6198,7 @@ site-llmo-akamai-config:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-llmo-akamai-properties:
   parameters:
@@ -6192,7 +6247,7 @@ site-llmo-akamai-properties:
       '502':
         $ref: './responses.yaml#/502'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-llmo-akamai-plan:
   parameters:
@@ -6288,7 +6343,7 @@ site-llmo-akamai-plan:
       '502':
         $ref: './responses.yaml#/502'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-llmo-akamai-deploy:
   parameters:
@@ -6397,7 +6452,7 @@ site-llmo-akamai-deploy:
       '502':
         $ref: './responses.yaml#/502'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-llmo-akamai-activate:
   parameters:
@@ -6479,7 +6534,7 @@ site-llmo-akamai-activate:
       '502':
         $ref: './responses.yaml#/502'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-llmo-akamai-activation-status:
   parameters:
@@ -6567,7 +6622,7 @@ site-llmo-akamai-activation-status:
       '502':
         $ref: './responses.yaml#/502'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 akamai-property-ref:
   type: object

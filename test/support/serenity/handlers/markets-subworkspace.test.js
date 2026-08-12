@@ -63,13 +63,22 @@ const log = { info: () => {}, error: () => {}, warn: () => {} };
 
 function proj({
   id = 'p1', geo = 2840, lang = 'en', status = 'live', domain = undefined,
+  promptsCount = undefined, modelsCount = undefined,
 } = {}) {
   return {
     id,
     publish_status: status,
     updated_at: '2026-06-02T00:00:00Z',
     ...(domain === undefined ? {} : { domain }),
-    settings: { ai: { location: { id: geo }, language: { name: lang } } },
+    settings: {
+      ai: {
+        location: { id: geo },
+        language: { name: lang },
+        ...(promptsCount === undefined ? {} : { prompts_count: promptsCount }),
+        ...(modelsCount === undefined
+          ? {} : { models_stats: { models: [], models_count: modelsCount } }),
+      },
+    },
   };
 }
 
@@ -147,6 +156,19 @@ describe('markets-subworkspace handlers', () => {
       expect(result.items).to.deep.equal([]);
     });
 
+    it('passes promptsCount/modelsCount through when carried, omits them otherwise', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({
+          items: [proj({ promptsCount: 24, modelsCount: 5 }), proj({ id: 'p2', geo: 2276, lang: 'de' })],
+        }),
+      });
+      const result = await handleListMarketsSubworkspace(transport, BRAND, WS);
+      expect(result.items[0].promptsCount).to.equal(24);
+      expect(result.items[0].modelsCount).to.equal(5);
+      expect(result.items[1]).to.not.have.property('promptsCount');
+      expect(result.items[1]).to.not.have.property('modelsCount');
+    });
+
     it('leaves siteId null when no dataAccess is supplied (best-effort)', async () => {
       const transport = makeTransport({ listProjects: sinon.stub().resolves({ items: [proj()] }) });
       const result = await handleListMarketsSubworkspace(transport, BRAND, WS);
@@ -216,6 +238,20 @@ describe('markets-subworkspace handlers', () => {
       });
       const result = await handleGetMarketSubworkspace(transport, BRAND, WS, 2840, 'en', log);
       expect(result.initialized).to.equal(null);
+    });
+
+    it('carries promptsCount/modelsCount on the detail shape too (slice DTO parity with the list)', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub()
+          .resolves({ items: [proj({ promptsCount: 24, modelsCount: 5 })] }),
+      });
+      const result = await handleGetMarketSubworkspace(transport, BRAND, WS, 2840, 'en', log);
+      expect(result.promptsCount).to.equal(24);
+      expect(result.modelsCount).to.equal(5);
+      const bare = makeTransport({ listProjects: sinon.stub().resolves({ items: [proj()] }) });
+      const noCount = await handleGetMarketSubworkspace(bare, BRAND, WS, 2840, 'en', log);
+      expect(noCount).to.not.have.property('promptsCount');
+      expect(noCount).to.not.have.property('modelsCount');
     });
 
     it('404s marketNotFound when no slice matches', async () => {
@@ -1486,11 +1522,10 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     expect(result.initialized).to.equal(null);
   });
 
-  // Line 115: `hasText(body?.name)?String(body.name):defaultMarketName(body.brandDisplayName)` else
-  // — body without a `name` field so defaultMarketName is called.
-  // Note: the existing test "defaults the project brand_names to just the primary brand name when
-  // no aliases" already passes a body without `name`, but does not assert the generated name
-  // pattern. This test locks the else branch explicitly by asserting the random-suffix shape.
+  // `hasText(body?.name) ? String(body.name) : defaultMarketName(body.market, languageCode)` else
+  // branch — body without a `name` field, so the market's own name is generated. The name is the
+  // customer-visible one in the Semrush navigation and must match what the migration writes
+  // (`{REGION}-{language}`), so this asserts the exact string, not a shape.
   it('buildCreateProjectBody: uses defaultMarketName when body has no name field', async () => {
     const transport = makeTransport();
     const brand = makeBrand();
@@ -1504,8 +1539,7 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     const res = await handleCreateMarketSubworkspace(transport, brand, PARENT, bodyNoName, log);
     expect(res.status).to.equal(201);
     const projectBody = transport.createProject.firstCall.args[1];
-    // defaultMarketName produces "<brandDisplayName>-<6hex>".
-    expect(projectBody.name).to.match(/^MyBrand-[0-9a-f]{6}$/);
+    expect(projectBody.name).to.equal('US-en');
   });
 
   // brand_name_display honors an explicit brandDisplayName when it differs from

@@ -18,7 +18,11 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
 
-import { ValidationError, Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+import {
+  ValidationError,
+  Site as SiteModel,
+  GeoExperiment as GeoExperimentModel,
+} from '@adobe/spacecat-shared-data-access';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import SuggestionsController from '../../src/controllers/suggestions.js';
@@ -77,7 +81,7 @@ describe('Suggestions Controller', () => {
       return suggData.status;
     },
     setStatus(value) {
-      if (value === 'throw-error') {
+      if (value === 'throw-error' || suggData.throwOnSetStatus) {
         throw new ValidationError('Validation error');
       }
       suggData.status = value;
@@ -164,8 +168,10 @@ describe('Suggestions Controller', () => {
     'deploySuggestionToEdge',
     'listGeoExperiments',
     'getGeoExperiment',
+    'getGeoExperimentResults',
     'patchGeoExperiment',
     'deleteGeoExperiment',
+    'triggerImpactMeasurement',
     'rollbackSuggestionFromEdge',
     'previewSuggestions',
     'fetchFromEdge',
@@ -512,7 +518,10 @@ describe('Suggestions Controller', () => {
       dataAccess: mockSuggestionDataAccess,
       pathInfo: { headers: { 'x-product': 'llmo' } },
       ...authContext,
-    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
   });
 
   afterEach(() => {
@@ -606,7 +615,10 @@ describe('Suggestions Controller', () => {
       dataAccess: mockSuggestionDataAccess,
       pathInfo: { headers: { 'x-product': 'llmo' } },
       ...authContext,
-    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
     const response = await controllerWithSummitPlg.getAllForOpportunity({
       params: {
         siteId: SITE_ID,
@@ -636,7 +648,10 @@ describe('Suggestions Controller', () => {
       dataAccess: mockSuggestionDataAccess,
       pathInfo: { headers: { 'x-product': 'llmo' } },
       ...authContext,
-    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
     const response = await controllerWithSummitPlg.getAllForOpportunity({
       params: {
         siteId: SITE_ID,
@@ -664,7 +679,10 @@ describe('Suggestions Controller', () => {
       dataAccess: mockSuggestionDataAccess,
       pathInfo: { headers: { 'x-product': 'llmo' } },
       ...authContext,
-    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
     mockSuggestionGrant.splitSuggestionsByGrantStatus.resetHistory();
     const response = await controllerWithSummitPlg.getAllForOpportunity({
       params: {
@@ -690,7 +708,10 @@ describe('Suggestions Controller', () => {
       pathInfo: { headers: { 'x-product': 'llmo' } },
       log: mockLog,
       ...authContext,
-    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
     const response = await controllerWithSummitPlg.getAllForOpportunity({
       params: {
         siteId: SITE_ID,
@@ -738,7 +759,10 @@ describe('Suggestions Controller', () => {
       dataAccess: mockSuggestionDataAccess,
       pathInfo: { headers: { 'x-product': 'llmo' } },
       ...authContext,
-    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
     const response = await controllerWithGrant.getAllForOpportunity({
       params: {
         siteId: SITE_ID,
@@ -766,7 +790,10 @@ describe('Suggestions Controller', () => {
       dataAccess: mockSuggestionDataAccess,
       pathInfo: { headers: { 'x-product': 'llmo' } },
       ...authContext,
-    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
     const response = await controllerWithGrant.getAllForOpportunity({
       params: {
         siteId: SITE_ID,
@@ -794,7 +821,10 @@ describe('Suggestions Controller', () => {
       dataAccess: mockSuggestionDataAccess,
       pathInfo: { headers: { 'x-product': 'llmo' } },
       ...authContext,
-    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
     const response = await controllerWithTrial.getAllForOpportunity({
       params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
       pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-as-trial': 'true' } },
@@ -820,7 +850,10 @@ describe('Suggestions Controller', () => {
       dataAccess: mockSuggestionDataAccess,
       pathInfo: { headers: { 'x-product': 'llmo' } },
       ...authContext,
-    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
     const response = await controllerWithGrant.getAllForOpportunity({
       params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
       pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-as-trial': 'true' } },
@@ -851,7 +884,10 @@ describe('Suggestions Controller', () => {
       dataAccess: mockSuggestionDataAccess,
       pathInfo: { headers: { 'x-product': 'llmo' } },
       ...authContext,
-    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
     const response = await controllerWithGrant.getAllForOpportunity({
       params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
       pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-as-trial': 'true' } },
@@ -899,7 +935,10 @@ describe('Suggestions Controller', () => {
       dataAccess: mockSuggestionDataAccess,
       pathInfo: { headers: { 'x-product': 'llmo' } },
       ...authContext,
-    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
     const response = await controllerWithGrant.getAllForOpportunity({
       params: {
         siteId: SITE_ID,
@@ -928,7 +967,10 @@ describe('Suggestions Controller', () => {
       pathInfo: { headers: { 'x-product': 'llmo' } },
       log: mockLog,
       ...authContext,
-    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
     const response = await controllerWithGrant.getAllForOpportunity({
       params: {
         siteId: SITE_ID,
@@ -2114,7 +2156,10 @@ describe('Suggestions Controller', () => {
       dataAccess: mockSuggestionDataAccess,
       pathInfo: { headers: { 'x-product': 'llmo' } },
       ...authContext,
-    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
     const response = await controllerWithSummitPlg.getByID({
       params: {
         siteId: SITE_ID,
@@ -2141,7 +2186,10 @@ describe('Suggestions Controller', () => {
       dataAccess: mockSuggestionDataAccess,
       pathInfo: { headers: { 'x-product': 'llmo' } },
       ...authContext,
-    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
     const response = await controllerWithSummitPlg.getByID({
       params: {
         siteId: SITE_ID,
@@ -2169,6 +2217,7 @@ describe('Suggestions Controller', () => {
         getUpdatedAt: () => '2025-01-01T00:00:00.000Z',
         getExecutedBy: () => 'test@test.com',
         getExecutedAt: () => '2025-01-01T01:00:00.000Z',
+        getDeployedAt: () => '2025-01-01T01:00:00.000Z',
         getPublishedAt: () => '2025-01-01T02:00:00.000Z',
         getChangeDetails: () => ({ file: 'index.js', changes: 'updated' }),
         getStatus: () => 'COMPLETED',
@@ -2182,6 +2231,7 @@ describe('Suggestions Controller', () => {
         getUpdatedAt: () => '2025-01-02T00:00:00.000Z',
         getExecutedBy: () => 'test@test.com',
         getExecutedAt: () => '2025-01-02T01:00:00.000Z',
+        getDeployedAt: () => '2025-01-02T01:00:00.000Z',
         getPublishedAt: () => null,
         getChangeDetails: () => ({ content: 'new content' }),
         getStatus: () => 'IN_PROGRESS',
@@ -3089,7 +3139,10 @@ describe('Suggestions Controller', () => {
       const da = { ...mockSuggestionDataAccess, Site: { findById: sandbox.stub().resolves(plgSite) } };
       const ctrl = ControllerWithSlack({
         dataAccess: da, pathInfo: { headers: {} }, ...authContext,
-      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
 
       const response = await ctrl.patchSuggestion({
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
@@ -3117,7 +3170,10 @@ describe('Suggestions Controller', () => {
       const da = { ...mockSuggestionDataAccess, Site: { findById: sandbox.stub().resolves(paidSite) } };
       const ctrl = ControllerWithSlack({
         dataAccess: da, pathInfo: { headers: {} }, ...authContext,
-      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
 
       const response = await ctrl.patchSuggestion({
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
@@ -3141,7 +3197,10 @@ describe('Suggestions Controller', () => {
       const da = { ...mockSuggestionDataAccess, Site: { findById: sandbox.stub().resolves(plgSite) } };
       const ctrl = ControllerWithSlack({
         dataAccess: da, pathInfo: { headers: {} }, ...authContext,
-      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
 
       const response = await ctrl.patchSuggestion({
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
@@ -3166,7 +3225,10 @@ describe('Suggestions Controller', () => {
       const da = { ...mockSuggestionDataAccess, Site: { findById: sandbox.stub().resolves(plgSite) } };
       const ctrl = ControllerWithSlack({
         dataAccess: da, pathInfo: { headers: {} }, ...authContext,
-      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
 
       const response = await ctrl.patchSuggestion({
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
@@ -3191,7 +3253,10 @@ describe('Suggestions Controller', () => {
       const da = { ...mockSuggestionDataAccess, Site: { findById: sandbox.stub().resolves(plgSite) } };
       const ctrl = ControllerWithSlack({
         dataAccess: da, pathInfo: { headers: {} }, ...authContext,
-      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
 
       const response = await ctrl.patchSuggestion({
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
@@ -3221,7 +3286,10 @@ describe('Suggestions Controller', () => {
       const da = { ...mockSuggestionDataAccess, Site: { findById: sandbox.stub().resolves(errorSite) } };
       const ctrl = ControllerWithSlack({
         dataAccess: da, pathInfo: { headers: {} }, ...authContext,
-      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
 
       const response = await ctrl.patchSuggestion({
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
@@ -3245,7 +3313,10 @@ describe('Suggestions Controller', () => {
       const da = { ...mockSuggestionDataAccess, Site: { findById: sandbox.stub().resolves(plgSite) } };
       const ctrl = ControllerWithSlack({
         dataAccess: da, pathInfo: { headers: {} }, ...authContext,
-      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
 
       const response = await ctrl.patchSuggestion({
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
@@ -3271,7 +3342,10 @@ describe('Suggestions Controller', () => {
       const da = { ...mockSuggestionDataAccess, Site: { findById: sandbox.stub().resolves(plgSite) } };
       const ctrl = ControllerWithSlack({
         dataAccess: da, pathInfo: { headers: {} }, ...authContext,
-      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
 
       const response = await ctrl.patchSuggestionsStatus({
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
@@ -3303,7 +3377,10 @@ describe('Suggestions Controller', () => {
       const da = { ...mockSuggestionDataAccess, Site: { findById: sandbox.stub().resolves(plgSite) } };
       const ctrl = ControllerWithSlack({
         dataAccess: da, pathInfo: { headers: {} }, ...authContext,
-      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
 
       const response = await ctrl.patchSuggestionsStatus({
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
@@ -3328,7 +3405,10 @@ describe('Suggestions Controller', () => {
       const da = { ...mockSuggestionDataAccess, Site: { findById: sandbox.stub().resolves(plgSite) } };
       const ctrl = ControllerWithSlack({
         dataAccess: da, pathInfo: { headers: {} }, ...authContext,
-      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
 
       const response = await ctrl.patchSuggestionsStatus({
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
@@ -3351,7 +3431,7 @@ describe('Suggestions Controller', () => {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
-      data: [{ id: SUGGESTION_IDS[0], status: 'NEW-updated' }, { id: SUGGESTION_IDS[1], status: 'APPROVED-updated' }],
+      data: [{ id: SUGGESTION_IDS[0], status: 'IN_PROGRESS' }, { id: SUGGESTION_IDS[1], status: 'FIXED' }],
       ...context,
     });
 
@@ -3369,8 +3449,8 @@ describe('Suggestions Controller', () => {
     expect(bulkPatchResponse.suggestions[1]).to.have.property('statusCode', 200);
     expect(bulkPatchResponse.suggestions[0].suggestion).to.exist;
     expect(bulkPatchResponse.suggestions[1].suggestion).to.exist;
-    expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('status', 'NEW-updated');
-    expect(bulkPatchResponse.suggestions[1].suggestion).to.have.property('status', 'APPROVED-updated');
+    expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('status', 'IN_PROGRESS');
+    expect(bulkPatchResponse.suggestions[1].suggestion).to.have.property('status', 'FIXED');
   });
 
   it('bulk patches suggestion status sets updatedBy to caller profile email on status change', async () => {
@@ -3379,7 +3459,7 @@ describe('Suggestions Controller', () => {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
-      data: [{ id: SUGGESTION_IDS[0], status: 'NEW-updated' }],
+      data: [{ id: SUGGESTION_IDS[0], status: 'IN_PROGRESS' }],
       ...context,
     });
 
@@ -3525,7 +3605,7 @@ describe('Suggestions Controller', () => {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
-      data: [{ id: SUGGESTION_IDS[1], status: 'NEW-APPROVED' }, { status: 'NEW-APPROVED' }],
+      data: [{ id: SUGGESTION_IDS[1], status: 'FIXED' }, { status: 'FIXED' }],
       ...context,
     });
     expect(response.status).to.equal(207);
@@ -3579,7 +3659,7 @@ describe('Suggestions Controller', () => {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
-      data: [{ id: SUGGESTION_IDS[1], status: 'NEW-APPROVED' }, { id: SUGGESTION_IDS[0] }],
+      data: [{ id: SUGGESTION_IDS[1], status: 'FIXED' }, { id: SUGGESTION_IDS[0] }],
       ...context,
     });
     expect(response.status).to.equal(207);
@@ -3606,7 +3686,7 @@ describe('Suggestions Controller', () => {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
-      data: [{ id: 'wrong-sugg-id', status: 'NEW-NEW' }, { id: SUGGESTION_IDS[0], status: 'NEW-APPROVED' }],
+      data: [{ id: 'wrong-sugg-id', status: 'APPROVED' }, { id: SUGGESTION_IDS[0], status: 'APPROVED' }],
       ...context,
     });
     expect(response.status).to.equal(207);
@@ -3698,14 +3778,14 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
       },
       data: [
-        { id: SUGGESTION_IDS[0], status: 'APPROVED' },
+        { id: SUGGESTION_IDS[0], status: 'NEW' },
       ],
       ...context,
     });
     expect(response.status).to.equal(207);
     const bulkPatchResponse = await response.json();
     expect(bulkPatchResponse.metadata.success).to.equal(1);
-    expect(suggs[0].status).to.equal('APPROVED');
+    expect(suggs[0].status).to.equal('NEW');
     expect(suggs[0].skipReason).to.be.null;
     expect(suggs[0].skipDetail).to.be.null;
   });
@@ -3733,7 +3813,7 @@ describe('Suggestions Controller', () => {
     expect(suggs[0].skipDetail).to.be.null;
   });
 
-  it('bulk patches suggestion status changes from SKIPPED to APPROVED without setSkipReason on model', async () => {
+  it('bulk patches suggestion status changes from SKIPPED to NEW without setSkipReason on model', async () => {
     suggs[0].status = 'SKIPPED';
     const entity = mockSuggestionEntity(suggs[0]);
     delete entity.setSkipReason;
@@ -3750,14 +3830,14 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
       },
       data: [
-        { id: SUGGESTION_IDS[0], status: 'APPROVED' },
+        { id: SUGGESTION_IDS[0], status: 'NEW' },
       ],
       ...context,
     });
     expect(response.status).to.equal(207);
     const bulkPatchResponse = await response.json();
     expect(bulkPatchResponse.metadata.success).to.equal(1);
-    expect(suggs[0].status).to.equal('APPROVED');
+    expect(suggs[0].status).to.equal('NEW');
     // Restore
     mockSuggestion.findById.callsFake((id) => {
       const s = suggs.find((sg) => sg.id === id);
@@ -3952,12 +4032,16 @@ describe('Suggestions Controller', () => {
   });
 
   it('bulk patches suggestion status fails if validation error in set status', async () => {
+    // A legal transition (NEW -> IN_PROGRESS) that still throws inside setStatus,
+    // to exercise the setStatus ValidationError -> 400 path after the transition gate.
+    suggs[0].throwOnSetStatus = true;
+    suggs[1].throwOnSetStatus = true;
     const response = await suggestionsController.patchSuggestionsStatus({
       params: {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
-      data: [{ id: SUGGESTION_IDS[0], status: 'throw-error' }, { id: SUGGESTION_IDS[1], status: 'throw-error' }],
+      data: [{ id: SUGGESTION_IDS[0], status: 'IN_PROGRESS' }, { id: SUGGESTION_IDS[1], status: 'IN_PROGRESS' }],
       ...context,
     });
     expect(response.status).to.equal(207);
@@ -3986,7 +4070,9 @@ describe('Suggestions Controller', () => {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
-      data: [{ id: SUGGESTION_IDS[0], status: 'NEW updated' }, { id: SUGGESTION_IDS[1], status: 'APPROVED updated' }],
+      // Legal transitions (NEW->IN_PROGRESS, APPROVED->FIXED) so the request reaches
+      // save(), where the mock throws.
+      data: [{ id: SUGGESTION_IDS[0], status: 'IN_PROGRESS' }, { id: SUGGESTION_IDS[1], status: 'FIXED' }],
       ...context,
     });
     expect(response.status).to.equal(207);
@@ -4255,6 +4341,62 @@ describe('Suggestions Controller', () => {
     });
   });
 
+  describe('status transition legality (SITES-49063)', () => {
+    const patchToStatus = async (currentStatus, targetStatus) => {
+      const suggestionEntity = mockSuggestionEntity({
+        id: SUGGESTION_IDS[0],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'CODE_CHANGE',
+        status: currentStatus,
+        rank: 1,
+        data: { info: 'sample data' },
+      }, removeStub);
+      const saveSpy = sandbox.spy(suggestionEntity, 'save');
+
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(suggestionEntity);
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(opportunity);
+      mockSite.findById.withArgs(SITE_ID).resolves(site);
+
+      sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability').resolves({ allowed: false, reason: 'not-s2s' });
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+
+      const response = await suggestionsController.patchSuggestionsStatus({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: [{ id: SUGGESTION_IDS[0], status: targetStatus }],
+        ...context,
+      });
+      return { response, saveSpy };
+    };
+
+    it('rejects OUTDATED -> FIXED with a 400 and does not save', async () => {
+      const { response, saveSpy } = await patchToStatus('OUTDATED', 'FIXED');
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.suggestions[0]).to.have.property('statusCode', 400);
+      expect(body.suggestions[0]).to.have.property('uuid', SUGGESTION_IDS[0]);
+      expect(body.suggestions[0]).to.have.property('message', 'Illegal status transition: OUTDATED -> FIXED');
+      expect(body.suggestions[0].suggestion).to.not.exist;
+      expect(body.metadata).to.have.property('failed', 1);
+      expect(body.metadata).to.have.property('success', 0);
+      // the exact invariant SITES-49063 is about: an illegal transition must not write
+      expect(saveSpy).to.not.have.been.called;
+    });
+
+    it('allows a legal transition (IN_PROGRESS -> FIXED)', async () => {
+      const { response, saveSpy } = await patchToStatus('IN_PROGRESS', 'FIXED');
+
+      expect(saveSpy).to.have.been.calledOnce;
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.suggestions[0]).to.have.property('statusCode', 200);
+      expect(body.suggestions[0].suggestion).to.have.property('status', 'FIXED');
+      expect(body.metadata).to.have.property('success', 1);
+      expect(body.metadata).to.have.property('failed', 0);
+    });
+  });
+
   describe('auto-fix suggestions', () => {
     let suggestionsControllerWithMock;
     beforeEach(async () => {
@@ -4274,7 +4416,10 @@ describe('Suggestions Controller', () => {
         dataAccess: mockSuggestionDataAccess,
         pathInfo: { headers: { 'x-product': 'abcd' } },
         ...authContext,
-      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
     });
 
     afterEach(() => {
@@ -4344,7 +4489,10 @@ describe('Suggestions Controller', () => {
         dataAccess: mockSuggestionDataAccess,
         pathInfo: { headers: { 'x-product': 'abcd' } },
         ...authContext,
-      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
 
       opportunity.getType = sandbox.stub().returns('meta-tags');
       mockSuggestionGrant.splitSuggestionsByGrantStatus.resetHistory();
@@ -4654,7 +4802,10 @@ describe('Suggestions Controller', () => {
         dataAccess: mockSuggestionDataAccess,
         pathInfo: { headers: { 'x-product': 'abcd' } },
         ...authContext,
-      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
 
       opportunity.getType = sandbox.stub().returns('alt-text');
       mockSuggestion.allByOpportunityId.resolves(
@@ -6615,7 +6766,10 @@ describe('Suggestions Controller', () => {
         dataAccess: mockSuggestionDataAccess,
         pathInfo: { headers: { 'x-product': 'abcd' } },
         ...authContext,
-      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
     });
 
     afterEach(() => {
@@ -7879,7 +8033,10 @@ describe('Suggestions Controller', () => {
         },
         pathInfo: { headers: { 'x-product': 'llmo' } },
         ...authContext,
-      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
 
       const response = await controllerWithoutGeoExperiment.deploySuggestionToEdge({
         ...context,
@@ -9393,7 +9550,10 @@ describe('Suggestions Controller', () => {
         dataAccess: mockSuggestionDataAccess,
         pathInfo: { headers: { 'x-product': 'llmo' } },
         ...authContext,
-      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
 
       const response = await controllerWithAtomicStub.deploySuggestionToEdge({
         ...context,
@@ -9436,7 +9596,10 @@ describe('Suggestions Controller', () => {
         dataAccess: mockSuggestionDataAccess,
         pathInfo: { headers: { 'x-product': 'llmo' } },
         ...authContext,
-      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
 
       const response = await controllerWithAtomicStub.deploySuggestionToEdge({
         ...context,
@@ -9491,7 +9654,10 @@ describe('Suggestions Controller', () => {
         dataAccess: mockSuggestionDataAccess,
         pathInfo: { headers: { 'x-product': 'llmo' } },
         ...authContext,
-      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
 
       const response = await controllerWithAtomicStub.deploySuggestionToEdge({
         ...context,
@@ -9561,7 +9727,10 @@ describe('Suggestions Controller', () => {
         dataAccess: mockSuggestionDataAccess,
         pathInfo: { headers: { 'x-product': 'llmo' } },
         ...authContext,
-      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
 
       const response = await controllerWithThrowingDto.deploySuggestionToEdge({
         ...context,
@@ -9606,7 +9775,10 @@ describe('Suggestions Controller', () => {
         dataAccess: mockSuggestionDataAccess,
         pathInfo: { headers: { 'x-product': 'llmo' } },
         ...authContext,
-      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
 
       const response = await controllerWithAtomicStub.deploySuggestionToEdge({
         ...context,
@@ -9671,7 +9843,10 @@ describe('Suggestions Controller', () => {
         dataAccess: mockSuggestionDataAccess,
         pathInfo: { headers: { 'x-product': 'llmo' } },
         ...authContext,
-      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
 
       const mockTokowakaClient = {
         deployToEdge: sandbox.stub().resolves({
@@ -10170,6 +10345,8 @@ describe('Suggestions Controller', () => {
 
   describe('getGeoExperiment', () => {
     const GEO_EXP_ID = 'b1b2c3d4-e5f6-7890-abcd-ef1234567890';
+    // Insights (and their detail blobs) live in the Mystique assets bucket, not the default one.
+    const MYSTIQUE_BUCKET = 'test-mystique-bucket';
 
     let mockGeoExperiment;
 
@@ -10183,7 +10360,9 @@ describe('Suggestions Controller', () => {
         s3Client: { send: sandbox.stub() },
         s3Bucket: 'test-bucket',
         GetObjectCommand: StubGetObjectCommand,
+        getSignedUrl: sandbox.stub().resolves('https://presigned.example/blob'),
       };
+      context.env = { S3_MYSTIQUE_BUCKET: MYSTIQUE_BUCKET };
       sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
 
       mockGeoExperiment = {
@@ -10356,6 +10535,113 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(200);
       const body = await response.json();
       expect(body.insights).to.deep.equal(insightsPayload);
+      // Insights are read from the Mystique bucket; prompts from the default services bucket.
+      const insightsCall = context.s3.s3Client.send.getCalls()
+        .find((c) => c.args[0].Key === insightsKey);
+      expect(insightsCall.args[0].Bucket).to.equal(MYSTIQUE_BUCKET);
+      const promptsCall = context.s3.s3Client.send.getCalls()
+        .find((c) => c.args[0].Key.endsWith('-prompts.json'));
+      expect(promptsCall.args[0].Bucket).to.equal('test-bucket');
+    });
+
+    it('returns null insights when the Mystique bucket is not configured', async () => {
+      context.env = {};
+      mockGeoExperiment.getInsightsLocation = () => `geo-experiments/${SITE_ID}/${GEO_EXP_ID}-insights.json`;
+      context.s3.s3Client.send.resolves({
+        Body: { transformToString: sandbox.stub().resolves('[]') },
+      });
+      const response = await suggestionsController.getGeoExperiment({
+        ...context,
+        data: { includeInsights: 'true' },
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.insights).to.be.null;
+      // No insights GetObject attempted without a bucket (only the prompts fetch runs).
+      const insightsAttempted = context.s3.s3Client.send.getCalls()
+        .some((c) => c.args[0].Key.endsWith('-insights.json'));
+      expect(insightsAttempted).to.equal(false);
+    });
+
+    it('replaces each analysis rawDataUrl with a presigned URL when includeInsights=true', async () => {
+      const insightsKey = `geo-experiments/${SITE_ID}/${GEO_EXP_ID}-insights.json`;
+      const insightsPayload = {
+        analyses: [
+          { kind: 'cited_text', rawDataUrl: 's3://mystique-bucket/geo-experiments/x/cited_text.json' },
+          { kind: 'url_presence' }, // no rawDataUrl → left untouched
+        ],
+      };
+      mockGeoExperiment.getInsightsLocation = () => insightsKey;
+      context.s3.getSignedUrl = sandbox.stub().resolves('https://signed.example/cited_text.json');
+      context.s3.s3Client.send.callsFake((command) => {
+        const payload = command.Key === insightsKey ? insightsPayload : [];
+        return Promise.resolve({
+          Body: { transformToString: sandbox.stub().resolves(JSON.stringify(payload)) },
+        });
+      });
+      const response = await suggestionsController.getGeoExperiment({
+        ...context,
+        data: { includeInsights: 'true' },
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      const [cited, urlPresence] = body.insights.analyses;
+      // rawDataUrl is replaced in place with the presigned HTTPS URL (no new fields, no s3://).
+      expect(cited.rawDataUrl).to.equal('https://signed.example/cited_text.json');
+      expect(cited).to.not.have.property('rawDataPresignedUrl');
+      // analysis without rawDataUrl is untouched.
+      expect(urlPresence).to.not.have.property('rawDataUrl');
+      // presigned against the URL's OWN bucket/key (Mystique bucket), not the api-service bucket.
+      const signedCommand = context.s3.getSignedUrl.firstCall.args[1];
+      expect(signedCommand.Bucket).to.equal('mystique-bucket');
+      expect(signedCommand.Key).to.equal('geo-experiments/x/cited_text.json');
+    });
+
+    it('returns insights unchanged when it has no analyses array', async () => {
+      const insightsKey = `geo-experiments/${SITE_ID}/${GEO_EXP_ID}-insights.json`;
+      const insightsPayload = { version: '1' }; // no analyses -> presign is a no-op
+      mockGeoExperiment.getInsightsLocation = () => insightsKey;
+      context.s3.s3Client.send.callsFake((command) => {
+        const payload = command.Key === insightsKey ? insightsPayload : [];
+        return Promise.resolve({
+          Body: { transformToString: sandbox.stub().resolves(JSON.stringify(payload)) },
+        });
+      });
+      const response = await suggestionsController.getGeoExperiment({
+        ...context,
+        data: { includeInsights: 'true' },
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.insights).to.deep.equal(insightsPayload);
+      expect(context.s3.getSignedUrl.called).to.equal(false);
+    });
+
+    it('leaves rawDataUrl unchanged and logs when presigning fails', async () => {
+      const insightsKey = `geo-experiments/${SITE_ID}/${GEO_EXP_ID}-insights.json`;
+      const rawUri = 's3://mystique-bucket/geo-experiments/x/cited_text.json';
+      const insightsPayload = { analyses: [{ kind: 'cited_text', rawDataUrl: rawUri }] };
+      mockGeoExperiment.getInsightsLocation = () => insightsKey;
+      context.s3.getSignedUrl = sandbox.stub().rejects(new Error('presign boom'));
+      context.s3.s3Client.send.callsFake((command) => {
+        const payload = command.Key === insightsKey ? insightsPayload : [];
+        return Promise.resolve({
+          Body: { transformToString: sandbox.stub().resolves(JSON.stringify(payload)) },
+        });
+      });
+      const response = await suggestionsController.getGeoExperiment({
+        ...context,
+        data: { includeInsights: 'true' },
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      // presign failed → original s3:// rawDataUrl left untouched, and the failure is logged.
+      expect(body.insights.analyses[0].rawDataUrl).to.equal(rawUri);
+      expect(context.log.info.calledWithMatch(/Could not presign rawDataUrl/)).to.equal(true);
     });
 
     it('returns null insights and logs when insights S3 fetch fails', async () => {
@@ -10395,7 +10681,144 @@ describe('Suggestions Controller', () => {
     });
   });
 
+  describe('getGeoExperimentResults', () => {
+    const GEO_EXP_ID = 'b1b2c3d4-e5f6-7890-abcd-ef1234567890';
+    const MYSTIQUE_BUCKET = 'test-mystique-bucket';
+    const INSIGHTS_KEY = `geo-experiments/${SITE_ID}/${GEO_EXP_ID}-insights.json`;
 
+    let mockGeoExperiment;
+
+    beforeEach(() => {
+      class StubGetObjectCommand {
+        constructor(input) {
+          Object.assign(this, input);
+        }
+      }
+      context.s3 = {
+        s3Client: { send: sandbox.stub() },
+        s3Bucket: 'test-bucket',
+        GetObjectCommand: StubGetObjectCommand,
+        getSignedUrl: sandbox.stub().resolves('https://presigned.example/blob'),
+      };
+      context.env = { S3_MYSTIQUE_BUCKET: MYSTIQUE_BUCKET };
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+
+      mockGeoExperiment = {
+        getId: () => GEO_EXP_ID,
+        getSiteId: () => SITE_ID,
+        getStatus: () => 'COMPLETED',
+        getPhase: () => 'impact_measurement_done',
+        getInsightsLocation: () => INSIGHTS_KEY,
+      };
+
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(mockGeoExperiment);
+    });
+
+    it('returns badRequest for invalid siteId', async () => {
+      const response = await suggestionsController.getGeoExperimentResults({
+        ...context,
+        params: { siteId: 'not-a-uuid', geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns badRequest for invalid geoExperimentId', async () => {
+      const response = await suggestionsController.getGeoExperimentResults({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: 'bad' },
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns notFound when site missing', async () => {
+      const response = await suggestionsController.getGeoExperimentResults({
+        ...context,
+        params: { siteId: SITE_ID_NOT_FOUND, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns forbidden without site access', async () => {
+      AccessControlUtil.prototype.hasAccess.restore();
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
+      const response = await suggestionsController.getGeoExperimentResults({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns notFound when GeoExperiment is missing', async () => {
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(null);
+      const response = await suggestionsController.getGeoExperimentResults({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns notFound when GeoExperiment belongs to another site', async () => {
+      mockGeoExperiment.getSiteId = () => 'other-site-id';
+      const response = await suggestionsController.getGeoExperimentResults({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns notFound (not ready) when insightsLocation is not set', async () => {
+      mockGeoExperiment.getInsightsLocation = () => undefined;
+      const response = await suggestionsController.getGeoExperimentResults({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.match(/No results available/);
+    });
+
+    it('returns notFound (not ready) when the insights S3 fetch fails', async () => {
+      context.s3.s3Client.send.rejects(new Error('NoSuchKey'));
+      const response = await suggestionsController.getGeoExperimentResults({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(404);
+      expect(context.log.info.calledWithMatch(/Could not fetch results/)).to.equal(true);
+    });
+
+    it('returns the insights report on success', async () => {
+      const insightsPayload = { analyses: [{ kind: 'cited_text' }] };
+      context.s3.s3Client.send.resolves({
+        Body: { transformToString: sandbox.stub().resolves(JSON.stringify(insightsPayload)) },
+      });
+      const response = await suggestionsController.getGeoExperimentResults({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.geoExperimentId).to.equal(GEO_EXP_ID);
+      expect(body.status).to.equal('COMPLETED');
+      expect(body.phase).to.equal('impact_measurement_done');
+      expect(body.insights).to.deep.equal(insightsPayload);
+    });
+
+    it('presigns each analysis rawDataUrl in the returned insights', async () => {
+      const rawUri = `s3://${MYSTIQUE_BUCKET}/geo-experiments/${SITE_ID}/${GEO_EXP_ID}/cited_text.json`;
+      const insightsPayload = { analyses: [{ kind: 'cited_text', rawDataUrl: rawUri }] };
+      context.s3.s3Client.send.resolves({
+        Body: { transformToString: sandbox.stub().resolves(JSON.stringify(insightsPayload)) },
+      });
+      const response = await suggestionsController.getGeoExperimentResults({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.insights.analyses[0].rawDataUrl).to.equal('https://presigned.example/blob');
+    });
+  });
 
   describe('patchGeoExperiment', () => {
     const GEO_EXP_ID = 'b1b2c3d4-e5f6-7890-abcd-ef1234567890';
@@ -10433,6 +10856,7 @@ describe('Suggestions Controller', () => {
         setSuggestionIds: sandbox.stub(),
         setPromptsCount: sandbox.stub(),
         setPromptsLocation: sandbox.stub(),
+        setInsightsLocation: sandbox.stub(),
         setStartTime: sandbox.stub(),
         setEndTime: sandbox.stub(),
         setMetadata: sandbox.stub(),
@@ -10558,6 +10982,18 @@ describe('Suggestions Controller', () => {
       expect(mockGeoExperiment.save.calledOnce).to.be.true;
     });
 
+    it('patches insightsLocation and saves', async () => {
+      const insightsLocation = `geo-experiments/${GEO_EXP_ID}/insights.json`;
+      const response = await suggestionsController.patchGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+        data: { insightsLocation },
+      });
+      expect(response.status).to.equal(200);
+      expect(mockGeoExperiment.setInsightsLocation.calledWith(insightsLocation)).to.be.true;
+      expect(mockGeoExperiment.save.calledOnce).to.be.true;
+    });
+
     it('patches all optional geo experiment fields in one request', async () => {
       const suggestionIds = [SUGGESTION_IDS[0]];
       const errorPayload = { code: 'E_TEST' };
@@ -10572,6 +11008,7 @@ describe('Suggestions Controller', () => {
           suggestionIds,
           promptsCount: 7,
           promptsLocation: 'geo-experiments/bucket/key.json',
+          insightsLocation: 'geo-experiments/bucket/insights.json',
           startTime: '2026-01-01T00:00:00.000Z',
           endTime: '2026-06-01T00:00:00.000Z',
           error: errorPayload,
@@ -10585,6 +11022,7 @@ describe('Suggestions Controller', () => {
       expect(mockGeoExperiment.setSuggestionIds.calledWith(suggestionIds)).to.be.true;
       expect(mockGeoExperiment.setPromptsCount.calledWith(7)).to.be.true;
       expect(mockGeoExperiment.setPromptsLocation.calledWith('geo-experiments/bucket/key.json')).to.be.true;
+      expect(mockGeoExperiment.setInsightsLocation.calledWith('geo-experiments/bucket/insights.json')).to.be.true;
       expect(mockGeoExperiment.setStartTime.calledWith('2026-01-01T00:00:00.000Z')).to.be.true;
       expect(mockGeoExperiment.setEndTime.calledWith('2026-06-01T00:00:00.000Z')).to.be.true;
       expect(mockGeoExperiment.setError.calledWith(errorPayload)).to.be.true;
@@ -10701,6 +11139,232 @@ describe('Suggestions Controller', () => {
       });
       expect(response.status).to.equal(204);
       expect(mockGeoExperiment.remove).to.have.been.calledOnce;
+    });
+  });
+
+  describe('triggerImpactMeasurement', () => {
+    const GEO_EXP_ID = 'b1b2c3d4-e5f6-7890-abcd-ef1234567890';
+    const { STATUSES, PHASES, METADATA_KEYS } = GeoExperimentModel;
+    let mockGeoExperiment;
+
+    function createMockGeoExperiment({
+      phase = PHASES.POST_ANALYSIS_DONE,
+      status = STATUSES.IN_PROGRESS,
+      metadata = {},
+    } = {}) {
+      return {
+        getId: () => GEO_EXP_ID,
+        getSiteId: () => SITE_ID,
+        getPhase: () => phase,
+        getStatus: () => status,
+        getMetadata: () => metadata,
+      };
+    }
+
+    beforeEach(() => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+
+      mockGeoExperiment = createMockGeoExperiment();
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(mockGeoExperiment);
+    });
+
+    it('returns 400 for invalid siteId', async () => {
+      const response = await suggestionsController.triggerImpactMeasurement({
+        ...context,
+        params: { siteId: 'bad', geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(400);
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('returns 400 for invalid geoExperimentId', async () => {
+      const response = await suggestionsController.triggerImpactMeasurement({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: 'bad' },
+      });
+      expect(response.status).to.equal(400);
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('returns 404 when site not found', async () => {
+      const response = await suggestionsController.triggerImpactMeasurement({
+        ...context,
+        params: { siteId: SITE_ID_NOT_FOUND, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(404);
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('returns 403 without site access', async () => {
+      AccessControlUtil.prototype.hasAccess.restore();
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
+      const response = await suggestionsController.triggerImpactMeasurement({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(403);
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('returns 404 when GeoExperiment not found', async () => {
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(null);
+      const response = await suggestionsController.triggerImpactMeasurement({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(404);
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('returns 404 when GeoExperiment belongs to another site', async () => {
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves({
+        ...mockGeoExperiment,
+        getSiteId: () => 'other-site-id',
+      });
+      const response = await suggestionsController.triggerImpactMeasurement({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(404);
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('returns 400 when the experiment has not reached post-analysis', async () => {
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(createMockGeoExperiment({
+        phase: PHASES.PRE_ANALYSIS_STARTED,
+        status: STATUSES.GENERATING_BASELINE,
+      }));
+      const response = await suggestionsController.triggerImpactMeasurement({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.include('post_analysis_done');
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('returns 400 when the experiment is failed, regardless of eligible phase', async () => {
+      const eligiblePhases = [
+        PHASES.POST_ANALYSIS_DONE,
+        PHASES.IMPACT_MEASUREMENT_STARTED,
+        PHASES.IMPACT_MEASUREMENT_DONE,
+      ];
+      await Promise.all(eligiblePhases.map(async (phase) => {
+        mockSuggestionDataAccess.GeoExperiment.findById.resolves(createMockGeoExperiment({
+          phase,
+          status: STATUSES.FAILED,
+        }));
+        const response = await suggestionsController.triggerImpactMeasurement({
+          ...context,
+          params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+        });
+        expect(response.status).to.equal(400);
+      }));
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('sends the message for an experiment genuinely in flight at impact_measurement_started', async () => {
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(createMockGeoExperiment({
+        phase: PHASES.IMPACT_MEASUREMENT_STARTED,
+        status: STATUSES.IN_PROGRESS,
+        metadata: { [METADATA_KEYS.IMPACT_MEASUREMENT_TASK_ID]: 'task-123' },
+      }));
+      const response = await suggestionsController.triggerImpactMeasurement({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(202);
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+    });
+
+    it('re-arms a completed experiment at impact_measurement_done for re-measurement', async () => {
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(createMockGeoExperiment({
+        phase: PHASES.IMPACT_MEASUREMENT_DONE,
+        status: STATUSES.COMPLETED,
+        metadata: { [METADATA_KEYS.IMPACT_MEASUREMENT_TASK_ID]: 'old-task' },
+      }));
+      const response = await suggestionsController.triggerImpactMeasurement({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(202);
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+    });
+
+    it('sends a TRIGGER_IMPACT_MEASUREMENT message for an experiment ready for measurement', async () => {
+      const response = await suggestionsController.triggerImpactMeasurement({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(202);
+      expect(mockSqs.sendMessage).to.have.been.calledOnceWithExactly(
+        'https://llmo-experimentation-engine-queue',
+        {
+          type: 'TRIGGER_IMPACT_MEASUREMENT',
+          geoExperimentId: GEO_EXP_ID,
+          triggeredBy: 'test@test.com',
+        },
+      );
+    });
+
+    it('re-arms a completed experiment at post_analysis_done for re-measurement', async () => {
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(createMockGeoExperiment({
+        phase: PHASES.POST_ANALYSIS_DONE,
+        status: STATUSES.COMPLETED,
+        metadata: { [METADATA_KEYS.IMPACT_MEASUREMENT_TASK_ID]: 'old-task' },
+      }));
+      const response = await suggestionsController.triggerImpactMeasurement({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(202);
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+    });
+
+    it('falls back triggeredBy to profile name, then "unknown"', async () => {
+      const responseWithName = await suggestionsController.triggerImpactMeasurement({
+        ...context,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'admin' }])
+            .withProfile({ name: 'jane-doe' })
+            .withAuthenticated(true),
+        },
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(responseWithName.status).to.equal(202);
+      expect(mockSqs.sendMessage).to.have.been.calledWithExactly(
+        'https://llmo-experimentation-engine-queue',
+        {
+          type: 'TRIGGER_IMPACT_MEASUREMENT',
+          geoExperimentId: GEO_EXP_ID,
+          triggeredBy: 'jane-doe',
+        },
+      );
+
+      mockSqs.sendMessage.resetHistory();
+      const responseUnknown = await suggestionsController.triggerImpactMeasurement({
+        ...context,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'admin' }])
+            .withProfile({})
+            .withAuthenticated(true),
+        },
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(responseUnknown.status).to.equal(202);
+      expect(mockSqs.sendMessage).to.have.been.calledWithExactly(
+        'https://llmo-experimentation-engine-queue',
+        {
+          type: 'TRIGGER_IMPACT_MEASUREMENT',
+          geoExperimentId: GEO_EXP_ID,
+          triggeredBy: 'unknown',
+        },
+      );
     });
   });
 
@@ -12895,7 +13559,10 @@ describe('Suggestions Controller', () => {
         dataAccess: mockSuggestionDataAccess,
         pathInfo: { headers: { 'x-product': 'abcd' } },
         ...authContext,
-      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
     });
 
     afterEach(() => {
@@ -13275,7 +13942,10 @@ describe('Suggestions Controller', () => {
         };
         const ctrl = ControllerWithSlack({
           dataAccess: da, pathInfo: { headers: {} }, ...authContext,
-        }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+        }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
 
         const response = await ctrl.patchSuggestion({
           params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
@@ -13346,7 +14016,10 @@ describe('Suggestions Controller', () => {
         };
         const ctrl = ControllerWithSlack({
           dataAccess: da, pathInfo: { headers: {} }, ...authContext,
-        }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+        }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
 
         const response = await ctrl.patchSuggestion({
           params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
@@ -13412,7 +14085,10 @@ describe('Suggestions Controller', () => {
           pathInfo: { headers: { 'x-product': 'llmo' } },
           log: ctxLog,
           ...authContext,
-        }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+        }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
 
         const response = await controllerWithLog.autofixSuggestions({
           params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
@@ -13450,7 +14126,10 @@ describe('Suggestions Controller', () => {
           pathInfo: { headers: { 'x-product': 'llmo' } },
           log: ctxLog,
           ...authContext,
-        }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+        }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
 
         const response = await controllerWithLog.autofixSuggestions({
           params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },

@@ -300,6 +300,8 @@ describe('grpc-utils', () => {
     it('maps valid country codes via COUNTRY_ENUM', () => {
       expect(normalizeCountryForGrpc('US')).to.equal(COUNTRY_ENUM.US);
       expect(normalizeCountryForGrpc('DE')).to.equal(COUNTRY_ENUM.DE);
+      expect(normalizeCountryForGrpc('NZ')).to.equal(COUNTRY_ENUM.NZ);
+      expect(normalizeCountryForGrpc('AF')).to.equal(COUNTRY_ENUM.AF);
     });
 
     it('defaults to US for unknown country', () => {
@@ -387,6 +389,8 @@ describe('grpc-utils', () => {
     it('returns country string for known enum value', () => {
       expect(restCountryFromGrpcRequestCountry(COUNTRY_ENUM.US)).to.equal('US');
       expect(restCountryFromGrpcRequestCountry(COUNTRY_ENUM.DE)).to.equal('DE');
+      expect(restCountryFromGrpcRequestCountry(COUNTRY_ENUM.NZ)).to.equal('NZ');
+      expect(restCountryFromGrpcRequestCountry(COUNTRY_ENUM.AF)).to.equal('AF');
     });
 
     it('returns undefined for unknown numeric value', () => {

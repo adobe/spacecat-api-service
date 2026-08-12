@@ -3193,7 +3193,13 @@ describe('Brands Controller', () => {
 
       expect(response.status).to.equal(200);
       const body = await response.json();
-      expect(body).to.deep.equal(SAMPLE_BRAND);
+      // The handler derives the per-brand serenity fields onto the payload; the
+      // stubbed reader supplies everything else.
+      expect(body).to.deep.equal({
+        ...SAMPLE_BRAND,
+        serenityActive: false,
+        serenityActivatedAt: null,
+      });
       expect(resolveLlmoOnboardingModeStub).to.have.been.calledOnce;
       const [orgArg, , optsArg] = resolveLlmoOnboardingModeStub.firstCall.args;
       expect(orgArg).to.equal(ORGANIZATION_ID);
@@ -6163,9 +6169,11 @@ describe('Brands Controller', () => {
       syncBrandAliasesAcrossMarkets = sinon.stub().resolves({ rejected: [] }),
       getBrandCompetitors = sinon.stub().resolves([]),
       getBrandById,
-      // Serenity active by default so a sync-field edit reaches the re-sync block.
-      // The inactive case overrides this to assert the gate rejects.
-      isSerenityActiveForOrg = sinon.stub().resolves(true),
+      // Serenity active for the brand by default so a sync-field edit reaches the
+      // re-sync block. The inactive case overrides this to assert the gate rejects.
+      // The edit path resolves PER BRAND, so one org can hold a released brand and
+      // an unreleased one at the same time.
+      isSerenityActiveForBrand = sinon.stub().resolves(true),
       // Serenity-UI OFF by default: the org is mid-migration, so Semrush failures
       // are absorbed. Tests that assert failures propagate override this to true.
       isSerenityUiActiveForOrg = sinon.stub().resolves(false),
@@ -6189,7 +6197,7 @@ describe('Brands Controller', () => {
         '../../src/support/serenity/competitor-benchmarks.js': { syncCompetitorBenchmarksAcrossMarkets },
         '../../src/support/serenity/brand-aliases.js': { syncBrandAliasesAcrossMarkets },
         '../../src/support/serenity/serenity-active.js': {
-          isSerenityActiveForOrg,
+          isSerenityActiveForBrand,
           isSerenityUiActiveForOrg,
         },
       };
@@ -6288,9 +6296,10 @@ describe('Brands Controller', () => {
         updateBrand: updateBrandStub,
         syncBrandUrlsAcrossMarkets: syncStub,
         createSerenityTransport: createTransportStub,
-        // Inactive org, but the brand still carries a backfilled workspace pointer.
+        // Inactive brand, but it still carries a backfilled workspace pointer —
+        // provisioned by an earlier wave, not yet released.
         getBrandById: sinon.stub().resolves({ id: BRAND_UUID, semrushSubWorkspaceId: 'ws-9' }),
-        isSerenityActiveForOrg: serenityActiveStub,
+        isSerenityActiveForBrand: serenityActiveStub,
       });
 
       const response = await controller.updateBrandForOrg({
@@ -6306,10 +6315,13 @@ describe('Brands Controller', () => {
       expect(updateBrandStub.called).to.equal(false);
       expect(syncStub.called).to.equal(false);
       expect(createTransportStub.called).to.equal(false);
-      // The gate must be asked about THIS org (2nd positional arg = spaceCatId).
+      // The gate must be asked about THIS org AND THIS brand (2nd and 3rd
+      // positional args) — asking about the org alone would give every brand it
+      // owns the same answer, which is what this change exists to end.
       expect(serenityActiveStub).to.have.been.calledWith(
         sinon.match.any,
         ORGANIZATION_ID,
+        BRAND_UUID,
         sinon.match.any,
       );
     });
@@ -6324,7 +6336,7 @@ describe('Brands Controller', () => {
         syncBrandUrlsAcrossMarkets: syncStub,
         createSerenityTransport: createTransportStub,
         getBrandById: sinon.stub().resolves({ id: BRAND_UUID }), // no semrushSubWorkspaceId → flat
-        isSerenityActiveForOrg: sinon.stub().resolves(false),
+        isSerenityActiveForBrand: sinon.stub().resolves(false),
       });
 
       const response = await controller.updateBrandForOrg({
@@ -7241,6 +7253,251 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(400);
     });
 
+    it('returns 409 with a code: brand_stale_write body when expectedUpdatedAt does not match (LLMO-6591)', async () => {
+      // beforeEach's mock resolves updated_at: '2026-01-02T00:00:00Z' for every
+      // read; a caller echoing a different (stale) timestamp must be rejected.
+      // The `code` field lets elmo-ui distinguish this from any other 409
+      // without regex-matching the message text.
+      const response = await brandsController.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { name: 'Updated Brand', expectedUpdatedAt: '2026-01-01T00:00:00Z' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+      expect(response.status).to.equal(409);
+      const body = await response.json();
+      expect(body.code).to.equal('brand_stale_write');
+    });
+
+    it('emits the BrandStaleWriteRejected metric on a rejected stale write (LLMO-6591)', async () => {
+      const logSpy = sinon.stub(console, 'log');
+      try {
+        const response = await brandsController.updateBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: { name: 'Updated Brand', expectedUpdatedAt: '2026-01-01T00:00:00Z' },
+          dataAccess: mockDataAccess,
+          pathInfo: { headers: { 'x-product': 'llmo' } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(409);
+        const emfLine = logSpy.getCalls()
+          .map((c) => c.args[0])
+          .find((l) => typeof l === 'string' && l.includes('BrandStaleWriteRejected'));
+        expect(emfLine, 'expected a BrandStaleWriteRejected EMF line').to.be.a('string');
+        const envelope = JSON.parse(emfLine);
+        expect(envelope.BrandStaleWriteRejected).to.equal(1);
+        expect(envelope.Operation).to.equal('updateBrand');
+        expect(envelope.Product).to.equal('llmo');
+        // eslint-disable-next-line no-underscore-dangle
+        expect(envelope._aws.CloudWatchMetrics[0].Namespace).to.equal('Mysticat/Brands');
+      } finally {
+        logSpy.restore();
+      }
+    });
+
+    it('succeeds when expectedUpdatedAt matches the persisted row (LLMO-6591)', async () => {
+      const response = await brandsController.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { name: 'Updated Brand', expectedUpdatedAt: '2026-01-02T00:00:00Z' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+      expect(response.status).to.equal(200);
+    });
+
+    it('swallows a logging failure emitting BrandStaleWriteRejected and still returns 409 (LLMO-6591, best-effort)', async () => {
+      // Mirrors the LLMO-5587 demotion-guard test of the same shape: proves
+      // emitBrandStaleWriteRejected's own catch keeps a logger failure from
+      // breaking the request path (covers the catch).
+      const logSpy = sinon.stub(console, 'log');
+      const throwingLogger = {
+        info: sandbox.stub(),
+        error: sandbox.stub(),
+        warn: sandbox.stub().throws(new Error('log boom')),
+        debug: sandbox.stub(),
+      };
+      const controller = BrandsController(context, throwingLogger, mockEnv);
+      try {
+        const response = await controller.updateBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: { name: 'Updated Brand', expectedUpdatedAt: '2026-01-01T00:00:00Z' },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(409);
+        expect(throwingLogger.warn).to.have.been.called;
+      } finally {
+        logSpy.restore();
+      }
+    });
+
+    it('emits BrandCollectionWiped when a successful write empties a previously non-empty collection (LLMO-6591)', async () => {
+      // Override the default fixture with a non-empty brand_aliases so the
+      // pre-write wipe-check read has something to detect as wiped.
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          in: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          upsert: sandbox.stub().returnsThis(),
+          delete: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({
+            data: {
+              id: BRAND_UUID,
+              name: 'Updated Brand',
+              status: 'active',
+              origin: 'human',
+              updated_at: '2026-01-02T00:00:00Z',
+              updated_by: 'user@test.com',
+              brand_aliases: [{ alias: 'Existing Alias', regions: [] }],
+              brand_social_accounts: [],
+              brand_earned_sources: [],
+              competitors: [],
+              brand_sites: [],
+            },
+            error: null,
+          }),
+        })),
+      };
+      const controller = BrandsController(context, loggerStub, mockEnv);
+      const logSpy = sinon.stub(console, 'log');
+      try {
+        const response = await controller.updateBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: { brandAliases: [] },
+          dataAccess: mockDataAccess,
+          pathInfo: { headers: { 'x-product': 'llmo' } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(200);
+        const emfLine = logSpy.getCalls()
+          .map((c) => c.args[0])
+          .find((l) => typeof l === 'string' && l.includes('BrandCollectionWiped'));
+        expect(emfLine, 'expected a BrandCollectionWiped EMF line').to.be.a('string');
+        const envelope = JSON.parse(emfLine);
+        expect(envelope.BrandCollectionWiped).to.equal(1);
+        expect(envelope.Operation).to.equal('updateBrand');
+        expect(envelope.Collection).to.equal('brandAliases');
+      } finally {
+        logSpy.restore();
+      }
+    });
+
+    it('still returns 200 (does not 500) when the best-effort wipe-check pre-read throws (LLMO-6591)', async () => {
+      // getBrandById is also called earlier (touchesSemrushSync check) with the
+      // exact same wide join select -- that occurrence must succeed; only the
+      // SECOND wide-select call (the wipe-check's own getBrandById) must throw.
+      let wideSelectCalls = 0;
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake((table) => ({
+          select: sandbox.stub().callsFake((cols) => {
+            if (table !== 'brands' || cols === 'id') {
+              return {
+                eq: sandbox.stub().returnsThis(),
+                maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+              };
+            }
+            wideSelectCalls += 1;
+            // Only the SECOND wide-select call is the wipe-check's own getBrandById --
+            // the first (touchesSemrushSync check) and any later ones (updateBrand's
+            // own final getBrandById) must succeed.
+            if (wideSelectCalls === 2) {
+              return {
+                eq: sandbox.stub().returnsThis(),
+                maybeSingle: sandbox.stub().rejects(new Error('wipe-check read boom')),
+              };
+            }
+            return {
+              eq: sandbox.stub().returnsThis(),
+              maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+            };
+          }),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          in: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          upsert: sandbox.stub().returnsThis(),
+          delete: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+        })),
+      };
+      const controller = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { brandAliases: [] },
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(loggerStub.warn).to.have.been.calledWithMatch('wipe-check pre-read failed');
+    });
+
+    it('swallows a logging failure emitting BrandCollectionWiped and still returns 200 (LLMO-6591, best-effort)', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          in: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          upsert: sandbox.stub().returnsThis(),
+          delete: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({
+            data: {
+              id: BRAND_UUID,
+              name: 'Updated Brand',
+              status: 'active',
+              origin: 'human',
+              updated_at: '2026-01-02T00:00:00Z',
+              updated_by: 'user@test.com',
+              brand_aliases: [{ alias: 'Existing Alias', regions: [] }],
+              brand_social_accounts: [],
+              brand_earned_sources: [],
+              competitors: [],
+              brand_sites: [],
+            },
+            error: null,
+          }),
+        })),
+      };
+      const throwingLogger = {
+        info: sandbox.stub(),
+        error: sandbox.stub(),
+        warn: sandbox.stub().throws(new Error('log boom')),
+        debug: sandbox.stub(),
+      };
+      const controller = BrandsController(context, throwingLogger, mockEnv);
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { brandAliases: [] },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(throwingLogger.warn).to.have.been.called;
+    });
+
     it('returns 400 when params is undefined', async () => {
       const response = await brandsController.updateBrandForOrg({
         ...context,
@@ -7441,6 +7698,40 @@ describe('Brands Controller', () => {
         expect(loggerStub.info).to.have.been.calledWithMatch(
           'brands: dropped self-referential competitor(s) on update',
         );
+      });
+
+      it('rejects (400) rather than silently wiping competitors when EVERY submitted competitor is self-referential (LLMO-6591)', async () => {
+        // If all submitted competitors get stripped by the guard, persisting the
+        // resulting [] would wipe the brand's existing competitors even though
+        // the caller never asked to clear the collection -- must reject instead.
+        const updateBrandStub = sinon.stub().resolves({ id: BRAND_UUID, name: 'Flat Brand' });
+        const getBrandByIdStub = sinon.stub().resolves({
+          id: BRAND_UUID,
+          baseUrl: 'https://acme.com',
+          urls: [{ value: 'https://shop.acme.com' }],
+          semrushSubWorkspaceId: undefined,
+        });
+        const controller = await buildUpdateController({
+          updateBrand: updateBrandStub,
+          getBrandById: getBrandByIdStub,
+        });
+
+        const response = await controller.updateBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: {
+            competitors: [
+              { name: 'Self', url: 'https://acme.com' },
+              { name: 'Shop', url: 'https://shop.acme.com' },
+            ],
+          },
+          dataAccess: mockDataAccess,
+          pathInfo: { headers: { authorization: 'Bearer tok' } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(400);
+        expect(updateBrandStub).to.not.have.been.called;
       });
 
       it('strips a self-referential competitor on a SEMRUSH brand update (a market/project domain)', async () => {
@@ -7718,7 +8009,22 @@ describe('Brands Controller', () => {
         listJobs: sinon.stub().resolves([]),
         submitPromptGenerationJob: sinon.stub().resolves({ job_id: 'pg-1' }),
         createBrandPresenceSchedule: sinon.stub().resolves({ scheduleId: 'sch-1' }),
+        submitJob: sinon.stub().resolves({ job_id: 'ps-1' }),
+        createSchedule: sinon.stub().resolves({ scheduleId: 'ps-sch-1' }),
       },
+      // Recurring prompt-suggestion provisioning (the shared module) is stubbed at
+      // its boundary so activation tests exercise the wiring, not the real
+      // TierClient/DRS tier logic (covered by the support module's own tests).
+      isPayingLlmoSiteStub = sinon.stub().resolves(false),
+      // Default: empty results (as if DRS returned nothing) so existing exact-body
+      // assertions are unaffected; wiring tests override this to assert the call.
+      ensurePromptSuggestionSchedulesStub = sinon.stub().resolves({
+        results: [],
+        allSucceeded: true,
+      }),
+      // Default: returns null (as if the brand-profile agent isn't configured / autorun off),
+      // so existing exact-body assertions are unaffected; wiring tests override this.
+      triggerBrandProfileAgentStub = sinon.stub().resolves(null),
     } = {}) {
       const getBrandByIdStub = typeof getBrandByIdResult === 'function'
         ? getBrandByIdResult
@@ -7772,6 +8078,13 @@ describe('Brands Controller', () => {
         '../../src/controllers/llmo/llmo-onboarding.js': {
           postLlmoAlert: postLlmoAlertStub,
         },
+        '../../src/support/prompt-suggestion-schedules.js': {
+          isPayingLlmoSite: isPayingLlmoSiteStub,
+          ensurePromptSuggestionSchedules: ensurePromptSuggestionSchedulesStub,
+        },
+        '../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: triggerBrandProfileAgentStub,
+        },
       });
 
       return {
@@ -7782,6 +8095,9 @@ describe('Brands Controller', () => {
         resolveBrandUuidStub,
         postLlmoAlertStub,
         fakeDrsClient,
+        isPayingLlmoSiteStub,
+        ensurePromptSuggestionSchedulesStub,
+        triggerBrandProfileAgentStub,
       };
     }
 
@@ -8602,6 +8918,136 @@ describe('Brands Controller', () => {
       const response = await controller.activateBrandForOrg(buildActivateRequest());
       expect(response.status).to.equal(409);
     });
+
+    // -------------------------------------------------------------------------
+    // Recurring prompt-suggestion provisioning (Path C wiring) — the gap that
+    // left brands added to an existing org via activate with no auto-generated
+    // prompt strategies. Mirrors onboarding's activateBrandAndGeneratePrompts.
+    // -------------------------------------------------------------------------
+
+    it('provisions recurring prompt-suggestion pipelines on activation', async () => {
+      const {
+        controller, ensurePromptSuggestionSchedulesStub, isPayingLlmoSiteStub,
+      } = await buildActivateController({
+        ensurePromptSuggestionSchedulesStub: sinon.stub().resolves({
+          results: [
+            { providerId: 'prompt_generation_semrush', status: 'submitted' },
+            { providerId: 'prompt_generation_agentic_traffic', status: 'submitted' },
+            { providerId: 'prompt_generation_synthetic_personas', status: 'submitted' },
+          ],
+          allSucceeded: true,
+        }),
+      });
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: true }),
+      );
+
+      expect(response.status).to.equal(200);
+      expect(isPayingLlmoSiteStub).to.have.been.calledOnce;
+      expect(ensurePromptSuggestionSchedulesStub).to.have.been.calledOnce;
+      const args = ensurePromptSuggestionSchedulesStub.firstCall.args[0];
+      expect(args.siteId).to.equal(SITE_ID);
+      expect(args.isPaying).to.equal(false);
+      expect(args.drsClient).to.exist;
+      const body = await response.json();
+      expect(body.promptSuggestionSchedules).to.have.lengthOf(3);
+    });
+
+    it('provisions prompt-suggestion pipelines even when generatePrompts is false', async () => {
+      // Unconditional: every active brand is monitored, unlike the one-shot
+      // base_url job which is generatePrompts-gated.
+      const { controller, ensurePromptSuggestionSchedulesStub } = await buildActivateController();
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: false }),
+      );
+
+      expect(response.status).to.equal(200);
+      expect(ensurePromptSuggestionSchedulesStub).to.have.been.calledOnce;
+    });
+
+    it('passes isPaying=true through for a paying site (recurring schedules)', async () => {
+      const { controller, ensurePromptSuggestionSchedulesStub } = await buildActivateController({
+        isPayingLlmoSiteStub: sinon.stub().resolves(true),
+      });
+
+      await controller.activateBrandForOrg(buildActivateRequest({ generatePrompts: true }));
+
+      expect(ensurePromptSuggestionSchedulesStub.firstCall.args[0].isPaying).to.equal(true);
+    });
+
+    it('keeps the activation a 200 when prompt-suggestion provisioning reports failures', async () => {
+      const { controller } = await buildActivateController({
+        ensurePromptSuggestionSchedulesStub: sinon.stub().resolves({
+          results: [{ providerId: 'prompt_generation_semrush', status: 'failed', error: 'boom' }],
+          allSucceeded: false,
+        }),
+      });
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: true }),
+      );
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.status).to.equal('active');
+    });
+
+    // -------------------------------------------------------------------------
+    // Brand-profile agent ("Brandaid") trigger — closes the gap where a brand
+    // added via activate had no brand profile, hard-failing Semrush/Synthetic
+    // prompt-gen. (#3014)
+    // -------------------------------------------------------------------------
+
+    it('triggers the brand-profile agent on activation', async () => {
+      const { controller, triggerBrandProfileAgentStub } = await buildActivateController({
+        triggerBrandProfileAgentStub: sinon.stub().resolves('brand-profile-site-123-brand-activation-abc'),
+      });
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: true }),
+      );
+
+      expect(response.status).to.equal(200);
+      expect(triggerBrandProfileAgentStub).to.have.been.calledOnce;
+      const args = triggerBrandProfileAgentStub.firstCall.args[0];
+      expect(args.site).to.exist;
+      expect(args.reason).to.equal('brand-activation');
+      const body = await response.json();
+      expect(body.brandProfileExecutionName).to.equal('brand-profile-site-123-brand-activation-abc');
+    });
+
+    it('triggers brand-profile even when generatePrompts is false', async () => {
+      const { controller, triggerBrandProfileAgentStub } = await buildActivateController({
+        triggerBrandProfileAgentStub: sinon.stub().resolves('exec-1'),
+      });
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: false }),
+      );
+
+      expect(response.status).to.equal(200);
+      expect(triggerBrandProfileAgentStub).to.have.been.calledOnce;
+    });
+
+    it('keeps activation a 200 (and still provisions schedules) when the brand-profile trigger throws', async () => {
+      const ensureStub = sinon.stub().resolves({ results: [], allSucceeded: true });
+      const { controller } = await buildActivateController({
+        triggerBrandProfileAgentStub: sinon.stub().rejects(new Error('sfn boom')),
+        ensurePromptSuggestionSchedulesStub: ensureStub,
+      });
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: true }),
+      );
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.status).to.equal('active');
+      // Its own try/catch means the throw doesn't skip prompt-suggestion provisioning.
+      expect(ensureStub).to.have.been.calledOnce;
+    });
   });
 
   describe('deleteBrandForOrg', () => {
@@ -9044,6 +9490,7 @@ describe('Brands Controller — region removal consistency guard (LLMO-5645)', (
   async function mountController({ blocking = {}, oldRegion = ['US', 'DE'], updateBrand } = {}) {
     const findStub = stub().resolves(blocking);
     const updateStub = updateBrand || stub().resolves({ id: BRAND_UUID, region: ['US'] });
+    const scopesStub = stub().resolves({ orgRow: null, brandRows: new Map() });
     const Mocked = await esmock('../../src/controllers/brands.js', {
       '../../src/support/prompts-storage.js': {
         resolveBrandUuid: stub().resolves(BRAND_UUID),
@@ -9052,6 +9499,10 @@ describe('Brands Controller — region removal consistency guard (LLMO-5645)', (
       '../../src/support/brands-storage.js': {
         getBrandById: stub().resolves({ id: BRAND_UUID, region: oldRegion }),
         updateBrand: updateStub,
+        // The handler resolves the serenity rollout rows for the response payload.
+        // Irrelevant to the region guard, but the real one would query the stub
+        // client here.
+        readSerenityFlagScopes: scopesStub,
       },
       '../../src/support/access-control-util.js': {
         default: {
@@ -9059,8 +9510,30 @@ describe('Brands Controller — region removal consistency guard (LLMO-5645)', (
         },
       },
     });
-    return { Mocked, findStub, updateStub };
+    return {
+      Mocked, findStub, updateStub, scopesStub,
+    };
   }
+
+  it('reads the serenity rollout rows BEFORE the write, so a flag-read fault cannot 500 a committed edit', async () => {
+    // Load-bearing ordering. updateBrand commits the row and its child syncs, and
+    // the Semrush re-sync that follows deliberately absorbs its own failures so a
+    // persisted edit is never reported as a 500. Resolving these rows afterwards
+    // would reintroduce exactly that: a throw between the commit and the response,
+    // which also skips the re-sync.
+    const { Mocked, updateStub, scopesStub } = await mountController({ blocking: {} });
+    const ctx = buildContext();
+    const controller = Mocked(ctx, loggerStub, mockEnv);
+
+    const response = await controller.updateBrandForOrg({
+      ...ctx,
+      params: { spaceCatId: ORG_ID, brandId: BRAND_UUID },
+      data: { region: ['US'] },
+    });
+
+    expect(response.status).to.equal(200);
+    expect(scopesStub.calledBefore(updateStub)).to.be.true;
+  });
 
   it('allows the region change and updates the brand when no prompt blocks removal', async () => {
     const { Mocked, findStub, updateStub } = await mountController({ blocking: {} });

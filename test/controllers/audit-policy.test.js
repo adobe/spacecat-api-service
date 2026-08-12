@@ -52,6 +52,9 @@ function buildClient({ row = null, rpcResult, revisions = [] } = {}) {
   };
 }
 
+// Deliberately omits `imsClient` so listRevisions' resolveUpdatedByIdentities() short-circuits
+// (returns an empty Map) - keeps the pre-existing listRevisions tests asserting raw updatedBy.
+// The identity-resolution suite attaches ctx.imsClient by hand after construction.
 function buildContext({
   client, params = {}, data = {}, profile = { email: 'u@x.com' },
 } = {}) {
@@ -721,7 +724,7 @@ describe('AuditPolicyController — E3 listRevisions', () => {
       rpc: sinon.stub(),
     };
     const controller = loadController();
-    const res = await controller.listRevisions(buildContext({ client, params: { limit: '2' } }));
+    const res = await controller.listRevisions(buildContext({ client, data: { limit: '2' } }));
     expect(res.status).to.equal(200);
     const body = await res.json();
     expect(body.items[0].version).to.equal(4);
@@ -738,7 +741,7 @@ describe('AuditPolicyController — E3 listRevisions', () => {
       rpc: sinon.stub(),
     };
     const controller = loadController();
-    await controller.listRevisions(buildContext({ client, params: { limit: '9999' } }));
+    await controller.listRevisions(buildContext({ client, data: { limit: '9999' } }));
     expect(limitSpy).to.have.been.calledWith(200);
   });
 
@@ -750,7 +753,7 @@ describe('AuditPolicyController — E3 listRevisions', () => {
       rpc: sinon.stub(),
     };
     const controller = loadController();
-    await controller.listRevisions(buildContext({ client, params: { limit: '-5' } }));
+    await controller.listRevisions(buildContext({ client, data: { limit: '-5' } }));
     expect(limitSpy).to.have.been.calledWith(1);
   });
 
@@ -771,7 +774,7 @@ describe('AuditPolicyController — E3 listRevisions', () => {
     const controller = loadController();
     // encodeCursor(Number.MAX_SAFE_INTEGER) — far beyond MAX_CURSOR_VERSION
     const tamperedCursor = Buffer.from(String(Number.MAX_SAFE_INTEGER), 'utf8').toString('base64url');
-    const ctx = buildContext({ client, params: { cursor: tamperedCursor } });
+    const ctx = buildContext({ client, data: { cursor: tamperedCursor } });
     const res = await controller.listRevisions(ctx);
     expect(res.status).to.equal(400);
     expect(ltSpy).to.not.have.been.called;
@@ -781,7 +784,7 @@ describe('AuditPolicyController — E3 listRevisions', () => {
   it('returns 400 for a malformed (non-numeric) cursor', async () => {
     const client = buildClient();
     const controller = loadController();
-    const res = await controller.listRevisions(buildContext({ client, params: { cursor: 'not-base64-number' } }));
+    const res = await controller.listRevisions(buildContext({ client, data: { cursor: 'not-base64-number' } }));
     expect(res.status).to.equal(400);
   });
 
@@ -801,7 +804,7 @@ describe('AuditPolicyController — E3 listRevisions', () => {
     };
     const controller = loadController();
     const cursor = Buffer.from('5', 'utf8').toString('base64url');
-    await controller.listRevisions(buildContext({ client, params: { cursor } }));
+    await controller.listRevisions(buildContext({ client, data: { cursor } }));
     expect(ltSpy).to.have.been.calledWith('version', 5);
   });
 
@@ -844,9 +847,237 @@ describe('AuditPolicyController — E3 listRevisions', () => {
   });
 });
 
+describe('AuditPolicyController — listRevisions updatedBy identity resolution', () => {
+  afterEach(() => sinon.restore());
+
+  function rowsWith(updatedByValues) {
+    return updatedByValues.map((updatedBy, i) => ({
+      version: updatedByValues.length - i,
+      budget: 4000,
+      strategy_name: 'tiered',
+      exclusion_globs: [],
+      manual_urls: [],
+      scope_config: {},
+      lifecycle_overrides: {},
+      updated_by: updatedBy,
+      reason: 'r',
+      note: null,
+      effective_at: '2026-01-01T00:00:00Z',
+      superseded_at: null,
+    }));
+  }
+
+  function clientReturning(rows) {
+    const order = sinon.stub().returnsThis();
+    const limit = sinon.stub().resolves({ data: rows, error: null });
+    return {
+      from: () => ({ select: () => ({ eq: () => ({ order, limit }) }) }),
+      rpc: sinon.stub(),
+    };
+  }
+
+  it('resolves an IMS-GUID updated_by to a display name via getImsAdminProfile', async () => {
+    const rows = rowsWith(['A1B2C3D4E5F60708A1B2C3D4E5F60708@AdobeOrg']);
+    const client = clientReturning(rows);
+    const imsClient = {
+      getImsAdminProfile: sinon.stub().resolves({ first_name: 'Jane', last_name: 'Doe', email: 'jane@x.com' }),
+    };
+    const controller = loadController();
+    const ctx = buildContext({ client });
+    ctx.imsClient = imsClient;
+    const res = await controller.listRevisions(ctx);
+    expect(res.status).to.equal(200);
+    const body = await res.json();
+    expect(body.items[0].updatedBy).to.equal('Jane Doe');
+    expect(imsClient.getImsAdminProfile).to.have.been.calledOnceWith('A1B2C3D4E5F60708A1B2C3D4E5F60708@AdobeOrg');
+  });
+
+  it('dedupes repeated updated_by values into a single IMS lookup', async () => {
+    const guid = 'A1B2C3D4E5F60708A1B2C3D4E5F60708@AdobeOrg';
+    const rows = rowsWith([guid, guid, guid]);
+    const client = clientReturning(rows);
+    const imsClient = {
+      getImsAdminProfile: sinon.stub().resolves({ first_name: 'Jane', last_name: 'Doe', email: 'jane@x.com' }),
+    };
+    const controller = loadController();
+    const ctx = buildContext({ client });
+    ctx.imsClient = imsClient;
+    const res = await controller.listRevisions(ctx);
+    const body = await res.json();
+    expect(body.items.every((item) => item.updatedBy === 'Jane Doe')).to.equal(true);
+    expect(imsClient.getImsAdminProfile).to.have.been.calledOnce;
+  });
+
+  it('maps two distinct GUIDs to their two distinct identities on the same page (per-row keying)', async () => {
+    const guidA = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA@AdobeOrg';
+    const guidB = 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB@AdobeOrg';
+    const rows = rowsWith([guidA, guidB]);
+    const client = clientReturning(rows);
+    const imsClient = { getImsAdminProfile: sinon.stub() };
+    imsClient.getImsAdminProfile.withArgs(guidA).resolves({ first_name: 'Ann', last_name: 'Alpha', email: 'ann@x.com' });
+    imsClient.getImsAdminProfile.withArgs(guidB).resolves({ first_name: 'Bob', last_name: 'Beta', email: 'bob@x.com' });
+    const controller = loadController();
+    const ctx = buildContext({ client });
+    ctx.imsClient = imsClient;
+    const res = await controller.listRevisions(ctx);
+    const body = await res.json();
+    // rowsWith assigns version desc: items[0] is guidA (v2), items[1] is guidB (v1)
+    expect(body.items[0].updatedBy).to.equal('Ann Alpha');
+    expect(body.items[1].updatedBy).to.equal('Bob Beta');
+  });
+
+  it('resolves across the batch boundary (>IMS_ENRICH_BATCH_SIZE distinct GUIDs) keying each row correctly', async () => {
+    // 6 distinct GUIDs > batch size 5, so the batching loop runs twice.
+    const guids = Array.from({ length: 6 }, (_, i) => `${'C'.repeat(31)}${i}@AdobeOrg`);
+    const rows = rowsWith(guids);
+    const client = clientReturning(rows);
+    const imsClient = { getImsAdminProfile: sinon.stub() };
+    guids.forEach((g, i) => imsClient.getImsAdminProfile.withArgs(g).resolves({ first_name: `User${i}`, last_name: null, email: null }));
+    const controller = loadController();
+    const ctx = buildContext({ client });
+    ctx.imsClient = imsClient;
+    const res = await controller.listRevisions(ctx);
+    const body = await res.json();
+    expect(imsClient.getImsAdminProfile.callCount).to.equal(6);
+    body.items.forEach((item, i) => expect(item.updatedBy).to.equal(`User${i}`));
+  });
+
+  it('a fulfilled-but-null IMS profile falls back to the raw GUID for that row without dropping sibling resolutions', async () => {
+    const guidA = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA@AdobeOrg';
+    const guidNull = 'DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD0@AdobeOrg';
+    const rows = rowsWith([guidA, guidNull]);
+    const client = clientReturning(rows);
+    const imsClient = { getImsAdminProfile: sinon.stub() };
+    imsClient.getImsAdminProfile.withArgs(guidA).resolves({ first_name: 'Ann', last_name: 'Alpha', email: 'ann@x.com' });
+    imsClient.getImsAdminProfile.withArgs(guidNull).resolves(null);
+    const controller = loadController();
+    const ctx = buildContext({ client });
+    ctx.imsClient = imsClient;
+    const res = await controller.listRevisions(ctx);
+    expect(res.status).to.equal(200);
+    const body = await res.json();
+    expect(body.items[0].updatedBy).to.equal('Ann Alpha');
+    expect(body.items[1].updatedBy).to.equal(guidNull);
+  });
+
+  it('resolves GUIDs but passes non-GUID values through untouched on a mixed page', async () => {
+    const guid = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA@AdobeOrg';
+    const rows = rowsWith([guid, 'system', 'jane@x.com']);
+    const client = clientReturning(rows);
+    const imsClient = {
+      getImsAdminProfile: sinon.stub().resolves({ first_name: 'Jane', last_name: 'Doe', email: 'jane@x.com' }),
+    };
+    const controller = loadController();
+    const ctx = buildContext({ client });
+    ctx.imsClient = imsClient;
+    const res = await controller.listRevisions(ctx);
+    const body = await res.json();
+    expect(body.items[0].updatedBy).to.equal('Jane Doe');
+    expect(body.items[1].updatedBy).to.equal('system');
+    expect(body.items[2].updatedBy).to.equal('jane@x.com');
+    expect(imsClient.getImsAdminProfile).to.have.been.calledOnce;
+  });
+
+  it('builds the display name from a partial (first-only) IMS profile', async () => {
+    const rows = rowsWith(['A1B2C3D4E5F60708A1B2C3D4E5F60708@AdobeOrg']);
+    const client = clientReturning(rows);
+    const imsClient = {
+      getImsAdminProfile: sinon.stub().resolves({ first_name: 'Jane', last_name: null, email: 'jane@x.com' }),
+    };
+    const controller = loadController();
+    const ctx = buildContext({ client });
+    ctx.imsClient = imsClient;
+    const res = await controller.listRevisions(ctx);
+    const body = await res.json();
+    expect(body.items[0].updatedBy).to.equal('Jane');
+  });
+
+  it('falls back to the raw GUID when the IMS profile has neither name nor email', async () => {
+    const guid = 'A1B2C3D4E5F60708A1B2C3D4E5F60708@AdobeOrg';
+    const rows = rowsWith([guid]);
+    const client = clientReturning(rows);
+    const imsClient = {
+      getImsAdminProfile: sinon.stub().resolves({ first_name: null, last_name: null, email: null }),
+    };
+    const controller = loadController();
+    const ctx = buildContext({ client });
+    ctx.imsClient = imsClient;
+    const res = await controller.listRevisions(ctx);
+    const body = await res.json();
+    expect(body.items[0].updatedBy).to.equal(guid);
+  });
+
+  it('falls back to email when the IMS profile has no first/last name', async () => {
+    const rows = rowsWith(['A1B2C3D4E5F60708A1B2C3D4E5F60708@AdobeOrg']);
+    const client = clientReturning(rows);
+    const imsClient = {
+      getImsAdminProfile: sinon.stub().resolves({ first_name: null, last_name: null, email: 'jane@x.com' }),
+    };
+    const controller = loadController();
+    const ctx = buildContext({ client });
+    ctx.imsClient = imsClient;
+    const res = await controller.listRevisions(ctx);
+    const body = await res.json();
+    expect(body.items[0].updatedBy).to.equal('jane@x.com');
+  });
+
+  it('leaves a non-GUID updated_by value (plain email/name/"system") untouched, without calling IMS', async () => {
+    const rows = rowsWith(['system']);
+    const client = clientReturning(rows);
+    const imsClient = { getImsAdminProfile: sinon.stub() };
+    const controller = loadController();
+    const ctx = buildContext({ client });
+    ctx.imsClient = imsClient;
+    const res = await controller.listRevisions(ctx);
+    const body = await res.json();
+    expect(body.items[0].updatedBy).to.equal('system');
+    expect(imsClient.getImsAdminProfile).to.not.have.been.called;
+  });
+
+  it('falls back to the raw GUID when the IMS lookup rejects, and logs a warning', async () => {
+    const rows = rowsWith(['A1B2C3D4E5F60708A1B2C3D4E5F60708@AdobeOrg']);
+    const client = clientReturning(rows);
+    const imsClient = { getImsAdminProfile: sinon.stub().rejects(new Error('ims down')) };
+    const controller = loadController();
+    const ctx = buildContext({ client });
+    ctx.imsClient = imsClient;
+    const res = await controller.listRevisions(ctx);
+    expect(res.status).to.equal(200);
+    const body = await res.json();
+    expect(body.items[0].updatedBy).to.equal('A1B2C3D4E5F60708A1B2C3D4E5F60708@AdobeOrg');
+    expect(ctx.log.warn).to.have.been.calledWith(sinon.match(/failed to resolve IMS profile/));
+  });
+
+  it('falls back to raw updated_by and logs a warning when the resolution loop itself throws synchronously', async () => {
+    const rows = rowsWith(['A1B2C3D4E5F60708A1B2C3D4E5F60708@AdobeOrg']);
+    const client = clientReturning(rows);
+    // Throws synchronously (not a rejected promise) so batch.map() throws inside the try block,
+    // before Promise.allSettled ever runs - exercises the outer catch, not the per-lookup one.
+    const imsClient = { getImsAdminProfile: sinon.stub().throws(new Error('boom')) };
+    const controller = loadController();
+    const ctx = buildContext({ client });
+    ctx.imsClient = imsClient;
+    const res = await controller.listRevisions(ctx);
+    expect(res.status).to.equal(200);
+    const body = await res.json();
+    expect(body.items[0].updatedBy).to.equal('A1B2C3D4E5F60708A1B2C3D4E5F60708@AdobeOrg');
+    expect(ctx.log.warn).to.have.been.calledWith(sinon.match(/could not resolve author identities/));
+  });
+
+  it('skips resolution entirely (no throw) when context.imsClient is not available', async () => {
+    const rows = rowsWith(['A1B2C3D4E5F60708A1B2C3D4E5F60708@AdobeOrg']);
+    const client = clientReturning(rows);
+    const controller = loadController();
+    const res = await controller.listRevisions(buildContext({ client }));
+    expect(res.status).to.equal(200);
+    const body = await res.json();
+    expect(body.items[0].updatedBy).to.equal('A1B2C3D4E5F60708A1B2C3D4E5F60708@AdobeOrg');
+  });
+});
+
 describe('AuditPolicyController — E4-E6 scope-read 501 stubs', () => {
   afterEach(() => sinon.restore());
-  for (const fn of ['getScopePages', 'getScopeSummary', 'getScopeSections']) {
+  for (const fn of ['getScopeSummary', 'getScopeSections']) {
     it(`${fn} returns 501 for an authorized caller`, async () => {
       const controller = loadController();
       const res = await controller[fn](buildContext());
@@ -858,4 +1089,112 @@ describe('AuditPolicyController — E4-E6 scope-read 501 stubs', () => {
       expect(res.status).to.equal(403);
     });
   }
+});
+
+describe('AuditPolicyController — E4 getScopePages', () => {
+  afterEach(() => sinon.restore());
+
+  const buildRow = (url, path) => ({
+    url,
+    url_path: path,
+    discovery_source: ['sitemap'],
+    last_modified: '2026-01-01T00:00:00.000000+00:00',
+    lifecycle_state: 'active',
+  });
+
+  // Real PostgREST client chaining: select/eq/order/gt are synchronous and chainable
+  // (returnsThis); only the terminal limit() call resolves { data, error } — mirrors
+  // the E3 listRevisions fake client above.
+  function buildScopeClient({ rows = [], error = null } = {}) {
+    const orderSpy = sinon.stub().returnsThis();
+    const limitSpy = sinon.stub().resolves({ data: rows, error });
+    const gtSpy = sinon.stub().returnsThis();
+    const eqSpy = sinon.stub().returns({ order: orderSpy, limit: limitSpy, gt: gtSpy });
+    const client = {
+      from: () => ({ select: () => ({ eq: eqSpy }) }),
+      rpc: sinon.stub(),
+    };
+    return {
+      client, orderSpy, limitSpy, gtSpy, eqSpy,
+    };
+  }
+
+  it('returns DTO-mapped items for the site (short page, no cursor)', async () => {
+    const rows = [buildRow('https://example.com/a', '/a')];
+    const { client } = buildScopeClient({ rows });
+    const controller = loadController();
+    const res = await controller.getScopePages(buildContext({ client, data: { limit: '2' } }));
+    expect(res.status).to.equal(200);
+    const body = await res.json();
+    expect(body.items).to.deep.equal([{
+      url: 'https://example.com/a',
+      urlPath: '/a',
+      discoverySource: ['sitemap'],
+      lastModified: '2026-01-01T00:00:00.000Z',
+      lifecycleState: 'active',
+    }]);
+    expect(body.cursor).to.be.undefined;
+  });
+
+  it('applies site_id filter, url ascending order, and clamped limit', async () => {
+    const {
+      client, eqSpy, orderSpy, limitSpy,
+    } = buildScopeClient({ rows: [] });
+    const controller = loadController();
+    await controller.getScopePages(buildContext({ client, data: { limit: '9999' } }));
+    expect(eqSpy).to.have.been.calledWith('site_id', SITE_ID);
+    expect(orderSpy).to.have.been.calledWith('url', { ascending: true });
+    expect(limitSpy).to.have.been.calledWith(200);
+  });
+
+  it('emits a cursor encoding the last url when a full page is returned', async () => {
+    const rows = [
+      buildRow('https://example.com/a', '/a'),
+      buildRow('https://example.com/b', '/b'),
+    ];
+    const { client } = buildScopeClient({ rows });
+    const controller = loadController();
+    const res = await controller.getScopePages(buildContext({ client, data: { limit: '2' } }));
+    const body = await res.json();
+    expect(body.cursor).to.equal(Buffer.from('https://example.com/b', 'utf8').toString('base64url'));
+  });
+
+  it('decodes a provided cursor and applies .gt(url, decoded)', async () => {
+    const { client, gtSpy } = buildScopeClient({ rows: [] });
+    const controller = loadController();
+    const cursor = Buffer.from('https://example.com/a', 'utf8').toString('base64url');
+    await controller.getScopePages(buildContext({ client, data: { cursor } }));
+    expect(gtSpy).to.have.been.calledWith('url', 'https://example.com/a');
+  });
+
+  it('returns 400 for a malformed cursor instead of silently falling back to page 1', async () => {
+    // Buffer.from(str, 'base64url') does not throw on invalid input - it decodes leniently
+    // to garbage bytes - so this must be caught by a round-trip/format check, not try/catch.
+    const { client, gtSpy, limitSpy } = buildScopeClient({ rows: [] });
+    const controller = loadController();
+    const res = await controller.getScopePages(
+      buildContext({ client, data: { cursor: '!!!not-valid!!!' } }),
+    );
+    expect(res.status).to.equal(400);
+    expect(gtSpy).to.not.have.been.called;
+    expect(limitSpy).to.not.have.been.called;
+  });
+
+  it('returns 403 when the caller fails read authorization, without querying pages', async () => {
+    const client = buildClient();
+    const fromSpy = sinon.spy(client, 'from');
+    const controller = loadController(sinon.stub().resolves(false));
+    const res = await controller.getScopePages(buildContext({ client }));
+    expect(res.status).to.equal(403);
+    expect(fromSpy).to.not.have.been.called;
+  });
+
+  it('returns 500 and logs the PostgREST error when the read fails', async () => {
+    const { client } = buildScopeClient({ rows: null, error: { code: '500', message: 'boom' } });
+    const controller = loadController();
+    const ctx = buildContext({ client });
+    const res = await controller.getScopePages(ctx);
+    expect(ctx.log.error).to.have.been.calledWith(sinon.match(/500.*boom/));
+    expect(res.status).to.equal(500);
+  });
 });

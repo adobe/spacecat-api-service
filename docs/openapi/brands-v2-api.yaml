@@ -27,7 +27,7 @@ v2-brands-for-org:
       to filter by specific status or include deleted brands.
     operationId: listBrandsForOrgV2
     security:
-      - ims_key: []
+      - session_token: []
       - api_key: []
     responses:
       '200':
@@ -64,7 +64,7 @@ v2-brands-for-org:
       create vs update. Per HTTP semantics, upsert-update should return 200.
     operationId: createBrandForOrgV2
     security:
-      - ims_key: []
+      - session_token: []
       - api_key: []
     requestBody:
       required: true
@@ -131,7 +131,7 @@ v2-brand-for-org:
       Retrieves a single brand by its UUID for the given organization.
     operationId: getBrandForOrgV2
     security:
-      - ims_key: []
+      - session_token: []
       - api_key: []
     responses:
       '200':
@@ -160,7 +160,7 @@ v2-brand-for-org:
       Nested arrays use full-replace semantics on each write.
     operationId: updateBrandForOrgV2
     security:
-      - ims_key: []
+      - session_token: []
       - api_key: []
     requestBody:
       required: true
@@ -206,10 +206,17 @@ v2-brand-for-org:
         description: Organization or brand not found
       '409':
         description: |
-          Conflict. The PATCH would demote an **active** brand to `pending` via the
-          generic update path (`code: brand_status_demotion_not_allowed`). Use
-          `PATCH /v2/orgs/{spaceCatId}/brands/{brandId}/status` for intentional
-          status transitions.
+          Conflict. One of (disambiguated by the `code` field in the response body):
+          - The PATCH would demote an **active** brand to `pending` via the
+            generic update path (`code: brand_status_demotion_not_allowed`). Use
+            `PATCH /v2/orgs/{spaceCatId}/brands/{brandId}/status` for intentional
+            status transitions.
+          - `expectedUpdatedAt` was supplied and no longer matches the brand's
+            persisted `updatedAt` — another write landed after this client last
+            loaded the brand (`code: brand_stale_write`). Reload the brand and
+            reapply the edit rather than retrying with the same body.
+          - The brand's primary URL is already the primary URL (base site) of
+            another brand in this organization.
         headers:
           X-Error:
             $ref: './headers.yaml#/xError'
@@ -233,7 +240,7 @@ v2-brand-for-org:
       The brand remains queryable with `?status=deleted`.
     operationId: deleteBrandForOrgV2
     security:
-      - ims_key: []
+      - session_token: []
       - api_key: []
     responses:
       '204':
@@ -290,7 +297,7 @@ v2-brand-for-org-activate:
       `scheduleId`.
     operationId: activateBrandForOrg
     security:
-      - ims_key: []
+      - session_token: []
       - api_key: []
     requestBody:
       required: true
@@ -349,7 +356,7 @@ v2-brand-status-for-org:
       `PATCH /v2/orgs/{spaceCatId}/brands/{brandId}` will refuse that transition.
     operationId: transitionBrandStatusForOrgV2
     security:
-      - ims_key: []
+      - session_token: []
       - api_key: []
     requestBody:
       required: true
@@ -431,7 +438,7 @@ v2-brand-for-org-site:
       (deterministic by name) is returned and a warning logged.
     operationId: getBrandForOrgSite
     security:
-      - ims_key: []
+      - session_token: []
       - api_key: []
     responses:
       '200':

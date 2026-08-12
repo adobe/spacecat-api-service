@@ -25,6 +25,9 @@ import { fetchOwnedUrlsTraffic, mergeOwnedUrlsTraffic } from '../support/element
 import { mapWithConcurrency } from '../support/elements/concurrency.js';
 import { addDaysToDate } from '../support/elements/week-utils.js';
 import { resolveBrandWorkspace } from '../support/serenity/workspace-resolver.js';
+import { isSerenityActiveForBrand } from '../support/serenity/serenity-active.js';
+import { createSerenityTransport } from '../support/serenity/rest-transport.js';
+import { SerenityTransportError } from '../support/serenity/serenity-transport-error.js';
 import { cachedOk } from '../support/cached-response.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { ErrorWithStatusCode, resolveSemrushImsToken } from '../support/utils.js';
@@ -123,6 +126,13 @@ function mapError(e, log) {
       );
     }
     return createResponse({ error: 'elementsUpstreamError', message: 'Upstream request failed' }, 502);
+  }
+  if (e instanceof SerenityTransportError) {
+    // Only reachable from checkAccess: the User Manager resource-allowance probe. A 401/403 is
+    // intercepted there and turned into `{ hasAccess: false }`, so anything reaching here is a
+    // genuine upstream failure (5xx / 504 timeout) — surfaced as a 502, never as a false denial.
+    log.error('Serenity upstream error', e);
+    return createResponse({ error: 'serenityUpstreamError', message: 'Upstream request failed' }, 502);
   }
   log.error('Elements controller error', e);
   return createResponse({ error: 'internalServerError', message: 'Internal server error' }, 500);
@@ -368,6 +378,14 @@ async function authorizeOrg(ctx) {
   if (!brand) {
     return { error: notFound('Brand not found for this organization') };
   }
+  // Per-brand serenity gate. Without it an unmigrated brand falls through to
+  // `resolveBrandWorkspace`'s flat mode and every read here — the brand-presence
+  // stats and the workspace-access probe — runs against the org's shared PARENT
+  // workspace, answering for the org instead of for the brand. A brand that has
+  // not been released to Semrush has no business on this surface at all.
+  if (!await isSerenityActiveForBrand(ctx, spaceCatId, brandIdParam, ctx?.log)) {
+    return { error: notFound('Serenity is not active for this brand') };
+  }
   const { workspaceId } = await resolveBrandWorkspace(ctx, spaceCatId, brandIdParam);
   if (!hasText(workspaceId)) {
     return { error: notFound('Brand has no resolvable Semrush workspace') };
@@ -386,10 +404,11 @@ async function authorizeOrg(ctx) {
  *
  * @param {object} ctx - Request context.
  * @param {object} log - Logger (for the misconfiguration alert).
- * @returns {Promise<{workspaceId: string} | {error: Response}>} the brand's
- *   sub-workspace id on success, or a Response on failure (400 non-UUID brandId,
- *   403 no access, 404 org/brand not found or brand has no sub-workspace,
- *   409 sub-workspace misconfigured as the parent).
+ * @returns {Promise<{workspaceId: string, brandUuid: string} | {error: Response}>}
+ *   the brand's sub-workspace id and resolved Postgres brand UUID on success, or a
+ *   Response on failure (400 non-UUID brandId, 403 no access, 404 org/brand not found
+ *   or brand has no sub-workspace, 409 sub-workspace misconfigured as the parent).
+ *   `brandUuid` lets callers run the project-ownership guard (see listUrlPrompts).
  */
 async function authorizeBrandSubWorkspace(ctx, log) {
   const spaceCatId = ctx?.params?.spaceCatId;
@@ -408,6 +427,18 @@ async function authorizeBrandSubWorkspace(ctx, log) {
   const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
   if (!brandUuid) {
     return { error: notFound(`Brand not found for organization: ${brandId}`) };
+  }
+  // Per-brand serenity gate, ahead of the sub-workspace requirement below: a
+  // brand can be provisioned (sub-workspace bound, so mode is 'subworkspace')
+  // long before its wave releases it, and until then its prompts must be read
+  // from the legacy corpus rather than from Semrush.
+  if (!await isSerenityActiveForBrand(ctx, spaceCatId, brandUuid, log)) {
+    return {
+      error: createResponse(
+        { error: 'serenityInactive', message: 'Serenity is not active for this brand' },
+        404,
+      ),
+    };
   }
   const { mode, workspaceId, parentWorkspaceId } = await resolveBrandWorkspace(
     ctx,
@@ -438,7 +469,7 @@ async function authorizeBrandSubWorkspace(ctx, log) {
       ),
     };
   }
-  return { workspaceId };
+  return { workspaceId, brandUuid };
 }
 
 export default function ElementsController(context, log, env) {
@@ -630,6 +661,57 @@ export default function ElementsController(context, log, env) {
       const service = await buildService(ctx);
       const result = await service.getWeeks(auth.workspaceId, query);
       return ok(result);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/access
+   *
+   * Reliable Semrush-workspace access check for the "Semrush workspace access needed"
+   * banner (LLMO-6747). Replaces the old probe that repurposed `brand-presence/weeks` — a
+   * Semrush Elements *reporting* endpoint whose 4xx/5xx conflate "no access" with "no data
+   * yet / bad query / upstream outage". Instead it hits the User Manager gateway's
+   * resource-allowance endpoint (`GET /v1/workspaces/{id}/resources` via
+   * `getWorkspaceResources`), forwarding the caller's IMS token — a purpose-built surface
+   * whose auth layer returns a clean 401/403 when the caller lacks access to the workspace
+   * linked to this brand.
+   *
+   * The workspace id comes from the SAME `authorizeOrg` dual-mode resolution the other
+   * brand-presence routes use (brand sub-workspace, falling back to the org parent), so a
+   * flat-mode brand is still checked against the workspace it actually reads from.
+   *
+   * Contract — a clean 200 boolean so the UI never guesses from a raw HTTP status:
+   *   - `200 { hasAccess: true }`  — upstream 2xx: the caller can reach the workspace.
+   *   - `200 { hasAccess: false }` — upstream 401/403: no access (the only banner case).
+   *   - a real error status (404 no workspace / org / brand, 403 no SpaceCat org access,
+   *     502 upstream 5xx / timeout, 503 misconfig) — INDETERMINATE, not a denial; the UI
+   *     treats these as "assume access" so a transient blip no longer flashes the banner.
+   */
+  const checkAccess = async (ctx) => {
+    try {
+      const auth = await authorizeOrg(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      // Forward the caller's own IMS token (x-promise-token flow, falling back to Authorization) so
+      // the upstream auth check is scoped to THIS user, then probe the resource-allowance endpoint.
+      const imsToken = await resolveElementsImsToken(ctx);
+      const transport = createSerenityTransport({ env, imsToken });
+      try {
+        await transport.getWorkspaceResources(auth.workspaceId);
+        return ok({ hasAccess: true });
+      } catch (e) {
+        // 401/403 from the User Manager gateway is the authoritative "no access to the linked
+        // workspace" signal — the whole point of this endpoint. Everything else is a genuine
+        // failure and must NOT be reported as a denial (rethrow → mapError → 502/etc.).
+        if (e instanceof SerenityTransportError && (e.status === 401 || e.status === 403)) {
+          log.info(`brand-presence access: upstream ${e.status} for workspace ${auth.workspaceId} — no access`);
+          return ok({ hasAccess: false });
+        }
+        throw e;
+      }
     } catch (e) {
       return mapError(e, log);
     }
@@ -968,6 +1050,98 @@ export default function ElementsController(context, log, env) {
   /* c8 ignore stop */
 
   /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/url-prompts
+   * URL Inspector details drill-down: the prompts that cited a specific URL. Backed by the
+   * URL_PROMPTS element (b4f1ead7), scoped by `CBF_source` = the URL string (verified live).
+   *
+   * Brand-scoped via the brand's Semrush **sub-workspace** (like {@link listTopicPrompts});
+   * the brand is NOT sent as a filter (`CBF_brand` is redundant with sub-workspace scoping —
+   * see url-prompts.js). Pagination is client-side; `totalCount` is the full count.
+   *
+   * Query params: `url` (required, the cited URL), `startDate`/`endDate` (required,
+   * YYYY-MM-DD), `model`/`platform` (optional, default search-gpt), `projectId`
+   * (optional, CSV of Semrush project ids — the market filter; each must be owned by the
+   * brand, and the payload fans out per project, see {@link buildUrlPromptsPayload}) and
+   * `category`/`categoryId` (optional, full `category__<label>` tag → `CBF_tags`). `siteId`
+   * is accepted but ignored (the sub-workspace authorization already scopes to the brand).
+   * Returns the full prompt list in one `{ prompts }` envelope, matching the PG
+   * url-prompts endpoint.
+   */
+  /* c8 ignore start -- LLMO-6620 POC endpoint; unit tests deferred (see url-prompts.js tests) */
+  const listUrlPrompts = async (ctx) => {
+    try {
+      const auth = await authorizeBrandSubWorkspace(ctx, log);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { workspaceId, brandUuid } = auth;
+
+      const query = extractQuery(ctx);
+
+      // `url` is the cited URL to drill into (CBF_source). Query params are already
+      // percent-decoded by the framework, so use as-is.
+      const { url } = query;
+      if (!hasText(url)) {
+        return badRequest('url is required');
+      }
+
+      // Date range is required (mirrors listOwnedUrls): a valid, ordered, bounded pair.
+      const startDate = query.startDate || query.start_date;
+      const endDate = query.endDate || query.end_date;
+      if (!hasText(startDate) || !hasText(endDate)) {
+        return badRequest('startDate and endDate are required (YYYY-MM-DD)');
+      }
+      if (!isYmdDate(startDate) || !isYmdDate(endDate)) {
+        return badRequest('startDate and endDate must be valid YYYY-MM-DD dates');
+      }
+      if (startDate > endDate) {
+        return badRequest('startDate must not be after endDate');
+      }
+      // Bound the span (mirrors listOwnedUrls/listDomainUrls): a multi-year window would buffer
+      // an unbounded result set into `allPrompts` before pagination slices it.
+      const MAX_RANGE_DAYS = 366;
+      const spanDays = (Date.parse(`${endDate}T00:00:00Z`)
+        - Date.parse(`${startDate}T00:00:00Z`)) / 86400000;
+      if (spanDays > MAX_RANGE_DAYS) {
+        return badRequest(`Date range must not exceed ${MAX_RANGE_DAYS} days`);
+      }
+
+      // Market scope: caller-supplied projectId(s) must belong to this brand — mirrors
+      // listOwnedUrls/listDomainUrls — or a caller could scope to another brand's data.
+      // Absent → the aggregate view across the brand's whole sub-workspace.
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const brandSemrushProjects = await fetchBrandSemrushProjects(
+        BrandSemrushProject,
+        [{ id: brandUuid }],
+      );
+      const requestedProjectIds = extractProjectIds(query);
+      const ownershipError = checkProjectIdsOwnership(requestedProjectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
+
+      const service = await buildService(ctx);
+      const prompts = await service.getUrlPrompts(workspaceId, {
+        url,
+        model: query.model || query.platform,
+        startDate,
+        endDate,
+        // Full `category__<label>` tag, sent as-is (CBF_tags in advanced).
+        category: query.categoryId || query.category,
+        // Fan out per market + union/dedupe by prompt text (element takes one project_id).
+        projectIds: requestedProjectIds,
+      });
+
+      // Match the PG url-prompts envelope this endpoint will replace: a bare `{ prompts }`
+      // with no server-side pagination (the element returns the full list in one call).
+      return cachedOk({ prompts });
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+  /* c8 ignore stop */
+
+  /**
    * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence
    *     /url-inspector/owned-urls
    * The URL Inspector "Your cited URLs" table. Hybrid: per-URL citations +
@@ -1086,10 +1260,9 @@ export default function ElementsController(context, log, env) {
    *     /url-inspector/domain-urls
    * Phase 2 of the Cited Third-Party tree: expand a cited domain → its URLs.
    * Same Semrush element as owned-urls (Stats-per-URL 9af5ed83) minus the trend
-   * element and the Postgres traffic hybrid, filtered to a single domain
-   * (required `hostname`) client-side instead of `domain_type='Owned'`.
+   * element and the Postgres traffic hybrid, optionally filtered to a single
+   * domain (`hostname`) client-side instead of `domain_type='Owned'`.
    */
-  /* c8 ignore start -- LLMO-6160 POC endpoint; unit tests intentionally deferred */
   const listDomainUrls = async (ctx) => {
     try {
       const auth = await authorizeOrg(ctx);
@@ -1121,13 +1294,6 @@ export default function ElementsController(context, log, env) {
         return badRequest(`Date range must not exceed ${MAX_RANGE_DAYS} days`);
       }
 
-      // hostname (aka domain) is the domain to drill into — required (the UI only
-      // calls this after a domain row is expanded).
-      const hostname = query.hostname || query.domain;
-      if (!hasText(hostname)) {
-        return badRequest('hostname is required for domain URL drilldown');
-      }
-
       const service = await buildService(ctx);
 
       const { BrandSemrushProject } = ctx?.dataAccess ?? {};
@@ -1149,9 +1315,13 @@ export default function ElementsController(context, log, env) {
       } else {
         projects = await service.getOwnedUrlProjects(workspaceId, { brandSemrushProjects });
       }
+      // Normalize whitespace-only hostname to "no filter" explicitly at the API
+      // boundary, rather than relying on the transform's downstream `.trim()`.
+      const hostname = (query.hostname || query.domain || '').trim() || undefined;
 
-      // The transform host-filters, sorts by citations desc, and slices client-side
-      // (Semrush has no server-side pagination); totalCount is the full post-filter count.
+      // The transform optionally host-filters, sorts by citations desc, and slices
+      // client-side (Semrush has no server-side pagination); totalCount is the full
+      // post-filter count.
       const result = await service.getDomainUrls(workspaceId, {
         projects,
         hostname,
@@ -1169,7 +1339,6 @@ export default function ElementsController(context, log, env) {
       return mapError(e, log);
     }
   };
-  /* c8 ignore stop */
 
   /**
    * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/market-tracking-trends
@@ -1793,11 +1962,13 @@ export default function ElementsController(context, log, env) {
   return {
     listUrlInspectorFilterDimensions,
     listWeeks,
+    checkAccess,
     listPrompts,
     listCitedDomains,
     listSentimentOverview,
     listTopics,
     listTopicPrompts,
+    listUrlPrompts,
     listOwnedUrls,
     listDomainUrls,
     getMarketTrackingTrends,

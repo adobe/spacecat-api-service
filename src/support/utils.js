@@ -384,6 +384,33 @@ export const triggerA11yCodefixForOpportunity = async (
   { opportunityId, opportunityType, aggregationKey },
 );
 
+/**
+ * Sends a message to the llmo-experimentation-engine-queue to manually (re-)trigger Mystique
+ * impact measurement for a GeoExperiment (see adobe/spacecat-infrastructure#655 for the queue,
+ * llmo-experimentation-engine's docs/decisions/004-manual-impact-measurement-retrigger.md for the
+ * handler contract).
+ *
+ * NOTE: this does NOT create or start an experiment. It only requests the impact-measurement
+ * report for an already-existing GeoExperiment that is ongoing or completed. The experiment must
+ * already exist; the engine re-validates eligibility itself before resubmitting and no-ops if the
+ * experiment is not in a measurable state.
+ *
+ * @param {string} geoExperimentId - The GeoExperiment ID to trigger measurement for.
+ * @param {string} triggeredBy - Identity of the caller, for the engine's log line
+ *   (e.g. an IMS user id/email resolved from the request's auth profile).
+ * @param {Object} lambdaContext - The Lambda context object (sqs, env).
+ * @return {Promise} - A promise representing the SQS send operation.
+ */
+export const triggerGeoExperimentImpactMeasurement = async (
+  geoExperimentId,
+  triggeredBy,
+  lambdaContext,
+) => lambdaContext.sqs.sendMessage(lambdaContext.env.LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL, {
+  type: 'TRIGGER_IMPACT_MEASUREMENT',
+  geoExperimentId,
+  triggeredBy: triggeredBy || 'unknown',
+});
+
 // todo: prototype - untested
 /* c8 ignore start */
 export const triggerExperimentationCandidates = async (
@@ -1180,6 +1207,54 @@ export const updateCodeConfig = async (site, host, slackContext, log) => {
 
   // TODO: Add AEM CS pattern code config resolution here
   log.debug(`Host '${host}' does not match a supported pattern for code config resolution`);
+};
+
+/**
+ * Derives a top-level `code` config object from a site's `hlxConfig`, for EDS
+ * sites discovered/onboarded via the Franklin aggregated config API. The
+ * repo coordinates are already resolved into `hlxConfig` at discovery time
+ * (`hlxConfig.code` from the aggregated config, `hlxConfig.rso` from the EDS
+ * hostname), but only the top-level `code` attribute is read by downstream
+ * consumers (the import-worker's code import and the autofix-worker's code-PR
+ * flow). This bridges the two so those consumers work without depending on
+ * `hlxConfig`, and lets `hlxConfig.code` be retired later.
+ *
+ * `hlxConfig` shape:
+ *   - hlxConfig.rso  = { ref, tld, site, owner }   (repo name is `rso.site`)
+ *   - hlxConfig.code = { owner, repo, source: { url, type } }
+ *
+ * owner/repo are sourced from `hlxConfig.code` first, falling back to
+ * `hlxConfig.rso`; `ref` comes from `rso` (default `main`); `type` defaults to
+ * `github`. Produces the top-level `code` shape the import-worker and
+ * autofix-worker consume via `site.getCode()` (they read `code`, not hlxConfig).
+ *
+ * @param {Object} hlxConfig - The site's hlxConfig object.
+ * @returns {Object|null} A `code`-shaped object ({ type, owner, repo, ref, url }),
+ *   or null when owner/repo cannot be resolved.
+ */
+export const deriveCodeFromHlxConfig = (hlxConfig) => {
+  if (!isObject(hlxConfig)) {
+    return null;
+  }
+
+  const hlxCode = isObject(hlxConfig.code) ? hlxConfig.code : {};
+  const rso = isObject(hlxConfig.rso) ? hlxConfig.rso : {};
+
+  const owner = hlxCode.owner || rso.owner;
+  // In the RSO the repository name is carried as `site`.
+  const repo = hlxCode.repo || rso.site;
+
+  if (!hasText(owner) || !hasText(repo)) {
+    return null;
+  }
+
+  return {
+    type: hlxCode.source?.type || 'github',
+    owner,
+    repo,
+    ref: rso.ref || 'main',
+    url: hlxCode.source?.url || `https://github.com/${owner}/${repo}`,
+  };
 };
 
 /**

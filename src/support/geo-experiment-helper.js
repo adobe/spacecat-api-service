@@ -12,6 +12,39 @@
 
 import { GeoExperiment } from '@adobe/spacecat-shared-data-access';
 
+const { STATUSES, PHASES } = GeoExperiment;
+
+// Phases at which the experiment has reached (or passed) post-analysis, i.e. there is DRS
+// post-analysis data for Mystique to measure. Earlier phases have nothing to measure yet.
+const MEASUREMENT_ELIGIBLE_PHASES = [
+  PHASES.POST_ANALYSIS_DONE,
+  PHASES.IMPACT_MEASUREMENT_STARTED,
+  PHASES.IMPACT_MEASUREMENT_DONE,
+];
+
+/**
+ * Whether a GeoExperiment can have impact measurement (re-)triggered: it must have reached (or
+ * passed) POST_ANALYSIS_DONE, with a status of IN_PROGRESS or COMPLETED. An earlier phase, or a
+ * FAILED status at any eligible phase, is not eligible.
+ *
+ * Deliberately includes IMPACT_MEASUREMENT_STARTED + IN_PROGRESS — an experiment with a Mystique
+ * task genuinely in flight. Re-triggering it discards the in-flight task's stored taskId and
+ * submits a new one, orphaning the original poll — an accepted, explicit tradeoff, not an
+ * oversight.
+ *
+ * This mirrors llmo-experimentation-engine's own eligibility check (which is authoritative — the
+ * engine re-validates on receipt) — checked here only so the API response is immediate and
+ * accurate instead of "sent, wait and see". Keep the two in sync.
+ * See llmo-experimentation-engine/docs/decisions/004-manual-impact-measurement-retrigger.md.
+ * @param {Object} geoExperiment
+ * @returns {boolean}
+ */
+export function isImpactMeasurementEligible(geoExperiment) {
+  const status = geoExperiment.getStatus();
+  return MEASUREMENT_ELIGIBLE_PHASES.includes(geoExperiment.getPhase())
+    && (status === STATUSES.COMPLETED || status === STATUSES.IN_PROGRESS);
+}
+
 /**
  * Validates a single phase config block.
  * All fields are optional — only present fields are validated.
@@ -143,4 +176,46 @@ export function buildExperimentMetadata(context, base, strategyType, opportunity
       post: getScheduleParams(context, strategyType, opportunityType, 'post'),
     },
   };
+}
+
+// TTL for presigned impact-measurement raw-data URLs (7 days).
+const INSIGHTS_PRESIGN_TTL_SECONDS = 60 * 60 * 24 * 7;
+
+/**
+ * Replace each analysis's `rawDataUrl` (an `s3://bucket/key` URI) in place with a presigned HTTPS URL
+ * so the UI can download the per-analysis detail blobs. Same field name — the `s3://` value is simply
+ * swapped for the presigned URL. Best-effort per analysis — on a presign failure the original
+ * `rawDataUrl` is left as-is. Analyses without a `rawDataUrl` are untouched.
+ *
+ * @param {object} insights - ExperimentInsights object.
+ * @param {object} s3Ctx - context.s3 ({ s3Client, getSignedUrl, GetObjectCommand }).
+ * @param {object} log - logger.
+ * @returns {Promise<object>} a new insights object with presigned rawDataUrls.
+ */
+export async function presignInsightsRawData(insights, s3Ctx, log) {
+  const analyses = insights?.analyses;
+  if (!Array.isArray(analyses)) {
+    return insights;
+  }
+  const { s3Client, getSignedUrl, GetObjectCommand } = s3Ctx;
+  const presignedAnalyses = await Promise.all(analyses.map(async (analysis) => {
+    const match = /^s3:\/\/([^/]+)\/(.+)$/.exec(analysis?.rawDataUrl || '');
+    if (!match) {
+      return analysis;
+    }
+    const [, bucket, key] = match;
+    try {
+      // Replace the s3:// rawDataUrl in place with a presigned HTTPS URL the browser can fetch.
+      const rawDataUrl = await getSignedUrl(
+        s3Client,
+        new GetObjectCommand({ Bucket: bucket, Key: key }),
+        { expiresIn: INSIGHTS_PRESIGN_TTL_SECONDS },
+      );
+      return { ...analysis, rawDataUrl };
+    } catch (e) {
+      log.info(`[geo-experiment] Could not presign rawDataUrl ${analysis.rawDataUrl}: ${e.message}`);
+      return analysis;
+    }
+  }));
+  return { ...insights, analyses: presignedAnalyses };
 }
