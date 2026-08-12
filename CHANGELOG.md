@@ -1,3 +1,10 @@
+# [1.738.0](https://github.com/adobe/spacecat-api-service/compare/v1.737.1...v1.738.0) (2026-08-11)
+
+
+### Features
+
+* **llmo:** block BYOCDN CDN auto-routing for subpath sites (LLMO-6685) ([#2984](https://github.com/adobe/spacecat-api-service/issues/2984)) ([311b20d](https://github.com/adobe/spacecat-api-service/commit/311b20d5f16cf33592440de6ea5b69ae519c1e9b))
+
 ## [1.737.1](https://github.com/adobe/spacecat-api-service/compare/v1.737.0...v1.737.1) (2026-08-11)
 
 
