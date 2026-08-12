@@ -816,7 +816,8 @@ export function getImsUserTokenStrict(context) {
  * Get an IMS promise token from the authorization header in context.
  * @param {object} context - The context of the request.
  * @param {string} [pair] - Optional IMS promise-pair selector (see
- *   {@link resolvePromisePair}). Omitted => the default pair.
+ *   {@link resolvePromisePair}). Selects which emitter client-id/secret/definition
+ *   set mints the token. Omitted => the default pair.
  * @returns {Promise<{
  *   promise_token: string,
  *   expires_in: number,
@@ -842,7 +843,9 @@ export function resolvePromisePair(context) {
   if (audience.toLowerCase() === 'semrush') {
     return ImsPromiseClient.PROMISE_PAIR.SEMRUSH;
   }
-  throw new ErrorWithStatusCode(`Unknown promise audience: ${audience}`, STATUS_BAD_REQUEST);
+  // Truncate the reflected header value so a long/hostile header cannot bloat the
+  // 400 body or logs.
+  throw new ErrorWithStatusCode(`Unknown promise audience: ${audience.slice(0, 40)}`, STATUS_BAD_REQUEST);
 }
 
 export async function getIMSPromiseToken(context, pair) {
