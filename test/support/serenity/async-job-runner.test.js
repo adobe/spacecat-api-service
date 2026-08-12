@@ -41,6 +41,8 @@ describe('async-job-runner', () => {
   let exchangeTokenStub;
   let invalidatePromiseTokenStub;
   let getPromiseTokenStub;
+  let resolvePromisePairStub;
+  let createFromStub;
   let createAndEnqueueJob;
   let exchangeAndPersistPromiseToken;
   let invalidateJobPromiseToken;
@@ -51,6 +53,11 @@ describe('async-job-runner', () => {
     exchangeTokenStub = sandbox.stub();
     invalidatePromiseTokenStub = sandbox.stub().resolves();
     getPromiseTokenStub = sandbox.stub();
+    resolvePromisePairStub = sandbox.stub().returns(undefined);
+    createFromStub = sandbox.stub().returns({
+      exchangeToken: exchangeTokenStub,
+      invalidatePromiseToken: invalidatePromiseTokenStub,
+    });
 
     ({
       createAndEnqueueJob,
@@ -60,15 +67,13 @@ describe('async-job-runner', () => {
     } = await esmock('../../../src/support/serenity/async-job-runner.js', {
       '@adobe/spacecat-shared-ims-client': {
         ImsPromiseClient: {
-          createFrom: () => ({
-            exchangeToken: exchangeTokenStub,
-            invalidatePromiseToken: invalidatePromiseTokenStub,
-          }),
+          createFrom: createFromStub,
           CLIENT_TYPE: { CONSUMER: 'consumer', EMITTER: 'emitter' },
         },
       },
       '../../../src/support/utils.js': {
         getIMSPromiseToken: getPromiseTokenStub,
+        resolvePromisePair: resolvePromisePairStub,
       },
     }));
   });
@@ -100,6 +105,7 @@ describe('async-job-runner', () => {
           foo: 'bar',
           jobType: 'serenity-classify-prompts',
           promiseToken: { promise_token: 'ptok', expires_in: 14399 },
+          promisePair: undefined,
         },
       });
       expect(sendMessageStub).to.have.been.calledWith('queue-url', {
@@ -131,8 +137,49 @@ describe('async-job-runner', () => {
           mode: 'reclassify',
           jobType: 'serenity-classify-prompts',
           promiseToken: { promise_token: 'forwarded-ptok' },
+          promisePair: undefined,
         },
       });
+    });
+
+    it('mints with the audience pair from the request and persists it on metadata', async () => {
+      resolvePromisePairStub.returns('SEMRUSH');
+      getPromiseTokenStub.resolves({ promise_token: 'ptok' });
+      const job = makeJob();
+      const createStub = sandbox.stub().resolves(job);
+      const context = {
+        dataAccess: { AsyncJob: { create: createStub } },
+        sqs: { sendMessage: sandbox.stub().resolves() },
+        env: { SERENITY_JOB_RUNNER_QUEUE_URL: 'queue-url' },
+        log: { error: sandbox.stub(), warn: sandbox.stub() },
+      };
+
+      await createAndEnqueueJob(context, { jobType: 'serenity-classify-prompts' });
+
+      expect(getPromiseTokenStub).to.have.been.calledWith(context, 'SEMRUSH');
+      const created = createStub.firstCall.args[0];
+      expect(created.metadata.promisePair).to.equal('SEMRUSH');
+    });
+
+    it('prefers an explicit promisePair over the request header (worker self-requeue)', async () => {
+      getPromiseTokenStub.resolves({ promise_token: 'ptok' });
+      const job = makeJob();
+      const createStub = sandbox.stub().resolves(job);
+      const context = {
+        dataAccess: { AsyncJob: { create: createStub } },
+        sqs: { sendMessage: sandbox.stub().resolves() },
+        env: { SERENITY_JOB_RUNNER_QUEUE_URL: 'queue-url' },
+        log: { error: sandbox.stub(), warn: sandbox.stub() },
+      };
+
+      await createAndEnqueueJob(context, {
+        jobType: 'serenity-classify-prompts',
+        promisePair: 'SEMRUSH',
+      });
+
+      expect(resolvePromisePairStub).to.not.have.been.called;
+      expect(getPromiseTokenStub).to.have.been.calledWith(context, 'SEMRUSH');
+      expect(createStub.firstCall.args[0].metadata.promisePair).to.equal('SEMRUSH');
     });
 
     it('rolls back the created job when the SQS send fails', async () => {
@@ -210,6 +257,38 @@ describe('async-job-runner', () => {
       await expect(exchangeAndPersistPromiseToken(context, job))
         .to.be.rejectedWith('network error');
     });
+
+    it('exchanges on the pair stored in job metadata and keeps it on the record', async () => {
+      const job = makeJob({
+        promiseToken: { promise_token: 'old-ptok', token_type: 'bearer' },
+        promisePair: 'SEMRUSH',
+      });
+      exchangeTokenStub.resolves({
+        access_token: 'access-abc',
+        promise_token: 'new-ptok',
+        promise_token_expires_in: 14399,
+      });
+
+      await exchangeAndPersistPromiseToken({ env: {} }, job);
+
+      const [, type, opts] = createFromStub.firstCall.args;
+      expect(type).to.equal('consumer');
+      expect(opts).to.deep.equal({ pair: 'SEMRUSH' });
+      expect(job.getMetadata().promisePair).to.equal('SEMRUSH');
+    });
+
+    it('exchanges on the default pair when metadata carries no promisePair', async () => {
+      const job = makeJob({ promiseToken: { promise_token: 'old-ptok' } });
+      exchangeTokenStub.resolves({
+        access_token: 'access-abc',
+        promise_token: 'new-ptok',
+        promise_token_expires_in: 1,
+      });
+
+      await exchangeAndPersistPromiseToken({ env: {} }, job);
+
+      expect(createFromStub.firstCall.args[2]).to.deep.equal({ pair: undefined });
+    });
   });
 
   describe('invalidateJobPromiseToken', () => {
@@ -251,6 +330,17 @@ describe('async-job-runner', () => {
 
       await expect(invalidateJobPromiseToken(context, job)).to.be.fulfilled;
       expect(warnStub).to.have.been.called;
+    });
+
+    it('invalidates on the pair stored in job metadata', async () => {
+      const job = makeJob({ promiseToken: { promise_token: 'ptok' }, promisePair: 'SEMRUSH' });
+      const context = { env: {}, log: { warn: sandbox.stub() } };
+
+      await invalidateJobPromiseToken(context, job);
+
+      const [, type, opts] = createFromStub.firstCall.args;
+      expect(type).to.equal('consumer');
+      expect(opts).to.deep.equal({ pair: 'SEMRUSH' });
     });
   });
 });

@@ -13,7 +13,7 @@
 // @ts-check
 
 import * as imsClientPkg from '@adobe/spacecat-shared-ims-client';
-import { getIMSPromiseToken } from '../utils.js';
+import { getIMSPromiseToken, resolvePromisePair } from '../utils.js';
 
 /**
  * Deferred user-context Semrush job runner (serenity-docs#186).
@@ -32,7 +32,7 @@ import { getIMSPromiseToken } from '../utils.js';
 // through a namespace import rather than widening anything shared.
 /**
  * @typedef {object} TypedImsPromiseClient
- * @property {(context: object, type: string) => {
+ * @property {(context: object, type: string, opts?: { pair?: string }) => {
  *   exchangeToken: (promiseToken: string, enableEncryption: boolean) => Promise<{
  *     access_token: string,
  *     promise_token: string,
@@ -57,8 +57,8 @@ export const NEEDS_REAUTH_ERROR_CODE = 'NEEDS_REAUTH';
  * TODO: replace with `NeedsReauthError` from `@adobe/spacecat-shared-ims-client` once
  * adobe/spacecat-shared#1843 (PromiseTokenSession) is merged and published — that PR
  * adds the same typed error upstream, keyed on the real HTTP status rather than this
- * message-parsing workaround. `@adobe/spacecat-shared-ims-client` is pinned at 1.12.7
- * today, which predates that change.
+ * message-parsing workaround. That PR is not yet published, so the message-parsing
+ * workaround stays.
  */
 export class NeedsReauthError extends Error {
   constructor(message, cause) {
@@ -88,15 +88,26 @@ const REAUTH_STATUS_PATTERN = /status: (401|403)\b/;
  *   HTTP request context (`getIMSPromiseToken` reads the caller's `Authorization`
  *   header, which does not exist there) — the worker instead forwards the token it
  *   already exchanged for the job it is currently processing.
+ * @param {string} [params.promisePair] - IMS promise-pair selector to mint with and
+ *   persist on the job (see `resolvePromisePair`). Pass this on the worker self-requeue
+ *   path (the worker has no request headers); from a request it defaults to the
+ *   `x-promise-audience` header. Persisted so the worker exchanges/invalidates on the
+ *   same pair.
  * @returns {Promise<object>} The created job (an AsyncJob instance).
  * @throws On SQS send failure, after rolling back the created job record.
  */
-export async function createAndEnqueueJob(context, { jobType, metadata = {}, promiseToken }) {
+export async function createAndEnqueueJob(
+  context,
+  {
+    jobType, metadata = {}, promiseToken, promisePair,
+  },
+) {
   const {
     dataAccess, sqs, env, log,
   } = context;
 
-  const promiseTokenResponse = promiseToken ?? await getIMSPromiseToken(context);
+  const pair = promisePair ?? resolvePromisePair(context);
+  const promiseTokenResponse = promiseToken ?? await getIMSPromiseToken(context, pair);
 
   const job = await dataAccess.AsyncJob.create({
     status: 'IN_PROGRESS',
@@ -104,6 +115,7 @@ export async function createAndEnqueueJob(context, { jobType, metadata = {}, pro
       ...metadata,
       jobType,
       promiseToken: promiseTokenResponse,
+      promisePair: pair,
     },
   });
 
@@ -146,13 +158,14 @@ export async function createAndEnqueueJob(context, { jobType, metadata = {}, pro
  */
 export async function exchangeAndPersistPromiseToken(context, job) {
   const metadata = job.getMetadata() ?? {};
-  const { promiseToken } = metadata;
+  const { promiseToken, promisePair } = metadata;
   const enableEncryption = !!context.env?.AUTOFIX_CRYPT_SECRET
     && !!context.env?.AUTOFIX_CRYPT_SALT;
 
   const consumerClient = ImsPromiseClient.createFrom(
     context,
     ImsPromiseClient.CLIENT_TYPE.CONSUMER,
+    { pair: promisePair },
   );
 
   let exchangeResult;
@@ -191,7 +204,7 @@ export async function exchangeAndPersistPromiseToken(context, job) {
  * @param {object} job - An AsyncJob instance.
  */
 export async function invalidateJobPromiseToken(context, job) {
-  const { promiseToken } = job.getMetadata() ?? {};
+  const { promiseToken, promisePair } = job.getMetadata() ?? {};
   if (!promiseToken?.promise_token) {
     return;
   }
@@ -201,6 +214,7 @@ export async function invalidateJobPromiseToken(context, job) {
   const consumerClient = ImsPromiseClient.createFrom(
     context,
     ImsPromiseClient.CLIENT_TYPE.CONSUMER,
+    { pair: promisePair },
   );
 
   try {

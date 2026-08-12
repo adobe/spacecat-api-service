@@ -1931,6 +1931,111 @@ describe('utils', () => {
     });
   });
 
+  describe('resolvePromisePair', () => {
+    let resolvePromisePair;
+
+    beforeEach(async () => {
+      ({ resolvePromisePair } = await esmock('../../src/support/utils.js', {
+        '@adobe/spacecat-shared-ims-client': {
+          ImsPromiseClient: {
+            PROMISE_PAIR: { SEMRUSH: 'SEMRUSH' },
+            CLIENT_TYPE: { CONSUMER: 'consumer', EMITTER: 'emitter' },
+          },
+        },
+      }));
+    });
+
+    const ctx = (audience) => ({
+      pathInfo: { headers: audience ? { 'x-promise-audience': audience } : {} },
+    });
+
+    it('returns undefined when the audience header is absent', () => {
+      expect(resolvePromisePair(ctx())).to.equal(undefined);
+    });
+
+    it('returns undefined when the audience header is empty', () => {
+      expect(resolvePromisePair(ctx(''))).to.equal(undefined);
+    });
+
+    it('returns the SEMRUSH pair for x-promise-audience: semrush', () => {
+      expect(resolvePromisePair(ctx('semrush'))).to.equal('SEMRUSH');
+    });
+
+    it('is case-insensitive on the audience value', () => {
+      expect(resolvePromisePair(ctx('SemRush'))).to.equal('SEMRUSH');
+    });
+
+    it('throws 400 on an unknown audience', () => {
+      let err;
+      try {
+        resolvePromisePair(ctx('bogus'));
+      } catch (e) {
+        err = e;
+      }
+      expect(err).to.exist;
+      expect(err.message).to.contain('Unknown promise audience: bogus');
+      expect(err.status).to.equal(400);
+    });
+  });
+
+  describe('resolveSemrushImsToken audience selection', () => {
+    let resolveSemrushImsToken;
+    let createFromStub;
+    let exchangeTokenStub;
+
+    beforeEach(async () => {
+      exchangeTokenStub = sinon.stub().resolves({ access_token: 'exchanged' });
+      createFromStub = sinon.stub().returns({ exchangeToken: exchangeTokenStub });
+      ({ resolveSemrushImsToken } = await esmock('../../src/support/utils.js', {
+        '@adobe/spacecat-shared-ims-client': {
+          ImsPromiseClient: {
+            createFrom: createFromStub,
+            PROMISE_PAIR: { SEMRUSH: 'SEMRUSH' },
+            CLIENT_TYPE: { CONSUMER: 'consumer', EMITTER: 'emitter' },
+          },
+        },
+      }));
+    });
+
+    const ctx = (headers) => ({ pathInfo: { headers } });
+
+    it('selects the SEMRUSH consumer pair when x-promise-audience: semrush accompanies the token', async () => {
+      await resolveSemrushImsToken(
+        ctx({ 'x-promise-token': 'pt', 'x-promise-audience': 'semrush' }),
+        { error: sinon.stub() },
+        'label',
+      );
+      const [, type, opts] = createFromStub.firstCall.args;
+      expect(type).to.equal('consumer');
+      expect(opts).to.deep.equal({ pair: 'SEMRUSH' });
+    });
+
+    it('uses the default pair (undefined) when no audience header is present', async () => {
+      await resolveSemrushImsToken(
+        ctx({ 'x-promise-token': 'pt' }),
+        { error: sinon.stub() },
+        'label',
+      );
+      const [, , opts] = createFromStub.firstCall.args;
+      expect(opts).to.deep.equal({ pair: undefined });
+    });
+
+    it('throws 400 and never exchanges when the audience is unknown', async () => {
+      let err;
+      try {
+        await resolveSemrushImsToken(
+          ctx({ 'x-promise-token': 'pt', 'x-promise-audience': 'bogus' }),
+          { error: sinon.stub() },
+          'label',
+        );
+      } catch (e) {
+        err = e;
+      }
+      expect(err?.status).to.equal(400);
+      expect(createFromStub).to.not.have.been.called;
+    });
+  });
+
   describe('sendGlobalImportRunMessage', () => {
     it('sends a message without a siteId when none is provided', async () => {
       const sqs = { sendMessage: sinon.stub().resolves() };
