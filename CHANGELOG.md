@@ -1,3 +1,37 @@
+# [1.738.0](https://github.com/adobe/spacecat-api-service/compare/v1.737.1...v1.738.0) (2026-08-11)
+
+
+### Features
+
+* **llmo:** block BYOCDN CDN auto-routing for subpath sites (LLMO-6685) ([#2984](https://github.com/adobe/spacecat-api-service/issues/2984)) ([311b20d](https://github.com/adobe/spacecat-api-service/commit/311b20d5f16cf33592440de6ea5b69ae519c1e9b))
+
+## [1.737.1](https://github.com/adobe/spacecat-api-service/compare/v1.737.0...v1.737.1) (2026-08-11)
+
+
+### Bug Fixes
+
+* **serenity:** classify branded prompts in scripts without word spaces ([#3028](https://github.com/adobe/spacecat-api-service/issues/3028)) ([c0f43c9](https://github.com/adobe/spacecat-api-service/commit/c0f43c95477d0d04826949e86ba36efcd17fdeb9)), closes [Hi#level](https://github.com/Hi/issues/level)
+* **serenity:** guard PATCH on the server-owned source dimension (LLMO-6665) ([#3025](https://github.com/adobe/spacecat-api-service/issues/3025)) ([47123e4](https://github.com/adobe/spacecat-api-service/commit/47123e4284b219942d3583d9720a0ac5e0ff83ae))
+
+# [1.737.0](https://github.com/adobe/spacecat-api-service/compare/v1.736.0...v1.737.0) (2026-08-11)
+
+
+### Bug Fixes
+
+* add on-demand opportunity validation API ([#2982](https://github.com/adobe/spacecat-api-service/issues/2982)) ([e7c916e](https://github.com/adobe/spacecat-api-service/commit/e7c916e70462ac17b4571ae5c5d3e8f1e2a5e308))
+
+
+### Features
+
+* **llmo-6818:** Add option all to platform param ([#3010](https://github.com/adobe/spacecat-api-service/issues/3010)) ([d32d126](https://github.com/adobe/spacecat-api-service/commit/d32d126b01904fc126cc661df1fe9e3c45dd0cd1))
+
+# [1.736.0](https://github.com/adobe/spacecat-api-service/compare/v1.735.0...v1.736.0) (2026-08-11)
+
+
+### Features
+
+* add API endpoint to manually trigger GeoExperiment impact measurement ([#2997](https://github.com/adobe/spacecat-api-service/issues/2997)) ([3e5df6f](https://github.com/adobe/spacecat-api-service/commit/3e5df6f8033e9101617ae4036a2ffb222dc8a566)), closes [adobe/spacecat-infrastructure#655](https://github.com/adobe/spacecat-infrastructure/issues/655) [adobe-rnd/llmo-experimentation-engine#69](https://github.com/adobe-rnd/llmo-experimentation-engine/issues/69) [adobe/spacecat-infrastructure#655](https://github.com/adobe/spacecat-infrastructure/issues/655)
+
 # [1.735.0](https://github.com/adobe/spacecat-api-service/compare/v1.734.1...v1.735.0) (2026-08-11)
 
 

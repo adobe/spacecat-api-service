@@ -165,6 +165,14 @@ describe('LlmoAkamaiController', () => {
       const res = await controller.getConfig(mockContext);
       expect(res.status).to.equal(403);
     });
+
+    it('returns 501 for a subpath site (CDN auto-routing not supported)', async () => {
+      mockSite.getBaseURL = () => 'https://www.example.com/blog';
+      const res = await controller.getConfig(mockContext);
+      expect(res.status).to.equal(501);
+      const body = await res.json();
+      expect(body.message).to.include('not supported');
+    });
   });
 
   describe('getConfig', () => {
