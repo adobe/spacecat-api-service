@@ -143,7 +143,7 @@ export default function llmoCloudflareOnboardingTests(getHttpClient, resetData) 
       it('returns 400 when x-cloudflare-token header is missing', async () => {
         const http = getHttpClient();
         const res = await http.llmoAdmin.post(deployPath, {
-          accountId: VALID_ACCOUNT_ID, targetHost: 'www.example.com',
+          accountId: VALID_ACCOUNT_ID,
         });
         expect(res.status).to.equal(400);
       });
@@ -152,7 +152,7 @@ export default function llmoCloudflareOnboardingTests(getHttpClient, resetData) 
         const http = getHttpClient();
         const res = await http.llmoAdmin.post(
           deployPath,
-          { targetHost: 'www.example.com' },
+          {},
           CF_TOKEN_HEADERS,
         );
         expect(res.status).to.equal(400);
@@ -162,27 +162,7 @@ export default function llmoCloudflareOnboardingTests(getHttpClient, resetData) 
         const http = getHttpClient();
         const res = await http.llmoAdmin.post(
           deployPath,
-          { accountId: 'acc-123', targetHost: 'www.example.com' },
-          CF_TOKEN_HEADERS,
-        );
-        expect(res.status).to.equal(400);
-      });
-
-      it('returns 400 when targetHost is not a valid hostname', async () => {
-        const http = getHttpClient();
-        const res = await http.llmoAdmin.post(
-          deployPath,
-          { accountId: VALID_ACCOUNT_ID, targetHost: 'not a host' },
-          CF_TOKEN_HEADERS,
-        );
-        expect(res.status).to.equal(400);
-      });
-
-      it('returns 400 when targetHost is outside the site domain', async () => {
-        const http = getHttpClient();
-        const res = await http.llmoAdmin.post(
-          deployPath,
-          { accountId: VALID_ACCOUNT_ID, targetHost: 'evil.com' },
+          { accountId: 'acc-123' },
           CF_TOKEN_HEADERS,
         );
         expect(res.status).to.equal(400);
