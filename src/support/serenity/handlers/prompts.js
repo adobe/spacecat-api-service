@@ -380,9 +380,8 @@ export async function handleListPrompts(
  * @param {object} log
  * @param {(fn: () => Promise<any>) => Promise<any>} [wrapPublish] - wraps each project's
  *   `publishProject` call (default identity — a plain call, byte-for-byte the pre-existing
- *   behavior). The subworkspace create-prompts caller passes `headroom.retryOnQuota` (LLMO-6190
- *   item 4) so a disguised metered-405 gets ONE bounded top-up+retry per project BEFORE it is
- *   recorded as a failure; flat-mode callers omit this param, so flat mode is untouched.
+ *   behavior). Retained as a per-project injection seam for a future publish-retry wrapper
+ *   (§10.3); no caller passes a non-identity wrapper today, so every publish is a plain call.
  * @param {{ env?: object | null, orgId?: string | null, brandId?: string | null } | null}
  *   [alertContext] - serenity-docs#72 §5: when supplied, fires the (deduplicated, fire-and-forget)
  *   Slack quota-rejection alert for a classified disguised-405 — every prior caller omitted this,

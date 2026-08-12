@@ -90,7 +90,6 @@ function makeTransport(overrides = {}) {
     publishProject: sinon.stub().resolves(null),
     deleteProject: sinon.stub().resolves(null),
     listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
-    transferWorkspaceResources: sinon.stub().resolves(null),
     getWorkspaceStatus: sinon.stub().resolves({ status: 'created' }),
     listPromptsByTags: sinon.stub().resolves({ items: [] }),
     listAiModels: sinon.stub().resolves({ items: [] }),
@@ -1018,7 +1017,6 @@ describe('markets-subworkspace handlers', () => {
       );
       expect(res.status).to.equal(201);
       // ensure was skipped: no settle/transfer was performed for this call.
-      expect(transport.transferWorkspaceResources).to.not.have.been.called;
       // the draft is created against the pre-resolved workspace.
       expect(transport.createProject).to.have.been.calledWith('preset-ws');
     });

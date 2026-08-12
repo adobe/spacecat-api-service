@@ -1,10 +1,13 @@
 # ADR-008: A brand sub-workspace carries no resource allocation
 
-> **Update (2026-08, SITES-49206).** This decision stands and is now **unconditional**: the dormant
-> JIT allocator that this ADR described as "retained behind `SERENITY_DYNAMIC_ALLOCATION`" as a
-> fallback has been removed (Semrush no longer enforces AI limits for proxy-routed LLMO workspaces).
-> The no-carve behaviour is the only behaviour; references below to the allocator being retained
-> behind a flag are historical.
+> **Update (2026-08, SITES-49206).** The **no-carve decision stands and is now unconditional.** Its
+> secondary decision — to *retain* the dormant JIT allocator behind `SERENITY_DYNAMIC_ALLOCATION` as
+> a fallback — has been **reversed**: the allocator is removed (Semrush no longer enforces AI limits
+> for proxy-routed LLMO workspaces). That reversal, which adopts this ADR's own rejected alternative
+> ("Delete the JIT allocator alongside the carve"), is recorded in
+> [ADR-009](009-remove-dormant-jit-allocator.md). Every reference below to the allocator being
+> retained behind a flag, to a flip procedure, or to a reclaim sweep is **historical** — see the
+> inline notes and ADR-009 for the current state.
 
 ## Context
 
@@ -44,6 +47,9 @@ The just-in-time allocator (`resource-manager.js`, `dynamic-allocation-active.js
 **retained, dormant**, behind `SERENITY_DYNAMIC_ALLOCATION`. It becomes the only mechanism that can
 ever size a child.
 
+> **Reversed (SITES-49206, ADR-009).** The allocator has since been removed, not retained; there is
+> no longer any mechanism that can size a child. See [ADR-009](009-remove-dormant-jit-allocator.md).
+
 ### Evidence
 
 Live probe against the LLMO-Dev-2 parent on `adobe-hackathon.semrush.com`, 2026-07-28. A child
@@ -67,13 +73,18 @@ Every real customer parent read that day carried `limits_enabled: false` with a 
 - **Children provisioned before this change keep their existing carve.** Nothing reclaims it: with
   the release transfers gone, a deactivate no longer returns those units to the parent pool. This is
   accepted — the pools are unmetered and effectively unbounded, so stranded units cost nothing.
-  `scripts/serenity-rightsizing-sweep.mjs` can reclaim them if a pool ever does matter.
+  _(SITES-49206: the `scripts/serenity-rightsizing-sweep.mjs` reclaim tool this line originally
+  pointed at has since been deleted with the allocator — see ADR-009. Stranded carves now have no
+  in-tree remedy; reclamation would have to be re-built if a pool ever does matter.)_
 - The failure mode the carve produced — a capacity refusal surfacing as an opaque `502` — is gone
-  from the lifecycle. The JIT path, which maps the same upstream condition to a typed
-  `409 orgPoolExhausted`, is the only remaining producer of it.
-- **A tenant whose parent enforces limits would get no sizing at all.** This is the risk the
-  retained allocator covers. Nothing detects such a tenant automatically; the operator signal and
-  the flip procedure are documented in `docs/serenity.md` § When to turn the JIT allocator on.
+  from the lifecycle. _(SITES-49206: the JIT path that mapped the same upstream condition to a typed
+  `409 orgPoolExhausted` has since been removed with the allocator — see ADR-009. No lifecycle path
+  produces that condition today.)_
+- **A tenant whose parent enforces limits would get no sizing at all.** _(SITES-49206: this was the
+  risk the retained allocator covered. The allocator, and the "when to turn the JIT allocator on"
+  flip procedure this line pointed at in `docs/serenity.md`, are both removed — see ADR-009. The
+  standing signal is now the `scripts/serenity-metered-405-canary.mjs` per-environment probe; a
+  failure is the trigger to re-introduce the allocator from history, not to flip a flag.)_
 
 ## Alternatives considered
 
@@ -82,8 +93,13 @@ rollback to the carve. Rejected: the flag was `false` in production, so this wou
 failing behaviour switched on by default and required a second decision to actually fix the
 outage — and it preserves in the tree a mechanism the evidence shows can only do harm.
 
-**Delete the JIT allocator alongside the carve.** Rejected: the evidence supports "our parents are
-unmetered", not "no tenant is ever metered". Deleting is a one-way door, and re-deriving block
-rounding, absolute-set transfer semantics, the `workspaceBusy` retry and the cross-container lock
-(ADR-007) is substantial work. It is proven against the post-change starting state — the
+**Delete the JIT allocator alongside the carve.** Rejected _at the time_: the evidence supported "our
+parents are unmetered", not "no tenant is ever metered". Deleting is a one-way door, and re-deriving
+block rounding, absolute-set transfer semantics, the `workspaceBusy` retry and the cross-container
+lock (ADR-007) is substantial work. It is proven against the post-change starting state — the
 integration suite drives the flag-on path end-to-end from a child seeded at `{used: 0, total: 0}`.
+
+> **Subsequently adopted (SITES-49206, ADR-009).** Semrush's confirmation that it no longer enforces
+> AI limits for proxy-routed workspaces, plus the soak, resolved the first objection; the one-way-door
+> cost is accepted, with the design preserved in git history and the `serenity-metered-405-canary.mjs`
+> probe as the standing per-environment check. See [ADR-009](009-remove-dormant-jit-allocator.md).

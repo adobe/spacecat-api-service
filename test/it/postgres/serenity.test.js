@@ -18,6 +18,9 @@ import {
 import serenityTests from '../shared/tests/serenity.js';
 
 serenityTests(() => ctx.httpClient, resetPostgres, resetSemrushMocks, {
+  // setUmMockQuota is intentionally retained though no shared serenity test consumes it today:
+  // the allocator's flag-ON IT went with SITES-49206, but the spacecat-shared §10.5 metered-write
+  // change will re-meter a sub-workspace through the same `__quota` route. See setup.js.
   setUmMockQuota,
   dumpUmMock,
   dumpPeMock,

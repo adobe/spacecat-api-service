@@ -460,11 +460,16 @@ future re-tightening upstream surfaces as a failed canary rather than a silent c
 error. Run it per environment when validating the premise.
 
 > **Removed (SITES-49206):** the just-in-time (JIT) top-up allocator
-> (`SERENITY_DYNAMIC_ALLOCATION`, `resource-manager.js`, `resource-lock.js`, `allocation-metrics.js`)
-> and its operational surface — the "when to turn it on" flip, the zombie-workspace runbook, and the
-> rightsizing sweep — have been deleted. Semrush no longer enforces AI limits for proxy-routed LLMO
-> workspaces, so there is no allocation to top up, exhaust, or reclaim. The no-carve behaviour above
-> is unconditional. See ADR-007 (superseded) and ADR-008.
+> (`SERENITY_DYNAMIC_ALLOCATION`, `resource-manager.js`, `dynamic-allocation-active.js`,
+> `resource-lock.js`) and its operational surface — the "when to turn it on" flip, the
+> zombie-workspace runbook, and the rightsizing sweep — have been deleted. Semrush no longer enforces
+> AI limits for proxy-routed LLMO workspaces, so there is no allocation to top up, exhaust, or
+> reclaim. `allocation-metrics.js` is **trimmed, not deleted** — `recordRejection` and
+> `recordMeteredQuotaClassifier` stay, since the disguised-405 quota classification still uses them.
+> The no-carve behaviour above is unconditional. See
+> [ADR-009](decisions/009-remove-dormant-jit-allocator.md) (the removal), and ADR-007 / ADR-008
+> (superseded).
+
 ## Dev environment smoke tests
 
 After the api-service feature branch deploys to dev, exercise the surface against `https://spacecat.experiencecloud.live/api/ci`.

@@ -455,7 +455,6 @@ describe('provisionBrandSubworkspace', () => {
 
   function makeCleanupTransport(overrides = {}) {
     return {
-      transferWorkspaceResources: sinon.stub().resolves({}),
       listProjects: sinon.stub().resolves({ items: [] }),
       deleteProject: sinon.stub().resolves(null),
       deleteWorkspace: sinon.stub().resolves(null),
@@ -495,7 +494,6 @@ describe('provisionBrandSubworkspace', () => {
       expect(e.status).to.equal(502);
     }
     expect(transport.deleteProject).to.have.been.calledOnceWithExactly(NEW_WS, 'proj-1');
-    expect(transport.transferWorkspaceResources).to.not.have.been.called;
     expect(transport.deleteWorkspace).to.not.have.been.called;
   });
 
@@ -523,7 +521,6 @@ describe('provisionBrandSubworkspace', () => {
       expect(e.status).to.equal(500);
     }
     expect(transport.listProjects.called).to.equal(false);
-    expect(transport.transferWorkspaceResources.called).to.equal(false);
     expect(transport.deleteWorkspace.called).to.equal(false);
   });
 });
@@ -708,7 +705,6 @@ describe('emptyProvisionedWorkspace', () => {
 
   function makeTransport(overrides = {}) {
     return {
-      transferWorkspaceResources: sinon.stub().resolves({}),
       listProjects: sinon.stub().resolves({ items: [] }),
       deleteProject: sinon.stub().resolves(null),
       deleteWorkspace: sinon.stub().resolves(null),
@@ -747,7 +743,6 @@ describe('emptyProvisionedWorkspace', () => {
     const log = { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() };
     await emptyProvisionedWorkspace(buildAuthedContext(), NEW_WS, 'org-1', log);
     expect(transport.deleteProject).to.have.been.calledOnceWithExactly(NEW_WS, 'p1');
-    expect(transport.transferWorkspaceResources).to.not.have.been.called;
     expect(transport.deleteWorkspace.called).to.equal(false);
     expect(log.error.called).to.equal(false);
     expect(log.info.called).to.equal(true);
@@ -773,7 +768,6 @@ describe('emptyProvisionedWorkspace', () => {
     const transport = makeTransport();
     const { emptyProvisionedWorkspace } = await loadWithTransport(transport);
     await emptyProvisionedWorkspace(buildAuthedContext(), '', 'org-1', { error: sinon.stub() });
-    expect(transport.transferWorkspaceResources.called).to.equal(false);
     expect(transport.deleteWorkspace.called).to.equal(false);
   });
 
@@ -841,7 +835,6 @@ describe('defensive branch coverage', () => {
             listProjects,
             deleteProject: sinon.stub().resolves(null),
             deleteWorkspace: sinon.stub().resolves(null),
-            transferWorkspaceResources: sinon.stub().resolves({}),
           }),
           SerenityTransportError,
         },
