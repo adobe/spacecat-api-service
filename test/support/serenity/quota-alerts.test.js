@@ -113,7 +113,11 @@ describe('serenity quota-alerts', () => {
       );
       await alerts.alertQuotaRejection(
         {
-          orgId: 'org-1', brandId: 'brand-1', caseType: 'orgPoolExhausted', dimension: 'prompts',
+          // A distinct caseType proves it participates in the dedup key. `brandCarveExhausted` is
+          // the only case `alertQuotaRejection` emits now (SITES-49206 narrowed QuotaCase), so this
+          // arm uses `rollbackFailed` — another caseType the module still keys on
+          // (alertRollbackFailure).
+          orgId: 'org-1', brandId: 'brand-1', caseType: 'rollbackFailed', dimension: 'prompts',
         },
         ENABLED_ENV,
       );

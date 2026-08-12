@@ -26,6 +26,21 @@
  * design doc says 405s as a disguised quota rejection (as opposed to a genuine Method-Not-Allowed).
  * It prints the raw response status, headers, and body so a human can re-confirm the shape.
  *
+ * SECOND READING (SITES-49206 / ADR-009): after the JIT allocator's removal this script is also the
+ * interim per-environment re-check that Semrush is still NOT enforcing AI limits — and under that
+ * premise its meaning INVERTS the LLMO-6190 labels used below. A publish that SUCCEEDS at zero
+ * headroom is the HEALTHY result (the premise holds); the disguised 405 this was built to capture
+ * now means Semrush is ENFORCING AGAIN — the signal to re-introduce the allocator from history. The
+ * on-screen `expected` / `UNEXPECTED` console text still speaks the fixture-capture language, so it
+ * reads the opposite way from the premise check. `main()` exits 0 in both branches: the operator
+ * reads the printed publish outcome, not an exit code.
+ *
+ * DELETE-LAST COUPLING: this script is the sole remaining caller of the transport's
+ * `transferWorkspaceResources` (the step-2 drain). Deleting this script strands that method, and
+ * deleting that method breaks this script — serenity-docs#72 §10.7 retires the two together with
+ * the §10.6 classifier. The step-1 read `getWorkspaceResources` is NOT part of this coupling:
+ * `elements.js` `checkAccess` (the brand-presence access banner) keeps it alive independently.
+ *
  * WHY THIS CAN'T RUN IN CI OR BE RUN BY the implementing agent: it needs a live IMS bearer token
  * and a real Semrush sub-workspace id — neither exists in this environment. A human with
  * Semrush/IMS dev-environment credentials must run it manually.

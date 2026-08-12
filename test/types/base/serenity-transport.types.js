@@ -52,6 +52,10 @@ export async function transportContractIsEnforced(transport, parentWorkspaceId) 
   // @ts-expect-error - Expected 2 arguments, but got 1.
   await transport.createSubworkspace(parentWorkspaceId);
 
+  // Body shape, derived from the generated contract: `ai` carries unit counts.
+  // @ts-expect-error - string has no properties in common with { projects?, prompts? }.
+  await transport.transferWorkspaceResources(parentWorkspaceId, { ai: 'unlimited' });
+
   // Argument types.
   // @ts-expect-error - number is not assignable to parameter of type string.
   await transport.publishProject(1, 'project-id');

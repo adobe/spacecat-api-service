@@ -41,15 +41,28 @@ Delete the JIT allocator and everything that exists only to serve it:
   re-meter sizing, both of which had the allocator as their only caller;
 - the flag-ON integration path.
 
-Three things at the metered-write boundary are **kept**, none belonging to the allocator any more:
-the publish-retry injection seam (`wrapPublish`, left at its identity default) is retained for
-serenity-docs#72 **§10.3** (quota-405 handling); the disguised-405 quota classification / alerting is
-retained for **§10.6**; and the transport's `getWorkspaceResources` / `transferWorkspaceResources`
-methods stay, because they are no longer allocator-only — the retained §10.7 canary
-(`scripts/serenity-metered-405-canary.mjs`) reads then drains a throwaway sub-workspace through them.
-Those two methods are therefore retired *with the canary* under the same delete-last sequencing, not
-now; deleting either here would break the canary at runtime (it sits outside `tsconfig`/CI, so no
-gate catches it). The no-carve behaviour from ADR-008 is now the only behaviour, unconditional.
+Several surfaces are **kept**, none belonging to the allocator any more, and they have *different*
+lifetimes — do not batch them:
+
+- the publish-retry injection seam (`wrapPublish`, left at its identity default) — retained for
+  serenity-docs#72 **§10.3** (quota-405 handling);
+- the disguised-405 quota classification / alerting — retained for **§10.6**;
+- the transport's **`transferWorkspaceResources`** — its only remaining caller is the retained §10.7
+  metered-405 canary (`scripts/serenity-metered-405-canary.mjs`, which drains a throwaway
+  sub-workspace through it), so it is **canary-scoped**: retired *with* the canary under §10.6/§10.7
+  "delete last";
+- the transport's **`getWorkspaceResources`** — **NOT** canary-scoped: it has a live production
+  caller, `elements.js` `checkAccess` (GET `.../brand-presence/access`, LLMO-6747), which the canary
+  only additionally borrows as its step-1 read. It outlives the canary and must not be deleted with
+  it;
+- the IT `__quota` controls (`setUmMockQuota` / `dumpUmMock` in `test/it/postgres/setup.js`) —
+  retained for the spacecat-shared **§10.5** metered-write change, consumed by no test today (see
+  that file's notes).
+
+Deleting `transferWorkspaceResources` (or the canary) prematurely would break the canary at runtime
+— it sits outside `tsconfig`/CI, so no gate catches it (a strict-tier pin in
+`test/types/strict/serenity-transport-strict.types.js` now guards renames of both transport methods).
+The no-carve behaviour from ADR-008 is now the only behaviour, unconditional.
 
 This adopts the alternative ADR-008 recorded as **"Delete the JIT allocator alongside the carve.
 Rejected."** The two grounds for that earlier rejection have resolved:
@@ -75,8 +88,13 @@ Rejected."** The two grounds for that earlier rejection have resolved:
 - **A tenant whose parent enforces limits would get no sizing, and there is no longer a flip
   procedure.** ADR-008 pointed operators at a "when to turn the JIT allocator on" runbook; that
   section and the allocator it armed are both removed. *For now* the `serenity-metered-405-canary.mjs`
-  probe is the re-check — a **manual** per-environment run whose failure is the trigger to
-  re-introduce the allocator from history, not to re-enable a flag. It is **not** a standing signal:
+  probe is the re-check — a **manual** per-environment run. Read its outcome by what the publish does
+  at zero headroom, not by an exit code (it exits 0 either way): a **publish that succeeds** against
+  zero headroom **confirms the premise** (Semrush is not enforcing), while the **disguised 405** it
+  was originally built to capture now means **Semrush is enforcing again** — the signal to
+  re-introduce the allocator from history, not to re-enable a flag. NB the script's on-screen
+  `expected` / `UNEXPECTED` labels are LLMO-6190 fixture-capture language and read the opposite way
+  round (see its header). It is **not** a standing signal:
   serenity-docs#72 §10.7 retires the probe *together with* the §10.6 classifier ("delete last"), and
   nothing schedules it. The **durable** re-check of the limits-unenforced premise beyond that point is
   an open question that **§10.6 must settle before deleting both** — otherwise every canary pointer

@@ -84,10 +84,13 @@ Every real customer parent read that day carried `limits_enabled: false` with a 
   risk the retained allocator covered. The allocator, and the "when to turn the JIT allocator on"
   flip procedure this line pointed at in `docs/serenity.md`, are both removed — see ADR-009. The
   re-check, for now, is the `scripts/serenity-metered-405-canary.mjs` probe — a **manual**
-  per-environment run whose failure is the trigger to re-introduce the allocator from history, not to
-  flip a flag. It is not a standing signal: serenity-docs#72 §10.7 retires it together with the §10.6
-  classifier, so the durable re-check beyond that point is an open question §10.6 must settle — see
-  ADR-009 Consequences.)_
+  per-environment run read by what the publish does at zero headroom (it exits 0 either way): a
+  publish that **succeeds** confirms the premise, a disguised **405** means Semrush is enforcing again
+  and is the trigger to re-introduce the allocator from history, not to flip a flag. (The script's
+  own `expected`/`UNEXPECTED` labels are LLMO-6190 fixture-capture language and read the opposite way
+  — see its header.) It is not a standing signal: serenity-docs#72 §10.7 retires it together with the
+  §10.6 classifier, so the durable re-check beyond that point is an open question §10.6 must settle —
+  see ADR-009 Consequences.)_
 
 ## Alternatives considered
 

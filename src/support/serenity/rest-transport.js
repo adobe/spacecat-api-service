@@ -1053,10 +1053,11 @@ export function createSerenityTransport({ env, imsToken }) {
      * OWN allocation, not the master pool (live-verified 2026-07-02).
      *
      * NOTE (SITES-49206): the just-in-time allocator that read this before a metered op was removed
-     * once Semrush stopped enforcing AI limits for proxy-routed LLMO workspaces. Its one remaining
-     * caller is the retained metered-405 canary (`scripts/serenity-metered-405-canary.mjs`, step
-     * 1), paired with `transferWorkspaceResources` below; kept until serenity-docs#72 §10.6/§10.7
-     * retire the canary together.
+     * once Semrush stopped enforcing AI limits for proxy-routed LLMO workspaces, but this read has
+     * a live production caller — `elements.js` `checkAccess` (GET .../brand-presence/access,
+     * LLMO-6747) probes it with the user's IMS token and reads a 401/403 as `hasAccess: false`. It
+     * is therefore NOT canary-scoped and outlives the metered-405 canary; do not couple its
+     * lifetime to §10.6/§10.7. (The canary also happens to use it as its step-1 read.)
      *
      * @param {string} workspaceId
      */
@@ -1075,10 +1076,11 @@ export function createSerenityTransport({ env, imsToken }) {
      * NOTE (SITES-49206): the just-in-time allocator that used to call this — `transferOnce` /
      * `transferAndSettle` in the removed `resource-manager.js` — is gone. The sole remaining caller
      * is the retained metered-405 canary (`scripts/serenity-metered-405-canary.mjs`, step 2), which
-     * drains a throwaway sub-workspace to zero prompt headroom to provoke the disguised 405. Kept —
-     * like its `getWorkspaceResources` read pair above — until serenity-docs#72 §10.6/§10.7 retire
-     * the canary together ("delete last"). No production lifecycle path calls this: a child is
-     * created with no allocation and never carries one (see `workspace-lifecycle.js`).
+     * drains a throwaway sub-workspace to zero prompt headroom to provoke the disguised 405. Unlike
+     * `getWorkspaceResources` above (which has a live `elements.js` caller), this method is
+     * canary-scoped: it is retired WITH the canary under serenity-docs#72 §10.6/§10.7 ("delete
+     * last"). No production lifecycle path calls it: a child is created with no allocation and
+     * never carries one (see `workspace-lifecycle.js`).
      *
      * V2 wraps the resources under a `resources` key (WorkspaceResourcesTransferV2Form
      * → createWorkspaceV2Resources); `payload` is the bare resources object

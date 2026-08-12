@@ -41,4 +41,12 @@ export async function unknownMembersAreReported(transport) {
   // A real method must stay clean, so the assertion above cannot pass merely because the
   // whole value went untyped.
   await transport.listLanguages();
+
+  // Compile-time gate for the workspace-resource surface (SITES-49206). Both methods are consumed
+  // off any type-checked call path — `transferWorkspaceResources` only by the metered-405 canary
+  // (`scripts/`, outside `tsconfig`, never run in CI), `getWorkspaceResources` also by
+  // `elements.js` `checkAccess`. Naming them here means a rename or removal in `rest-transport.js`
+  // is reported as TS2339 under the strict tier rather than only breaking the canary at runtime.
+  await transport.getWorkspaceResources('ws-1');
+  await transport.transferWorkspaceResources('ws-1', { ai: { projects: 1, prompts: 1 } });
 }
