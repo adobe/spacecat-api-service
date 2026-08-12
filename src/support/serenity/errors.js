@@ -14,7 +14,7 @@
 
 import { ProjectEngineApiError } from '@adobe/spacecat-shared-project-engine-client';
 import { ErrorWithStatusCode } from '../utils.js';
-import { SerenityTransportError } from './rest-transport.js';
+import { SerenityTransportError } from './serenity-transport-error.js';
 import { recordMeteredQuotaClassifier, recordRejection } from './allocation-metrics.js';
 
 /**

@@ -58,17 +58,20 @@ describe('LLMO Onboarding Functions', () => {
 
     // Default feature_flags stub so all v2-path tests get a working postgrestClient.
     // Individual tests can override with .withArgs('feature_flags') for specific assertions.
-    const defaultUpsertSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
-    const defaultUpsertSelect = sinon.stub().returns({ single: defaultUpsertSingle });
-    const defaultUpsert = sinon.stub().returns({ select: defaultUpsertSelect });
-    const defaultMaybeSingle = sinon.stub().resolves({ data: null, error: null });
-    const defaultEq3 = sinon.stub().returns({ maybeSingle: defaultMaybeSingle });
+    const defaultWriteSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
+    const defaultWriteSelect = sinon.stub().returns({ single: defaultWriteSingle });
+    const defaultInsert = sinon.stub().returns({ select: defaultWriteSelect });
+    const defaultUpdate = sinon.stub().returns({
+      eq: sinon.stub().returns({ select: defaultWriteSelect }),
+    });
+    const defaultEq3 = sinon.stub().resolves({ data: [], error: null });
     const defaultEq2 = sinon.stub().returns({ eq: defaultEq3 });
     const defaultEq1 = sinon.stub().returns({ eq: defaultEq2 });
     const defaultSelect = sinon.stub().returns({ eq: defaultEq1 });
     mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
       select: defaultSelect,
-      upsert: defaultUpsert,
+      insert: defaultInsert,
+      update: defaultUpdate,
     });
 
     // Default brands lookup (LLMO-5556 collision check) — no existing brand,
@@ -300,6 +303,39 @@ describe('LLMO Onboarding Functions', () => {
     };
 
     return deps;
+  };
+
+  // The tier-gated prompt-suggestion helpers (isPayingLlmoSite,
+  // ensurePromptSuggestionSchedules) moved to src/support/prompt-suggestion-schedules.js,
+  // a TRANSITIVE dep of the onboarding controller. esmock's 2nd-arg (local) mocks
+  // only reach the target's direct imports, so the tier-client/entitlement doubles
+  // would NOT reach the shared module. Rather than mock tree-wide with esmock's 3rd
+  // (global) arg — whose per-call cost and cross-test accumulation in
+  // `global.mockKeys` slowed every later esmock in this file past its mocha timeout
+  // (the 25-test hang) — we mock the shared module AT ITS OWN BOUNDARIES (TierClient
+  // + Entitlement) via a nested esmock, then inject that mocked module as a LOCAL dep
+  // of the onboarding controller. The real isPayingLlmoSite / ensurePromptSuggestionSchedules
+  // logic still runs (so createSchedule/submitJob assertions hold), but against the
+  // doubles — and no global esmock state leaks between tests.
+  const SHARED_SCHEDULES_MODULE = '../../../src/support/prompt-suggestion-schedules.js';
+  const TIER_CLIENT_MODULE = '@adobe/spacecat-shared-tier-client';
+  const ENTITLEMENT_MODULE = '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
+  const esmockOnboarding = async (deps) => {
+    // Forward only the shared module's own imports (TierClient + Entitlement) to
+    // the nested mock; anything else in `deps` (drs-client, storages, ...) reaches
+    // the onboarding controller directly as a local mock below.
+    const sharedDeps = {};
+    if (deps[TIER_CLIENT_MODULE]) {
+      sharedDeps[TIER_CLIENT_MODULE] = deps[TIER_CLIENT_MODULE];
+    }
+    if (deps[ENTITLEMENT_MODULE]) {
+      sharedDeps[ENTITLEMENT_MODULE] = deps[ENTITLEMENT_MODULE];
+    }
+    const sharedModule = await esmock(SHARED_SCHEDULES_MODULE, sharedDeps);
+    return esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
+      ...deps,
+      [SHARED_SCHEDULES_MODULE]: sharedModule,
+    });
   };
 
   /**
@@ -1525,8 +1561,7 @@ describe('LLMO Onboarding Functions', () => {
       mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
       // feature_flags: read (mode resolution) + upsert (brandalf enable) tracking
-      const maybeSingle = sinon.stub().resolves({ data: null, error: null });
-      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqFlag = sinon.stub().resolves({ data: [], error: null });
       const eqProduct = sinon.stub().returns({ eq: eqFlag });
       const eqOrg = sinon.stub().returns({ eq: eqProduct });
       const selectRead = sinon.stub().returns({ eq: eqOrg });
@@ -1535,7 +1570,7 @@ describe('LLMO Onboarding Functions', () => {
       const upsertStub = sinon.stub().returns({ select: upsertSelect });
       mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
         select: selectRead,
-        upsert: upsertStub,
+        insert: upsertStub,
       });
 
       const mockConfig = createMockConfig();
@@ -1554,8 +1589,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
       const mockUpsertBrand = sinon.stub().resolves({ id: 'brand-x' });
 
-      const { performLlmoOnboarding: onboard } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { performLlmoOnboarding: onboard } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockTierClient,
           mockTracingFetch,
@@ -1636,8 +1670,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
       const mockUpsertBrand = sinon.stub().resolves({ id: 'brand-x' });
 
-      const { performLlmoOnboarding: onboard } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { performLlmoOnboarding: onboard } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockTierClient,
           mockTracingFetch,
@@ -1701,8 +1734,7 @@ describe('LLMO Onboarding Functions', () => {
       const { mockDrsClient } = buildTrackableDrsClient();
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
 
-      const { performLlmoOnboarding: onboard } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { performLlmoOnboarding: onboard } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockTierClient,
           mockTracingFetch,
@@ -1761,8 +1793,7 @@ describe('LLMO Onboarding Functions', () => {
       const { mockDrsClient } = buildTrackableDrsClient();
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
 
-      const { performLlmoOnboarding: onboard } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { performLlmoOnboarding: onboard } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockTierClient,
           mockTracingFetch,
@@ -1846,8 +1877,7 @@ describe('LLMO Onboarding Functions', () => {
 
       // Stub postgrestClient for feature flag read (resolveLlmoOnboardingMode)
       // and upsert (enabling brandalf during v2 onboarding)
-      const maybeSingle = sinon.stub().resolves({ data: null, error: null });
-      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqFlag = sinon.stub().resolves({ data: [], error: null });
       const eqProduct = sinon.stub().returns({ eq: eqFlag });
       const eqOrg = sinon.stub().returns({ eq: eqProduct });
       const selectRead = sinon.stub().returns({ eq: eqOrg });
@@ -1861,7 +1891,7 @@ describe('LLMO Onboarding Functions', () => {
       const upsertStub = sinon.stub().returns({ select: upsertSelect });
       mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
         select: selectRead,
-        upsert: upsertStub,
+        insert: upsertStub,
       });
 
       // Use helper functions for common mocks
@@ -1885,8 +1915,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockUpsertBrand = sinon.stub().resolves({ id: 'brand-123', name: 'Test Brand' });
 
       // Mock the Config import
-      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockTierClient,
           mockTracingFetch,
@@ -2079,8 +2108,7 @@ describe('LLMO Onboarding Functions', () => {
       mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
       // Feature flag postgrest mock
-      const maybeSingle = sinon.stub().resolves({ data: null, error: null });
-      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqFlag = sinon.stub().resolves({ data: [], error: null });
       const eqProduct = sinon.stub().returns({ eq: eqFlag });
       const eqOrg = sinon.stub().returns({ eq: eqProduct });
       const selectRead = sinon.stub().returns({ eq: eqOrg });
@@ -2089,7 +2117,7 @@ describe('LLMO Onboarding Functions', () => {
       const upsertStub = sinon.stub().returns({ select: upsertSelect });
       mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
         select: selectRead,
-        upsert: upsertStub,
+        insert: upsertStub,
       });
 
       // upsertBrand throws — should not block onboarding
@@ -2107,8 +2135,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockDrsClient = createMockDrsClient();
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
 
-      const { performLlmoOnboarding: onboardWithMocks } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { performLlmoOnboarding: onboardWithMocks } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockTierClient,
           mockTracingFetch,
@@ -2186,8 +2213,7 @@ describe('LLMO Onboarding Functions', () => {
       mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
       // Feature flag postgrest mock
-      const maybeSingle = sinon.stub().resolves({ data: null, error: null });
-      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqFlag = sinon.stub().resolves({ data: [], error: null });
       const eqProduct = sinon.stub().returns({ eq: eqFlag });
       const eqOrg = sinon.stub().returns({ eq: eqProduct });
       const selectRead = sinon.stub().returns({ eq: eqOrg });
@@ -2196,7 +2222,7 @@ describe('LLMO Onboarding Functions', () => {
       const upsertStub = sinon.stub().returns({ select: upsertSelect });
       mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
         select: selectRead,
-        upsert: upsertStub,
+        insert: upsertStub,
       });
 
       // Existing brand with the same name already points at a DIFFERENT site.
@@ -2225,8 +2251,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockDrsClient = createMockDrsClient();
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
 
-      const { performLlmoOnboarding: onboardWithMocks } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { performLlmoOnboarding: onboardWithMocks } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockTierClient,
           mockTracingFetch,
@@ -2294,8 +2319,7 @@ describe('LLMO Onboarding Functions', () => {
       mockDataAccess.Site.create.resolves(mockSite);
       mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
-      const maybeSingle = sinon.stub().resolves({ data: null, error: null });
-      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqFlag = sinon.stub().resolves({ data: [], error: null });
       const eqProduct = sinon.stub().returns({ eq: eqFlag });
       const eqOrg = sinon.stub().returns({ eq: eqProduct });
       const selectRead = sinon.stub().returns({ eq: eqOrg });
@@ -2304,7 +2328,7 @@ describe('LLMO Onboarding Functions', () => {
       const upsertStub = sinon.stub().returns({ select: upsertSelect });
       mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
         select: selectRead,
-        upsert: upsertStub,
+        insert: upsertStub,
       });
 
       // Brand lookup returns a PostgREST error (does not throw).
@@ -2333,8 +2357,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockDrsClient = createMockDrsClient();
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
 
-      const { performLlmoOnboarding: onboardWithMocks } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { performLlmoOnboarding: onboardWithMocks } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockTierClient,
           mockTracingFetch,
@@ -2400,8 +2423,7 @@ describe('LLMO Onboarding Functions', () => {
       mockDataAccess.Site.create.resolves(mockSite);
       mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
-      const maybeSingle = sinon.stub().resolves({ data: null, error: null });
-      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqFlag = sinon.stub().resolves({ data: [], error: null });
       const eqProduct = sinon.stub().returns({ eq: eqFlag });
       const eqOrg = sinon.stub().returns({ eq: eqProduct });
       const selectRead = sinon.stub().returns({ eq: eqOrg });
@@ -2410,7 +2432,7 @@ describe('LLMO Onboarding Functions', () => {
       const upsertStub = sinon.stub().returns({ select: upsertSelect });
       mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
         select: selectRead,
-        upsert: upsertStub,
+        insert: upsertStub,
       });
 
       // Existing brand exists by name but has no primary site (site_id null) —
@@ -2440,8 +2462,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockDrsClient = createMockDrsClient();
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
 
-      const { performLlmoOnboarding: onboardWithMocks } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { performLlmoOnboarding: onboardWithMocks } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockTierClient,
           mockTracingFetch,
@@ -2505,8 +2526,7 @@ describe('LLMO Onboarding Functions', () => {
       mockDataAccess.Site.create.resolves(mockSite);
       mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
-      const maybeSingle = sinon.stub().resolves({ data: null, error: null });
-      const eqFlag = sinon.stub().returns({ maybeSingle });
+      const eqFlag = sinon.stub().resolves({ data: [], error: null });
       const eqProduct = sinon.stub().returns({ eq: eqFlag });
       const eqOrg = sinon.stub().returns({ eq: eqProduct });
       const selectRead = sinon.stub().returns({ eq: eqOrg });
@@ -2515,7 +2535,7 @@ describe('LLMO Onboarding Functions', () => {
       const upsertStub = sinon.stub().returns({ select: upsertSelect });
       mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
         select: selectRead,
-        upsert: upsertStub,
+        insert: upsertStub,
       });
 
       // Existing brand already points at THIS site (same-site re-onboard) — no
@@ -2545,8 +2565,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockDrsClient = createMockDrsClient();
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
 
-      const { performLlmoOnboarding: onboardWithMocks } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { performLlmoOnboarding: onboardWithMocks } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockTierClient,
           mockTracingFetch,
@@ -2607,15 +2626,23 @@ describe('LLMO Onboarding Functions', () => {
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
 
-      const maybeSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
-      const eqFlag = sinon.stub().returns({ maybeSingle });
+      // The org already carries the brandalf row, so the flag write updates it.
+      const eqFlag = sinon.stub().resolves({
+        data: [{ id: 'flag-row-1', flag_value: true }],
+        error: null,
+      });
       const eqProduct = sinon.stub().returns({ eq: eqFlag });
       const eqOrg = sinon.stub().returns({ eq: eqProduct });
       const select = sinon.stub().returns({ eq: eqOrg });
       const upsertSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
       const upsertSelect = sinon.stub().returns({ single: upsertSingle });
-      const upsertStub = sinon.stub().returns({ select: upsertSelect });
-      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({ select, upsert: upsertStub });
+      const upsertStub = sinon.stub().returns({
+        eq: sinon.stub().returns({ select: upsertSelect }),
+      });
+      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
+        select,
+        update: upsertStub,
+      });
 
       mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
       mockDataAccess.Site.findByBaseURL.resolves(null);
@@ -2636,8 +2663,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
       const mockDetectCdnForDomain = sinon.stub().resolves('aem-cs-fastly');
 
-      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockTierClient,
           mockTracingFetch,
@@ -2699,15 +2725,23 @@ describe('LLMO Onboarding Functions', () => {
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
 
-      const maybeSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
-      const eqFlag = sinon.stub().returns({ maybeSingle });
+      // The org already carries the brandalf row, so the flag write updates it.
+      const eqFlag = sinon.stub().resolves({
+        data: [{ id: 'flag-row-1', flag_value: true }],
+        error: null,
+      });
       const eqProduct = sinon.stub().returns({ eq: eqFlag });
       const eqOrg = sinon.stub().returns({ eq: eqProduct });
       const select = sinon.stub().returns({ eq: eqOrg });
       const upsertSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
       const upsertSelect = sinon.stub().returns({ single: upsertSingle });
-      const upsertStub = sinon.stub().returns({ select: upsertSelect });
-      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({ select, upsert: upsertStub });
+      const upsertStub = sinon.stub().returns({
+        eq: sinon.stub().returns({ select: upsertSelect }),
+      });
+      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
+        select,
+        update: upsertStub,
+      });
 
       mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
       mockDataAccess.Site.findByBaseURL.resolves(null);
@@ -2728,8 +2762,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
       const mockDetectCdnForDomain = sinon.stub().resolves('byocdn-other');
 
-      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockTierClient,
           mockTracingFetch,
@@ -2790,15 +2823,23 @@ describe('LLMO Onboarding Functions', () => {
         getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
 
-      const maybeSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
-      const eqFlag = sinon.stub().returns({ maybeSingle });
+      // The org already carries the brandalf row, so the flag write updates it.
+      const eqFlag = sinon.stub().resolves({
+        data: [{ id: 'flag-row-1', flag_value: true }],
+        error: null,
+      });
       const eqProduct = sinon.stub().returns({ eq: eqFlag });
       const eqOrg = sinon.stub().returns({ eq: eqProduct });
       const select = sinon.stub().returns({ eq: eqOrg });
       const upsertSingle = sinon.stub().resolves({ data: { flag_value: true }, error: null });
       const upsertSelect = sinon.stub().returns({ single: upsertSingle });
-      const upsertStub = sinon.stub().returns({ select: upsertSelect });
-      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({ select, upsert: upsertStub });
+      const upsertStub = sinon.stub().returns({
+        eq: sinon.stub().returns({ select: upsertSelect }),
+      });
+      mockDataAccess.services.postgrestClient.from.withArgs('feature_flags').returns({
+        select,
+        update: upsertStub,
+      });
 
       mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
       mockDataAccess.Site.findByBaseURL.resolves(null);
@@ -2819,8 +2860,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
       const mockDetectCdnForDomain = sinon.stub().rejects(new Error('DNS exploded'));
 
-      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockTierClient,
           mockTracingFetch,
@@ -2901,8 +2941,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockDrsClient = createMockDrsClient();
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
 
-      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockTierClient,
           mockTracingFetch,
@@ -2996,8 +3035,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockDrsClient = createMockDrsClient();
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
 
-      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockTierClient,
           mockTracingFetch,
@@ -3088,8 +3126,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockDrsClient = createMockDrsClient(sinon, { isConfigured: false });
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
 
-      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockTierClient,
           mockTracingFetch,
@@ -3170,8 +3207,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockDrsClient = createMockDrsClient(sinon, { submitPromptGenerationJob });
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
 
-      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockTierClient,
           mockTracingFetch,
@@ -3255,8 +3291,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockDrsClient = createMockDrsClient();
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
 
-      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockTierClient,
           mockTracingFetch,
@@ -3344,8 +3379,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockDrsClient = createMockDrsClient(sinon, { submitPromptGenerationJob });
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
 
-      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockTierClient,
           mockTracingFetch,
@@ -3433,8 +3467,7 @@ describe('LLMO Onboarding Functions', () => {
       // DRS client not configured
       const mockDrsClient = createMockDrsClient(sinon, { isConfigured: false });
 
-      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockTierClient,
           mockTracingFetch,
@@ -3525,8 +3558,7 @@ describe('LLMO Onboarding Functions', () => {
         submitJob: sinon.stub().rejects(new Error('Brandalf API connection failed')),
       });
 
-      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockTierClient,
           mockTracingFetch,
@@ -3615,8 +3647,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockOctokit = createMockOctokit(sinon, { sha: 'test-sha-456' });
 
       // Mock the module
-      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockTierClient,
           mockTracingFetch,
@@ -3705,8 +3736,7 @@ describe('LLMO Onboarding Functions', () => {
       );
       const mockOctokit = createMockOctokit();
 
-      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockTierClient,
           mockTracingFetch,
@@ -3785,8 +3815,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockOctokit = createMockOctokit();
       const { repos: { createOrUpdateFileContents } } = mockOctokit();
 
-      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockTierClient,
           mockTracingFetch,
@@ -3907,8 +3936,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockOctokit = createMockOctokit();
 
       // Mock the Config import
-      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockTierClient,
           mockTracingFetch,
@@ -4392,8 +4420,7 @@ describe('LLMO Onboarding Functions', () => {
 
   describe('ensureInitialCustomerConfigV2', () => {
     it('throws when PostgREST is not available', async () => {
-      const { ensureInitialCustomerConfigV2 } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { ensureInitialCustomerConfigV2 } = await esmockOnboarding(
         createCommonEsmockDependencies(),
       );
 
@@ -4421,8 +4448,7 @@ describe('LLMO Onboarding Functions', () => {
 
     it('creates and writes the initial v2 config when one does not exist', async () => {
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
-      const { ensureInitialCustomerConfigV2 } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { ensureInitialCustomerConfigV2 } = await esmockOnboarding(
         createCommonEsmockDependencies({ mockCustomerConfigV2Storage }),
       );
 
@@ -4470,8 +4496,7 @@ describe('LLMO Onboarding Functions', () => {
 
     it('uses authInfo.getProfile email when profile.email is not available', async () => {
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage();
-      const { ensureInitialCustomerConfigV2 } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { ensureInitialCustomerConfigV2 } = await esmockOnboarding(
         createCommonEsmockDependencies({ mockCustomerConfigV2Storage }),
       );
 
@@ -4511,8 +4536,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage(sinon, {
         readCustomerConfigV2FromPostgres: sinon.stub().resolves(existingConfig),
       });
-      const { ensureInitialCustomerConfigV2 } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { ensureInitialCustomerConfigV2 } = await esmockOnboarding(
         createCommonEsmockDependencies({ mockCustomerConfigV2Storage }),
       );
 
@@ -4546,8 +4570,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage(sinon, {
         readCustomerConfigV2FromPostgres: sinon.stub().resolves(existingConfig),
       });
-      const { ensureInitialCustomerConfigV2 } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { ensureInitialCustomerConfigV2 } = await esmockOnboarding(
         createCommonEsmockDependencies({ mockCustomerConfigV2Storage }),
       );
 
@@ -4598,8 +4621,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage(sinon, {
         readCustomerConfigV2FromPostgres: sinon.stub().resolves(existingConfig),
       });
-      const { ensureInitialCustomerConfigV2 } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { ensureInitialCustomerConfigV2 } = await esmockOnboarding(
         createCommonEsmockDependencies({ mockCustomerConfigV2Storage }),
       );
 
@@ -4633,8 +4655,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage(sinon, {
         readCustomerConfigV2FromPostgres: sinon.stub().resolves(existingConfig),
       });
-      const { ensureInitialCustomerConfigV2 } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { ensureInitialCustomerConfigV2 } = await esmockOnboarding(
         createCommonEsmockDependencies({ mockCustomerConfigV2Storage }),
       );
 
@@ -4661,8 +4682,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockCustomerConfigV2Storage = createMockCustomerConfigV2Storage(sinon, {
         readCustomerConfigV2FromPostgres: sinon.stub().resolves(existingConfig),
       });
-      const { ensureInitialCustomerConfigV2 } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { ensureInitialCustomerConfigV2 } = await esmockOnboarding(
         createCommonEsmockDependencies({ mockCustomerConfigV2Storage }),
       );
 
@@ -5873,7 +5893,7 @@ describe('LLMO Onboarding Functions', () => {
           provider_id: providerId,
           source: 'onboarding',
           priority: 'HIGH',
-          parameters: { siteId: 'site-123' },
+          parameters: { site_id: 'site-123' },
         });
         expect(result).to.deep.equal({ job_id: 'job-1' });
         expect(log.info).to.have.been.calledWithMatch(/Submitted one-time DRS/);
@@ -5937,47 +5957,49 @@ describe('LLMO Onboarding Functions', () => {
       expect(log.info).to.have.been.calledWithMatch(/prompt_generation_semrush/);
     });
 
-    it('registerPromptSuggestionSchedules resolves to a completion sentinel on success (paying)', async () => {
-      // The caller distinguishes "finished" from a settleWithin timeout by this
-      // sentinel (timeout resolves to the null fallback instead).
+    it('ensurePromptSuggestionSchedules returns per-pipeline results on success (paying)', async () => {
+      // The onboarding caller distinguishes "finished" from a settleWithin timeout
+      // by a truthy return (timeout resolves to the null fallback instead).
       const drsClient = buildDrsClient(
         sandbox.stub().resolves({ scheduleId: 'sched-1', alreadyExisted: false }),
       );
-      const result = await onboardingModule.registerPromptSuggestionSchedules({
+      const result = await onboardingModule.ensurePromptSuggestionSchedules({
         drsClient,
         siteId: 'site-123',
         isPaying: true,
         log: buildLog(),
         say: sandbox.stub(),
       });
-      expect(result).to.deep.equal({ completed: true });
+      expect(result.allSucceeded).to.equal(true);
+      expect(result.results.map((r) => r.status)).to.deep.equal(['created', 'created', 'created']);
       // Paying → recurring schedule per pipeline, no one-shot submits.
       expect(drsClient.createSchedule).to.have.been.calledThrice;
       expect(drsClient.submitJob).to.not.have.been.called;
     });
 
-    it('registerPromptSuggestionSchedules submits one-time runs (no schedules) for a trial site', async () => {
+    it('ensurePromptSuggestionSchedules submits one-time runs (no schedules) for a trial site', async () => {
       const drsClient = buildDrsClient();
-      const result = await onboardingModule.registerPromptSuggestionSchedules({
+      const result = await onboardingModule.ensurePromptSuggestionSchedules({
         drsClient,
         siteId: 'site-123',
         isPaying: false,
         log: buildLog(),
         say: sandbox.stub(),
       });
-      expect(result).to.deep.equal({ completed: true });
+      expect(result.allSucceeded).to.equal(true);
+      expect(result.results.map((r) => r.status)).to.deep.equal(['submitted', 'submitted', 'submitted']);
       // Trial → one-shot submitJob per pipeline, no recurring schedules.
       expect(drsClient.submitJob).to.have.been.calledThrice;
       expect(drsClient.createSchedule).to.not.have.been.called;
     });
 
-    it('registerPromptSuggestionSchedules resolves to the sentinel when DRS is not configured', async () => {
+    it('ensurePromptSuggestionSchedules short-circuits (empty results) when DRS is not configured', async () => {
       const drsClient = buildDrsClient(sandbox.stub());
       drsClient.isConfigured = sandbox.stub().returns(false);
-      const result = await onboardingModule.registerPromptSuggestionSchedules({
+      const result = await onboardingModule.ensurePromptSuggestionSchedules({
         drsClient, siteId: 'site-123', isPaying: true, log: buildLog(), say: sandbox.stub(),
       });
-      expect(result).to.deep.equal({ completed: true });
+      expect(result).to.deep.equal({ results: [], allSucceeded: true });
       expect(drsClient.createSchedule).to.not.have.been.called;
       expect(drsClient.submitJob).to.not.have.been.called;
     });
@@ -6023,8 +6045,7 @@ describe('LLMO Onboarding Functions', () => {
 
     it('registers all three prompt-suggestion schedules after the Brandalf trigger', async () => {
       const mockDrsClient = createMockDrsClient(sandbox);
-      const { activateBrandAndGeneratePrompts } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { activateBrandAndGeneratePrompts } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockDrsClient,
           mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
@@ -6049,8 +6070,7 @@ describe('LLMO Onboarding Functions', () => {
 
     it('submits one-time runs (no schedules) for a FREE_TRIAL site', async () => {
       const mockDrsClient = createMockDrsClient(sandbox);
-      const { activateBrandAndGeneratePrompts } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { activateBrandAndGeneratePrompts } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockDrsClient,
           mockTierClient: createMockTierClientForTier('FREE_TRIAL', sandbox),
@@ -6067,7 +6087,7 @@ describe('LLMO Onboarding Functions', () => {
       // submitJob = 1 Brandalf + 3 one-shot pipeline runs.
       expect(instance.submitJob.callCount).to.equal(4);
       const oneShotCalls = instance.submitJob.getCalls()
-        .filter((c) => c.args[0].source === 'onboarding' && c.args[0].parameters?.siteId === 'site-123');
+        .filter((c) => c.args[0].source === 'onboarding' && c.args[0].parameters?.site_id === 'site-123');
       const providerIds = oneShotCalls.map((c) => c.args[0].provider_id);
       expect(providerIds).to.have.members([
         'prompt_generation_semrush',
@@ -6084,8 +6104,7 @@ describe('LLMO Onboarding Functions', () => {
           checkValidEntitlement: sandbox.stub().rejects(new Error('tier lookup boom')),
         }),
       };
-      const { activateBrandAndGeneratePrompts } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { activateBrandAndGeneratePrompts } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockDrsClient,
           mockTierClient: failingTierClient,
@@ -6111,8 +6130,7 @@ describe('LLMO Onboarding Functions', () => {
           checkValidEntitlement: sandbox.stub().resolves({}),
         }),
       };
-      const { activateBrandAndGeneratePrompts } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { activateBrandAndGeneratePrompts } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockDrsClient,
           mockTierClient: noEntitlementTierClient,
@@ -6136,8 +6154,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockDrsClient = createMockDrsClient(sandbox, {
         createSchedule: sandbox.stub().rejects(err),
       });
-      const { activateBrandAndGeneratePrompts } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { activateBrandAndGeneratePrompts } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockDrsClient,
           mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
@@ -6172,8 +6189,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockDrsClient = createMockDrsClient(sandbox, {
         createSchedule: sandbox.stub().rejects(err),
       });
-      const { activateBrandAndGeneratePrompts } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { activateBrandAndGeneratePrompts } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockDrsClient,
           mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
@@ -6200,8 +6216,7 @@ describe('LLMO Onboarding Functions', () => {
       createSchedule.resolves({ scheduleId: 'sched-ok', alreadyExisted: false });
 
       const mockDrsClient = createMockDrsClient(sandbox, { createSchedule });
-      const { activateBrandAndGeneratePrompts } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { activateBrandAndGeneratePrompts } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockDrsClient,
           mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
@@ -6230,8 +6245,7 @@ describe('LLMO Onboarding Functions', () => {
       // onboarding resolves.
       const createFromErr = new Error('DRS client init boom');
       const mockDrsClient = { createFrom: sandbox.stub().throws(createFromErr) };
-      const { activateBrandAndGeneratePrompts } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { activateBrandAndGeneratePrompts } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockDrsClient,
           mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
@@ -6257,8 +6271,7 @@ describe('LLMO Onboarding Functions', () => {
       try {
         const createSchedule = sandbox.stub().returns(new Promise(() => {})); // never settles
         const mockDrsClient = createMockDrsClient(sandbox, { createSchedule });
-        const { activateBrandAndGeneratePrompts } = await esmock(
-          '../../../src/controllers/llmo/llmo-onboarding.js',
+        const { activateBrandAndGeneratePrompts } = await esmockOnboarding(
           createCommonEsmockDependencies({
             mockDrsClient,
             mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
@@ -6294,8 +6307,7 @@ describe('LLMO Onboarding Functions', () => {
             checkValidEntitlement: sandbox.stub().returns(new Promise(() => {})),
           }),
         };
-        const { activateBrandAndGeneratePrompts } = await esmock(
-          '../../../src/controllers/llmo/llmo-onboarding.js',
+        const { activateBrandAndGeneratePrompts } = await esmockOnboarding(
           createCommonEsmockDependencies({
             mockDrsClient,
             mockTierClient: hangingTierClient,
@@ -6328,8 +6340,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockDrsClient = createMockDrsClient(sandbox, {
         submitJob: sandbox.stub().rejects(err),
       });
-      const { activateBrandAndGeneratePrompts } = await esmock(
-        '../../../src/controllers/llmo/llmo-onboarding.js',
+      const { activateBrandAndGeneratePrompts } = await esmockOnboarding(
         createCommonEsmockDependencies({
           mockDrsClient,
           mockTierClient: createMockTierClientForTier('FREE_TRIAL', sandbox),

@@ -113,6 +113,9 @@ function isStaticRoute(routePattern) {
  * @param {Object} onboardingController - Semrush onboarding notification controller.
  * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
  * @param {Object} auditPolicyController - Audit policy + audit scope controller.
+ * @param {Object} opportunityValidationController - On-demand opportunity validation
+ *   controller.
+ * @param {Object} promptSuggestionSchedulesController - LLMO prompt-suggestion schedule controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -183,6 +186,8 @@ export default function getRouteHandlers(
   onboardingController,
   redirectsController,
   auditPolicyController,
+  opportunityValidationController,
+  promptSuggestionSchedulesController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -390,6 +395,7 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/opportunities': opportunitiesController.createOpportunity,
     'PATCH /sites/:siteId/opportunities/:opportunityId': opportunitiesController.patchOpportunity,
     'DELETE /sites/:siteId/opportunities/:opportunityId': opportunitiesController.removeOpportunity,
+    'POST /sites/:siteId/opportunities/:opportunityId/validate': opportunityValidationController.triggerValidation,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions': suggestionsController.getAllForOpportunity,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit/:cursor': suggestionsController.getAllForOpportunityPaged,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit': suggestionsController.getAllForOpportunityPaged,
@@ -410,8 +416,10 @@ export default function getRouteHandlers(
     'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.removeSuggestion,
     'GET /sites/:siteId/geo-experiments': suggestionsController.listGeoExperiments,
     'GET /sites/:siteId/geo-experiments/:geoExperimentId': suggestionsController.getGeoExperiment,
+    'GET /sites/:siteId/geo-experiments/:geoExperimentId/results': suggestionsController.getGeoExperimentResults,
     'PATCH /sites/:siteId/geo-experiments/:geoExperimentId': suggestionsController.patchGeoExperiment,
     'DELETE /sites/:siteId/geo-experiments/:geoExperimentId': suggestionsController.deleteGeoExperiment,
+    'POST /sites/:siteId/geo-experiments/:geoExperimentId/trigger-impact-measurement': suggestionsController.triggerImpactMeasurement,
     'GET /sites/:siteId/traffic/paid': paidController.getTopPaidPages,
     'GET /sites/:siteId/traffic/paid/page-type-platform-campaign': trafficController.getPaidTrafficByPageTypePlatformCampaign,
     'GET /sites/:siteId/traffic/paid/url-page-type': trafficController.getPaidTrafficByUrlPageType,
@@ -588,6 +596,7 @@ export default function getRouteHandlers(
     'POST /v2/orgs/:spaceCatId/llmo/onboard-site': llmoController.onboardSiteOnly,
     'POST /llmo/onboard/update-query-index': llmoController.updateQueryIndex,
     'POST /sites/:siteId/llmo/offboard': llmoController.offboardCustomer,
+    'POST /sites/:siteId/prompt-suggestion-schedules': promptSuggestionSchedulesController.createSchedules,
     'POST /sites/:siteId/llmo/edge-optimize-config': llmoController.createOrUpdateEdgeConfig,
     'GET /sites/:siteId/llmo/edge-optimize-config': llmoController.getEdgeConfig,
     'POST /sites/:siteId/llmo/edge-optimize-config/stage': llmoController.createOrUpdateStageEdgeConfig,
@@ -712,6 +721,8 @@ export default function getRouteHandlers(
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/domain-urls': llmoMysticatController.getUrlInspectorDomainUrls,
     'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/url-prompts': llmoMysticatController.getUrlInspectorUrlPrompts,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/url-prompts': llmoMysticatController.getUrlInspectorUrlPrompts,
+    'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/prompts-by-url': llmoMysticatController.getUrlInspectorPromptsByUrl,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/prompts-by-url': llmoMysticatController.getUrlInspectorPromptsByUrl,
     'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/filter-dimensions': llmoMysticatController.getUrlInspectorFilterDimensions,
     'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/filter-dimensions': llmoMysticatController.getUrlInspectorFilterDimensions,
 
@@ -746,6 +757,7 @@ export default function getRouteHandlers(
     'PATCH /trial-users/email-preferences': trialUserController.updateEmailPreferences,
     'GET /organizations/:organizationId/entitlements': entitlementController.getByOrganizationID,
     'POST /organizations/:organizationId/entitlements': entitlementController.createEntitlement,
+    'PATCH /organizations/:organizationId/entitlements': entitlementController.patchEntitlement,
     'POST /sites/:siteId/entitlements': entitlementController.createSiteEntitlement,
     'GET /organizations/:organizationId/feature-flags': featureFlagsController.listByOrganization,
     'PUT /organizations/:organizationId/feature-flags/:product/:flagName':
@@ -844,17 +856,41 @@ export default function getRouteHandlers(
     'GET /llmo/ai-visibility/v1/topic/gap-topics': aiVisibilityController.getV1TopicGapTopics,
     'GET /llmo/ai-visibility/v1/topic/gap-topics-export': aiVisibilityController.getV1TopicGapTopicsExport,
     'GET /llmo/ai-visibility/v1/topic/gap-topics-totals': aiVisibilityController.getV1TopicGapTopicsTotals,
+    'GET /llmo/ai-visibility/v1/topic/metrics-by-fts': aiVisibilityController.getV1TopicMetricsByFts,
+    'GET /llmo/ai-visibility/v1/topic/topics-by-fts': aiVisibilityController.getV1TopicTopicsByFts,
+    'GET /llmo/ai-visibility/v1/topic/topics-by-fts-export': aiVisibilityController.getV1TopicTopicsByFtsExport,
+    'GET /llmo/ai-visibility/v1/topic/topics-by-fts-totals': aiVisibilityController.getV1TopicTopicsByFtsTotals,
     'GET /llmo/ai-visibility/v1/prompt/brand-prompts': aiVisibilityController.getV1PromptBrandPrompts,
     'GET /llmo/ai-visibility/v1/prompt/brand-prompts-export': aiVisibilityController.getV1PromptBrandPromptsExport,
     'GET /llmo/ai-visibility/v1/prompt/gap-prompts': aiVisibilityController.getV1PromptGapPrompts,
     'GET /llmo/ai-visibility/v1/prompt/gap-prompts-export': aiVisibilityController.getV1PromptGapPromptsExport,
     'GET /llmo/ai-visibility/v1/prompt/gap-prompts-totals': aiVisibilityController.getV1PromptGapPromptsTotals,
+    'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts': aiVisibilityController.getV1PromptPromptsByTopicFts,
+    'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-export': aiVisibilityController.getV1PromptPromptsByTopicFtsExport,
+    'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-totals': aiVisibilityController.getV1PromptPromptsByTopicFtsTotals,
+    'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids': aiVisibilityController.getV1PromptPromptsByTopicIds,
+    'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids-totals': aiVisibilityController.getV1PromptPromptsByTopicIdsTotals,
     'GET /llmo/ai-visibility/v1/prompt/prompt-response': aiVisibilityController.getV1PromptPromptResponse,
     'GET /llmo/ai-visibility/v1/source/gap-source-domains': aiVisibilityController.getV1SourceGapSourceDomains,
     'GET /llmo/ai-visibility/v1/source/gap-source-domains-export': aiVisibilityController.getV1SourceGapSourceDomainsExport,
     'GET /llmo/ai-visibility/v1/source/gap-source-domains-totals': aiVisibilityController.getV1SourceGapSourceDomainsTotals,
+    'GET /llmo/ai-visibility/v1/source/cited-pages': aiVisibilityController.getV1SourceCitedPages,
+    'GET /llmo/ai-visibility/v1/source/cited-pages-export': aiVisibilityController.getV1SourceCitedPagesExport,
+    'GET /llmo/ai-visibility/v1/source/cited-pages-totals': aiVisibilityController.getV1SourceCitedPagesTotals,
+    'GET /llmo/ai-visibility/v1/source/cited-sources': aiVisibilityController.getV1SourceCitedSources,
+    'GET /llmo/ai-visibility/v1/source/cited-sources-export': aiVisibilityController.getV1SourceCitedSourcesExport,
+    'GET /llmo/ai-visibility/v1/source/cited-sources-totals': aiVisibilityController.getV1SourceCitedSourcesTotals,
     'GET /llmo/ai-visibility/v1/brand/stats-by-country': aiVisibilityController.getV1BrandStatsByCountry,
     'GET /llmo/ai-visibility/v1/brand/stats-by-llm': aiVisibilityController.getV1BrandStatsByLlm,
+    'GET /llmo/ai-visibility/v1/brand/competitors': aiVisibilityController.getV1BrandCompetitors,
+    'GET /llmo/ai-visibility/v1/brand/competitors-stats': aiVisibilityController.getV1BrandCompetitorsStats,
+    'GET /llmo/ai-visibility/v1/brand/top-brands': aiVisibilityController.getV1BrandTopBrands,
+    'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts': aiVisibilityController.getV1BrandBrandsByTopicFts,
+    'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts-export': aiVisibilityController.getV1BrandBrandsByTopicFtsExport,
+    'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts-totals': aiVisibilityController.getV1BrandBrandsByTopicFtsTotals,
+    'GET /llmo/ai-visibility/v1/source/source-domains-by-topic-fts': aiVisibilityController.getV1SourceSourceDomainsByTopicFts,
+    'GET /llmo/ai-visibility/v1/source/source-domains-by-topic-fts-export': aiVisibilityController.getV1SourceSourceDomainsByTopicFtsExport,
+    'GET /llmo/ai-visibility/v1/source/source-domains-by-topic-fts-totals': aiVisibilityController.getV1SourceSourceDomainsByTopicFtsTotals,
     'GET /llmo/ai-visibility/v1/meta/meta': aiVisibilityController.getV1MetaMeta,
     'GET /llmo/ai-visibility/v1/prompt-research/prompts-export': aiVisibilityController.getV1PromptResearchPromptsExport,
     'GET /llmo/ai-visibility/v1/prompt-research/brands-export': aiVisibilityController.getV1PromptResearchBrandsExport,

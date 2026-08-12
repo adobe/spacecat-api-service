@@ -28,7 +28,7 @@ project:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
   patch:
     tags:
@@ -67,7 +67,7 @@ project:
         $ref: './responses.yaml#/500'
     security:
       - admin_key: [ ]
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
   delete:
     tags:
@@ -94,7 +94,7 @@ project:
         $ref: './responses.yaml#/500'
     security:
       - admin_key: [ ]
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 
 project-sites:
@@ -141,7 +141,7 @@ project-sites:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 
 project-primary-locale-sites:
@@ -180,7 +180,7 @@ project-primary-locale-sites:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 
 project-sites-by-name:
@@ -219,7 +219,7 @@ project-sites-by-name:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 
 project-by-org-and-id:
@@ -258,7 +258,7 @@ project-by-org-and-id:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 
 project-by-org-and-name:
@@ -297,7 +297,7 @@ project-by-org-and-name:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 
 project-by-name-global:
@@ -332,5 +332,5 @@ project-by-name-global:
         $ref: './responses.yaml#/500'
     security:
       - admin_key: [ ]
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]

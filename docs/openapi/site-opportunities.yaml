@@ -28,7 +28,7 @@ site-opportunities:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
   post:
     operationId: createSiteOpportunity
     summary: |
@@ -64,7 +64,7 @@ site-opportunities:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunities-by-status:
   parameters:
@@ -103,7 +103,7 @@ site-opportunities-by-status:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity:
   parameters:
@@ -137,7 +137,7 @@ site-opportunity:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
   patch:
     operationId: updateSiteOpportunity
@@ -174,7 +174,7 @@ site-opportunity:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
   delete:
     operationId: deleteSiteOpportunity
@@ -185,6 +185,47 @@ site-opportunity:
     responses:
       '204':
         description: Opportunity deleted
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - session_token: [ ]
+
+site-opportunity-validate:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+  post:
+    operationId: triggerSiteOpportunityValidation
+    summary: |
+      Trigger on-demand validation of a GeoExperiment's own suggestions against this
+      opportunity. Currently only supported for prerender opportunities. Fire-and-forget: queues
+      the validation and responds immediately; the result lands on the GeoExperiment's own
+      metadata and each covered suggestion's own data, not in this response.
+    tags:
+      - opportunities
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/OpportunityValidationRequest'
+    responses:
+      '202':
+        description: Validation queued
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/OpportunityValidationResponse'
+      '400':
+        $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
       '404':
@@ -246,7 +287,7 @@ site-opportunity-suggestions:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
   post:
     operationId: createSiteOpportunitySuggestions
@@ -276,7 +317,7 @@ site-opportunity-suggestions:
               broken-backlinks-suggestion-create-list-response:
                 $ref: './examples.yaml#/broken-backlinks-suggestion-create-list-response'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-suggestions-by-status:
   parameters:
@@ -319,7 +360,7 @@ site-opportunity-suggestions-by-status:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-suggestions-paged:
   parameters:
@@ -360,7 +401,7 @@ site-opportunity-suggestions-paged:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-suggestions-paged-with-cursor:
   parameters:
@@ -402,7 +443,7 @@ site-opportunity-suggestions-paged-with-cursor:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-suggestions-by-status-paged:
   parameters:
@@ -447,7 +488,7 @@ site-opportunity-suggestions-by-status-paged:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-suggestions-by-status-paged-with-cursor:
   parameters:
@@ -493,7 +534,7 @@ site-opportunity-suggestions-by-status-paged-with-cursor:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-suggestions-status:
   parameters:
@@ -535,7 +576,7 @@ site-opportunity-suggestions-status:
               broken-backlinks-suggestions-status-update-response:
                 $ref: './examples.yaml#/broken-backlinks-suggestions-status-update-response'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-suggestions-edge-deploy:
   parameters:
@@ -702,7 +743,7 @@ site-opportunity-suggestions-edge-deploy:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-geo-experiments:
   parameters:
@@ -734,7 +775,7 @@ site-geo-experiments:
       '404':
         $ref: './responses.yaml#/404'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-geo-experiment:
   parameters:
@@ -806,6 +847,103 @@ site-geo-experiment:
                         Impact-measurement insights (ExperimentInsights) fetched from S3.
                         Only present when the request sets `includeInsights=true`; null when
                         insights do not exist yet or the S3 fetch fails.
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+    security:
+      - session_token: [ ]
+
+site-geo-experiment-results:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: geoExperimentId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: The GeoExperiment ID
+  get:
+    operationId: getGeoExperimentResults
+    summary: Get the impact-measurement results (insights) for a geo experiment
+    description: |
+      Returns the impact-measurement insights ("results") for a GeoExperiment. This is the
+      read-only counterpart to POST .../trigger-impact-measurement: it fetches the
+      already-computed report rather than asking the engine to (re-)run measurement. The
+      insights JSON is produced by the experimentation engine once impact measurement
+      completes; each analysis's rawDataUrl is presigned so detail blobs can be downloaded
+      directly. Returns 404 when the experiment has no insights yet.
+    tags:
+      - geo-experiments
+    responses:
+      '200':
+        description: Geo experiment impact-measurement results
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                geoExperimentId:
+                  type: string
+                  format: uuid
+                status:
+                  type: string
+                  description: High-level experiment state at the time of the read
+                phase:
+                  type: string
+                  description: Detailed lifecycle phase at the time of the read
+                insights:
+                  type: object
+                  description: |
+                    Impact-measurement insights (ExperimentInsights) fetched from S3, with each
+                    analysis's rawDataUrl presigned.
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+    security:
+      - ims_key: [ ]
+
+site-geo-experiment-trigger-impact-measurement:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: geoExperimentId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: The GeoExperiment ID
+  post:
+    operationId: triggerImpactMeasurement
+    summary: Manually (re-)trigger impact measurement for a geo experiment
+    description: |
+      Manually (re-)triggers Mystique impact measurement for a GeoExperiment. Only allowed once
+      the experiment has reached `post_analysis_done` (or later: `impact_measurement_started`,
+      `impact_measurement_done`), with status `in_progress` or `completed`. Sends a message to
+      the llmo-experimentation-engine, which re-validates eligibility and re-arms the experiment
+      before resubmitting.
+    tags:
+      - geo-experiments
+    responses:
+      '202':
+        description: Impact measurement triggered; the experimentation engine will process it shortly
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
       '400':
         $ref: './responses.yaml#/400'
       '401':
@@ -1137,7 +1275,7 @@ site-opportunity-suggestions-auto-fix:
               broken-backlinks-suggestions-status-update-response:
                 $ref: './examples.yaml#/broken-backlinks-suggestions-status-update-response'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-suggestion:
   parameters:
@@ -1175,7 +1313,7 @@ site-opportunity-suggestion:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
   patch:
     operationId: updateSiteOpportunitySuggestion
     summary: |
@@ -1214,7 +1352,7 @@ site-opportunity-suggestion:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
   delete:
     operationId: deleteSiteOpportunitySuggestion
@@ -1236,7 +1374,7 @@ site-opportunity-suggestion:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-suggestion-backoffice-reviews:
   parameters:
@@ -1336,7 +1474,7 @@ site-opportunity-suggestion-backoffice-reviews:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-suggestions-edge-live-preview:
   parameters:
@@ -1413,7 +1551,7 @@ site-opportunity-suggestions-edge-live-preview:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-suggestion-fixes:
   parameters:
@@ -1444,7 +1582,7 @@ site-opportunity-suggestion-fixes:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-fixes:
   parameters:
@@ -1501,7 +1639,7 @@ site-fixes:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-fixes:
   parameters:
@@ -1534,7 +1672,7 @@ site-opportunity-fixes:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
   post:
     operationId: createSiteOpportunityFixes
     summary: |
@@ -1567,7 +1705,7 @@ site-opportunity-fixes:
               fix-create-list-response:
                 $ref: './examples.yaml#/fix-create-list-response'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-fixes-by-status:
   parameters:
@@ -1604,7 +1742,7 @@ site-opportunity-fixes-by-status:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-fix:
   parameters:
@@ -1635,7 +1773,7 @@ site-opportunity-fix:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
   patch:
     operationId: updateSiteOpportunityFix
     summary: |
@@ -1672,7 +1810,7 @@ site-opportunity-fix:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
   delete:
     operationId: deleteSiteOpportunityFix
     summary: |
@@ -1693,7 +1831,7 @@ site-opportunity-fix:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 
 site-opportunity-fix-suggestions:
@@ -1728,7 +1866,7 @@ site-opportunity-fix-suggestions:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-fix-rollback:
   parameters:
@@ -1772,7 +1910,7 @@ site-opportunity-fix-rollback:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-opportunity-status:
   parameters:
@@ -1800,4 +1938,4 @@ site-opportunity-status:
             schema:
               $ref: './schemas.yaml#/FixStatusUpdateListResponse'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]

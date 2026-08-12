@@ -59,8 +59,36 @@ describe('AiVisibilityController', () => {
   let mockHandleV1SourceGapSourceDomains;
   let mockHandleV1SourceGapSourceDomainsExport;
   let mockHandleV1SourceGapSourceDomainsTotals;
+  let mockHandleV1SourceCitedPages;
+  let mockHandleV1SourceCitedPagesExport;
+  let mockHandleV1SourceCitedPagesTotals;
+  let mockHandleV1SourceCitedSources;
+  let mockHandleV1SourceCitedSourcesExport;
+  let mockHandleV1SourceCitedSourcesTotals;
   let mockHandleV1BrandStatsByCountry;
   let mockHandleV1BrandStatsByLlm;
+  let mockHandleV1BrandCompetitors;
+  let mockHandleV1BrandCompetitorsStats;
+  let mockHandleV1BrandTopBrands;
+  let mockHandleV1BrandBrandsByTopicFts;
+  let mockHandleV1BrandBrandsByTopicFtsExport;
+  let mockHandleV1BrandBrandsByTopicFtsTotals;
+  let mockHandleV1TopicMetricsByFts;
+  let mockHandleV1TopicTopicsByFts;
+  let mockHandleV1TopicTopicsByFtsExport;
+  let mockHandleV1TopicTopicsByFtsTotals;
+  let mockHandleV1PromptPromptsByTopicFts;
+  let mockHandleV1PromptPromptsByTopicFtsExport;
+  let mockHandleV1PromptPromptsByTopicFtsTotals;
+  let mockHandleV1PromptPromptsByTopicIds;
+  let mockHandleV1PromptPromptsByTopicIdsTotals;
+  let mockHandleV1SourceSourceDomainsByTopicFts;
+  let mockHandleV1SourceSourceDomainsByTopicFtsExport;
+  let mockHandleV1SourceSourceDomainsByTopicFtsTotals;
+  let mockHandleV1PromptResearchPromptsExport;
+  let mockHandleV1PromptResearchBrandsExport;
+  let mockHandleV1PromptResearchSourceDomainsExport;
+  let mockHandleV1PromptResearchTopicsExport;
   let mockHandleV1MetaMeta;
 
   const log = {
@@ -181,12 +209,52 @@ describe('AiVisibilityController', () => {
     mockHandleV1SourceGapSourceDomainsTotals = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
+    mockHandleV1SourceCitedPages = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
+    mockHandleV1SourceCitedPagesExport = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
+    mockHandleV1SourceCitedPagesTotals = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
+    mockHandleV1SourceCitedSources = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
+    mockHandleV1SourceCitedSourcesExport = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
+    mockHandleV1SourceCitedSourcesTotals = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
     mockHandleV1BrandStatsByCountry = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
     mockHandleV1BrandStatsByLlm = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
+    mockHandleV1BrandCompetitors = sandbox.stub().resolves({ status: 200, body: {} });
+    mockHandleV1BrandCompetitorsStats = sandbox.stub().resolves({ status: 200, body: {} });
+    mockHandleV1BrandTopBrands = sandbox.stub().resolves({ status: 200, body: {} });
+    mockHandleV1BrandBrandsByTopicFts = sandbox.stub().resolves({ status: 200, body: {} });
+    mockHandleV1BrandBrandsByTopicFtsExport = sandbox.stub().resolves({ status: 200, body: {} });
+    mockHandleV1BrandBrandsByTopicFtsTotals = sandbox.stub().resolves({ status: 200, body: {} });
+    mockHandleV1TopicMetricsByFts = sandbox.stub().resolves({ status: 200, body: {} });
+    mockHandleV1TopicTopicsByFts = sandbox.stub().resolves({ status: 200, body: {} });
+    mockHandleV1TopicTopicsByFtsExport = sandbox.stub().resolves({ status: 200, body: {} });
+    mockHandleV1TopicTopicsByFtsTotals = sandbox.stub().resolves({ status: 200, body: {} });
+    mockHandleV1PromptPromptsByTopicFts = sandbox.stub().resolves({ status: 200, body: {} });
+    mockHandleV1PromptPromptsByTopicFtsExport = sandbox.stub().resolves({ status: 200, body: {} });
+    mockHandleV1PromptPromptsByTopicFtsTotals = sandbox.stub().resolves({ status: 200, body: {} });
+    mockHandleV1PromptPromptsByTopicIds = sandbox.stub().resolves({ status: 200, body: {} });
+    mockHandleV1PromptPromptsByTopicIdsTotals = sandbox.stub().resolves({ status: 200, body: {} });
+    mockHandleV1SourceSourceDomainsByTopicFts = sandbox.stub().resolves({ status: 200, body: {} });
+    mockHandleV1SourceSourceDomainsByTopicFtsExport = sandbox.stub().resolves({ status: 200, body: {} });
+    mockHandleV1SourceSourceDomainsByTopicFtsTotals = sandbox.stub().resolves({ status: 200, body: {} });
+    mockHandleV1PromptResearchPromptsExport = sandbox.stub().resolves({ status: 200, body: {} });
+    mockHandleV1PromptResearchBrandsExport = sandbox.stub().resolves({ status: 200, body: {} });
+    mockHandleV1PromptResearchSourceDomainsExport = sandbox.stub().resolves({ status: 200, body: {} });
+    mockHandleV1PromptResearchTopicsExport = sandbox.stub().resolves({ status: 200, body: {} });
     mockHandleV1MetaMeta = sandbox.stub().resolves({ status: 200, body: {} });
 
     const mod = await esmock('../../src/controllers/ai-visibility.js', {
@@ -279,11 +347,97 @@ describe('AiVisibilityController', () => {
       '../../src/support/ai-visibility/handlers/v1/source/gap-source-domains-totals.js': {
         handleGapSourceDomainsTotals: mockHandleV1SourceGapSourceDomainsTotals,
       },
+      '../../src/support/ai-visibility/handlers/v1/source/cited-pages.js': {
+        handleCitedPages: mockHandleV1SourceCitedPages,
+        buildCitedPagesFilterQl: sandbox.stub().returns(''),
+      },
+      '../../src/support/ai-visibility/handlers/v1/source/cited-pages-export.js': {
+        handleCitedPagesExport: mockHandleV1SourceCitedPagesExport,
+      },
+      '../../src/support/ai-visibility/handlers/v1/source/cited-pages-totals.js': {
+        handleCitedPagesTotals: mockHandleV1SourceCitedPagesTotals,
+      },
+      '../../src/support/ai-visibility/handlers/v1/source/cited-sources.js': {
+        handleCitedSources: mockHandleV1SourceCitedSources,
+        buildCitedSourcesDimensionFilterQl: sandbox.stub().returns(''),
+      },
+      '../../src/support/ai-visibility/handlers/v1/source/cited-sources-export.js': {
+        handleCitedSourcesExport: mockHandleV1SourceCitedSourcesExport,
+      },
+      '../../src/support/ai-visibility/handlers/v1/source/cited-sources-totals.js': {
+        handleCitedSourcesTotals: mockHandleV1SourceCitedSourcesTotals,
+      },
       '../../src/support/ai-visibility/handlers/v1/brand/stats-by-country.js': {
         handleStatsByCountry: mockHandleV1BrandStatsByCountry,
       },
       '../../src/support/ai-visibility/handlers/v1/brand/stats-by-llm.js': {
         handleStatsByLLM: mockHandleV1BrandStatsByLlm,
+      },
+      '../../src/support/ai-visibility/handlers/v1/brand/competitors.js': {
+        handleCompetitors: mockHandleV1BrandCompetitors,
+      },
+      '../../src/support/ai-visibility/handlers/v1/brand/competitors-stats.js': {
+        handleCompetitorsStats: mockHandleV1BrandCompetitorsStats,
+      },
+      '../../src/support/ai-visibility/handlers/v1/brand/top-brands.js': {
+        handleTopBrands: mockHandleV1BrandTopBrands,
+      },
+      '../../src/support/ai-visibility/handlers/v1/brand/brands-by-topic-fts.js': {
+        handleBrandsByTopicFts: mockHandleV1BrandBrandsByTopicFts,
+      },
+      '../../src/support/ai-visibility/handlers/v1/brand/brands-by-topic-fts-export.js': {
+        handleBrandsByTopicFtsExport: mockHandleV1BrandBrandsByTopicFtsExport,
+      },
+      '../../src/support/ai-visibility/handlers/v1/brand/brands-by-topic-fts-totals.js': {
+        handleBrandsByTopicFtsTotals: mockHandleV1BrandBrandsByTopicFtsTotals,
+      },
+      '../../src/support/ai-visibility/handlers/v1/topic/metrics-by-fts.js': {
+        handleMetricsByFts: mockHandleV1TopicMetricsByFts,
+      },
+      '../../src/support/ai-visibility/handlers/v1/topic/topics-by-fts.js': {
+        handleTopicsByFts: mockHandleV1TopicTopicsByFts,
+      },
+      '../../src/support/ai-visibility/handlers/v1/topic/topics-by-fts-export.js': {
+        handleTopicsByFtsExport: mockHandleV1TopicTopicsByFtsExport,
+      },
+      '../../src/support/ai-visibility/handlers/v1/topic/topics-by-fts-totals.js': {
+        handleTopicsByFtsTotals: mockHandleV1TopicTopicsByFtsTotals,
+      },
+      '../../src/support/ai-visibility/handlers/v1/prompt/prompts-by-topic-fts.js': {
+        handlePromptsByTopicFts: mockHandleV1PromptPromptsByTopicFts,
+      },
+      '../../src/support/ai-visibility/handlers/v1/prompt/prompts-by-topic-fts-export.js': {
+        handlePromptsByTopicFtsExport: mockHandleV1PromptPromptsByTopicFtsExport,
+      },
+      '../../src/support/ai-visibility/handlers/v1/prompt/prompts-by-topic-fts-totals.js': {
+        handlePromptsByTopicFtsTotals: mockHandleV1PromptPromptsByTopicFtsTotals,
+      },
+      '../../src/support/ai-visibility/handlers/v1/prompt/prompts-by-topic-ids.js': {
+        handlePromptsByTopicIds: mockHandleV1PromptPromptsByTopicIds,
+      },
+      '../../src/support/ai-visibility/handlers/v1/prompt/prompts-by-topic-ids-totals.js': {
+        handlePromptsByTopicIdsTotals: mockHandleV1PromptPromptsByTopicIdsTotals,
+      },
+      '../../src/support/ai-visibility/handlers/v1/source/source-domains-by-topic-fts.js': {
+        handleSourceDomainsByTopicFts: mockHandleV1SourceSourceDomainsByTopicFts,
+      },
+      '../../src/support/ai-visibility/handlers/v1/source/source-domains-by-topic-fts-export.js': {
+        handleSourceDomainsByTopicFtsExport: mockHandleV1SourceSourceDomainsByTopicFtsExport,
+      },
+      '../../src/support/ai-visibility/handlers/v1/source/source-domains-by-topic-fts-totals.js': {
+        handleSourceDomainsByTopicFtsTotals: mockHandleV1SourceSourceDomainsByTopicFtsTotals,
+      },
+      '../../src/support/ai-visibility/handlers/v1/prompt-research/prompts-export.js': {
+        handlePromptsResearchExport: mockHandleV1PromptResearchPromptsExport,
+      },
+      '../../src/support/ai-visibility/handlers/v1/prompt-research/brands-export.js': {
+        handleBrandsResearchExport: mockHandleV1PromptResearchBrandsExport,
+      },
+      '../../src/support/ai-visibility/handlers/v1/prompt-research/source-domains-export.js': {
+        handleSourceDomainsResearchExport: mockHandleV1PromptResearchSourceDomainsExport,
+      },
+      '../../src/support/ai-visibility/handlers/v1/prompt-research/topics-export.js': {
+        handleTopicsResearchExport: mockHandleV1PromptResearchTopicsExport,
       },
       '../../src/support/ai-visibility/handlers/v1/meta/meta.js': {
         handleMeta: mockHandleV1MetaMeta,
@@ -593,8 +747,10 @@ describe('AiVisibilityController', () => {
       getTopicsStats: mockHandleTopicsStats,
       getV1TopicBrandTopics: mockHandleV1TopicBrandTopics,
       getV1TopicBrandTopicsExport: mockHandleV1TopicBrandTopicsExport,
+      getV1TopicBrandTopicsTotals: mockHandleV1TopicBrandTopicsTotals,
       getV1TopicGapTopics: mockHandleV1TopicGapTopics,
       getV1TopicGapTopicsExport: mockHandleV1TopicGapTopicsExport,
+      getV1TopicGapTopicsTotals: mockHandleV1TopicGapTopicsTotals,
       getV1PromptBrandPrompts: mockHandleV1PromptBrandPrompts,
       getV1PromptBrandPromptsExport: mockHandleV1PromptBrandPromptsExport,
       getV1PromptGapPrompts: mockHandleV1PromptGapPrompts,
@@ -604,8 +760,36 @@ describe('AiVisibilityController', () => {
       getV1SourceGapSourceDomains: mockHandleV1SourceGapSourceDomains,
       getV1SourceGapSourceDomainsExport: mockHandleV1SourceGapSourceDomainsExport,
       getV1SourceGapSourceDomainsTotals: mockHandleV1SourceGapSourceDomainsTotals,
+      getV1SourceCitedPages: mockHandleV1SourceCitedPages,
+      getV1SourceCitedPagesExport: mockHandleV1SourceCitedPagesExport,
+      getV1SourceCitedPagesTotals: mockHandleV1SourceCitedPagesTotals,
+      getV1SourceCitedSources: mockHandleV1SourceCitedSources,
+      getV1SourceCitedSourcesExport: mockHandleV1SourceCitedSourcesExport,
+      getV1SourceCitedSourcesTotals: mockHandleV1SourceCitedSourcesTotals,
       getV1BrandStatsByCountry: mockHandleV1BrandStatsByCountry,
       getV1BrandStatsByLlm: mockHandleV1BrandStatsByLlm,
+      getV1BrandCompetitors: mockHandleV1BrandCompetitors,
+      getV1BrandCompetitorsStats: mockHandleV1BrandCompetitorsStats,
+      getV1BrandTopBrands: mockHandleV1BrandTopBrands,
+      getV1BrandBrandsByTopicFts: mockHandleV1BrandBrandsByTopicFts,
+      getV1BrandBrandsByTopicFtsExport: mockHandleV1BrandBrandsByTopicFtsExport,
+      getV1BrandBrandsByTopicFtsTotals: mockHandleV1BrandBrandsByTopicFtsTotals,
+      getV1TopicMetricsByFts: mockHandleV1TopicMetricsByFts,
+      getV1TopicTopicsByFts: mockHandleV1TopicTopicsByFts,
+      getV1TopicTopicsByFtsExport: mockHandleV1TopicTopicsByFtsExport,
+      getV1TopicTopicsByFtsTotals: mockHandleV1TopicTopicsByFtsTotals,
+      getV1PromptPromptsByTopicFts: mockHandleV1PromptPromptsByTopicFts,
+      getV1PromptPromptsByTopicFtsExport: mockHandleV1PromptPromptsByTopicFtsExport,
+      getV1PromptPromptsByTopicFtsTotals: mockHandleV1PromptPromptsByTopicFtsTotals,
+      getV1PromptPromptsByTopicIds: mockHandleV1PromptPromptsByTopicIds,
+      getV1PromptPromptsByTopicIdsTotals: mockHandleV1PromptPromptsByTopicIdsTotals,
+      getV1SourceSourceDomainsByTopicFts: mockHandleV1SourceSourceDomainsByTopicFts,
+      getV1SourceSourceDomainsByTopicFtsExport: mockHandleV1SourceSourceDomainsByTopicFtsExport,
+      getV1SourceSourceDomainsByTopicFtsTotals: mockHandleV1SourceSourceDomainsByTopicFtsTotals,
+      getV1PromptResearchPromptsExport: mockHandleV1PromptResearchPromptsExport,
+      getV1PromptResearchBrandsExport: mockHandleV1PromptResearchBrandsExport,
+      getV1PromptResearchSourceDomainsExport: mockHandleV1PromptResearchSourceDomainsExport,
+      getV1PromptResearchTopicsExport: mockHandleV1PromptResearchTopicsExport,
       getV1MetaMeta: mockHandleV1MetaMeta,
     });
 

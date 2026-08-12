@@ -14,9 +14,11 @@ import {
   ok, badRequest, notFound, forbidden, unauthorized, internalServerError, createResponse,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
-import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
+import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
 import CloudflareClient from '@adobe/spacecat-shared-cloudflare-client';
 import AccessControlUtil from '../../support/access-control-util.js';
+import { hasSubpath } from '../../support/edge-routing-utils.js';
+import { auditHostname } from './llmo-utils.js';
 import {
   deriveWorkerName, hostInSiteDomain, registrableDomain, routePatternHost, routePatternHostGlob,
   routePatternsOverlap,
@@ -52,7 +54,6 @@ const WORKER_SCRIPT_FETCH_TIMEOUT_MS = 10_000;
 
 // Boundary input validation (defense-in-depth, independent of CloudflareClient behaviour).
 const CF_ID_RE = /^[0-9a-f]{32}$/; // Cloudflare account/zone IDs are 32-char lowercase hex
-const HOSTNAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/i;
 
 /**
  * Identifies the API caller for audit logging and worker tagging. profile.email is an IMS user
@@ -143,7 +144,9 @@ function LlmoCloudflareController(ctx) {
     if (!accessControlUtil.isLLMOAdministrator()) {
       return forbidden('Only LLMO administrators can access Cloudflare onboarding endpoints');
     }
-
+    if (hasSubpath(site.getBaseURL())) {
+      return createResponse({ message: 'CDN auto-routing is not supported for subpath sites' }, 501);
+    }
     return { site };
   };
 
@@ -159,7 +162,9 @@ function LlmoCloudflareController(ctx) {
    */
   const cfErrorResponse = (error, action, context, fields = {}) => {
     const message = error?.message || String(error);
-    log.error(auditLine(context, 'cf-call', 'error', { op: action, ...fields, error: message }));
+    log.error(auditLine(context, 'cf-call', 'error', {
+      severity: 'error', op: action, ...fields, error: message,
+    }));
     if (/returned 401\b/.test(message)) {
       return unauthorized('Cloudflare authentication failed');
     }
@@ -220,17 +225,27 @@ function LlmoCloudflareController(ctx) {
    * Builds a handler for a parameter-less Cloudflare list call (accounts, zones, ...): runs
    * access control + token resolution, invokes `cfClient[method]()`, and maps failures.
    */
-  const cfListProxy = (method, action) => async (context) => {
+  const cfListProxy = (method, action, auditAction) => async (context) => {
     const result = await getSiteAndCheckAccess(context);
     if (result.status) {
       return result;
     }
+    const { site } = result;
     const { client, error } = requireCfClient(context);
     if (error) {
       return error;
     }
     try {
-      return ok(await client[method]());
+      const listed = await client[method]();
+      // Runs with the customer's own Cloudflare API token, so this is the earliest server-side
+      // evidence that a Cloudflare onboarding is under way — every preceding wizard step is
+      // client-side only and `deploy-worker` is the last step. Onboarding alerts key off this.
+      log.info(auditLine(context, auditAction, 'ok', {
+        siteId: site.getId(),
+        host: auditHostname(site),
+        count: Array.isArray(listed) ? listed.length : undefined,
+      }));
+      return ok(listed);
     } catch (e) {
       return cfErrorResponse(e, action, context, { siteId: context.params?.siteId });
     }
@@ -255,7 +270,7 @@ function LlmoCloudflareController(ctx) {
   };
 
   // GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts
-  const listAccounts = cfListProxy('listAccounts', 'account listing');
+  const listAccounts = cfListProxy('listAccounts', 'account listing', 'list-accounts');
 
   /**
    * GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones?accountId=<id>
@@ -292,6 +307,15 @@ function LlmoCloudflareController(ctx) {
       const matching = (zones || []).filter(
         (zone) => hasText(zone?.name) && !!siteApex && registrableDomain(zone.name) === siteApex,
       );
+      // matched=0 with listed>0 means the token works but no zone is on the site's apex — the
+      // most common Cloudflare onboarding dead end, and invisible without this line.
+      log.info(auditLine(context, 'list-zones', 'ok', {
+        siteId: site.getId(),
+        host: auditHostname(site),
+        accountId,
+        listed: (zones || []).length,
+        matched: matching.length,
+      }));
       return ok(matching);
     } catch (e) {
       return cfErrorResponse(e, 'zone listing', context, {
@@ -303,7 +327,10 @@ function LlmoCloudflareController(ctx) {
 
   /**
    * POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy
-   * Body: { accountId, targetHost }
+   * Body: { accountId }
+   * The target host is NOT client-supplied — it is derived server-side from the site's own base
+   * URL (see calculateForwardedHost) so the worker always forwards to the canonical host for the
+   * site, consistent with how the other CDN integrations resolve the origin.
    * Fetches the Edge Optimize worker script from GitHub and deploys it under a name derived
    * from the site (see deriveWorkerName), tagging it with CF_WORKER_OWNER_TAG (+ the caller's
    * IMS identity), then sets the LLMO API key as the EDGE_OPTIMIZE_API_KEY secret on the worker.
@@ -331,7 +358,7 @@ function LlmoCloudflareController(ctx) {
       return nameError;
     }
 
-    const { accountId, targetHost } = context.data || {};
+    const { accountId } = context.data || {};
 
     if (!hasText(accountId)) {
       return badRequest('Missing accountId in request body');
@@ -339,17 +366,24 @@ function LlmoCloudflareController(ctx) {
     if (!CF_ID_RE.test(accountId)) {
       return badRequest('accountId must be a 32-character hexadecimal Cloudflare account ID');
     }
-    if (!hasText(targetHost)) {
-      return badRequest('Missing targetHost in request body');
-    }
-    if (!HOSTNAME_RE.test(targetHost)) {
-      return badRequest('targetHost must be a valid hostname');
-    }
-    if (!hostInSiteDomain(targetHost, site.getBaseURL())) {
-      return badRequest('targetHost must belong to the site\'s domain');
-    }
 
     const siteId = site.getId();
+
+    // targetHost is derived server-side from the site's own base URL — never taken from the client
+    // — so the worker always forwards to the canonical host for the site. calculateForwardedHost
+    // normalizes a bare apex (example.com) to its www host, matching how audits/crawls resolve the
+    // origin and keeping host derivation consistent across CDNs (CloudFront uses the same helper).
+    // Known gap: sites served from the apex without a www record still resolve to www here; that
+    // is tracked as a follow-up enhancement.
+    let targetHost;
+    try {
+      targetHost = calculateForwardedHost(site.getBaseURL(), log);
+    } catch (e) {
+      log.error(auditLine(context, 'deploy-worker', 'target-host-failed', {
+        severity: 'error', siteId, accountId, error: e.message,
+      }));
+      return internalServerError('Could not derive target host from site base URL');
+    }
 
     // Tags attached to the worker. CF_WORKER_OWNER_TAG is always present and always first so the
     // client's idempotency match (tags.some((t) => settings.tags?.includes(t))) recognizes any
@@ -368,12 +402,18 @@ function LlmoCloudflareController(ctx) {
       llmoApiKey = await getLlmoApiKey(site, context);
     } catch (e) {
       log.error(auditLine(context, 'deploy-worker', 'metaconfig-failed', {
-        siteId, accountId, scriptName, error: e.message,
+        severity: 'error',
+        siteId,
+        accountId,
+        scriptName,
+        error: e.message,
       }));
       return createResponse({ message: 'Failed to fetch site metaconfig' }, 502);
     }
     if (!hasText(llmoApiKey)) {
-      log.error(auditLine(context, 'deploy-worker', 'no-api-key', { siteId, accountId, scriptName }));
+      log.error(auditLine(context, 'deploy-worker', 'no-api-key', {
+        severity: 'error', siteId, accountId, scriptName,
+      }));
       return internalServerError('LLMO API key not configured for this site');
     }
 
@@ -435,6 +475,7 @@ function LlmoCloudflareController(ctx) {
       // log the partial state explicitly and return a structured response the caller can
       // act on (re-deploy to set the secret).
       log.error(auditLine(context, 'deploy-worker', 'secret-failed', {
+        severity: 'error',
         siteId,
         accountId,
         scriptName,

@@ -1,8 +1,9 @@
 # Audit Policy CRUD + scope reconciliation stubs.
 # `audit-policy` / `audit-policy-revisions` are fully implemented (SITES-47301
-# write-seam + SITES-47306 contract). The `audit-scope-*` paths are 501 stubs
-# pending B4 (SITES-46351, page list) and B7 (SITES-47089, reconciliation
-# counts + section aggregation).
+# write-seam + SITES-47306 contract). `audit-scope-pages` is fully implemented
+# (B4, SITES-46351, page list). `audit-scope-summary` / `audit-scope-sections`
+# are 501 stubs pending B7 (SITES-47089, reconciliation counts + section
+# aggregation).
 
 audit-policy:
   parameters:
@@ -25,7 +26,7 @@ audit-policy:
       '404': { $ref: './responses.yaml#/404-site-not-found-with-id' }
       '500': { $ref: './responses.yaml#/500' }
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 audit-policy-exclusions:
   parameters:
@@ -61,7 +62,7 @@ audit-policy-exclusions:
               $ref: '#/AuditPolicyConflict'
       '500': { $ref: './responses.yaml#/500' }
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 
 audit-policy-exclusions-delete:
@@ -101,7 +102,7 @@ audit-policy-exclusions-delete:
               $ref: '#/AuditPolicyConflict'
       '500': { $ref: './responses.yaml#/500' }
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 
 audit-policy-inclusions:
@@ -138,7 +139,7 @@ audit-policy-inclusions:
               $ref: '#/AuditPolicyConflict'
       '500': { $ref: './responses.yaml#/500' }
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 
 audit-policy-inclusions-delete:
@@ -177,7 +178,7 @@ audit-policy-inclusions-delete:
               $ref: '#/AuditPolicyConflict'
       '500': { $ref: './responses.yaml#/500' }
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 
 audit-policy-revisions:
@@ -220,24 +221,49 @@ audit-policy-revisions:
       '404': { $ref: './responses.yaml#/404-site-not-found-with-id' }
       '500': { $ref: './responses.yaml#/500' }
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 
 audit-scope-pages:
   parameters:
     - $ref: './parameters.yaml#/siteId'
+    - name: limit
+      in: query
+      required: false
+      description: Maximum number of pages to return. Default 50, clamped to a maximum of 200.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    - name: cursor
+      in: query
+      required: false
+      description: >-
+        Opaque pagination cursor from a previous response's `cursor` field. Omit to fetch the
+        first page.
+      schema:
+        type: string
   get:
     tags:
       - site
       - audit policy
-    summary: |
-      Not implemented yet. In-scope page list (B4 / SITES-46351).
+    summary: List in-scope pages, ordered by URL, cursor-paginated (B4 / SITES-46351)
     operationId: getAuditScopePages
     responses:
-      '501':
-        description: Not implemented yet.
+      '200':
+        description: In-scope page list
+        content:
+          application/json:
+            schema:
+              $ref: '#/AuditScopePageList'
+      '400': { $ref: './responses.yaml#/400' }
+      '401': { $ref: './responses.yaml#/401' }
+      '403': { $ref: './responses.yaml#/403' }
+      '404': { $ref: './responses.yaml#/404-site-not-found-with-id' }
+      '500': { $ref: './responses.yaml#/500' }
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 
 audit-scope-summary:
@@ -254,7 +280,7 @@ audit-scope-summary:
       '501':
         description: Not implemented yet.
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 
 audit-scope-sections:
@@ -271,7 +297,7 @@ audit-scope-sections:
       '501':
         description: Not implemented yet.
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 
 # ─────────────────────────────── schemas ──────────────────────────────
@@ -339,4 +365,20 @@ AuditPolicyRevisionList:
   type: object
   properties:
     items: { type: array, items: { $ref: '#/AuditPolicyRevision' } }
+    cursor: { type: string }
+
+AuditScopePage:
+  type: object
+  required: [url, urlPath, discoverySource, lifecycleState]
+  properties:
+    url: { type: string }
+    urlPath: { type: string }
+    discoverySource: { type: array, items: { type: string } }
+    lastModified: { type: [string, 'null'], format: date-time }
+    lifecycleState: { type: string }
+
+AuditScopePageList:
+  type: object
+  properties:
+    items: { type: array, items: { $ref: '#/AuditScopePage' } }
     cursor: { type: string }

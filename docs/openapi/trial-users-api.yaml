@@ -26,7 +26,7 @@ trial-users-by-organization:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 
 
@@ -72,4 +72,4 @@ trial-user-invite:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]

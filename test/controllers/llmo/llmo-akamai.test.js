@@ -163,6 +163,14 @@ describe('LlmoAkamaiController', () => {
       const res = await controller.getConfig(mockContext);
       expect(res.status).to.equal(403);
     });
+
+    it('returns 501 for a subpath site (CDN auto-routing not supported)', async () => {
+      mockSite.getBaseURL = () => 'https://www.example.com/blog';
+      const res = await controller.getConfig(mockContext);
+      expect(res.status).to.equal(501);
+      const body = await res.json();
+      expect(body.message).to.include('not supported');
+    });
   });
 
   describe('getConfig', () => {
@@ -189,6 +197,14 @@ describe('LlmoAkamaiController', () => {
       expect(body.domain).to.equal('www.example.com');
       expect(body.properties[0].propertyId).to.equal(PROPERTY_ID);
       expect(mockAkamaiClient.findPropertiesByDomain).to.have.been.calledWith('www.example.com');
+    });
+
+    it('emits a list-properties audit line carrying caller and host (onboarding-started signal)', async () => {
+      await controller.listProperties(mockContext);
+      const logged = mockContext.log.info.getCalls().map((c) => c.args[0]).join('\n');
+      expect(logged).to.contain('[llmo-akamai] action=list-properties outcome=ok');
+      expect(logged).to.contain('host=www.example.com');
+      expect(logged).to.contain('caller=');
     });
 
     it('returns 200 with an empty list when the client finds nothing (it swallows search errors)', async () => {
