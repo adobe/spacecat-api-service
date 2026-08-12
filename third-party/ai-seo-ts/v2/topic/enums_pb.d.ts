@@ -196,11 +196,16 @@ export enum BRAND_TOPICS_ORDER_BY_ENUM {
   UNSPECIFIED = 0,
 
   /**
+   * Accepted for backward compatibility; behaves as VISIBILITY (relevancy sorting was dropped for
+   * performance, see AISEO-2171). A client passing it is silently reinterpreted, not rejected.
+   *
    * @generated from enum value: RELEVANCY = 1;
    */
   RELEVANCY = 1,
 
   /**
+   * It's the default ordering.
+   *
    * @generated from enum value: VISIBILITY = 2;
    */
   VISIBILITY = 2,

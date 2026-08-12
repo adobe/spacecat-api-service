@@ -26,6 +26,7 @@ import {
   buildRuleConfig, mergeIntoTree, buildRuleTreePatch, managedRuleNames, redactSecrets,
   redactPapiErrors, detectManagedRuleNames, estimateRuleTreeComplexity, getManagedFetcherKey,
 } from './llmo-akamai-utils.js';
+import { hasSubpath } from '../../support/edge-routing-utils.js';
 
 // EdgeGrid credentials are CLIENT-SUPPLIED per request (never persisted, never logged): the caller
 // passes them as headers, mirroring the Cloudflare controller's x-cloudflare-token model, and we
@@ -158,6 +159,9 @@ function LlmoAkamaiController(ctx) {
     }
     if (!accessControlUtil.isLLMOAdministrator()) {
       return forbidden('Only LLMO administrators can access Akamai onboarding endpoints');
+    }
+    if (hasSubpath(site.getBaseURL())) {
+      return createResponse({ message: 'CDN auto-routing is not supported for subpath sites' }, 501);
     }
     return { site };
   };

@@ -1,3 +1,51 @@
+# [1.739.0](https://github.com/adobe/spacecat-api-service/compare/v1.738.2...v1.739.0) (2026-08-12)
+
+
+### Features
+
+* **ai-seo:** AISEODT-134 added new countries ([#3029](https://github.com/adobe/spacecat-api-service/issues/3029)) ([f357d28](https://github.com/adobe/spacecat-api-service/commit/f357d28f90fe9fdb9b29891f16980a0608fafb6f))
+
+## [1.738.2](https://github.com/adobe/spacecat-api-service/compare/v1.738.1...v1.738.2) (2026-08-12)
+
+
+### Bug Fixes
+
+* **brand-claims:** select latest Monday sheet for daily cadence ([#3031](https://github.com/adobe/spacecat-api-service/issues/3031)) ([00bb5a7](https://github.com/adobe/spacecat-api-service/commit/00bb5a7f11f73a72eb53c07a9572c5b3704f3de5))
+
+## [1.738.1](https://github.com/adobe/spacecat-api-service/compare/v1.738.0...v1.738.1) (2026-08-12)
+
+
+### Bug Fixes
+
+* **llmo:** derive Cloudflare worker targetHost from site base URL ([#3027](https://github.com/adobe/spacecat-api-service/issues/3027)) ([ec525d5](https://github.com/adobe/spacecat-api-service/commit/ec525d5a8c95547e27ff5d2575f71b91c8d87f62))
+
+# [1.738.0](https://github.com/adobe/spacecat-api-service/compare/v1.737.1...v1.738.0) (2026-08-11)
+
+
+### Features
+
+* **llmo:** block BYOCDN CDN auto-routing for subpath sites (LLMO-6685) ([#2984](https://github.com/adobe/spacecat-api-service/issues/2984)) ([311b20d](https://github.com/adobe/spacecat-api-service/commit/311b20d5f16cf33592440de6ea5b69ae519c1e9b))
+
+## [1.737.1](https://github.com/adobe/spacecat-api-service/compare/v1.737.0...v1.737.1) (2026-08-11)
+
+
+### Bug Fixes
+
+* **serenity:** classify branded prompts in scripts without word spaces ([#3028](https://github.com/adobe/spacecat-api-service/issues/3028)) ([c0f43c9](https://github.com/adobe/spacecat-api-service/commit/c0f43c95477d0d04826949e86ba36efcd17fdeb9)), closes [Hi#level](https://github.com/Hi/issues/level)
+* **serenity:** guard PATCH on the server-owned source dimension (LLMO-6665) ([#3025](https://github.com/adobe/spacecat-api-service/issues/3025)) ([47123e4](https://github.com/adobe/spacecat-api-service/commit/47123e4284b219942d3583d9720a0ac5e0ff83ae))
+
+# [1.737.0](https://github.com/adobe/spacecat-api-service/compare/v1.736.0...v1.737.0) (2026-08-11)
+
+
+### Bug Fixes
+
+* add on-demand opportunity validation API ([#2982](https://github.com/adobe/spacecat-api-service/issues/2982)) ([e7c916e](https://github.com/adobe/spacecat-api-service/commit/e7c916e70462ac17b4571ae5c5d3e8f1e2a5e308))
+
+
+### Features
+
+* **llmo-6818:** Add option all to platform param ([#3010](https://github.com/adobe/spacecat-api-service/issues/3010)) ([d32d126](https://github.com/adobe/spacecat-api-service/commit/d32d126b01904fc126cc661df1fe9e3c45dd0cd1))
+
 # [1.736.0](https://github.com/adobe/spacecat-api-service/compare/v1.735.0...v1.736.0) (2026-08-11)
 
 
