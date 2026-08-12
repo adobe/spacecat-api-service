@@ -696,6 +696,9 @@ const routeFacsCapabilities = {
       'GET /organizations/:organizationId/permission/audit-logs': 'llmo/can_manage_users',
       'GET /product/capabilities': 'llmo/can_view',
       'GET /user/capabilities/:resourceId': 'llmo/can_view',
+      // LLMO-6848: authz introspection — caller must be at least a viewer of the
+      // site; the can_deploy answer is computed inside the controller.
+      'POST /sites/:siteId/permissions/check': 'llmo/can_view',
 
       // ---- View (read-only) ----------------------------------------------
       // Cross-product GETs + POSTs that are body-based queries (no side
@@ -1215,6 +1218,9 @@ const routeFacsCapabilities = {
       // State-layer introspection endpoints
       'GET /product/capabilities': 'aso/can_view',
       'GET /user/capabilities/:resourceId': 'aso/can_view',
+      // LLMO-6848: authz introspection — caller must be at least a viewer of the
+      // site; the can_deploy answer is computed inside the controller.
+      'POST /sites/:siteId/permissions/check': 'aso/can_view',
     },
 
     // ACO — TBD. Same status as ASO.

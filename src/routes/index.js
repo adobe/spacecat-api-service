@@ -188,6 +188,7 @@ export default function getRouteHandlers(
   auditPolicyController,
   opportunityValidationController,
   promptSuggestionSchedulesController,
+  permissionsController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -556,6 +557,10 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.getByID(c),
     'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/suggestions': (c) => fixesController.getAllSuggestionsForFix(c),
     'POST /sites/:siteId/opportunities/:opportunityId/fixes': (c) => fixesController.createFixes(c),
+    // LLMO-6848: resource-scoped authz introspection ("may this caller <capability>
+    // this site?") — Mystique /v1/apply calls this S2S to reuse SpaceCat's
+    // entitlement + ReBAC instead of re-implementing it. See controllers/permissions.js.
+    'POST /sites/:siteId/permissions/check': (c) => permissionsController.checkSitePermission(c),
     'POST /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/actions/rolled_back': (c) => fixesController.rollbackFailedFix(c),
     'PATCH /sites/:siteId/opportunities/:opportunityId/status': (c) => fixesController.patchFixesStatus(c),
     'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.patchFix(c),

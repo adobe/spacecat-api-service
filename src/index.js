@@ -113,6 +113,7 @@ import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
 import WebhooksController from './controllers/webhooks.js';
 import AiVisibilityController from './controllers/ai-visibility.js';
 import StateAccessMappingsController from './controllers/state-access-mappings.js';
+import PermissionsController from './controllers/permissions.js';
 import AgenticCategoriesController from './controllers/agentic-categories.js';
 import AgenticPageTypesController from './controllers/agentic-page-types.js';
 import AuditPolicyController from './controllers/audit-policy.js';
@@ -295,6 +296,7 @@ async function run(request, context) {
     const webhooksController = WebhooksController(context);
     const aiVisibilityController = AiVisibilityController(context, log, context.env);
     const stateAccessMappingsController = StateAccessMappingsController(context);
+    const permissionsController = PermissionsController(context);
     const agenticCategoriesController = AgenticCategoriesController();
     const agenticPageTypesController = AgenticPageTypesController();
     const auditPolicyController = AuditPolicyController();
@@ -376,6 +378,7 @@ async function run(request, context) {
       auditPolicyController,
       opportunityValidationController,
       promptSuggestionSchedulesController,
+      permissionsController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
