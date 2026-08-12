@@ -1,3 +1,10 @@
+# [1.739.0](https://github.com/adobe/spacecat-api-service/compare/v1.738.2...v1.739.0) (2026-08-12)
+
+
+### Features
+
+* **ai-seo:** AISEODT-134 added new countries ([#3029](https://github.com/adobe/spacecat-api-service/issues/3029)) ([f357d28](https://github.com/adobe/spacecat-api-service/commit/f357d28f90fe9fdb9b29891f16980a0608fafb6f))
+
 ## [1.738.2](https://github.com/adobe/spacecat-api-service/compare/v1.738.1...v1.738.2) (2026-08-12)
 
 
