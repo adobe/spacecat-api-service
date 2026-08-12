@@ -28,7 +28,11 @@ import { listResourceIdsWithCapability } from './state-access-mapping-utils.js';
  * (org-scoped `listBrandIdsForSite` + a single `listResourceIdsWithCapability`
  * query) so the wrapper and the controller decide identically — keep the two in
  * parity. Fail-closed: returns `false` when postgrest, the site, its org, its
- * `imsOrgId`, or its brands cannot be resolved.
+ * `imsOrgId`, or its brands cannot be resolved; each fail-closed branch logs
+ * (tag `facs-secondary`, distinct `reason`) so a production denial is debuggable
+ * — anomalies (`no-postgrest`, `no-ims-org`) at `warn`, ordinary data-shape
+ * denials (`site-not-found`, `no-brands`) at `info` to stay low-noise. The
+ * normal "evaluated, not authorized" outcome is intentionally not logged here.
  *
  * @param {object} context - request context (dataAccess: Site, Organization, postgrestClient).
  * @param {object} args
@@ -41,22 +45,35 @@ import { listResourceIdsWithCapability } from './state-access-mapping-utils.js';
 export async function hasCapabilityOnSiteBrands(context, {
   siteId, product, subjectId, capability,
 }) {
+  const { log } = context;
   const postgrestClient = context.dataAccess?.services?.postgrestClient;
   if (!postgrestClient?.from) {
+    log?.warn?.({
+      tag: 'facs-secondary', reason: 'no-postgrest', siteId, product, capability,
+    }, 'FACS secondary resolver fail-closed: postgrest client unavailable');
     return false;
   }
   const site = await context.dataAccess.Site.findById(siteId);
   if (!site) {
+    log?.info?.({
+      tag: 'facs-secondary', reason: 'site-not-found', siteId, product, capability,
+    }, 'FACS secondary resolver fail-closed: site not found');
     return false;
   }
   const orgId = site.getOrganizationId();
   const org = await context.dataAccess.Organization.findById(orgId);
   const imsOrgId = org?.getImsOrgId?.();
   if (!hasText(imsOrgId)) {
+    log?.warn?.({
+      tag: 'facs-secondary', reason: 'no-ims-org', siteId, orgId, product,
+    }, 'FACS secondary resolver fail-closed: site org has no imsOrgId');
     return false;
   }
   const brandIds = await listBrandIdsForSite(orgId, siteId, postgrestClient);
   if (brandIds.size === 0) {
+    log?.info?.({
+      tag: 'facs-secondary', reason: 'no-brands', siteId, orgId, product,
+    }, 'FACS secondary resolver fail-closed: no brands linked to site');
     return false;
   }
   const capable = await listResourceIdsWithCapability(postgrestClient, {

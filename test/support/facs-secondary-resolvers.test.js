@@ -40,6 +40,7 @@ describe('facs-secondary-resolvers', () => {
       },
     });
     context = {
+      log: { warn: sandbox.stub(), info: sandbox.stub(), debug: sandbox.stub() },
       dataAccess: {
         services: { postgrestClient: { from: () => {} } },
         Site: { findById: sandbox.stub().resolves(site) },
@@ -82,23 +83,27 @@ describe('facs-secondary-resolvers', () => {
       context.dataAccess.services.postgrestClient = undefined;
       expect(await mod.hasCapabilityOnSiteBrands(context, args)).to.equal(false);
       expect(listBrandIdsForSiteStub.called).to.be.false;
+      expect(context.log.warn.calledWithMatch({ reason: 'no-postgrest' })).to.be.true;
     });
 
     it('fails closed when the site is not found', async () => {
       context.dataAccess.Site.findById.resolves(null);
       expect(await mod.hasCapabilityOnSiteBrands(context, args)).to.equal(false);
+      expect(context.log.info.calledWithMatch({ reason: 'site-not-found' })).to.be.true;
     });
 
     it('fails closed when the org has no imsOrgId', async () => {
       context.dataAccess.Organization.findById.resolves({ getImsOrgId: () => undefined });
       expect(await mod.hasCapabilityOnSiteBrands(context, args)).to.equal(false);
       expect(listBrandIdsForSiteStub.called).to.be.false;
+      expect(context.log.warn.calledWithMatch({ reason: 'no-ims-org' })).to.be.true;
     });
 
     it('fails closed when the site maps to no brands', async () => {
       listBrandIdsForSiteStub.resolves(new Set());
       expect(await mod.hasCapabilityOnSiteBrands(context, args)).to.equal(false);
       expect(listResourceIdsWithCapabilityStub.called).to.be.false;
+      expect(context.log.info.calledWithMatch({ reason: 'no-brands' })).to.be.true;
     });
   });
 
