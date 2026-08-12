@@ -98,9 +98,11 @@ function PermissionsController(context) {
     }
 
     const requested = ctx.data?.capability;
-    const capability = hasText(requested)
-      ? (requested.includes('/') ? requested : `${product.toLowerCase()}/${requested}`)
-      : `${product.toLowerCase()}/can_deploy`;
+    const productLower = product.toLowerCase();
+    let capability = `${productLower}/can_deploy`;
+    if (hasText(requested)) {
+      capability = requested.includes('/') ? requested : `${productLower}/${requested}`;
+    }
 
     const site = await context.dataAccess.Site.findById(siteId);
     if (!site) {
