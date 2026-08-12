@@ -57,9 +57,32 @@ export function sanitizePathComponent(component) {
 }
 
 /**
+ * True if the S3 date partition (`YYYY`/`MM`/`DD`) falls on a Monday (UTC).
+ *
+ * Claims runs on a WEEKLY cadence keyed to Monday's sheet: the Brand Claims
+ * consumer's cadence gate drops a daily sheet whose `sheet_date` isn't a Monday.
+ * So a daily sheet is only eligible as "latest" on a Monday partition.
+ *
+ * @param {string} yyyy - 4-digit year.
+ * @param {string} mm - 2-digit month.
+ * @param {string} dd - 2-digit day.
+ * @returns {boolean} True when the date is a Monday.
+ */
+function isMondayPartition(yyyy, mm, dd) {
+  const date = new Date(Date.UTC(Number(yyyy), Number(mm) - 1, Number(dd)));
+  return date.getUTCDay() === 1;
+}
+
+/**
  * Finds the same "latest" object under `prefix` the Brand Claims consumer's
  * freshness guard would independently pick: max by (S3 date partition,
  * LastModified) — mirrors `brand_presence_s3.discover_latest_bp_object`.
+ *
+ * For DAILY sheets (6-digit run suffix) only Monday partitions are eligible, so
+ * the selection agrees with the consumer's daily→Monday cadence gate; a
+ * mid-week daily sheet would otherwise be published and then dropped as
+ * `non_monday_dropped`. Weekly sheets (no suffix) are always eligible.
+ * (LLMO-6877)
  *
  * @param {object} s3Client - AWS SDK S3 client.
  * @param {string} prefix - `{siteId}/{brandSlug}/analytics/{platform}/`.
@@ -86,14 +109,19 @@ async function findLatestSheet(s3Client, prefix, bucket) {
       const dateMatch = key.match(KEY_DATE_RE);
 
       if (filenameMatch && dateMatch) {
+        const [, week, year, dailySuffix] = filenameMatch;
         const [, yyyy, mm, dd] = dateMatch;
         const partitionDate = `${yyyy}-${mm}-${dd}`;
         const lastModified = object.LastModified ? new Date(object.LastModified).getTime() : 0;
 
-        if (!best
-          || partitionDate > best.partitionDate
-          || (partitionDate === best.partitionDate && lastModified > best.lastModified)) {
-          const [, week, year, dailySuffix] = filenameMatch;
+        // Claims runs weekly on Monday's sheet; a daily sheet is eligible as
+        // "latest" only on a Monday partition (weekly sheets always eligible).
+        const eligible = !dailySuffix || isMondayPartition(yyyy, mm, dd);
+
+        if (eligible
+          && (!best
+            || partitionDate > best.partitionDate
+            || (partitionDate === best.partitionDate && lastModified > best.lastModified))) {
           best = {
             key,
             partitionDate,
