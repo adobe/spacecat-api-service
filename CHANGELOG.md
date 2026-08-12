@@ -1,3 +1,10 @@
+## [1.738.1](https://github.com/adobe/spacecat-api-service/compare/v1.738.0...v1.738.1) (2026-08-12)
+
+
+### Bug Fixes
+
+* **llmo:** derive Cloudflare worker targetHost from site base URL ([#3027](https://github.com/adobe/spacecat-api-service/issues/3027)) ([ec525d5](https://github.com/adobe/spacecat-api-service/commit/ec525d5a8c95547e27ff5d2575f71b91c8d87f62))
+
 # [1.738.0](https://github.com/adobe/spacecat-api-service/compare/v1.737.1...v1.738.0) (2026-08-11)
 
 
