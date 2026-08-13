@@ -7,8 +7,8 @@ description: >-
   regrant of the best available suggestion. Use when asked to check/revoke/
   regrant suggestion "grants" or "tokens" for a site, investigate why a PLG
   customer isn't seeing a proposed fix, or verify the top-ranked suggestion
-  is actually the one granted. This mutates real per-site PLG token
-  allocations on production — not a dry run.
+  is actually the one granted. Supports dev/stage/prod. This mutates real
+  per-site PLG token allocations — not a dry run.
 ---
 
 # PLG Suggestion Grants (check / revoke / regrant)
@@ -21,12 +21,44 @@ Each PLG site gets a small monthly quota ("token") of suggestions it's
 allowed to see per opportunity type — this skill lets you inspect that state
 and force a refresh (revoke anything stale, backfill with the current best).
 
-**This mutates production PLG token allocations for a real site.** There is
-no dedicated "revoke" or "regrant" endpoint you call with a body — the
-revoke+regrant cycle is a side effect of `GET /sites/:siteId/opportunities/
-:opportunityId`, gated behind the site's entitlement tier. Treat every
-trigger call here as a real, customer-facing action, same spirit as the
-`plg-onboard` skill's safety gate.
+**This mutates a real site's PLG token allocation in whichever environment
+you point it at.** There is no dedicated "revoke" or "regrant" endpoint you
+call with a body — the revoke+regrant cycle is a side effect of `GET
+/sites/:siteId/opportunities/:opportunityId`, gated behind the site's
+entitlement tier. Treat every trigger call here as a real action against
+that environment's data — same spirit as the `plg-onboard` skill's safety
+gate — and be especially careful on `prod`, where it's customer-facing.
+
+## Target environment
+
+**Ask which environment (`dev`, `stage`, or `prod`) before doing anything**,
+unless the user already said. Default to `prod` only after confirming — a
+real PLG customer's token allocation lives there, so don't assume.
+
+| Env | App API base | PostgREST base | Auth |
+|---|---|---|---|
+| `prod` | `https://spacecat.experiencecloud.live/api/v1` | `https://d1xldhzwm6wv00.cloudfront.net` | `mysticat auth token` / `mysticat login` (defaults to prod) |
+| `stage` | `https://spacecat.experiencecloud.live/api/stage` | *(none — see caveat below)* | `mysticat auth token --env stage` / `mysticat login --env stage` |
+| `dev` | `https://spacecat.experiencecloud.live/api/ci` | `https://dql63ofcyt4dr.cloudfront.net` | `mysticat auth token --env dev` / `mysticat login --env dev` |
+
+**Caveat — no separate stage PostgREST instance.** The app API has all three
+environments, but the PostgREST reporting service (used for every read-only
+inspection step below) only has `dev` and `prod` deployments — confirmed
+against the `query-sites`/`query-opportunities` skills' own endpoint tables,
+neither of which lists a stage URL. If the target is `stage`, you can still
+trigger the app-API refresh call against `/api/stage`, but you cannot verify
+grant/token state via PostgREST for a stage-only site — the `dev` PostgREST
+instance won't have that site's rows either. Say this limitation out loud
+rather than silently querying the wrong environment's data.
+
+Once the env is picked, set both bases for the rest of this skill:
+
+```bash
+# example for prod — swap per the table above
+APP_API="https://spacecat.experiencecloud.live/api/v1"
+POSTGREST="https://d1xldhzwm6wv00.cloudfront.net"
+ENV_FLAG="prod"   # dev | stage | prod — passed to mysticat auth/login
+```
 
 ## Precondition: does this even apply to the site?
 
@@ -51,9 +83,9 @@ no-op — say so rather than declaring success.
 ## Auth — use the session token, not the IMS token
 
 **Use `mysticat auth token` (no `--ims` flag) for every call to the live app
-API** (`https://spacecat.experiencecloud.live/api/v1/...`). The raw IMS
-access token (`mysticat auth token --ims`) gets rejected with a plain-text
-`401 Unauthorized` before it ever reaches the app — the response carries an
+API**, on whichever env you picked above. The raw IMS access token
+(`mysticat auth token --ims`) gets rejected with a plain-text `401
+Unauthorized` before it ever reaches the app — the response carries an
 `apigw-requestid` header and `content-length: 12`, meaning API Gateway's
 custom authorizer layer rejected it, not the app's own `authWrapper`. This
 reproduced consistently across multiple fresh `mysticat login --force`
@@ -66,12 +98,13 @@ but empirically swapping to the session token is what works). Don't spend
 time re-diagnosing this — just use the session token:
 
 ```bash
-TOKEN=$(mysticat auth token)
+TOKEN=$(mysticat auth token --env "$ENV_FLAG")   # omit --env for prod, it's the default
 ```
 
-PostgREST reporting calls (`query-sites`/`query-opportunities` skills) work
-fine with either `mysticat auth token` or `mysticat auth token --env prod` —
-only the live app API is picky.
+Make sure you're logged into the right env first — `mysticat login --env
+"$ENV_FLAG"` if `mysticat auth token --env "$ENV_FLAG"` prints nothing or a
+token for the wrong tenant. A prod session doesn't carry over to
+dev/stage and vice versa.
 
 ## Data model (read-only inspection)
 
@@ -86,8 +119,8 @@ auth/endpoint setup):
 | `suggestions` | `id, opportunity_id, status, rank, data, updated_at` | `status` drives staleness — see below. |
 
 ```bash
-POSTGREST="https://d1xldhzwm6wv00.cloudfront.net"   # prod; use dev URL from query-sites skill for dev
-TOKEN=$(mysticat auth token --env prod)
+# $POSTGREST already set from the Target environment table above
+TOKEN=$(mysticat auth token --env "$ENV_FLAG")
 
 # Current token state for a site
 curl -s "$POSTGREST/tokens?select=*&site_id=eq.<siteId>" -H "Authorization: Bearer $TOKEN"
@@ -145,24 +178,27 @@ and a listing endpoint `GET /sites/:siteId/tokens/:tokenId/grants`
 
 ## Steps
 
-1. **Confirm target with the user**: site (ID or URL), opportunity type(s)
-   (`broken-backlinks`, `alt-text`, `cwv`, ...), and what outcome they
-   expect (just inspect? force a refresh?). Don't skip this even if a
-   similar request ran earlier in the session for a different site.
+1. **Confirm target with the user**: environment (`dev`/`stage`/`prod` — see
+   above), site (ID or URL), opportunity type(s) (`broken-backlinks`,
+   `alt-text`, `cwv`, ...), and what outcome they expect (just inspect?
+   force a refresh?). Don't skip this even if a similar request ran earlier
+   in the session for a different site or env.
 2. **Check the PLG precondition** (entitlement tier, above). If it's not
    `PLG`, say so up front — the trigger call will "succeed" but do nothing.
 3. **Find the opportunity ID(s)** via `query-opportunities` skill
-   (`fetch_opportunities.py --filters site_id=eq.<siteId> type=eq.<type>`).
+   (`fetch_opportunities.py --env <env> --filters site_id=eq.<siteId>
+   type=eq.<type>`).
 4. **Inspect current state before mutating** — pull `tokens` for the site,
    `suggestion_grants` for the relevant token(s), and the full `suggestions`
    data for both the currently-granted ones and all `NEW` ones for the
    opportunity. This is what tells you whether a trigger call will actually
-   *do* anything (any stale grants? any remaining capacity?).
+   *do* anything (any stale grants? any remaining capacity?). Skip this step
+   for `stage` — no PostgREST instance to query (see caveat above).
 5. **Trigger the refresh**:
    ```bash
-   TOKEN=$(mysticat auth token)
+   TOKEN=$(mysticat auth token --env "$ENV_FLAG")
    curl -s -w "\nHTTP_STATUS:%{http_code}\n" --request GET \
-     --url "https://spacecat.experiencecloud.live/api/v1/sites/<siteId>/opportunities/<opportunityId>" \
+     --url "$APP_API/sites/<siteId>/opportunities/<opportunityId>" \
      --header "authorization: Bearer ${TOKEN}" \
      --header 'accept: */*' \
      --header 'x-client-type: sites-optimizer-ui'
@@ -175,10 +211,12 @@ and a listing endpoint `GET /sites/:siteId/tokens/:tokenId/grants`
    `suggestion_grants` for that token (are the suggestion IDs different?).
    Cross-check the newly-granted suggestion IDs against the ranking
    strategy for that opportunity type yourself — don't just trust that
-   "granted" means "best" (see Gotchas).
-7. **Report precisely**: what was already there, what changed (or didn't,
-   and why — no stale grants / token already full / tier not PLG), and any
-   ranking anomalies you found. Don't just say "done."
+   "granted" means "best" (see Gotchas). For `stage`, you can't do this
+   step — say so instead of guessing at the outcome.
+7. **Report precisely**: environment used, what was already there, what
+   changed (or didn't, and why — no stale grants / token already full /
+   tier not PLG), and any ranking anomalies you found. Don't just say
+   "done."
 
 ## Gotchas (hard-won this session)
 
