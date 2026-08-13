@@ -194,6 +194,26 @@ describe('GetSiteCommand', () => {
       expect(responseText).to.include('Test Org');
     });
 
+    it('shows only imsOrgId when org name is not available', async () => {
+      site.getOrganization = sinon.stub().resolves({
+        getImsOrgId: () => 'ims-org-456',
+        getName: () => null,
+      });
+      site.getAuditsByAuditType.resolves(generateMockAudits(1));
+
+      const args = ['example.com', 'mobile'];
+      const command = GetSiteCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+      const callArgs = slackContext.say.firstCall.args;
+      const responseText = JSON.stringify(callArgs);
+
+      expect(responseText).to.include('ims-org-456');
+      expect(responseText).to.not.include('(null)');
+    });
+
     it('handles missing organization ID and IMS org gracefully', async () => {
       site.getOrganizationId = () => null;
       site.getOrganization = sinon.stub().resolves(null);
