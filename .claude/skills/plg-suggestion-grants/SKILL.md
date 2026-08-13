@@ -213,10 +213,40 @@ and a listing endpoint `GET /sites/:siteId/tokens/:tokenId/grants`
    strategy for that opportunity type yourself — don't just trust that
    "granted" means "best" (see Gotchas). For `stage`, you can't do this
    step — say so instead of guessing at the outcome.
-7. **Report precisely**: environment used, what was already there, what
+7. **Content-quality check on what actually got granted** — "granted" only
+   means "won the priority ranking," it says nothing about whether the
+   proposed fix itself is good. The ranking strategies in
+   `grant-suggestions-handler.js` never look at content quality, only
+   `rank`/`traffic_domain`/`pageviews`. For each newly-granted suggestion:
+   - **`broken-backlinks`**: take `data.urlsSuggested[0]` (the top
+     candidate) and fetch it (`WebFetch` or `curl -I`). Confirm it's live
+     (200, not 404/redirect-loop) and that its content plausibly matches
+     the broken URL's original intent — cross-reference `data.title` /
+     `data.aiRationale` for what the broken page was likely about. A
+     suggested redirect to an unrelated or dead page is a bad grant even if
+     it was the correctly top-ranked one.
+   - **`alt-text`**: for each `data.recommendations[]` entry, download
+     `data.recommendations[].imageUrl` to the scratchpad (`curl -sL
+     <imageUrl> -o <scratchpad>/img.png` — the `Read` tool only opens local
+     paths, it can't fetch a remote URL directly) and **view it with
+     `Read`**, which renders images directly. Judge the proposed `altText`
+     against what's actually visible — not just "some text is present."
+     Flag generic/lazy captions (e.g. "image", "photo", the filename
+     verbatim, keyword-stuffed text unrelated to the visible content) and
+     outright mismatches (alt text describes a different subject than the
+     image shows). Also check `isDecorativeByAgent` alongside `isDecorative`
+     — see Gotchas; a suggestion can have `isDecorative: false` (so the
+     grant filter lets it through) while `isDecorativeByAgent: true` (a
+     secondary AI check already flagged it as probably not needing
+     meaningful alt text at all) — worth surfacing even though nothing in
+     the grant/revoke code looks at that field.
+   - Report specific findings (URL live/dead, caption accurate/wrong), not
+     just "looks fine" — this is exactly the kind of check the automated
+     ranking can't do.
+8. **Report precisely**: environment used, what was already there, what
    changed (or didn't, and why — no stale grants / token already full /
-   tier not PLG), and any ranking anomalies you found. Don't just say
-   "done."
+   tier not PLG), any ranking anomalies you found, and the content-quality
+   verdict from step 7. Don't just say "done."
 
 ## Gotchas (hard-won this session)
 
@@ -242,6 +272,31 @@ and a listing endpoint `GET /sites/:siteId/tokens/:tokenId/grants`
   query (full row) or `view=full` before concluding data is actually
   missing. (This is an open bug in `spacecat-shared`'s
   `suggestion.data-schemas.js`, not yet fixed.)
+- **"Granted" ≠ "content is good."** The ranking strategies only compare
+  `rank` / `traffic_domain` / `pageviews` — none of them evaluate whether
+  the proposed fix actually makes sense. A suggestion can win the priority
+  ranking and still be a bad grant: the top `broken-backlinks` candidate
+  URL can 404 or be unrelated to the original page's topic; an `alt-text`
+  caption can be generic ("image", the filename, boilerplate) or describe
+  something other than what the image actually shows. Always do the
+  content-quality check (Steps, step 7) — don't equate "the algorithm
+  picked it" with "it's a good suggestion."
+- **`alt-text`'s decorative filter only checks `isDecorative`, not
+  `isDecorativeByAgent`.** The `alt-text` `groupFn` in
+  `grant-suggestions-handler.js` excludes a suggestion only when
+  `data.recommendations[].isDecorative === true`. Real production data
+  (virginaustralia.com) shows a second, independent field,
+  `isDecorativeByAgent`, that can be `true` while `isDecorative` stays
+  `false` — meaning a secondary AI check already flagged an image as
+  probably decorative, but the grant filter never looks at that field and
+  lets it through anyway. Observed outcome: 2 of a site's 3 monthly
+  alt-text token slots went to tiny UI icons (a ~1KB airplane icon, a ~1KB
+  timezone icon) that `isDecorativeByAgent` had flagged, while a real
+  content image (a banner photo, already `isManuallyEdited: true`) got the
+  third slot. Not itself a bug in the grant mechanism (it does exactly what
+  its filter says), but worth flagging when reporting alt-text grant
+  results — the filter is incomplete relative to signals the data already
+  carries.
 - **No stale grant + full token capacity = the trigger is a correct no-op.**
   Don't interpret an unchanged `tokens.used`/`suggestion_grants` after the
   trigger call as a failure — check whether any currently-granted
