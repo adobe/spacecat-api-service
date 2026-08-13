@@ -337,6 +337,7 @@ export default function getRouteHandlers(
     'GET /sites.xlsx': sitesController.getAllAsExcel,
     'GET /sites/:siteId': sitesController.getByID,
     'GET /sites/:siteId/identity': sitesController.getIdentity,
+    'POST /sites/:siteId/permissions/check/deploy': sitesController.checkDeployPermission,
     'PATCH /sites/:siteId': sitesController.updateSite,
     'PATCH /sites/:siteId/config/cdn-logs': sitesController.updateCdnLogsConfig,
     'GET /sites/:siteId/config/scraper': sitesController.getScraperConfig,

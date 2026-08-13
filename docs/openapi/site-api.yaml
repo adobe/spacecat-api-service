@@ -322,6 +322,55 @@ site-page-relationships-search:
       '500':
         $ref: './responses.yaml#/500'
 
+site-permissions-check-deploy:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
+    operationId: checkSiteDeployPermission
+    summary: Check whether the caller may deploy optimizations for a site
+    description: |
+      Permission probe for the "deploy" capability (apply / roll back optimizations) on a site.
+      Returns `200 { "hasPermission": true }` when the caller is authorized to deploy, and `403`
+      otherwise. Intended for UI flows that show or hide a deploy/apply control before the user acts.
+
+      The product is selected via the `x-product` request header (`LLMO` or `ASO`).
+
+      Authorization: for FACS-enrolled organizations the request is gated by the FACS layer
+      (`<product>/can_deploy`) before it reaches the handler, so a `200` already implies the caller
+      holds the capability. For organizations not yet on FACS the handler applies the legacy check —
+      the LLMO administrator capability for `LLMO`, or the `auto_fix`-scoped organization access for
+      `ASO`.
+
+      Internal endpoint: it is not exposed to service-to-service (S2S) consumers.
+    tags:
+      - site
+    security:
+      - session_token: [ ]
+    responses:
+      '200':
+        description: The caller is authorized to deploy optimizations for the site.
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - hasPermission
+              properties:
+                hasPermission:
+                  type: boolean
+                  description: Always `true` on a 200 response; the caller may deploy.
+                  example: true
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403-site-access-forbidden'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+
 site-reports:
   parameters:
     - $ref: './parameters.yaml#/siteId'

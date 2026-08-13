@@ -52,6 +52,7 @@ describe('getRouteHandlers', () => {
     getAllWithLatestAudit: sinon.stub(),
     getByID: sinon.stub(),
     getIdentity: sinon.stub(),
+    checkDeployPermission: sinon.stub(),
     getByBaseURL: sinon.stub(),
     getPageCitabilityCounts: sinon.stub(),
   };
@@ -1109,6 +1110,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/detect/jobs/:jobId',
       'GET /sites/:siteId',
       'GET /sites/:siteId/identity',
+      'POST /sites/:siteId/permissions/check/deploy',
       'PATCH /sites/:siteId',
       'PATCH /sites/:siteId/config/cdn-logs',
       'GET /sites/:siteId/config/scraper',
@@ -1489,6 +1491,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/identity'].handler).to.equal(mockSitesController.getIdentity);
     expect(dynamicRoutes['GET /sites/:siteId/identity'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['POST /sites/:siteId/permissions/check/deploy'].handler).to.equal(mockSitesController.checkDeployPermission);
+    expect(dynamicRoutes['POST /sites/:siteId/permissions/check/deploy'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/by-delivery-type/:deliveryType'].handler).to.equal(mockSitesController.getAllByDeliveryType);
     expect(dynamicRoutes['GET /sites/by-delivery-type/:deliveryType'].paramNames).to.deep.equal(['deliveryType']);
     expect(dynamicRoutes['GET /sites/by-tier/:tier'].handler).to.equal(mockSitesController.getAllByEnrollmentAndTier);

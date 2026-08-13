@@ -132,6 +132,7 @@ describe('Sites Controller', () => {
     'getByBaseURL',
     'getByID',
     'getIdentity',
+    'checkDeployPermission',
     'getBrandProfile',
     'removeSite',
     'updateSite',
@@ -2026,6 +2027,97 @@ describe('Sites Controller', () => {
     expect(mockDataAccess.Site.findById).to.have.been.calledOnce;
     expect(result.status).to.equal(403);
     expect(error).to.have.property('message', 'Only users belonging to the organization can view its sites');
+  });
+
+  describe('checkDeployPermission (POST /sites/:siteId/permissions/check/deploy)', () => {
+    const withProduct = (product, extra = {}) => ({
+      params: { siteId: SITE_IDS[0] },
+      pathInfo: { headers: product ? { 'x-product': product } : {} },
+      ...extra,
+    });
+
+    it('returns 400 for an invalid site id', async () => {
+      const result = await sitesController.checkDeployPermission({
+        params: { siteId: 'not-a-uuid' },
+        pathInfo: { headers: { 'x-product': 'ASO' } },
+      });
+
+      expect(result.status).to.equal(400);
+      expect(mockDataAccess.Site.findById).to.not.have.been.called;
+    });
+
+    it('returns 404 for an unknown site', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const result = await sitesController.checkDeployPermission(withProduct('ASO'));
+
+      expect(result.status).to.equal(404);
+    });
+
+    it('LLMO: returns 200 when the caller holds the LLMO capability for the site', async () => {
+      const capabilityStub = sandbox
+        .stub(AccessControlUtil.prototype, 'hasLlmoCapabilityForSite').resolves(true);
+
+      const result = await sitesController.checkDeployPermission(withProduct('LLMO'));
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body).to.deep.equal({ hasPermission: true });
+      expect(capabilityStub).to.have.been.calledOnce;
+    });
+
+    it('LLMO: returns 403 when the caller lacks the LLMO capability for the site', async () => {
+      const capabilityStub = sandbox
+        .stub(AccessControlUtil.prototype, 'hasLlmoCapabilityForSite').resolves(false);
+
+      const result = await sitesController.checkDeployPermission(withProduct('LLMO'));
+
+      expect(result.status).to.equal(403);
+      expect(capabilityStub).to.have.been.calledOnce;
+    });
+
+    it('ASO (ReBAC disabled): returns 200 and checks org access with the auto_fix scope', async () => {
+      const hasAccessStub = sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+
+      const result = await sitesController.checkDeployPermission(withProduct('ASO'));
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body).to.deep.equal({ hasPermission: true });
+      expect(hasAccessStub).to.have.been.calledOnceWithExactly(sites[0], 'auto_fix');
+    });
+
+    it('ASO (ReBAC disabled): returns 403 when org access with the auto_fix scope is denied', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
+
+      const result = await sitesController.checkDeployPermission(withProduct('ASO'));
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('ASO (ReBAC enabled): returns 200 without re-checking when facs_enabled is set', async () => {
+      const hasAccessStub = sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
+
+      const result = await sitesController.checkDeployPermission(withProduct('ASO', {
+        attributes: { authInfo: new AuthInfo().withProfile({ facs_enabled: true }) },
+      }));
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body).to.deep.equal({ hasPermission: true });
+      // The facsWrapper already enforced aso/can_deploy upstream, so the legacy
+      // auto_fix check must not run.
+      expect(hasAccessStub).to.not.have.been.called;
+    });
+
+    it('no x-product (ReBAC disabled): falls back to plain org-membership access', async () => {
+      const hasAccessStub = sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+
+      const result = await sitesController.checkDeployPermission(withProduct(null));
+
+      expect(result.status).to.equal(200);
+      expect(hasAccessStub).to.have.been.calledOnceWithExactly(sites[0], '');
+    });
   });
 
   describe('getIdentity (GET /sites/:siteId/identity)', () => {

@@ -50,7 +50,7 @@ import {
   wwwUrlResolver, resolveWwwUrl, getAsoEntitlement, getAsoTier, CUSTOMER_VISIBLE_TIERS,
   isInternalOrg,
 } from '../support/utils.js';
-import AccessControlUtil from '../support/access-control-util.js';
+import AccessControlUtil, { X_PRODUCT_HEADER } from '../support/access-control-util.js';
 import { CAP_SITE_READ_ALL, CAP_SITE_CREATE } from '../routes/capability-constants.js';
 import { auditTargetURLsPatchGuard } from '../support/audit-target-urls-validation.js';
 import { detectedCdnPatchGuard } from '../support/detected-cdn-validation.js';
@@ -1847,7 +1847,6 @@ function SitesController(ctx, log, env) {
       organizationId, imsOrg, siteId, callerImsOrg,
     } = context.data;
     const { pathInfo } = context;
-    const X_PRODUCT_HEADER = 'x-product';
     let productCode = pathInfo.headers[X_PRODUCT_HEADER];
     // Local-dev affordance (SKIP_AUTH only): the local UI harness may run a UI
     // build that predates the x-product requirement on /sites-resolve and so omits
@@ -2291,6 +2290,67 @@ function SitesController(ctx, log, env) {
     }
   };
 
+  /**
+   * Checks whether the caller may DEPLOY (apply / roll back optimizations) for a site.
+   *
+   * Internal-only route: it is intentionally absent from `routeRequiredCapabilities`, so it is
+   * never reachable by S2S consumers. The external customer surface is governed by FACS, which
+   * maps this route to `<product>/can_deploy` for both LLMO and ASO.
+   *
+   * For FACS-enrolled orgs (ReBAC enabled) `facsWrapper` has already enforced
+   * `<product>/can_deploy` upstream before this handler runs — ASO resolves the `:siteId`
+   * resource directly, LLMO via the site->brands secondary resolver — so reaching here means the
+   * caller is authorized. This method only adds the legacy (ReBAC-disabled) fallback that the
+   * wrapper leaves to the controller for non-FACS orgs:
+   *   - LLMO -> {@link AccessControlUtil#hasLlmoCapabilityForSite}, which itself falls back to the
+   *     legacy `isLLMOAdministrator()` claim for non-FACS orgs (and returns true when the wrapper
+   *     already confirmed the capability for FACS orgs).
+   *   - ASO (and any non-LLMO product) -> when ReBAC is disabled (`facs_enabled` not set), require
+   *     org access carrying the `auto_fix` sub-service scope — the legacy ASO deploy gate. The
+   *     `auto_fix` scope maps to `dx_aem_perf_auto_fix`, minted only for ASO logins.
+   *
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} 200 `{ hasPermission: true }` when the caller may deploy;
+   *   403 when not; 404 when the site does not exist.
+   */
+  const checkDeployPermission = async (context) => {
+    const siteId = context.params?.siteId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    const xProduct = context.pathInfo?.headers?.[X_PRODUCT_HEADER];
+
+    if (xProduct === 'LLMO') {
+      // Handles both FACS-enrolled (wrapper-confirmed -> true) and non-FACS
+      // (legacy isLLMOAdministrator) orgs.
+      if (!await accessControlUtil.hasLlmoCapabilityForSite(site)) {
+        return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can deploy optimizations'));
+      }
+      return ok({ hasPermission: true });
+    }
+
+    // ASO (and any non-LLMO product). For FACS-enrolled orgs the wrapper already enforced
+    // aso/can_deploy, so only the ReBAC-disabled path needs the legacy `auto_fix`-scoped
+    // org-access check. Mirrors the `facs_enabled` gate used by edge-routing-auth /
+    // hasLlmoCapabilityForSite.
+    const facsEnabled = context.attributes?.authInfo?.getProfile?.()?.facs_enabled === true;
+    if (!facsEnabled) {
+      const autoFixSubService = xProduct === 'ASO' ? 'auto_fix' : '';
+      if (!await accessControlUtil.hasAccess(site, autoFixSubService)) {
+        return forbidden('User does not belong to the organization or does not have sufficient permissions');
+      }
+    }
+
+    return ok({ hasPermission: true });
+  };
+
   return {
     createSite,
     getAll,
@@ -2303,6 +2363,7 @@ function SitesController(ctx, log, env) {
     getAllByEnrollmentAndTier,
     getByID,
     getIdentity,
+    checkDeployPermission,
     removeSite,
     updateSite,
     updateCdnLogsConfig,
