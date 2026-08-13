@@ -135,14 +135,17 @@ sites:
         branch paginates by `offset`). Defaults to a limit of 50 (clamped to 500) and an
         offset of 0. The search term must be at least 3 characters after trimming
         (otherwise 400).
-      - **Server-side filter/sort (with `deliveryType`, `isLive`, and/or `sort`, alone or
-        combined with `baseUrlContains`):** same non-cursor, offset-paginated envelope as
-        substring search — `{ sites, pagination }` where `pagination` is
-        `{ limit, offset, hasMore, baseUrlContains?, deliveryType?, isLive?, sort? }`
-        (only the filters/sort actually applied are echoed back). `deliveryType` filters
-        on an exact match; `isLive` filters by live status (`"true"`/`"false"`); `sort` is
+      - **Server-side filter/sort (with `deliveryType`, `isLive`, `sort`, `tier`,
+        and/or `productCode`, alone or combined with `baseUrlContains`):** same
+        non-cursor, offset-paginated envelope as substring search — `{ sites, pagination
+        }` where `pagination` is `{ limit, offset, hasMore, baseUrlContains?,
+        deliveryType?, isLive?, sort?, tier?, productCode? }` (only the filters/sort
+        actually applied are echoed back). `deliveryType` filters on an exact match;
+        `isLive` filters by live status (`"true"`/`"false"`); `sort` is
         `<field>:<direction>` (field ∈ `baseURL`, `updatedAt`, `createdAt`,
-        `deliveryType`, `isLive`; direction ∈ `asc`/`desc`, defaults to `asc`). Multiple
+        `deliveryType`, `isLive`; direction ∈ `asc`/`desc`, defaults to `asc`). `tier`
+        restricts to sites enrolled at that entitlement tier; `productCode` (optionally
+        combined with `tier`) further restricts to that product's entitlement. Multiple
         filters combine with AND. Defaults to a limit of 50 (clamped to 500) and an
         offset of 0. Not combinable with `cursor` (400; use `offset` instead).
 
@@ -201,8 +204,8 @@ sites:
           Zero-based offset into the filtered/sorted search results, used to page
           through matches (e.g. `offset=2&limit=2` returns the second page of 2).
           Only honored on the filtered/sorted search path (i.e. when `baseUrlContains`,
-          `deliveryType`, `isLive`, and/or `sort` is present). Defaults to 0. Negative
-          or non-integer values return 400.
+          `deliveryType`, `isLive`, `sort`, `tier`, and/or `productCode` is present).
+          Defaults to 0. Negative or non-integer values return 400.
         schema:
           type: integer
           minimum: 0
@@ -259,27 +262,67 @@ sites:
         schema:
           type: string
           example: "updatedAt:desc"
+      - name: tier
+        in: query
+        required: false
+        description: |
+          Server-side filter: only return sites enrolled at this entitlement tier.
+          When provided — alone, or combined with `baseUrlContains`, `deliveryType`,
+          `isLive`, `sort`, and/or `productCode` — the response uses the non-cursor,
+          offset-paginated envelope, calling the enrollment-aware data-access path
+          instead of the plain site query, where `pagination.tier` echoes the applied
+          value. An unrecognized value returns 400. Not combinable with `cursor` (400;
+          use `offset` instead). The `limit` parameter (default 50, clamped to 500)
+          bounds the page size and `offset` (default 0) selects the page.
+        schema:
+          type: string
+          enum:
+            - FREE_TRIAL
+            - PAID
+            - PLG
+          example: PAID
+      - name: productCode
+        in: query
+        required: false
+        description: |
+          Server-side filter: only return sites enrolled under this product's
+          entitlement. May be combined with `tier` to narrow to that product's
+          entitlement at a specific tier, or provided alone to match the product across
+          any tier. When provided — alone, or combined with `baseUrlContains`,
+          `deliveryType`, `isLive`, `sort`, and/or `tier` — the response uses the
+          non-cursor, offset-paginated envelope, calling the enrollment-aware
+          data-access path instead of the plain site query, where
+          `pagination.productCode` echoes the applied value. An unrecognized value
+          returns 400. Not combinable with `cursor` (400; use `offset` instead).
+        schema:
+          type: string
+          enum:
+            - LLMO
+            - ASO
+            - ACO
+          example: LLMO
       - $ref: './parameters.yaml#/fields'
     responses:
       '200':
         description: |
           A paginated list of sites. The `pagination` shape depends on whether any of
-          `baseUrlContains`, `deliveryType`, `isLive`, or `sort` was provided.
+          `baseUrlContains`, `deliveryType`, `isLive`, `sort`, `tier`, or `productCode`
+          was provided.
         content:
           application/json:
             schema:
               description: |
                 Two response shapes are possible, selected by the request and
                 unambiguous by JSON shape, so no `discriminator` is used:
-                - When any of `baseUrlContains`, `deliveryType`, `isLive`, or `sort` is
-                  provided → **`SiteSearchResponse`**, a JSON object with `sites` and a
-                  non-cursor `pagination`
+                - When any of `baseUrlContains`, `deliveryType`, `isLive`, `sort`,
+                  `tier`, or `productCode` is provided → **`SiteSearchResponse`**, a
+                  JSON object with `sites` and a non-cursor `pagination`
                   (`{ limit, offset, hasMore, baseUrlContains?, deliveryType?, isLive?,
-                  sort? }`). Only the filters/sort actually applied are echoed back, so
-                  a client can confirm what ran on the deployment it hit (e.g. an older
-                  deployment that ignores `deliveryType` but honors `limit` would
-                  return this envelope with unfiltered sites and no `deliveryType`
-                  echo).
+                  sort?, tier?, productCode? }`). Only the filters/sort actually applied
+                  are echoed back, so a client can confirm what ran on the deployment it
+                  hit (e.g. an older deployment that ignores `deliveryType` but honors
+                  `limit` would return this envelope with unfiltered sites and no
+                  `deliveryType` echo).
                 - Otherwise (default first page, or with `limit`/`cursor`) →
                   **`SitePagedResponse`**, a JSON object with `sites` and a
                   cursor-based `pagination`.
