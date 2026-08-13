@@ -409,9 +409,6 @@ async function run(request, context) {
       if (params.jobId && !isValidUUIDAnyVersion(params.jobId)) {
         return badRequest('Job Id is invalid. Please provide a valid UUID.');
       }
-      if (params.preflightId && !isValidUUID(params.preflightId)) {
-        return badRequest('Preflight Id is invalid. Please provide a valid UUID.');
-      }
       if (params.connectionId && !isValidUUIDAnyVersion(params.connectionId)) {
         return badRequest('Connection Id is invalid. Please provide a valid UUID.');
       }

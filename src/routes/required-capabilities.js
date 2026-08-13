@@ -416,10 +416,6 @@ const routeRequiredCapabilities = {
   // preflight jobs (legacy)
   'POST /preflight/jobs': 'site:write',
   'GET /preflight/jobs/:jobId': 'site:read',
-  // preflight site-scoped endpoints
-  'POST /sites/:siteId/preflights': 'site:write',
-  'GET /sites/:siteId/preflights': 'site:read',
-  'GET /sites/:siteId/preflights/:preflightId': 'site:read',
   // Preflight checks - proxies user's Bearer token to AEM Author; end-user UI only
   'POST /sites/:siteId/autofix-checks': 'site:read',
 
