@@ -12,6 +12,7 @@
  */
 
 import { expect } from 'chai';
+import { SEARCH_TYPE_ENUM } from '@quazar/ai-seo-ts/v2/source/enums_pb.js';
 import {
   COUNTRY_ENUM,
   LLM_ENUM,
@@ -25,6 +26,7 @@ import {
   TOPIC_OPPORTUNITY_PROMPTS_MAX_PAGES,
   num,
   brandTarget,
+  resolveSearchType,
   parseLimitOffset,
   normalizeCountryForGrpc,
   resolveCountry,
@@ -239,6 +241,35 @@ describe('grpc-utils', () => {
   describe('brandTarget', () => {
     it('normalizes domain to lowercase trimmed', () => {
       expect(brandTarget(' Example.COM ')).to.deep.equal({ domain: 'example.com', name: 'example.com' });
+    });
+  });
+
+  describe('resolveSearchType', () => {
+    it('returns DOMAIN for an apex domain', () => {
+      expect(resolveSearchType('intuit.com')).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+    });
+    it('returns DOMAIN for a bare www host', () => {
+      expect(resolveSearchType('www.intuit.com')).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+    });
+    it('returns SUBDOMAIN for a non-www subdomain', () => {
+      expect(resolveSearchType('quickbooks.intuit.com')).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
+    });
+    it('returns SUBDOMAIN for a deep subdomain', () => {
+      expect(resolveSearchType('a.b.intuit.com')).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
+    });
+    it('handles multi-part TLDs: apex is DOMAIN', () => {
+      expect(resolveSearchType('example.co.uk')).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+    });
+    it('handles multi-part TLDs: subdomain is SUBDOMAIN', () => {
+      expect(resolveSearchType('blog.example.co.uk')).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
+    });
+    it('ignores scheme and path when present', () => {
+      expect(resolveSearchType('https://quickbooks.intuit.com/foo')).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
+    });
+    it('defaults to DOMAIN for empty or unparseable input', () => {
+      expect(resolveSearchType('')).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+      expect(resolveSearchType(null)).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+      expect(resolveSearchType(undefined)).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
     });
   });
 
