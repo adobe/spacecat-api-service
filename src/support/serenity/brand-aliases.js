@@ -187,9 +187,12 @@ export async function syncBrandAliasesAcrossMarkets(
         const withDerived = benchmarkAliases(benchmarkName, desiredBrandNames)
           .filter((a) => !ownedElsewhere.has(a.toLowerCase()));
         // Only the aliases this edit dropped from THIS market are removed; the rest
-        // of the live list (Semrush's enrichment) is carried forward.
+        // of the live list (Semrush's enrichment) is carried forward. Compared on the
+        // folded value, which is how upstream identifies an alias — a caller that
+        // re-spells an alias is editing it, not removing one and adding another.
+        const desiredKeys = new Set(desiredAliases.map((a) => a.toLowerCase()));
         const removedForMarket = collectAliasNames(previousAliases, market)
-          .filter((a) => !desiredAliases.includes(a));
+          .filter((a) => !desiredKeys.has(a.toLowerCase()));
         const nextAliases = mergeBenchmarkAliases(currentAliases, withDerived, removedForMarket);
         // Compared with casing significant, so a re-cased alias counts as a change.
         // The merge keeps every live spelling, so this is quiet in the steady state.

@@ -272,8 +272,9 @@ export async function syncCompetitorBenchmarksForProject(
   for (const c of desired) {
     const existing = competitorByDomain.get(c.domain);
     if (existing) {
+      const keptKeys = new Set(c.aliases.map((a) => a.toLowerCase()));
       const removed = (previousByDomain.get(c.domain) || [])
-        .filter((a) => !c.aliases.includes(a));
+        .filter((a) => !keptKeys.has(a.toLowerCase()));
       plannedAliases.set(c.domain, mergeBenchmarkAliases(
         existing.aliases,
         allowed(benchmarkAliases(c.name, c.aliases), existing.id),
@@ -352,12 +353,15 @@ export async function syncCompetitorBenchmarksForProject(
         .map((c) => c.domain),
     ]);
     const removedKeysByDomain = new Map(
-      desired.map((c) => [
-        c.domain,
-        new Set((previousByDomain.get(c.domain) || [])
-          .filter((a) => !c.aliases.includes(a))
-          .map((a) => a.toLowerCase())),
-      ]),
+      desired.map((c) => {
+        const keptKeys = new Set(c.aliases.map((a) => a.toLowerCase()));
+        return [
+          c.domain,
+          new Set((previousByDomain.get(c.domain) || [])
+            .map((a) => a.toLowerCase())
+            .filter((a) => !keptKeys.has(a))),
+        ];
+      }),
     );
     // Draft again — the writes above are not published yet.
     const after = await transport.listBenchmarks(workspaceId, projectId, { draft: true });
