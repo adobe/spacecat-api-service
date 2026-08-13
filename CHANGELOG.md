@@ -1,3 +1,10 @@
+## [1.741.2](https://github.com/adobe/spacecat-api-service/compare/v1.741.1...v1.741.2) (2026-08-13)
+
+
+### Bug Fixes
+
+* **serenity:** remove dormant Semrush AI allocator, §10.1/§10.2 (SITES-49206) ([#2995](https://github.com/adobe/spacecat-api-service/issues/2995)) ([a2de970](https://github.com/adobe/spacecat-api-service/commit/a2de9703d1650de6a6d8b2125a42fc8105aa6239))
+
 ## [1.741.1](https://github.com/adobe/spacecat-api-service/compare/v1.741.0...v1.741.1) (2026-08-13)
 
 
