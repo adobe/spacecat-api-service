@@ -1,3 +1,10 @@
+# [1.741.0](https://github.com/adobe/spacecat-api-service/compare/v1.740.1...v1.741.0) (2026-08-13)
+
+
+### Features
+
+* **facs:** enforce site-scoped LLMO routes in facsWrapper via secondary resource param ([#3030](https://github.com/adobe/spacecat-api-service/issues/3030)) ([0b57533](https://github.com/adobe/spacecat-api-service/commit/0b57533ffde583a1aa8aa4666cf5fd995ca973ed)), closes [adobe/mysticat-architecture#241](https://github.com/adobe/mysticat-architecture/issues/241) [#2947](https://github.com/adobe/spacecat-api-service/issues/2947)
+
 ## [1.740.1](https://github.com/adobe/spacecat-api-service/compare/v1.740.0...v1.740.1) (2026-08-13)
 
 
