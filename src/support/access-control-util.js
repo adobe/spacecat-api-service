@@ -305,6 +305,31 @@ export default class AccessControlUtil {
   }
 
   /**
+   * ASO counterpart to {@link hasLlmoCapabilityForSite}: whether the caller may
+   * DEPLOY (apply / roll back fixes) for a site. Two regimes, mirroring the
+   * hybrid model:
+   *   - FACS-enrolled (`facs_enabled` claim set) → `facsWrapper` already enforced
+   *     `aso/can_deploy` upstream. ASO's ReBAC anchor is the site itself, so the
+   *     wrapper resolves it directly and never defers; reaching the controller
+   *     means it admitted the request → allow.
+   *   - Not FACS-enrolled (ReBAC disabled) → the legacy ASO deploy gate: org
+   *     access carrying the `auto_fix` sub-service scope (the `dx_aem_perf_auto_fix`
+   *     user scope, minted only for ASO logins).
+   *
+   * MUST only be called on FACS-governed routes (see {@link hasLlmoCapabilityForSite}).
+   *
+   * @param {object} site - Site model.
+   * @returns {Promise<boolean>}
+   */
+  async hasAsoDeployCapabilityForSite(site) {
+    const facsEnabled = this.authInfo.getProfile?.()?.facs_enabled === true;
+    if (facsEnabled) {
+      return true;
+    }
+    return this.hasAccess(site, 'auto_fix');
+  }
+
+  /**
    * Chooses the 403 message for an LLMO capability denial based on which layer
    * rejected the caller, so the response is not misleading:
    *   - org NOT FACS-enrolled → the legacy `isLLMOAdministrator()` claim denied;

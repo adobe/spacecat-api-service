@@ -325,6 +325,7 @@ site-page-relationships-search:
 site-permissions-check-deploy:
   parameters:
     - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/xProduct'
   post:
     operationId: checkSiteDeployPermission
     summary: Check whether the caller may deploy optimizations for a site
@@ -333,7 +334,8 @@ site-permissions-check-deploy:
       Returns `200 { "hasPermission": true }` when the caller is authorized to deploy, and `403`
       otherwise. Intended for UI flows that show or hide a deploy/apply control before the user acts.
 
-      The product is selected via the `x-product` request header (`LLMO` or `ASO`).
+      The product is selected via the **required** `x-product` request header (case-insensitive,
+      `LLMO` or `ASO`); the endpoint returns `400` when it is missing or unrecognized.
 
       Authorization: for FACS-enrolled organizations the request is gated by the FACS layer
       (`<product>/can_deploy`) before it reaches the handler, so a `200` already implies the caller

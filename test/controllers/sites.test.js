@@ -2046,6 +2046,20 @@ describe('Sites Controller', () => {
       expect(mockDataAccess.Site.findById).to.not.have.been.called;
     });
 
+    it('returns 400 when the x-product header is missing', async () => {
+      const result = await sitesController.checkDeployPermission(withProduct(null));
+
+      expect(result.status).to.equal(400);
+      expect(mockDataAccess.Site.findById).to.not.have.been.called;
+    });
+
+    it('returns 400 when the x-product header is unrecognized', async () => {
+      const result = await sitesController.checkDeployPermission(withProduct('FOO'));
+
+      expect(result.status).to.equal(400);
+      expect(mockDataAccess.Site.findById).to.not.have.been.called;
+    });
+
     it('returns 404 for an unknown site', async () => {
       mockDataAccess.Site.findById.resolves(null);
 
@@ -2076,47 +2090,36 @@ describe('Sites Controller', () => {
       expect(capabilityStub).to.have.been.calledOnce;
     });
 
-    it('ASO (ReBAC disabled): returns 200 and checks org access with the auto_fix scope', async () => {
-      const hasAccessStub = sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+    it('ASO: returns 200 when the caller holds the ASO deploy capability for the site', async () => {
+      const capabilityStub = sandbox
+        .stub(AccessControlUtil.prototype, 'hasAsoDeployCapabilityForSite').resolves(true);
 
       const result = await sitesController.checkDeployPermission(withProduct('ASO'));
       const body = await result.json();
 
       expect(result.status).to.equal(200);
       expect(body).to.deep.equal({ hasPermission: true });
-      expect(hasAccessStub).to.have.been.calledOnceWithExactly(sites[0], 'auto_fix');
+      expect(capabilityStub).to.have.been.calledOnceWithExactly(sites[0]);
     });
 
-    it('ASO (ReBAC disabled): returns 403 when org access with the auto_fix scope is denied', async () => {
-      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
+    it('ASO: returns 403 when the caller lacks the ASO deploy capability for the site', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAsoDeployCapabilityForSite').resolves(false);
 
       const result = await sitesController.checkDeployPermission(withProduct('ASO'));
 
       expect(result.status).to.equal(403);
     });
 
-    it('ASO (ReBAC enabled): returns 200 without re-checking when facs_enabled is set', async () => {
-      const hasAccessStub = sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
+    it('normalizes the x-product header case (lowercase "aso" routes to the ASO check)', async () => {
+      const asoStub = sandbox
+        .stub(AccessControlUtil.prototype, 'hasAsoDeployCapabilityForSite').resolves(true);
+      const llmoStub = sandbox.stub(AccessControlUtil.prototype, 'hasLlmoCapabilityForSite');
 
-      const result = await sitesController.checkDeployPermission(withProduct('ASO', {
-        attributes: { authInfo: new AuthInfo().withProfile({ facs_enabled: true }) },
-      }));
-      const body = await result.json();
-
-      expect(result.status).to.equal(200);
-      expect(body).to.deep.equal({ hasPermission: true });
-      // The facsWrapper already enforced aso/can_deploy upstream, so the legacy
-      // auto_fix check must not run.
-      expect(hasAccessStub).to.not.have.been.called;
-    });
-
-    it('no x-product (ReBAC disabled): falls back to plain org-membership access', async () => {
-      const hasAccessStub = sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
-
-      const result = await sitesController.checkDeployPermission(withProduct(null));
+      const result = await sitesController.checkDeployPermission(withProduct('aso'));
 
       expect(result.status).to.equal(200);
-      expect(hasAccessStub).to.have.been.calledOnceWithExactly(sites[0], '');
+      expect(asoStub).to.have.been.calledOnce;
+      expect(llmoStub).to.not.have.been.called;
     });
   });
 

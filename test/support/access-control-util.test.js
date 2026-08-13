@@ -2382,6 +2382,42 @@ describe('Access Control Util', () => {
     });
   });
 
+  describe('hasAsoDeployCapabilityForSite', () => {
+    const site = { getId: () => 'site-1', getOrganizationId: () => 'org-uuid' };
+
+    function makeCtx(profile = {}) {
+      return {
+        pathInfo: {
+          method: 'POST',
+          suffix: '/sites/site-1/permissions/check/deploy',
+          headers: { 'x-product': 'aso' },
+        },
+        attributes: { authInfo: new AuthInfo().withType('jwt').withProfile(profile) },
+        dataAccess: { Entitlement: {}, TrialUser: {}, OrganizationIdentityProvider: {} },
+      };
+    }
+
+    it('FACS-enrolled (facs_enabled) → true without running the legacy auto_fix check', async () => {
+      const util = AccessControlUtil.fromContext(makeCtx({ facs_enabled: true }));
+      const hasAccessSpy = sandbox.spy(util, 'hasAccess');
+      expect(await util.hasAsoDeployCapabilityForSite(site)).to.be.true;
+      expect(hasAccessSpy).to.not.have.been.called;
+    });
+
+    it('not FACS-enrolled → delegates to hasAccess(site, auto_fix) — grant', async () => {
+      const util = AccessControlUtil.fromContext(makeCtx({}));
+      sandbox.stub(util, 'hasAccess').resolves(true);
+      expect(await util.hasAsoDeployCapabilityForSite(site)).to.be.true;
+      expect(util.hasAccess).to.have.been.calledOnceWithExactly(site, 'auto_fix');
+    });
+
+    it('not FACS-enrolled → delegates to hasAccess(site, auto_fix) — deny', async () => {
+      const util = AccessControlUtil.fromContext(makeCtx({}));
+      sandbox.stub(util, 'hasAccess').resolves(false);
+      expect(await util.hasAsoDeployCapabilityForSite(site)).to.be.false;
+    });
+  });
+
   describe('llmoForbiddenMessage', () => {
     function makeCtx({
       profile = {}, facs, suffix = '/sites/site-1/llmo/config', method = 'POST',
