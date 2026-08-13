@@ -78,6 +78,42 @@ describe('provisionWorkspaceMember', () => {
     expect(thrown.body).to.deep.equal({ message: 'already a member' });
   });
 
+  it('treats an unparseable body as null on a non-2xx response (empty/non-JSON upstream body)', async () => {
+    fetchStub.resolves({
+      ok: false,
+      status: 500,
+      json: async () => { throw new SyntaxError('Unexpected end of JSON input'); },
+    });
+
+    let thrown;
+    try {
+      await provisionWorkspaceMember(ENV, IMS_TOKEN);
+    } catch (e) {
+      thrown = e;
+    }
+
+    expect(thrown).to.be.instanceOf(SerenityTransportError);
+    expect(thrown.status).to.equal(500);
+    expect(thrown.body).to.equal(null);
+  });
+
+  it('returns undefined fields rather than throwing when a 2xx response has an unparseable body', async () => {
+    fetchStub.resolves({
+      ok: true,
+      status: 200,
+      json: async () => { throw new SyntaxError('Unexpected end of JSON input'); },
+    });
+
+    const result = await provisionWorkspaceMember(ENV, IMS_TOKEN);
+
+    expect(result).to.deep.equal({
+      email: undefined,
+      organizationId: undefined,
+      workspaceId: undefined,
+      role: undefined,
+    });
+  });
+
   it('throws a 502 SerenityTransportError when the request to Semrush fails (network error)', async () => {
     fetchStub.rejects(new Error('ECONNREFUSED'));
 
