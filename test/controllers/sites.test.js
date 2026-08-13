@@ -1708,6 +1708,27 @@ describe('Sites Controller', () => {
       expect(opts.cursor).to.equal(Buffer.from(JSON.stringify({ offset: 0 })).toString('base64'));
     });
 
+    it('accepts tier=PRE_ONBOARD for a full admin (not just CUSTOMER_VISIBLE_TIERS) and calls Site.allByEnrollmentFiltered', async () => {
+      // This filter path is already full-admin-gated (see the 403 tests below), so it
+      // accepts the full Entitlement.TIERS set - same as the sibling admin-only
+      // GET /sites/by-tier endpoint (getAllByEnrollmentAndTier) - not just the
+      // customer-visible subset.
+      mockDataAccess.Site.allByEnrollmentFiltered.resolves(sites);
+
+      const result = await sitesController.getAll({
+        ...context,
+        data: { tier: 'PRE_ONBOARD' },
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.pagination).to.include({ tier: 'PRE_ONBOARD' });
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+      expect(mockDataAccess.Site.allByEnrollmentFiltered).to.have.been.calledOnce;
+      const [filter] = mockDataAccess.Site.allByEnrollmentFiltered.firstCall.args;
+      expect(filter).to.deep.equal({ tier: 'PRE_ONBOARD', productCode: undefined });
+    });
+
     it('with no sort, the enrollment and non-enrollment branches receive an IDENTICAL default orderBy', async () => {
       // Regression: Site.all defaults (via its all-index) to baseURL asc, while
       // Site.allByEnrollmentFiltered defaults to updatedAt desc and ignores `order`.
@@ -1829,7 +1850,10 @@ describe('Sites Controller', () => {
         ...context,
         data: { tier: 'BOGUS_TIER' },
       });
+      const error = await result.json();
       expect(result.status).to.equal(400);
+      // Mirrors the sibling GET /sites/by-tier wording (getAllByEnrollmentAndTier).
+      expect(error.message).to.match(/^Tier must be one of:/);
       expect(mockDataAccess.Site.all).to.not.have.been.called;
       expect(mockDataAccess.Site.allByEnrollmentFiltered).to.not.have.been.called;
     });
@@ -1859,6 +1883,21 @@ describe('Sites Controller', () => {
       const result = await sitesController.getAll({
         ...context,
         data: { tier: 'PAID' },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Filtering sites by tier or productCode requires admin access');
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+      expect(mockDataAccess.Site.allByEnrollmentFiltered).to.not.have.been.called;
+    });
+
+    it('returns 403 (not 400 or 200) when a read-only admin requests tier=PRE_ONBOARD - the admin-access guard runs before tier enum validation', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false, is_read_only_admin: true });
+
+      const result = await sitesController.getAll({
+        ...context,
+        data: { tier: 'PRE_ONBOARD' },
       });
       const error = await result.json();
 
