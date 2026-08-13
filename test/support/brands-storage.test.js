@@ -3193,27 +3193,115 @@ describe('brands-storage', () => {
       await expect(deleteBrand(ORG_ID, BRAND_ID, null)).to.be.rejectedWith('PostgREST client is required');
     });
 
-    it('returns true when brand is found and soft-deleted', async () => {
-      const query = createChainableQuery({ data: { id: BRAND_ID }, error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+    it('renames the brand to {name}_deleted and returns true (LLMO-6978)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: { name: 'Acme', status: 'active' }, error: null }, // read name + status
+          { data: { id: BRAND_ID }, error: null }, // rename + soft-delete
+        ],
+      });
 
-      const result = await deleteBrand(ORG_ID, BRAND_ID, postgrestClient, 'user@test.com');
+      const result = await deleteBrand(ORG_ID, BRAND_ID, client, 'user@test.com');
+
       expect(result).to.be.true;
+      expect(client.capturedCalls.update).to.have.lengthOf(1);
+      expect(client.capturedCalls.update[0].row).to.deep.equal({
+        status: 'deleted',
+        name: 'Acme_deleted',
+        updated_by: 'user@test.com',
+      });
     });
 
-    it('returns false when brand not found', async () => {
-      const query = createChainableQuery({ data: null, error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+    it('renames a brand with a NULL status (treated as live) rather than 404ing it', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: { name: 'Acme', status: null }, error: null }, // read name + status
+          { data: { id: BRAND_ID }, error: null }, // rename + soft-delete
+        ],
+      });
 
-      const result = await deleteBrand(ORG_ID, BRAND_ID, postgrestClient);
+      const result = await deleteBrand(ORG_ID, BRAND_ID, client, 'user@test.com');
+
+      expect(result).to.be.true;
+      expect(client.capturedCalls.update[0].row.name).to.equal('Acme_deleted');
+    });
+
+    it('succeeds idempotently without renaming when the brand is already deleted', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: { name: 'Acme_deleted', status: 'deleted' }, error: null }, // read
+        ],
+      });
+
+      const result = await deleteBrand(ORG_ID, BRAND_ID, client);
+
+      // Idempotent DELETE (→ 204), but no second write — the already-renamed
+      // name is left untouched so it is never re-suffixed.
+      expect(result).to.be.true;
+      expect(client.capturedCalls.update).to.have.lengthOf(0);
+    });
+
+    it('appends an incrementing index when {name}_deleted already exists (LLMO-6978)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: { name: 'Acme' }, error: null }, // read current name
+          // first rename collides with an existing deleted "Acme_deleted"
+          { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint "uq_brand_name_per_org"' } },
+          { data: { id: BRAND_ID }, error: null }, // retry with _deleted2 succeeds
+        ],
+      });
+
+      const result = await deleteBrand(ORG_ID, BRAND_ID, client, 'user@test.com');
+
+      expect(result).to.be.true;
+      expect(client.capturedCalls.update.map((u) => u.row.name)).to.deep.equal([
+        'Acme_deleted',
+        'Acme_deleted2',
+      ]);
+    });
+
+    it('returns false when no live brand is found (already deleted / not found)', async () => {
+      const client = createTableMockClient({
+        brands: [{ data: null, error: null }], // read finds no non-deleted row
+      });
+
+      const result = await deleteBrand(ORG_ID, BRAND_ID, client);
+
       expect(result).to.be.false;
     });
 
-    it('throws on database error', async () => {
-      const query = createChainableQuery({ data: null, error: { message: 'delete failed' } });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+    it('throws when the current-name read fails', async () => {
+      const client = createTableMockClient({
+        brands: [{ data: null, error: { message: 'read failed' } }],
+      });
 
-      await expect(deleteBrand(ORG_ID, BRAND_ID, postgrestClient)).to.be.rejectedWith('Failed to delete brand: delete failed');
+      await expect(deleteBrand(ORG_ID, BRAND_ID, client))
+        .to.be.rejectedWith('Failed to delete brand: read failed');
+    });
+
+    it('throws on a non-collision database error during the rename', async () => {
+      const client = createTableMockClient({
+        brands: [
+          { data: { name: 'Acme' }, error: null }, // read current name
+          { data: null, error: { message: 'delete failed' } }, // rename fails hard
+        ],
+      });
+
+      await expect(deleteBrand(ORG_ID, BRAND_ID, client))
+        .to.be.rejectedWith('Failed to delete brand: delete failed');
+    });
+
+    it('throws after exhausting the collision-retry budget', async () => {
+      const client = createTableMockClient({
+        brands: [
+          { data: { name: 'Acme' }, error: null }, // read current name
+          // every rename attempt collides (clamped: reused for all updates)
+          { data: null, error: { code: '23505', message: 'duplicate key' } },
+        ],
+      });
+
+      await expect(deleteBrand(ORG_ID, BRAND_ID, client))
+        .to.be.rejectedWith('could not free the name "Acme" after 100 attempts');
     });
   });
   describe('active->pending demotion guard (LLMO-5587)', () => {
