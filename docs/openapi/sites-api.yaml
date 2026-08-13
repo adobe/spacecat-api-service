@@ -262,8 +262,9 @@ sites:
           `asc` when omitted). An unrecognized field or direction returns 400.
           When `sort` is omitted entirely, results default to `baseURL` ascending —
           the same default across every filter combination, including `tier` and
-          `productCode`. `pagination.sort` echoes the applied value verbatim (and is
-          absent when `sort` was omitted). Not combinable with `cursor` (400; use
+          `productCode`. `pagination.sort` echoes the applied sort in canonical
+          `<field>:<direction>` form — so `sort=updatedAt` echoes `updatedAt:asc` — and
+          is absent when `sort` was omitted. Not combinable with `cursor` (400; use
           `offset` instead).
         schema:
           type: string

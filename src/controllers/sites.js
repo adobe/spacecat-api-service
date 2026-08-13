@@ -723,7 +723,7 @@ function SitesController(ctx, log, env) {
           ...(trimmedQuery !== null && { baseUrlContains: trimmedQuery }),
           ...(hasText(deliveryType) && { deliveryType }),
           ...(isLiveBool !== undefined && { isLive: isLiveBool }),
-          ...(hasText(sortParam) && { sort: sortParam }),
+          ...(hasText(sortParam) && { sort: `${orderBy.attribute}:${orderBy.direction}` }),
           ...(hasText(tier) && { tier }),
           ...(hasText(productCode) && { productCode }),
         },

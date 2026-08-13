@@ -1586,6 +1586,30 @@ describe('Sites Controller', () => {
       ]);
     });
 
+    it('composes all three of baseUrlContains, deliveryType and isLive into one op.and', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+      await sitesController.getAll({
+        ...context,
+        data: { baseUrlContains: 'sem', deliveryType: 'aem_edge', isLive: 'false' },
+      });
+      const [, opts] = mockDataAccess.Site.all.firstCall.args;
+      const op = {
+        ilike: (f, v) => ({ type: 'ilike', field: f, value: v }),
+        eq: (f, v) => ({ type: 'eq', field: f, value: v }),
+        and: (...c) => ({ type: 'and', conditions: c }),
+      };
+      const expr = opts.where(
+        { baseURL: 'base_url', deliveryType: 'delivery_type', isLive: 'is_live' },
+        op,
+      );
+      expect(expr.type).to.equal('and');
+      expect(expr.conditions).to.deep.equal([
+        { type: 'ilike', field: 'base_url', value: '%sem%' },
+        { type: 'eq', field: 'delivery_type', value: 'aem_edge' },
+        { type: 'eq', field: 'is_live', value: false },
+      ]);
+    });
+
     it('passes orderBy from a valid sort param and echoes it', async () => {
       mockDataAccess.Site.all.resolves(sites);
       const res = await sitesController.getAll({ ...context, data: { sort: 'updatedAt:desc' } });
@@ -1593,6 +1617,33 @@ describe('Sites Controller', () => {
       const [, opts] = mockDataAccess.Site.all.firstCall.args;
       expect(opts.orderBy).to.deep.equal({ attribute: 'updatedAt', direction: 'desc' });
       expect(body.pagination.sort).to.equal('updatedAt:desc');
+    });
+
+    it('defaults an omitted sort direction to asc and echoes the canonical <field>:<direction>', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+      // `sort=baseURL` with no `:direction` → implicit asc.
+      const res = await sitesController.getAll({ ...context, data: { sort: 'baseURL' } });
+      const body = await res.json();
+      const [, opts] = mockDataAccess.Site.all.firstCall.args;
+      expect(opts.orderBy).to.deep.equal({ attribute: 'baseURL', direction: 'asc' });
+      // Echo is normalized to the canonical form, not the raw verbatim `baseURL`.
+      expect(body.pagination.sort).to.equal('baseURL:asc');
+    });
+
+    it('passes BOTH orderBy and where on the same call when sort combines with a filter', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+      const res = await sitesController.getAll({
+        ...context,
+        data: { deliveryType: 'aem_edge', sort: 'updatedAt:desc' },
+      });
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.pagination).to.include({ deliveryType: 'aem_edge', sort: 'updatedAt:desc' });
+      const [, opts] = mockDataAccess.Site.all.firstCall.args;
+      expect(opts.orderBy).to.deep.equal({ attribute: 'updatedAt', direction: 'desc' });
+      const op = { eq: (f, v) => ({ type: 'eq', field: f, value: v }), and: (...c) => ({ type: 'and', conditions: c }) };
+      const expr = opts.where({ deliveryType: 'delivery_type' }, op);
+      expect(expr).to.deep.equal({ type: 'eq', field: 'delivery_type', value: 'aem_edge' });
     });
 
     it('rejects invalid deliveryType, isLive, sort field, and sort direction with 400', async () => {
@@ -1658,6 +1709,19 @@ describe('Sites Controller', () => {
       const [, enrollmentOpts] = mockDataAccess.Site.allByEnrollmentFiltered.firstCall.args;
       expect(enrollmentOpts.orderBy).to.deep.equal(nonEnrollmentOpts.orderBy);
       expect(enrollmentOpts.orderBy).to.deep.equal({ attribute: 'baseURL', direction: 'asc' });
+    });
+
+    it('sets hasMore:true and trims the body to the limit when the enrollment branch returns N+1 rows', async () => {
+      // The N+1 hasMore detection is shared with Site.all: effectiveLimit = 1, so
+      // allByEnrollmentFiltered returning 2 rows means "more exists".
+      mockDataAccess.Site.allByEnrollmentFiltered.resolves(sites); // 2 rows
+      const res = await sitesController.getAll({ ...context, data: { tier: 'PAID', limit: '1' } });
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.sites).to.be.an('array').with.lengthOf(1); // trimmed to effectiveLimit
+      expect(body.pagination).to.deep.equal({
+        limit: 1, offset: 0, hasMore: true, tier: 'PAID',
+      });
     });
 
     it('tier + productCode calls Site.allByEnrollmentFiltered with both and echoes both', async () => {
