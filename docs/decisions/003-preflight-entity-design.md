@@ -7,10 +7,10 @@ Superseded (2026-08-13) — originally Accepted 2026-06-26.
 > site-scoped V2 endpoints introduced in
 > [ADR-002](002-preflight-api-rest-redesign.md). Those endpoints were removed from
 > spacecat-api-service in **SITES-48935** (the site-scoped Preflight surface moved
-> to Mystique, SITES-48932), so this service no longer uses the entity. The model
-> may still exist in `spacecat-shared-data-access` for other consumers; this note
-> only records that spacecat-api-service no longer depends on it. Retained for
-> historical context.
+> to Mystique, SITES-48932), so this service no longer uses the entity. The
+> `Preflight` entity itself lives on in `spacecat-shared-data-access` — it backs
+> the Mystique-hosted site-scoped endpoints; only spacecat-api-service's use of it
+> was removed. Retained for historical context.
 
 ## Context
 The REST redesign in [ADR-002](002-preflight-api-rest-redesign.md) introduced three site-scoped
