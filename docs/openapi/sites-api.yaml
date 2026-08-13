@@ -260,8 +260,11 @@ sites:
           `<field>` must be one of `baseURL`, `updatedAt`, `createdAt`, `deliveryType`,
           `isLive`; `<direction>` is optional and must be `asc` or `desc` (defaults to
           `asc` when omitted). An unrecognized field or direction returns 400.
-          `pagination.sort` echoes the applied value verbatim. Not combinable with
-          `cursor` (400; use `offset` instead).
+          When `sort` is omitted entirely, results default to `baseURL` ascending —
+          the same default across every filter combination, including `tier` and
+          `productCode`. `pagination.sort` echoes the applied value verbatim (and is
+          absent when `sort` was omitted). Not combinable with `cursor` (400; use
+          `offset` instead).
         schema:
           type: string
           example: "updatedAt:desc"

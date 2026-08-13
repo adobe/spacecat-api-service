@@ -176,6 +176,13 @@ const SEARCH_DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 500;
 // Allowlisted `sort` fields for the GET /sites filtered/sorted mode.
 const SORT_FIELDS = new Set(['baseURL', 'updatedAt', 'createdAt', 'deliveryType', 'isLive']);
+// Default order for the filtered/sorted mode when the caller sends no `sort`.
+// Applied EXPLICITLY (as an orderBy both branches honor) rather than left to each
+// data-access method's own default: Site.all's all-index default is baseURL asc,
+// but Site.allByEnrollmentFiltered defaults to updatedAt desc and ignores the
+// `order` option entirely — so an implicit default would order the tier/productCode
+// branch differently from the baseUrlContains/deliveryType/isLive branch.
+const DEFAULT_SORT = { attribute: 'baseURL', direction: 'asc' };
 
 /**
  * Filters Ahrefs top pages by site base URL
@@ -565,7 +572,7 @@ function SitesController(ctx, log, env) {
     if (hasText(deliveryType) && !Object.values(SiteModel.DELIVERY_TYPES).includes(deliveryType)) {
       return badRequest(`Invalid deliveryType: ${deliveryType}`);
     }
-    let orderBy;
+    let orderBy = DEFAULT_SORT;
     if (hasText(sortParam)) {
       const [sortField, sortDirection = 'asc'] = sortParam.split(':');
       if (!SORT_FIELDS.has(sortField)) {
@@ -644,12 +651,13 @@ function SitesController(ctx, log, env) {
       };
 
       // Fetch one extra row to detect whether more results exist beyond the limit.
-      const allOpts = { limit: effectiveLimit + 1, cursor: offsetCursor, order: 'asc' };
+      // orderBy is passed EXPLICITLY (never left to each method's implicit default)
+      // so the Site.all and Site.allByEnrollmentFiltered branches return the SAME
+      // order — see DEFAULT_SORT. allByEnrollmentFiltered ignores an `order` option,
+      // so a bare `order: 'asc'` here would silently not apply to the tier branch.
+      const allOpts = { limit: effectiveLimit + 1, cursor: offsetCursor, orderBy };
       if (hasWhereConditions) {
         allOpts.where = where;
-      }
-      if (orderBy) {
-        allOpts.orderBy = orderBy;
       }
 
       // tier/productCode compose with the SAME where/orderBy/limit/cursor built above —
@@ -715,7 +723,7 @@ function SitesController(ctx, log, env) {
           ...(trimmedQuery !== null && { baseUrlContains: trimmedQuery }),
           ...(hasText(deliveryType) && { deliveryType }),
           ...(isLiveBool !== undefined && { isLive: isLiveBool }),
-          ...(orderBy && { sort: sortParam }),
+          ...(hasText(sortParam) && { sort: sortParam }),
           ...(hasText(tier) && { tier }),
           ...(hasText(productCode) && { productCode }),
         },

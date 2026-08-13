@@ -1296,7 +1296,8 @@ describe('Sites Controller', () => {
       expect(mockDataAccess.Site.all).to.have.been.calledOnce;
       const [firstArg, opts] = mockDataAccess.Site.all.firstCall.args;
       expect(firstArg).to.deep.equal({});
-      expect(opts.order).to.equal('asc');
+      // No `sort` param → explicit default orderBy (baseURL asc), not left implicit.
+      expect(opts.orderBy).to.deep.equal({ attribute: 'baseURL', direction: 'asc' });
       expect(opts.limit).to.equal(11); // effectiveLimit (10) + 1
 
       // Invoke the captured `where` builder with the real (attrs, op) signature:
@@ -1635,9 +1636,29 @@ describe('Sites Controller', () => {
       expect(mockDataAccess.Site.allByEnrollmentFiltered).to.have.been.calledOnce;
       const [filter, opts] = mockDataAccess.Site.allByEnrollmentFiltered.firstCall.args;
       expect(filter).to.deep.equal({ tier: 'PAID', productCode: undefined });
-      expect(opts.order).to.equal('asc');
+      // No `sort` param → same explicit default orderBy the non-enrollment Site.all
+      // branch gets (baseURL asc), so both branches return the SAME default order.
+      // allByEnrollmentFiltered ignores an `order` option, so this MUST be orderBy.
+      expect(opts.orderBy).to.deep.equal({ attribute: 'baseURL', direction: 'asc' });
       expect(opts.limit).to.equal(11); // effectiveLimit (10) + 1
       expect(opts.cursor).to.equal(Buffer.from(JSON.stringify({ offset: 0 })).toString('base64'));
+    });
+
+    it('with no sort, the enrollment and non-enrollment branches receive an IDENTICAL default orderBy', async () => {
+      // Regression: Site.all defaults (via its all-index) to baseURL asc, while
+      // Site.allByEnrollmentFiltered defaults to updatedAt desc and ignores `order`.
+      // The controller must pass the SAME explicit orderBy to both so the default
+      // page order does not silently change when a tier/productCode filter is added.
+      mockDataAccess.Site.all.resolves(sites);
+      mockDataAccess.Site.allByEnrollmentFiltered.resolves(sites);
+
+      await sitesController.getAll({ ...context, data: { deliveryType: 'aem_edge' } });
+      await sitesController.getAll({ ...context, data: { tier: 'PAID' } });
+
+      const [, nonEnrollmentOpts] = mockDataAccess.Site.all.firstCall.args;
+      const [, enrollmentOpts] = mockDataAccess.Site.allByEnrollmentFiltered.firstCall.args;
+      expect(enrollmentOpts.orderBy).to.deep.equal(nonEnrollmentOpts.orderBy);
+      expect(enrollmentOpts.orderBy).to.deep.equal({ attribute: 'baseURL', direction: 'asc' });
     });
 
     it('tier + productCode calls Site.allByEnrollmentFiltered with both and echoes both', async () => {
