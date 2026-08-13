@@ -95,6 +95,8 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/deploy',
   'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/plan',
   'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/permissions',
+  'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-delivery',
+  'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-rescan',
   'PUT /sites/:siteId/llmo/opportunities-reviewed',
 
   // LLMO Cloudflare onboarding - not S2S (uses a caller-supplied x-cloudflare-token,
