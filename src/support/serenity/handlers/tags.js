@@ -204,9 +204,12 @@ function parseCreateTagBody(body) {
   if (rawName.includes(':')) {
     throw new ErrorWithStatusCode('name must not contain ":"', 400);
   }
-  // The root level holds exactly the four dimension roots. A value may not
+  // The root level holds exactly the five dimension roots. A value may not
   // shadow one of their names, or the tree would have two tags a reader cannot
-  // tell apart by name at the level that matters.
+  // tell apart by name at the level that matters. The CHECK covers every reserved
+  // name (both intent spellings); the MESSAGE names only the dimensions, so the
+  // `$abv_tags$` marker — a Semrush-internal detail that means nothing to a
+  // customer — stays out of a customer-facing 400.
   if (isDimensionRootName(rawName)) {
     throw new ErrorWithStatusCode(
       `name must not be a reserved dimension root name (${ALL_DIMENSIONS.join(', ')})`,
