@@ -1,3 +1,10 @@
+## [1.741.1](https://github.com/adobe/spacecat-api-service/compare/v1.741.0...v1.741.1) (2026-08-13)
+
+
+### Bug Fixes
+
+* **autofix:** require LLMO capability for LLMO auto-fix ([#3036](https://github.com/adobe/spacecat-api-service/issues/3036)) ([2c50d4a](https://github.com/adobe/spacecat-api-service/commit/2c50d4aec47fd8f34d9a58524f22de5b196e5474))
+
 # [1.741.0](https://github.com/adobe/spacecat-api-service/compare/v1.740.1...v1.741.0) (2026-08-13)
 
 
