@@ -177,6 +177,7 @@ const routeFacsCapabilities = {
     'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties',
     'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan',
     'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy',
+    'GET /sites/:siteId/llmo/cdn-onboard/akamai/deploy-status',
     'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate',
     'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status',
     // Admin-only writes
