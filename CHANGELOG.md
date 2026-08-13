@@ -1,3 +1,10 @@
+# [1.742.0](https://github.com/adobe/spacecat-api-service/compare/v1.741.3...v1.742.0) (2026-08-13)
+
+
+### Features
+
+* **ai-visibility:** scope brand prompts and topics to subdomains ([#3041](https://github.com/adobe/spacecat-api-service/issues/3041)) ([1c69d9c](https://github.com/adobe/spacecat-api-service/commit/1c69d9cbba690587f60ff0c8a29b6c0ad52bb1b5)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 ## [1.741.3](https://github.com/adobe/spacecat-api-service/compare/v1.741.2...v1.741.3) (2026-08-13)
 
 
