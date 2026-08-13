@@ -1,3 +1,10 @@
+# [1.744.0](https://github.com/adobe/spacecat-api-service/compare/v1.743.0...v1.744.0) (2026-08-13)
+
+
+### Features
+
+* **sites:** server-side filtering and sorting on GET /sites ([#3046](https://github.com/adobe/spacecat-api-service/issues/3046)) ([9516ebb](https://github.com/adobe/spacecat-api-service/commit/9516ebbc314bf1c184fa56b2564b1f228b8979b0))
+
 # [1.743.0](https://github.com/adobe/spacecat-api-service/compare/v1.742.0...v1.743.0) (2026-08-13)
 
 
