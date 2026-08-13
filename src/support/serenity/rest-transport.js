@@ -199,10 +199,15 @@ function normalizeBaseUrl(raw, varName) {
  * No source default: the upstream host is operational config that must be
  * settable per-environment without a code change.
  *
+ * Exported for the onboarding workspace-provisioning call
+ * (`src/support/onboarding/workspace-provisioning.js`), which hits a Semrush
+ * host directly rather than going through the typed Project Engine / User
+ * Manager clients built below.
+ *
  * @param {TransportEnv} env
  * @returns {string} canonical `protocol//host` origin
  */
-function baseUrl(env) {
+export function baseUrl(env) {
   return normalizeBaseUrl(env?.SEMRUSH_PROJECTS_BASE_URL, 'SEMRUSH_PROJECTS_BASE_URL');
 }
 

@@ -13,31 +13,17 @@
 // @ts-check
 
 import {
-  badRequest, createResponse, forbidden, notFound, ok,
+  createResponse, forbidden, notFound, ok,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import AccessControlUtil from '../support/access-control-util.js';
-import { notifyOnboarding } from '../support/onboarding/slack-notifier.js';
+import { notifyProvisioningFailure } from '../support/onboarding/slack-notifier.js';
+import { provisionWorkspaceMember } from '../support/onboarding/workspace-provisioning.js';
+import { resolveSemrushImsToken } from '../support/utils.js';
 
 /**
- * Best-effort per-org notification cooldown. Guards against a buggy client or MFE
- * retry loop hammering the Slack channel with duplicate onboarding pings.
- *
- * Deliberately minimal: this Map is module-scoped, so — like the workspace cache
- * — it is PER LAMBDA CONTAINER. It de-dupes serial retries that land on the same
- * warm container but does NOT bound a flood fanned out across many concurrent
- * containers. A hard cross-instance guarantee would need shared state (an org
- * `lastNotifiedAt` column or a shared store); that is not warranted for this
- * low-QPS, authenticated, `hasAccess`-gated endpoint today. The cooldown is armed
- * only AFTER a successful send, so a failed notification stays immediately
- * retryable.
- */
-const ONBOARDING_COOLDOWN_MS = 30 * 1000; // 30s per org
-const onboardingCooldown = new Map();
-
-/**
- * Controller for the Semrush onboarding notification endpoint.
+ * Controller for the Semrush onboarding / workspace-provisioning endpoint.
  *
  * @param {object} context - Boot-time context injected by the route wiring in
  *   index.js. Unused here: all per-request data (dataAccess, params, attributes)
@@ -50,6 +36,15 @@ const onboardingCooldown = new Map();
 export default function OnboardingController(context, log, env) {
   /**
    * POST /v2/orgs/:spaceCatId/semrush-onboarding
+   *
+   * Grants the caller admin access to their organization's Semrush workspace
+   * by calling Semrush's Adobe IMS Workspace Provisioning API with the
+   * caller's own IMS access token (resolved via the shared `x-promise-token`
+   * flow — see `resolveSemrushImsToken`). On success, nothing further
+   * happens: no Slack notification, since the user now has access already.
+   * On failure, a best-effort Slack alert is sent so a CSM can follow up
+   * manually — mirroring the old manual-onboarding process this API replaces.
+   *
    * @param {object} ctx - Request context.
    * @returns {Promise<Response>}
    */
@@ -66,50 +61,45 @@ export default function OnboardingController(context, log, env) {
       return forbidden('User does not have access to this organization');
     }
 
-    const profile = ctx.attributes?.authInfo?.getProfile?.();
-    const email = profile?.trial_email || profile?.email;
-    if (!hasText(email)) {
-      return badRequest('Unable to determine customer email from the request identity');
-    }
-
-    // We already fetched `org` above for the access check. Read the workspace
-    // id straight off it rather than routing through resolveWorkspaceId — that
-    // avoids a second Organization.findById on a cold cache, and (since the
-    // resolver can serve a 30s negative-cached null) reports the org's true
-    // current workspace for an org that was just given one.
-    const workspaceId = typeof org.getSemrushWorkspaceId === 'function'
-      ? (org.getSemrushWorkspaceId() ?? null)
-      : null;
-
-    const lastNotified = onboardingCooldown.get(spaceCatId);
-    if (lastNotified && Date.now() - lastNotified < ONBOARDING_COOLDOWN_MS) {
-      log.info(`[onboarding] skipping notification for org=${spaceCatId}: within ${ONBOARDING_COOLDOWN_MS}ms cooldown`);
-      return ok({ notified: false, workspaceId, reason: 'recently notified' });
+    let imsToken;
+    try {
+      imsToken = await resolveSemrushImsToken(ctx, log, 'onboarding');
+    } catch (e) {
+      const status = e.status || 401;
+      return createResponse({ message: e.message || 'Unable to resolve IMS credentials' }, status);
     }
 
     try {
-      await notifyOnboarding(env, { email, workspaceId, spaceCatId });
+      const result = await provisionWorkspaceMember(env, imsToken);
+      return ok({ provisioned: true, workspaceId: result.workspaceId, role: result.role });
     } catch (e) {
-      // Default unexpected errors (no .status) to 500; only notifyOnboarding's
-      // explicit 502 (webhook failure) surfaces as a gateway error.
+      // Default unexpected errors (no .status) to 500.
       const status = e.status || 500;
-      // The webhook URL is a secret (its path carries the Slack token).
-      // notifyOnboarding is contracted to keep it out of thrown messages, but
-      // redact it here defensively so a future change there can never leak it
-      // into server logs.
-      const webhookUrl = env?.SLACK_ONBOARDING_WEBHOOK_URL;
-      const reason = webhookUrl && typeof e.message === 'string'
-        ? e.message.split(webhookUrl).join('[redacted]')
-        : (e.message || 'unknown error');
-      log.error(`[onboarding] notification failed for org=${spaceCatId} status=${status}: ${reason}`);
-      return createResponse({ message: 'Failed to send onboarding notification' }, status);
+      log.error(`[onboarding] workspace provisioning failed for org=${spaceCatId} status=${status}: ${e.message}`);
+
+      // We already fetched `org` above for the access check. Read the workspace
+      // id straight off it rather than a second Organization.findById.
+      const workspaceId = typeof org.getSemrushWorkspaceId === 'function'
+        ? (org.getSemrushWorkspaceId() ?? null)
+        : null;
+      const profile = ctx.attributes?.authInfo?.getProfile?.();
+      const email = profile?.trial_email || profile?.email;
+
+      try {
+        await notifyProvisioningFailure(env, {
+          email: hasText(email) ? email : 'unknown',
+          workspaceId,
+          spaceCatId,
+          reason: `status ${status}: ${e.message || 'unknown error'}`,
+        });
+      } catch (slackErr) {
+        // Best-effort alert — a broken webhook must not mask the original
+        // provisioning failure returned to the caller below.
+        log.error(`[onboarding] failed to send provisioning-failure alert for org=${spaceCatId}: ${slackErr.message}`);
+      }
+
+      return createResponse({ message: 'Failed to provision Semrush workspace access' }, status);
     }
-
-    // Arm the cooldown only after a confirmed send so a failed notification
-    // (the catch above returns before this) stays immediately retryable.
-    onboardingCooldown.set(spaceCatId, Date.now());
-
-    return ok({ notified: true, workspaceId });
   };
 
   return { triggerOnboarding };

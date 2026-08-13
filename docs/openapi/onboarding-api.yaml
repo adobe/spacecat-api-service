@@ -8,33 +8,64 @@ trigger-onboarding:
         type: string
         format: uuid
         example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+    - name: x-promise-token
+      in: header
+      required: true
+      description: >-
+        An IMS promise token (minted by POST /auth/v2/promise) that is
+        exchanged server-side for the caller's Adobe IMS access token. That
+        token is forwarded to Semrush's Adobe IMS Workspace Provisioning API,
+        which validates it directly against Adobe IMS and resolves the
+        caller's email and Adobe Organization ID from it.
+      schema:
+        type: string
   post:
     tags:
       - semrush-onboarding
-    summary: Trigger a Semrush onboarding notification
+    summary: Provision the caller into their org's Semrush workspace
     description: >-
-      Sends a Slack notification announcing an onboarding request for the
-      organization. The customer email is taken from the authenticated
-      identity and the Semrush workspace ID is resolved from the organization.
+      Grants the caller admin access to their organization's Semrush
+      (Enterprise) workspace by calling Semrush's Adobe IMS Workspace
+      Provisioning API with the caller's own IMS access token. On success, no
+      further action is taken. On failure, a best-effort Slack alert is sent
+      so the request can be completed manually.
     operationId: triggerOnboarding
     security:
       - session_token: []
     responses:
       '200':
-        description: Notification sent.
+        description: The caller was granted admin access to the Semrush workspace.
         content:
           application/json:
             schema:
-              $ref: './schemas.yaml#/OnboardingNotificationResponse'
+              $ref: './schemas.yaml#/OnboardingProvisioningResponse'
       '400':
-        $ref: './responses.yaml#/400'
+        description: >-
+          Bad request. No Semrush workspace is mapped to the resolved
+          Organization ID, the workspace's subscription is invalid, or the
+          resolved workspace (or its parent workspace) could not be found.
+      '401':
+        description: >-
+          The x-promise-token header is missing/invalid, or Adobe IMS reports
+          the resolved access token invalid or expired.
       '403':
-        $ref: './responses.yaml#/403'
+        description: >-
+          Forbidden. Either the caller does not have access to this
+          organization, or the resolved user is already the owner of a
+          different Semrush workspace.
       '404':
         $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '409':
+        description: >-
+          Conflict. The resolved user is already a member of this workspace
+          (or its parent workspace).
+      '422':
+        description: >-
+          Unprocessable entity. The workspace cannot receive new members
+          (no capacity, no active core account, role/subscription restriction).
       '500':
         $ref: './responses.yaml#/500'
       '502':
         description: |
-          Bad gateway. The Slack onboarding-notification webhook was
-          unreachable or returned a non-2xx response.
+          Bad gateway. The Semrush workspace-provisioning API was unreachable
+          or returned an unmapped internal error.
