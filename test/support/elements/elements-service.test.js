@@ -320,12 +320,16 @@ describe('createElementsService', () => {
     const withTag = (val) => sinon.match((payload) => Boolean(
       payload?.filters?.advanced?.filters?.some((f) => f.col === 'tags' && f.val === val),
     ));
+    // The intent tag as Elements encodes it: the `__`-joined path, so the root's
+    // own name is the PREFIX — which is why the matchers below test startsWith,
+    // matching production rather than a looser substring search that a tag merely
+    // containing `intent__` further in would also satisfy.
+    const intentTag = (root, value) => `${root}__${value}`;
+    const isIntentTag = (val) => [INTENT_ROOT_NAME, LEGACY_INTENT_ROOT_NAME]
+      .some((root) => String(val).startsWith(`${root}__`));
     // Matches the base call — no intent tag clause under EITHER root spelling.
     const noIntentTag = sinon.match((payload) => !payload?.filters?.advanced?.filters
-      ?.some((f) => f.col === 'tags' && String(f.val).includes('intent__')));
-    // The intent tag as Elements encodes it: the `__`-joined path, so the root's
-    // own name is the prefix.
-    const intentTag = (root, value) => `${root}__${value}`;
+      ?.some((f) => f.col === 'tags' && isIntentTag(f.val)));
     const promptCallsWith = (root) => transport.fetchElement.getCalls().filter(
       (c) => c.args[1] === ELEMENT_IDS.PROMPTS
         && c.args[2]?.filters?.advanced?.filters?.some(
@@ -380,7 +384,14 @@ describe('createElementsService', () => {
       transport.fetchElement.reset();
       transport.fetchElement.withArgs('ws-1', ELEMENT_IDS.PROMPTS, noIntentTag).resolves(RAW_BASE);
       stubIntentRound(LEGACY_INTENT_ROOT_NAME);
-      const result = await service.getPrompts('ws-1', ENRICH);
+      const log = { info: sinon.stub(), warn: sinon.stub(), error: sinon.stub() };
+      const result = await createElementsService(transport, log).getPrompts('ws-1', ENRICH);
+      // The fallback is one of the three signals LLMO-6986 waits to go quiet, so
+      // the event key is part of the contract, not incidental logging.
+      expect(log.info).to.have.been.calledWithMatch(
+        sinon.match(/retrying the pre-rename one/),
+        sinon.match({ event: 'intent-rename-legacy-retry', workspaceId: 'ws-1' }),
+      );
       const byPrompt = Object.fromEntries(result.prompts.map((p) => [p.prompt, p.userIntent]));
       expect(byPrompt['p-comm']).to.equal('commercial');
       expect(byPrompt['p-info']).to.equal('');

@@ -343,7 +343,7 @@ export async function ensureDimensionRoots(transport, semrushWorkspaceId, projec
     log?.info?.(
       'ensureDimensionRoots: resolved the pre-rename `intent` root — the '
       + '`$abv_tags$intent` rename has not reached this project',
-      { semrushWorkspaceId, projectId },
+      { event: 'intent-rename-legacy-root-adopted', semrushWorkspaceId, projectId },
     );
   }
 

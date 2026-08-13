@@ -136,7 +136,10 @@ export function createElementsService(transport, log) {
       // log. Report it too, so LLMO-6986 can be gated on all three going quiet rather
       // than on a judgement call about which projects the sweep reached.
       if (result.page_intents.some((i) => i.id.startsWith(`${LEGACY_INTENT_ROOT_NAME}${SEP}`))) {
-        log?.info?.('serenity filter dimensions: workspace still carries pre-rename `intent__` tags', { workspaceId });
+        log?.info?.(
+          'serenity filter dimensions: workspace still carries pre-rename `intent__` tags',
+          { event: 'intent-rename-legacy-tags-present', workspaceId },
+        );
       }
       // Merge any tag types not covered above (e.g. `type:branded`) under their own
       // prefix key, and plain prefix-less tags under `tags` — see
@@ -267,7 +270,10 @@ export function createElementsService(transport, log) {
         if (!unreached) {
           return current;
         }
-        log?.info?.('serenity userIntent enrichment: no rows under the renamed intent root, retrying the pre-rename one', { workspaceId });
+        log?.info?.(
+          'serenity userIntent enrichment: no rows under the renamed intent root, retrying the pre-rename one',
+          { event: 'intent-rename-legacy-retry', workspaceId },
+        );
         return fetchIntentRound(LEGACY_INTENT_ROOT_NAME);
       };
 

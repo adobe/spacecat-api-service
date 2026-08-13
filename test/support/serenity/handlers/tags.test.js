@@ -255,7 +255,7 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
     it('400s a name that shadows a reserved dimension root', async () => {
       const transport = makeTransport();
       const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
-      for (const name of ['category', 'intent', 'origin', 'type']) {
+      for (const name of ['category', 'intent', 'origin', 'type', INTENT_ROOT_NAME]) {
         // eslint-disable-next-line no-await-in-loop
         await expect(handler.handleCreateTag(
           transport,
@@ -978,7 +978,7 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
     it('400s on a rename to a reserved dimension root name', async () => {
       const transport = makeTransport();
       const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
-      for (const name of ['category', 'intent', 'origin', 'type']) {
+      for (const name of ['category', 'intent', 'origin', 'type', INTENT_ROOT_NAME]) {
         // eslint-disable-next-line no-await-in-loop
         await expect(handler.handleUpdateTag(
           transport,

@@ -88,6 +88,13 @@ export const INTENT_ROOT_NAME = '$abv_tags$intent';
  * CLI (LLMO-6985), so a project can carry either spelling until that sweep
  * completes. Both the tag-tree resolver and the Elements read path tolerate this
  * one; LLMO-6986 removes the tolerance once no live project carries it.
+ *
+ * Each of the three tolerances logs when it fires, under its own `event` key, so
+ * "has the sweep finished?" is a query rather than a judgement call:
+ * `intent-rename-legacy-root-adopted` (tag-tree resolved the pre-rename root),
+ * `intent-rename-legacy-retry` (the Elements enrichment fell back), and
+ * `intent-rename-legacy-tags-present` (filter dimensions still saw `intent__`
+ * tags). LLMO-6986 is safe once all three have gone quiet.
  */
 export const LEGACY_INTENT_ROOT_NAME = DIMENSION.INTENT;
 
