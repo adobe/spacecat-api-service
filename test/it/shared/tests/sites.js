@@ -361,6 +361,80 @@ export default function siteTests(getHttpClient, resetData) {
         const res = await http.user.get('/sites?deliveryType=aem_edge');
         expect(res.status).to.equal(403);
       });
+
+      // ── tier / productCode (server-side entitlement-enrollment filter) ──
+      // Exercises the REAL entitlement/enrollment join end-to-end (not a stub), via
+      // Site.allByEnrollmentFiltered, against actual seeded rows. Seed enrollments:
+      // ENTITLEMENT_1 (LLMO, FREE_TRIAL, ORG_1) -> SITE_ENROLLMENT_1 -> SITE_1 only;
+      // ENTITLEMENT_3 (LLMO, PAID, ORG_3) -> SITE_ENROLLMENT_2/3 -> SITE_1 and SITE_4;
+      // ENTITLEMENT_2 (ASO, PAID, ORG_1) has no site enrollment at all. `GET /sites`
+      // is already a cross-tenant admin/S2S-readAll view with no org-scoping (see the
+      // "no exclusion" test above, which returns sites from ORG_1/2/3 alike), so tier/
+      // productCode composing across orgs here does not widen that existing scope.
+      it('admin: tier=FREE_TRIAL returns only the site enrolled at that tier and echoes tier', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?tier=FREE_TRIAL');
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('object').that.has.all.keys('sites', 'pagination');
+        expect(res.body.pagination).to.include({ hasMore: false, tier: 'FREE_TRIAL' });
+        expect(res.body.sites).to.be.an('array').with.lengthOf(1);
+        expect(res.body.sites[0].id).to.equal(SITE_1_ID);
+        expectSiteListDto(res.body.sites[0]);
+      });
+
+      it('admin: tier=PAID returns every site enrolled at that tier across orgs and echoes tier', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?tier=PAID');
+        expect(res.status).to.equal(200);
+        expect(res.body.pagination).to.include({ hasMore: false, tier: 'PAID' });
+        // ENTITLEMENT_3 (LLMO, PAID) is enrolled by SITE_1 (ORG_1) and SITE_4 (ORG_3);
+        // ENTITLEMENT_2 (ASO, PAID) has no enrollment and contributes nothing.
+        const ids = res.body.sites.map((s) => s.id);
+        expect(ids.sort()).to.deep.equal([SITE_1_ID, SITE_4_ID].sort());
+      });
+
+      it('admin: tier + baseUrlContains compose with AND, narrowing to the matching site', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?tier=PAID&baseUrlContains=delegate');
+        expect(res.status).to.equal(200);
+        expect(res.body.pagination).to.include({
+          hasMore: false, tier: 'PAID', baseUrlContains: 'delegate',
+        });
+        // tier=PAID alone yields {SITE_1, SITE_4}; only SITE_4's baseURL
+        // (site4-delegate.example.com) contains "delegate" — if the where-builder ever
+        // regressed to OR this would instead return both sites.
+        expect(res.body.sites).to.be.an('array').with.lengthOf(1);
+        expect(res.body.sites[0].id).to.equal(SITE_4_ID);
+      });
+
+      it('admin: tier + productCode compose, narrowing to sites enrolled under that product', async () => {
+        const http = getHttpClient();
+        // ENTITLEMENT_2 (ASO, PAID) has no site enrollment, unlike ENTITLEMENT_3
+        // (LLMO, PAID) — proves productCode genuinely narrows the join rather than
+        // being ignored once tier is already present.
+        const res = await http.admin.get('/sites?tier=PAID&productCode=ASO');
+        expect(res.status).to.equal(200);
+        expect(res.body.pagination).to.include({ hasMore: false, tier: 'PAID', productCode: 'ASO' });
+        expect(res.body.sites).to.be.an('array').that.is.empty;
+      });
+
+      it('admin: tier is rejected with 400 when not a recognized value', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?tier=BOGUS_TIER');
+        expect(res.status).to.equal(400);
+      });
+
+      it('admin: productCode is rejected with 400 when not a recognized value', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?productCode=BOGUS_PRODUCT');
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: tier still returns 403 (authz parity with the list endpoint)', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get('/sites?tier=PAID');
+        expect(res.status).to.equal(403);
+      });
     });
 
     describe('GET /sites/:siteId', () => {
