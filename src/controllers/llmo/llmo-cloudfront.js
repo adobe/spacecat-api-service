@@ -126,8 +126,10 @@ function LlmoCloudFrontController(ctx) {
       if (!await accessControlUtil.hasAccess(site)) {
         return forbidden('User does not have access to this site');
       }
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can generate the CloudFront bootstrap URL');
+      if (!await accessControlUtil.hasLlmoCapabilityForSite(site)) {
+        return forbidden(accessControlUtil.llmoForbiddenMessage(
+          'Only LLMO administrators can generate the CloudFront bootstrap URL',
+        ));
       }
 
       // The template-hosting S3 bucket — per-environment, from Vault
@@ -212,8 +214,12 @@ function LlmoCloudFrontController(ctx) {
     if (!await accessControlUtil.hasAccess(site)) {
       return { error: forbidden('User does not have access to this site') };
     }
-    if (!accessControlUtil.isLLMOAdministrator()) {
-      return { error: forbidden(`Only LLMO administrators can ${action}`) };
+    if (!await accessControlUtil.hasLlmoCapabilityForSite(site)) {
+      return {
+        error: forbidden(accessControlUtil.llmoForbiddenMessage(
+          `Only LLMO administrators can ${action}`,
+        )),
+      };
     }
     if (hasSubpath(site.getBaseURL())) {
       return { error: createResponse({ message: 'CDN auto-routing is not supported for subpath sites' }, 501) };

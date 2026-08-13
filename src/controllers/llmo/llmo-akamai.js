@@ -157,8 +157,10 @@ function LlmoAkamaiController(ctx) {
     if (!await accessControlUtil.hasAccess(site)) {
       return forbidden('User does not have access to this site');
     }
-    if (!accessControlUtil.isLLMOAdministrator()) {
-      return forbidden('Only LLMO administrators can access Akamai onboarding endpoints');
+    if (!await accessControlUtil.hasLlmoCapabilityForSite(site)) {
+      return forbidden(accessControlUtil.llmoForbiddenMessage(
+        'Only LLMO administrators can access Akamai onboarding endpoints',
+      ));
     }
     if (hasSubpath(site.getBaseURL())) {
       return createResponse({ message: 'CDN auto-routing is not supported for subpath sites' }, 501);
