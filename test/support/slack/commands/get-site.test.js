@@ -78,6 +78,7 @@ describe('GetSiteCommand', () => {
       getOrganizationId: () => 'org-123',
       getOrganization: sinon.stub().resolves({
         getImsOrgId: () => 'ims-org-456',
+        getName: () => 'Test Org',
       }),
       getIsLive: () => true,
       getIsLiveToggledAt: () => '2011-10-05T14:48:00.000Z',
@@ -190,6 +191,7 @@ describe('GetSiteCommand', () => {
 
       expect(responseText).to.include('org-123');
       expect(responseText).to.include('ims-org-456');
+      expect(responseText).to.include('Test Org');
     });
 
     it('handles missing organization ID and IMS org gracefully', async () => {
