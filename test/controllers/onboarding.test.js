@@ -112,21 +112,54 @@ describe('OnboardingController', () => {
   });
 
   it('sends a Slack failure alert and maps the upstream status when provisioning fails', async () => {
-    const err = new Error('workspace-members request failed with status 409');
-    err.status = 409;
+    const err = new Error('workspace-members request failed with status 422');
+    err.status = 422;
     provisionStub.rejects(err);
     const ctx = buildContext();
     const controller = OnboardingController(ctx, ctx.log, ctx.env);
     const res = await controller.triggerOnboarding(ctx);
 
-    expect(res.status).to.equal(409);
+    expect(res.status).to.equal(422);
     expect(notifyStub.calledOnce).to.equal(true);
     expect(notifyStub.firstCall.args[1]).to.include({
       email: 'jane@example.com',
       workspaceId: 'ws-123',
       spaceCatId: ORG_ID,
     });
-    expect(notifyStub.firstCall.args[1].reason).to.contain('409');
+    expect(notifyStub.firstCall.args[1].reason).to.contain('422');
+  });
+
+  it('treats a 409 (already a member) as success: 200 with alreadyMember, and sends no Slack alert', async () => {
+    const err = Object.assign(new Error('workspace-members request failed with status 409'), {
+      status: 409,
+      body: { workspace_id: 'ws-123', role: 'admin' },
+    });
+    provisionStub.rejects(err);
+    const ctx = buildContext();
+    const controller = OnboardingController(ctx, ctx.log, ctx.env);
+    const res = await controller.triggerOnboarding(ctx);
+
+    expect(res.status).to.equal(200);
+    const body = await res.json();
+    expect(body).to.deep.equal({
+      provisioned: true, alreadyMember: true, workspaceId: 'ws-123', role: 'admin',
+    });
+    expect(notifyStub.called).to.equal(false);
+  });
+
+  it('falls back to the org workspaceId and a default admin role on 409 when the error body lacks them', async () => {
+    const err = Object.assign(new Error('workspace-members request failed with status 409'), { status: 409 });
+    provisionStub.rejects(err);
+    const ctx = buildContext();
+    const controller = OnboardingController(ctx, ctx.log, ctx.env);
+    const res = await controller.triggerOnboarding(ctx);
+
+    expect(res.status).to.equal(200);
+    const body = await res.json();
+    expect(body).to.deep.equal({
+      provisioned: true, alreadyMember: true, workspaceId: 'ws-123', role: 'admin',
+    });
+    expect(notifyStub.called).to.equal(false);
   });
 
   it('maps an unexpected provisioning error without a status to 500 and still alerts Slack', async () => {

@@ -97,21 +97,40 @@ describe('provisionWorkspaceMember', () => {
     expect(thrown.body).to.equal(null);
   });
 
-  it('returns undefined fields rather than throwing when a 2xx response has an unparseable body', async () => {
+  it('throws a 502 SerenityTransportError rather than returning undefined fields when a 2xx response has an unparseable body', async () => {
     fetchStub.resolves({
       ok: true,
       status: 200,
       json: async () => { throw new SyntaxError('Unexpected end of JSON input'); },
     });
 
-    const result = await provisionWorkspaceMember(ENV, IMS_TOKEN);
+    await expect(provisionWorkspaceMember(ENV, IMS_TOKEN))
+      .to.be.rejectedWith(SerenityTransportError, /invalid response/)
+      .and.eventually.have.property('status', 502);
+  });
 
-    expect(result).to.deep.equal({
-      email: undefined,
-      organizationId: undefined,
-      workspaceId: undefined,
-      role: undefined,
+  it('throws a 502 SerenityTransportError when a 2xx response is missing workspace_id', async () => {
+    fetchStub.resolves({
+      ok: true,
+      status: 200,
+      json: async () => ({ email: 'jane@example.com', organization_id: 'org-abc', role: 'admin' }),
     });
+
+    await expect(provisionWorkspaceMember(ENV, IMS_TOKEN))
+      .to.be.rejectedWith(SerenityTransportError, /invalid response/)
+      .and.eventually.have.property('status', 502);
+  });
+
+  it('throws a 502 SerenityTransportError when a 2xx response is missing role', async () => {
+    fetchStub.resolves({
+      ok: true,
+      status: 200,
+      json: async () => ({ email: 'jane@example.com', organization_id: 'org-abc', workspace_id: 'ws-123' }),
+    });
+
+    await expect(provisionWorkspaceMember(ENV, IMS_TOKEN))
+      .to.be.rejectedWith(SerenityTransportError, /invalid response/)
+      .and.eventually.have.property('status', 502);
   });
 
   it('throws a 502 SerenityTransportError when the request to Semrush fails (network error)', async () => {
@@ -132,5 +151,30 @@ describe('provisionWorkspaceMember', () => {
 
     expect(thrown.status).to.equal(503);
     expect(fetchStub.called).to.equal(false);
+  });
+
+  it('passes an AbortSignal with the shared 15s Semrush timeout on the fetch call', async () => {
+    fetchStub.resolves({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        email: 'jane@example.com', organization_id: 'org-abc', workspace_id: 'ws-123', role: 'admin',
+      }),
+    });
+
+    await provisionWorkspaceMember(ENV, IMS_TOKEN);
+
+    const [, opts] = fetchStub.firstCall.args;
+    expect(opts.signal).to.be.instanceOf(AbortSignal);
+  });
+
+  it('maps an AbortError from a timed-out request to a 502 SerenityTransportError', async () => {
+    const abortError = new Error('This operation was aborted');
+    abortError.name = 'TimeoutError';
+    fetchStub.rejects(abortError);
+
+    await expect(provisionWorkspaceMember(ENV, IMS_TOKEN))
+      .to.be.rejectedWith(SerenityTransportError, /TimeoutError/)
+      .and.eventually.have.property('status', 502);
   });
 });

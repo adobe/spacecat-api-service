@@ -12,8 +12,8 @@
 
 // @ts-check
 
-import { tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
-import { baseUrl } from '../serenity/rest-transport.js';
+import { hasText, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
+import { baseUrl, DEFAULT_TIMEOUT_MS } from '../serenity/rest-transport.js';
 import { SerenityTransportError } from '../serenity/serenity-transport-error.js';
 
 const WORKSPACE_MEMBERS_PATH = '/enterprise/users/api/v1/adobe-ims/workspace-members';
@@ -36,7 +36,9 @@ const WORKSPACE_MEMBERS_PATH = '/enterprise/users/api/v1/adobe-ims/workspace-mem
  * @param {string} imsToken - The caller's Adobe IMS access token.
  * @returns {Promise<{ email: string, organizationId: string, workspaceId: string, role: string }>}
  * @throws {SerenityTransportError} the upstream status (400/401/403/409/422/500)
- *   on a non-2xx response, or 502 when the request to Semrush itself fails.
+ *   on a non-2xx response, 502 when the request to Semrush itself fails (including
+ *   a timeout past `DEFAULT_TIMEOUT_MS`) or the 2xx body is missing `workspace_id`/
+ *   `role`.
  */
 export async function provisionWorkspaceMember(env, imsToken) {
   const url = `${baseUrl(env)}${WORKSPACE_MEMBERS_PATH}`;
@@ -50,6 +52,12 @@ export async function provisionWorkspaceMember(env, imsToken) {
         authorization: `Bearer ${imsToken}`,
       },
       body: JSON.stringify({ token: imsToken }),
+      // Caps the upstream call so a hung Semrush connection doesn't pin the
+      // Lambda for its full ~29s API Gateway execution budget — same ceiling
+      // every other direct Semrush call in this codebase uses (rest-transport.js).
+      // A timeout surfaces as an AbortError/TimeoutError, caught below like any
+      // other network failure.
+      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
     });
   } catch (e) {
     const reason = e.code || e.name || 'network error';
@@ -69,6 +77,14 @@ export async function provisionWorkspaceMember(env, imsToken) {
       `workspace-members request failed with status ${response.status}`,
       body,
     );
+  }
+
+  // The OpenAPI contract declares workspaceId/role as required strings on the
+  // 200 response. A 2xx with either missing is a contract violation from
+  // Semrush, not a value we can pass through to the controller/client — treat
+  // it as an upstream failure (502) rather than returning undefined fields.
+  if (!hasText(body?.workspace_id) || !hasText(body?.role)) {
+    throw new SerenityTransportError(502, 'workspace-members returned an invalid response', body);
   }
 
   return {

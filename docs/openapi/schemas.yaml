@@ -14035,3 +14035,10 @@ OnboardingProvisioningResponse:
       type: string
       description: The role granted to the caller in the Semrush workspace.
       example: "admin"
+    alreadyMember:
+      type: boolean
+      description: >-
+        Present and true when the caller was already a member of the
+        workspace (or its parent) before this call — Semrush's 409 response,
+        which is treated as success rather than an error.
+      example: true

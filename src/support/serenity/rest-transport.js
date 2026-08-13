@@ -44,7 +44,9 @@ export { SerenityTransportError } from './serenity-transport-error.js';
 // Cap upstream calls so a slow Semrush response doesn't pin the Lambda for its
 // full wall budget. Semrush returns well under 5s in practice; 15s is a safe
 // ceiling that still gives the user a clean error rather than a Lambda timeout.
-const DEFAULT_TIMEOUT_MS = 15_000;
+// Exported so other direct (non-typed-client) Semrush callers — e.g. the
+// onboarding workspace-provisioning call — use the same ceiling.
+export const DEFAULT_TIMEOUT_MS = 15_000;
 
 /**
  * The two generated Semrush contracts this transport speaks. Every request shape below is

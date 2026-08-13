@@ -26,15 +26,19 @@ trigger-onboarding:
     description: >-
       Grants the caller admin access to their organization's Semrush
       (Enterprise) workspace by calling Semrush's Adobe IMS Workspace
-      Provisioning API with the caller's own IMS access token. On success, no
-      further action is taken. On failure, a best-effort Slack alert is sent
-      so the request can be completed manually.
+      Provisioning API with the caller's own IMS access token. On success —
+      including when the caller was already a member (Semrush's 409, surfaced
+      here as `200 { alreadyMember: true }`) — no further action is taken. On
+      any other failure, a best-effort Slack alert is sent so the request can
+      be completed manually.
     operationId: triggerOnboarding
     security:
       - session_token: []
     responses:
       '200':
-        description: The caller was granted admin access to the Semrush workspace.
+        description: >-
+          The caller has admin access to the Semrush workspace — either newly
+          granted, or (`alreadyMember: true`) they already had it.
         content:
           application/json:
             schema:
@@ -55,10 +59,6 @@ trigger-onboarding:
           different Semrush workspace.
       '404':
         $ref: './responses.yaml#/404-organization-not-found-with-id'
-      '409':
-        description: >-
-          Conflict. The resolved user is already a member of this workspace
-          (or its parent workspace).
       '422':
         description: >-
           Unprocessable entity. The workspace cannot receive new members
@@ -67,5 +67,6 @@ trigger-onboarding:
         $ref: './responses.yaml#/500'
       '502':
         description: |
-          Bad gateway. The Semrush workspace-provisioning API was unreachable
-          or returned an unmapped internal error.
+          Bad gateway. The Semrush workspace-provisioning API was unreachable,
+          timed out, returned an unmapped internal error, or returned a 2xx
+          response missing the required workspaceId/role fields.
