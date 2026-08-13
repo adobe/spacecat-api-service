@@ -17,7 +17,9 @@ import {
   LLM_ENUM,
   TOPIC_INTENT_ENUM,
 } from '@quazar/ai-seo-ts/common/types_pb.js';
+import { SEARCH_TYPE_ENUM } from '@quazar/ai-seo-ts/v2/source/enums_pb.js';
 import { ConnectError, Code } from '@connectrpc/connect';
+import { parse as parseDomain } from 'tldts';
 
 export { COUNTRY_ENUM, LLM_ENUM, TOPIC_INTENT_ENUM };
 
@@ -183,6 +185,25 @@ export function num(v) {
 export function brandTarget(domain) {
   const d = domain.trim().toLowerCase();
   return { domain: d, name: d };
+}
+
+/**
+ * Resolve the Semrush `search_type` for a target domain. When the target carries a
+ * non-www subdomain (e.g. `quickbooks.intuit.com`) mentions/citations must be scoped
+ * to that subdomain; otherwise Semrush interprets the target as the registrable domain
+ * (`intuit.com`) and returns the parent-domain results. Apex domains and bare `www.`
+ * hosts resolve to DOMAIN. Uses tldts so multi-part TLDs (`.co.uk`, `.com.au`) are
+ * handled correctly. Unparseable input defaults to DOMAIN (preserving prior behaviour).
+ *
+ * @param {string|null|undefined} domain target domain/hostname (may include scheme or `www.`)
+ * @returns {number} SEARCH_TYPE_ENUM.SUBDOMAIN when a non-www subdomain is present, else DOMAIN
+ */
+export function resolveSearchType(domain) {
+  const parsed = parseDomain(String(domain ?? ''));
+  const subdomain = parsed?.subdomain || '';
+  return subdomain !== '' && subdomain !== 'www'
+    ? SEARCH_TYPE_ENUM.SUBDOMAIN
+    : SEARCH_TYPE_ENUM.DOMAIN;
 }
 
 export function parseLimitOffset(sp) {
