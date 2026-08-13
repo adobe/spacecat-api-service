@@ -20,7 +20,14 @@ import {
   marketOf,
   republishBestEffort,
 } from './brand-urls.js';
-import { dedupeAliases, sameAliasSet, rejectedAliasesFrom } from './aliases.js';
+import {
+  dedupeAliases,
+  sameAliasSet,
+  sameAliasSetExact,
+  benchmarkAliases,
+  mergeBenchmarkAliases,
+  rejectedAliasesFrom,
+} from './aliases.js';
 import { resolveProjects } from './resolve-projects.js';
 
 /** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */
@@ -78,6 +85,12 @@ export function collectAliasNames(aliases, market) {
  * @param {Array<object>|null} [prefetchedProjects=null] - a pre-fetched project listing
  *   to reuse (the brand-edit path lists once and shares it across the URL/competitor/alias
  *   syncs); null/undefined lists here. An explicit `[]` reuses the prefetch (no re-list).
+ * @param {Array<{name: string, regions?: string[]}>} [previousAliases=[]] - the brand's
+ *   aliases as they were BEFORE this edit, read by the caller ahead of the row write.
+ *   Region-filtered per market like the desired set, so the ones this edit dropped
+ *   from a given market are the only values removed from that market's benchmark;
+ *   everything else Semrush had added there is carried forward. An empty list makes
+ *   the benchmark write purely additive.
  * @returns {Promise<{markets: number, projectsUpdated: number,
  *   benchmarksUpdated: number, rejected: {projectId: string, market: string,
  *   domain: string|null, aliases: string[]}[]}>}
@@ -89,6 +102,7 @@ export async function syncBrandAliasesAcrossMarkets(
   workspaceId,
   log,
   prefetchedProjects = null,
+  previousAliases = [],
 ) {
   // Reuse a pre-fetched project listing when supplied (the brand-edit path lists
   // once and shares it across the URL/competitor/alias syncs), else list here.
@@ -142,8 +156,11 @@ export async function syncBrandAliasesAcrossMarkets(
       }
 
       // 2) Own-brand benchmark brand_aliases (PUT) — only when drifted.
+      // Read the DRAFT view: the PUT below acts on the draft, so diffing the
+      // published list would compare against a stale snapshot on any project that
+      // already has pending changes.
       // eslint-disable-next-line no-await-in-loop
-      const resp = await transport.listBenchmarks(workspaceId, projectId);
+      const resp = await transport.listBenchmarks(workspaceId, projectId, { draft: true });
       const benchmarks = Array.isArray(resp?.aio_benchmarks) ? resp.aio_benchmarks : [];
       const ownDomain = normalizeBenchmarkDomain(project?.domain);
       const own = benchmarks.find((b) => b?.main_brand === true && hasText(b?.id))
@@ -151,27 +168,51 @@ export async function syncBrandAliasesAcrossMarkets(
           && normalizeBenchmarkDomain(b?.domain) === ownDomain);
       if (own) {
         const currentAliases = Array.isArray(own.brand_aliases) ? own.brand_aliases : [];
-        if (!sameAliasSet(currentAliases, desiredAliases)) {
+        // Keep brand_name deterministic: own → display → project domain → ''
+        // (never undefined, which would make the PUT body non-deterministic).
+        const benchmarkName = hasText(own.brand_name)
+          ? own.brand_name
+          : (display || project?.domain || '');
+        // Preferred spellings come off the name upstream folds against — the
+        // benchmark's own brand_name, not the brand's display name.
+        const withDerived = benchmarkAliases(benchmarkName, desiredAliases);
+        // Only the aliases this edit dropped from THIS market are removed; the rest
+        // of the live list (Semrush's enrichment) is carried forward.
+        const removedForMarket = collectAliasNames(previousAliases, market)
+          .filter((a) => !desiredAliases.includes(a));
+        const nextAliases = mergeBenchmarkAliases(currentAliases, withDerived, removedForMarket);
+        // Compared with casing significant, so a re-cased alias counts as a change.
+        // The merge keeps every live spelling, so this is quiet in the steady state.
+        if (!sameAliasSetExact(currentAliases, nextAliases)) {
           // eslint-disable-next-line no-await-in-loop
           await transport.updateBenchmark(workspaceId, projectId, String(own.id), {
-            // Keep brand_name deterministic: own → display → project domain → ''
-            // (never undefined, which would make the PUT body non-deterministic).
-            brand_name: hasText(own.brand_name)
-              ? own.brand_name
-              : (display || project?.domain || ''),
+            brand_name: benchmarkName,
             domain: own.domain ?? project?.domain,
-            brand_aliases: desiredAliases,
+            brand_aliases: nextAliases,
           });
           benchmarksUpdated += 1;
           changed = true;
 
-          // Capture aliases Semrush rejected on the own-brand benchmark.
-          if (desiredAliases.length > 0) {
+          // Report the aliases the benchmark is not carrying, so the caller can warn
+          // the operator. Read the draft again — the write has not been published.
+          //
+          // `rejected_brand_aliases` is upstream's list of values this benchmark
+          // knows but does not currently apply, which includes the ones THIS edit
+          // just removed (live-verified 2026-08-13: dropping an alias moves it
+          // there). Reporting those back would flag the operator's own deletion as
+          // a problem, so they are filtered out and only the rest is surfaced.
+          if (nextAliases.length > 0) {
+            const removedKeys = new Set(removedForMarket.map((a) => a.toLowerCase()));
             // eslint-disable-next-line no-await-in-loop
-            const after = await transport.listBenchmarks(workspaceId, projectId);
+            const after = await transport.listBenchmarks(workspaceId, projectId, { draft: true });
             const list = Array.isArray(after?.aio_benchmarks) ? after.aio_benchmarks : [];
             rejected.push(
               ...rejectedAliasesFrom(list, (b) => String(b?.id) === String(own.id))
+                .map((r) => ({
+                  ...r,
+                  aliases: r.aliases.filter((a) => !removedKeys.has(String(a).toLowerCase())),
+                }))
+                .filter((r) => r.aliases.length > 0)
                 .map((r) => ({ projectId, market, ...r })),
             );
           }
