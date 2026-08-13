@@ -8428,6 +8428,31 @@ describe('Suggestions Controller', () => {
       // Prompt fields are no longer set by the API service — owned by the engine.
       expect(depExpCreateArg.promptsLocation).to.be.undefined;
       expect(depExpCreateArg.promptsCount).to.be.undefined;
+      expect(depExpCreateArg.metadata.applyStale).to.be.undefined;
+    });
+
+    it('persists applyStale: true onto GeoExperiment metadata when the request opts in', async () => {
+      await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]], applyStale: true },
+        env: asyncExperimentEnv,
+      });
+
+      const createArg = mockSuggestionDataAccess.GeoExperiment.create.firstCall.args[0];
+      expect(createArg.metadata.applyStale).to.equal(true);
+    });
+
+    it('persists applyStale: false onto GeoExperiment metadata when the request explicitly opts out', async () => {
+      await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]], applyStale: false },
+        env: asyncExperimentEnv,
+      });
+
+      const createArg = mockSuggestionDataAccess.GeoExperiment.create.firstCall.args[0];
+      expect(createArg.metadata.applyStale).to.equal(false);
     });
 
     it('deduplicates urls in GeoExperiment metadata when multiple suggestions share the same URL', async () => {
@@ -8726,7 +8751,7 @@ describe('Suggestions Controller', () => {
       expect(callArgs.metadata).to.deep.equal({ applyStale: true });
     });
 
-    it('defaults applyStale metadata to false when not provided in the request body', async () => {
+    it('omits applyStale metadata when not provided in the request body', async () => {
       const mockTokowakaClient = {
         deployToEdge: sandbox.stub().resolves({
           succeededSuggestions: [edgeSuggestions[0]],
@@ -8744,7 +8769,7 @@ describe('Suggestions Controller', () => {
       });
 
       const [callArgs] = mockTokowakaClient.deployToEdge.firstCall.args;
-      expect(callArgs.metadata).to.deep.equal({ applyStale: false });
+      expect(callArgs.metadata).to.be.undefined;
     });
 
     it('uses profile email in direct deploy success path', async () => {
