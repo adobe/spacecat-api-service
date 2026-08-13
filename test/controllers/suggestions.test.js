@@ -4452,6 +4452,44 @@ describe('Suggestions Controller', () => {
       expect(hasAccessStub).to.have.been.calledWithExactly(sinon.match.any, 'auto_fix');
     });
 
+    it('returns 403 for the LLMO product when the caller lacks the LLMO capability for the site', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+      const capabilityStub = sandbox.stub(AccessControlUtil.prototype, 'hasLlmoCapabilityForSite').resolves(false);
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+        pathInfo: { headers: { 'x-product': 'LLMO' } },
+      });
+
+      expect(response.status).to.equal(403);
+      expect(capabilityStub).to.have.been.calledOnce;
+    });
+
+    it('proceeds with LLMO autofix when the caller has the LLMO capability for the site', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+      const capabilityStub = sandbox.stub(AccessControlUtil.prototype, 'hasLlmoCapabilityForSite').resolves(true);
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestionGrant.splitSuggestionsByGrantStatus.resolves({
+        grantedIds: [SUGGESTION_IDS[0]],
+        notGrantedIds: [],
+        grantIds: [`grant-${SUGGESTION_IDS[0]}`],
+      });
+      mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(suggs[0])]);
+      mockSuggestion.bulkUpdateStatus.resolves(
+        [mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' })],
+      );
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+        pathInfo: { headers: { 'x-product': 'LLMO' } },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(capabilityStub).to.have.been.calledOnce;
+    });
+
     it('proceeds with autofix when summit-plg is enabled and all suggestions are granted', async () => {
       opportunity.getType = sandbox.stub().returns('meta-tags');
       mockSuggestionGrant.splitSuggestionsByGrantStatus.resolves({
