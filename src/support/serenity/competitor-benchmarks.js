@@ -25,6 +25,7 @@ import {
   sameAliasSetExact,
   benchmarkAliases,
   mergeBenchmarkAliases,
+  aliasKeysOwnedByOthers,
   rejectedAliasesFrom,
 } from './aliases.js';
 import { resolveProjects } from './resolve-projects.js';
@@ -255,6 +256,18 @@ export async function syncCompetitorBenchmarksForProject(
   // Domain → the alias list to PUT, for the competitors that already have a
   // benchmark: the derived set merged over what is live there, minus the aliases
   // this edit dropped. Computed once and reused by the drift check and the write.
+  // An alias another benchmark in this project already owns must never be offered:
+  // upstream refuses it with a 409 that fails the WHOLE write, so on a batched
+  // create it would take every other competitor in the batch with it. The aliases
+  // we derive make that reachable — a competitor's own lowercase name can collide
+  // with a sibling benchmark's name or alias — so they are filtered here, against
+  // the listing already in hand.
+  const ownedElsewhere = (ownId) => aliasKeysOwnedByOthers(benchmarks, ownId);
+  const allowed = (list, ownId) => {
+    const owned = ownedElsewhere(ownId);
+    return list.filter((a) => !owned.has(a.toLowerCase()));
+  };
+
   const plannedAliases = new Map();
   for (const c of desired) {
     const existing = competitorByDomain.get(c.domain);
@@ -263,7 +276,7 @@ export async function syncCompetitorBenchmarksForProject(
         .filter((a) => !c.aliases.includes(a));
       plannedAliases.set(c.domain, mergeBenchmarkAliases(
         existing.aliases,
-        benchmarkAliases(c.name, c.aliases),
+        allowed(benchmarkAliases(c.name, c.aliases), existing.id),
         removed,
       ));
     }
@@ -297,7 +310,7 @@ export async function syncCompetitorBenchmarksForProject(
   // spellings as they are — the one moment we get to choose them, since upstream
   // keeps whatever spelling an alias was created with.
   const createdAliases = new Map(
-    toCreate.map((c) => [c.domain, benchmarkAliases(c.name, c.aliases)]),
+    toCreate.map((c) => [c.domain, allowed(benchmarkAliases(c.name, c.aliases))]),
   );
   if (toCreate.length > 0) {
     await transport.createBenchmarks(

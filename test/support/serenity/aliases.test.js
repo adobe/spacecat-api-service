@@ -18,6 +18,7 @@ import {
   sameAliasSetExact,
   benchmarkAliases,
   mergeBenchmarkAliases,
+  aliasKeysOwnedByOthers,
   rejectedAliasesFrom,
 } from '../../../src/support/serenity/aliases.js';
 
@@ -127,6 +128,31 @@ describe('serenity alias helpers', () => {
       expect(mergeBenchmarkAliases(null, null)).to.deep.equal([]);
       expect(mergeBenchmarkAliases(['A'], null, null)).to.deep.equal(['A']);
       expect(mergeBenchmarkAliases(['A'], ['A'], [''])).to.deep.equal(['A']);
+    });
+  });
+
+  describe('aliasKeysOwnedByOthers', () => {
+    const benchmarks = [
+      { id: 'a', brand_name: 'Rival One', brand_aliases: ['rival one', 'R1'] },
+      { id: 'b', brand_name: 'Rival Two', brand_aliases: ['rival two'] },
+      { id: 'c', brand_name: '', brand_aliases: null },
+    ];
+
+    it('collects every other benchmark\'s name and aliases, case-folded', () => {
+      expect([...aliasKeysOwnedByOthers(benchmarks, 'a')].sort())
+        .to.deep.equal(['rival two']);
+      expect([...aliasKeysOwnedByOthers(benchmarks, 'b')].sort())
+        .to.deep.equal(['r1', 'rival one']);
+    });
+
+    it('excludes nothing when no owner id is given', () => {
+      expect([...aliasKeysOwnedByOthers(benchmarks)].sort())
+        .to.deep.equal(['r1', 'rival one', 'rival two']);
+    });
+
+    it('tolerates a non-array listing and blank values', () => {
+      expect(aliasKeysOwnedByOthers(null, 'a').size).to.equal(0);
+      expect(aliasKeysOwnedByOthers([{ id: 'x', brand_name: '  ' }], 'y').size).to.equal(0);
     });
   });
 

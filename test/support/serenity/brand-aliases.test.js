@@ -91,12 +91,13 @@ describe('brand-aliases helpers', () => {
         brand_name_display: 'Brand',
         brand_names: ['Brand', 'Acme', 'Acme Inc'],
       });
-      // One spelling per alias, lowercase — the form Semrush stores itself, and the
-      // only spelling we get to choose (a later PUT cannot re-case an alias).
+      // Every name the project tracks, lowercased — the same set as brand_names
+      // above. One spelling per alias, which is the only spelling we get to choose
+      // (a later PUT cannot re-case an alias upstream already stores).
       expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, 'p-us', 'own', {
         brand_name: 'Brand',
         domain: 'brand.com',
-        brand_aliases: ['acme', 'acme inc', 'brand'],
+        brand_aliases: ['brand', 'acme', 'acme inc'],
       });
       // The benchmark diff reads the DRAFT view — writes act on the draft.
       expect(transport.listBenchmarks).to.have.been.calledWith(WS, 'p-us', { draft: true });
@@ -310,6 +311,38 @@ describe('brand-aliases helpers', () => {
       expect(result.benchmarksUpdated).to.equal(1);
     });
 
+    it('drops an alias a competitor benchmark in the same project already owns', async () => {
+      // Upstream enforces alias uniqueness across every benchmark in the project,
+      // case-insensitively, and refuses a duplicate with a 409 that fails the whole
+      // write. So an alias owned elsewhere is never offered.
+      const transport = makeTransport(
+        [projectWith('p-us', 'us', { brandNames: ['Brand', 'Acme'] })],
+        {
+          'p-us': [
+            {
+              id: 'own', main_brand: true, domain: 'brand.com', brand_aliases: ['brand'],
+            },
+            {
+              id: 'rival', main_brand: false, domain: 'rival.com', brand_name: 'ACME',
+            },
+          ],
+        },
+      );
+
+      const result = await syncBrandAliasesAcrossMarkets(
+        transport,
+        [{ name: 'Acme', regions: [] }],
+        'Brand',
+        WS,
+        undefined,
+      );
+
+      // 'acme' belongs to the rival benchmark's name, so it is left out and the
+      // benchmark needs no write at all.
+      expect(transport.updateBenchmark).to.not.have.been.called;
+      expect(result.benchmarksUpdated).to.equal(0);
+    });
+
     it('does not re-offer an alias Semrush has already rejected', async () => {
       const transport = makeTransport(
         [projectWith('p-us', 'us', { brandNames: ['Chevrolet Canada'] })],
@@ -350,12 +383,12 @@ describe('brand-aliases helpers', () => {
 
       await syncBrandAliasesAcrossMarkets(transport, [{ name: 'Acme', regions: [] }], 'Brand', WS, undefined);
 
-      // The name-derived spelling comes off the BENCHMARK's name, which is what
-      // upstream folds against — not the brand's display name.
+      // Both names are covered: the display name the project tracks, and the
+      // benchmark's own name, which upstream folds against and differs here.
       expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, 'p-us', 'own', {
         brand_name: 'Existing Brand',
         domain: 'existing.com',
-        brand_aliases: ['acme', 'existing brand'],
+        brand_aliases: ['brand', 'acme', 'existing brand'],
       });
     });
 
@@ -370,7 +403,7 @@ describe('brand-aliases helpers', () => {
       expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, 'p-us', 'own', {
         brand_name: 'Brand',
         domain: 'brand.com',
-        brand_aliases: ['acme', 'brand'],
+        brand_aliases: ['brand', 'acme'],
       });
     });
 
@@ -436,7 +469,7 @@ describe('brand-aliases helpers', () => {
       expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, 'p-us', 'own', {
         brand_name: 'Brand',
         domain: 'brand.com',
-        brand_aliases: ['acme', 'brand'],
+        brand_aliases: ['brand', 'acme'],
       });
       expect(transport.publishProject).to.have.been.calledOnceWith(WS, 'p-us');
       expect(result).to.deep.equal({

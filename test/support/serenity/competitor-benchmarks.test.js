@@ -168,6 +168,29 @@ describe('competitor-benchmarks helpers', () => {
       });
     });
 
+    it('drops a derived alias a sibling benchmark owns, so the batch cannot 409', async () => {
+      // Live-verified 2026-08-13: alias uniqueness is project-wide and case-folded,
+      // and the 409 fails the WHOLE create — in a batch, the innocent members too.
+      // A competitor's own lowercase name is exactly what can collide.
+      const transport = makeTransport([
+        { id: 'own', main_brand: true, domain: 'acme.com' },
+        {
+          id: 'held', main_brand: false, domain: 'held.com', brand_name: 'Duck',
+        },
+      ]);
+      const competitors = [
+        // 'duck' (its lowercase name) is held by the 'Duck' benchmark above.
+        { name: 'DUCK', url: 'https://duckduckgo.com', regions: ['us'] },
+        { name: 'Clean', url: 'https://clean.com', regions: ['us'] },
+      ];
+      const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined);
+      expect(transport.createBenchmarks).to.have.been.calledOnceWith(WS, PID, [
+        { brand_name: 'DUCK', domain: 'duckduckgo.com', brand_aliases: [] },
+        { brand_name: 'Clean', domain: 'clean.com', brand_aliases: ['clean'] },
+      ]);
+      expect(result.created).to.equal(2);
+    });
+
     it('deletes the benchmark of a removed competitor (never the main brand)', async () => {
       const transport = makeTransport([
         { id: 'own', main_brand: true, domain: 'acme.com' },

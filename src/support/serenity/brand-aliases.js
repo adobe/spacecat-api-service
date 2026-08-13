@@ -26,6 +26,7 @@ import {
   sameAliasSetExact,
   benchmarkAliases,
   mergeBenchmarkAliases,
+  aliasKeysOwnedByOthers,
   rejectedAliasesFrom,
 } from './aliases.js';
 import { resolveProjects } from './resolve-projects.js';
@@ -173,9 +174,18 @@ export async function syncBrandAliasesAcrossMarkets(
         const benchmarkName = hasText(own.brand_name)
           ? own.brand_name
           : (display || project?.domain || '');
-        // Preferred spellings come off the name upstream folds against — the
-        // benchmark's own brand_name, not the brand's display name.
-        const withDerived = benchmarkAliases(benchmarkName, desiredAliases);
+        // The own-brand benchmark carries the lowercase form of every name this
+        // project tracks — the display name and its region-applicable aliases, i.e.
+        // exactly the `brand_names` set PATCHed above — plus the benchmark's own
+        // name, which upstream folds against and which can differ from the display
+        // name. Keeping the two surfaces in step is the point: `brand_names`
+        // classifies branded prompts and the benchmark's aliases decide what counts
+        // as a mention of this brand, so a name known to one should be known to both.
+        // Never offer an alias another benchmark in this project already owns: the
+        // 409 that would follow fails the whole write, not just that alias.
+        const ownedElsewhere = aliasKeysOwnedByOthers(benchmarks, own.id);
+        const withDerived = benchmarkAliases(benchmarkName, desiredBrandNames)
+          .filter((a) => !ownedElsewhere.has(a.toLowerCase()));
         // Only the aliases this edit dropped from THIS market are removed; the rest
         // of the live list (Semrush's enrichment) is carried forward.
         const removedForMarket = collectAliasNames(previousAliases, market)

@@ -165,6 +165,45 @@ export function mergeBenchmarkAliases(live, desired, removed = []) {
 }
 
 /**
+ * The alias keys other benchmarks in the same project already own — every OTHER
+ * benchmark's `brand_name` and `brand_aliases`, case-folded.
+ *
+ * Upstream enforces alias uniqueness across the union of every benchmark's name and
+ * aliases WITHIN A PROJECT, case-insensitively, and a duplicate is refused with a
+ * `409 duplicate brand name or alias` that fails the WHOLE write — for a batched
+ * create, every benchmark in the batch, including the ones that would have been
+ * fine (live-verified 2026-08-13). Sending an alias another benchmark owns is
+ * therefore not a small mistake; it takes unrelated work down with it.
+ *
+ * Callers subtract this from what they were going to send. The values are dropped
+ * silently rather than reported: they are ours to derive, so a customer cannot act
+ * on them, and the alternative is a failed edit.
+ *
+ * @param {Array<object>} benchmarks - `aio_benchmarks` from `listBenchmarks`.
+ * @param {string} [ownId] - the benchmark being written, excluded from the set.
+ * @returns {Set<string>} case-folded keys.
+ */
+export function aliasKeysOwnedByOthers(benchmarks, ownId) {
+  const owned = new Set();
+  for (const b of Array.isArray(benchmarks) ? benchmarks : []) {
+    if (ownId !== undefined && ownId !== null && String(b?.id) === String(ownId)) {
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+    const values = [b?.brand_name, ...(Array.isArray(b?.brand_aliases) ? b.brand_aliases : [])];
+    for (const v of values) {
+      // Key on the trimmed value, not the raw one: `hasText` counts whitespace as
+      // text, so a blank name would otherwise add an empty key to the set.
+      const key = typeof v === 'string' ? v.trim().toLowerCase() : '';
+      if (hasText(key)) {
+        owned.add(key);
+      }
+    }
+  }
+  return owned;
+}
+
+/**
  * Whether two alias lists hold the same spellings (order ignored, casing
  * significant). The benchmark write decision uses this rather than
  * {@link sameAliasSet} so that a re-cased alias registers as a difference.
