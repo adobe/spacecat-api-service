@@ -1732,6 +1732,36 @@ describe('Sites Controller', () => {
       expect(mockDataAccess.Site.allByEnrollmentFiltered).to.not.have.been.called;
     });
 
+    it('returns 403 when a read-only admin requests tier filtering (full admin required)', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false, is_read_only_admin: true });
+
+      const result = await sitesController.getAll({
+        ...context,
+        data: { tier: 'PAID' },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Filtering sites by tier or productCode requires admin access');
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+      expect(mockDataAccess.Site.allByEnrollmentFiltered).to.not.have.been.called;
+    });
+
+    it('returns 403 when a read-only admin requests productCode filtering (full admin required)', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false, is_read_only_admin: true });
+
+      const result = await sitesController.getAll({
+        ...context,
+        data: { productCode: 'LLMO' },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Filtering sites by tier or productCode requires admin access');
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+      expect(mockDataAccess.Site.allByEnrollmentFiltered).to.not.have.been.called;
+    });
+
     it('uses Site.all (not allByEnrollmentFiltered) when neither tier nor productCode is present', async () => {
       mockDataAccess.Site.all.resolves(sites);
 
@@ -1825,6 +1855,24 @@ describe('Sites Controller', () => {
       expect(loggerStub.info).to.have.been.calledWithMatch(
         /\[s2s-readall\] GET \/sites \(baseUrlContains\) granted clientId=svc-1 consumerId=consumer-id-1 capability=site:readAll count=2 requestId=req-s2s-baseurlcontains-1/,
       );
+    });
+
+    it('denies S2S consumer with site:readAll when tier is requested (full admin required)', async () => {
+      context.s2sConsumer = makeS2SConsumer();
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: ['site:readAll'] }));
+
+      const result = await sitesController.getAll({ ...context, data: { tier: 'PAID' } });
+      const body = await result.json();
+
+      // The S2S readAll check itself passes (proven by the Consumer lookup running) —
+      // it's the NEW admin-only guard for tier/productCode that denies here, not the
+      // base GET /sites authz.
+      expect(mockDataAccess.Consumer.findByClientIdAndImsOrgId).to.have.been.calledOnce;
+      expect(result.status).to.equal(403);
+      expect(body).to.have.property('message', 'Filtering sites by tier or productCode requires admin access');
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+      expect(mockDataAccess.Site.allByEnrollmentFiltered).to.not.have.been.called;
     });
 
     it('denies S2S consumer with only site:read (no readAll)', async () => {

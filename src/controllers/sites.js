@@ -506,7 +506,12 @@ function SitesController(ctx, log, env) {
    * `CUSTOMER_VISIBLE_TIERS`) and `productCode` (one of `EntitlementModel.PRODUCT_CODES`)
    * filter to sites enrolled at that entitlement tier/product; when either is present the
    * SAME where/orderBy/limit/cursor built for the branch is passed to
-   * `Site.allByEnrollmentFiltered` instead of `Site.all`. `cursor` is not supported
+   * `Site.allByEnrollmentFiltered` instead of `Site.all`. Unlike every other filter here,
+   * `tier`/`productCode` require FULL admin (`accessControlUtil.hasAdminAccess()`) -
+   * the same gate as the standalone `GET /sites/by-tier` endpoint
+   * (`getAllByEnrollmentAndTier`) - so a read-only admin or an S2S `site:readAll`
+   * caller gets 403 for either param, checked before their enum validation so the 403
+   * vs 400 outcome can't be used to probe valid values. `cursor` is not supported
    * together with any filter/sort (use `offset` instead) - accepting both would silently
    * discard the cursor and mislead the client into thinking cursor pagination is active.
    * @returns {Promise<Response>} Paginated sites response
@@ -535,12 +540,18 @@ function SitesController(ctx, log, env) {
     const deliveryType = context?.data?.deliveryType;
     const isLiveParam = context?.data?.isLive;
     const sortParam = context?.data?.sort;
-    // AUTHZ NOTE (reviewer/security): tier/productCode intentionally run under getAll's
-    // EXISTING admin-read/S2S-readAll authz checked above — NOT the stricter full-admin
-    // gate used by the standalone GET /sites/by-tier endpoint (getAllByEnrollmentAndTier).
-    // No tier-specific gating is added here by design; flagging for review.
+    // AUTHZ NOTE: baseUrlContains/deliveryType/isLive/sort keep getAll's EXISTING
+    // broad authz (admin-read or S2S site:readAll, checked above). tier/productCode
+    // are more sensitive (entitlement/enrollment data) and require FULL admin — the
+    // SAME gate as the standalone GET /sites/by-tier endpoint
+    // (getAllByEnrollmentAndTier, ~:809) — enforced immediately below, before any
+    // tier/productCode validation, so a caller who fails this check can't use the
+    // enum 400 to probe which tier/productCode values are valid.
     const tier = context?.data?.tier;
     const productCode = context?.data?.productCode;
+    if ((hasText(tier) || hasText(productCode)) && !accessControlUtil.hasAdminAccess()) {
+      return forbidden('Filtering sites by tier or productCode requires admin access');
+    }
 
     // Validate facets/sort up front (after authz, before branching) so invalid input is
     // always rejected the same way, whether or not it's combined with other filters.

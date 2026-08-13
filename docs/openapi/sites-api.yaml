@@ -145,11 +145,14 @@ sites:
         `<field>:<direction>` (field ∈ `baseURL`, `updatedAt`, `createdAt`,
         `deliveryType`, `isLive`; direction ∈ `asc`/`desc`, defaults to `asc`). `tier`
         restricts to sites enrolled at that entitlement tier; `productCode` (optionally
-        combined with `tier`) further restricts to that product's entitlement. Multiple
-        filters combine with AND. Defaults to a limit of 50 (clamped to 500) and an
-        offset of 0. Not combinable with `cursor` (400; use `offset` instead).
+        combined with `tier`) further restricts to that product's entitlement — both
+        require full admin access (see their parameter descriptions). Multiple filters
+        combine with AND. Defaults to a limit of 50 (clamped to 500) and an offset of 0.
+        Not combinable with `cursor` (400; use `offset` instead).
 
-      Required capabilities: admin access or S2S `site:readAll`.
+      Required capabilities: admin access or S2S `site:readAll`. `tier` and
+      `productCode` additionally require full admin (403 for read-only admins and S2S
+      `site:readAll` callers) — see the `tier`/`productCode` parameter descriptions.
     operationId: getSites
     parameters:
       - name: limit
@@ -267,13 +270,20 @@ sites:
         required: false
         description: |
           Server-side filter: only return sites enrolled at this entitlement tier.
-          When provided — alone, or combined with `baseUrlContains`, `deliveryType`,
-          `isLive`, `sort`, and/or `productCode` — the response uses the non-cursor,
-          offset-paginated envelope, calling the enrollment-aware data-access path
-          instead of the plain site query, where `pagination.tier` echoes the applied
-          value. An unrecognized value returns 400. Not combinable with `cursor` (400;
-          use `offset` instead). The `limit` parameter (default 50, clamped to 500)
-          bounds the page size and `offset` (default 0) selects the page.
+          **Requires full admin access** — unlike every other `GET /sites` filter,
+          this one is NOT available to S2S `site:readAll` callers or read-only admins
+          (403 `Filtering sites by tier or productCode requires admin access`), the
+          same restriction as the standalone `GET /sites/by-tier/{tier}` endpoint,
+          because it exposes entitlement/enrollment data. When provided — alone, or
+          combined with `baseUrlContains`, `deliveryType`, `isLive`, `sort`, and/or
+          `productCode` — the response uses the non-cursor, offset-paginated envelope,
+          calling the enrollment-aware data-access path instead of the plain site
+          query, where `pagination.tier` echoes the applied value. An unrecognized
+          value returns 400 (only for full admins; non-full-admins get 403 regardless
+          of whether the value is valid, so the two outcomes cannot be used to probe
+          valid tier values). Not combinable with `cursor` (400; use `offset`
+          instead). The `limit` parameter (default 50, clamped to 500) bounds the page
+          size and `offset` (default 0) selects the page.
         schema:
           type: string
           enum:
@@ -286,7 +296,9 @@ sites:
         required: false
         description: |
           Server-side filter: only return sites enrolled under this product's
-          entitlement. May be combined with `tier` to narrow to that product's
+          entitlement. **Requires full admin access** — same restriction as `tier`
+          above (not available to S2S `site:readAll` callers or read-only admins; see
+          `tier` for details). May be combined with `tier` to narrow to that product's
           entitlement at a specific tier, or provided alone to match the product across
           any tier. When provided — alone, or combined with `baseUrlContains`,
           `deliveryType`, `isLive`, `sort`, and/or `tier` — the response uses the
