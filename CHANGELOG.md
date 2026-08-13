@@ -1,3 +1,45 @@
+## [1.741.2](https://github.com/adobe/spacecat-api-service/compare/v1.741.1...v1.741.2) (2026-08-13)
+
+
+### Bug Fixes
+
+* **serenity:** remove dormant Semrush AI allocator, §10.1/§10.2 (SITES-49206) ([#2995](https://github.com/adobe/spacecat-api-service/issues/2995)) ([a2de970](https://github.com/adobe/spacecat-api-service/commit/a2de9703d1650de6a6d8b2125a42fc8105aa6239))
+
+## [1.741.1](https://github.com/adobe/spacecat-api-service/compare/v1.741.0...v1.741.1) (2026-08-13)
+
+
+### Bug Fixes
+
+* **autofix:** require LLMO capability for LLMO auto-fix ([#3036](https://github.com/adobe/spacecat-api-service/issues/3036)) ([2c50d4a](https://github.com/adobe/spacecat-api-service/commit/2c50d4aec47fd8f34d9a58524f22de5b196e5474))
+
+# [1.741.0](https://github.com/adobe/spacecat-api-service/compare/v1.740.1...v1.741.0) (2026-08-13)
+
+
+### Features
+
+* **facs:** enforce site-scoped LLMO routes in facsWrapper via secondary resource param ([#3030](https://github.com/adobe/spacecat-api-service/issues/3030)) ([0b57533](https://github.com/adobe/spacecat-api-service/commit/0b57533ffde583a1aa8aa4666cf5fd995ca973ed)), closes [adobe/mysticat-architecture#241](https://github.com/adobe/mysticat-architecture/issues/241) [#2947](https://github.com/adobe/spacecat-api-service/issues/2947)
+
+## [1.740.1](https://github.com/adobe/spacecat-api-service/compare/v1.740.0...v1.740.1) (2026-08-13)
+
+
+### Bug Fixes
+
+* **llmo-akamai:** PATCH-delta deploy + fast plan + deploy-status reconciliation for large Akamai properties ([#3013](https://github.com/adobe/spacecat-api-service/issues/3013)) ([b413048](https://github.com/adobe/spacecat-api-service/commit/b41304893961bf70de0a45e729c5c4016132811e)), closes [adobe/spacecat-shared#1864](https://github.com/adobe/spacecat-shared/issues/1864) [adobe/project-elmo-ui#2729](https://github.com/adobe/project-elmo-ui/issues/2729) [adobe/spacecat-shared#1864](https://github.com/adobe/spacecat-shared/issues/1864)
+
+# [1.740.0](https://github.com/adobe/spacecat-api-service/compare/v1.739.0...v1.740.0) (2026-08-12)
+
+
+### Features
+
+* **llmo:** CloudFront CDN log delivery with assume-role setup (LLMO-5566) ([#2680](https://github.com/adobe/spacecat-api-service/issues/2680)) ([d68f8a5](https://github.com/adobe/spacecat-api-service/commit/d68f8a5c3ab48fbc7fadb96244f6931e4a983cb1)), closes [#2654](https://github.com/adobe/spacecat-api-service/issues/2654) [#2671](https://github.com/adobe/spacecat-api-service/issues/2671)
+
+# [1.739.0](https://github.com/adobe/spacecat-api-service/compare/v1.738.2...v1.739.0) (2026-08-12)
+
+
+### Features
+
+* **ai-seo:** AISEODT-134 added new countries ([#3029](https://github.com/adobe/spacecat-api-service/issues/3029)) ([f357d28](https://github.com/adobe/spacecat-api-service/commit/f357d28f90fe9fdb9b29891f16980a0608fafb6f))
+
 ## [1.738.2](https://github.com/adobe/spacecat-api-service/compare/v1.738.1...v1.738.2) (2026-08-12)
 
 

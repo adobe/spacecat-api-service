@@ -12,17 +12,6 @@
 
 import { ctx } from './harness.js';
 import { resetPostgres } from './seed.js';
-import {
-  resetSemrushMocks, setUmMockQuota, dumpUmMock, dumpPeMock,
-} from './setup.js';
-import serenityTests from '../shared/tests/serenity.js';
+import llmoCloudFrontLogDeliveryTests from '../shared/tests/llmo-cloudfront-log-delivery.js';
 
-serenityTests(() => ctx.httpClient, resetPostgres, resetSemrushMocks, {
-  // setUmMockQuota and dumpUmMock are both intentionally retained though no shared serenity test
-  // consumes them today: the allocator's flag-ON IT went with SITES-49206, but the spacecat-shared
-  // §10.5 metered-write change will re-meter a sub-workspace through the same `__quota` route and
-  // assert the result via the UM dump. Only dumpPeMock has a live consumer now. See setup.js.
-  setUmMockQuota,
-  dumpUmMock,
-  dumpPeMock,
-});
+llmoCloudFrontLogDeliveryTests(() => ctx.httpClient, resetPostgres);

@@ -750,6 +750,10 @@ paths:
     $ref: './llmo-api.yaml#/site-llmo-cloudfront-plan'
   /sites/{siteId}/llmo/cdn-onboard/cloudfront/permissions:
     $ref: './llmo-api.yaml#/site-llmo-cloudfront-permissions'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/log-delivery:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-log-delivery'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/log-rescan:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-log-rescan'
   /sites/{siteId}/llmo/edge-optimize-status:
     $ref: './llmo-api.yaml#/llmo-edge-optimize-status'
   /sites/{siteId}/llmo/probes/edge-optimize:
@@ -774,6 +778,8 @@ paths:
     $ref: './llmo-api.yaml#/site-llmo-akamai-plan'
   /sites/{siteId}/llmo/cdn-onboard/akamai/deploy:
     $ref: './llmo-api.yaml#/site-llmo-akamai-deploy'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/deploy-status:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-deploy-status'
   /sites/{siteId}/llmo/cdn-onboard/akamai/activate:
     $ref: './llmo-api.yaml#/site-llmo-akamai-activate'
   /sites/{siteId}/llmo/cdn-onboard/akamai/activation-status:

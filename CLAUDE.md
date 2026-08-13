@@ -100,6 +100,7 @@ Request → AWS Lambda → Middleware Stack → Route Matcher → Controller →
 10. `elevatedSlackClientWrapper` - Slack client
 11. `secrets` - AWS Secrets Manager
 12. `helixStatus` - Health checks
+13. `facsWrapper` - FACS/ReBAC customer-authorization enforcement for FACS-governed routes (innermost wrapper — attached first in the `wrap(...).with(...)` chain, so it runs last, immediately before the controller; configured with `routeFacsCapabilities` + `secondaryResolvers`; see Access Control → FACS-native authorization)
 
 All dependencies are injected into `context` and available throughout the request lifecycle.
 

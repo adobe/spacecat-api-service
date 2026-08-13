@@ -616,6 +616,8 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/deploy': llmoCloudFrontController.deploy,
     'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/plan': llmoCloudFrontController.plan,
     'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/permissions': llmoCloudFrontController.getPermissions,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-delivery': llmoCloudFrontController.enableCdnLogDelivery,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-rescan': llmoCloudFrontController.rescanCdnLogDelivery,
     'GET /sites/:siteId/llmo/strategy': llmoController.getStrategy,
     'PUT /sites/:siteId/llmo/strategy': llmoController.saveStrategy,
     'GET /sites/:siteId/llmo/edge-optimize-status': llmoController.checkEdgeOptimizeStatus,
@@ -634,6 +636,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties': llmoAkamaiController.listProperties,
     'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan': llmoAkamaiController.plan,
     'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy': llmoAkamaiController.deploy,
+    'GET /sites/:siteId/llmo/cdn-onboard/akamai/deploy-status': llmoAkamaiController.deployStatus,
     'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate': llmoAkamaiController.activate,
     'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status': llmoAkamaiController.activationStatus,
 
