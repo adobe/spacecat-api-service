@@ -22,7 +22,6 @@ import { deleteAllProjects, ensureSubworkspace } from './workspace-lifecycle.js'
 import { handleCreateMarketSubworkspace } from './handlers/markets-subworkspace.js';
 import { isSerenityDeferPublishEnabled } from './defer-publish-active.js';
 import { computeWriteDeadline } from './intent-classification.js';
-import { isDynamicAllocationEnabled, resolveBrandAiCeiling } from './dynamic-allocation-active.js';
 import { resolveCanonicalDefaultModelIds } from './default-models.js';
 import { resolveCallerId } from './handlers/prompts.js';
 
@@ -176,13 +175,6 @@ export async function provisionBrandSubworkspace(context, {
     ? modelIds
     : await resolveCanonicalDefaultModelIds(transport, log);
 
-  // Dynamic-allocation kill-switch + per-brand ceiling (LLMO-6190): brand creation is onboarding,
-  // and §3/§4a of the design require an onboarded-while-ON brand to get JIT top-up on its first
-  // metered op like every other subworkspace write path (activate, create-market, create-prompts,
-  // update-models). Threaded here so brand creation is not silently excluded from the allocator.
-  const dynamicAllocation = isDynamicAllocationEnabled(context.env);
-  const ceiling = resolveBrandAiCeiling(context.env, log);
-
   /** @type {string|null} */
   let capturedWorkspaceId = null;
   // Set ONLY when ensureSubworkspace freshly created the sub-workspace. A workspace it
@@ -277,8 +269,6 @@ export async function provisionBrandSubworkspace(context, {
         brandUrlSources,
         competitors,
         publishMode,
-        dynamicAllocation,
-        ceiling,
         brandCollection: context?.dataAccess?.Brand,
         onWorkspaceCreated: (id) => { createdWorkspaceId = id; },
         // Caller identity for the created_* stamp on generated prompts (LLMO-6289),

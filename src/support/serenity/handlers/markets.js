@@ -1077,59 +1077,6 @@ export async function listUnionModels(transport, semrushWorkspaceId, projectIds)
   return { items: [...byKey.values()] };
 }
 
-/**
- * Counts the project's currently-PUBLISHED prompts (the live layer), by paginating
- * `listPromptsByTags` with an empty tag filter — the same live-layer walk `listTagsForProject`
- * uses, with the same page ceiling. Used by the dynamic allocator to size the prompt re-meter of a
- * model-set change: attaching Δ models to a project re-meters every published text
- * (`publishedTexts × Δmodels`, plan §12 / resource-manager `modelChangeUnits`). Bounded by
- * `PROMPT_COUNT_PAGE_LIMIT` pages; on a truncated walk it returns the counted-so-far (a floor),
- * which can only UNDER-state the need — the transfer 422 remains the authoritative backstop.
- *
- * @param {SerenityTransport} transport
- * @param {string} semrushWorkspaceId
- * @param {string} projectId
- * @param {any} [log]
- * @returns {Promise<number>} number of published prompts on the project.
- */
-export async function countPublishedPrompts(transport, semrushWorkspaceId, projectId, log) {
-  const LIMIT = 200;
-  const PROMPT_COUNT_PAGE_LIMIT = 50;
-  let count = 0;
-  let page = 1;
-  while (page <= PROMPT_COUNT_PAGE_LIMIT) {
-    let resp;
-    try {
-      // eslint-disable-next-line no-await-in-loop
-      resp = await transport.listPromptsByTags(semrushWorkspaceId, projectId, {
-        tag_ids: [], page, limit: LIMIT,
-      });
-    } catch (e) {
-      // An upstream failure MID-WALK is truncation, same as hitting the page ceiling below: return
-      // the counted-so-far (a floor) instead of propagating the rejection and failing the WHOLE
-      // metered write over a partial-page read error. The transfer 422 remains the authoritative
-      // backstop if this under-states the real need.
-      log?.warn?.('countPublishedPrompts: upstream failure mid-walk; returning counted-so-far', {
-        semrushWorkspaceId, projectId, page, error: e?.message,
-      });
-      return count;
-    }
-    const items = Array.isArray(resp?.items) ? resp.items : [];
-    count += items.length;
-    if (items.length < LIMIT) {
-      break;
-    }
-    if (page === PROMPT_COUNT_PAGE_LIMIT) {
-      log?.warn?.('countPublishedPrompts: page ceiling hit; published-prompt count may be under-stated', {
-        semrushWorkspaceId, projectId, pages: PROMPT_COUNT_PAGE_LIMIT,
-      });
-      break;
-    }
-    page += 1;
-  }
-  return count;
-}
-
 /** @param {SerenityTransport} transport */
 export async function handleListModels(
   transport,
@@ -1182,9 +1129,8 @@ export async function handleListModels(
  * inner publish runs on an unpublishable (e.g. unit-less) project and throws.
  *
  * `wrapPublish` (default identity — a plain call, byte-for-byte the pre-existing behavior) wraps
- * the inner `publishProject` call. The subworkspace update-models caller passes
- * `headroom.retryOnQuota` (LLMO-6190 item 4) so a disguised metered-405 gets ONE bounded
- * top-up+retry; flat-mode callers omit this param, so flat mode is untouched.
+ * the inner `publishProject` call. Retained as an injection seam for a future publish-retry
+ * wrapper (§10.3); no caller passes a non-identity wrapper today, so every publish is a plain call.
  * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId

@@ -26,6 +26,21 @@
  * design doc says 405s as a disguised quota rejection (as opposed to a genuine Method-Not-Allowed).
  * It prints the raw response status, headers, and body so a human can re-confirm the shape.
  *
+ * SECOND READING (SITES-49206 / ADR-009): after the JIT allocator's removal this script is also the
+ * interim per-environment re-check that Semrush is still NOT enforcing AI limits — and under that
+ * premise its meaning INVERTS the LLMO-6190 labels used below. A publish that SUCCEEDS at zero
+ * headroom is the HEALTHY result (the premise holds); the disguised 405 this was built to capture
+ * now means Semrush is ENFORCING AGAIN — the signal to re-introduce the allocator from history. The
+ * on-screen `expected` / `UNEXPECTED` console text still speaks the fixture-capture language, so it
+ * reads the opposite way from the premise check. `main()` exits 0 in both branches: the operator
+ * reads the printed publish outcome, not an exit code.
+ *
+ * DELETE-LAST COUPLING: this script is the sole remaining caller of the transport's
+ * `transferWorkspaceResources` (the step-2 drain). Deleting this script strands that method, and
+ * deleting that method breaks this script — serenity-docs#72 §10.7 retires the two together with
+ * the §10.6 classifier. The step-1 read `getWorkspaceResources` is NOT part of this coupling:
+ * `elements.js` `checkAccess` (the brand-presence access banner) keeps it alive independently.
+ *
  * WHY THIS CAN'T RUN IN CI OR BE RUN BY the implementing agent: it needs a live IMS bearer token
  * and a real Semrush sub-workspace id — neither exists in this environment. A human with
  * Semrush/IMS dev-environment credentials must run it manually.
@@ -51,9 +66,10 @@
  *      SerenityTransportError captured — everything needed to pin a fixture.
  *
  * Cleanup: this script does NOT delete the project or restore the drained allocation — it's meant
- * to run against a disposable dev/throwaway sub-workspace. Re-run `ensureAiHeadroom`/an ordinary
- * API top-up (or just re-activate the brand) afterwards if the workspace needs to keep working, or
- * decommission the throwaway workspace entirely.
+ * to run against a disposable dev/throwaway sub-workspace. To restore headroom afterwards, transfer
+ * `prompts.total` back up (the inverse of step 2 — a `transferWorkspaceResources` call, or just
+ * re-activate the brand) if the workspace needs to keep working, or decommission the throwaway
+ * workspace entirely.
  *
  * If the captured body's SHAPE ever changes (e.g. the gateway starts returning JSON for this
  * rejection too), `isMeteredQuota` and its pinned fixture in `test/support/serenity/errors.test.js`
@@ -123,6 +139,22 @@ async function main() {
     ai: { projects: before.product_resources.ai.resources.projects.total, prompts: prompts.used },
   });
 
+  // Re-read AFTER the drain and print the post-drain totals. Without this, "did the drain land?"
+  // is an open confounder on the premise-confirming reading (a publish that succeeds against
+  // GENUINELY zero headroom confirms Semrush is not enforcing — but a publish that succeeds because
+  // the drain silently no-op'd proves nothing). This is the "after" half the header advertises.
+  const after = await transport.getWorkspaceResources(subWorkspaceId);
+  const promptsAfter = after?.product_resources?.ai?.resources?.prompts;
+  const zeroHeadroom = promptsAfter && typeof promptsAfter.used === 'number'
+    && typeof promptsAfter.total === 'number' && promptsAfter.total <= promptsAfter.used;
+  console.log(
+    'prompts.used:',
+    promptsAfter?.used,
+    ' prompts.total (after drain):',
+    promptsAfter?.total,
+    zeroHeadroom ? ' — zero headroom confirmed' : ' — ⚠ HEADROOM REMAINS: the drain did not land; the publish result below is inconclusive either way',
+  );
+
   let projectId = opts['project-id'];
   if (!projectId) {
     console.log('Resolving a real language_id from the Semrush language catalog...');
@@ -172,11 +204,17 @@ async function main() {
   );
 
   try {
-    console.log('Publishing with zero prompt headroom — expecting the disguised metered-quota 405...');
+    console.log('Publishing with zero prompt headroom — LLMO-6190 fixture capture expects the disguised metered-quota 405...');
     await transport.publishProject(subWorkspaceId, projectId);
-    console.log('\nUNEXPECTED: publish succeeded. The workspace may not actually be at zero headroom, or the disguised-405 only fires with drafted prompts present — try creating a prompt on the project before publishing.');
+    console.log('\npublish SUCCEEDED at zero headroom. Read this against the "after drain" totals printed above:');
+    console.log('  • if zero headroom was confirmed there — this is the ADR-009 premise-confirming result: Semrush is NOT enforcing AI limits (no allocator needed).');
+    console.log('  • if HEADROOM REMAINS was printed — inconclusive: the drain did not land (or the disguised-405 only fires with drafted prompts present — try a prompt first).');
+    console.log('(The legacy label for this branch was "UNEXPECTED"; that reflects the LLMO-6190 fixture-capture goal, not the ADR-009 premise check — see the header.)');
   } catch (e) {
     printError('publishProject result (this is what isMeteredQuota must match)', e);
+    if (e instanceof SerenityTransportError && e.status === 405) {
+      console.log('\nA disguised 405 at confirmed-zero headroom is the LLMO-6190 fixture; under the ADR-009 premise it ALSO means Semrush is enforcing AI limits again — the signal to re-introduce the allocator from history (ADR-009).');
+    }
   }
 
   console.log('\nDone. This script did NOT restore the drained allocation or delete the canary project — clean up the throwaway workspace manually.');

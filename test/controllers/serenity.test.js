@@ -1463,19 +1463,14 @@ describe('SerenityController', () => {
           competitors: [],
           env: {},
           dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
-          // Dynamic-allocation kill-switch defaults OFF (env unset) — the guard is a no-op.
-          dynamicAllocation: false,
-          // Per-brand AI ceiling (LLMO-6190 gate): undefined when no ceiling env is set — the
-          // guard keeps its non-binding default.
-          ceiling: undefined,
           // serenity-docs#72 §5: threaded through for the (opt-in) quota-rejection Slack alert.
           orgId: ORG,
           // Caller identity for the created_* stamp (LLMO-6289); the test context
           // has no auth profile, so it resolves to the `unknown` sentinel.
           callerId: 'unknown',
         });
-      // The org parent (JIT units pool) is threaded POSITIONALLY (arg index 2), not in the
-      // options bag — the same id given to ensureSubworkspace.
+      // The org parent is threaded POSITIONALLY (arg index 2), not in the options bag —
+      // the same id given to ensureSubworkspace.
       expect(handlers.handleCreateMarketSubworkspace.firstCall.args[2]).to.equal(WORKSPACE);
     });
 
@@ -1545,17 +1540,6 @@ describe('SerenityController', () => {
       const response = await controller.deleteMarket(fakeContext({ params: { geoTargetId: '2840', languageCode: 'en' } }));
       expect(response.status).to.equal(204);
       expect(handlers.handleDeleteMarketSubworkspace).to.have.been.calledOnce;
-    });
-
-    it('deleteMarket threads the dynamic-allocation flag (LLMO-6190 item 3) into the subworkspace handler options', async () => {
-      handlers.handleDeleteMarketSubworkspace.resolves({ status: 204 });
-      const controller = SerenityController({ env: {} }, fakeLog(), {});
-      await controller.deleteMarket(fakeContext({
-        params: { geoTargetId: '2840', languageCode: 'en' },
-        env: { SERENITY_DYNAMIC_ALLOCATION: 'true' },
-      }));
-      const opts = handlers.handleDeleteMarketSubworkspace.firstCall.args[5];
-      expect(opts.dynamicAllocation).to.equal(true);
     });
 
     it('deleteMarket unlinks the orphaned market site when the handler reports a deletedSiteId (LLMO-6405 R12)', async () => {
@@ -1649,39 +1633,6 @@ describe('SerenityController', () => {
       expect(response.status).to.equal(200);
       expect(handlers.handleCreatePromptsSubworkspace).to.have.been.calledOnce;
       expect(handlers.handleCreatePrompts).to.not.have.been.called;
-    });
-
-    it('createPrompts threads the per-brand AI ceiling (LLMO-6190 gate) from env into the subworkspace handler options', async () => {
-      handlers.handleCreatePromptsSubworkspace.resolves({ created: [], skipped: [], failed: [] });
-      const controller = SerenityController({ env: {} }, fakeLog(), {});
-      await controller.createPrompts(fakeContext({
-        data: { prompts: [] },
-        env: { SERENITY_BRAND_AI_CEILING_PROMPTS: '5000' },
-      }));
-      // options bag is the 9th positional arg (transport, workspaceId, data, log,
-      // classifyPromptType, env, writeDeadline, callerId, options).
-      const opts = handlers.handleCreatePromptsSubworkspace.firstCall.args[8];
-      expect(opts.ceiling).to.deep.equal({ prompts: 5000 });
-    });
-
-    it('createPrompts leaves ceiling undefined when no ceiling env is set (byte-for-byte non-binding default)', async () => {
-      handlers.handleCreatePromptsSubworkspace.resolves({ created: [], skipped: [], failed: [] });
-      const controller = SerenityController({ env: {} }, fakeLog(), {});
-      await controller.createPrompts(fakeContext({ data: { prompts: [] } }));
-      const opts = handlers.handleCreatePromptsSubworkspace.firstCall.args[8];
-      expect(opts.ceiling).to.equal(undefined);
-    });
-
-    it('createPrompts FAIL-SAFE: a malformed ceiling env leaves ceiling undefined (never throws)', async () => {
-      handlers.handleCreatePromptsSubworkspace.resolves({ created: [], skipped: [], failed: [] });
-      const controller = SerenityController({ env: {} }, fakeLog(), {});
-      const response = await controller.createPrompts(fakeContext({
-        data: { prompts: [] },
-        env: { SERENITY_BRAND_AI_CEILING_PROMPTS: 'not-a-number' },
-      }));
-      expect(response.status).to.equal(200);
-      const opts = handlers.handleCreatePromptsSubworkspace.firstCall.args[8];
-      expect(opts.ceiling).to.equal(undefined);
     });
 
     it('updatePrompt routes to the subworkspace handler in subworkspace mode', async () => {
@@ -2221,9 +2172,6 @@ describe('SerenityController', () => {
         competitors: [],
         env: {},
         dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
-        dynamicAllocation: false,
-        // Per-brand AI ceiling (LLMO-6190 gate): undefined when no ceiling env is set.
-        ceiling: undefined,
         // serenity-docs#72 §5: threaded through for the (opt-in) quota-rejection Slack alert.
         orgId: ORG,
         // Caller id resolved once for the batch; no auth profile in the test

@@ -154,9 +154,14 @@ export async function resetSemrushMocks() {
 
 /**
  * Sets a workspace's finite AI resources on the User Manager mock via its `POST /__quota` control
- * route (makes it metered). Each dim is a bare `total` or `{ used, drafted, total }`. Used by the
- * dynamic-allocation flag-ON IT to put BRAND_1's sub-workspace into a metered state so the JIT
- * guard reads real `/resources` over the wire. TLS verification is already off process-wide.
+ * route (makes it metered). Each dim is a bare `total` or `{ used, drafted, total }`.
+ *
+ * Retained control-route seam, deliberately still wired: the dynamic-allocation flag-ON IT that
+ * used to consume this was removed with the allocator (SITES-49206), so no IT calls it today. It
+ * stays exported — and threaded through `mockControls` in serenity.test.js — because the
+ * spacecat-shared §10.5 metered-write change (and the §10 metered-405 canary) will re-meter a
+ * sub-workspace through this same route; dropping it now would only have to be re-added there.
+ * TLS verification is already off process-wide.
  *
  * @param {string} workspaceId - the workspace to meter
  * @param {{ projects?: number|object, prompts?: number|object }} dims - per-dimension resources
@@ -192,7 +197,12 @@ async function dumpMock(mockBase, label) {
 
 /**
  * Reads the User Manager mock's full store snapshot — to assert mock-side state (e.g. a
- * workspace's resource `total` did/didn't change) after a flag-ON request.
+ * workspace's resource `total` did/didn't change) after a request.
+ *
+ * Like `setUmMockQuota` above, this has no shared-test consumer today: the flag-ON block that read
+ * it went with the allocator removal (SITES-49206). Kept and still threaded through `mockControls`
+ * (serenity.test.js) as the UM-side counterpart of the consumed `dumpPeMock`, for the
+ * spacecat-shared §10.5 metered-write assertions.
  * @returns {Promise<any>}
  */
 export const dumpUmMock = () => dumpMock(UM_MOCK_BASE, 'UM');

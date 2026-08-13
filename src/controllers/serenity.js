@@ -69,7 +69,6 @@ import {
 } from '../support/serenity/handlers/tags.js';
 import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
 import { isSerenityActiveForBrand } from '../support/serenity/serenity-active.js';
-import { isDynamicAllocationEnabled, resolveBrandAiCeiling } from '../support/serenity/dynamic-allocation-active.js';
 import { MAX_TOPICS_ON_CREATE } from '../support/serenity/brand-provisioning.js';
 import { resolveDefaultModelIds } from '../support/serenity/default-models.js';
 import { marketForGeoTargetId } from '../support/serenity/locations.js';
@@ -459,17 +458,6 @@ function SerenityController(context, log, env) {
     return createSerenityTransport({ env: ctx.env || env, imsToken });
   }
 
-  // Global dynamic-allocation kill-switch for this request (env/Vault boolean, default OFF). Read
-  // per request off ctx.env, mirroring buildTransport's env resolution. When OFF the metered
-  // handlers front through a no-op guard (byte-for-byte pre-PR behavior).
-  const dynamicAllocationEnabled = (ctx) => isDynamicAllocationEnabled(ctx?.env || env);
-
-  // Global per-brand AI ceiling (LLMO-6190 flag-flip gate) — a runaway backstop, the SAME value
-  // for every brand, resolved from Vault off the same per-request env as the kill-switch above.
-  // `undefined` when unset → the guard keeps its non-binding default (byte-for-byte today). Passed
-  // as a plain object alongside `dynamicAllocation` at each guard-building handler call site.
-  const brandAiCeiling = (ctx) => resolveBrandAiCeiling(ctx?.env || env, log);
-
   /** Loads the Brand model instance (for subworkspace-mode write/lifecycle flows). */
   async function loadBrand(ctx, brandUuid) {
     const Brand = ctx?.dataAccess?.Brand;
@@ -600,9 +588,6 @@ function SerenityController(context, log, env) {
           writeDeadline,
           callerId,
           {
-            dynamicAllocation: dynamicAllocationEnabled(ctx),
-            parentWorkspaceId: auth.parentWorkspaceId ?? '',
-            ceiling: brandAiCeiling(ctx),
             // serenity-docs#72 §5: feeds the quota-rejection Slack alert (opt-in via
             // SERENITY_QUOTA_ALERTS_ENABLED) — never required, a no-op when unset.
             orgId: ctx?.params?.spaceCatId,
@@ -861,10 +846,6 @@ function SerenityController(context, log, env) {
             // in depth: this options bag flows into markets-subworkspace.js and
             // shouldn't carry access to unrelated tables).
             dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
-            // Dynamic-allocation kill-switch. The JIT top-up units pool is the org parent passed
-            // positionally above (auth.parentWorkspaceId) — not duplicated in this options bag.
-            dynamicAllocation: dynamicAllocationEnabled(ctx),
-            ceiling: brandAiCeiling(ctx),
             // Sub-workspace titles are bare brand names, so ensureSubworkspace needs the Brand
             // collection to tell this brand's own interrupted create from a same-named sibling
             // brand's workspace. Only consulted when this brand has no sub-workspace yet.
@@ -948,7 +929,6 @@ function SerenityController(context, log, env) {
           // create-market call site above for the same rationale.
           {
             dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
-            dynamicAllocation: dynamicAllocationEnabled(ctx),
           },
         )
         : handleDeleteMarket(
@@ -1218,9 +1198,6 @@ function SerenityController(context, log, env) {
           ctx.data || {},
           log,
           {
-            dynamicAllocation: dynamicAllocationEnabled(ctx),
-            parentWorkspaceId: auth.parentWorkspaceId ?? '',
-            ceiling: brandAiCeiling(ctx),
             env: ctx.env || env,
             orgId: ctx?.params?.spaceCatId,
             brandId: auth.brandUuid,
@@ -1529,9 +1506,6 @@ function SerenityController(context, log, env) {
               // Narrowed to the one model the mapping-row helpers touch — see
               // the single-market create call site for the same rationale.
               dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
-              // JIT units pool = the org parent passed positionally above; not duplicated here.
-              dynamicAllocation: dynamicAllocationEnabled(ctx),
-              ceiling: brandAiCeiling(ctx),
               // serenity-docs#72 §5: feeds the quota-rejection Slack alert (opt-in via
               // SERENITY_QUOTA_ALERTS_ENABLED) — never required, a no-op when unset.
               orgId: ctx?.params?.spaceCatId,
