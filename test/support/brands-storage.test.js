@@ -3244,7 +3244,7 @@ describe('brands-storage', () => {
     it('appends an incrementing index when {name}_deleted already exists (LLMO-6978)', async () => {
       const client = createCapturingClient({
         brands: [
-          { data: { name: 'Acme' }, error: null }, // read current name
+          { data: { name: 'Acme', status: 'active' }, error: null }, // read name + status
           // first rename collides with an existing deleted "Acme_deleted"
           { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint "uq_brand_name_per_org"' } },
           { data: { id: BRAND_ID }, error: null }, // retry with _deleted2 succeeds
@@ -3294,14 +3294,49 @@ describe('brands-storage', () => {
     it('throws after exhausting the collision-retry budget', async () => {
       const client = createTableMockClient({
         brands: [
-          { data: { name: 'Acme' }, error: null }, // read current name
-          // every rename attempt collides (clamped: reused for all updates)
-          { data: null, error: { code: '23505', message: 'duplicate key' } },
+          { data: { name: 'Acme', status: 'active' }, error: null }, // read name + status
+          // every rename attempt collides on the per-org name constraint
+          // (clamped: reused for all updates), so the loop keeps retrying.
+          { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint "uq_brand_name_per_org"' } },
         ],
       });
 
       await expect(deleteBrand(ORG_ID, BRAND_ID, client))
         .to.be.rejectedWith('could not free the name "Acme" after 100 attempts');
+    });
+
+    it('reports success when a concurrent delete already soft-deleted the row (guarded zero-row UPDATE)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: { name: 'Acme', status: 'active' }, error: null }, // read: still live
+          // Our guarded UPDATE (.not status eq deleted) matches zero rows because a
+          // racing deleteBrand already flipped this row to deleted between the read
+          // and the write — so we neither 404 nor re-suffix the already-renamed brand.
+          { data: null, error: null },
+        ],
+      });
+
+      const result = await deleteBrand(ORG_ID, BRAND_ID, client, 'user@test.com');
+
+      // Idempotent success: the racing caller completed the delete for us.
+      expect(result).to.be.true;
+      // Exactly one UPDATE, no extra retries — the write itself is the guard.
+      expect(client.capturedCalls.update).to.have.lengthOf(1);
+      expect(client.capturedCalls.update[0].row.name).to.equal('Acme_deleted');
+    });
+
+    it('surfaces a 23505 from a different unique constraint immediately instead of retrying', async () => {
+      const client = createTableMockClient({
+        brands: [
+          { data: { name: 'Acme', status: 'active' }, error: null }, // read name + status
+          // A 23505 that is NOT the per-org name collision — advancing the index
+          // can't resolve it, so it must surface right away, not burn 100 attempts.
+          { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint "brands_base_site_unique"' } },
+        ],
+      });
+
+      await expect(deleteBrand(ORG_ID, BRAND_ID, client))
+        .to.be.rejectedWith('Failed to delete brand: duplicate key value violates unique constraint "brands_base_site_unique"');
     });
   });
   describe('active->pending demotion guard (LLMO-5587)', () => {

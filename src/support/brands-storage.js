@@ -1598,19 +1598,25 @@ export async function updateBrand({
  * appended (`{name}_deleted2`, `{name}_deleted3`, ...) until the name is free —
  * the only re-collision case is a customer literally naming a brand `..._deleted`.
  *
- * A brand that is already `deleted` is left untouched (returns false → 404) so
- * a repeated delete never double-suffixes an already-renamed brand
- * (`Acme_deleted` → `Acme_deleted_deleted`). Any other status — including a NULL
- * status, which the rest of the code treats as a live brand — is renamed as
- * normal; the guard is a JS `status === 'deleted'` check rather than a SQL
- * `status != 'deleted'` filter precisely because the latter would also exclude
- * NULL-status rows (`NULL <> 'deleted'` is NULL) and leave them undeletable.
+ * A brand that is already `deleted` short-circuits (returns true → idempotent
+ * 204) WITHOUT re-renaming, so a repeated delete never double-suffixes an
+ * already-renamed brand (`Acme_deleted` → `Acme_deleted_deleted`). Any other
+ * status — including a NULL status, which the rest of the code treats as a live
+ * brand — is renamed as normal. This early check is a JS `status === 'deleted'`
+ * guard rather than a SQL `status != 'deleted'` filter, which would also
+ * exclude NULL-status rows (`NULL <> 'deleted'` is NULL) and leave them
+ * undeletable. To also close the read-then-write race, the UPDATE itself is
+ * filtered with PostgREST `.not('status', 'eq', 'deleted')` — which DOES match
+ * NULL-status rows — so a concurrent delete that already renamed the row turns
+ * our UPDATE into a zero-row no-op (reported as success) instead of
+ * re-suffixing it.
  *
- * A colliding rename surfaces as a `23505` unique violation (`name` is the only
- * unique column this UPDATE touches), which we resolve by advancing the index
- * and retrying — race-safe against concurrent deletes of same-named brands
- * (the rename is keyed by brand id, so a re-run recomputes the same target and
- * is idempotent).
+ * A colliding rename surfaces as a `23505` on the per-org name constraint
+ * (`uq_brand_name_per_org`, the only unique column this UPDATE touches), which
+ * we resolve by advancing the index and retrying; any other 23505 is surfaced
+ * rather than retried. Race-safe against concurrent deletes of same-named
+ * brands (the rename is keyed by brand id, so a re-run recomputes the same
+ * target and is idempotent).
  *
  * Backfilling brands deleted before this change (which kept their original
  * names) is a separate one-off data migration and is intentionally out of scope
@@ -1661,19 +1667,33 @@ export async function deleteBrand(organizationId, brandId, postgrestClient, upda
       : `${brand.name}_deleted${index}`;
 
     // eslint-disable-next-line no-await-in-loop -- sequential retry on name collision
-    const { data, error } = await postgrestClient
+    const { error } = await postgrestClient
       .from('brands')
       .update({ status: 'deleted', name: deletedName, updated_by: updatedBy })
       .eq('organization_id', organizationId)
       .eq('id', brandId)
+      // Make the write itself the concurrency guard: only a still-live row is
+      // renamed. If a concurrent deleteBrand already flipped this row to
+      // `deleted` between our SELECT above and this UPDATE, we match zero rows
+      // instead of re-suffixing an already-renamed brand (`Acme_deleted` →
+      // `Acme_deleted2`). PostgREST `.not(...eq...)` still matches NULL-status
+      // rows (unlike a bare `status != 'deleted'`), so NULL-status live brands
+      // stay deletable.
+      .not('status', 'eq', 'deleted')
       .select('id')
       .maybeSingle();
 
     if (!error) {
-      return !!data;
+      // Either we renamed + soft-deleted the row, OR a racing caller already
+      // soft-deleted it so our status-guarded UPDATE matched zero rows — either
+      // way the brand is now deleted, so report success idempotently.
+      return true;
     }
-    // Not a name collision → a real failure; surface it.
-    if (error.code !== '23505') {
+    // A 23505 on our per-org name constraint means `{name}_deletedN` is taken —
+    // advance the index and retry. Any other 23505 (a different unique
+    // constraint) can't be resolved by renaming, so surface it immediately
+    // rather than burning the whole retry budget on an unresolvable violation.
+    if (error.code !== '23505' || !error.message?.includes('uq_brand_name_per_org')) {
       throw new Error(`Failed to delete brand: ${error.message}`);
     }
     // else: `{name}_deletedN` is taken — fall through and try the next index.
