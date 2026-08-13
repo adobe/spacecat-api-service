@@ -507,6 +507,8 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/deploy': 'llmo/can_configure',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/plan': 'llmo/can_configure',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/permissions': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-delivery': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-rescan': 'llmo/can_configure',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config': 'llmo/can_configure',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts': 'llmo/can_configure',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones': 'llmo/can_configure',
@@ -518,6 +520,7 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy': 'llmo/can_configure',
       'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate': 'llmo/can_configure',
       'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status': 'llmo/can_configure',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/deploy-status': 'llmo/can_configure',
 
       // Referral traffic (site-scoped)
       'GET /sites/:siteId/referral-traffic/kpis': 'llmo/can_view',
