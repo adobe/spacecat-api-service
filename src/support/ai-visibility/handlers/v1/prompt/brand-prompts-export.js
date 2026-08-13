@@ -31,6 +31,7 @@ import {
 import {
   parseLimitOffset,
   resolveCountry,
+  resolveSearchType,
   engineToLlm,
   responseFromGrpcError,
   PROTO_FROM_JSON,
@@ -41,6 +42,7 @@ import { buildBrandPromptsDimensionFilterQl } from './brand-prompts.js';
 /* c8 ignore start */
 export async function handleBrandPromptsExport(sp, clients) {
   const domain = sp.get('domain');
+  const searchType = resolveSearchType(domain);
   const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const country = resolveCountry(sp) || COUNTRY_ENUM.US;
   const sortBy = sp.get('sortBy') || PROMPTS_REQUEST_ORDER_BY_ENUM.MENTIONED_BRANDS_COUNT;
@@ -69,6 +71,7 @@ export async function handleBrandPromptsExport(sp, clients) {
         categories,
         dimension_filter_ql: buildBrandPromptsDimensionFilterQl(sp),
         target_date: date,
+        search_type: searchType,
       },
       PROTO_FROM_JSON,
     );
