@@ -1,3 +1,10 @@
+## [1.740.1](https://github.com/adobe/spacecat-api-service/compare/v1.740.0...v1.740.1) (2026-08-13)
+
+
+### Bug Fixes
+
+* **llmo-akamai:** PATCH-delta deploy + fast plan + deploy-status reconciliation for large Akamai properties ([#3013](https://github.com/adobe/spacecat-api-service/issues/3013)) ([b413048](https://github.com/adobe/spacecat-api-service/commit/b41304893961bf70de0a45e729c5c4016132811e)), closes [adobe/spacecat-shared#1864](https://github.com/adobe/spacecat-shared/issues/1864) [adobe/project-elmo-ui#2729](https://github.com/adobe/project-elmo-ui/issues/2729) [adobe/spacecat-shared#1864](https://github.com/adobe/spacecat-shared/issues/1864)
+
 # [1.740.0](https://github.com/adobe/spacecat-api-service/compare/v1.739.0...v1.740.0) (2026-08-12)
 
 
