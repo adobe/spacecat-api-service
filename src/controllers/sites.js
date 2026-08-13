@@ -492,18 +492,23 @@ function SitesController(ctx, log, env) {
    * explicit paginated request.
    *
    * Filtered/sorted mode: triggered when ANY of `baseUrlContains`, `deliveryType`,
-   * `isLive`, `sort` is present. Returns a non-cursor, offset-paginated response:
-   * `{ sites, pagination: { limit, offset, hasMore, baseUrlContains?, deliveryType?,
-   * isLive?, sort? } }` - only the filters/sort actually applied are echoed back, so a
-   * client can confirm what was applied even if it hits an older deployment that ignores
-   * some of the params. `baseUrlContains` (3-256 chars after trim) performs a
-   * case-insensitive substring search on `baseURL`; LIKE wildcards in the input are
-   * escaped so callers cannot inject their own wildcards. `deliveryType` and `isLive`
-   * are exact-match filters; when more than one filter is present they compose with AND.
-   * `sort` (`<field>:<asc|desc>`, field one of `baseURL`/`updatedAt`/`createdAt`/
-   * `deliveryType`/`isLive`) sets the result order. `cursor` is not supported together
-   * with any filter/sort (use `offset` instead) - accepting both would silently discard
-   * the cursor and mislead the client into thinking cursor pagination is active.
+   * `isLive`, `sort`, `tier`, `productCode` is present. Returns a non-cursor,
+   * offset-paginated response: `{ sites, pagination: { limit, offset, hasMore,
+   * baseUrlContains?, deliveryType?, isLive?, sort?, tier?, productCode? } }` - only the
+   * filters/sort actually applied are echoed back, so a client can confirm what was
+   * applied even if it hits an older deployment that ignores some of the params.
+   * `baseUrlContains` (3-256 chars after trim) performs a case-insensitive substring
+   * search on `baseURL`; LIKE wildcards in the input are escaped so callers cannot
+   * inject their own wildcards. `deliveryType` and `isLive` are exact-match filters;
+   * when more than one filter is present they compose with AND. `sort`
+   * (`<field>:<asc|desc>`, field one of `baseURL`/`updatedAt`/`createdAt`/
+   * `deliveryType`/`isLive`) sets the result order. `tier` (one of
+   * `CUSTOMER_VISIBLE_TIERS`) and `productCode` (one of `EntitlementModel.PRODUCT_CODES`)
+   * filter to sites enrolled at that entitlement tier/product; when either is present the
+   * SAME where/orderBy/limit/cursor built for the branch is passed to
+   * `Site.allByEnrollmentFiltered` instead of `Site.all`. `cursor` is not supported
+   * together with any filter/sort (use `offset` instead) - accepting both would silently
+   * discard the cursor and mislead the client into thinking cursor pagination is active.
    * @returns {Promise<Response>} Paginated sites response
    */
   const getAll = async (context) => {
@@ -523,12 +528,19 @@ function SitesController(ctx, log, env) {
     const cursor = context?.data?.cursor || null;
 
     // Optional filtered/sorted mode: triggered when ANY of baseUrlContains, deliveryType,
-    // isLive, sort is present. Runs after the authz check (so unauthorized callers still
-    // get 403) and before the cursor/legacy branches. Offset-paginated (not cursor-based).
+    // isLive, sort, tier, productCode is present. Runs after the authz check (so
+    // unauthorized callers still get 403) and before the cursor/legacy branches.
+    // Offset-paginated (not cursor-based).
     const baseUrlContains = context?.data?.baseUrlContains;
     const deliveryType = context?.data?.deliveryType;
     const isLiveParam = context?.data?.isLive;
     const sortParam = context?.data?.sort;
+    // AUTHZ NOTE (reviewer/security): tier/productCode intentionally run under getAll's
+    // EXISTING admin-read/S2S-readAll authz checked above — NOT the stricter full-admin
+    // gate used by the standalone GET /sites/by-tier endpoint (getAllByEnrollmentAndTier).
+    // No tier-specific gating is added here by design; flagging for review.
+    const tier = context?.data?.tier;
+    const productCode = context?.data?.productCode;
 
     // Validate facets/sort up front (after authz, before branching) so invalid input is
     // always rejected the same way, whether or not it's combined with other filters.
@@ -553,9 +565,16 @@ function SitesController(ctx, log, env) {
       }
       orderBy = { attribute: sortField, direction: sortDirection };
     }
+    if (hasText(tier) && !CUSTOMER_VISIBLE_TIERS.includes(tier)) {
+      return badRequest(`Invalid tier: ${tier}`);
+    }
+    const validProductCodes = Object.values(EntitlementModel.PRODUCT_CODES);
+    if (hasText(productCode) && !validProductCodes.includes(productCode)) {
+      return badRequest(`Invalid productCode: ${productCode}`);
+    }
 
     const hasFilters = hasText(baseUrlContains) || hasText(deliveryType)
-      || hasText(isLiveParam) || hasText(sortParam);
+      || hasText(isLiveParam) || hasText(sortParam) || hasText(tier) || hasText(productCode);
     if (hasFilters && hasText(cursor)) {
       // The public search path paginates via offset, not the client cursor;
       // accepting both would silently discard the cursor and mislead the client
@@ -622,9 +641,21 @@ function SitesController(ctx, log, env) {
         allOpts.orderBy = orderBy;
       }
 
+      // tier/productCode compose with the SAME where/orderBy/limit/cursor built above —
+      // they just swap which data-access method resolves the rows.
+      const useEnrollmentFilter = hasText(tier) || hasText(productCode);
+
       let rows;
       try {
-        rows = await Site.all({}, allOpts);
+        rows = useEnrollmentFilter
+          ? await Site.allByEnrollmentFiltered(
+            {
+              tier: hasText(tier) ? tier : undefined,
+              productCode: hasText(productCode) ? productCode : undefined,
+            },
+            allOpts,
+          )
+          : await Site.all({}, allOpts);
       } catch (e) {
         // Re-throw so the framework still returns a 500 — the point here is a
         // searchable, prefixed log line, not swallowing the error.
@@ -674,6 +705,8 @@ function SitesController(ctx, log, env) {
           ...(hasText(deliveryType) && { deliveryType }),
           ...(isLiveBool !== undefined && { isLive: isLiveBool }),
           ...(orderBy && { sort: sortParam }),
+          ...(hasText(tier) && { tier }),
+          ...(hasText(productCode) && { productCode }),
         },
       });
     }

@@ -198,6 +198,7 @@ describe('Sites Controller', () => {
         all: sandbox.stub().resolves(sites),
         allByDeliveryType: sandbox.stub().resolves(sites),
         allByEnrollmentAndTier: sandbox.stub().resolves(sites),
+        allByEnrollmentFiltered: sandbox.stub().resolves(sites),
         allWithLatestAudit: sandbox.stub().resolves(sites),
         allByOrganizationId: sandbox.stub().resolves(sites),
         create: sandbox.stub().resolves(sites[0]),
@@ -1608,6 +1609,140 @@ describe('Sites Controller', () => {
     it('returns 400 when cursor is combined with any filter/sort', async () => {
       const res = await sitesController.getAll({ ...context, data: { cursor: 'c', deliveryType: 'aem_edge' } });
       expect(res.status).to.equal(400);
+    });
+
+    // ── tier / productCode (server-side enrollment filter) ──
+    // When present, the filtered branch calls Site.allByEnrollmentFiltered (a
+    // shared-data-access method not yet released — see spacecat-shared branch
+    // feat/sites-tier-join) instead of Site.all, passing the SAME
+    // where/orderBy/limit/cursor the branch already builds.
+
+    it('tier alone calls Site.allByEnrollmentFiltered (not Site.all), with the same opts, and echoes tier', async () => {
+      mockDataAccess.Site.allByEnrollmentFiltered.resolves(sites);
+
+      const result = await sitesController.getAll({
+        ...context,
+        data: { tier: 'PAID', limit: '10' },
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.pagination).to.deep.equal({
+        limit: 10, offset: 0, hasMore: false, tier: 'PAID',
+      });
+
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+      expect(mockDataAccess.Site.allByEnrollmentFiltered).to.have.been.calledOnce;
+      const [filter, opts] = mockDataAccess.Site.allByEnrollmentFiltered.firstCall.args;
+      expect(filter).to.deep.equal({ tier: 'PAID', productCode: undefined });
+      expect(opts.order).to.equal('asc');
+      expect(opts.limit).to.equal(11); // effectiveLimit (10) + 1
+      expect(opts.cursor).to.equal(Buffer.from(JSON.stringify({ offset: 0 })).toString('base64'));
+    });
+
+    it('tier + productCode calls Site.allByEnrollmentFiltered with both and echoes both', async () => {
+      mockDataAccess.Site.allByEnrollmentFiltered.resolves(sites);
+
+      const result = await sitesController.getAll({
+        ...context,
+        data: { tier: 'PAID', productCode: 'LLMO' },
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.pagination).to.include({ tier: 'PAID', productCode: 'LLMO' });
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+      const [filter] = mockDataAccess.Site.allByEnrollmentFiltered.firstCall.args;
+      expect(filter).to.deep.equal({ tier: 'PAID', productCode: 'LLMO' });
+    });
+
+    it('tier + baseUrlContains + deliveryType compose into the same where passed to allByEnrollmentFiltered', async () => {
+      mockDataAccess.Site.allByEnrollmentFiltered.resolves(sites);
+
+      const result = await sitesController.getAll({
+        ...context,
+        data: { tier: 'PAID', baseUrlContains: 'sem', deliveryType: 'aem_edge' },
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.pagination).to.include({
+        tier: 'PAID', baseUrlContains: 'sem', deliveryType: 'aem_edge',
+      });
+
+      // Invoke the captured `where` builder with the real (attrs, op) signature, exactly
+      // like the baseUrlContains+isLive composition test above.
+      const [, opts] = mockDataAccess.Site.allByEnrollmentFiltered.firstCall.args;
+      const op = {
+        ilike: (f, v) => ({ type: 'ilike', field: f, value: v }),
+        eq: (f, v) => ({ type: 'eq', field: f, value: v }),
+        and: (...c) => ({ type: 'and', conditions: c }),
+      };
+      const expr = opts.where({ baseURL: 'base_url', deliveryType: 'delivery_type' }, op);
+      expect(expr.type).to.equal('and');
+      expect(expr.conditions).to.deep.equal([
+        { type: 'ilike', field: 'base_url', value: '%sem%' },
+        { type: 'eq', field: 'delivery_type', value: 'aem_edge' },
+      ]);
+    });
+
+    it('productCode alone (no tier) calls Site.allByEnrollmentFiltered with tier undefined', async () => {
+      mockDataAccess.Site.allByEnrollmentFiltered.resolves(sites);
+
+      const result = await sitesController.getAll({
+        ...context,
+        data: { productCode: 'LLMO' },
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.pagination).to.include({ productCode: 'LLMO' });
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+      expect(mockDataAccess.Site.allByEnrollmentFiltered).to.have.been.calledOnce;
+      const [filter] = mockDataAccess.Site.allByEnrollmentFiltered.firstCall.args;
+      expect(filter).to.deep.equal({ tier: undefined, productCode: 'LLMO' });
+    });
+
+    it('returns 400 for an invalid tier and calls neither Site.all nor Site.allByEnrollmentFiltered', async () => {
+      const result = await sitesController.getAll({
+        ...context,
+        data: { tier: 'BOGUS_TIER' },
+      });
+      expect(result.status).to.equal(400);
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+      expect(mockDataAccess.Site.allByEnrollmentFiltered).to.not.have.been.called;
+    });
+
+    it('returns 400 for an invalid productCode and calls neither Site.all nor Site.allByEnrollmentFiltered', async () => {
+      const result = await sitesController.getAll({
+        ...context,
+        data: { productCode: 'BOGUS_PRODUCT' },
+      });
+      expect(result.status).to.equal(400);
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+      expect(mockDataAccess.Site.allByEnrollmentFiltered).to.not.have.been.called;
+    });
+
+    it('returns 400 when cursor is combined with tier', async () => {
+      const result = await sitesController.getAll({
+        ...context,
+        data: { cursor: 'c', tier: 'PAID' },
+      });
+      expect(result.status).to.equal(400);
+      expect(mockDataAccess.Site.allByEnrollmentFiltered).to.not.have.been.called;
+    });
+
+    it('uses Site.all (not allByEnrollmentFiltered) when neither tier nor productCode is present', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+
+      const result = await sitesController.getAll({
+        ...context,
+        data: { deliveryType: 'aem_edge' },
+      });
+
+      expect(result.status).to.equal(200);
+      expect(mockDataAccess.Site.all).to.have.been.calledOnce;
+      expect(mockDataAccess.Site.allByEnrollmentFiltered).to.not.have.been.called;
     });
   });
 
