@@ -21,7 +21,7 @@ import {
 } from '../validation.js';
 import { resolveProject } from '../subworkspace-projects.js';
 import {
-  ALL_DIMENSIONS, SERVER_OWNED_DIMENSIONS,
+  ALL_DIMENSIONS, SERVER_OWNED_DIMENSIONS, RESERVED_ROOT_NAMES,
   isClosedDimension, isServerOwnedDimension, closedValuesOf, isDimensionRootName,
   MAX_TAG_NAME_LEN,
 } from '../prompt-tags.js';
@@ -204,12 +204,12 @@ function parseCreateTagBody(body) {
   if (rawName.includes(':')) {
     throw new ErrorWithStatusCode('name must not contain ":"', 400);
   }
-  // The root level holds exactly the four dimension roots. A value may not
+  // The root level holds exactly the five dimension roots. A value may not
   // shadow one of their names, or the tree would have two tags a reader cannot
   // tell apart by name at the level that matters.
   if (isDimensionRootName(rawName)) {
     throw new ErrorWithStatusCode(
-      `name must not be a reserved dimension root name (${ALL_DIMENSIONS.join(', ')})`,
+      `name must not be a reserved dimension root name (${RESERVED_ROOT_NAMES.join(', ')})`,
       400,
     );
   }
@@ -592,7 +592,7 @@ function parseUpdateTagBody(body) {
   }
   if (isDimensionRootName(value)) {
     throw new ErrorWithStatusCode(
-      `name must not be a reserved dimension root name (${ALL_DIMENSIONS.join(', ')})`,
+      `name must not be a reserved dimension root name (${RESERVED_ROOT_NAMES.join(', ')})`,
       400,
     );
   }

@@ -12,9 +12,14 @@
 
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { ELEMENT_IDS } from './element-ids.js';
+import { SEP } from './constants.js';
 import { mapWithConcurrency } from './concurrency.js';
 import { splitDateRangeIntoWeeksBackward } from './week-utils.js';
-import { INTENT_VALUE } from '../serenity/prompt-tags.js';
+import {
+  INTENT_VALUE,
+  INTENT_ROOT_NAME,
+  LEGACY_INTENT_ROOT_NAME,
+} from '../serenity/prompt-tags.js';
 import {
   buildBrandsPayload,
   transformBrandsToFilterDimensions,
@@ -126,6 +131,13 @@ export function createElementsService(transport, log) {
         origins: transformOriginsToFilterDimensions(rawTopics),
         content_types: transformContentTypesToFilterDimensions(rawContentTypes),
       };
+      // The dual-prefix intent read is the one rename tolerance that would otherwise
+      // fire silently forever — the write-path alias and the `getPrompts` retry both
+      // log. Report it too, so LLMO-6986 can be gated on all three going quiet rather
+      // than on a judgement call about which projects the sweep reached.
+      if (result.page_intents.some((i) => i.id.startsWith(`${LEGACY_INTENT_ROOT_NAME}${SEP}`))) {
+        log?.info?.('serenity filter dimensions: workspace still carries pre-rename `intent__` tags', { workspaceId });
+      }
       // Merge any tag types not covered above (e.g. `type:branded`) under their own
       // prefix key, and plain prefix-less tags under `tags` — see
       // transformOtherTagsForFilterDimensions. The reserved-key list is derived
@@ -173,11 +185,24 @@ export function createElementsService(transport, log) {
      * When `params.enrichUserIntent` is set (and the query is scoped to exactly
      * one `projectId` — see below), each returned row also carries its OWN intent
      * (`userIntent`). The intent isn't a column on the PROMPTS element, so it's
-     * derived with one `intent__<value>`-filtered call per Semrush intent, run in
-     * parallel and joined back to the base rows.
+     * derived with one `<intentRoot>__<value>`-filtered call per Semrush intent, run
+     * in parallel and joined back to the base rows.
+     *
+     * The intent root is being renamed to `$abv_tags$intent` project by project
+     * (LLMO-6984), and an Elements tag filter is the `__`-joined tag PATH — so the
+     * root's name IS the prefix, and a filter carrying the wrong one matches nothing
+     * and answers 200 with an empty `userIntent` on every row. The current spelling
+     * is therefore tried first and the pre-rename `intent` only as a RETRY, fired
+     * when all five calls came back empty: that is the signature of a project the
+     * rename has not reached. A renamed project stays at five calls, and the retry
+     * stops firing on its own as the sweep progresses, so removing the legacy
+     * spelling (LLMO-6986) is a no-op rather than a behaviour change.
      *
      * Enrichment is non-fatal per intent value: each call catches its own failure
      * and contributes nothing, so one failing intent drops only that intent's rows.
+     * A failed call is NOT read as the empty-result signature, though — when any of
+     * the five failed, the legacy retry is skipped rather than doubling the call
+     * volume against a struggling upstream for an answer that would be a guess.
      * The base call still propagates on failure. Without the flag, response shape
      * and upstream call count are unchanged.
      *
@@ -208,9 +233,11 @@ export function createElementsService(transport, log) {
       // `(prompt, prompt_topic)` join key — unique within the single requested slice.
       const rowKey = (row) => `${row?.prompt ?? ''} ${row?.prompt_topic ?? ''}`;
 
-      // Base call + one intent-filtered call per intent value, in parallel
-      // (~one extra round-trip). Each intent call degrades independently.
-      const intentPromise = mapWithConcurrency(
+      // One intent-filtered call per intent value under one root spelling, in
+      // parallel (~one extra round-trip). Each call degrades independently and
+      // reports whether it failed, so an empty round can be told apart from a
+      // broken one.
+      const fetchIntentRound = (intentRoot) => mapWithConcurrency(
         Object.values(INTENT_VALUE),
         INTENT_ENRICH_CONCURRENCY,
         async (value) => {
@@ -219,17 +246,33 @@ export function createElementsService(transport, log) {
             const raw = await transport.fetchElement(
               workspaceId,
               ELEMENT_IDS.PROMPTS,
-              buildPromptsPayload({ ...promptParams, tags: [...(promptParams.tags ?? []), `intent__${value}`] }),
+              buildPromptsPayload({
+                ...promptParams,
+                tags: [...(promptParams.tags ?? []), `${intentRoot}${SEP}${value}`],
+              }),
             );
-            return { key, rows: transformPromptsResponse(raw).prompts };
+            return { key, rows: transformPromptsResponse(raw).prompts, failed: false };
           } catch (e) {
-            log?.warn?.(`serenity userIntent enrichment: intent-filtered PROMPTS call failed for '${value}'`, { workspaceId, error: e?.message });
-            return { key, rows: [] };
+            log?.warn?.(`serenity userIntent enrichment: intent-filtered PROMPTS call failed for '${value}' under '${intentRoot}'`, { workspaceId, error: e?.message });
+            return { key, rows: [], failed: true };
           }
         },
       );
 
-      const [base, intentResults] = await Promise.all([basePromise, intentPromise]);
+      // Current spelling first; the pre-rename one only when all five answered
+      // successfully AND empty (see the doc above).
+      const resolveIntentRows = async () => {
+        const current = await fetchIntentRound(INTENT_ROOT_NAME);
+        const unreached = current.every(({ rows, failed }) => rows.length === 0 && !failed);
+        if (!unreached) {
+          return current;
+        }
+        log?.info?.('serenity userIntent enrichment: no rows under the renamed intent root, retrying the pre-rename one', { workspaceId });
+        return fetchIntentRound(LEGACY_INTENT_ROOT_NAME);
+      };
+
+      // Base call runs alongside the intent rounds rather than after them.
+      const [base, intentResults] = await Promise.all([basePromise, resolveIntentRows()]);
 
       // (prompt, prompt_topic) → own intent. A prompt carries exactly one intent
       // tag, so within a single slice it appears in at most one filtered result.

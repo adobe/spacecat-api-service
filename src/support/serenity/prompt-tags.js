@@ -59,13 +59,48 @@ export const DIMENSION = Object.freeze({
  * {@link canonicalizeSource} refuses a derived value longer than it.
  */
 export const MAX_TAG_NAME_LEN = 100;
-/** Root names, in the order they are provisioned on a project. */
-export const DIMENSION_ROOT_NAMES = Object.freeze([
+/** The five dimensions, in the order their roots are provisioned on a project. */
+export const DIMENSION_PROVISION_ORDER = Object.freeze([
   DIMENSION.CATEGORY,
   DIMENSION.INTENT,
   DIMENSION.ORIGIN,
   DIMENSION.TYPE,
   DIMENSION.SOURCE,
+]);
+
+/**
+ * The upstream ROOT NAME of the `intent` dimension.
+ *
+ * Semrush hides a tag tree entry whose name starts with the agreed `$abv_tags$`
+ * marker from the customer-facing Brand Presence tag filter, so the intent root
+ * is named `$abv_tags$intent` upstream. `intent` remains the DIMENSION KEY
+ * everywhere else — the `type` a client names on the tag endpoints, the key of
+ * the closed vocabularies, the value elmo reads — and only the root's upstream
+ * name carries the marker. The five intent VALUES stay bare-named
+ * (`Informational`, `Commercial`, …); the rename does not touch them.
+ */
+export const INTENT_ROOT_NAME = '$abv_tags$intent';
+
+/**
+ * The pre-rename intent root name, identical to the dimension key.
+ *
+ * TEMPORARY — the rename runs project by project from the data-service migration
+ * CLI (LLMO-6985), so a project can carry either spelling until that sweep
+ * completes. Both the tag-tree resolver and the Elements read path tolerate this
+ * one; LLMO-6986 removes the tolerance once no live project carries it.
+ */
+export const LEGACY_INTENT_ROOT_NAME = DIMENSION.INTENT;
+
+/**
+ * Every name reserved at the root level: the four roots named after their
+ * dimension, plus BOTH intent spellings — the upstream `$abv_tags$intent` and
+ * the pre-rename `intent`, which stays reserved while any project still carries
+ * it. A customer value may shadow neither, or the tree would hold two tags a
+ * reader cannot tell apart at the level that decides a tag's dimension.
+ */
+export const RESERVED_ROOT_NAMES = Object.freeze([
+  ...DIMENSION_PROVISION_ORDER,
+  INTENT_ROOT_NAME,
 ]);
 
 /** `origin` values — who authored the prompt. */
@@ -164,7 +199,7 @@ export const SERVER_OWNED_DIMENSIONS = Object.freeze([
 /**
  * Every dimension a caller may address on the create-tag endpoint. This is a
  * MEMBERSHIP set (used only for `.includes` validation), so its order is
- * irrelevant and INTENTIONALLY differs from {@link DIMENSION_ROOT_NAMES} — that
+ * irrelevant and INTENTIONALLY differs from {@link DIMENSION_PROVISION_ORDER} — that
  * list is provisioning ORDER (`category, intent, origin, type, source`), whereas
  * this is grouped open-then-closed (`category, source, intent, origin, type`).
  * Do not assume the two share an order.
@@ -253,15 +288,42 @@ export const STANDARD_PROMPT_TAG_VALUES = Object.freeze([
 ]);
 
 /**
- * True when `name` is a reserved dimension-root name. Root names are reserved:
- * a customer category may not be called `category`, and a closed value may not
- * be minted at the root level.
+ * True when `name` is a reserved dimension-root name ({@link RESERVED_ROOT_NAMES}).
+ * Root names are reserved: a customer category may not be called `category`, and
+ * a closed value may not be minted at the root level.
  *
  * @param {string} name - a bare tag name.
  * @returns {boolean}
  */
 export function isDimensionRootName(name) {
-  return (/** @type {readonly string[]} */ (DIMENSION_ROOT_NAMES)).includes(name);
+  return (/** @type {readonly string[]} */ (RESERVED_ROOT_NAMES)).includes(name);
+}
+
+/**
+ * The upstream root NAME a dimension's root is provisioned and resolved by — the
+ * dimension key itself for four of the five, {@link INTENT_ROOT_NAME} for
+ * `intent`. Anything outside the taxonomy maps to itself, so a caller gets the
+ * name it asked for rather than `undefined` flowing into a create.
+ *
+ * @param {string} dimension - a dimension key.
+ * @returns {string} the upstream root name.
+ */
+export function rootNameOfDimension(dimension) {
+  return dimension === DIMENSION.INTENT ? INTENT_ROOT_NAME : dimension;
+}
+
+/**
+ * The DIMENSION KEY a root name denotes — the inverse of
+ * {@link rootNameOfDimension}, and the fold that keeps `$abv_tags$intent` from
+ * leaking out of the tag-tree walk into everything that reasons about dimensions
+ * by key. Identity for every other name, the pre-rename `intent` included (it IS
+ * the key), so a mid-rename project and a renamed one answer the same thing.
+ *
+ * @param {string} rootName - a tag's root-ancestor name, as upstream spells it.
+ * @returns {string} the dimension key.
+ */
+export function dimensionOfRootName(rootName) {
+  return rootName === INTENT_ROOT_NAME ? DIMENSION.INTENT : rootName;
 }
 
 /**
