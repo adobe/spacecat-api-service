@@ -1345,6 +1345,19 @@ function SuggestionsController(ctx, sqs, env) {
       return forbidden('User does not belong to the organization or does not have sufficient permissions');
     }
 
+    // LLMO auto-fix: enforce the finer-grained LLMO capability for this site.
+    // LLMO logins never carry the ASO `auto_fix` scope, so the access check above
+    // only confirmed org membership; require the LLMO capability too. S2S callers
+    // were already authorized via CAP_FIX_ENTITY_CREATE and are not FACS subjects,
+    // so they are exempt.
+    if (
+      xProduct === 'LLMO'
+      && !s2sResult.allowed
+      && !await accessControlUtil.hasLlmoCapabilityForSite(site)
+    ) {
+      return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can trigger auto-fix'));
+    }
+
     const opportunity = await Opportunity.findById(opportunityId);
     if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound('Opportunity not found');
