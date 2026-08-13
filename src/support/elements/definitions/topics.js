@@ -10,7 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
-import { resolveElementModel } from '../constants.js';
+import { resolveElementModel, SEP } from '../constants.js';
+import { INTENT_ROOT_NAME, LEGACY_INTENT_ROOT_NAME } from '../../serenity/prompt-tags.js';
 
 /**
  * Builds the payload for the Topics (Tags) filter-dimensions element (row 3).
@@ -44,14 +45,6 @@ export function buildTopicsPayload({
     filters: { advanced: { op: 'and', filters } },
   };
 }
-
-// Semrush's Elements API tag encoding: `prefix__value`, with `__` also used for
-// `parent__child` nesting within the value. This replaced an earlier `prefix:value`
-// encoding (colon-delimited, `Parent__Child` nesting only within the value). The
-// cutover is a one-time, atomic migration on Semrush's side — all workspaces/customers
-// were migrated to `__` together, so there is no dual-format transition period and no
-// need to parse both encodings here.
-const SEP = '__';
 
 /**
  * @typedef {object} FilterDimensionItem
@@ -135,15 +128,35 @@ export function transformCategoriesToFilterDimensions(raw) {
 }
 
 /**
- * Extracts only "intent__"-prefixed entries → `{ id: original tag, label }`,
- * plus `parent_id`/`parent_label` when the tag encodes a "Parent__Child"
- * hierarchy.
+ * The intent dimension's root names, and therefore its Elements tag prefixes —
+ * the current `$abv_tags$intent` and the pre-rename `intent`. The Elements tag
+ * encoding is the `__`-joined tag PATH, so a dimension's prefix is literally its
+ * root's name and the rename (LLMO-6984) changes what these tags look like on
+ * the wire. The rename runs project by project, so both shapes are read; a
+ * project carries one or the other, never a mix, and the two prefixes cannot
+ * match the same value (`intent__` does not prefix `$abv_tags$intent__…`).
+ *
+ * LLMO-6986 drops the legacy entry once no project carries it.
+ */
+const INTENT_ROOT_NAMES = [INTENT_ROOT_NAME, LEGACY_INTENT_ROOT_NAME];
+
+/**
+ * Extracts the intent-prefixed entries → `{ id: original tag, label }`, plus
+ * `parent_id`/`parent_label` when the tag encodes a "Parent__Child" hierarchy.
+ *
+ * `id` stays the original tag value, which is what a caller passes back as a
+ * `tags` filter, so it carries whichever prefix that project actually uses. The
+ * `label` is the bare value either way — the rename touches only the root.
+ *
  * @param {object} raw - Raw response from the Elements API.
  * @returns {FilterDimensionItem[]}
  */
 export function transformIntentsToFilterDimensions(raw) {
-  return extractByPrefix(raw, 'intent')
-    .map(({ original, stripped }) => ({ id: original, ...splitParent(stripped, 'intent__') }));
+  return INTENT_ROOT_NAMES.flatMap((root) => {
+    const marker = `${root}${SEP}`;
+    return extractByPrefix(raw, root)
+      .map(({ original, stripped }) => ({ id: original, ...splitParent(stripped, marker) }));
+  });
 }
 
 /**
@@ -158,12 +171,23 @@ export function transformOriginsToFilterDimensions(raw) {
     .map(({ original, stripped }) => ({ id: original, ...splitParent(stripped, 'source__') }));
 }
 
-const KNOWN_TAG_PREFIXES = ['topic__', 'category__', 'intent__', 'source__'];
+const KNOWN_TAG_PREFIXES = [
+  'topic__',
+  'category__',
+  ...INTENT_ROOT_NAMES.map((root) => `${root}${SEP}`),
+  'source__',
+];
 
 /**
- * Extracts every tag NOT already covered by the known `topic__`/`category__`/
- * `intent__`/`source__` prefixes, so newly-introduced Semrush tag types (e.g.
- * `type__branded`) surface in the response without a code change per prefix.
+ * Extracts every tag NOT already covered by {@link KNOWN_TAG_PREFIXES} —
+ * `topic__`, `category__`, `source__` and both intent spellings — so
+ * newly-introduced Semrush tag types (e.g. `type__branded`) surface in the
+ * response without a code change per prefix.
+ *
+ * Both intent spellings are covered, so a renamed project's tags are claimed by
+ * `page_intents` rather than resurfacing here as a dynamic `$abv_tags$intent`
+ * group — this catch-all is where an unrecognised dimension would otherwise leak
+ * into the filter payload under its raw upstream name.
  *
  * - `prefix__value` tags are grouped by their prefix into a dynamic key
  *   (e.g. `{ type: [{ id: 'type__branded', label: 'branded' }, ...] }`), unless

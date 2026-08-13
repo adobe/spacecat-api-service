@@ -207,7 +207,15 @@ export function validateDeferPublish(body) {
  * `GET /aio/tags` — and the two objects compare equal for the same id (verified
  * live 2026-07-10). What varies is DEPTH, not endpoint: a ROOT tag omits
  * `parent_id` and `path` entirely, while a descendant carries both. So a tag
- * with no `path` is a root, and its own name is its dimension.
+ * with no `path` is a root, and its own name names its dimension.
+ *
+ * Names are passed through as upstream holds them, root breadcrumb included, so
+ * a root's name is not always the bare dimension key: the intent root is named
+ * `$abv_tags$intent` on a project the rename (LLMO-6984) has reached, and
+ * `intent` on one it has not. Folding either spelling to the dimension key here
+ * would put a name in `path[]` beside an id that upstream does not hold under
+ * it, so this stays a faithful mirror and a consumer that keys on the intent
+ * dimension matches both spellings.
  *
  * String-form tags (a defensive upstream fallback) carry a name but no id, and
  * are surfaced with an empty id rather than dropped.

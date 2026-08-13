@@ -11859,7 +11859,10 @@ SerenityPrompt:
         upstream, so a prompt can carry two tags with the same bare name from
         different dimensions (a sub-category `human` and the `source` value
         `human`). Read a tag's dimension from `path[0].name`, never from its
-        own name.
+        own name — bearing in mind that `path[0].name` is the root's UPSTREAM
+        name, which for the intent dimension is `$abv_tags$intent`, or the
+        pre-rename `intent` on a project the rename has not reached. Match both
+        spellings when keying on that dimension.
     tagIds:
       type: array
       items: { type: string }
@@ -11907,7 +11910,10 @@ SerenityPromptTag:
     parentage. What varies is DEPTH, not endpoint: upstream omits `parent_id` and
     `path` on a dimension root and carries both on a descendant. This API
     normalizes that absence to `null`, so a tag whose `path` is `null` is a
-    dimension root and its own `name` is its dimension.
+    dimension root and its own `name` names its dimension upstream. Names are
+    passed through exactly as upstream holds them, so the intent root reads
+    `$abv_tags$intent` — or the pre-rename `intent` on a project the rename has
+    not reached. The dimension is `intent` either way.
   required: [id, name]
   properties:
     id:
@@ -12795,7 +12801,11 @@ SerenityUrlInspectorFilterDimensions:
       items: { $ref: '#/SerenityFilterDimensionItem' }
     page_intents:
       type: array
-      description: Distinct `intent__`-prefixed tags. `id` is the original `intent__`-prefixed tag value.
+      description: >-
+        Distinct intent-prefixed tags. The prefix is the intent root's name on that
+        project — `$abv_tags$intent__`, or `intent__` on a project the rename has not
+        reached yet — and `id` is the original tag value, carrying whichever prefix
+        that project uses.
       items: { $ref: '#/SerenityFilterDimensionItem' }
     origins:
       type: array
