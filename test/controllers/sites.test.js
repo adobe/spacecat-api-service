@@ -1528,7 +1528,7 @@ describe('Sites Controller', () => {
       const error = await result.json();
 
       expect(result.status).to.equal(400);
-      expect(error).to.have.property('message', 'cursor is not supported with baseUrlContains; use offset');
+      expect(error).to.have.property('message', 'cursor is not supported with filters or sort; use offset');
       expect(mockDataAccess.Site.all).to.not.have.been.called;
     });
 
@@ -1543,7 +1543,7 @@ describe('Sites Controller', () => {
       expect(body.pagination).to.deep.equal({
         limit: 50, offset: 0, hasMore: false, baseUrlContains: 'site',
       });
-      expect(loggerStub.warn).to.have.been.calledWithMatch(/\[sites\]\[baseUrlContains\] unexpected Site\.all shape/);
+      expect(loggerStub.warn).to.have.been.calledWithMatch(/\[sites\]\[filtered\] unexpected Site\.all shape/);
     });
 
     it('logs a prefixed error and re-throws when the Site.all search query rejects', async () => {
@@ -1554,7 +1554,7 @@ describe('Sites Controller', () => {
         sitesController.getAll({ ...context, data: { baseUrlContains: 'site' } }),
       ).to.be.rejectedWith('boom');
 
-      expect(loggerStub.error).to.have.been.calledWithMatch(/\[sites\]\[baseUrlContains\] query failed/);
+      expect(loggerStub.error).to.have.been.calledWithMatch(/\[sites\]\[filtered\] query failed/);
     });
 
     it('filters by deliveryType alone using an eq where and the offset envelope', async () => {
@@ -1613,10 +1613,9 @@ describe('Sites Controller', () => {
     });
 
     // ── tier / productCode (server-side enrollment filter) ──
-    // When present, the filtered branch calls Site.allByEnrollmentFiltered (a
-    // shared-data-access method not yet released — see spacecat-shared branch
-    // feat/sites-tier-join) instead of Site.all, passing the SAME
-    // where/orderBy/limit/cursor the branch already builds.
+    // When present, the filtered branch calls Site.allByEnrollmentFiltered
+    // (shipped in @adobe/spacecat-shared-data-access 4.21.0) instead of Site.all,
+    // passing the SAME where/orderBy/limit/cursor the branch already builds.
 
     it('tier alone calls Site.allByEnrollmentFiltered (not Site.all), with the same opts, and echoes tier', async () => {
       mockDataAccess.Site.allByEnrollmentFiltered.resolves(sites);
@@ -1874,7 +1873,7 @@ describe('Sites Controller', () => {
       expect(body.pagination).to.include({ baseUrlContains: 'site' });
       expect(body.pagination).to.not.have.property('cursor');
       expect(loggerStub.info).to.have.been.calledWithMatch(
-        /\[s2s-readall\] GET \/sites \(baseUrlContains\) granted clientId=svc-1 consumerId=consumer-id-1 capability=site:readAll count=2 requestId=req-s2s-baseurlcontains-1/,
+        /\[s2s-readall\] GET \/sites \(filtered\) granted clientId=svc-1 consumerId=consumer-id-1 capability=site:readAll count=2 requestId=req-s2s-baseurlcontains-1/,
       );
     });
 

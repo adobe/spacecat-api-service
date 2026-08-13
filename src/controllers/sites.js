@@ -597,15 +597,16 @@ function SitesController(ctx, log, env) {
       // The public search path paginates via offset, not the client cursor;
       // accepting both would silently discard the cursor and mislead the client
       // into thinking cursor pagination is active. Reject the combination explicitly.
-      return badRequest('cursor is not supported with baseUrlContains; use offset');
+      return badRequest('cursor is not supported with filters or sort; use offset');
     }
     if (hasFilters) {
-      if (hasText(baseUrlContains)) {
-        const q = baseUrlContains.trim();
-        if (q.length < 3) {
+      // Trim once and reuse for validation, escaping, echo, and logging.
+      const trimmedQuery = hasText(baseUrlContains) ? baseUrlContains.trim() : null;
+      if (trimmedQuery !== null) {
+        if (trimmedQuery.length < 3) {
           return badRequest('baseUrlContains must be at least 3 characters');
         }
-        if (q.length > 256) {
+        if (trimmedQuery.length > 256) {
           return badRequest('baseUrlContains exceeds maximum length');
         }
       }
@@ -623,7 +624,6 @@ function SitesController(ctx, log, env) {
       }
 
       // Escape LIKE special chars so user input cannot inject its own wildcards.
-      const trimmedQuery = hasText(baseUrlContains) ? baseUrlContains.trim() : null;
       const escaped = trimmedQuery !== null ? trimmedQuery.replace(/([\\%_])/g, '\\$1') : null;
 
       // The data-access layer paginates by an offset-encoded cursor (postgrest.utils
@@ -678,7 +678,7 @@ function SitesController(ctx, log, env) {
       } catch (e) {
         // Re-throw so the framework still returns a 500 — the point here is a
         // searchable, prefixed log line, not swallowing the error.
-        log.error(`[sites][baseUrlContains] query failed requestId=${requestId}`, e);
+        log.error(`[sites][filtered] query failed requestId=${requestId}`, e);
         throw e;
       }
       let list;
@@ -687,19 +687,19 @@ function SitesController(ctx, log, env) {
       } else if (Array.isArray(rows?.data)) {
         list = rows.data;
       } else {
-        log.warn(`[sites][baseUrlContains] unexpected Site.all shape; returning empty requestId=${requestId}`);
+        log.warn(`[sites][filtered] unexpected Site.all shape; returning empty requestId=${requestId}`);
         list = [];
       }
       const hasMore = list.length > effectiveLimit;
       const sites = list.slice(0, effectiveLimit).map((site) => SiteDto.toListJSON(site));
 
       if (s2sResult.allowed) {
-        log.info(`[s2s-readall] GET /sites (baseUrlContains) granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_SITE_READ_ALL} count=${sites.length} requestId=${requestId}`);
+        log.info(`[s2s-readall] GET /sites (filtered) granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_SITE_READ_ALL} count=${sites.length} requestId=${requestId}`);
       }
 
       // Unconditional observability for both admin and S2S paths. Never log the raw
       // query value (URLs may be sensitive) — only its length and result counts.
-      log.info(`[sites][baseUrlContains] qlen=${trimmedQuery !== null ? trimmedQuery.length : 0} count=${sites.length} hasMore=${hasMore} requestId=${requestId}`);
+      log.info(`[sites][filtered] qlen=${trimmedQuery !== null ? trimmedQuery.length : 0} count=${sites.length} hasMore=${hasMore} requestId=${requestId}`);
 
       const { list: projectedSites, error: fieldsError } = applyFieldProjection(
         sites,
