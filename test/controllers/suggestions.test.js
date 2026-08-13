@@ -172,6 +172,7 @@ describe('Suggestions Controller', () => {
     'patchGeoExperiment',
     'deleteGeoExperiment',
     'triggerImpactMeasurement',
+    'triggerGeoExperimentValidation',
     'rollbackSuggestionFromEdge',
     'previewSuggestions',
     'fetchFromEdge',
@@ -11401,6 +11402,176 @@ describe('Suggestions Controller', () => {
           type: 'TRIGGER_IMPACT_MEASUREMENT',
           geoExperimentId: GEO_EXP_ID,
           triggeredBy: 'unknown',
+        },
+      );
+    });
+  });
+
+  describe('triggerGeoExperimentValidation', () => {
+    const GEO_EXP_ID = 'b1b2c3d4-e5f6-7890-abcd-ef1234567890';
+
+    function createMockGeoExperiment({
+      siteId = SITE_ID,
+      opportunityId = OPPORTUNITY_ID,
+    } = {}) {
+      return {
+        getId: () => GEO_EXP_ID,
+        getSiteId: () => siteId,
+        getOpportunityId: () => opportunityId,
+      };
+    }
+
+    function createMockOpportunity({
+      siteId = SITE_ID,
+      type = 'prerender',
+    } = {}) {
+      return {
+        getId: () => OPPORTUNITY_ID,
+        getSiteId: () => siteId,
+        getType: () => type,
+      };
+    }
+
+    beforeEach(() => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(createMockGeoExperiment());
+      mockSuggestionDataAccess.Opportunity.findById.withArgs(OPPORTUNITY_ID)
+        .resolves(createMockOpportunity());
+      mockConfiguration.findLatest.resolves({
+        getQueues: () => ({ imports: 'https://imports-queue' }),
+      });
+    });
+
+    it('returns 400 for invalid siteId', async () => {
+      const response = await suggestionsController.triggerGeoExperimentValidation({
+        ...context,
+        params: { siteId: 'bad', geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(400);
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('returns 400 for invalid geoExperimentId', async () => {
+      const response = await suggestionsController.triggerGeoExperimentValidation({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: 'bad' },
+      });
+      expect(response.status).to.equal(400);
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('returns 404 when site not found', async () => {
+      const response = await suggestionsController.triggerGeoExperimentValidation({
+        ...context,
+        params: { siteId: SITE_ID_NOT_FOUND, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(404);
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('returns 403 without site access', async () => {
+      AccessControlUtil.prototype.hasAccess.restore();
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
+      const response = await suggestionsController.triggerGeoExperimentValidation({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(403);
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('returns 404 when GeoExperiment not found', async () => {
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(null);
+      const response = await suggestionsController.triggerGeoExperimentValidation({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(404);
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('returns 404 when GeoExperiment belongs to another site', async () => {
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(
+        createMockGeoExperiment({ siteId: 'other-site-id' }),
+      );
+      const response = await suggestionsController.triggerGeoExperimentValidation({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(404);
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('returns 400 when the GeoExperiment has no linked opportunity', async () => {
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(
+        createMockGeoExperiment({ opportunityId: null }),
+      );
+      const response = await suggestionsController.triggerGeoExperimentValidation({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(400);
+      expect(mockSuggestionDataAccess.Opportunity.findById).to.not.have.been.called;
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('returns 404 when the linked opportunity is not found', async () => {
+      mockSuggestionDataAccess.Opportunity.findById.withArgs(OPPORTUNITY_ID).resolves(null);
+      const response = await suggestionsController.triggerGeoExperimentValidation({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(404);
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('returns 404 when the linked opportunity belongs to another site', async () => {
+      mockSuggestionDataAccess.Opportunity.findById.withArgs(OPPORTUNITY_ID).resolves(
+        createMockOpportunity({ siteId: 'other-site-id' }),
+      );
+      const response = await suggestionsController.triggerGeoExperimentValidation({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(404);
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('returns 400 when the linked opportunity type is not supported', async () => {
+      mockSuggestionDataAccess.Opportunity.findById.withArgs(OPPORTUNITY_ID).resolves(
+        createMockOpportunity({ type: 'content' }),
+      );
+      const response = await suggestionsController.triggerGeoExperimentValidation({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.match(/not supported for opportunity type 'content'/);
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('queues the validation and returns 202 on the happy path', async () => {
+      const response = await suggestionsController.triggerGeoExperimentValidation({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(202);
+      const body = await response.json();
+      expect(body).to.deep.equal({
+        siteId: SITE_ID,
+        geoExperimentId: GEO_EXP_ID,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'queued',
+      });
+      expect(mockSqs.sendMessage).to.have.been.calledOnceWithExactly(
+        'https://imports-queue',
+        {
+          type: 'optimize-at-edge-enabled-marking',
+          siteId: SITE_ID,
+          validateOnly: true,
+          geoExperimentId: GEO_EXP_ID,
         },
       );
     });
