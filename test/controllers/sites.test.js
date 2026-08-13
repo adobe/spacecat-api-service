@@ -1557,6 +1557,19 @@ describe('Sites Controller', () => {
       expect(loggerStub.error).to.have.been.calledWithMatch(/\[sites\]\[filtered\] query failed/);
     });
 
+    it('logs a prefixed error and re-throws when the enrollment-filtered query rejects', async () => {
+      // Mirror of the Site.all error-path test for the tier/productCode branch —
+      // the try/catch wraps BOTH data-access calls with the same prefixed log.
+      const boom = new Error('boom');
+      mockDataAccess.Site.allByEnrollmentFiltered.rejects(boom);
+
+      await expect(
+        sitesController.getAll({ ...context, data: { tier: 'PAID' } }),
+      ).to.be.rejectedWith('boom');
+
+      expect(loggerStub.error).to.have.been.calledWithMatch(/\[sites\]\[filtered\] query failed/);
+    });
+
     it('filters by deliveryType alone using an eq where and the offset envelope', async () => {
       mockDataAccess.Site.all.resolves(sites);
       const res = await sitesController.getAll({ ...context, data: { deliveryType: 'aem_edge', limit: '10' } });
@@ -1650,6 +1663,7 @@ describe('Sites Controller', () => {
       for (const data of [
         { deliveryType: 'nope' }, { isLive: 'maybe' },
         { sort: 'bogus:desc' }, { sort: 'updatedAt:sideways' },
+        { sort: 'updatedAt:desc:extra' },
       ]) {
         // eslint-disable-next-line no-await-in-loop
         const res = await sitesController.getAll({ ...context, data });
@@ -1768,6 +1782,29 @@ describe('Sites Controller', () => {
         { type: 'ilike', field: 'base_url', value: '%sem%' },
         { type: 'eq', field: 'delivery_type', value: 'aem_edge' },
       ]);
+    });
+
+    it('composes isLive (boolean) with tier and passes it in the where to allByEnrollmentFiltered', async () => {
+      mockDataAccess.Site.allByEnrollmentFiltered.resolves(sites);
+
+      const result = await sitesController.getAll({
+        ...context,
+        data: { tier: 'PAID', isLive: 'false' },
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.pagination).to.include({ tier: 'PAID', isLive: false });
+
+      const [, opts] = mockDataAccess.Site.allByEnrollmentFiltered.firstCall.args;
+      const op = {
+        eq: (f, v) => ({ type: 'eq', field: f, value: v }),
+        and: (...c) => ({ type: 'and', conditions: c }),
+      };
+      // isLive is the only site-table condition here → returned bare (not wrapped in
+      // op.and) and boolean-valued (false, not the string 'false').
+      const expr = opts.where({ isLive: 'is_live' }, op);
+      expect(expr).to.deep.equal({ type: 'eq', field: 'is_live', value: false });
     });
 
     it('productCode alone (no tier) calls Site.allByEnrollmentFiltered with tier undefined', async () => {

@@ -896,8 +896,10 @@ SiteSearchResponse:
           example: true
         sort:
           description: |
-            The `<field>:<direction>` sort that was applied, echoed verbatim. Present
-            only when `sort` was provided on the request.
+            The applied sort, echoed in canonical `<field>:<direction>` form (the
+            implicit `:asc` direction is added when omitted from the request, so
+            `sort=updatedAt` echoes `updatedAt:asc`). Present only when `sort` was
+            provided on the request.
           type: string
           example: "updatedAt:desc"
         tier:

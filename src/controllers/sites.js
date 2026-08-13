@@ -574,7 +574,11 @@ function SitesController(ctx, log, env) {
     }
     let orderBy = DEFAULT_SORT;
     if (hasText(sortParam)) {
-      const [sortField, sortDirection = 'asc'] = sortParam.split(':');
+      const sortParts = sortParam.split(':');
+      if (sortParts.length > 2) {
+        return badRequest('Invalid sort: expected "<field>" or "<field>:<direction>"');
+      }
+      const [sortField, sortDirection = 'asc'] = sortParts;
       if (!SORT_FIELDS.has(sortField)) {
         return badRequest(`Invalid sort field: ${sortField}`);
       }
