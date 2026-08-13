@@ -8704,6 +8704,49 @@ describe('Suggestions Controller', () => {
       expect(mockSuggestionDataAccess.AsyncJob.create).to.not.have.been.called;
     });
 
+    it('passes applyStale metadata to deployToEdge when applyStale is true in the request body', async () => {
+      const mockTokowakaClient = {
+        deployToEdge: sandbox.stub().resolves({
+          succeededSuggestions: [edgeSuggestions[0]],
+          failedSuggestions: [],
+          coveredSuggestions: [],
+        }),
+      };
+      sandbox.stub(TokowakaClient, 'createFrom').returns(mockTokowakaClient);
+
+      await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]], applyStale: true },
+      });
+
+      expect(mockTokowakaClient.deployToEdge).to.have.been.calledOnce;
+      const [callArgs] = mockTokowakaClient.deployToEdge.firstCall.args;
+      expect(callArgs.metadata).to.deep.equal({ applyStale: true });
+    });
+
+    it('defaults applyStale metadata to false when not provided in the request body', async () => {
+      const mockTokowakaClient = {
+        deployToEdge: sandbox.stub().resolves({
+          succeededSuggestions: [edgeSuggestions[0]],
+          failedSuggestions: [],
+          coveredSuggestions: [],
+        }),
+      };
+      sandbox.stub(TokowakaClient, 'createFrom').returns(mockTokowakaClient);
+
+      await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      const [callArgs] = mockTokowakaClient.deployToEdge.firstCall.args;
+      expect(callArgs.metadata).to.deep.equal({ applyStale: false });
+    });
+
     it('uses profile email in direct deploy success path', async () => {
       context.attributes.authInfo.profile = { email: 'owner@example.com' };
       sandbox.stub(TokowakaClient, 'createFrom').returns({

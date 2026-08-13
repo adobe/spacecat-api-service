@@ -629,6 +629,15 @@ site-opportunity-suggestions-edge-deploy:
               name:
                 type: string
                 description: Optional experiment name (defaults to opportunity type). Only used in async experiment mode.
+              applyStale:
+                type: boolean
+                default: false
+                description: |
+                  When true, the deployed patch keeps applying even if the source page's content
+                  goes stale (e.g. a missing/outdated Last-Modified header). Mirrored onto each
+                  deployed suggestion's `data.applyStale` for display, and set on the underlying
+                  edge patch itself. Only synchronous (direct) deployment mode is supported;
+                  ignored in async experiment mode.
     responses:
       '207':
         description: |

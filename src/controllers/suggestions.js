@@ -2352,6 +2352,7 @@ function SuggestionsController(ctx, sqs, env) {
         targetSuggestions: allTargetSuggestions,
         allSuggestions,
         updatedBy: profile?.email || 'tokowaka-deployment',
+        metadata: { applyStale: context.data?.applyStale === true },
       });
 
       succeededSuggestions = deployResult.succeededSuggestions;
