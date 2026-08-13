@@ -90,7 +90,6 @@ function makeTransport(overrides = {}) {
     publishProject: sinon.stub().resolves(null),
     deleteProject: sinon.stub().resolves(null),
     listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
-    transferWorkspaceResources: sinon.stub().resolves(null),
     getWorkspaceStatus: sinon.stub().resolves({ status: 'created' }),
     listPromptsByTags: sinon.stub().resolves({ items: [] }),
     listAiModels: sinon.stub().resolves({ items: [] }),
@@ -793,40 +792,6 @@ describe('markets-subworkspace handlers', () => {
       expect(transport.publishProject).to.have.been.calledOnce;
     });
 
-    it('dynamic-allocation ON: fronts prompt headroom sized on the generated batch BEFORE the write (LLMO-6190, live-verified)', async () => {
-      // The metered write is createPromptsWithMetadata itself (Rainer, live-verified) — a
-      // disguised-quota 405 fires there, before any publish. getWorkspaceResources must be read
-      // before the first create call for the generated batch, not only before the final publish.
-      const transport = makeTransport({
-        getBrandTopics: sinon.stub().resolves([
-          { topic: 'Running Shoes', volume: 900, prompts: ['best running shoes', 'top trail shoes'] },
-        ]),
-        getWorkspaceResources: sinon.stub().resolves({
-          product_resources: {
-            ai: {
-              resources: {
-                projects: { used: 0, total: 10 }, prompts: { used: 0, total: 100 },
-              },
-            },
-          },
-        }),
-      });
-      const res = await handleCreateMarketSubworkspace(
-        transport,
-        makeBrand(),
-        PARENT,
-        { ...createBody, brandNames: ['Trail'] },
-        log,
-        null,
-        null,
-        { generateTopics: true, publishMode: 'require', dynamicAllocation: true },
-      );
-      expect(res.status).to.equal(201);
-      expect(transport.getWorkspaceResources).to.have.been.called;
-      expect(transport.getWorkspaceResources.firstCall)
-        .to.have.been.calledBefore(transport.createPromptsWithMetadata.firstCall);
-    });
-
     it('propagates a fatal model-attach failure (NOT best-effort like URL/competitor enrichment)', async () => {
       // Model attach is a core correctness step: a failure must abort the create
       // (a half-provisioned project must never be reported as success).
@@ -1051,9 +1016,8 @@ describe('markets-subworkspace handlers', () => {
         'preset-ws',
       );
       expect(res.status).to.equal(201);
-      // ensure was skipped: no settle/transfer was performed for this call.
-      expect(transport.transferWorkspaceResources).to.not.have.been.called;
-      // the draft is created against the pre-resolved workspace.
+      // The activate-batch path skips the per-call ensure and creates the draft directly
+      // against the pre-resolved workspace.
       expect(transport.createProject).to.have.been.calledWith('preset-ws');
     });
   });

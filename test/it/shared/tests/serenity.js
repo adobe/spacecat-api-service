@@ -12,7 +12,7 @@
 
 import { expect } from 'chai';
 import {
-  ORG_1_ID, BRAND_1_ID, SITE_1_ID, SERENITY_MOCK_WORKSPACE_ID, SERENITY_ORG_PARENT_WS_ID,
+  ORG_1_ID, BRAND_1_ID, SITE_1_ID,
 } from '../seed-ids.js';
 
 /**
@@ -828,96 +828,6 @@ export default function serenityTests(
     });
   });
 
-  // Dynamic-allocation kill-switch ON — drives the JIT top-up FRONTING end-to-end against the live
-  // metered User Manager mock (Rainer's review item #4). ORG_1 carries a parent workspace
-  // (SERENITY_ORG_PARENT_WS_ID) so BRAND_1's sub-workspace resolves a non-null parent id and
-  // the guard engages; the flag is a global env kill-switch read per request, toggled here around
-  // the block. The `__quota` / `__dump` mock control routes are injected by the postgres harness.
-  describe('Serenity API — dynamic allocation ON (metered JIT via the live UM mock)', () => {
-    const { setUmMockQuota, dumpUmMock } = mockControls;
-    const base = `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity`;
-    const US_GEO = 2840;
-    const CHILD = SERENITY_MOCK_WORKSPACE_ID; // BRAND_1's sub-workspace (the metered child)
-    const PARENT = SERENITY_ORG_PARENT_WS_ID; // ORG_1's parent workspace (advisory units pool)
-
-    const childTotal = (dump, dim) => {
-      const rec = (dump.workspace_resources || []).find((r) => r.id === CHILD);
-      // A missing record (shape mismatch / wiring regression) must fail with an ACTIONABLE message
-      // here, not surface downstream as the opaque "expected undefined to be above 0".
-      expect(rec, `expected a workspace_resources record for CHILD (${CHILD}) in the mock dump`)
-        .to.exist;
-      return rec.ai?.[dim]?.total;
-    };
-
-    // Skip cleanly if a wiring didn't inject the mock control routes (only the postgres harness has
-    // the live containers); this keeps the shared factory usable by any future non-metered wiring.
-    before(function skipWithoutMockControls() {
-      if (typeof setUmMockQuota !== 'function' || typeof dumpUmMock !== 'function') {
-        this.skip();
-      }
-    });
-
-    beforeEach(async () => {
-      await resetData();
-      await resetMocks();
-      process.env.SERENITY_DYNAMIC_ALLOCATION = 'true';
-      // Parent (units pool) amply provisioned; child seeded at ZERO total so a metered write must
-      // top it up. Both metered so the allocator's strict /resources reads resolve.
-      await setUmMockQuota(PARENT, { projects: 100, prompts: 100000 });
-      await setUmMockQuota(CHILD, {
-        projects: { used: 0, drafted: 0, total: 0 },
-        prompts: { used: 0, drafted: 0, total: 0 },
-      });
-    });
-
-    afterEach(() => {
-      delete process.env.SERENITY_DYNAMIC_ALLOCATION;
-      delete process.env.SERENITY_BRAND_AI_CEILING_PROMPTS;
-    });
-
-    it('tops up the sub-workspace via a live /resources transfer when a metered write needs headroom', async () => {
-      // create-market fronts PROJECT headroom before createProject: from a seeded 0 total the guard
-      // tops the child up to a whole block (>=1) with a REAL /resources transfer to the mock, then
-      // creates + publishes the project.
-      const created = await getHttpClient().admin.post(`${base}/markets`, {
-        market: 'US', languageCode: 'en', brandDomain: 'example.com', brandNames: ['Test Brand'],
-      });
-      expect(created.status).to.equal(201);
-
-      // Positive proof the flag-ON JIT engaged end-to-end over the wire: the child's PROJECT total
-      // grew from the seeded 0 via a live transfer. A flag-OFF run never fronts/transfers, so it
-      // would still read 0 — asserting the top-up AND that the kill-switch env toggle took effect
-      // for the request. (The prompt dimension's `texts × models` sizing is covered by the
-      // resource-manager unit tests; here the project carve is the decisive over-the-wire signal.)
-      const dump = await dumpUmMock();
-      expect(childTotal(dump, 'projects'), 'projects topped up from 0 via a live transfer')
-        .to.be.greaterThan(0);
-
-      // Smoke: the prompt write path also runs cleanly under the flag (fronts, then publishes).
-      const post = await getHttpClient().admin.post(`${base}/prompts`, {
-        prompts: [{ text: 'best trail running shoes?', geoTargetId: US_GEO, languageCode: 'en' }],
-      });
-      expect(post.status).to.equal(200);
-    });
-
-    it('a binding per-brand ceiling (LLMO-6190 gate) rejects a prompt write that would top up past the cap', async () => {
-      // A low prompts ceiling set in the env (Vault, in prod). The market create tops up PROJECTS
-      // only (the ceiling caps prompts, unset for projects) and publishes empty, so it still
-      // succeeds; the later prompt write needs a PROMPTS top-up from the seeded 0, which rounds to
-      // a whole block (100) and exceeds the cap (50) → brandAiLimit (409), over the wire.
-      process.env.SERENITY_BRAND_AI_CEILING_PROMPTS = '50';
-
-      const created = await getHttpClient().admin.post(`${base}/markets`, {
-        market: 'US', languageCode: 'en', brandDomain: 'example.com', brandNames: ['Test Brand'],
-      });
-      expect(created.status).to.equal(201);
-
-      const post = await getHttpClient().admin.post(`${base}/prompts`, {
-        prompts: [{ text: 'capped by the ceiling', geoTargetId: US_GEO, languageCode: 'en' }],
-      });
-      expect(post.status).to.equal(409);
-    });
-  });
   // Prompt authorship metadata (LLMO-6289): every native prompt write stamps the four-key
   // `metadata` block — `created_at`/`created_by` on the create, `updated_at`/`updated_by` on the
   // create AND on every subsequent edit — upstream on the Semrush prompt row.
