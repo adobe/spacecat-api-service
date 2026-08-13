@@ -582,6 +582,7 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-preview': 'llmo/can_deploy',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-live-preview': 'llmo/can_deploy',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-rollback': 'llmo/can_deploy',
+      'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/edge-apply-stale': 'llmo/can_deploy',
       'POST /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/actions/rolled_back': 'llmo/can_deploy',
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/auto-fix': 'llmo/can_deploy',
 
@@ -950,6 +951,7 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-preview': 'aso/can_deploy',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-live-preview': 'aso/can_deploy',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-rollback': 'aso/can_deploy',
+      'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/edge-apply-stale': 'aso/can_deploy',
       'POST /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/actions/rolled_back': 'aso/can_deploy',
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/auto-fix': 'aso/can_deploy',
       'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'aso/can_deploy',

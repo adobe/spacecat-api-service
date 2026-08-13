@@ -173,6 +173,7 @@ describe('Suggestions Controller', () => {
     'deleteGeoExperiment',
     'triggerImpactMeasurement',
     'rollbackSuggestionFromEdge',
+    'setSuggestionsApplyStale',
     'previewSuggestions',
     'fetchFromEdge',
     'getByID',
@@ -12053,6 +12054,290 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(403);
       expect(hasAccessStub.calledBefore(isLLMOAdminStub), 'hasAccess must be called before isLLMOAdministrator').to.be.true;
       expect(isLLMOAdminStub.calledBefore(isOwnerStub), 'isLLMOAdministrator must be called before isOwnerOfSite').to.be.true;
+    });
+  });
+
+  describe('setSuggestionsApplyStale', () => {
+    let tokowakaSuggestions;
+    let headingsOpportunity;
+
+    beforeEach(() => {
+      delete context.tokowakaClient;
+      sandbox.stub(AccessControlUtil.prototype, 'isLLMOAdministrator').returns(true);
+      sandbox.stub(AccessControlUtil.prototype, 'isOwnerOfSite').resolves(true);
+
+      tokowakaSuggestions = [
+        {
+          getId: () => SUGGESTION_IDS[0],
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getType: () => 'headings',
+          getStatus: () => 'NEW',
+          getRank: () => 1,
+          getData: () => ({
+            url: 'https://example.com/page1',
+            edgeDeployed: '2025-01-01T00:00:00.000Z',
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+        },
+        {
+          getId: () => SUGGESTION_IDS[1],
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getType: () => 'headings',
+          getStatus: () => 'NEW',
+          getRank: () => 2,
+          getData: () => ({
+            url: 'https://example.com/page1',
+            edgeDeployed: '2025-01-01T00:00:00.000Z',
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+        },
+      ];
+
+      headingsOpportunity = {
+        getId: sandbox.stub().returns(OPPORTUNITY_ID),
+        getSiteId: sandbox.stub().returns(SITE_ID),
+        getType: sandbox.stub().returns('headings'),
+      };
+
+      site.getBaseURL = sandbox.stub().returns('https://example.com');
+      site.getId = sandbox.stub().returns(SITE_ID);
+      mockOpportunity.findById.resetBehavior();
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(headingsOpportunity);
+      mockSuggestion.allByOpportunityId.resetBehavior();
+      mockSuggestion.allByOpportunityId.resolves(tokowakaSuggestions);
+    });
+
+    it('should return 400 when no data provided', async () => {
+      const response = await suggestionsController.setSuggestionsApplyStale({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: null,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'No data provided');
+    });
+
+    it('should return 400 when suggestionIds is empty', async () => {
+      const response = await suggestionsController.setSuggestionsApplyStale({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [], applyStale: true },
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Request body must contain a non-empty array of suggestionIds');
+    });
+
+    it('should return 400 when applyStale is missing or not a boolean', async () => {
+      const response = await suggestionsController.setSuggestionsApplyStale({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]], applyStale: 'yes' },
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Request body must contain a boolean applyStale');
+    });
+
+    it('should return 404 when site not found', async () => {
+      mockSite.findById.withArgs('non-existent-site').resolves(null);
+
+      const response = await suggestionsController.setSuggestionsApplyStale({
+        ...context,
+        params: { siteId: 'non-existent-site', opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]], applyStale: true },
+      });
+
+      expect(response.status).to.equal(404);
+    });
+
+    it('should return 403 when user does not have access', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+
+      const response = await suggestionsController.setSuggestionsApplyStale({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]], applyStale: true },
+      });
+
+      expect(response.status).to.equal(403);
+    });
+
+    it('should return 403 when user is not an LLMO administrator', async () => {
+      AccessControlUtil.prototype.isLLMOAdministrator.returns(false);
+
+      const response = await suggestionsController.setSuggestionsApplyStale({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]], applyStale: true },
+      });
+
+      expect(response.status).to.equal(403);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Only LLMO administrators can toggle applyStale for suggestions');
+    });
+
+    it('should return 403 when user is not the owner of the site', async () => {
+      AccessControlUtil.prototype.isOwnerOfSite.resolves(false);
+
+      const response = await suggestionsController.setSuggestionsApplyStale({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]], applyStale: true },
+      });
+
+      expect(response.status).to.equal(403);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'User does not have access to toggle applyStale for this site');
+    });
+
+    it('should return 404 when opportunity not found', async () => {
+      mockOpportunity.findById.withArgs('non-existent-opportunity').resolves(null);
+
+      const response = await suggestionsController.setSuggestionsApplyStale({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: 'non-existent-opportunity' },
+        data: { suggestionIds: [SUGGESTION_IDS[0]], applyStale: true },
+      });
+
+      expect(response.status).to.equal(404);
+    });
+
+    it('should return 400 per-item for suggestions without edgeDeployed', async () => {
+      tokowakaSuggestions[0].getData = () => ({ url: 'https://example.com/page1' });
+
+      const response = await suggestionsController.setSuggestionsApplyStale({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]], applyStale: true },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.success).to.equal(0);
+      expect(body.metadata.failed).to.equal(1);
+      expect(body.suggestions[0].message).to.include('has not been deployed');
+      expect(body.suggestions[0].statusCode).to.equal(400);
+    });
+
+    it('should return 404 per-item for a suggestion id that does not exist', async () => {
+      const response = await suggestionsController.setSuggestionsApplyStale({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0], 'not-found-id'], applyStale: true },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.total).to.equal(2);
+
+      const failedSuggestion = body.suggestions.find((s) => s.uuid === 'not-found-id');
+      expect(failedSuggestion.statusCode).to.equal(404);
+      expect(failedSuggestion.message).to.include('not found');
+    });
+
+    it('should set applyStale=true via the tokowaka client and return 207 on success', async () => {
+      const applyStaleStub = sandbox.stub().resolves({
+        succeededSuggestions: [tokowakaSuggestions[0]],
+        failedSuggestions: [],
+      });
+      sandbox.stub(TokowakaClient, 'createFrom').returns({
+        setApplyStaleForSuggestions: applyStaleStub,
+      });
+
+      const response = await suggestionsController.setSuggestionsApplyStale({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]], applyStale: true },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.success).to.equal(1);
+      expect(body.metadata.failed).to.equal(0);
+
+      expect(applyStaleStub.calledOnce).to.be.true;
+      const [, , suggestions, options] = applyStaleStub.firstCall.args;
+      expect(suggestions).to.include(tokowakaSuggestions[0]);
+      expect(options.applyStale).to.equal(true);
+      expect(options.updatedBy).to.equal('test@test.com');
+    });
+
+    it('should set applyStale=false via the tokowaka client', async () => {
+      const applyStaleStub = sandbox.stub().resolves({
+        succeededSuggestions: [tokowakaSuggestions[0]],
+        failedSuggestions: [],
+      });
+      sandbox.stub(TokowakaClient, 'createFrom').returns({
+        setApplyStaleForSuggestions: applyStaleStub,
+      });
+
+      await suggestionsController.setSuggestionsApplyStale({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]], applyStale: false },
+      });
+
+      const [, , , options] = applyStaleStub.firstCall.args;
+      expect(options.applyStale).to.equal(false);
+    });
+
+    it('should surface per-suggestion failures returned by the tokowaka client', async () => {
+      sandbox.stub(TokowakaClient, 'createFrom').returns({
+        setApplyStaleForSuggestions: sandbox.stub().resolves({
+          succeededSuggestions: [tokowakaSuggestions[0]],
+          failedSuggestions: [
+            {
+              suggestion: tokowakaSuggestions[1],
+              reason: 'No patch found for suggestion',
+              statusCode: 400,
+            },
+          ],
+        }),
+      });
+
+      const response = await suggestionsController.setSuggestionsApplyStale({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]], applyStale: true },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.success).to.equal(1);
+      expect(body.metadata.failed).to.equal(1);
+
+      const failedSuggestion = body.suggestions.find((s) => s.uuid === SUGGESTION_IDS[1]);
+      expect(failedSuggestion.statusCode).to.equal(400);
+      expect(failedSuggestion.message).to.equal('No patch found for suggestion');
+    });
+
+    it('should handle tokowaka client errors gracefully', async () => {
+      sandbox.stub(TokowakaClient, 'createFrom').returns({
+        setApplyStaleForSuggestions: sandbox.stub().rejects(new Error('S3 upload failed')),
+      });
+
+      const response = await suggestionsController.setSuggestionsApplyStale({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]], applyStale: true },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.success).to.equal(0);
+      expect(body.metadata.failed).to.equal(1);
+      expect(body.suggestions[0].message).to.include('Toggling applyStale failed');
     });
   });
 
