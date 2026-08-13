@@ -1,3 +1,17 @@
+# [1.742.0](https://github.com/adobe/spacecat-api-service/compare/v1.741.3...v1.742.0) (2026-08-13)
+
+
+### Features
+
+* **ai-visibility:** scope brand prompts and topics to subdomains ([#3041](https://github.com/adobe/spacecat-api-service/issues/3041)) ([1c69d9c](https://github.com/adobe/spacecat-api-service/commit/1c69d9cbba690587f60ff0c8a29b6c0ad52bb1b5)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+## [1.741.3](https://github.com/adobe/spacecat-api-service/compare/v1.741.2...v1.741.3) (2026-08-13)
+
+
+### Bug Fixes
+
+* Rename brands to '{name}_deleted' on delete to free the name for reuse | LLMO-6978 ([#3040](https://github.com/adobe/spacecat-api-service/issues/3040)) ([2260abd](https://github.com/adobe/spacecat-api-service/commit/2260abd2a6ec0f27ea9c8ff53a761b119f076798))
+
 ## [1.741.2](https://github.com/adobe/spacecat-api-service/compare/v1.741.1...v1.741.2) (2026-08-13)
 
 
