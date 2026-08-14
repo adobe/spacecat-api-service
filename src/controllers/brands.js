@@ -2461,6 +2461,13 @@ function BrandsController(ctx, log, env) {
       // usually baseUrl); a pending brand resolves from its stashed Semrush primary URL.
       // We deliberately do NOT fall back to urls[] — that's the brand's listed URLs,
       // not a declared activation anchor, so guessing one would be wrong.
+      //
+      // SITES-49448: pendingSemrushProvisioning is no longer written at create, so this
+      // stash-primaryUrl fallback now serves ONLY legacy pending rows during drain. A new
+      // pending brand anchors via baseSiteId (the caller's site selection) or activates
+      // through /serenity/activate (sub-workspace-anchored, needs no site) — neither path
+      // reaches this branch. The fallback is removed with the read-path cleanup once no
+      // live row carries a non-empty blob.
       let { baseSiteId, baseUrl } = brand;
       if (!hasText(baseSiteId)) {
         const primaryUrl = brand.pendingSemrushProvisioning?.primaryUrl;
