@@ -1,3 +1,10 @@
+# [1.745.0](https://github.com/adobe/spacecat-api-service/compare/v1.744.0...v1.745.0) (2026-08-14)
+
+
+### Features
+
+* allow tracking user activities for paying customers ([#3047](https://github.com/adobe/spacecat-api-service/issues/3047)) ([4a61588](https://github.com/adobe/spacecat-api-service/commit/4a61588b5c4d684cb760fe6ab997b382cc7547b5))
+
 # [1.744.0](https://github.com/adobe/spacecat-api-service/compare/v1.743.0...v1.744.0) (2026-08-13)
 
 
