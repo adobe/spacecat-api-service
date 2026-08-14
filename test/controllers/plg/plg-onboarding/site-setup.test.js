@@ -532,6 +532,67 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       });
     });
 
+    it('auto-corrects stored OTHER delivery type without alerting when detected is non-AMS', async () => {
+      const postSlackMessageStub = sandbox.stub().resolves();
+      const AutoCorrectControllerFactory = await createPlgEsmock(stubs, {
+        hasAdminAccess: false,
+        postSlackMessageStub,
+      });
+
+      rumRetrieveDomainkeyStub.rejects(new Error('No RUM data'));
+      findDeliveryTypeStub.resetHistory();
+      findDeliveryTypeStub.resolves('aem_edge');
+      const existingSite = createMockSite({ deliveryType: 'other', orgId: TEST_ORG_ID });
+      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+
+      const autoCorrectController = AutoCorrectControllerFactory({ log: mockLog });
+      const context = buildContext({ domain: TEST_DOMAIN });
+      context.env = {
+        ...context.env,
+        SLACK_PLG_ONBOARDING_CHANNEL_ID: 'C_ALERT',
+        SLACK_BOT_TOKEN: 'xoxb-test',
+      };
+
+      const res = await autoCorrectController.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      expect(existingSite.setDeliveryType).to.have.been.calledWith('aem_edge');
+      expect(mockLog.info).to.have.been.calledWithMatch(/Auto-correcting delivery type/);
+      expect(mockLog.warn).to.not.have.been.calledWithMatch(/Delivery type mismatch/);
+      expect(postSlackMessageStub).to.not.have.been.called;
+    });
+
+    it('auto-corrects stored OTHER delivery type without alerting when detected is AEM_AMS', async () => {
+      const postSlackMessageStub = sandbox.stub().resolves();
+      const AutoCorrectAmsControllerFactory = await createPlgEsmock(stubs, {
+        hasAdminAccess: false,
+        postSlackMessageStub,
+      });
+
+      rumRetrieveDomainkeyStub.rejects(new Error('No RUM data'));
+      findDeliveryTypeStub.resetHistory();
+      findDeliveryTypeStub.resolves('aem_ams');
+      const existingSite = createMockSite({ deliveryType: 'other', orgId: TEST_ORG_ID });
+      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+
+      const autoCorrectController = AutoCorrectAmsControllerFactory({ log: mockLog });
+      const context = buildContext({ domain: TEST_DOMAIN });
+      context.env = {
+        ...context.env,
+        SLACK_PLG_ONBOARDING_CHANNEL_ID: 'C_ALERT',
+        SLACK_BOT_TOKEN: 'xoxb-test',
+      };
+
+      const res = await autoCorrectController.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(existingSite.setDeliveryType).to.have.been.calledWith('aem_ams');
+      expect(mockLog.info).to.have.been.calledWithMatch(/Auto-correcting delivery type/);
+      expect(mockLog.warn).to.not.have.been.calledWithMatch(/Delivery type mismatch/);
+      expect(postSlackMessageStub).to.not.have.been.called;
+    });
+
     it('does not alert when detected delivery type matches existing', async () => {
       findDeliveryTypeStub.resetHistory();
       findDeliveryTypeStub.resolves('aem_edge');
