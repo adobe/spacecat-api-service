@@ -1,3 +1,17 @@
+# [1.748.0](https://github.com/adobe/spacecat-api-service/compare/v1.747.2...v1.748.0) (2026-08-14)
+
+
+### Features
+
+* **ai-visibility:** llmo-6585 expose response completeness on prompts/responses ([#3053](https://github.com/adobe/spacecat-api-service/issues/3053)) ([3b00b9d](https://github.com/adobe/spacecat-api-service/commit/3b00b9d53d84ebc2177bc43835a73cfc55891b4f))
+
+## [1.747.2](https://github.com/adobe/spacecat-api-service/compare/v1.747.1...v1.747.2) (2026-08-14)
+
+
+### Bug Fixes
+
+* **suggestions:** include skip reason/detail, org name, and ASO link  ([#3061](https://github.com/adobe/spacecat-api-service/issues/3061)) ([58b2fa2](https://github.com/adobe/spacecat-api-service/commit/58b2fa25a799adc7735145e9437e61a0241a3b4f))
+
 ## [1.747.1](https://github.com/adobe/spacecat-api-service/compare/v1.747.0...v1.747.1) (2026-08-14)
 
 
