@@ -566,9 +566,11 @@ describe('markets-subworkspace handlers', () => {
         null,
         { competitors },
       );
-      // Our us competitor becomes a benchmark; the de one is excluded.
+      // Our us competitor becomes a benchmark; the de one is excluded. The created
+      // benchmark carries the lowercase form of its name, which is the spelling
+      // upstream keeps for an alias created with it.
       expect(transport.createBenchmarks).to.have.been.calledWith(WS, 'new-proj', [
-        { brand_name: 'Rival', domain: 'rival.com' },
+        { brand_name: 'Rival', domain: 'rival.com', brand_aliases: ['rival'] },
       ]);
       expect(transport.createBenchmarks).to.have.been.calledBefore(transport.publishProject);
     });
