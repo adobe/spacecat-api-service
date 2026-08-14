@@ -1236,12 +1236,27 @@ export function createSerenityTransport({ env, imsToken }) {
      * brand carries `main_brand: true`; its `id` is the `benchmark_id` the brand
      * URL endpoints require. Returns `{ aio_benchmarks: [...] }`.
      *
+     * The default is the PUBLISHED view, exactly as for the brand URLs below: a
+     * benchmark that has been created or updated but not yet published is INVISIBLE
+     * to it (live-verified 2026-08-13 — create → the benchmark is absent from the
+     * default list and present under `?draft=true`; the project publish then promotes
+     * it). Benchmark writes act on the DRAFT, so a diff meant to converge the draft
+     * must read the draft; reading the published view compares against a stale
+     * snapshot whenever the project has unpublished changes.
+     *
      * @param {string} workspaceId
      * @param {string} projectId
+     * @param {object} [opts]
+     * @param {boolean} [opts.draft=false] - read the draft (pending) view.
      */
-    async listBenchmarks(workspaceId, projectId) {
+    async listBenchmarks(workspaceId, projectId, { draft = false } = {}) {
       return projects.listBenchmarks(
-        { params: { path: { id: workspaceId, project_id: projectId } } },
+        {
+          params: {
+            path: { id: workspaceId, project_id: projectId },
+            ...(draft ? { query: { draft: true } } : {}),
+          },
+        },
       );
     },
 
@@ -1292,8 +1307,22 @@ export function createSerenityTransport({ env, imsToken }) {
      * benchmark's `brand_aliases` (own-brand or a competitor) when the alias set
      * changes but the domain does not — the create/delete pair cannot express an
      * in-place alias edit. Upstream PUT confirmed live on prod 2026-06-24
-     * (OPTIONS .../benchmarks/{bid} → 405 allow: PUT). Semrush may silently reject
-     * some aliases; read them back from `listBenchmarks` (`rejected_brand_aliases`).
+     * (OPTIONS .../benchmarks/{bid} → 405 allow: PUT); re-verified 2026-08-13, and
+     * it is the ONLY write on a benchmark — there is no PATCH and no alias
+     * sub-resource, unlike `brand_urls` and `products`.
+     *
+     * Three behaviours to hold in mind, all live-verified 2026-08-13:
+     * - A field left OUT of the body is cleared, not preserved: a PUT of
+     *   `{brand_name, domain}` empties `brand_aliases`. Always send the full list.
+     * - `domain` is required in practice (a body without it 400s on `primary_url`),
+     *   even though the generated request type marks nothing required.
+     * - An alias is identified case-insensitively and keeps the spelling it was
+     *   created with, so a PUT cannot re-case one, and two spellings of the same
+     *   alias in one list are refused with a 409 that fails the whole write.
+     *
+     * `rejected_brand_aliases` on the read model is the set of aliases the benchmark
+     * knows but does not currently apply — which includes ones a previous write
+     * removed, so it is NOT a list of values Semrush refused.
      *
      * @param {string} workspaceId
      * @param {string} projectId
