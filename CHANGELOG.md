@@ -1,3 +1,11 @@
+## [1.747.1](https://github.com/adobe/spacecat-api-service/compare/v1.747.0...v1.747.1) (2026-08-14)
+
+
+### Bug Fixes
+
+* **plg:** auto-correct OTHER delivery type instead of alerting on mis… ([#3060](https://github.com/adobe/spacecat-api-service/issues/3060)) ([1154c30](https://github.com/adobe/spacecat-api-service/commit/1154c30d2b5e3f04e556e36c9ff7fd50cc665851))
+* **serenity:** surface renamed origin__ authorship root in filter dimensions (LLMO-7000) ([#3057](https://github.com/adobe/spacecat-api-service/issues/3057)) ([d36fb8f](https://github.com/adobe/spacecat-api-service/commit/d36fb8fea981577660559e052bc396b01865a137))
+
 # [1.747.0](https://github.com/adobe/spacecat-api-service/compare/v1.746.1...v1.747.0) (2026-08-14)
 
 
