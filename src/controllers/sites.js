@@ -510,7 +510,8 @@ function SitesController(ctx, log, env) {
    * when more than one filter is present they compose with AND. `sort`
    * (`<field>:<asc|desc>`, field one of `baseURL`/`updatedAt`/`createdAt`/
    * `deliveryType`/`isLive`) sets the result order. `tier` (one of
-   * `CUSTOMER_VISIBLE_TIERS`) and `productCode` (one of `EntitlementModel.PRODUCT_CODES`)
+   * `EntitlementModel.TIERS`, incl. `PRE_ONBOARD` - not just `CUSTOMER_VISIBLE_TIERS`)
+   * and `productCode` (one of `EntitlementModel.PRODUCT_CODES`)
    * filter to sites enrolled at that entitlement tier/product; when either is present the
    * SAME where/orderBy/limit/cursor built for the branch is passed to
    * `Site.allByEnrollmentFiltered` instead of `Site.all`. Unlike every other filter here,
@@ -518,7 +519,10 @@ function SitesController(ctx, log, env) {
    * the same gate as the standalone `GET /sites/by-tier` endpoint
    * (`getAllByEnrollmentAndTier`) - so a read-only admin or an S2S `site:readAll`
    * caller gets 403 for either param, checked before their enum validation so the 403
-   * vs 400 outcome can't be used to probe valid values. `cursor` is not supported
+   * vs 400 outcome can't be used to probe valid values; the tier accepted-value set
+   * intentionally mirrors that sibling admin-only endpoint (both accept the full
+   * `EntitlementModel.TIERS`, since PRE_ONBOARD is a legitimate admin query here too).
+   * `cursor` is not supported
    * together with any filter/sort (use `offset` instead) - accepting both would silently
    * discard the cursor and mislead the client into thinking cursor pagination is active.
    * @returns {Promise<Response>} Paginated sites response
@@ -587,8 +591,9 @@ function SitesController(ctx, log, env) {
       }
       orderBy = { attribute: sortField, direction: sortDirection };
     }
-    if (hasText(tier) && !CUSTOMER_VISIBLE_TIERS.includes(tier)) {
-      return badRequest(`Invalid tier: ${tier}`);
+    const validTiers = Object.values(EntitlementModel.TIERS);
+    if (hasText(tier) && !validTiers.includes(tier)) {
+      return badRequest(`Tier must be one of: ${validTiers.join(', ')}`);
     }
     const validProductCodes = Object.values(EntitlementModel.PRODUCT_CODES);
     if (hasText(productCode) && !validProductCodes.includes(productCode)) {
