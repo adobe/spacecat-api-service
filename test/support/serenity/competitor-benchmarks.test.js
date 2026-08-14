@@ -154,13 +154,41 @@ describe('competitor-benchmarks helpers', () => {
         { name: 'Duck', url: 'https://duckduckgo.com', regions: ['us'] }, // new → create
       ];
       const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined);
+      // A competitor with no aliases still carries the lowercase form of its name.
       expect(transport.createBenchmarks).to.have.been.calledOnceWith(WS, PID, [
-        { brand_name: 'Duck', domain: 'duckduckgo.com' },
+        { brand_name: 'Duck', domain: 'duckduckgo.com', brand_aliases: ['duck'] },
       ]);
+      // The diff reads the DRAFT view — the writes below act on the draft.
+      expect(transport.listBenchmarks).to.have.been.calledWith(WS, PID, { draft: true });
       expect(transport.deleteBenchmarks).to.not.have.been.called;
+      // Bing's benchmark is already present but carries no aliases, so it is updated
+      // to add the lowercase form of its name.
       expect(result).to.deep.equal({
-        created: 1, updated: 0, deleted: 0, changed: true, rejected: [],
+        created: 1, updated: 1, deleted: 0, changed: true, rejected: [],
       });
+    });
+
+    it('drops a derived alias a sibling benchmark owns, so the batch cannot 409', async () => {
+      // Live-verified 2026-08-13: alias uniqueness is project-wide and case-folded,
+      // and the 409 fails the WHOLE create — in a batch, the innocent members too.
+      // A competitor's own lowercase name is exactly what can collide.
+      const transport = makeTransport([
+        { id: 'own', main_brand: true, domain: 'acme.com' },
+        {
+          id: 'held', main_brand: false, domain: 'held.com', brand_name: 'Duck',
+        },
+      ]);
+      const competitors = [
+        // 'duck' (its lowercase name) is held by the 'Duck' benchmark above.
+        { name: 'DUCK', url: 'https://duckduckgo.com', regions: ['us'] },
+        { name: 'Clean', url: 'https://clean.com', regions: ['us'] },
+      ];
+      const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined);
+      expect(transport.createBenchmarks).to.have.been.calledOnceWith(WS, PID, [
+        { brand_name: 'DUCK', domain: 'duckduckgo.com', brand_aliases: [] },
+        { brand_name: 'Clean', domain: 'clean.com', brand_aliases: ['clean'] },
+      ]);
+      expect(result.created).to.equal(2);
     });
 
     it('deletes the benchmark of a removed competitor (never the main brand)', async () => {
@@ -178,7 +206,8 @@ describe('competitor-benchmarks helpers', () => {
     });
 
     it('is a no-op (changed:false) when nothing to add or remove', async () => {
-      const transport = makeTransport([{ id: 'bing', domain: 'bing.com' }]);
+      // Already carries the lowercase form of its name, so there is nothing to add.
+      const transport = makeTransport([{ id: 'bing', domain: 'bing.com', brand_aliases: ['bing'] }]);
       const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, [{ name: 'Bing', url: 'https://bing.com' }], [], 'us', undefined);
       expect(transport.createBenchmarks).to.not.have.been.called;
       expect(transport.deleteBenchmarks).to.not.have.been.called;
@@ -200,7 +229,11 @@ describe('competitor-benchmarks helpers', () => {
       ];
       const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined);
       expect(transport.createBenchmarks).to.have.been.calledOnceWith(WS, PID, [
-        { brand_name: 'Duck', domain: 'duckduckgo.com', brand_aliases: ['DDG', 'Duck Duck Go'] },
+        {
+          brand_name: 'Duck',
+          domain: 'duckduckgo.com',
+          brand_aliases: ['ddg', 'duck duck go', 'duck'],
+        },
       ]);
       expect(result.created).to.equal(1);
     });
@@ -222,9 +255,28 @@ describe('competitor-benchmarks helpers', () => {
           name: 'Bing', url: 'https://bing.com', aliases: ['Microsoft Bing'], regions: ['us'],
         },
       ];
-      const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined);
+      // 'MSN' was this competitor's alias before the edit and is gone from it now,
+      // so it leaves the benchmark; everything else there is carried forward.
+      const previous = [
+        {
+          name: 'Bing', url: 'https://bing.com', aliases: ['MSN'], regions: ['us'],
+        },
+      ];
+      const result = await syncCompetitorBenchmarksForProject(
+        transport,
+        WS,
+        PID,
+        competitors,
+        [],
+        'us',
+        undefined,
+        new Set(),
+        previous,
+      );
       expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, PID, 'bing', {
-        brand_name: 'Bing', domain: 'bing.com', brand_aliases: ['Microsoft Bing'],
+        brand_name: 'Bing',
+        domain: 'bing.com',
+        brand_aliases: ['microsoft bing', 'bing'],
       });
       expect(transport.createBenchmarks).to.not.have.been.called;
       expect(result).to.deep.equal({
@@ -245,7 +297,7 @@ describe('competitor-benchmarks helpers', () => {
       ];
       const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined);
       expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, PID, 'rival', {
-        brand_name: 'test12345', domain: 'test1234.de',
+        brand_name: 'test12345', domain: 'test1234.de', brand_aliases: ['test12345'],
       });
       expect(transport.createBenchmarks).to.not.have.been.called;
       expect(result).to.deep.equal({
@@ -259,7 +311,12 @@ describe('competitor-benchmarks helpers', () => {
       // is not clobbered by a drifting desired name.
       const transport = makeTransport([
         {
-          id: 'rival', main_brand: false, domain: 'test1234.de', brand_name: '',
+          id: 'rival',
+          main_brand: false,
+          domain: 'test1234.de',
+          brand_name: '',
+          // Already carries the derived form, so the name is the only difference.
+          brand_aliases: ['test12345'],
         },
       ]);
       const competitors = [
@@ -275,7 +332,11 @@ describe('competitor-benchmarks helpers', () => {
     it('does NOT update when the name and alias set are unchanged', async () => {
       const transport = makeTransport([
         {
-          id: 'rival', main_brand: false, domain: 'test1234.de', brand_name: 'test1234',
+          id: 'rival',
+          main_brand: false,
+          domain: 'test1234.de',
+          brand_name: 'test1234',
+          brand_aliases: ['test1234'],
         },
       ]);
       const competitors = [
@@ -286,10 +347,17 @@ describe('competitor-benchmarks helpers', () => {
       expect(result.changed).to.equal(false);
     });
 
-    it('does NOT update when the alias set is unchanged (order/case-insensitive)', async () => {
+    it('does NOT update when only the SPELLING of a live alias differs', async () => {
+      // Upstream keeps the spelling an alias was created with, so a PUT cannot
+      // re-case one. Treating a case difference as drift would rewrite and republish
+      // the project on every single sync.
       const transport = makeTransport([
         {
-          id: 'bing', main_brand: false, domain: 'bing.com', brand_aliases: ['MSN', 'Microsoft Bing'],
+          id: 'bing',
+          main_brand: false,
+          domain: 'bing.com',
+          brand_name: 'Bing',
+          brand_aliases: ['MSN', 'Microsoft Bing', 'bing'],
         },
       ]);
       const competitors = [
@@ -300,6 +368,30 @@ describe('competitor-benchmarks helpers', () => {
       const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined);
       expect(transport.updateBenchmark).to.not.have.been.called;
       expect(result.changed).to.equal(false);
+    });
+
+    it('carries a competitor benchmark\'s vendor-added aliases through a rename', async () => {
+      // The rename path used to omit brand_aliases entirely, which CLEARS the list
+      // upstream — so renaming a competitor wiped whatever Semrush had added to it.
+      const transport = makeTransport([
+        {
+          id: 'gm',
+          main_brand: false,
+          domain: 'gm.com',
+          brand_name: 'General Motors',
+          brand_aliases: ['gm'],
+        },
+      ]);
+      const competitors = [
+        { name: 'GM Company', url: 'https://gm.com', regions: ['us'] },
+      ];
+      const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined);
+      expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, PID, 'gm', {
+        brand_name: 'GM Company',
+        domain: 'gm.com',
+        brand_aliases: ['gm', 'gm company'],
+      });
+      expect(result.updated).to.equal(1);
     });
 
     it('treats a non-array re-read after an alias write as no benchmarks (no rejections)', async () => {
@@ -374,10 +466,10 @@ describe('competitor-benchmarks helpers', () => {
         undefined,
       );
       expect(transport.createBenchmarks).to.have.been.calledWith(WS, 'p-us', [
-        { brand_name: 'US rival', domain: 'us-rival.com' },
+        { brand_name: 'US rival', domain: 'us-rival.com', brand_aliases: ['us rival'] },
       ]);
       expect(transport.createBenchmarks).to.have.been.calledWith(WS, 'p-de', [
-        { brand_name: 'DE rival', domain: 'de-rival.com' },
+        { brand_name: 'DE rival', domain: 'de-rival.com', brand_aliases: ['de rival'] },
       ]);
       expect(transport.publishProject).to.have.been.calledTwice;
       expect(result).to.deep.equal({
@@ -437,7 +529,7 @@ describe('competitor-benchmarks helpers', () => {
       // Only the real rival survives for p-us; the three self-references (own
       // primary brand.com, other-market brand.de, own website shop.brand.io) drop.
       expect(transport.createBenchmarks).to.have.been.calledOnceWith(WS, 'p-us', [
-        { brand_name: 'US rival', domain: 'rival.com' },
+        { brand_name: 'US rival', domain: 'rival.com', brand_aliases: ['us rival'] },
       ]);
       expect(result).to.deep.equal({
         markets: 2, created: 1, updated: 0, deleted: 0, rejected: [],
@@ -498,12 +590,17 @@ describe('competitor-benchmarks helpers', () => {
         listProjects: sandbox.stub().resolves({
           items: [projectWith('p-us', 'us'), { id: 'p-x', settings: { ai: {} } }],
         }),
-        listBenchmarks: sandbox.stub().resolves({ aio_benchmarks: [{ id: 'r', domain: 'rival.com' }] }),
+        // Carries the derived form already, so the benchmark needs no write.
+        listBenchmarks: sandbox.stub().resolves({
+          aio_benchmarks: [{ id: 'r', domain: 'rival.com', brand_aliases: ['rival'] }],
+        }),
         createBenchmarks: sandbox.stub().resolves({}),
+        updateBenchmark: sandbox.stub().resolves(null),
         deleteBenchmarks: sandbox.stub().resolves(null),
         publishProject: sandbox.stub().resolves({}),
       };
       const result = await syncCompetitorBenchmarksAcrossMarkets(transport, [{ name: 'Rival', url: 'https://rival.com' }], [], WS, undefined);
+      expect(transport.updateBenchmark).to.not.have.been.called;
       expect(transport.createBenchmarks).to.not.have.been.called;
       expect(transport.publishProject).to.not.have.been.called;
       expect(result).to.deep.equal({
@@ -608,10 +705,14 @@ describe('competitor-benchmarks helpers', () => {
         listBenchmarks: sandbox.stub().resolves({
           aio_benchmarks: [
             { id: 'bad', main_brand: false, domain: '' }, // null domain -> skip
-            { id: 'good', main_brand: false, domain: 'bing.com' },
+            // Carries the derived form, so being present is all this asserts.
+            {
+              id: 'good', main_brand: false, domain: 'bing.com', brand_aliases: ['bing'],
+            },
           ],
         }),
         createBenchmarks: sandbox.stub().resolves({ ids: ['x'], existing_count: 0 }),
+        updateBenchmark: sandbox.stub().resolves(null),
         deleteBenchmarks: sandbox.stub().resolves(null),
       };
       const result = await syncCompetitorBenchmarksForProject(
@@ -629,7 +730,7 @@ describe('competitor-benchmarks helpers', () => {
       // bing.com is in presentDomains -> not created. Duck -> created.
       expect(result.created).to.equal(1);
       expect(transport.createBenchmarks).to.have.been.calledOnceWith(WS, PID, [
-        { brand_name: 'Duck', domain: 'duckduckgo.com' },
+        { brand_name: 'Duck', domain: 'duckduckgo.com', brand_aliases: ['duck'] },
       ]);
     });
   });

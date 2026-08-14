@@ -1,3 +1,24 @@
+## [1.746.1](https://github.com/adobe/spacecat-api-service/compare/v1.746.0...v1.746.1) (2026-08-14)
+
+
+### Bug Fixes
+
+* **serenity:** stop benchmark alias writes from destroying what Semrush added ([#3044](https://github.com/adobe/spacecat-api-service/issues/3044)) ([e64cb17](https://github.com/adobe/spacecat-api-service/commit/e64cb171fb7a8a3311282be06bf3927752569aea)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+# [1.746.0](https://github.com/adobe/spacecat-api-service/compare/v1.745.0...v1.746.0) (2026-08-14)
+
+
+### Features
+
+* **slack:** show org name alongside imsOrgId in get-site output ([#3051](https://github.com/adobe/spacecat-api-service/issues/3051)) ([60a9e00](https://github.com/adobe/spacecat-api-service/commit/60a9e00cae0b1616b1adab15ec9fd645ba9bdcbd))
+
+# [1.745.0](https://github.com/adobe/spacecat-api-service/compare/v1.744.0...v1.745.0) (2026-08-14)
+
+
+### Features
+
+* allow tracking user activities for paying customers ([#3047](https://github.com/adobe/spacecat-api-service/issues/3047)) ([4a61588](https://github.com/adobe/spacecat-api-service/commit/4a61588b5c4d684cb760fe6ab997b382cc7547b5))
+
 # [1.744.0](https://github.com/adobe/spacecat-api-service/compare/v1.743.0...v1.744.0) (2026-08-13)
 
 
