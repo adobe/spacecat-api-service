@@ -21,6 +21,7 @@ import {
 import {
   hasText,
   isArray, isNonEmptyArray,
+  isBoolean,
   isNonEmptyObject,
   isObject,
   isInteger,
@@ -1915,6 +1916,7 @@ function SuggestionsController(ctx, sqs, env) {
   const deploySuggestionToEdge = async (context) => {
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
+    const applyStale = context.data?.applyStale;
     const { authInfo: { profile } } = context.attributes;
 
     context.log.info('[edge-deploy] request', {
@@ -2141,7 +2143,7 @@ function SuggestionsController(ctx, sqs, env) {
           ...domainWideSuggestions.map(({ suggestion }) => suggestion),
           ...pathSuggestions.map(({ suggestion }) => suggestion),
         ];
-        const metadataBase = {};
+        const metadataBase = { ...(applyStale !== undefined && { applyStale }) };
 
         const highImpactIds = context.data?.metadata?.highImpactSuggestionIds;
         const hasHighImpactIds = Array.isArray(highImpactIds) && highImpactIds.length > 0;
@@ -2352,6 +2354,7 @@ function SuggestionsController(ctx, sqs, env) {
         targetSuggestions: allTargetSuggestions,
         allSuggestions,
         updatedBy: profile?.email || 'tokowaka-deployment',
+        ...(applyStale !== undefined && { metadata: { applyStale } }),
       });
 
       succeededSuggestions = deployResult.succeededSuggestions;
@@ -2907,6 +2910,164 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   /**
+   * Toggles the `applyStale` flag for already-deployed per-URL suggestions without redeploying:
+   * sets/clears it on the S3 patch and mirrors the same value onto suggestion.data. Only
+   * suggestions that have been deployed (`edgeDeployed` set) and have a matching S3 patch are
+   * eligible; everything else is reported as a per-suggestion failure.
+   * @param {Object} context of the request
+   * @returns {Promise<Response>} 207 multi-status response, same shape as edge-deploy/edge-rollback
+   */
+  const setSuggestionsApplyStale = async (context) => {
+    const { siteId, opportunityId } = context.params;
+    const { authInfo: { profile } } = context.attributes;
+
+    context.log.info('[edge-apply-stale] request', {
+      siteId,
+      opportunityId,
+      suggestionIdsCount: context.data?.suggestionIds?.length ?? 0,
+      applyStale: context.data?.applyStale,
+      userId: profile?.email,
+    });
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      context.log.warn(`[edge-apply-stale-failed] site ${siteId} not found`);
+      return notFound('Site not found');
+    }
+
+    const apexBaseUrl = getHostName(site.getBaseURL()) || site.getBaseURL();
+
+    if (!isNonEmptyObject(context.data)) {
+      context.log.warn('[edge-apply-stale-failed] site: n/a, no request body data provided');
+      return badRequest('No data provided');
+    }
+    const { suggestionIds, applyStale } = context.data;
+    if (!isArray(suggestionIds) || suggestionIds.length === 0) {
+      context.log.warn('[edge-apply-stale-failed] site: n/a, suggestionIds is not a non-empty array');
+      return badRequest('Request body must contain a non-empty array of suggestionIds');
+    }
+    if (!isBoolean(applyStale)) {
+      context.log.warn('[edge-apply-stale-failed] site: n/a, applyStale is not a boolean');
+      return badRequest('Request body must contain a boolean applyStale');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      context.log.warn(`[edge-apply-stale-failed] site: ${apexBaseUrl}, user does not have access to the site.`);
+      return forbidden('User does not belong to the organization');
+    }
+
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      context.log.warn('[edge-apply-stale-failed] site: n/a, user is not an LLMO administrator');
+      return forbidden('Only LLMO administrators can toggle applyStale for suggestions');
+    }
+
+    if (!await accessControlUtil.isOwnerOfSite(site)) {
+      context.log.warn(`[edge-apply-stale-failed] site: ${apexBaseUrl}, user is not the owner of the site`);
+      return forbidden('User does not have access to toggle applyStale for this site');
+    }
+
+    const opportunity = await Opportunity.findById(opportunityId);
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      context.log.warn(`[edge-apply-stale-failed] site: ${apexBaseUrl}, opportunity ${opportunityId} not found`);
+      return notFound('Opportunity not found');
+    }
+
+    const allSuggestions = await Suggestion.allByOpportunityId(opportunityId);
+
+    const validSuggestions = [];
+    const failedSuggestions = [];
+
+    suggestionIds.forEach((suggestionId, index) => {
+      const suggestion = allSuggestions.find((s) => s.getId() === suggestionId);
+
+      if (!suggestion) {
+        context.log.warn(`[edge-apply-stale-failed] site: ${apexBaseUrl}, suggestion ${suggestionId} not found`);
+        failedSuggestions.push({
+          uuid: suggestionId,
+          index,
+          message: 'Suggestion not found',
+          statusCode: 404,
+        });
+      } else if (!suggestion.getData()?.edgeDeployed) {
+        context.log.warn(`[edge-apply-stale-failed] site: ${apexBaseUrl}, suggestion ${suggestionId} hasn't been deployed, can't toggle applyStale`);
+        failedSuggestions.push({
+          uuid: suggestionId,
+          index,
+          message: 'Suggestion has not been deployed, cannot toggle applyStale',
+          statusCode: 400,
+        });
+      } else {
+        validSuggestions.push(suggestion);
+      }
+    });
+
+    let succeededSuggestions = [];
+
+    if (isNonEmptyArray(validSuggestions)) {
+      try {
+        const tokowakaClient = TokowakaClient.createFrom(context);
+
+        const result = await tokowakaClient.setApplyStaleForSuggestions(
+          site,
+          opportunity,
+          validSuggestions,
+          { applyStale, updatedBy: profile?.email },
+        );
+
+        const {
+          succeededSuggestions: processedSuggestions,
+          failedSuggestions: ineligibleSuggestions,
+        } = result;
+
+        succeededSuggestions = processedSuggestions;
+
+        ineligibleSuggestions.forEach((item) => {
+          context.log.info(`[edge-apply-stale-failed] site: ${apexBaseUrl}, suggestion ${item.suggestion.getId()} is ineligible: ${item.reason}`);
+          failedSuggestions.push({
+            uuid: item.suggestion.getId(),
+            index: suggestionIds.indexOf(item.suggestion.getId()),
+            message: item.reason,
+            statusCode: item.statusCode || 400,
+          });
+        });
+
+        context.log.info(`[edge-apply-stale] Successfully set applyStale=${applyStale} for ${succeededSuggestions.length} suggestions by ${profile?.email || 'tokowaka-apply-stale'}`);
+      } catch (error) {
+        context.log.error(`[edge-apply-stale-failed] site: ${apexBaseUrl}, Error toggling applyStale: ${error.message}`, error);
+        validSuggestions.forEach((suggestion) => {
+          failedSuggestions.push({
+            uuid: suggestion.getId(),
+            index: suggestionIds.indexOf(suggestion.getId()),
+            message: 'Toggling applyStale failed: Internal server error',
+            statusCode: 500,
+          });
+        });
+      }
+    }
+
+    const response = {
+      suggestions: [
+        ...succeededSuggestions.map((suggestion) => ({
+          uuid: suggestion.getId(),
+          index: suggestionIds.indexOf(suggestion.getId()),
+          statusCode: 200,
+          suggestion: SuggestionDto.toJSON(suggestion),
+        })),
+        ...failedSuggestions,
+      ],
+      metadata: {
+        total: suggestionIds.length,
+        success: succeededSuggestions.length,
+        failed: failedSuggestions.length,
+      },
+    };
+    response.suggestions.sort((a, b) => a.index - b.index);
+
+    context.log.info(`[edge-apply-stale] response: ${JSON.stringify(response)}`);
+    return createResponse(response, 207);
+  };
+
+  /**
    * Fetches content from a URL using Tokowaka-AI User-Agent.
    * This is a simple URL-based fetch, useful for checking deployed content.
    * @param {Object} context of the request
@@ -3237,6 +3398,7 @@ function SuggestionsController(ctx, sqs, env) {
     deleteGeoExperiment,
     triggerImpactMeasurement,
     rollbackSuggestionFromEdge,
+    setSuggestionsApplyStale,
     previewSuggestions,
     fetchFromEdge,
     getAllForOpportunity,
