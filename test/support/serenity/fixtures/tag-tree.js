@@ -13,8 +13,10 @@
 import sinon from 'sinon';
 
 import {
-  DIMENSION_ROOT_NAMES,
+  DIMENSION_PROVISION_ORDER,
   CLOSED_DIMENSION_VALUES,
+  LEGACY_INTENT_ROOT_NAME,
+  rootNameOfDimension,
 } from '../../../../src/support/serenity/prompt-tags.js';
 
 /**
@@ -103,13 +105,25 @@ const CATEGORY_CRUMB = [{ id: TAG_IDS.categoryRoot, name: 'category' }];
  * Builds the level map: `parentId` → the tags directly beneath it. `''` is the
  * root level. Callers may add or replace levels via `extraLevels`.
  *
+ * The intent root is named as upstream names it — `$abv_tags$intent` by default,
+ * or the pre-rename `intent` when `legacyIntentRoot` is set, which is what a
+ * project the rename (LLMO-6984) has not reached still carries. Everything below
+ * that root is identical in both shapes: the rename touches only the root's name.
+ *
  * @param {Record<string, object[]>} [extraLevels]
+ * @param {object} [options]
+ * @param {boolean} [options.legacyIntentRoot] - name the intent root `intent`.
  * @returns {Record<string, object[]>}
  */
-export function dimensionTreeLevels(extraLevels = {}) {
-  const roots = DIMENSION_ROOT_NAMES.map((name) => upstreamTag({
+export function dimensionTreeLevels(extraLevels = {}, { legacyIntentRoot = false } = {}) {
+  const rootNameOf = (dimension) => (
+    legacyIntentRoot && dimension === 'intent'
+      ? LEGACY_INTENT_ROOT_NAME
+      : rootNameOfDimension(dimension)
+  );
+  const roots = DIMENSION_PROVISION_ORDER.map((name) => upstreamTag({
     id: ROOT_IDS[name],
-    name,
+    name: rootNameOf(name),
     // `category` carries one seeded sub-tree; the closed dimensions carry their
     // enum. The open `source` root reports `children_count: 0` so tree WALKS
     // (findTagsInTree) do not descend it, yet its level below still serves one
@@ -125,7 +139,7 @@ export function dimensionTreeLevels(extraLevels = {}) {
         id: CLOSED_VALUE_IDS[dimension][value],
         name: value,
         parentId: ROOT_IDS[dimension],
-        path: [{ id: ROOT_IDS[dimension], name: dimension }],
+        path: [{ id: ROOT_IDS[dimension], name: rootNameOf(dimension) }],
       })
     ));
   }
