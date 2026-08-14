@@ -1915,6 +1915,7 @@ function SuggestionsController(ctx, sqs, env) {
   const deploySuggestionToEdge = async (context) => {
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
+    const applyStale = context.data?.applyStale;
     const { authInfo: { profile } } = context.attributes;
 
     context.log.info('[edge-deploy] request', {
@@ -2141,7 +2142,7 @@ function SuggestionsController(ctx, sqs, env) {
           ...domainWideSuggestions.map(({ suggestion }) => suggestion),
           ...pathSuggestions.map(({ suggestion }) => suggestion),
         ];
-        const metadataBase = {};
+        const metadataBase = { ...(applyStale !== undefined && { applyStale }) };
 
         const highImpactIds = context.data?.metadata?.highImpactSuggestionIds;
         const hasHighImpactIds = Array.isArray(highImpactIds) && highImpactIds.length > 0;
@@ -2352,6 +2353,7 @@ function SuggestionsController(ctx, sqs, env) {
         targetSuggestions: allTargetSuggestions,
         allSuggestions,
         updatedBy: profile?.email || 'tokowaka-deployment',
+        ...(applyStale !== undefined && { metadata: { applyStale } }),
       });
 
       succeededSuggestions = deployResult.succeededSuggestions;
