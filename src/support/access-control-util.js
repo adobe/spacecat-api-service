@@ -401,7 +401,7 @@ export default class AccessControlUtil {
         try {
           let trialUser = await this.TrialUser.findByExternalUserId(profile.email);
 
-          if (!trialUser && profile?.trial_email) {
+          if (!trialUser && profile.trial_email) {
             trialUser = await this.TrialUser.findByEmailId(profile.trial_email);
             if (trialUser && !trialUser.getExternalUserId()) {
               trialUser.setExternalUserId(profile.email);
@@ -419,6 +419,7 @@ export default class AccessControlUtil {
         } catch (err) {
           this.log?.warn('[AccessControl] trial user update failed; continuing', {
             externalUserId: profile.email,
+            ...(profile.trial_email && { trialEmail: profile.trial_email }),
             error: err.message,
           });
         }

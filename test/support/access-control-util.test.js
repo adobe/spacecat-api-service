@@ -1366,7 +1366,7 @@ describe('Access Control Util', () => {
       expect(mockTrialUser.findByExternalUserId).to.have.been.calledWith(TEST_IMS_GUID);
       expect(mockTrialUser.findByEmailId).to.not.have.been.called;
       expect(existingUser.setExternalUserId).to.not.have.been.called;
-      expect(existingUser.setLastSeenAt).to.have.been.calledOnce;
+      expect(existingUser.setLastSeenAt).to.have.been.calledOnceWith(sinon.match.string);
       expect(existingUser.save).to.have.been.calledOnce;
     });
 
@@ -1396,7 +1396,7 @@ describe('Access Control Util', () => {
 
       expect(mockTrialUser.findByEmailId).to.have.been.calledWith('trial@example.com');
       expect(existingUser.setExternalUserId).to.have.been.calledWith(TEST_IMS_GUID);
-      expect(existingUser.setLastSeenAt).to.have.been.calledOnce;
+      expect(existingUser.setLastSeenAt).to.have.been.calledOnceWith(sinon.match.string);
       expect(existingUser.save).to.have.been.calledOnce;
     });
 
@@ -1425,7 +1425,7 @@ describe('Access Control Util', () => {
       await util.validateEntitlement(mockOrg, null, 'llmo');
 
       expect(existingUser.setExternalUserId).to.not.have.been.called;
-      expect(existingUser.setLastSeenAt).to.have.been.calledOnce;
+      expect(existingUser.setLastSeenAt).to.have.been.calledOnceWith(sinon.match.string);
       expect(existingUser.save).to.have.been.calledOnce;
     });
 
