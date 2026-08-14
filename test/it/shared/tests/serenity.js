@@ -14,6 +14,7 @@ import { expect } from 'chai';
 import {
   ORG_1_ID, BRAND_1_ID, SITE_1_ID,
 } from '../seed-ids.js';
+import { INTENT_ROOT_NAME } from '../../../../src/support/serenity/prompt-tags.js';
 
 /**
  * End-to-end tests for the /serenity/* surface (LLMO-5190), driven against the
@@ -351,8 +352,12 @@ export default function serenityTests(
         `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=`,
       );
       expect(roots.status).to.equal(200);
+      // The intent root is provisioned under its upstream name: Semrush hides a
+      // `$abv_tags$`-marked entry from the customer-facing Brand Presence tag
+      // filter, and a project provisioned here must not need the rename sweep
+      // (LLMO-6985) to come back for it.
       expect(roots.body.items.map((t) => t.name))
-        .to.have.members(['category', 'intent', 'origin', 'type', 'source']);
+        .to.have.members(['category', INTENT_ROOT_NAME, 'origin', 'type', 'source']);
       const categoryRoot = roots.body.items.find((t) => t.name === 'category');
       expect(res.body.parentId).to.equal(categoryRoot.id);
     });
@@ -426,7 +431,7 @@ export default function serenityTests(
       const roots = await getHttpClient().admin.get(
         `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=`,
       );
-      const intentRoot = roots.body.items.find((t) => t.name === 'intent');
+      const intentRoot = roots.body.items.find((t) => t.name === INTENT_ROOT_NAME);
       expect(intentRoot, 'the intent root should be provisioned').to.exist;
 
       const res = await createTag('ai', intentRoot.id);
