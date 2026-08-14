@@ -18,9 +18,9 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import { createElementsService } from '../../../src/support/elements/elements-service.js';
 import { ELEMENT_IDS } from '../../../src/support/elements/element-ids.js';
 import {
+  DIMENSION,
   INTENT_VALUE,
   INTENT_ROOT_NAME,
-  LEGACY_INTENT_ROOT_NAME,
 } from '../../../src/support/serenity/prompt-tags.js';
 
 const INTENT_VALUES = Object.values(INTENT_VALUE);
@@ -51,7 +51,7 @@ const RAW_TOPICS = {
     value: [
       { value: 'topic__SEO' },
       { value: 'category__Firefly' },
-      { value: 'intent__Informational' },
+      { value: `${INTENT_ROOT_NAME}__Informational` },
       { value: 'source__organic' },
       { value: 'type__branded' },
       { value: 'plain-tag' },
@@ -158,28 +158,18 @@ describe('createElementsService', () => {
       expect(result.tags).to.deep.equal([]);
     });
 
-    it('populates page_intents on a project the rename has not reached, and says so', async () => {
-      // The read tolerance is otherwise silent, so this log is what tells LLMO-6986
-      // the sweep is not finished. RAW_TOPICS carries the pre-rename prefix.
-      const log = { info: sinon.stub(), warn: sinon.stub(), error: sinon.stub() };
-      const result = await createElementsService(transport, log)
-        .getUrlInspectorFilterDimensions('ws-1', {});
-      expect(result.page_intents).to.deep.equal([
-        { id: 'intent__Informational', label: 'Informational' },
-      ]);
-      expect(log.info).to.have.been.calledWithMatch(
-        sinon.match(/pre-rename `intent__` tags/),
-        sinon.match({ workspaceId: 'ws-1' }),
-      );
-    });
-
-    it('stays quiet when every intent tag already carries the renamed root', async () => {
-      const log = { info: sinon.stub(), warn: sinon.stub(), error: sinon.stub() };
+    it('leaves a bare `intent__` tag out of page_intents', async () => {
+      // The intent prefix IS the root's name. A bare `intent__` tag belongs to no
+      // dimension this reader knows, so it must not be claimed as an intent — it
+      // falls through to the generic catch-all like any other unrecognised tag.
       transport.fetchElement
         .withArgs('ws-1', ELEMENT_IDS.TOPICS, sinon.match.any)
-        .resolves({ blocks: { value: [{ value: `${INTENT_ROOT_NAME}__Informational` }] } });
-      await createElementsService(transport, log).getUrlInspectorFilterDimensions('ws-1', {});
-      expect(log.info).to.not.have.been.called;
+        .resolves({ blocks: { value: [{ value: 'intent__Informational' }] } });
+      const result = await service.getUrlInspectorFilterDimensions('ws-1', {});
+      expect(result.page_intents).to.deep.equal([]);
+      expect(result.intent).to.deep.equal([
+        { id: 'intent__Informational', label: 'Informational' },
+      ]);
     });
 
     it('ignores plain, separator-less tags (bare prefix declarations)', async () => {
@@ -209,9 +199,11 @@ describe('createElementsService', () => {
       expect(result.categories).to.deep.equal([{ id: 'category__Firefly', label: 'Firefly' }]);
     });
 
-    it('page_intents contains only intent__-prefixed entries with the original tag as id', async () => {
+    it('page_intents contains only intent-prefixed entries with the original tag as id', async () => {
       const result = await service.getUrlInspectorFilterDimensions('ws-1', {});
-      expect(result.page_intents).to.deep.equal([{ id: 'intent__Informational', label: 'Informational' }]);
+      expect(result.page_intents).to.deep.equal([
+        { id: `${INTENT_ROOT_NAME}__Informational`, label: 'Informational' },
+      ]);
     });
 
     it('origins contains only source__-prefixed entries', async () => {
@@ -325,9 +317,8 @@ describe('createElementsService', () => {
     // matching production rather than a looser substring search that a tag merely
     // containing `intent__` further in would also satisfy.
     const intentTag = (root, value) => `${root}__${value}`;
-    const isIntentTag = (val) => [INTENT_ROOT_NAME, LEGACY_INTENT_ROOT_NAME]
-      .some((root) => String(val).startsWith(`${root}__`));
-    // Matches the base call — no intent tag clause under EITHER root spelling.
+    const isIntentTag = (val) => String(val).startsWith(`${INTENT_ROOT_NAME}__`);
+    // Matches the base call — no intent tag clause.
     const noIntentTag = sinon.match((payload) => !payload?.filters?.advanced?.filters
       ?.some((f) => f.col === 'tags' && isIntentTag(f.val)));
     const promptCallsWith = (root) => transport.fetchElement.getCalls().filter(
@@ -340,9 +331,8 @@ describe('createElementsService', () => {
       primary_intent: 'informational', prompt: 'p-comm', prompt_topic: 'T1', volume: 10,
     };
     /**
-     * Stubs the five intent-filtered calls under one root spelling: every value
-     * empty except Commercial, which claims p-comm. A project carries exactly one
-     * spelling, so the other root's calls stay unstubbed and answer empty.
+     * Stubs the five intent-filtered calls: every value empty except Commercial,
+     * which claims p-comm.
      */
     const stubIntentRound = (root) => {
       INTENT_VALUES
@@ -356,7 +346,6 @@ describe('createElementsService', () => {
 
     beforeEach(() => {
       transport.fetchElement.withArgs('ws-1', ELEMENT_IDS.PROMPTS, noIntentTag).resolves(RAW_BASE);
-      // The common case: a project the intent rename has reached.
       stubIntentRound(INTENT_ROOT_NAME);
     });
 
@@ -373,40 +362,22 @@ describe('createElementsService', () => {
       expect(promptCalls).to.have.length(1 + INTENT_VALUES.length);
     });
 
-    it('costs five intent calls on a renamed project — no legacy retry once rows come back', async () => {
+    it('costs exactly five intent calls, all under the renamed root', async () => {
       await service.getPrompts('ws-1', ENRICH);
       expect(promptCallsWith(INTENT_ROOT_NAME)).to.have.length(INTENT_VALUES.length);
-      expect(promptCallsWith(LEGACY_INTENT_ROOT_NAME)).to.have.length(0);
+      expect(promptCallsWith(DIMENSION.INTENT)).to.have.length(0);
     });
 
-    it('retries under the pre-rename root when all five renamed-root calls come back empty', async () => {
-      // A project the rename has not reached: it answers only the legacy prefix.
-      transport.fetchElement.reset();
-      transport.fetchElement.withArgs('ws-1', ELEMENT_IDS.PROMPTS, noIntentTag).resolves(RAW_BASE);
-      stubIntentRound(LEGACY_INTENT_ROOT_NAME);
-      const log = { info: sinon.stub(), warn: sinon.stub(), error: sinon.stub() };
-      const result = await createElementsService(transport, log).getPrompts('ws-1', ENRICH);
-      // The fallback is one of the three signals LLMO-6986 waits to go quiet, so
-      // the event key is part of the contract, not incidental logging.
-      expect(log.info).to.have.been.calledWithMatch(
-        sinon.match(/retrying the pre-rename one/),
-        sinon.match({ event: 'intent-rename-legacy-retry', workspaceId: 'ws-1' }),
-      );
-      const byPrompt = Object.fromEntries(result.prompts.map((p) => [p.prompt, p.userIntent]));
-      expect(byPrompt['p-comm']).to.equal('commercial');
-      expect(byPrompt['p-info']).to.equal('');
-      expect(promptCallsWith(INTENT_ROOT_NAME)).to.have.length(INTENT_VALUES.length);
-      expect(promptCallsWith(LEGACY_INTENT_ROOT_NAME)).to.have.length(INTENT_VALUES.length);
-    });
-
-    it('leaves userIntent blank without a second round when a project has no intent tags at all', async () => {
+    it('leaves userIntent blank at the same five-call cost when a project has no intent tags', async () => {
+      // An empty round is just an empty answer — it buys no second round, so the
+      // call count does not depend on how the project is tagged.
       transport.fetchElement.reset();
       transport.fetchElement.withArgs('ws-1', ELEMENT_IDS.PROMPTS, noIntentTag).resolves(RAW_BASE);
       const result = await service.getPrompts('ws-1', ENRICH);
       result.prompts.forEach((p) => expect(p.userIntent).to.equal(''));
-      // The bounded cost of the transition: an intent-less project pays a second
-      // round that also comes back empty.
-      expect(promptCallsWith(LEGACY_INTENT_ROOT_NAME)).to.have.length(INTENT_VALUES.length);
+      const promptCalls = transport.fetchElement.getCalls()
+        .filter((c) => c.args[1] === ELEMENT_IDS.PROMPTS);
+      expect(promptCalls).to.have.length(1 + INTENT_VALUES.length);
     });
 
     it('does not enrich or make extra calls without the flag', async () => {
@@ -460,20 +431,6 @@ describe('createElementsService', () => {
       const result = await service.getPrompts('ws-1', ENRICH);
       expect(result.count).to.equal(2);
       result.prompts.forEach((p) => expect(p.userIntent).to.equal(''));
-    });
-
-    it('does not read an all-empty round as un-renamed when one of its calls failed', async () => {
-      // Every renamed-root call answers empty, but one of them because it FAILED —
-      // which is not the empty-result signature, so the legacy round must not fire
-      // and double the load on an upstream that is already struggling.
-      transport.fetchElement.reset();
-      transport.fetchElement.withArgs('ws-1', ELEMENT_IDS.PROMPTS, noIntentTag).resolves(RAW_BASE);
-      transport.fetchElement
-        .withArgs('ws-1', ELEMENT_IDS.PROMPTS, withTag(intentTag(INTENT_ROOT_NAME, 'Commercial')))
-        .rejects(new Error('intent call failed'));
-      const result = await service.getPrompts('ws-1', ENRICH);
-      result.prompts.forEach((p) => expect(p.userIntent).to.equal(''));
-      expect(promptCallsWith(LEGACY_INTENT_ROOT_NAME)).to.have.length(0);
     });
   });
 

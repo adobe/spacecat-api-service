@@ -51,8 +51,6 @@ import {
   DIMENSION_PROVISION_ORDER,
   CLOSED_DIMENSION_VALUES,
   CLOSED_DIMENSIONS,
-  INTENT_ROOT_NAME,
-  LEGACY_INTENT_ROOT_NAME,
   rootNameOfDimension,
   dimensionOfRootName,
 } from './prompt-tags.js';
@@ -117,42 +115,15 @@ export async function indexLevelByName(transport, semrushWorkspaceId, projectId,
 }
 
 /**
- * Folds ALIAS resolutions into a level index, in place, and reports what is left
- * to create.
+ * The names of `wanted` that a level index does not already carry, and therefore
+ * still have to be created under that parent.
  *
- * A wanted name that is absent while one of its aliases is present adopts that
- * alias's id under the WANTED name, so a caller reads the level by the name it
- * asked for whichever spelling the project actually carries. An alias is never
- * created — only a name with no alias present is reported missing.
- *
- * Every level index {@link ensureChildren} may hand back goes through this,
- * including the ones re-read on its recovery paths: a map that skipped the fold
- * would be missing the wanted name entirely, and the `undefined` root id that
- * follows degrades the next create to a ROOT-LEVEL one (see
- * {@link requireServerOwnedRootId}).
- *
- * @param {Map<string, string>} level - a level index, mutated in place.
+ * @param {Map<string, string>} level - a level index.
  * @param {readonly string[]} wanted - the names the caller asked for.
- * @param {Record<string, readonly string[]>} [aliases] - wanted name → older
- *   spellings that count as already present.
- * @returns {{ missing: string[], adopted: string[] }} `missing` is what still
- *   has to be created; `adopted` names the wanted names an alias resolved.
+ * @returns {string[]} what still has to be created.
  */
-function adoptAliases(level, wanted, aliases) {
-  const missing = [];
-  const adopted = [];
-  for (const name of wanted) {
-    if (!level.has(name)) {
-      const alias = (aliases?.[name] ?? []).find((a) => level.has(a));
-      if (alias) {
-        level.set(name, /** @type {string} */ (level.get(alias)));
-        adopted.push(name);
-      } else {
-        missing.push(name);
-      }
-    }
-  }
-  return { missing, adopted };
+function missingNames(level, wanted) {
+  return wanted.filter((name) => !level.has(name));
 }
 
 /**
@@ -175,19 +146,8 @@ function adoptAliases(level, wanted, aliases) {
  * @param {string} parentId - '' to create at the root level.
  * @param {readonly string[]} wanted - bare names that must exist under `parentId`.
  * @param {object} [log] - logger.
- * @param {Record<string, readonly string[]>} [aliases] - older spellings of a
- *   wanted name that count as ALREADY PRESENT. When the wanted name is absent
- *   but one of its aliases resolves, that tag's id is adopted under the wanted
- *   name and nothing is created — which is what keeps a name that upstream data
- *   is still being renamed to from being minted a second time beside the
- *   populated tag it renames (`$abv_tags$intent` vs `intent`, LLMO-6984). An
- *   alias is never created: only the wanted name is. See {@link adoptAliases}.
- * @returns {Promise<{ byName: Map<string, string>, createdNames: string[],
- *   adoptedNames: string[] }>} `byName` maps every wanted name to its tag id.
- *   `adoptedNames` names the wanted names an ALIAS resolved rather than the name
- *   itself — reported rather than left to be inferred from the map, which also
- *   carries the alias's own key and would make the inference an accident of
- *   `indexLevelByName` returning the whole level.
+ * @returns {Promise<{ byName: Map<string, string>, createdNames: string[] }>}
+ *   `byName` maps every wanted name to its tag id.
  */
 export async function ensureChildren(
   transport,
@@ -196,12 +156,11 @@ export async function ensureChildren(
   parentId,
   wanted,
   log,
-  aliases,
 ) {
   const existing = await indexLevelByName(transport, semrushWorkspaceId, projectId, parentId, log);
-  const { missing, adopted } = adoptAliases(existing, wanted, aliases);
+  const missing = missingNames(existing, wanted);
   if (missing.length === 0) {
-    return { byName: existing, createdNames: [], adoptedNames: adopted };
+    return { byName: existing, createdNames: [] };
   }
 
   let echoed;
@@ -219,14 +178,13 @@ export async function ensureChildren(
     // before deciding this is a failure. The batch is all-or-nothing upstream,
     // so one collision also fails the names we were not racing on.
     const reread = await indexLevelByName(transport, semrushWorkspaceId, projectId, parentId, log);
-    const { adopted: rereadAdopted } = adoptAliases(reread, wanted, aliases);
     if (!missing.every((name) => reread.has(name))) {
       throw e;
     }
     log?.info?.('ensureChildren: lost a create race; resolved the names a concurrent writer minted', {
       semrushWorkspaceId, projectId, parentId, resolved: missing,
     });
-    return { byName: reread, createdNames: [], adoptedNames: rereadAdopted };
+    return { byName: reread, createdNames: [] };
   }
 
   // createProjectTags resolves to a LIST of the created nodes, in request order.
@@ -237,7 +195,7 @@ export async function ensureChildren(
     }
   }
   if (missing.every((name) => existing.has(name))) {
-    return { byName: existing, createdNames: missing, adoptedNames: adopted };
+    return { byName: existing, createdNames: missing };
   }
 
   // A node the upstream did not echo back leaves a hole. Re-read rather than hand
@@ -249,7 +207,6 @@ export async function ensureChildren(
     unechoed: missing.filter((name) => !existing.has(name)),
   });
   const byName = await indexLevelByName(transport, semrushWorkspaceId, projectId, parentId, log);
-  const { adopted: rereadAdopted } = adoptAliases(byName, wanted, aliases);
   const unresolved = missing.filter((name) => !byName.has(name));
   if (unresolved.length > 0) {
     // The create answered 2xx and the draft-layer re-read still does not see the
@@ -271,7 +228,6 @@ export async function ensureChildren(
   return {
     byName,
     createdNames: missing.filter((name) => existing.has(name)),
-    adoptedNames: rereadAdopted,
   };
 }
 
@@ -325,27 +281,14 @@ const LEGACY_SOURCE_ROOT_NAME = 'source';
  * @returns {Promise<Map<string, string>>} dimension → tag id, in provisioning order.
  */
 export async function ensureDimensionRoots(transport, semrushWorkspaceId, projectId, log) {
-  const { byName, createdNames, adoptedNames } = await ensureChildren(
+  const { byName, createdNames } = await ensureChildren(
     transport,
     semrushWorkspaceId,
     projectId,
     '',
     DIMENSION_PROVISION_ORDER.map(rootNameOfDimension),
     log,
-    { [INTENT_ROOT_NAME]: [LEGACY_INTENT_ROOT_NAME] },
   );
-
-  // Report the projects the rename has not reached: adoption is invisible in the
-  // returned map (that is its point), and this is the write path's only signal of
-  // the sweep's progress — the one LLMO-6986 waits to go quiet before dropping the
-  // tolerance.
-  if (adoptedNames.includes(INTENT_ROOT_NAME)) {
-    log?.info?.(
-      'ensureDimensionRoots: resolved the pre-rename `intent` root — the '
-      + '`$abv_tags$intent` rename has not reached this project',
-      { event: 'intent-rename-legacy-root-adopted', semrushWorkspaceId, projectId },
-    );
-  }
 
   // Observability guardrail (no tolerance, no behavior change): freshly minting `origin`
   // while a legacy `source` root still sits at this level means the data reshape may have

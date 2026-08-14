@@ -30,7 +30,6 @@ import {
 import {
   DIMENSION,
   INTENT_ROOT_NAME,
-  LEGACY_INTENT_ROOT_NAME,
 } from '../../../src/support/serenity/prompt-tags.js';
 import {
   TAG_IDS,
@@ -297,36 +296,24 @@ describe('serenity tag-tree', () => {
       expect(log.warn).to.not.have.been.called;
     });
 
-    it('adopts the pre-rename `intent` root rather than minting a second one beside it', async () => {
-      // A project the intent rename has not reached. Minting `$abv_tags$intent` here
-      // would split the dimension: the new root is empty, every already-tagged prompt
-      // stays under the old one, and no read sees both.
+    it('resolves the intent root by its upstream name, keyed by dimension', async () => {
       const transport = {
-        listProjectTags: makeListProjectTagsStub(
-          dimensionTreeLevels({}, { legacyIntentRoot: true }),
-        ),
+        listProjectTags: makeListProjectTagsStub(dimensionTreeLevels()),
         createProjectTags: sinon.stub(),
       };
-      const log = fakeLog();
-      const roots = await ensureDimensionRoots(transport, WS, PROJECT, log);
+      const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
       expect(transport.createProjectTags).to.not.have.been.called;
-      // Keyed by dimension, so the caller never learns which spelling this project has…
-      expect(roots.get('intent')).to.equal(TAG_IDS.intentRoot);
-      // …but the sweep's progress stays observable.
-      expect(log.info).to.have.been.calledWithMatch(
-        sinon.match(/has not reached this project/),
-        sinon.match({ projectId: PROJECT }),
-      );
+      // Upstream names it `$abv_tags$intent`; the caller reads it by dimension.
+      expect(roots.get(DIMENSION.INTENT)).to.equal(TAG_IDS.intentRoot);
     });
 
-    it('keeps the adopted legacy root when a concurrent writer wins the create race', async () => {
-      // The race-recovery path answers from a FRESH level index, so the alias
-      // adoption has to be applied to that one too. Without it the intent root
-      // drops out of the returned map, and the `undefined` root id that follows
-      // makes the next create mint the intent VALUES as bogus root-level tags.
+    it('resolves every root when a concurrent writer wins the create race', async () => {
+      // The race-recovery path answers from a FRESH level index. A root missing from
+      // that map yields an `undefined` root id, which makes the next create mint the
+      // dimension's VALUES as bogus root-level tags.
       const rootLevel = (extra = []) => ([
         { id: 'r-category', name: 'category', children_count: 0 },
-        { id: 'r-intent-legacy', name: LEGACY_INTENT_ROOT_NAME, children_count: 5 },
+        { id: 'r-intent', name: INTENT_ROOT_NAME, children_count: 5 },
         { id: 'r-origin', name: 'origin', children_count: 2 },
         { id: 'r-type', name: 'type', children_count: 2 },
         ...extra,
@@ -343,13 +330,13 @@ describe('serenity tag-tree', () => {
         createProjectTags: sinon.stub().rejects(new Error('duplicate (parent, name)')),
       };
       const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
-      expect(roots.get(DIMENSION.INTENT)).to.equal('r-intent-legacy');
+      expect(roots.get(DIMENSION.INTENT)).to.equal('r-intent');
       expect(roots.get('source')).to.equal('r-source-other');
     });
 
-    it('prefers the renamed root over a leftover `intent` root when a project carries both', async () => {
-      // Two distinct roots is not the mid-rename shape — the rename is done here and a
-      // stale empty `intent` root simply survived it.
+    it('ignores a leftover bare `intent` root beside the renamed one', async () => {
+      // A stale empty `intent` root that survived the rename. It is not a second
+      // intent dimension: the root is resolved by its upstream name only.
       const levels = dimensionTreeLevels();
       const transport = {
         listProjectTags: makeListProjectTagsStub({
@@ -357,7 +344,7 @@ describe('serenity tag-tree', () => {
           '': [
             ...levels[''],
             {
-              id: 'stale-intent', name: LEGACY_INTENT_ROOT_NAME, parent_id: null, children_count: 0,
+              id: 'stale-intent', name: DIMENSION.INTENT, parent_id: null, children_count: 0,
             },
           ],
         }),
@@ -379,7 +366,7 @@ describe('serenity tag-tree', () => {
       const legacyLevels = {
         '': [
           { id: 'root-category', name: 'category', children_count: 0 },
-          { id: 'root-intent', name: 'intent', children_count: 5 },
+          { id: 'root-intent', name: INTENT_ROOT_NAME, children_count: 5 },
           { id: 'root-source', name: 'source', children_count: 2 },
           { id: 'root-type', name: 'type', children_count: 2 },
         ],
@@ -423,7 +410,7 @@ describe('serenity tag-tree', () => {
       const bothLevels = {
         '': [
           { id: 'root-category', name: 'category', children_count: 0 },
-          { id: 'root-intent', name: 'intent', children_count: 5 },
+          { id: 'root-intent', name: INTENT_ROOT_NAME, children_count: 5 },
           { id: 'root-origin', name: 'origin', children_count: 2 },
           { id: 'root-source', name: 'source', children_count: 2 },
           { id: 'root-type', name: 'type', children_count: 2 },
@@ -478,7 +465,7 @@ describe('serenity tag-tree', () => {
       const listProjectTags = makeListProjectTagsStub({
         '': [
           { id: 'r-cat', name: 'category', children_count: 0 },
-          { id: 'r-int', name: 'intent', children_count: 0 },
+          { id: 'r-int', name: INTENT_ROOT_NAME, children_count: 0 },
           { id: 'r-org', name: 'origin', children_count: 0 },
         ],
         'r-int': [],
@@ -833,19 +820,13 @@ describe('serenity tag-tree', () => {
 
     // The descendant branch reads `path[0]`, which upstream fills with the root's
     // real name — so this is where an unfolded `$abv_tags$intent` would leak out and
-    // silently disarm every guard that compares against `DIMENSION.*`. Both spellings
-    // must answer the same dimension; LLMO-6986 drops the legacy row.
-    [
-      { label: 'renamed', levels: dimensionTreeLevels() },
-      { label: 'pre-rename', levels: dimensionTreeLevels({}, { legacyIntentRoot: true }) },
-    ].forEach(({ label, levels }) => {
-      it(`reports a value under the ${label} intent root as the \`intent\` dimension`, async () => {
-        const transport = { listProjectTags: makeListProjectTagsStub(levels) };
-        const id = TAG_IDS.intentCommercial;
-        const found = (await findTagsInTree(transport, WS, PROJECT, [id], fakeLog())).get(id);
-        expect(found.kind).to.equal('descendant');
-        expect(found.rootName).to.equal(DIMENSION.INTENT);
-      });
+    // silently disarm every guard that compares against `DIMENSION.*`.
+    it('reports a value under the intent root as the `intent` dimension', async () => {
+      const transport = { listProjectTags: makeListProjectTagsStub(dimensionTreeLevels()) };
+      const id = TAG_IDS.intentCommercial;
+      const found = (await findTagsInTree(transport, WS, PROJECT, [id], fakeLog())).get(id);
+      expect(found.kind).to.equal('descendant');
+      expect(found.rootName).to.equal(DIMENSION.INTENT);
     });
 
     it('reports a depth-3 sub-category with the dimension it descends from', async () => {

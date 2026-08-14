@@ -82,28 +82,17 @@ export const DIMENSION_PROVISION_ORDER = Object.freeze([
 export const INTENT_ROOT_NAME = '$abv_tags$intent';
 
 /**
- * The pre-rename intent root name, identical to the dimension key.
- *
- * TEMPORARY — the rename runs project by project from the data-service migration
- * CLI (LLMO-6985), so a project can carry either spelling until that sweep
- * completes. Both the tag-tree resolver and the Elements read path tolerate this
- * one; LLMO-6986 removes the tolerance once no live project carries it.
- *
- * Each of the three tolerances logs when it fires, under its own `event` key, so
- * "has the sweep finished?" is a query rather than a judgement call:
- * `intent-rename-legacy-root-adopted` (tag-tree resolved the pre-rename root),
- * `intent-rename-legacy-retry` (the Elements enrichment fell back), and
- * `intent-rename-legacy-tags-present` (filter dimensions still saw `intent__`
- * tags). LLMO-6986 is safe once all three have gone quiet.
- */
-export const LEGACY_INTENT_ROOT_NAME = DIMENSION.INTENT;
-
-/**
  * Every name reserved at the root level: the four roots named after their
  * dimension, plus BOTH intent spellings — the upstream `$abv_tags$intent` and
- * the pre-rename `intent`, which stays reserved while any project still carries
- * it. A customer value may shadow neither, or the tree would hold two tags a
- * reader cannot tell apart at the level that decides a tag's dimension.
+ * the bare `intent`.
+ *
+ * The bare one is reserved even though no root is named that, because
+ * {@link dimensionOfRootName} maps it to the intent dimension: a customer
+ * category named `intent` at the root level would be READ as the intent
+ * dimension itself. A customer value may shadow neither, or the tree would hold
+ * two tags a reader cannot tell apart at the level that decides a tag's
+ * dimension. `DIMENSION_PROVISION_ORDER` is spread unmapped, which is what
+ * carries the bare spelling into this list.
  */
 export const RESERVED_ROOT_NAMES = Object.freeze([
   ...DIMENSION_PROVISION_ORDER,
