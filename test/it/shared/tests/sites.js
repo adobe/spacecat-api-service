@@ -418,6 +418,18 @@ export default function siteTests(getHttpClient, resetData) {
         expect(res.body.sites).to.be.an('array').that.is.empty;
       });
 
+      it('admin: tier=PRE_ONBOARD is accepted (internal-only, not customer-visible) since this filter is already admin-gated', async () => {
+        const http = getHttpClient();
+        // Mirrors the sibling GET /sites/by-tier/PRE_ONBOARD IT test: no PRE_ONBOARD
+        // entitlement is seeded above, so this only asserts the value is ACCEPTED
+        // (200, echoed in pagination) rather than rejected with 400, not that any
+        // specific site is returned.
+        const res = await http.admin.get('/sites?tier=PRE_ONBOARD');
+        expect(res.status).to.equal(200);
+        expect(res.body.pagination).to.include({ hasMore: false, tier: 'PRE_ONBOARD' });
+        expect(res.body.sites).to.be.an('array');
+      });
+
       it('admin: tier is rejected with 400 when not a recognized value', async () => {
         const http = getHttpClient();
         const res = await http.admin.get('/sites?tier=BOGUS_TIER');
