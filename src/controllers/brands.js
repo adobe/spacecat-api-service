@@ -1682,46 +1682,16 @@ function BrandsController(ctx, log, env) {
           return badRequest('market and languageCode are required when generatePrompts is true');
         }
         if (isPendingBrand) {
-          // Defer provisioning: persist the chosen (market, languageCode) AND
-          // the primary URL (if the user entered one before saving as pending)
-          // on the brand, so activation can provision the real sub-workspace +
-          // project later (stored in brands.pending_semrush_provisioning). The primary
-          // URL otherwise lives only on the Semrush side, so a site-less draft
-          // would have nowhere to keep it. The row lands as 'pending' because it
-          // has no anchor (no site_id, no semrush_sub_workspace_id) — see
+          // A pending (draft) brand defers ALL Semrush provisioning — no
+          // sub-workspace, no project. Its markets are added later from the Markets
+          // tab, and pending→active activation is sub-workspace-only (LLMO-6405), so
+          // nothing needs to be stashed at create time. The row lands as 'pending'
+          // because it has no anchor (no site_id, no semrush_sub_workspace_id) — see
           // upsertBrand's anchor check.
-          const primaryUrl = (Array.isArray(brandData.urls) ? brandData.urls : [])
-            .map((u) => (typeof u === 'string' ? u : u?.value))
-            .find(hasText) || null;
-          // AI models (LLMs) the wizard collected. Unlike the direct-provision
-          // path they are NOT required here — a draft can be saved before the
-          // user picks any, and they can be edited per-market later from the
-          // Markets tab. Seed the initial market's modelIds with them when
-          // present so activation applies them; omit the key entirely when none
-          // were chosen (mirrors normalizePendingSemrushProvisioning).
-          const seedModelIds = Array.isArray(brandData.semrushModelIds)
-            ? brandData.semrushModelIds.filter(hasText)
-            : [];
-          // A no-prompt draft may carry NO market at all (location/language are
-          // optional then) — stash only the market actually picked. The activate
-          // flow already handles 0..N stashed markets: an empty list + a primary
-          // URL provisions a single US/EN fallback project, and an empty list +
-          // no URL provisions a sub-workspace-only brand.
-          // TODO: the wizard creates at most one market today; if multi-market
-          // draft creation is added, build this array from all selected markets.
-          const markets = [];
-          if (hasSemrushMarket) {
-            const initialMarket = { market, languageCode };
-            if (seedModelIds.length > 0) {
-              initialMarket.modelIds = seedModelIds;
-            }
-            markets.push(initialMarket);
-          }
-          brandData.pendingSemrushProvisioning = {
-            primaryUrl,
-            markets,
-            generatePrompts,
-          };
+          //
+          // SITES-49448: brands.pending_semrush_provisioning is being retired — this
+          // was its last create-time writer. The staging blob no longer serves any
+          // activation path, so the draft is saved without one.
         } else if (hasSemrushMarket) {
           const brandDomain = brandDomainFromPayload(brandData);
           if (!brandDomain || !hasText(brandDomain)) {
@@ -1942,28 +1912,11 @@ function BrandsController(ctx, log, env) {
       // baseUrl is read-only (resolved from baseSiteId) — strip from updates.
       delete updates.baseUrl;
 
-      // pendingSemrushProvisioning is the deferred-provisioning staging blob for
-      // a *pending* (draft) brand. The draft UI mutates it via PATCH — the
-      // Markets tab appends a market / edits a market's LLMs before activation.
-      // Permit that ONLY while the brand is (and stays) pending: an active brand
-      // keeps its markets on the Semrush side, so a PATCH must never inject a
-      // primaryUrl/markets onto a live brand that activation would later trust.
-      // When the target isn't pending (or the same PATCH is flipping it to
-      // active — activation is the serenity endpoint's job, not PATCH's), strip
-      // it. Only pay for the status read when the field is actually present.
-      if (updates.pendingSemrushProvisioning !== undefined) {
-        const { data: currentBrand } = await postgrestClient
-          .from('brands')
-          .select('status')
-          .eq('organization_id', spaceCatId)
-          .eq('id', brandUuid)
-          .maybeSingle();
-        const isPending = currentBrand?.status === 'pending'
-          && (updates.status === undefined || updates.status === 'pending');
-        if (!isPending) {
-          delete updates.pendingSemrushProvisioning;
-        }
-      }
+      // pendingSemrushProvisioning was the deferred-provisioning staging blob for a
+      // *pending* (draft) brand, mutated by the draft Markets-tab UI via PATCH. That
+      // UI is gone and the blob is being retired (SITES-49448): never accept a
+      // client-supplied value, so no PATCH can (re)populate the column on any brand.
+      delete updates.pendingSemrushProvisioning;
 
       // Capture the competitor list BEFORE the update so the Semrush re-sync can
       // compute which competitors were removed (old − new) — the only ones it
