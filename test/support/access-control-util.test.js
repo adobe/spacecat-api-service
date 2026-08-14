@@ -780,6 +780,7 @@ describe('Access Control Util', () => {
 
       mockTrialUser = {
         findByEmailId: sinon.stub(),
+        findByExternalUserId: sinon.stub(),
         create: sinon.stub(),
       };
 
@@ -1340,7 +1341,37 @@ describe('Access Control Util', () => {
     const TEST_IMS_GUID = '145D1F646365E9C70A495FC8@17481f256365e20f495cc2.e';
     const EXISTING_IMS_GUID = '1BB32091680634E20A495CA8@17481f256365e20f495cc2.e';
 
-    it('should backfill externalUserId for PAID-tier trial user that is missing it', async () => {
+    it('should find PAID-tier trial user by externalUserId and refresh lastSeenAt', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-paid',
+        getProductCode: () => 'llmo',
+        getTier: () => 'PAID',
+      };
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
+      mockAuthInfo.getProfile.returns({
+        email: TEST_IMS_GUID,
+        // no trial_email — paying-customer trial users don't store email
+      });
+
+      const existingUser = {
+        getExternalUserId: sinon.stub().returns(TEST_IMS_GUID),
+        setExternalUserId: sinon.stub(),
+        setLastSeenAt: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+      mockTrialUser.findByExternalUserId.resolves(existingUser);
+
+      await util.validateEntitlement(mockOrg, null, 'llmo');
+
+      expect(mockTrialUser.findByExternalUserId).to.have.been.calledWith(TEST_IMS_GUID);
+      expect(mockTrialUser.findByEmailId).to.not.have.been.called;
+      expect(existingUser.setExternalUserId).to.not.have.been.called;
+      expect(existingUser.setLastSeenAt).to.have.been.calledOnceWith(sinon.match.string);
+      expect(existingUser.save).to.have.been.calledOnce;
+    });
+
+    it('should fall back to legacy emailId lookup and backfill externalUserId when '
+      + 'PAID-tier trial user is not found by externalUserId', async () => {
       const entitlement = {
         getId: () => 'entitlement-paid',
         getProductCode: () => 'llmo',
@@ -1351,31 +1382,42 @@ describe('Access Control Util', () => {
         trial_email: 'trial@example.com',
         email: TEST_IMS_GUID,
       });
+      mockTrialUser.findByExternalUserId.resolves(null);
 
       const existingUser = {
         getExternalUserId: sinon.stub().returns(null),
         setExternalUserId: sinon.stub(),
+        setLastSeenAt: sinon.stub(),
         save: sinon.stub().resolves(),
       };
       mockTrialUser.findByEmailId.resolves(existingUser);
 
       await util.validateEntitlement(mockOrg, null, 'llmo');
 
+      expect(mockTrialUser.findByEmailId).to.have.been.calledWith('trial@example.com');
       expect(existingUser.setExternalUserId).to.have.been.calledWith(TEST_IMS_GUID);
+      expect(existingUser.setLastSeenAt).to.have.been.calledOnceWith(sinon.match.string);
       expect(existingUser.save).to.have.been.calledOnce;
     });
 
-    it('should not overwrite externalUserId for PAID-tier user that already has it set', async () => {
+    it('should not overwrite externalUserId for a legacy PAID-tier user that already has it '
+      + 'set, but still refreshes lastSeenAt', async () => {
       const entitlement = {
         getId: () => 'entitlement-paid',
         getProductCode: () => 'llmo',
         getTier: () => 'PAID',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
+      mockAuthInfo.getProfile.returns({
+        trial_email: 'trial@example.com',
+        email: TEST_IMS_GUID,
+      });
+      mockTrialUser.findByExternalUserId.resolves(null);
 
       const existingUser = {
         getExternalUserId: sinon.stub().returns(EXISTING_IMS_GUID),
         setExternalUserId: sinon.stub(),
+        setLastSeenAt: sinon.stub(),
         save: sinon.stub().resolves(),
       };
       mockTrialUser.findByEmailId.resolves(existingUser);
@@ -1383,10 +1425,11 @@ describe('Access Control Util', () => {
       await util.validateEntitlement(mockOrg, null, 'llmo');
 
       expect(existingUser.setExternalUserId).to.not.have.been.called;
-      expect(existingUser.save).to.not.have.been.called;
+      expect(existingUser.setLastSeenAt).to.have.been.calledOnceWith(sinon.match.string);
+      expect(existingUser.save).to.have.been.calledOnce;
     });
 
-    it('should skip externalUserId backfill for PAID-tier when profile has no email', async () => {
+    it('should skip trial user lookup for PAID-tier when profile has no email', async () => {
       const entitlement = {
         getId: () => 'entitlement-paid',
         getProductCode: () => 'llmo',
@@ -1394,32 +1437,30 @@ describe('Access Control Util', () => {
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
-      const existingUser = {
-        getExternalUserId: sinon.stub().returns(null),
-        setExternalUserId: sinon.stub(),
-        save: sinon.stub().resolves(),
-      };
-      mockTrialUser.findByEmailId.resolves(existingUser);
-
       mockAuthInfo.getProfile.returns({
         trial_email: 'trial@example.com',
-        // no email field — findByEmailId should not be called
+        // no email field — neither lookup should be called
       });
 
       await util.validateEntitlement(mockOrg, null, 'llmo');
 
+      expect(mockTrialUser.findByExternalUserId).to.not.have.been.called;
       expect(mockTrialUser.findByEmailId).to.not.have.been.called;
-      expect(existingUser.setExternalUserId).to.not.have.been.called;
-      expect(existingUser.save).to.not.have.been.called;
     });
 
-    it('should skip externalUserId backfill for PAID-tier when findByEmailId returns null', async () => {
+    it('should do nothing for PAID-tier when neither externalUserId nor legacy emailId '
+      + 'lookup finds a trial user', async () => {
       const entitlement = {
         getId: () => 'entitlement-paid',
         getProductCode: () => 'llmo',
         getTier: () => 'PAID',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
+      mockAuthInfo.getProfile.returns({
+        trial_email: 'trial@example.com',
+        email: TEST_IMS_GUID,
+      });
+      mockTrialUser.findByExternalUserId.resolves(null);
       mockTrialUser.findByEmailId.resolves(null);
 
       await util.validateEntitlement(mockOrg, null, 'llmo');
@@ -1427,7 +1468,7 @@ describe('Access Control Util', () => {
       expect(mockTrialUser.create).to.not.have.been.called;
     });
 
-    it('should not backfill externalUserId for PAID-tier when caller is S2S consumer', async () => {
+    it('should not look up a trial user for PAID-tier when caller is S2S consumer', async () => {
       const entitlement = {
         getId: () => 'entitlement-paid',
         getProductCode: () => 'llmo',
@@ -1443,31 +1484,38 @@ describe('Access Control Util', () => {
       const existingUser = {
         getExternalUserId: sinon.stub().returns(null),
         setExternalUserId: sinon.stub(),
+        setLastSeenAt: sinon.stub(),
         save: sinon.stub().resolves(),
       };
+      mockTrialUser.findByExternalUserId.resolves(existingUser);
       mockTrialUser.findByEmailId.resolves(existingUser);
 
       await util.validateEntitlement(mockOrg, null, 'llmo');
 
+      expect(mockTrialUser.findByExternalUserId).to.not.have.been.called;
       expect(mockTrialUser.findByEmailId).to.not.have.been.called;
       expect(existingUser.setExternalUserId).to.not.have.been.called;
       expect(existingUser.save).to.not.have.been.called;
     });
 
-    it('should not throw when PAID-tier backfill save fails', async () => {
+    it('should not throw when PAID-tier lastSeenAt save fails', async () => {
       const entitlement = {
         getId: () => 'entitlement-paid',
         getProductCode: () => 'llmo',
         getTier: () => 'PAID',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
+      mockAuthInfo.getProfile.returns({
+        email: TEST_IMS_GUID,
+      });
 
       const existingUser = {
-        getExternalUserId: sinon.stub().returns(null),
+        getExternalUserId: sinon.stub().returns(TEST_IMS_GUID),
         setExternalUserId: sinon.stub(),
+        setLastSeenAt: sinon.stub(),
         save: sinon.stub().rejects(new Error('DDB throttle')),
       };
-      mockTrialUser.findByEmailId.resolves(existingUser);
+      mockTrialUser.findByExternalUserId.resolves(existingUser);
 
       await expect(util.validateEntitlement(mockOrg, null, 'llmo')).to.not.be.rejected;
     });
