@@ -16,27 +16,9 @@ import { PROMPTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/prompt/enums
 import {
   num, brandTarget, parseLimitOffset, resolveCountryForFts, requiredLlmFromQuery,
   llmToEngine, promptMatchesResponsesQuery, mentionedBrandRestLabel,
-  PROMPTS_RESPONSES_PROMPTS_SCAN_LIMIT,
+  PROMPTS_RESPONSES_PROMPTS_SCAN_LIMIT, toIsoDate, hasRelationIdentity,
+  relationStatusFor, deriveResponse,
 } from '../grpc-utils.js';
-
-/**
- * Normalizes a relation `date` into an ISO `YYYY-MM-DD` string. The gRPC relation
- * value carries `date` as a protobuf Date message (`{ year, month, day }`, plus a
- * `$typeName` tag), not a scalar — emitting it verbatim leaks that struct to callers.
- * Passes an already-formatted string through unchanged; returns `null` when the date
- * is absent or incomplete.
- *
- * @param {object|string|null|undefined} d
- * @returns {string|null}
- */
-function toIsoDate(d) {
-  if (!d) { return null; }
-  if (typeof d === 'string') { return d; }
-  const { year, month, day } = d;
-  if (!year || !month || !day) { return null; }
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${year}-${pad(month)}-${pad(day)}`;
-}
 
 export async function handlePromptsResponses(sp, clients) {
   const domain = sp.get('domain')?.trim();
@@ -64,7 +46,6 @@ export async function handlePromptsResponses(sp, clients) {
   // (missing identity → Promise.resolve(null)) is indistinguishable from a
   // relation call that fulfilled with a null value, which hides why a row has no
   // full response.
-  const hasRelationIdentity = (p) => Boolean(p.promptHash && String(p.serpId ?? '') && p.topicId);
   const attempted = page.map(hasRelationIdentity);
   const settled = await Promise.allSettled(
     page.map((p) => {
@@ -81,18 +62,12 @@ export async function handlePromptsResponses(sp, clients) {
     const rel = relations[i]?.value ?? null;
     // Per-item relation status so callers (e.g. claims_extraction) can tell a real
     // full response from a degraded one. `error` was previously swallowed silently.
-    let relationStatus;
-    if (!attempted[i]) { relationStatus = 'skipped'; } else if (settled[i].status === 'rejected') { relationStatus = 'error'; } else { relationStatus = 'ok'; }
+    const relationStatus = relationStatusFor({ attempted: attempted[i], settled: settled[i] });
     // Response provenance. Preserves the exact legacy `response` value (nullish-coalesce
     // chain) while exposing whether it came from the full relation response or the
     // brief excerpt. LLMO-6585: claims must never be extracted from an excerpt that is
     // mistaken for the full answer, so the excerpt fallback is now explicit, not silent.
-    const relResponse = rel?.response;
-    const excerpt = p.briefResponse ?? '';
-    const usedFullResponse = relResponse != null; // relation supplied a `response` field
-    const response = usedFullResponse ? relResponse : excerpt;
-    let responseSource;
-    if (usedFullResponse) { responseSource = 'full'; } else if (excerpt !== '') { responseSource = 'excerpt'; } else { responseSource = 'none'; }
+    const { response, responseSource, responseComplete } = deriveResponse(rel, p.briefResponse);
     return {
       prompt: p.prompt,
       promptHash: String(p.promptHash ?? ''),
@@ -103,7 +78,7 @@ export async function handlePromptsResponses(sp, clients) {
       response,
       responseExcerpt: p.briefResponse ?? '',
       responseSource,
-      responseComplete: responseSource === 'full' && response.length > 0,
+      responseComplete,
       relationStatus,
       date: toIsoDate(rel?.date),
       citedPages: Array.isArray(rel?.sources) ? rel.sources : [],
