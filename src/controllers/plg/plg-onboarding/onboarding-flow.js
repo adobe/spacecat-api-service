@@ -750,22 +750,29 @@ export async function performAsoPlgOnboarding({
         && detectedDeliveryType !== SiteModel.DELIVERY_TYPES.OTHER
         && detectedDeliveryType !== currentDeliveryType
       ) {
-        log.warn(`Delivery type mismatch for site ${site.getId()} (${baseURL}): stored=${currentDeliveryType} detected=${detectedDeliveryType}`);
-        const channelId = env.SLACK_PLG_ONBOARDING_CHANNEL_ID;
-        const token = env.SLACK_BOT_TOKEN;
-        /* c8 ignore next */
-        if (channelId && token) {
-          const message = ':warning: *PLG Onboarding — Delivery Type Mismatch*\n\n'
-            + `• *Site ID:* \`${site.getId()}\`\n`
-            + `• *Domain:* \`${baseURL}\`\n`
-            + `• *Org ID:* \`${organizationId}\`\n`
-            + `• *Org:* ${organization.getName()} (\`${imsOrgId}\`)\n`
-            + `• *Stored delivery type:* \`${currentDeliveryType}\`\n`
-            + `• *Detected delivery type:* \`${detectedDeliveryType}\``;
-          try {
-            await context.postSlackMessage(channelId, message, token);
-          } catch (err) {
-            log.error(`Failed to post delivery type mismatch alert: ${err.message}`);
+        if (currentDeliveryType === SiteModel.DELIVERY_TYPES.OTHER) {
+          // Stored type was a placeholder ("other") and detection found a confident
+          // signal — safe to auto-correct without a human review step.
+          log.info(`Auto-correcting delivery type for site ${site.getId()} (${baseURL}): stored=${currentDeliveryType} detected=${detectedDeliveryType}`);
+          site.setDeliveryType(detectedDeliveryType);
+        } else {
+          log.warn(`Delivery type mismatch for site ${site.getId()} (${baseURL}): stored=${currentDeliveryType} detected=${detectedDeliveryType}`);
+          const channelId = env.SLACK_PLG_ONBOARDING_CHANNEL_ID;
+          const token = env.SLACK_BOT_TOKEN;
+          /* c8 ignore next */
+          if (channelId && token) {
+            const message = ':warning: *PLG Onboarding — Delivery Type Mismatch*\n\n'
+              + `• *Site ID:* \`${site.getId()}\`\n`
+              + `• *Domain:* \`${baseURL}\`\n`
+              + `• *Org ID:* \`${organizationId}\`\n`
+              + `• *Org:* ${organization.getName()} (\`${imsOrgId}\`)\n`
+              + `• *Stored delivery type:* \`${currentDeliveryType}\`\n`
+              + `• *Detected delivery type:* \`${detectedDeliveryType}\``;
+            try {
+              await context.postSlackMessage(channelId, message, token);
+            } catch (err) {
+              log.error(`Failed to post delivery type mismatch alert: ${err.message}`);
+            }
           }
         }
       }
