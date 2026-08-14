@@ -118,13 +118,6 @@ describe('Preflight Controller', () => {
     Configuration: {
       findLatest: sandbox.stub().resolves(mockConfiguration),
     },
-    Organization: {
-      findById: sandbox.stub().resolves({
-        getId: () => 'org-123',
-        // Default org identity for the mock; per-test overrides as needed.
-        getImsOrgId: () => 'TEST123456@AdobeOrg',
-      }),
-    },
   };
 
   const mockSqs = {
