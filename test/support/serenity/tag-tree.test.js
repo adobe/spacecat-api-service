@@ -354,7 +354,9 @@ describe('serenity tag-tree', () => {
       const roots = await ensureDimensionRoots(transport, WS, PROJECT, log);
       expect(roots.get('intent')).to.equal(TAG_IDS.intentRoot);
       expect(transport.createProjectTags).to.not.have.been.called;
-      expect(log.info).to.not.have.been.called;
+      // The split-root warn is for a root this call MINTED beside a pre-rename one.
+      // Nothing was created here, so a leftover bare root alone must not trip it.
+      expect(log.warn).to.not.have.been.calledWithMatch(/intent rename may have missed/);
     });
 
     it('creates a fresh `origin` root, leaving a legacy `source` root untouched', async () => {
@@ -589,11 +591,13 @@ describe('serenity tag-tree', () => {
   // and maps the existing `source` as the producing-system root (WP-S2). The
   // observability guardrail fires to surface the reshape-missed state.
   describe('ensureDimensionRoots on a reshape-missed project', () => {
-    // Shared levels fixture: legacy `source` (ai/human), no `origin`.
+    // Shared levels fixture: legacy `source` (ai/human), no `origin`. The intent
+    // root is already renamed here so this fixture isolates the `origin` concern —
+    // the un-renamed intent case is its own test below.
     const midRenameLevels = () => ({
       '': [
         { id: 'root-category', name: 'category', children_count: 0 },
-        { id: 'root-intent', name: 'intent', children_count: 5 },
+        { id: 'root-intent', name: INTENT_ROOT_NAME, children_count: 5 },
         { id: 'root-source', name: 'source', children_count: 2 },
         { id: 'root-type', name: 'type', children_count: 2 },
       ],
@@ -622,6 +626,52 @@ describe('serenity tag-tree', () => {
       expect(roots.get('source')).to.equal('root-source');
       // Guardrail: minting `origin` while `source` was already present triggers the warn.
       expect(log.warn).to.have.been.calledWithMatch(/reshape may have missed/);
+      // Pin the create batch: `origin` is the ONLY root missing from this fixture.
+      // Without this, a fixture whose intent root is spelled the pre-rename way
+      // would silently add `$abv_tags$intent` to the batch and still pass.
+      expect(createProjectTags).to.have.been.calledOnce;
+      expect(createProjectTags.firstCall.args[2]).to.deep.equal(['origin']);
+      expect(log.warn).to.not.have.been.calledWithMatch(/intent rename may have missed/);
+    });
+
+    // The intent counterpart: a project the rename never reached still names its
+    // populated root `intent`. The strict resolver mints `$abv_tags$intent` beside
+    // it, which splits the dimension and strands every prompt tagged under the old
+    // root. That state must not pass through silently — the fleet-sweep gate proves
+    // it is empty at merge time, not that it stays empty.
+    it('warns when it mints a fresh intent root beside a pre-rename `intent` one', async () => {
+      const levels = midRenameLevels();
+      levels[''] = levels[''].map(
+        (t) => (t.name === INTENT_ROOT_NAME ? { ...t, name: DIMENSION.INTENT } : t),
+      );
+      const listProjectTags = makeListProjectTagsStub(levels);
+      const createProjectTags = sinon.stub().callsFake(
+        (_ws, _proj, names, options = {}) => Promise.resolve(
+          names.map((name) => ({ id: `new-${name}`, name, parent_id: options.parentId ?? null })),
+        ),
+      );
+      const log = fakeLog();
+      const transport = { listProjectTags, createProjectTags };
+      const roots = await ensureDimensionRoots(transport, WS, PROJECT, log);
+
+      // The split really happens: a second, empty intent root is minted.
+      expect(createProjectTags.firstCall.args[2]).to.include(INTENT_ROOT_NAME);
+      expect(roots.get('intent')).to.equal(`new-${INTENT_ROOT_NAME}`);
+      // And it is loud rather than silent.
+      expect(log.warn).to.have.been.calledWithMatch(/intent rename may have missed/);
+    });
+
+    // The common case must stay quiet, or the warn is noise nobody reads.
+    it('stays quiet about intent when the project is already renamed', async () => {
+      const listProjectTags = makeListProjectTagsStub(midRenameLevels());
+      const createProjectTags = sinon.stub().callsFake(
+        (_ws, _proj, names, options = {}) => Promise.resolve(
+          names.map((name) => ({ id: `new-${name}`, name, parent_id: options.parentId ?? null })),
+        ),
+      );
+      const log = fakeLog();
+      await ensureDimensionRoots({ listProjectTags, createProjectTags }, WS, PROJECT, log);
+      expect(log.warn).to.not.have.been.calledWithMatch(/intent rename may have missed/);
     });
   });
 

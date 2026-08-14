@@ -16,6 +16,7 @@ import { SEP } from './constants.js';
 import { mapWithConcurrency } from './concurrency.js';
 import { splitDateRangeIntoWeeksBackward } from './week-utils.js';
 import {
+  DIMENSION,
   INTENT_VALUE,
   INTENT_ROOT_NAME,
 } from '../serenity/prompt-tags.js';
@@ -139,8 +140,17 @@ export function createElementsService(transport, log) {
       // below would repoint result's prototype instead of adding a property for
       // those (rather than dropping such tags, routing them as "reserved" sends
       // them into the generic `tags` array, same as any other collision).
+      //
+      // `intent` is reserved explicitly because it is NOT one of `result`'s keys —
+      // the intent dimension surfaces as `page_intents`. Without it, a project the
+      // intent rename has not reached would have its pre-rename `intent__` tags
+      // caught by the catch-all and published as a dynamic, customer-visible
+      // `intent` filter group — the exposure the `$abv_tags$` marker exists to
+      // prevent. Reserving it routes them to the generic `tags` array instead.
+      // This is a blast-radius bound on an un-swept project, not a tolerance: the
+      // tags are still not read as intents.
       const reservedResultKeys = [
-        ...Object.keys(result), 'tags', '__proto__', 'constructor', 'prototype',
+        ...Object.keys(result), DIMENSION.INTENT, 'tags', '__proto__', 'constructor', 'prototype',
       ];
       const { tags, ...otherGroups } = transformOtherTagsForFilterDimensions(
         rawTopics,
@@ -220,7 +230,7 @@ export function createElementsService(transport, log) {
 
       // One intent-filtered call per intent value, in parallel (~one extra
       // round-trip). Each call degrades independently.
-      const fetchIntentRound = (intentRoot) => mapWithConcurrency(
+      const fetchIntentRound = () => mapWithConcurrency(
         Object.values(INTENT_VALUE),
         INTENT_ENRICH_CONCURRENCY,
         async (value) => {
@@ -231,22 +241,26 @@ export function createElementsService(transport, log) {
               ELEMENT_IDS.PROMPTS,
               buildPromptsPayload({
                 ...promptParams,
-                tags: [...(promptParams.tags ?? []), `${intentRoot}${SEP}${value}`],
+                tags: [...(promptParams.tags ?? []), `${INTENT_ROOT_NAME}${SEP}${value}`],
               }),
             );
             return { key, rows: transformPromptsResponse(raw).prompts };
           } catch (e) {
-            log?.warn?.(`serenity userIntent enrichment: intent-filtered PROMPTS call failed for '${value}' under '${intentRoot}'`, { workspaceId, error: e?.message });
+            // A failed call contributes an empty round, so it reaches the caller as a
+            // blank `userIntent` — indistinguishable in the response from a prompt that
+            // genuinely carries no intent tag. This warn is the only thing that tells
+            // the two apart, so it carries an `event` key to stay queryable.
+            log?.warn?.(
+              `serenity userIntent enrichment: intent-filtered PROMPTS call failed for '${value}'`,
+              { workspaceId, error: e?.message, event: 'intent-enrichment-call-failed' },
+            );
             return { key, rows: [] };
           }
         },
       );
 
       // Base call runs alongside the intent round rather than after it.
-      const [base, intentResults] = await Promise.all([
-        basePromise,
-        fetchIntentRound(INTENT_ROOT_NAME),
-      ]);
+      const [base, intentResults] = await Promise.all([basePromise, fetchIntentRound()]);
 
       // (prompt, prompt_topic) → own intent. A prompt carries exactly one intent
       // tag, so within a single slice it appears in at most one filtered result.

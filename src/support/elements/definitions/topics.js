@@ -11,7 +11,7 @@
  */
 
 import { resolveElementModel, SEP } from '../constants.js';
-import { INTENT_ROOT_NAME } from '../../serenity/prompt-tags.js';
+import { HIDDEN_TAG_MARKER, INTENT_ROOT_NAME } from '../../serenity/prompt-tags.js';
 
 /**
  * Builds the payload for the Topics (Tags) filter-dimensions element (row 3).
@@ -180,6 +180,13 @@ const KNOWN_TAG_PREFIXES = [
  * group — this catch-all is where an unrecognised dimension would otherwise leak
  * into the filter payload under its raw upstream name.
  *
+ * Anything carrying the `$abv_tags$` marker is dropped outright, whether or not it
+ * is a known prefix. The marker is what hides a root from the customer-facing Brand
+ * Presence tag filter upstream, so surfacing a marked family here would defeat it.
+ * Gating on the marker rather than on the known-prefix list keeps that control
+ * correct when Semrush adds a second marked root, instead of relying on someone
+ * remembering to extend the list.
+ *
  * - `prefix__value` tags are grouped by their prefix into a dynamic key
  *   (e.g. `{ type: [{ id: 'type__branded', label: 'branded' }, ...] }`), unless
  *   `prefix` collides with an entry in `reservedResultKeys`, in which case the
@@ -210,7 +217,9 @@ const KNOWN_TAG_PREFIXES = [
 export function transformOtherTagsForFilterDimensions(raw, reservedResultKeys = []) {
   const values = (raw?.blocks?.value ?? [])
     .map((item) => String(item.value ?? ''))
-    .filter((value) => value !== '' && !KNOWN_TAG_PREFIXES.some((p) => value.startsWith(p)));
+    .filter((value) => value !== ''
+      && !value.startsWith(HIDDEN_TAG_MARKER)
+      && !KNOWN_TAG_PREFIXES.some((p) => value.startsWith(p)));
 
   const groups = Object.create(null);
   const tags = [];

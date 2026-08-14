@@ -69,35 +69,69 @@ export const DIMENSION_PROVISION_ORDER = Object.freeze([
 ]);
 
 /**
- * The upstream ROOT NAME of the `intent` dimension.
+ * The agreed marker that hides a tag tree entry from the customer-facing Brand
+ * Presence tag filter: Semrush suppresses any entry whose name starts with it.
  *
- * Semrush hides a tag tree entry whose name starts with the agreed `$abv_tags$`
- * marker from the customer-facing Brand Presence tag filter, so the intent root
- * is named `$abv_tags$intent` upstream. `intent` remains the DIMENSION KEY
- * everywhere else — the `type` a client names on the tag endpoints, the key of
- * the closed vocabularies, the value elmo reads — and only the root's upstream
- * name carries the marker. The five intent VALUES stay bare-named
- * (`Informational`, `Commercial`, …); the rename does not touch them.
+ * This is a data-exposure control, not a naming convention, so anything deciding
+ * what reaches a customer-visible payload keys on THIS rather than on a list of
+ * known marked names.
  */
-export const INTENT_ROOT_NAME = '$abv_tags$intent';
+export const HIDDEN_TAG_MARKER = '$abv_tags$';
 
 /**
- * Every name reserved at the root level: the four roots named after their
- * dimension, plus BOTH intent spellings — the upstream `$abv_tags$intent` and
- * the bare `intent`.
+ * The upstream ROOT NAME of the `intent` dimension.
  *
- * The bare one is reserved even though no root is named that, because
- * {@link dimensionOfRootName} maps it to the intent dimension: a customer
- * category named `intent` at the root level would be READ as the intent
- * dimension itself. A customer value may shadow neither, or the tree would hold
- * two tags a reader cannot tell apart at the level that decides a tag's
- * dimension. `DIMENSION_PROVISION_ORDER` is spread unmapped, which is what
- * carries the bare spelling into this list.
+ * The intent root carries {@link HIDDEN_TAG_MARKER}, so it is named
+ * `$abv_tags$intent` upstream. `intent` remains the DIMENSION KEY everywhere else
+ * — the `type` a client names on the tag endpoints, the key of the closed
+ * vocabularies, the value elmo reads — and only the root's upstream name carries
+ * the marker. The five intent VALUES stay bare-named (`Informational`,
+ * `Commercial`, …); the rename does not touch them.
  */
-export const RESERVED_ROOT_NAMES = Object.freeze([
+export const INTENT_ROOT_NAME = `${HIDDEN_TAG_MARKER}intent`;
+
+/**
+ * The upstream root NAME a dimension's root is provisioned and resolved by — the
+ * dimension key itself for four of the five, {@link INTENT_ROOT_NAME} for
+ * `intent`. Anything outside the taxonomy maps to itself, so a caller gets the
+ * name it asked for rather than `undefined` flowing into a create.
+ *
+ * Defined here, above {@link RESERVED_ROOT_NAMES}, because that list is derived
+ * through it.
+ *
+ * @param {string} dimension - a dimension key.
+ * @returns {string} the upstream root name.
+ */
+export function rootNameOfDimension(dimension) {
+  return dimension === DIMENSION.INTENT ? INTENT_ROOT_NAME : dimension;
+}
+
+/**
+ * Every name reserved at the root level: each dimension's key AND its upstream
+ * root name. Those coincide for four of the five; for `intent` they differ, so
+ * both `intent` and `$abv_tags$intent` are reserved.
+ *
+ * The bare `intent` is reserved even though no root is named that, because
+ * {@link dimensionOfRootName} maps it to the intent dimension: a name shadowing
+ * it would be READ as the dimension itself, leaving the tree with two entries a
+ * reader cannot tell apart at the level that decides a tag's dimension.
+ *
+ * Its most reachable effect today is on {@link canonicalizeSource}, which reuses
+ * this list to refuse a free-text `prompts.source` that folds onto a dimension
+ * name. The root-level create paths are already closed by other means — a create
+ * without a parent is placed under its dimension's own root, one with a parent
+ * must prove in-dimension ancestry, and a patch cannot promote a tag to root — so
+ * treat this as defence in depth there rather than the only guard.
+ *
+ * Both halves are derived from `DIMENSION_PROVISION_ORDER` rather than listed, so
+ * a future tidy-up that maps the spread through {@link rootNameOfDimension} —
+ * which is what the other consumer of that list does — cannot silently drop the
+ * bare spelling and with it the shadowing guard.
+ */
+export const RESERVED_ROOT_NAMES = Object.freeze([...new Set([
   ...DIMENSION_PROVISION_ORDER,
-  INTENT_ROOT_NAME,
-]);
+  ...DIMENSION_PROVISION_ORDER.map(rootNameOfDimension),
+])]);
 
 /** `origin` values — who authored the prompt. */
 export const ORIGIN_VALUE = Object.freeze({
@@ -296,24 +330,17 @@ export function isDimensionRootName(name) {
 }
 
 /**
- * The upstream root NAME a dimension's root is provisioned and resolved by — the
- * dimension key itself for four of the five, {@link INTENT_ROOT_NAME} for
- * `intent`. Anything outside the taxonomy maps to itself, so a caller gets the
- * name it asked for rather than `undefined` flowing into a create.
- *
- * @param {string} dimension - a dimension key.
- * @returns {string} the upstream root name.
- */
-export function rootNameOfDimension(dimension) {
-  return dimension === DIMENSION.INTENT ? INTENT_ROOT_NAME : dimension;
-}
-
-/**
  * The DIMENSION KEY a root name denotes — the inverse of
  * {@link rootNameOfDimension}, and the fold that keeps `$abv_tags$intent` from
  * leaking out of the tag-tree walk into everything that reasons about dimensions
- * by key. Identity for every other name, the pre-rename `intent` included (it IS
- * the key), so a mid-rename project and a renamed one answer the same thing.
+ * by key.
+ *
+ * Identity for every other name. That is by construction and cannot single out
+ * the bare `intent`, which is why it stays in {@link RESERVED_ROOT_NAMES}: a root
+ * named that would be read as the intent dimension. Note the write and read paths
+ * deliberately disagree about such a root — this fold makes the write path treat
+ * its children as server-owned, while the Elements read path does not claim them
+ * as intents. That asymmetry is intended; do not "fix" one side to match the other.
  *
  * @param {string} rootName - a tag's root-ancestor name, as upstream spells it.
  * @returns {string} the dimension key.

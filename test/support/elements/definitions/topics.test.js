@@ -396,8 +396,23 @@ describe('topics definitions', () => {
       const result = transformOtherTagsForFilterDimensions(RAW_MIXED);
       expect(result).to.not.have.property('topic');
       expect(result).to.not.have.property('category');
-      expect(result).to.not.have.property('intent');
+      // RAW_MIXED spells intent the renamed way, so this is the assertion that
+      // carries weight here; the bare spelling is covered by its own test below.
+      expect(result).to.not.have.property(INTENT_ROOT_NAME);
       expect(result).to.not.have.property('source');
+      expect(result.tags).to.deep.equal([]);
+    });
+
+    it('drops anything carrying the hidden-tag marker, not just the known intent root', () => {
+      // The marker is the exposure control: Semrush hides a marked root from the
+      // customer-facing filter, so a marked family must never reach this payload.
+      // A second marked root Semrush adds later must be dropped without a code
+      // change here, which is why the filter keys on the marker and not on the
+      // known-prefix list.
+      const result = transformOtherTagsForFilterDimensions({
+        blocks: { value: [{ value: '$abv_tags$somethingnew__Value' }] },
+      });
+      expect(result).to.not.have.property('$abv_tags$somethingnew');
       expect(result.tags).to.deep.equal([]);
     });
 

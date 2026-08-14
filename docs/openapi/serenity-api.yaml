@@ -1097,9 +1097,7 @@ v2-serenity-url-inspector-filter-dimensions:
       `topics`/`categories`/`page_intents`/`origins` are derived from the same
       underlying Topics element response, split apart by their `topic__`/
       `category__`/`$abv_tags$intent__`/`source__` tag prefix. A tag prefix is the
-      name of the dimension's root tag, so `page_intents` also claims the
-      pre-rename `intent__` prefix on a project the intent rename has not reached.
-      Any other tag prefix Semrush
+      name of the dimension's root tag. Any other tag prefix Semrush
       introduces later (e.g. `type__branded`) surfaces automatically as an extra
       array property keyed by that prefix. Bare prefix declarations with no
       value (e.g. a lone `category` row) are ignored. `content_types` is

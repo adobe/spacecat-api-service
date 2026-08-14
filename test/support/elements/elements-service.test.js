@@ -158,16 +158,19 @@ describe('createElementsService', () => {
       expect(result.tags).to.deep.equal([]);
     });
 
-    it('leaves a bare `intent__` tag out of page_intents', async () => {
-      // The intent prefix IS the root's name. A bare `intent__` tag belongs to no
-      // dimension this reader knows, so it must not be claimed as an intent — it
-      // falls through to the generic catch-all like any other unrecognised tag.
+    it('routes a bare `intent__` tag to `tags`, never to page_intents or a customer-facing group', async () => {
+      // The intent prefix IS the root's name, so a bare `intent__` tag is the
+      // pre-rename spelling and must not be claimed as an intent. Nor may it become
+      // a dynamic `intent` group: that is a customer-visible filter under the very
+      // name the `$abv_tags$` marker exists to hide. `intent` is reserved for
+      // exactly that reason, so it lands in the generic `tags` array instead.
       transport.fetchElement
         .withArgs('ws-1', ELEMENT_IDS.TOPICS, sinon.match.any)
         .resolves({ blocks: { value: [{ value: 'intent__Informational' }] } });
       const result = await service.getUrlInspectorFilterDimensions('ws-1', {});
       expect(result.page_intents).to.deep.equal([]);
-      expect(result.intent).to.deep.equal([
+      expect(result).to.not.have.property('intent');
+      expect(result.tags).to.deep.equal([
         { id: 'intent__Informational', label: 'Informational' },
       ]);
     });
@@ -362,9 +365,18 @@ describe('createElementsService', () => {
       expect(promptCalls).to.have.length(1 + INTENT_VALUES.length);
     });
 
-    it('costs exactly five intent calls, all under the renamed root', async () => {
+    it('costs exactly five intent calls, one per value, all under the renamed root', async () => {
       await service.getPrompts('ws-1', ENRICH);
-      expect(promptCallsWith(INTENT_ROOT_NAME)).to.have.length(INTENT_VALUES.length);
+      // Assert the SET, not the count: five calls all carrying the same value would
+      // satisfy a length check while enriching nothing.
+      const intentTags = promptCallsWith(INTENT_ROOT_NAME).map(
+        (c) => c.args[2].filters.advanced.filters.find((f) => f.col === 'tags').val,
+      );
+      expect(intentTags.sort()).to.deep.equal(
+        INTENT_VALUES.map((v) => `${INTENT_ROOT_NAME}__${v}`).sort(),
+      );
+      // No call goes out under the pre-rename root. This trips if the legacy round
+      // is ever reintroduced, since those calls carry an `intent__`-prefixed tag.
       expect(promptCallsWith(DIMENSION.INTENT)).to.have.length(0);
     });
 
@@ -431,6 +443,25 @@ describe('createElementsService', () => {
       const result = await service.getPrompts('ws-1', ENRICH);
       expect(result.count).to.equal(2);
       result.prompts.forEach((p) => expect(p.userIntent).to.equal(''));
+    });
+
+    it('logs the failed intent call, since the response cannot show one happened', async () => {
+      // A blank `userIntent` means either "no intent tag" or "the call failed", and
+      // the response cannot distinguish them. The warn is the only thing that can,
+      // so assert it with a real logger — the test above builds its service without
+      // one, which makes `log?.warn?.` a no-op and the message unverified.
+      const log = { info: sinon.stub(), warn: sinon.stub(), error: sinon.stub() };
+      const logged = createElementsService(transport, log);
+      transport.fetchElement
+        .withArgs('ws-1', ELEMENT_IDS.PROMPTS, withTag(intentTag(INTENT_ROOT_NAME, 'Commercial')))
+        .rejects(new Error('intent call failed'));
+
+      await logged.getPrompts('ws-1', ENRICH);
+
+      expect(log.warn).to.have.been.calledWithMatch(
+        /intent-filtered PROMPTS call failed for 'Commercial'/,
+        sinon.match({ workspaceId: 'ws-1', event: 'intent-enrichment-call-failed' }),
+      );
     });
   });
 

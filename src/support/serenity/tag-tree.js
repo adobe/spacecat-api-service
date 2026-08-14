@@ -51,6 +51,7 @@ import {
   DIMENSION_PROVISION_ORDER,
   CLOSED_DIMENSION_VALUES,
   CLOSED_DIMENSIONS,
+  INTENT_ROOT_NAME,
   rootNameOfDimension,
   dimensionOfRootName,
 } from './prompt-tags.js';
@@ -255,24 +256,22 @@ const LEGACY_SOURCE_ROOT_NAME = 'source';
  * The returned map is keyed by DIMENSION, so a caller asks for the dimension it means
  * and never has to know which spelling a given project carries.
  *
- * The intent rename runs project by project from the migration CLI (LLMO-6985), so a
- * project may still name that root `intent`. That name is passed as an ALIAS rather
- * than resolved on its own: a project the rename has not reached keeps its populated
- * root and gets no second one, while a project that has no intent root at all is
- * provisioned under the new name. Minting `$abv_tags$intent` beside a populated
- * `intent` would split the dimension across two roots and strand every prompt already
- * tagged under the old one.
+ * Two dimension roots were renamed, and BOTH are resolved strictly by their current
+ * name here — there is no fallback for either pre-rename spelling.
  *
- * The `source` → `origin` authorship rename, by contrast, is complete (origin-dimension.md):
- * there is no fallback for the pre-rename `source` name. A project that still carries a
- * legacy `source` authorship root gets a fresh `origin` root created here, and the stale
- * `source` root is left untouched for the data reshape to retire.
+ * The intent root is `$abv_tags$intent`; it was once bare `intent`. The `origin`
+ * authorship root was once `source` (origin-dimension.md).
  *
- * Deploy ordering is the invariant for THAT rename, and it is enforced OUTSIDE this code
- * (the reshape lands before this resolver ships). If that ordering is violated and a
- * project is still authorship-on-`source` when this runs, the fresh `origin` root is
- * minted EMPTY and the populated `source` root's `ai`/`human` values are orphaned. This
- * seam does not detect or fail on that — the deploy gate owns it.
+ * For both, deploy ordering is the invariant and it is enforced OUTSIDE this code: the
+ * data reshape reaches every live project before this resolver ships. Violate that
+ * ordering and the consequence is the same shape in both cases — a fresh root is minted
+ * EMPTY beside the populated pre-rename one, splitting the dimension across two roots
+ * and stranding every value already tagged under the old one. For `origin` those are the
+ * `ai`/`human` values; for `intent`, every prompt carrying an intent tag.
+ *
+ * This seam does not prevent or fail on that state — the deploy gate owns it — but it
+ * does WARN on it (below), because a gate that is a point-in-time sweep proves the state
+ * is empty today, not that it stays empty.
  *
  * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
@@ -306,6 +305,19 @@ export async function ensureDimensionRoots(transport, semrushWorkspaceId, projec
         { semrushWorkspaceId, projectId },
       );
     }
+  }
+
+  // Same guardrail for the intent rename, and cheaper: `byName` already indexes every
+  // name at this level, so the pre-rename spelling can be checked without a re-read.
+  // Minting `$abv_tags$intent` beside a populated bare `intent` root splits the
+  // dimension and strands every prompt tagged under the old one, so a project the
+  // rename missed must not pass through silently.
+  if (createdNames.includes(INTENT_ROOT_NAME) && byName.has(DIMENSION.INTENT)) {
+    log?.warn?.(
+      'ensureDimensionRoots: minted a fresh `$abv_tags$intent` root while a pre-rename '
+      + '`intent` root is still present — the intent rename may have missed this project',
+      { semrushWorkspaceId, projectId, event: 'intent-rename-split-root' },
+    );
   }
 
   // Return the roots keyed by DIMENSION, in canonical order.
