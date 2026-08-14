@@ -30,7 +30,6 @@ import {
   listSliceModels,
   listUnionModels,
   syncModelsForProject,
-  countPublishedPrompts,
   MAX_MODEL_IDS,
   validateParentIdQuery,
 } from './markets.js';
@@ -38,11 +37,6 @@ import {
   listMarkets, resolveProject, mapPublishStatus, projectToSlice,
 } from '../subworkspace-projects.js';
 import { ensureSubworkspace } from '../workspace-lifecycle.js';
-import { createHeadroomGuard } from '../dynamic-allocation-active.js';
-import { withResourceLock } from '../resource-lock.js';
-import {
-  modelChangeUnits, releaseAiSurplus, PROJECT_BLOCK, PROMPT_BLOCK,
-} from '../resource-manager.js';
 import {
   DIMENSION, STANDARD_PROMPT_TAG_VALUES, INTENT_VALUE, GENERATED_PROMPT_SOURCE_VALUE,
 } from '../prompt-tags.js';
@@ -330,20 +324,13 @@ function validateCreateBody(body) {
  *   classification (serenity-docs#32).
  * @param {number} [options.writeDeadline] - shared request-write deadline.
  * @param {object} log - logger.
- * @param {{ ensure: Function, retryOnQuota: Function }} headroom - the caller's headroom guard
- *   (createHeadroomGuard) —
- *   REQUIRED, not optional: a genuine no-op object when the flag is OFF, never `undefined`. Not
- *   optional-chained at the call site below (Rainer review) — a caller that forgets to thread it
- *   must fail loud, not silently skip metering. PROMPT metering seam (Rainer, live-verified
- *   LLMO-6190): the metered write is `createPromptsWithMetadata` below, NOT publish — front it
- *   BEFORE the write loop, sized on the real prompt count now known (`texts.size`), not estimated.
  * @param {string} callerId - resolved caller id (see `resolveCallerId`) stamped as
  *   `created_by`/`updated_by` on every generated prompt (LLMO-6289).
  */
 async function generateAndAttachPrompts(transport, workspaceId, projectId, {
   domain, country, topicCap = 0, brandNames = [], provisioned, env,
   writeDeadline = computeWriteDeadline(),
-}, log, headroom, callerId) {
+}, log, callerId) {
   const raw = await transport.getBrandTopics(workspaceId, { domain, country });
   let topics = [];
   if (Array.isArray(raw)) {
@@ -460,31 +447,18 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
     }
   }
 
-  // PROMPT metering seam (Rainer, live-verified LLMO-6190): front headroom sized
-  // on the real generated prompt count (`texts.size`) BEFORE the metered
-  // `createPromptsByIds` writes below — the disguised-quota 405 fires there, not
-  // at publish. No-op when the flag is OFF; NOT optional-chained, a caller that
-  // forgets to thread the guard must fail loud.
-  await headroom.ensure({ prompts: texts.size }, { includeDrafted: true });
-
   // STAMP (LLMO-6289): AI-generated prompts are created through the v3
   // metadata-carrying write, `created_* = updated_* = now / callerId`. One
   // metadata object per batch (same instant for every text in the group).
   const metadata = buildCreateMetadata(callerId);
   for (const { items, tagIds } of byTagSet.values()) {
-    // LLMO-6190 follow-up: the metered write can still 405 as a disguised metered-quota rejection
-    // despite the `ensure` above (live-verified ~9s gateway write-enforcement lag after a JIT
-    // top-up) — route through `headroom.retryOnQuota` (no-op passthrough when the flag is OFF).
     // `tagIds` is precomputed per (type, intent) bucket above (standard + intent + source + type).
     // eslint-disable-next-line no-await-in-loop
-    await headroom.retryOnQuota(
-      () => transport.createPromptsWithMetadata(
-        workspaceId,
-        projectId,
-        items.map((name) => ({ name, metadata })),
-        tagIds,
-      ),
-      { callSite: 'createPromptsWithMetadata' },
+    await transport.createPromptsWithMetadata(
+      workspaceId,
+      projectId,
+      items.map((name) => ({ name, metadata })),
+      tagIds,
     );
   }
   return { topicCount: selected.length, promptCount: texts.size };
@@ -503,8 +477,9 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  *
  * @param {SerenityTransport} transport
  * @param {object} brand - brand record/stub being provisioned.
- * @param {string} parentWorkspaceId - the org parent workspace: the `assertNotParent` guard
- *   input, and the units pool when JIT allocation is on. Nothing is carved from it.
+ * @param {string} parentWorkspaceId - the org parent workspace, used as the `assertNotParent` guard
+ *   input. Nothing is carved from it (the JIT allocator that once drew a pool from it is removed —
+ *   SITES-49206).
  * @param {object} body - request body ({ market, languageCode, brandDomain, ... }).
  * @param {object} log - logger.
  * @param {string|null} [preResolvedWorkspaceId] - when set (the activate batch
@@ -548,15 +523,6 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  *   `brand_to_semrush_projects` mapping row for this project (best-effort,
  *   never fails the create). Omit for a `brand` that is not yet a persisted
  *   row — see `mapping-rows.js` `upsertMappingRow` doc.
- * @param {boolean} [options.dynamicAllocation=false] - global kill-switch value. When true, JIT
- *   top-up fronts the project-create and publish seams (fail-fast). When false, the headroom guard
- *   is a genuine no-op and no resources are read or transferred at all — a sub-workspace carries no
- *   allocation either way (see `workspace-lifecycle.js`), so there is no alternative sizing path.
- *   (The units pool for JIT sizing is the positional `parentWorkspaceId` arg — the same id given
- *   to `ensureSubworkspace` — so it is not duplicated in this options bag.)
- * @param {Partial<import('../resource-manager.js').Blocks>} [options.ceiling] - per-brand AI
- *   ceiling (LLMO-6190 flag-flip gate), resolved from Vault by the controller and passed through to
- *   `createHeadroomGuard`. Omitted → non-binding default. No-op when `dynamicAllocation` is false.
  * @param {object} [options.brandCollection] - the data-access Brand collection, threaded to
  *   `ensureSubworkspace` on the single-market POST path so its claim filter can tell this
  *   brand's own interrupted create from a same-named sibling brand's sub-workspace (titles are
@@ -565,8 +531,7 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  *   only when the sub-workspace was FRESHLY CREATED here, so the caller's failure compensation
  *   never tears down a workspace that was merely adopted.
  * @param {object} [options.env] - environment (Azure OpenAI creds), threaded into intent
- *   classification when `generateTopics` is set (serenity-docs#32); ALSO threaded to
- *   `createHeadroomGuard` (org-pool early-warning alert) and used directly to fire the
+ *   classification when `generateTopics` is set (serenity-docs#32); ALSO used directly to fire the
  *   quota-rejection Slack alert (serenity-docs#72 §5) on a publish quota rejection. Optional —
  *   omitted, alerting is a no-op.
  * @param {number} [options.writeDeadline] - shared request-write deadline; defaults
@@ -596,8 +561,6 @@ export async function handleCreateMarketSubworkspace(
     dataAccess = null,
     brandCollection = undefined,
     onWorkspaceCreated = undefined,
-    dynamicAllocation = false,
-    ceiling = undefined,
     env = null,
     writeDeadline = computeWriteDeadline(),
     orgId = null,
@@ -636,22 +599,6 @@ export async function handleCreateMarketSubworkspace(
       { brandCollection, onWorkspaceCreated },
     );
 
-  // JIT top-up choke point. The sub-workspace id is only known after ensureSubworkspace resolves
-  // it; OFF (or a missing parent) yields a no-op guard so the flag-OFF path issues zero reads.
-  const headroom = createHeadroomGuard(
-    transport,
-    {
-      enabled: dynamicAllocation,
-      subWorkspaceId: workspaceId,
-      parentWorkspaceId,
-      ceiling,
-      env,
-      orgId,
-      brandId: brand.getId(),
-    },
-    log,
-  );
-
   const existing = await resolveProject(
     transport,
     workspaceId,
@@ -674,18 +621,9 @@ export async function handleCreateMarketSubworkspace(
     if (!languageId) {
       return { status: 400, body: { error: 'unknownLanguage', message: `Language '${languageCode}' not found` } };
     }
-    // PROJECT metering seam: ensure one project of headroom before creating a new project (no-op
-    // when the flag is OFF). Not needed on the adopt-existing-draft branch above (no new project).
-    await headroom.ensure({ projects: 1 });
-    // LLMO-6190 follow-up: the metered write can still 405 as a disguised metered-quota rejection
-    // despite the `ensure` above (live-verified ~9s gateway write-enforcement lag after a JIT
-    // top-up) — route through `headroom.retryOnQuota` (no-op passthrough when the flag is OFF).
-    const createResp = await headroom.retryOnQuota(
-      () => transport.createProject(
-        workspaceId,
-        buildCreateProjectBody(body, location, languageId, aliasNames),
-      ),
-      { callSite: 'createProject' },
+    const createResp = await transport.createProject(
+      workspaceId,
+      buildCreateProjectBody(body, location, languageId, aliasNames),
     );
     projectId = String(createResp?.id || '');
     if (!hasText(projectId)) {
@@ -741,7 +679,6 @@ export async function handleCreateMarketSubworkspace(
         writeDeadline,
       },
       log,
-      headroom,
       callerId,
     );
   }
@@ -817,35 +754,17 @@ export async function handleCreateMarketSubworkspace(
     });
   }
 
-  // PROMPT metering seam: before publishing, ensure prompt headroom sized from `used + drafted`
-  // (includeDrafted) — the just-staged models + generated prompts are drafted synchronously and
-  // meter at publish, while the post-publish `used` reconciles asynchronously (stale-low). No-op
-  // when the flag is OFF. Skipped when we won't publish at all.
-  if (publishMode !== 'skip') {
-    await headroom.ensure({}, { includeDrafted: true });
-  }
-
   // Publish per mode. 'best-effort' swallows a quota 405 (publishing an
   // empty-units child 405s as a disguised quota rejection, workspace doc §5) and
   // leaves the project a draft so the brand still succeeds.
-  //
-  // Both branches route the publish through `headroom.retryOnQuota` (LLMO-6190 item 4): a no-op
-  // passthrough when the flag is OFF (or `headroom.ensure` above already covered the need), and
-  // ONE bounded re-read+top-up+retry when the publish 405s as a disguised metered-quota rejection
-  // despite the pre-publish `ensure`. A 'best-effort' publish that STILL 405s after that one retry
-  // falls through to the existing swallow below, unchanged.
   let published = false;
   if (publishMode === 'require') {
     try {
-      await headroom.retryOnQuota(
-        () => transport.publishProject(workspaceId, projectId),
-        { callSite: 'publishProject' },
-      );
+      await transport.publishProject(workspaceId, projectId);
       published = true;
     } catch (e) {
-      // Case 1 (serenity-docs#72 §2): the brand carve is exhausted (allocator OFF — production
-      // today), or `retryOnQuota`'s bounded poll-retry (LLMO-6190 follow-up) still didn't clear
-      // the disguised quota 405. Classify via `isMeteredQuota` (body-SHAPE check, not bare
+      // Case 1 (serenity-docs#72 §2): the upstream refused the publish with the
+      // disguised quota 405. Classify via `isMeteredQuota` (body-SHAPE check, not bare
       // status — MysticatBot review) so a genuine app-level 405 Method-Not-Allowed (JSON body)
       // is never mistaken for a quota rejection and hidden behind the wrong error token; this
       // also gives the shared `MeteredQuotaClassifier` metric (LLMO-6191) a live call site.
@@ -873,10 +792,7 @@ export async function handleCreateMarketSubworkspace(
     }
   } else if (publishMode === 'best-effort') {
     try {
-      await headroom.retryOnQuota(
-        () => transport.publishProject(workspaceId, projectId),
-        { callSite: 'publishProject' },
-      );
+      await transport.publishProject(workspaceId, projectId);
       published = true;
     } catch (e) {
       if (isMeteredQuota(e)) {
@@ -950,16 +866,6 @@ export async function handleCreateMarketSubworkspace(
  * already-vanished project is left un-tombstoned — accepted,
  * reconcile-recoverable drift (implementation plan §3.2/§11).
  *
- * Wires `releaseAiSurplus` (LLMO-6190 item 3) once the project is confirmed gone — either branch
- * (our own `deleteProject` succeeded, or it 404'd because the upstream was already gone) leaves the
- * project truly absent, so both are treated identically: release fires after the try/catch, not
- * just on the success leg. Same shape as the model-removal seam
- * (`handleUpdateModelsSubworkspace`): per-child `withResourceLock`-wrapped (LLMO-6191 item 3,
- * closing the same same-container absolute-set race the sibling call site closes), fail-fast
- * (`releaseAiSurplus({ failFast: true })`), best-effort (its own internal try/catch swallows
- * expected transport/pool failures — a release hiccup must never fail an otherwise-successful
- * DELETE), post-delete. No-op when the flag is OFF.
- *
  * @param {SerenityTransport} transport
  * @param {string|null} workspaceId - sub-workspace id the market's project lives in.
  * @param {string|number|null} geoTargetId - the market's Google Ads Geo Target id.
@@ -967,8 +873,6 @@ export async function handleCreateMarketSubworkspace(
  * @param {object} log - logger.
  * @param {object} [options]
  * @param {any} [options.dataAccess]
- * @param {boolean} [options.dynamicAllocation=false] - global kill-switch value. When true, hands
- *   the deleted project's freed units back to the parent pool after the delete.
  */
 export async function handleDeleteMarketSubworkspace(
   transport,
@@ -976,7 +880,7 @@ export async function handleDeleteMarketSubworkspace(
   geoTargetId,
   languageCode,
   log,
-  { dataAccess = null, dynamicAllocation = false } = {},
+  { dataAccess = null } = {},
 ) {
   validateSlice(geoTargetId, languageCode);
   const lang = normalizeLanguageCode(languageCode);
@@ -1001,7 +905,7 @@ export async function handleDeleteMarketSubworkspace(
   }
   // Reaching here means `resolveProject` matched a project from `listProjects(workspaceId)`,
   // so `workspaceId` is a real, non-blank id — narrow the (JSDoc-optional) `string|null` once
-  // for tsc, which cannot infer that. The DELETE and the release below both rely on it.
+  // for tsc, which cannot infer that. The DELETE below relies on it.
   const resolvedWorkspaceId = /** @type {string} */ (workspaceId);
   try {
     await transport.deleteProject(resolvedWorkspaceId, projectId);
@@ -1017,28 +921,6 @@ export async function handleDeleteMarketSubworkspace(
   if (dataAccess) {
     const tombstoned = await tombstoneMappingRow(dataAccess, projectId, log);
     deletedSiteId = tombstoned?.siteId ?? null;
-  }
-  if (dynamicAllocation) {
-    // Retain at least one block per dim so an idle child never asks releaseAiSurplus for a to-zero
-    // transfer (silently ignored by the gateway — see resource-manager.js). Best-effort: a release
-    // failure must not turn an already-successful delete into a 500 — releaseAiSurplus's own
-    // try/catch guarantees this by construction (it never throws for expected failures).
-    // releaseAiSurplus's own requireWorkspaceId re-asserts the non-blank id at runtime.
-    //
-    // Wrapped in `withResourceLock` (LLMO-6191 item 3), mirroring `handleUpdateModelsSubworkspace`:
-    // `releaseAiSurplus` does the same read-then-absolute-set as `ensureAiHeadroom`, so an
-    // in-flight `ensure`/release for this SAME child in this same warm container must not race
-    // this one — both go through the one per-child lock. This closes the same-container half of
-    // the absolute-set race; the cross-container half is the deferred distributed lock (see
-    // docs/decisions/007-cross-container-resource-lock.md).
-    await withResourceLock(
-      resolvedWorkspaceId,
-      () => releaseAiSurplus(transport, {
-        subWorkspaceId: resolvedWorkspaceId,
-        floor: { projects: PROJECT_BLOCK, prompts: PROMPT_BLOCK },
-        failFast: true,
-      }, log),
-    );
   }
   return { status: 204, deletedSiteId };
 }
@@ -1222,14 +1104,6 @@ export async function handleListModelsSubworkspace(transport, workspaceId, query
  * @param {object} body
  * @param {object} log
  * @param {object} [options]
- * @param {boolean} [options.dynamicAllocation=false] - global kill-switch. When on, size on the
- *   SIGNED net model delta: top up (`publishedTexts × netDelta`) before the sync's publish on a net
- *   ADD, and release the freed units after it on a net REMOVAL. Lives at this mode-guarded caller,
- *   NOT inside the shared `syncModelsForProject`, so flat mode is untouched (byte-for-byte).
- * @param {string} [options.parentWorkspaceId=''] - org parent/master workspace id (units pool).
- * @param {Partial<import('../resource-manager.js').Blocks>} [options.ceiling] - per-brand AI
- *   ceiling (LLMO-6190 flag-flip gate), resolved from Vault by the controller and passed to
- *   `createHeadroomGuard`. Omitted → non-binding default. No-op when `dynamicAllocation` is false.
  * @param {string | null} [options.orgId] - serenity-docs#72 §5 alert payload only.
  * @param {string | null} [options.brandId] - serenity-docs#72 §5 alert payload only.
  * @param {object | null} [options.env] - serenity-docs#72 §5 alert kill-switch/config only.
@@ -1240,9 +1114,6 @@ export async function handleUpdateModelsSubworkspace(
   body,
   log,
   {
-    dynamicAllocation = false,
-    parentWorkspaceId = '',
-    ceiling = undefined,
     orgId = null,
     brandId = null,
     env = null,
@@ -1270,48 +1141,6 @@ export async function handleUpdateModelsSubworkspace(
   }
   const projectId = String(project.id);
 
-  // PROMPT re-meter seam. PUT /models is REPLACE semantics — one request may add AND remove models
-  // — so size on the SIGNED NET model delta (`finalModelCount − currentModelCount`), not adds.
-  // published consumption is `publishedTexts × finalModelCount`, so a swap (net 0) or a net removal
-  // consumes nothing extra and must NOT top up (gross-add sizing over-grants and can spuriously
-  // 409 ORG_POOL_EXHAUSTED). A net ADD tops up before the sync's publish; a net REMOVAL frees units
-  // that are handed back after it. No-op when OFF (guarded on `enabled` → zero extra reads).
-  const headroom = createHeadroomGuard(
-    transport,
-    {
-      enabled: dynamicAllocation,
-      subWorkspaceId: workspaceId,
-      parentWorkspaceId,
-      ceiling,
-      env,
-      orgId,
-      brandId,
-    },
-    log,
-  );
-  let netDelta = 0;
-  if (headroom.enabled) {
-    // Reads the current model set to size the delta; syncModelsForProject below reads it again to
-    // diff — one duplicate ai_models fetch on the flag-ON path (latency-only, not a correctness
-    // concern; deduping needs a shared pre-mutation diff seam in syncModelsForProject — PR-4).
-    // listSliceModels returns one cleaned item per attached model, so its length IS the current
-    // attached-model count (all we need for the net delta — not the id set).
-    const current = await listSliceModels(transport, workspaceId, projectId);
-    const finalModelCount = new Set(modelIds.map(String)).size;
-    netDelta = finalModelCount - current.items.length;
-    if (netDelta > 0) {
-      const publishedTexts = await countPublishedPrompts(transport, workspaceId, projectId, log);
-      // RESOLVED (serenity-docs#22 §2, write-only metering): the prompt dimension is consumed at
-      // prompt WRITE, not re-gated at publish, so the sync's publish converting this project's
-      // DRAFTED prompts to `used` triggers NO prompt-dimension quota check — only the published
-      // texts re-meter against the added models. Sizing `publishedTexts × netDelta` is therefore
-      // correct, and this seam deliberately does NOT pass `includeDrafted` (unlike the
-      // create/bulk-prompt seams — theirs guards read-staleness of a SUBSEQUENT op's `used`, a
-      // different concern from a publish-time gate). The §8 canary confirms §2 empirically.
-      await headroom.ensure({ prompts: modelChangeUnits(publishedTexts, netDelta) });
-    }
-  }
-
   const result = await syncModelsForProject(
     transport,
     workspaceId,
@@ -1319,41 +1148,11 @@ export async function handleUpdateModelsSubworkspace(
     modelIds,
     { geoTargetId, languageCode },
     log,
-    // LLMO-6190 follow-up: bounded poll-retry if the sync's publish 405s as a disguised
-    // metered-quota rejection despite the sizing above (e.g. the pre-publish read was stale). No-op
-    // when OFF.
     // serenity-docs#72 §5: feeds the shared syncModelsForProject publish-catch's alert.
     {
-      wrapPublish: (fn) => headroom.retryOnQuota(fn, { callSite: 'syncModelsPublish' }),
       alertContext: { orgId, brandId, env },
     },
   );
-
-  // Net model REMOVAL freed published-prompt units. Release them AFTER the sync's publish — by then
-  // the child's `used` reflects the removal, so releaseAiSurplus reads it and lowers `total` to it
-  // (ordering §3 requires: publish → read → release). Fail-fast (one transfer, no settle poll) +
-  // best-effort per the release scope decision; the sub-workspace id is present (headroom.enabled).
-  if (headroom.enabled && netDelta < 0) {
-    // Non-zero floor is the PRIMARY guard against the all-zero-transfer no-op: a release target of
-    // 0 for any dim is silently ignored by the gateway (only workspace delete reclaims to zero).
-    // Retain at least one block per dim so an idle child never asks releaseAiSurplus for a to-zero
-    // transfer (which it would refuse anyway — this just keeps the request off that path).
-    //
-    // Wrapped in `withResourceLock` (LLMO-6191 item 3): `releaseAiSurplus` does the same
-    // read-then-absolute-set as `ensureAiHeadroom` (via `createHeadroomGuard.ensure`, above), so
-    // an in-flight `ensure` for this SAME child in this same warm container must not race this
-    // release — both go through the one per-child lock. This closes the same-container half of
-    // the absolute-set race; the cross-container half is the deferred distributed lock (see
-    // docs/decisions/007-cross-container-resource-lock.md).
-    await withResourceLock(
-      workspaceId,
-      () => releaseAiSurplus(transport, {
-        subWorkspaceId: workspaceId,
-        floor: { projects: PROJECT_BLOCK, prompts: PROMPT_BLOCK },
-        failFast: true,
-      }, log),
-    );
-  }
 
   return result;
 }

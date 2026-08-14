@@ -152,6 +152,27 @@ describe('RunBrandClaimsCommand', () => {
       expect(event.cadence).to.equal('daily');
     });
 
+    it('skips a mid-week daily sheet and picks the latest Monday daily sheet', async () => {
+      getBrandBySiteStub.resolves({ id: BRAND_ID, name: 'Acme', brandClaimsEnabled: true });
+      // Daily-cadence site with a Monday (2026-08-10) and a newer Tuesday
+      // (2026-08-11) sheet. The consumer only runs daily sheets on a Monday, so
+      // the newer Tuesday sheet must be skipped for Monday's. (LLMO-6877)
+      s3SendStub.resolves(s3Page([
+        `${SITE_ID}/acme/analytics/chatgpt_free/2026/08/10/brandpresence-chatgpt-w33-2026-100826.xlsx`,
+        `${SITE_ID}/acme/analytics/chatgpt_free/2026/08/11/brandpresence-chatgpt-w33-2026-110826.xlsx`,
+      ]));
+
+      const command = RunBrandClaimsCommand(context);
+      await command.handleExecution(['https://example.com'], slackContext);
+
+      const [, event] = sqsSendMessageStub.firstCall.args;
+      expect(event.cadence).to.equal('daily');
+      expect(event.sheet_date).to.equal('2026-08-10');
+      expect(event.s3_key).to.equal(
+        `${SITE_ID}/acme/analytics/chatgpt_free/2026/08/10/brandpresence-chatgpt-w33-2026-100826.xlsx`,
+      );
+    });
+
     it('picks the newest key across paginated S3 listings', async () => {
       getBrandBySiteStub.resolves({ id: BRAND_ID, name: 'Acme', brandClaimsEnabled: true });
       s3SendStub.onFirstCall().resolves(s3Page(

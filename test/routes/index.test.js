@@ -379,6 +379,7 @@ describe('getRouteHandlers', () => {
     listProperties: () => null,
     plan: () => null,
     deploy: () => null,
+    deployStatus: () => null,
     activate: () => null,
     activationStatus: () => null,
   };
@@ -663,6 +664,10 @@ describe('getRouteHandlers', () => {
     getScopeSections: sinon.stub(),
   };
 
+  const mockOpportunityValidationController = {
+    triggerValidation: sinon.stub(),
+  };
+
   const mockPromptSuggestionSchedulesController = {
     createSchedules: sinon.stub(),
   };
@@ -736,6 +741,7 @@ describe('getRouteHandlers', () => {
       mockOnboardingController,
       mockRedirectsController,
       mockAuditPolicyController,
+      mockOpportunityValidationController,
       mockPromptSuggestionSchedulesController,
     );
 
@@ -1137,6 +1143,7 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/opportunities',
       'PATCH /sites/:siteId/opportunities/:opportunityId',
       'DELETE /sites/:siteId/opportunities/:opportunityId',
+      'POST /sites/:siteId/opportunities/:opportunityId/validate',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit/:cursor',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit',
@@ -1157,8 +1164,10 @@ describe('getRouteHandlers', () => {
       'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
       'GET /sites/:siteId/geo-experiments',
       'GET /sites/:siteId/geo-experiments/:geoExperimentId',
+      'GET /sites/:siteId/geo-experiments/:geoExperimentId/results',
       'PATCH /sites/:siteId/geo-experiments/:geoExperimentId',
       'DELETE /sites/:siteId/geo-experiments/:geoExperimentId',
+      'POST /sites/:siteId/geo-experiments/:geoExperimentId/trigger-impact-measurement',
       'GET /sites/:siteId/traffic/paid',
       'GET /sites/:siteId/traffic/paid/page-type-platform-campaign',
       'GET /sites/:siteId/traffic/paid/url-page-type',
@@ -1313,6 +1322,8 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/deploy',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/plan',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/permissions',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-delivery',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-rescan',
       'GET /sites/:siteId/llmo/edge-optimize-status',
       'GET /sites/:siteId/llmo/probes/edge-optimize',
       'GET /sites/:siteId/llmo/strategy',
@@ -1327,6 +1338,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties',
       'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan',
       'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/deploy-status',
       'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate',
       'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status',
       'GET /sites/:siteId/user-activities',
@@ -1516,6 +1528,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['PATCH /sites/:siteId/opportunities/:opportunityId'].paramNames).to.deep.equal(['siteId', 'opportunityId']);
     expect(dynamicRoutes['DELETE /sites/:siteId/opportunities/:opportunityId'].handler).to.equal(mockOpportunitiesController.removeOpportunity);
     expect(dynamicRoutes['DELETE /sites/:siteId/opportunities/:opportunityId'].paramNames).to.deep.equal(['siteId', 'opportunityId']);
+    expect(dynamicRoutes['POST /sites/:siteId/opportunities/:opportunityId/validate'].handler).to.equal(mockOpportunityValidationController.triggerValidation);
+    expect(dynamicRoutes['POST /sites/:siteId/opportunities/:opportunityId/validate'].paramNames).to.deep.equal(['siteId', 'opportunityId']);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions'].handler).to.equal(mockSuggestionsController.getAllForOpportunity);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit/:cursor'].handler).to.equal(mockSuggestionsController.getAllForOpportunityPaged);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit/:cursor'].paramNames).to.deep.equal(['siteId', 'opportunityId', 'limit', 'cursor']);

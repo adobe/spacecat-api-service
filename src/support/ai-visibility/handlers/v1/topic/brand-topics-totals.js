@@ -24,6 +24,7 @@ import {
 } from '@quazar/ai-seo-ts/v2/topic/enums_pb.js';
 import {
   resolveCountry,
+  resolveSearchType,
   engineToLlm,
   responseFromGrpcError,
   PROTO_FROM_JSON,
@@ -37,6 +38,7 @@ import {
 /* c8 ignore start */
 export async function handleBrandTopicsTotals(sp, clients) {
   const domain = sp.get('domain');
+  const searchType = resolveSearchType(domain);
   const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const country = resolveCountry(sp) || COUNTRY_ENUM.WORLDWIDE;
   const date = sp.get('date');
@@ -65,6 +67,7 @@ export async function handleBrandTopicsTotals(sp, clients) {
         dimension_filter_ql: dimensionFilterQl,
         metric_filter_ql: metricFilterQl,
         target_date: date,
+        search_type: searchType,
       },
       PROTO_FROM_JSON,
     );

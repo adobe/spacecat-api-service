@@ -3193,7 +3193,13 @@ describe('Brands Controller', () => {
 
       expect(response.status).to.equal(200);
       const body = await response.json();
-      expect(body).to.deep.equal(SAMPLE_BRAND);
+      // The handler derives the per-brand serenity fields onto the payload; the
+      // stubbed reader supplies everything else.
+      expect(body).to.deep.equal({
+        ...SAMPLE_BRAND,
+        serenityActive: false,
+        serenityActivatedAt: null,
+      });
       expect(resolveLlmoOnboardingModeStub).to.have.been.calledOnce;
       const [orgArg, , optsArg] = resolveLlmoOnboardingModeStub.firstCall.args;
       expect(orgArg).to.equal(ORGANIZATION_ID);
@@ -6163,9 +6169,11 @@ describe('Brands Controller', () => {
       syncBrandAliasesAcrossMarkets = sinon.stub().resolves({ rejected: [] }),
       getBrandCompetitors = sinon.stub().resolves([]),
       getBrandById,
-      // Serenity active by default so a sync-field edit reaches the re-sync block.
-      // The inactive case overrides this to assert the gate rejects.
-      isSerenityActiveForOrg = sinon.stub().resolves(true),
+      // Serenity active for the brand by default so a sync-field edit reaches the
+      // re-sync block. The inactive case overrides this to assert the gate rejects.
+      // The edit path resolves PER BRAND, so one org can hold a released brand and
+      // an unreleased one at the same time.
+      isSerenityActiveForBrand = sinon.stub().resolves(true),
       // Serenity-UI OFF by default: the org is mid-migration, so Semrush failures
       // are absorbed. Tests that assert failures propagate override this to true.
       isSerenityUiActiveForOrg = sinon.stub().resolves(false),
@@ -6189,7 +6197,7 @@ describe('Brands Controller', () => {
         '../../src/support/serenity/competitor-benchmarks.js': { syncCompetitorBenchmarksAcrossMarkets },
         '../../src/support/serenity/brand-aliases.js': { syncBrandAliasesAcrossMarkets },
         '../../src/support/serenity/serenity-active.js': {
-          isSerenityActiveForOrg,
+          isSerenityActiveForBrand,
           isSerenityUiActiveForOrg,
         },
       };
@@ -6288,9 +6296,10 @@ describe('Brands Controller', () => {
         updateBrand: updateBrandStub,
         syncBrandUrlsAcrossMarkets: syncStub,
         createSerenityTransport: createTransportStub,
-        // Inactive org, but the brand still carries a backfilled workspace pointer.
+        // Inactive brand, but it still carries a backfilled workspace pointer —
+        // provisioned by an earlier wave, not yet released.
         getBrandById: sinon.stub().resolves({ id: BRAND_UUID, semrushSubWorkspaceId: 'ws-9' }),
-        isSerenityActiveForOrg: serenityActiveStub,
+        isSerenityActiveForBrand: serenityActiveStub,
       });
 
       const response = await controller.updateBrandForOrg({
@@ -6306,10 +6315,13 @@ describe('Brands Controller', () => {
       expect(updateBrandStub.called).to.equal(false);
       expect(syncStub.called).to.equal(false);
       expect(createTransportStub.called).to.equal(false);
-      // The gate must be asked about THIS org (2nd positional arg = spaceCatId).
+      // The gate must be asked about THIS org AND THIS brand (2nd and 3rd
+      // positional args) — asking about the org alone would give every brand it
+      // owns the same answer, which is what this change exists to end.
       expect(serenityActiveStub).to.have.been.calledWith(
         sinon.match.any,
         ORGANIZATION_ID,
+        BRAND_UUID,
         sinon.match.any,
       );
     });
@@ -6324,7 +6336,7 @@ describe('Brands Controller', () => {
         syncBrandUrlsAcrossMarkets: syncStub,
         createSerenityTransport: createTransportStub,
         getBrandById: sinon.stub().resolves({ id: BRAND_UUID }), // no semrushSubWorkspaceId → flat
-        isSerenityActiveForOrg: sinon.stub().resolves(false),
+        isSerenityActiveForBrand: sinon.stub().resolves(false),
       });
 
       const response = await controller.updateBrandForOrg({
@@ -9047,6 +9059,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          not: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
@@ -9478,6 +9491,7 @@ describe('Brands Controller — region removal consistency guard (LLMO-5645)', (
   async function mountController({ blocking = {}, oldRegion = ['US', 'DE'], updateBrand } = {}) {
     const findStub = stub().resolves(blocking);
     const updateStub = updateBrand || stub().resolves({ id: BRAND_UUID, region: ['US'] });
+    const scopesStub = stub().resolves({ orgRow: null, brandRows: new Map() });
     const Mocked = await esmock('../../src/controllers/brands.js', {
       '../../src/support/prompts-storage.js': {
         resolveBrandUuid: stub().resolves(BRAND_UUID),
@@ -9486,6 +9500,10 @@ describe('Brands Controller — region removal consistency guard (LLMO-5645)', (
       '../../src/support/brands-storage.js': {
         getBrandById: stub().resolves({ id: BRAND_UUID, region: oldRegion }),
         updateBrand: updateStub,
+        // The handler resolves the serenity rollout rows for the response payload.
+        // Irrelevant to the region guard, but the real one would query the stub
+        // client here.
+        readSerenityFlagScopes: scopesStub,
       },
       '../../src/support/access-control-util.js': {
         default: {
@@ -9493,8 +9511,30 @@ describe('Brands Controller — region removal consistency guard (LLMO-5645)', (
         },
       },
     });
-    return { Mocked, findStub, updateStub };
+    return {
+      Mocked, findStub, updateStub, scopesStub,
+    };
   }
+
+  it('reads the serenity rollout rows BEFORE the write, so a flag-read fault cannot 500 a committed edit', async () => {
+    // Load-bearing ordering. updateBrand commits the row and its child syncs, and
+    // the Semrush re-sync that follows deliberately absorbs its own failures so a
+    // persisted edit is never reported as a 500. Resolving these rows afterwards
+    // would reintroduce exactly that: a throw between the commit and the response,
+    // which also skips the re-sync.
+    const { Mocked, updateStub, scopesStub } = await mountController({ blocking: {} });
+    const ctx = buildContext();
+    const controller = Mocked(ctx, loggerStub, mockEnv);
+
+    const response = await controller.updateBrandForOrg({
+      ...ctx,
+      params: { spaceCatId: ORG_ID, brandId: BRAND_UUID },
+      data: { region: ['US'] },
+    });
+
+    expect(response.status).to.equal(200);
+    expect(scopesStub.calledBefore(updateStub)).to.be.true;
+  });
 
   it('allows the region change and updates the brand when no prompt blocks removal', async () => {
     const { Mocked, findStub, updateStub } = await mountController({ blocking: {} });

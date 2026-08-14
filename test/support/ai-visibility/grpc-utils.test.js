@@ -12,6 +12,7 @@
  */
 
 import { expect } from 'chai';
+import { SEARCH_TYPE_ENUM } from '@quazar/ai-seo-ts/v2/source/enums_pb.js';
 import {
   COUNTRY_ENUM,
   LLM_ENUM,
@@ -25,6 +26,7 @@ import {
   TOPIC_OPPORTUNITY_PROMPTS_MAX_PAGES,
   num,
   brandTarget,
+  resolveSearchType,
   parseLimitOffset,
   normalizeCountryForGrpc,
   resolveCountry,
@@ -242,6 +244,35 @@ describe('grpc-utils', () => {
     });
   });
 
+  describe('resolveSearchType', () => {
+    it('returns DOMAIN for an apex domain', () => {
+      expect(resolveSearchType('intuit.com')).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+    });
+    it('returns DOMAIN for a bare www host', () => {
+      expect(resolveSearchType('www.intuit.com')).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+    });
+    it('returns SUBDOMAIN for a non-www subdomain', () => {
+      expect(resolveSearchType('quickbooks.intuit.com')).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
+    });
+    it('returns SUBDOMAIN for a deep subdomain', () => {
+      expect(resolveSearchType('a.b.intuit.com')).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
+    });
+    it('handles multi-part TLDs: apex is DOMAIN', () => {
+      expect(resolveSearchType('example.co.uk')).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+    });
+    it('handles multi-part TLDs: subdomain is SUBDOMAIN', () => {
+      expect(resolveSearchType('blog.example.co.uk')).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
+    });
+    it('ignores scheme and path when present', () => {
+      expect(resolveSearchType('https://quickbooks.intuit.com/foo')).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
+    });
+    it('defaults to DOMAIN for empty or unparseable input', () => {
+      expect(resolveSearchType('')).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+      expect(resolveSearchType(null)).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+      expect(resolveSearchType(undefined)).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+    });
+  });
+
   describe('parseLimitOffset', () => {
     it('defaults limit to 100 and offset to 0 when absent', () => {
       expect(parseLimitOffset(sp(''))).to.deep.equal({ limit: 100, offset: 0 });
@@ -300,6 +331,8 @@ describe('grpc-utils', () => {
     it('maps valid country codes via COUNTRY_ENUM', () => {
       expect(normalizeCountryForGrpc('US')).to.equal(COUNTRY_ENUM.US);
       expect(normalizeCountryForGrpc('DE')).to.equal(COUNTRY_ENUM.DE);
+      expect(normalizeCountryForGrpc('NZ')).to.equal(COUNTRY_ENUM.NZ);
+      expect(normalizeCountryForGrpc('AF')).to.equal(COUNTRY_ENUM.AF);
     });
 
     it('defaults to US for unknown country', () => {
@@ -387,6 +420,8 @@ describe('grpc-utils', () => {
     it('returns country string for known enum value', () => {
       expect(restCountryFromGrpcRequestCountry(COUNTRY_ENUM.US)).to.equal('US');
       expect(restCountryFromGrpcRequestCountry(COUNTRY_ENUM.DE)).to.equal('DE');
+      expect(restCountryFromGrpcRequestCountry(COUNTRY_ENUM.NZ)).to.equal('NZ');
+      expect(restCountryFromGrpcRequestCountry(COUNTRY_ENUM.AF)).to.equal('AF');
     });
 
     it('returns undefined for unknown numeric value', () => {

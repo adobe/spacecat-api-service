@@ -653,6 +653,381 @@ export enum COUNTRY_ENUM {
   VN = 42,
 
   /**
+   * @generated from enum value: NZ = 43;
+   */
+  NZ = 43,
+
+  /**
+   * @generated from enum value: PT = 44;
+   */
+  PT = 44,
+
+  /**
+   * @generated from enum value: PK = 45;
+   */
+  PK = 45,
+
+  /**
+   * @generated from enum value: BS = 46;
+   */
+  BS = 46,
+
+  /**
+   * @generated from enum value: GR = 47;
+   */
+  GR = 47,
+
+  /**
+   * @generated from enum value: RS = 48;
+   */
+  RS = 48,
+
+  /**
+   * @generated from enum value: HU = 49;
+   */
+  HU = 49,
+
+  /**
+   * @generated from enum value: BG = 50;
+   */
+  BG = 50,
+
+  /**
+   * @generated from enum value: CV = 51;
+   */
+  CV = 51,
+
+  /**
+   * @generated from enum value: CY = 52;
+   */
+  CY = 52,
+
+  /**
+   * @generated from enum value: UA = 53;
+   */
+  UA = 53,
+
+  /**
+   * @generated from enum value: EG = 54;
+   */
+  EG = 54,
+
+  /**
+   * @generated from enum value: MT = 55;
+   */
+  MT = 55,
+
+  /**
+   * @generated from enum value: HR = 56;
+   */
+  HR = 56,
+
+  /**
+   * @generated from enum value: CR = 57;
+   */
+  CR = 57,
+
+  /**
+   * @generated from enum value: LT = 58;
+   */
+  LT = 58,
+
+  /**
+   * @generated from enum value: EE = 59;
+   */
+  EE = 59,
+
+  /**
+   * @generated from enum value: SI = 60;
+   */
+  SI = 60,
+
+  /**
+   * @generated from enum value: LV = 61;
+   */
+  LV = 61,
+
+  /**
+   * @generated from enum value: GE = 62;
+   */
+  GE = 62,
+
+  /**
+   * @generated from enum value: MA = 63;
+   */
+  MA = 63,
+
+  /**
+   * @generated from enum value: LU = 64;
+   */
+  LU = 64,
+
+  /**
+   * @generated from enum value: NG = 65;
+   */
+  NG = 65,
+
+  /**
+   * @generated from enum value: EC = 66;
+   */
+  EC = 66,
+
+  /**
+   * @generated from enum value: IS = 67;
+   */
+  IS = 67,
+
+  /**
+   * @generated from enum value: KH = 68;
+   */
+  KH = 68,
+
+  /**
+   * @generated from enum value: LK = 69;
+   */
+  LK = 69,
+
+  /**
+   * @generated from enum value: LB = 70;
+   */
+  LB = 70,
+
+  /**
+   * @generated from enum value: GT = 72;
+   */
+  GT = 72,
+
+  /**
+   * @generated from enum value: AM = 73;
+   */
+  AM = 73,
+
+  /**
+   * @generated from enum value: JO = 74;
+   */
+  JO = 74,
+
+  /**
+   * @generated from enum value: SK = 75;
+   */
+  SK = 75,
+
+  /**
+   * @generated from enum value: BD = 76;
+   */
+  BD = 76,
+
+  /**
+   * @generated from enum value: MU = 77;
+   */
+  MU = 77,
+
+  /**
+   * @generated from enum value: DO = 78;
+   */
+  DO = 78,
+
+  /**
+   * @generated from enum value: QA = 79;
+   */
+  QA = 79,
+
+  /**
+   * @generated from enum value: TN = 80;
+   */
+  TN = 80,
+
+  /**
+   * @generated from enum value: BA = 81;
+   */
+  BA = 81,
+
+  /**
+   * @generated from enum value: AZ = 82;
+   */
+  AZ = 82,
+
+  /**
+   * @generated from enum value: AL = 83;
+   */
+  AL = 83,
+
+  /**
+   * @generated from enum value: KW = 84;
+   */
+  KW = 84,
+
+  /**
+   * @generated from enum value: BH = 85;
+   */
+  BH = 85,
+
+  /**
+   * @generated from enum value: HN = 86;
+   */
+  HN = 86,
+
+  /**
+   * @generated from enum value: SV = 87;
+   */
+  SV = 87,
+
+  /**
+   * @generated from enum value: NP = 88;
+   */
+  NP = 88,
+
+  /**
+   * @generated from enum value: RO = 89;
+   */
+  RO = 89,
+
+  /**
+   * @generated from enum value: NI = 90;
+   */
+  NI = 90,
+
+  /**
+   * @generated from enum value: KZ = 91;
+   */
+  KZ = 91,
+
+  /**
+   * @generated from enum value: GH = 92;
+   */
+  GH = 92,
+
+  /**
+   * @generated from enum value: OM = 93;
+   */
+  OM = 93,
+
+  /**
+   * @generated from enum value: DZ = 94;
+   */
+  DZ = 94,
+
+  /**
+   * @generated from enum value: ME = 95;
+   */
+  ME = 95,
+
+  /**
+   * @generated from enum value: JM = 96;
+   */
+  JM = 96,
+
+  /**
+   * @generated from enum value: CM = 97;
+   */
+  CM = 97,
+
+  /**
+   * @generated from enum value: SN = 98;
+   */
+  SN = 98,
+
+  /**
+   * @generated from enum value: PY = 99;
+   */
+  PY = 99,
+
+  /**
+   * @generated from enum value: BZ = 100;
+   */
+  BZ = 100,
+
+  /**
+   * @generated from enum value: ZW = 101;
+   */
+  ZW = 101,
+
+  /**
+   * @generated from enum value: TT = 102;
+   */
+  TT = 102,
+
+  /**
+   * @generated from enum value: BW = 103;
+   */
+  BW = 103,
+
+  /**
+   * @generated from enum value: CZ = 104;
+   */
+  CZ = 104,
+
+  /**
+   * @generated from enum value: ET = 105;
+   */
+  ET = 105,
+
+  /**
+   * @generated from enum value: CD = 106;
+   */
+  CD = 106,
+
+  /**
+   * @generated from enum value: AO = 107;
+   */
+  AO = 107,
+
+  /**
+   * @generated from enum value: MG = 108;
+   */
+  MG = 108,
+
+  /**
+   * @generated from enum value: BO = 109;
+   */
+  BO = 109,
+
+  /**
+   * @generated from enum value: ZM = 110;
+   */
+  ZM = 110,
+
+  /**
+   * @generated from enum value: HT = 111;
+   */
+  HT = 111,
+
+  /**
+   * @generated from enum value: VE = 113;
+   */
+  VE = 113,
+
+  /**
+   * @generated from enum value: MZ = 114;
+   */
+  MZ = 114,
+
+  /**
+   * @generated from enum value: MN = 115;
+   */
+  MN = 115,
+
+  /**
+   * @generated from enum value: GY = 116;
+   */
+  GY = 116,
+
+  /**
+   * @generated from enum value: BN = 117;
+   */
+  BN = 117,
+
+  /**
+   * @generated from enum value: MD = 118;
+   */
+  MD = 118,
+
+  /**
+   * @generated from enum value: AF = 119;
+   */
+  AF = 119,
+
+  /**
    * @generated from enum value: WORLDWIDE = 999;
    */
   WORLDWIDE = 999,
@@ -661,7 +1036,7 @@ export enum COUNTRY_ENUM {
 /**
  * @generated from enum semrush.services.ai_seo.common.v1.COUNTRY.ENUM
  */
-export declare type COUNTRY_ENUMJson = "UNKNOWN" | "AE" | "AU" | "BR" | "CA" | "DE" | "ES" | "FR" | "IN" | "IT" | "JP" | "MX" | "NL" | "SE" | "UK" | "US" | "AR" | "AT" | "BE" | "CH" | "CL" | "CO" | "DK" | "FI" | "IE" | "IL" | "NO" | "PA" | "PE" | "PL" | "UY" | "ZA" | "SA" | "HK" | "ID" | "KR" | "MY" | "PH" | "SG" | "TH" | "TR" | "TW" | "VN" | "WORLDWIDE";
+export declare type COUNTRY_ENUMJson = "UNKNOWN" | "AE" | "AU" | "BR" | "CA" | "DE" | "ES" | "FR" | "IN" | "IT" | "JP" | "MX" | "NL" | "SE" | "UK" | "US" | "AR" | "AT" | "BE" | "CH" | "CL" | "CO" | "DK" | "FI" | "IE" | "IL" | "NO" | "PA" | "PE" | "PL" | "UY" | "ZA" | "SA" | "HK" | "ID" | "KR" | "MY" | "PH" | "SG" | "TH" | "TR" | "TW" | "VN" | "NZ" | "PT" | "PK" | "BS" | "GR" | "RS" | "HU" | "BG" | "CV" | "CY" | "UA" | "EG" | "MT" | "HR" | "CR" | "LT" | "EE" | "SI" | "LV" | "GE" | "MA" | "LU" | "NG" | "EC" | "IS" | "KH" | "LK" | "LB" | "GT" | "AM" | "JO" | "SK" | "BD" | "MU" | "DO" | "QA" | "TN" | "BA" | "AZ" | "AL" | "KW" | "BH" | "HN" | "SV" | "NP" | "RO" | "NI" | "KZ" | "GH" | "OM" | "DZ" | "ME" | "JM" | "CM" | "SN" | "PY" | "BZ" | "ZW" | "TT" | "BW" | "CZ" | "ET" | "CD" | "AO" | "MG" | "BO" | "ZM" | "HT" | "VE" | "MZ" | "MN" | "GY" | "BN" | "MD" | "AF" | "WORLDWIDE";
 
 /**
  * Describes the enum semrush.services.ai_seo.common.v1.COUNTRY.ENUM.

@@ -48,9 +48,13 @@ import { ErrorWithStatusCode } from '../utils.js';
 import { listProjectTagTree } from './handlers/markets.js';
 import {
   DIMENSION,
-  DIMENSION_ROOT_NAMES,
+  DIMENSION_PROVISION_ORDER,
   CLOSED_DIMENSION_VALUES,
   CLOSED_DIMENSIONS,
+  INTENT_ROOT_NAME,
+  LEGACY_INTENT_ROOT_NAME,
+  rootNameOfDimension,
+  dimensionOfRootName,
 } from './prompt-tags.js';
 
 /** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */
@@ -61,8 +65,10 @@ import {
  * @typedef {object} TagPosition
  * @property {'root' | 'descendant' | 'unknown'} kind
  * @property {string | null} parentId
- * @property {string | null} rootName - the tag's dimension: its own name when it
- *   IS a root, else `path[0]`.
+ * @property {string | null} rootName - the tag's DIMENSION: its own name when it
+ *   IS a root, else `path[0]`, in both cases folded to the dimension key
+ *   ({@link dimensionOfRootName}) so a caller compares it against `DIMENSION.*`
+ *   without knowing how upstream spells that root on this project.
  * @property {string[]} ancestorIds - ids of the tag's ancestors, root FIRST and
  *   the tag itself excluded. Empty for a root and for an unknown id.
  */
@@ -111,6 +117,45 @@ export async function indexLevelByName(transport, semrushWorkspaceId, projectId,
 }
 
 /**
+ * Folds ALIAS resolutions into a level index, in place, and reports what is left
+ * to create.
+ *
+ * A wanted name that is absent while one of its aliases is present adopts that
+ * alias's id under the WANTED name, so a caller reads the level by the name it
+ * asked for whichever spelling the project actually carries. An alias is never
+ * created — only a name with no alias present is reported missing.
+ *
+ * Every level index {@link ensureChildren} may hand back goes through this,
+ * including the ones re-read on its recovery paths: a map that skipped the fold
+ * would be missing the wanted name entirely, and the `undefined` root id that
+ * follows degrades the next create to a ROOT-LEVEL one (see
+ * {@link requireServerOwnedRootId}).
+ *
+ * @param {Map<string, string>} level - a level index, mutated in place.
+ * @param {readonly string[]} wanted - the names the caller asked for.
+ * @param {Record<string, readonly string[]>} [aliases] - wanted name → older
+ *   spellings that count as already present.
+ * @returns {{ missing: string[], adopted: string[] }} `missing` is what still
+ *   has to be created; `adopted` names the wanted names an alias resolved.
+ */
+function adoptAliases(level, wanted, aliases) {
+  const missing = [];
+  const adopted = [];
+  for (const name of wanted) {
+    if (!level.has(name)) {
+      const alias = (aliases?.[name] ?? []).find((a) => level.has(a));
+      if (alias) {
+        level.set(name, /** @type {string} */ (level.get(alias)));
+        adopted.push(name);
+      } else {
+        missing.push(name);
+      }
+    }
+  }
+  return { missing, adopted };
+}
+
+/**
  * Creates the missing names under one parent and returns their ids, merged with
  * the ones that already existed. A single upstream call carries every name for
  * one parent, so the batch never straddles two parents (the wire has exactly one
@@ -130,8 +175,19 @@ export async function indexLevelByName(transport, semrushWorkspaceId, projectId,
  * @param {string} parentId - '' to create at the root level.
  * @param {readonly string[]} wanted - bare names that must exist under `parentId`.
  * @param {object} [log] - logger.
- * @returns {Promise<{ byName: Map<string, string>, createdNames: string[] }>}
- *   `byName` maps every wanted name to its tag id.
+ * @param {Record<string, readonly string[]>} [aliases] - older spellings of a
+ *   wanted name that count as ALREADY PRESENT. When the wanted name is absent
+ *   but one of its aliases resolves, that tag's id is adopted under the wanted
+ *   name and nothing is created — which is what keeps a name that upstream data
+ *   is still being renamed to from being minted a second time beside the
+ *   populated tag it renames (`$abv_tags$intent` vs `intent`, LLMO-6984). An
+ *   alias is never created: only the wanted name is. See {@link adoptAliases}.
+ * @returns {Promise<{ byName: Map<string, string>, createdNames: string[],
+ *   adoptedNames: string[] }>} `byName` maps every wanted name to its tag id.
+ *   `adoptedNames` names the wanted names an ALIAS resolved rather than the name
+ *   itself — reported rather than left to be inferred from the map, which also
+ *   carries the alias's own key and would make the inference an accident of
+ *   `indexLevelByName` returning the whole level.
  */
 export async function ensureChildren(
   transport,
@@ -140,11 +196,12 @@ export async function ensureChildren(
   parentId,
   wanted,
   log,
+  aliases,
 ) {
   const existing = await indexLevelByName(transport, semrushWorkspaceId, projectId, parentId, log);
-  const missing = wanted.filter((name) => !existing.has(name));
+  const { missing, adopted } = adoptAliases(existing, wanted, aliases);
   if (missing.length === 0) {
-    return { byName: existing, createdNames: [] };
+    return { byName: existing, createdNames: [], adoptedNames: adopted };
   }
 
   let echoed;
@@ -162,13 +219,14 @@ export async function ensureChildren(
     // before deciding this is a failure. The batch is all-or-nothing upstream,
     // so one collision also fails the names we were not racing on.
     const reread = await indexLevelByName(transport, semrushWorkspaceId, projectId, parentId, log);
+    const { adopted: rereadAdopted } = adoptAliases(reread, wanted, aliases);
     if (!missing.every((name) => reread.has(name))) {
       throw e;
     }
     log?.info?.('ensureChildren: lost a create race; resolved the names a concurrent writer minted', {
       semrushWorkspaceId, projectId, parentId, resolved: missing,
     });
-    return { byName: reread, createdNames: [] };
+    return { byName: reread, createdNames: [], adoptedNames: rereadAdopted };
   }
 
   // createProjectTags resolves to a LIST of the created nodes, in request order.
@@ -179,7 +237,7 @@ export async function ensureChildren(
     }
   }
   if (missing.every((name) => existing.has(name))) {
-    return { byName: existing, createdNames: missing };
+    return { byName: existing, createdNames: missing, adoptedNames: adopted };
   }
 
   // A node the upstream did not echo back leaves a hole. Re-read rather than hand
@@ -191,6 +249,7 @@ export async function ensureChildren(
     unechoed: missing.filter((name) => !existing.has(name)),
   });
   const byName = await indexLevelByName(transport, semrushWorkspaceId, projectId, parentId, log);
+  const { adopted: rereadAdopted } = adoptAliases(byName, wanted, aliases);
   const unresolved = missing.filter((name) => !byName.has(name));
   if (unresolved.length > 0) {
     // The create answered 2xx and the draft-layer re-read still does not see the
@@ -209,7 +268,11 @@ export async function ensureChildren(
   }
   // Only the names the create echoed are ours to claim. A name that reappeared on
   // the re-read was resolved, not minted here — another writer may have won it.
-  return { byName, createdNames: missing.filter((name) => existing.has(name)) };
+  return {
+    byName,
+    createdNames: missing.filter((name) => existing.has(name)),
+    adoptedNames: rereadAdopted,
+  };
 }
 
 /**
@@ -231,33 +294,58 @@ const LEGACY_SOURCE_ROOT_NAME = 'source';
  * Older projects predate this taxonomy entirely, so this is the seam that brings
  * them forward on first touch.
  *
- * Every root — `origin` included — is resolved-or-created by bare name. The
- * `source` → `origin` authorship rename is complete (origin-dimension.md): there is
- * no fallback for the pre-rename `source` name. A project that still carries a legacy
- * `source` authorship root gets a fresh `origin` root created here, and the stale
+ * Each root is resolved-or-created by its UPSTREAM NAME ({@link rootNameOfDimension}),
+ * which is the dimension key for four of the five and `$abv_tags$intent` for `intent`.
+ * The returned map is keyed by DIMENSION, so a caller asks for the dimension it means
+ * and never has to know which spelling a given project carries.
+ *
+ * The intent rename runs project by project from the migration CLI (LLMO-6985), so a
+ * project may still name that root `intent`. That name is passed as an ALIAS rather
+ * than resolved on its own: a project the rename has not reached keeps its populated
+ * root and gets no second one, while a project that has no intent root at all is
+ * provisioned under the new name. Minting `$abv_tags$intent` beside a populated
+ * `intent` would split the dimension across two roots and strand every prompt already
+ * tagged under the old one.
+ *
+ * The `source` → `origin` authorship rename, by contrast, is complete (origin-dimension.md):
+ * there is no fallback for the pre-rename `source` name. A project that still carries a
+ * legacy `source` authorship root gets a fresh `origin` root created here, and the stale
  * `source` root is left untouched for the data reshape to retire.
  *
- * Deploy ordering is the invariant, and it is enforced OUTSIDE this code (the reshape
- * lands before this resolver ships). If that ordering is violated and a project is
- * still authorship-on-`source` when this runs, the fresh `origin` root is minted EMPTY
- * and the populated `source` root's `ai`/`human` values are orphaned. This seam does
- * not detect or fail on that — the deploy gate owns it.
+ * Deploy ordering is the invariant for THAT rename, and it is enforced OUTSIDE this code
+ * (the reshape lands before this resolver ships). If that ordering is violated and a
+ * project is still authorship-on-`source` when this runs, the fresh `origin` root is
+ * minted EMPTY and the populated `source` root's `ai`/`human` values are orphaned. This
+ * seam does not detect or fail on that — the deploy gate owns it.
  *
  * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
  * @param {object} [log] - logger.
- * @returns {Promise<Map<string, string>>} root name → tag id, in root order.
+ * @returns {Promise<Map<string, string>>} dimension → tag id, in provisioning order.
  */
 export async function ensureDimensionRoots(transport, semrushWorkspaceId, projectId, log) {
-  const { byName, createdNames } = await ensureChildren(
+  const { byName, createdNames, adoptedNames } = await ensureChildren(
     transport,
     semrushWorkspaceId,
     projectId,
     '',
-    DIMENSION_ROOT_NAMES,
+    DIMENSION_PROVISION_ORDER.map(rootNameOfDimension),
     log,
+    { [INTENT_ROOT_NAME]: [LEGACY_INTENT_ROOT_NAME] },
   );
+
+  // Report the projects the rename has not reached: adoption is invisible in the
+  // returned map (that is its point), and this is the write path's only signal of
+  // the sweep's progress — the one LLMO-6986 waits to go quiet before dropping the
+  // tolerance.
+  if (adoptedNames.includes(INTENT_ROOT_NAME)) {
+    log?.info?.(
+      'ensureDimensionRoots: resolved the pre-rename `intent` root — the '
+      + '`$abv_tags$intent` rename has not reached this project',
+      { event: 'intent-rename-legacy-root-adopted', semrushWorkspaceId, projectId },
+    );
+  }
 
   // Observability guardrail (no tolerance, no behavior change): freshly minting `origin`
   // while a legacy `source` root still sits at this level means the data reshape may have
@@ -277,10 +365,10 @@ export async function ensureDimensionRoots(transport, semrushWorkspaceId, projec
     }
   }
 
-  // Return the roots in canonical order.
+  // Return the roots keyed by DIMENSION, in canonical order.
   const roots = new Map();
-  for (const name of DIMENSION_ROOT_NAMES) {
-    roots.set(name, byName.get(name));
+  for (const dimension of DIMENSION_PROVISION_ORDER) {
+    roots.set(dimension, byName.get(rootNameOfDimension(dimension)));
   }
   return roots;
 }
@@ -293,7 +381,7 @@ export async function ensureDimensionRoots(transport, semrushWorkspaceId, projec
  * and `category`); the `source` root can be `undefined` on a mid-rename project,
  * so callers that need it read `roots.get(DIMENSION.SOURCE)` directly instead.
  *
- * @param {Map<string, string | undefined>} roots - the resolved root name → id map.
+ * @param {Map<string, string | undefined>} roots - the resolved dimension → id map.
  * @param {string} dimension - one of the always-resolved dimension root names.
  * @returns {string}
  */
@@ -314,7 +402,7 @@ function rootIdOf(roots, dimension) {
  * production, but a gate bypass must fail visibly, not corrupt the tree — so refuse
  * rather than proceed. A no-op for the always-provisioned dimensions.
  *
- * @param {Map<string, string | undefined>} roots - the resolved root name → id map.
+ * @param {Map<string, string | undefined>} roots - the resolved dimension → id map.
  * @param {string} dimension - a server-owned dimension root name.
  * @returns {string}
  */
@@ -363,7 +451,7 @@ export async function findTagsInTree(transport, semrushWorkspaceId, projectId, t
   for (const root of roots.items) {
     if (wanted.has(root.id)) {
       found.set(root.id, {
-        kind: 'root', parentId: null, rootName: root.name, ancestorIds: [],
+        kind: 'root', parentId: null, rootName: dimensionOfRootName(root.name), ancestorIds: [],
       });
     }
   }
@@ -371,7 +459,7 @@ export async function findTagsInTree(transport, semrushWorkspaceId, projectId, t
   let reads = 1;
   let frontier = roots.items
     .filter((r) => r.childrenCount > 0)
-    .map((r) => ({ node: r, rootName: r.name, ancestorIds: [r.id] }));
+    .map((r) => ({ node: r, rootName: dimensionOfRootName(r.name), ancestorIds: [r.id] }));
   while (frontier.length > 0 && found.size < wanted.size) {
     const next = [];
     for (const { node, rootName, ancestorIds } of frontier) {
@@ -396,7 +484,7 @@ export async function findTagsInTree(transport, semrushWorkspaceId, projectId, t
             found.set(child.id, {
               kind: 'descendant',
               parentId: child.parentId ?? node.id,
-              rootName: child.path?.[0]?.name ?? rootName,
+              rootName: dimensionOfRootName(child.path?.[0]?.name ?? rootName),
               ancestorIds,
             });
           }
@@ -432,7 +520,8 @@ export async function findTagsInTree(transport, semrushWorkspaceId, projectId, t
  * @param {string} tagId - the upstream id to locate.
  * @param {object} [log] - logger.
  * @returns {Promise<TagPosition>} `rootName` is the tag's dimension: its own name
- *   when it IS a root, else `path[0]`.
+ *   when it IS a root, else `path[0]`, folded to the dimension key either way
+ *   ({@link dimensionOfRootName}).
  */
 async function findTagInTree(transport, semrushWorkspaceId, projectId, tagId, log) {
   const found = await findTagsInTree(transport, semrushWorkspaceId, projectId, [tagId], log);
@@ -519,8 +608,8 @@ export async function assertParentWithinDimension(
  * @returns {Promise<{
  *   roots: Map<string, string | undefined>,
  *   values: Map<string, Map<string, string>>,
- * }>} `roots` maps a root name to its id (the `source` key is `undefined` on a
- *   mid-rename project — see {@link ensureDimensionRoots}); `values` maps a closed
+ * }>} `roots` maps a dimension to its root's id (the `source` key is `undefined` on
+ *   a mid-rename project — see {@link ensureDimensionRoots}); `values` maps a closed
  *   dimension name to that dimension's bare value → id map.
  */
 export async function provisionDimensionTree(transport, semrushWorkspaceId, projectId, log) {

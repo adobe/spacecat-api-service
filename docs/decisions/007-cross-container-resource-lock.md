@@ -1,6 +1,15 @@
 # ADR-007: Cross-container serialization for the dynamic-allocation absolute-set race
 
-> **Applies only when `SERENITY_DYNAMIC_ALLOCATION` is on**, which it is not in any deployed
+> **SUPERSEDED (2026-08, SITES-49206; see [ADR-009](009-remove-dormant-jit-allocator.md)).** The
+> dynamic (JIT) Semrush AI allocator this ADR concerns — `resource-manager.js`
+> (`ensureAiHeadroom`/`releaseAiSurplus`) and `resource-lock.js` (`withResourceLock`) — has been
+> removed: Semrush no longer enforces AI limits for proxy-routed LLMO workspaces, so there is nothing
+> to allocate or serialize. Retained as a decision record only; the race and its mitigation below no
+> longer exist in the codebase.
+>
+> _Historical context follows._
+>
+> **Applied only when `SERENITY_DYNAMIC_ALLOCATION` is on**, which it never was in any deployed
 > environment. The race described here is between `ensureAiHeadroom` and `releaseAiSurplus`; both
 > are JIT-only. The sub-workspace lifecycle transfers no resources at all, so with the flag off
 > there is nothing to serialize. See ADR-008 and `docs/serenity.md` § Sub-workspace resource

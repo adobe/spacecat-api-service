@@ -1,0 +1,252 @@
+/*
+ * Copyright 2026 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+
+import crypto from 'crypto';
+import {
+  CloudWatchLogsClient,
+  PutDeliverySourceCommand,
+  CreateDeliveryCommand,
+  GetDeliverySourceCommand,
+  DescribeDeliveriesCommand,
+} from '@aws-sdk/client-cloudwatch-logs';
+import { hasText } from '@adobe/spacecat-shared-utils';
+
+// CDN vended-log delivery control plane and the Adobe cross-account destination both live in
+// us-east-1 (see spacecat-auth-service cdn-logs provisioning).
+export const CDN_LOG_DELIVERY_REGION = 'us-east-1';
+
+const CDN_LOG_S3_SUFFIX_PATH = '/{yyyy}/{MM}/{dd}/{HH}';
+
+// Supported CDN providers. CloudFront is the first; add a new provider here (resource-ARN shape,
+// CloudWatch log type, source-name prefix, delivered record fields) without touching the
+// delivery flow below.
+export const CDN_PROVIDERS = {
+  cloudfront: {
+    logType: 'ACCESS_LOGS',
+    sourceNamePrefix: 'llmo-cf',
+    buildResourceArn: ({ accountId, resourceId }) => `arn:aws:cloudfront::${accountId}:distribution/${resourceId}`,
+    recordFields: [
+      'date', 'time', 'x-edge-location', 'cs-method', 'cs(Host)', 'cs-uri-stem', 'sc-status',
+      'cs(Referer)', 'cs(User-Agent)', 'time-to-first-byte', 'sc-content-type', 'x-host-header',
+    ],
+  },
+};
+
+export const DEFAULT_CDN_PROVIDER = 'cloudfront';
+
+function getProviderConfig(provider) {
+  const config = CDN_PROVIDERS[provider];
+  if (!config) {
+    throw new Error(`Unsupported CDN provider: ${provider}`);
+  }
+  return config;
+}
+
+/**
+ * Normalize an IMS org id into the AWS-safe token used in cdn-logs resource names. Mirrors
+ * spacecat-auth-service `toSafeAwsName` — must match byte-for-byte so the destination resolves.
+ */
+export function toSafeAwsName(imsOrgId) {
+  return String(imsOrgId).replace(/@AdobeOrg$/, '').replace(/@/g, '').toLowerCase();
+}
+
+/**
+ * Build the cross-account delivery-destination ARN Adobe provisioned for this org's cdn-logs
+ * bucket (`cdn-logs-<org>`). Provider-agnostic.
+ */
+export function buildDeliveryDestinationArn({
+  imsOrgId,
+  adobeAccountId,
+  region = CDN_LOG_DELIVERY_REGION,
+}) {
+  if (!hasText(imsOrgId)) {
+    throw new Error('imsOrgId is required');
+  }
+  if (!/^[0-9]{12}$/.test(String(adobeAccountId))) {
+    throw new Error('adobeAccountId must be a 12-digit AWS account ID');
+  }
+  const name = `cdn-logs-${toSafeAwsName(imsOrgId)}`;
+  return `arn:aws:logs:${region}:${adobeAccountId}:delivery-destination:${name}`;
+}
+
+// CloudWatch Logs caps a delivery-source name at 60 characters.
+const MAX_DELIVERY_SOURCE_NAME_LENGTH = 60;
+
+/** Per-resource delivery-source name, scoped by provider + org + resource. */
+export function buildDeliverySourceName({
+  provider = DEFAULT_CDN_PROVIDER,
+  imsOrgId,
+  resourceId,
+}) {
+  const { sourceNamePrefix } = getProviderConfig(provider);
+  const safeOrg = toSafeAwsName(imsOrgId);
+  if (!safeOrg || !/^[a-z0-9]/.test(safeOrg)) {
+    throw new Error(`IMS org ID '${imsOrgId}' produces an invalid AWS resource name segment`);
+  }
+  const name = `${sourceNamePrefix}-${safeOrg}-${resourceId}`;
+  if (name.length <= MAX_DELIVERY_SOURCE_NAME_LENGTH) {
+    return name;
+  }
+  // For unusually long org/resource ids, keep the readable head and append a deterministic hash
+  // of the full name. Determinism matters: the name is regenerated on every call and idempotency
+  // (GetDeliverySource) relies on it being byte-for-byte stable for the same inputs.
+  const suffix = crypto.createHash('sha256').update(name).digest('hex').slice(0, 12);
+  const head = name.slice(0, MAX_DELIVERY_SOURCE_NAME_LENGTH - suffix.length - 1);
+  return `${head}-${suffix}`;
+}
+
+/**
+ * Enable CDN access-log forwarding to Adobe (diagram step 8): create the customer-account
+ * delivery source and link it to Adobe's cross-account destination so the CDN pushes logs to
+ * the cdn-logs S3 bucket.
+ *
+ * Idempotent — returns `{ created: false, alreadyExisted: true }` and mutates nothing when a
+ * delivery from this resource's source already exists.
+ *
+ * @param {object} credentials - temporary credentials from the connector role assume-role.
+ * @param {object} params
+ * @param {string} [params.provider] - CDN provider key (see CDN_PROVIDERS); defaults to cloudfront.
+ * @param {string} params.resourceId - the CDN resource id (e.g. CloudFront distribution id).
+ * @param {string} params.accountId - 12-digit customer AWS account id.
+ * @param {string} params.imsOrgId
+ * @param {string} params.deliveryDestinationArn - Adobe's cross-account destination ARN.
+ * @param {string} [params.region]
+ * @returns {Promise<{created: boolean, alreadyExisted: boolean, deliverySourceName: string,
+ *   deliveryId: string|undefined}>}
+ */
+export async function createCdnLogDelivery(credentials, {
+  provider = DEFAULT_CDN_PROVIDER,
+  resourceId,
+  accountId,
+  imsOrgId,
+  deliveryDestinationArn,
+  region = CDN_LOG_DELIVERY_REGION,
+}) {
+  const config = getProviderConfig(provider);
+  if (!hasText(resourceId)) {
+    throw new Error('resourceId is required');
+  }
+  if (!/^[0-9]{12}$/.test(String(accountId))) {
+    throw new Error('accountId must be a 12-digit AWS account ID');
+  }
+  if (!hasText(imsOrgId)) {
+    throw new Error('imsOrgId is required');
+  }
+  if (!hasText(deliveryDestinationArn)) {
+    throw new Error('deliveryDestinationArn is required');
+  }
+
+  const client = new CloudWatchLogsClient({ region, credentials });
+  const deliverySourceName = buildDeliverySourceName({ provider, imsOrgId, resourceId });
+  const resourceArn = config.buildResourceArn({ accountId, resourceId });
+
+  // Find the existing delivery for this source pointing at the expected destination (paginated).
+  // The DescribeDeliveries API does not accept a server-side filter; pagination is client-side.
+  const MAX_DESCRIBE_PAGES = 50;
+  const findExistingDelivery = async () => {
+    let nextToken;
+    let pages = 0;
+    do {
+      pages += 1;
+      // eslint-disable-next-line no-await-in-loop
+      const page = await client.send(new DescribeDeliveriesCommand({
+        ...(nextToken && { nextToken }),
+      }));
+      // Match on both source name AND destination ARN: a delivery to an old/different destination
+      // is not valid — if the destination ARN ever changes, re-enable is needed.
+      const match = (page.deliveries || []).find(
+        (d) => d.deliverySourceName === deliverySourceName
+          && d.deliveryDestinationArn === deliveryDestinationArn,
+      );
+      if (match) {
+        return match;
+      }
+      nextToken = page.nextToken;
+    } while (nextToken && pages < MAX_DESCRIBE_PAGES);
+    return undefined;
+  };
+
+  // No-op if forwarding is already enabled for this resource.
+  let sourceExists = false;
+  try {
+    await client.send(new GetDeliverySourceCommand({ name: deliverySourceName }));
+    sourceExists = true;
+  } catch (err) {
+    if (err?.name !== 'ResourceNotFoundException') {
+      throw err;
+    }
+  }
+
+  if (sourceExists) {
+    const existing = await findExistingDelivery();
+    if (existing) {
+      return {
+        created: false,
+        alreadyExisted: true,
+        deliverySourceName,
+        deliveryId: existing.id,
+      };
+    }
+  }
+
+  try {
+    await client.send(new PutDeliverySourceCommand({
+      name: deliverySourceName,
+      resourceArn,
+      logType: config.logType,
+    }));
+  } catch (err) {
+    // Distribution already bound to a different delivery source (e.g. the customer set one up
+    // manually). AWS rejects the re-registration; surface a clear 4xx rather than a generic 500.
+    if (err?.name === 'ConflictException') {
+      const conflict = new Error(`Distribution ${resourceId} is already registered to a different delivery source and cannot be re-registered without removing the existing source first`);
+      conflict.name = 'DeliverySourceConflict';
+      throw conflict;
+    }
+    throw err;
+  }
+
+  let response;
+  try {
+    response = await client.send(new CreateDeliveryCommand({
+      deliverySourceName,
+      deliveryDestinationArn,
+      s3DeliveryConfiguration: { suffixPath: CDN_LOG_S3_SUFFIX_PATH },
+      recordFields: config.recordFields,
+    }));
+  } catch (err) {
+    // TOCTOU: a concurrent enable/rescan for the same distribution can both pass the existence
+    // check above and race here; the losing CreateDelivery conflicts. Treat as already-enabled to
+    // preserve the idempotency contract instead of surfacing a 500.
+    if (err?.name === 'ConflictException') {
+      const existing = await findExistingDelivery();
+      // deliveryId may be undefined here if DescribeDeliveries hasn't caught up to the winning
+      // CreateDelivery yet (eventual consistency). That is acceptable: delivery IS enabled — the
+      // id is informational, and the caller already treats this as a successful no-op. We don't
+      // retry-loop for the id since the idempotency outcome (alreadyExisted) is already correct.
+      return {
+        created: false,
+        alreadyExisted: true,
+        deliverySourceName,
+        deliveryId: existing?.id,
+      };
+    }
+    throw err;
+  }
+
+  return {
+    created: true,
+    alreadyExisted: false,
+    deliverySourceName,
+    deliveryId: response?.delivery?.id,
+  };
+}

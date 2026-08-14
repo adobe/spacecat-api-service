@@ -100,6 +100,7 @@ Request → AWS Lambda → Middleware Stack → Route Matcher → Controller →
 10. `elevatedSlackClientWrapper` - Slack client
 11. `secrets` - AWS Secrets Manager
 12. `helixStatus` - Health checks
+13. `facsWrapper` - FACS/ReBAC customer-authorization enforcement for FACS-governed routes (innermost wrapper — attached first in the `wrap(...).with(...)` chain, so it runs last, immediately before the controller; configured with `routeFacsCapabilities` + `secondaryResolvers`; see Access Control → FACS-native authorization)
 
 All dependencies are injected into `context` and available throughout the request lifecycle.
 
@@ -248,7 +249,7 @@ Capability constants live in `src/routes/capability-constants.js`. Both the rout
 
 **Authentication precedence** (checked in order):
 1. JWT with scopes
-2. Adobe IMS
+2. Route-scoped IMS (`ApiKeyImsHandler`) — `/tools/api-keys/*` only, for IaaS-only orgs that cannot mint a JWT session token. The global direct-IMS-token handler has been removed; all other routes require a JWT session token.
 3. Scoped API Key (fine-grained permissions)
 4. Route-Scoped Legacy API Key (`POST /event/fulfillment` and `POST /slack/channels/invite-by-user-id` only — frozen list, SITES-34224)
 

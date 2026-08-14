@@ -113,6 +113,8 @@ function isStaticRoute(routePattern) {
  * @param {Object} onboardingController - Semrush onboarding notification controller.
  * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
  * @param {Object} auditPolicyController - Audit policy + audit scope controller.
+ * @param {Object} opportunityValidationController - On-demand opportunity validation
+ *   controller.
  * @param {Object} promptSuggestionSchedulesController - LLMO prompt-suggestion schedule controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
@@ -184,6 +186,7 @@ export default function getRouteHandlers(
   onboardingController,
   redirectsController,
   auditPolicyController,
+  opportunityValidationController,
   promptSuggestionSchedulesController,
 ) {
   const staticRoutes = {};
@@ -392,6 +395,7 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/opportunities': opportunitiesController.createOpportunity,
     'PATCH /sites/:siteId/opportunities/:opportunityId': opportunitiesController.patchOpportunity,
     'DELETE /sites/:siteId/opportunities/:opportunityId': opportunitiesController.removeOpportunity,
+    'POST /sites/:siteId/opportunities/:opportunityId/validate': opportunityValidationController.triggerValidation,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions': suggestionsController.getAllForOpportunity,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit/:cursor': suggestionsController.getAllForOpportunityPaged,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit': suggestionsController.getAllForOpportunityPaged,
@@ -412,8 +416,10 @@ export default function getRouteHandlers(
     'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.removeSuggestion,
     'GET /sites/:siteId/geo-experiments': suggestionsController.listGeoExperiments,
     'GET /sites/:siteId/geo-experiments/:geoExperimentId': suggestionsController.getGeoExperiment,
+    'GET /sites/:siteId/geo-experiments/:geoExperimentId/results': suggestionsController.getGeoExperimentResults,
     'PATCH /sites/:siteId/geo-experiments/:geoExperimentId': suggestionsController.patchGeoExperiment,
     'DELETE /sites/:siteId/geo-experiments/:geoExperimentId': suggestionsController.deleteGeoExperiment,
+    'POST /sites/:siteId/geo-experiments/:geoExperimentId/trigger-impact-measurement': suggestionsController.triggerImpactMeasurement,
     'GET /sites/:siteId/traffic/paid': paidController.getTopPaidPages,
     'GET /sites/:siteId/traffic/paid/page-type-platform-campaign': trafficController.getPaidTrafficByPageTypePlatformCampaign,
     'GET /sites/:siteId/traffic/paid/url-page-type': trafficController.getPaidTrafficByUrlPageType,
@@ -610,6 +616,8 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/deploy': llmoCloudFrontController.deploy,
     'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/plan': llmoCloudFrontController.plan,
     'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/permissions': llmoCloudFrontController.getPermissions,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-delivery': llmoCloudFrontController.enableCdnLogDelivery,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-rescan': llmoCloudFrontController.rescanCdnLogDelivery,
     'GET /sites/:siteId/llmo/strategy': llmoController.getStrategy,
     'PUT /sites/:siteId/llmo/strategy': llmoController.saveStrategy,
     'GET /sites/:siteId/llmo/edge-optimize-status': llmoController.checkEdgeOptimizeStatus,
@@ -628,6 +636,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties': llmoAkamaiController.listProperties,
     'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan': llmoAkamaiController.plan,
     'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy': llmoAkamaiController.deploy,
+    'GET /sites/:siteId/llmo/cdn-onboard/akamai/deploy-status': llmoAkamaiController.deployStatus,
     'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate': llmoAkamaiController.activate,
     'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status': llmoAkamaiController.activationStatus,
 
