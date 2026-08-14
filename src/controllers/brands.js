@@ -60,6 +60,7 @@ import {
   getBrandById,
   getBrandBySite,
   getBrandCompetitors,
+  getBrandAliases,
   readSerenityFlagScopes,
   withSerenityState,
 } from '../support/brands-storage.js';
@@ -1972,8 +1973,14 @@ function BrandsController(ctx, log, env) {
         ? await getBrandCompetitors(brandUuid, postgrestClient)
         : [];
       // Brand aliases (the extra names the brand is known by) re-sync to every
-      // market's project brand_names + own-brand benchmark on edit.
+      // market's project brand_names + own-brand benchmark on edit. Captured
+      // BEFORE the update for the same reason as the competitors above: the
+      // benchmark alias write removes only the aliases this edit dropped, so that
+      // the values Semrush's brand resolution added there survive it.
       const aliasesTouched = updates.brandAliases !== undefined;
+      const oldAliases = aliasesTouched
+        ? await getBrandAliases(brandUuid, postgrestClient)
+        : [];
 
       // Per-brand serenity rollout gate. An edit that changes URL sources /
       // competitors / aliases re-syncs onto the brand's Semrush projects (the
@@ -2270,6 +2277,7 @@ function BrandsController(ctx, log, env) {
               // of the brand's own properties.
               updated.urls,
               sharedProjects,
+              oldCompetitors,
             );
             rejectedAliases.push(...(competitorResult?.rejected ?? []));
           }
@@ -2281,6 +2289,7 @@ function BrandsController(ctx, log, env) {
               updated.semrushSubWorkspaceId,
               log,
               sharedProjects,
+              oldAliases,
             );
             rejectedAliases.push(...(aliasResult?.rejected ?? []));
           }
