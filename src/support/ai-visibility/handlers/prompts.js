@@ -58,18 +58,19 @@ export async function handlePromptsResponses(sp, clients) {
   }
   const total = prompts.length;
   const page = prompts.slice(offset, offset + limit);
-  // `attempted[i]` records whether we actually issued the per-prompt relation call.
-  // Without it a skipped prompt (missing identity → Promise.resolve(null)) is
-  // indistinguishable from a relation call that fulfilled with a null value, which
-  // hides why a row has no full response. Same identity check as the guard below.
+  // Single identity predicate, reused by both the relation-call guard and
+  // `attempted[i]`, so the two cannot drift. `attempted[i]` records whether we
+  // actually issued the per-prompt relation call: without it a skipped prompt
+  // (missing identity → Promise.resolve(null)) is indistinguishable from a
+  // relation call that fulfilled with a null value, which hides why a row has no
+  // full response.
   const hasRelationIdentity = (p) => Boolean(p.promptHash && String(p.serpId ?? '') && p.topicId);
   const attempted = page.map(hasRelationIdentity);
   const settled = await Promise.allSettled(
     page.map((p) => {
-      const { promptHash } = p;
+      if (!hasRelationIdentity(p)) { return Promise.resolve(null); }
+      const { promptHash, topicId } = p;
       const serpId = String(p.serpId ?? '');
-      const { topicId } = p;
-      if (!promptHash || !serpId || !topicId) { return Promise.resolve(null); }
       return clients.prRelationsClient.prompt({
         country, llm: p.llm || llm, promptHash, serpId, topicId,
       });
