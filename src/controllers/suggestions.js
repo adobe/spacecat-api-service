@@ -162,11 +162,27 @@ async function postPlgSuggestionSkipAlert(site, opportunity, suggestion, context
     const suggestionId = suggestion.getId?.() ?? 'unknown';
     const skipReason = suggestion.getSkipReason?.() ?? null;
     const skipDetail = suggestion.getSkipDetail?.() ?? null;
+    const organizationId = site.getOrganizationId?.() ?? null;
+
+    let orgName = null;
+    if (organizationId) {
+      try {
+        const org = await context.dataAccess.Organization.findById(organizationId);
+        orgName = org?.getName?.() || null;
+      } catch (orgLookupError) {
+        log.warn(`Failed to look up org name for PLG suggestion skip alert: ${orgLookupError.message}`);
+      }
+    }
 
     let message = ':no_entry_sign: *PLG Customer Skipped a Suggestion*\n\n'
       + `• *Site:* \`${siteBaseURL}\`\n`
-      + `• *Site ID:* \`${site.getId()}\`\n`
-      + `• *Opportunity Type:* \`${opportunityType}\`\n`
+      + `• *Site ID:* \`${site.getId()}\``;
+
+    if (orgName) {
+      message += `\n• *IMS Org Name:* ${orgName}`;
+    }
+
+    message += `\n• *Opportunity Type:* \`${opportunityType}\`\n`
       + `• *Opportunity ID:* \`${opportunityId}\`\n`
       + `• *Suggestion ID:* \`${suggestionId}\``;
 
@@ -175,6 +191,12 @@ async function postPlgSuggestionSkipAlert(site, opportunity, suggestion, context
     }
     if (skipDetail) {
       message += `\n• *Skip Detail:* \`${skipDetail}\``;
+    }
+
+    if (organizationId) {
+      const experienceUrl = env.EXPERIENCE_URL || 'https://experience.adobe.com';
+      const asoUrl = `${experienceUrl}/?organizationId=${organizationId}#/sites-optimizer/sites/${site.getId()}`;
+      message += `\n• *ASO Link:* ${asoUrl}`;
     }
 
     await postSlackMessage(channelId, message, token);
