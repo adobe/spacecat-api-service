@@ -1,3 +1,10 @@
+# [1.746.0](https://github.com/adobe/spacecat-api-service/compare/v1.745.0...v1.746.0) (2026-08-14)
+
+
+### Features
+
+* **slack:** show org name alongside imsOrgId in get-site output ([#3051](https://github.com/adobe/spacecat-api-service/issues/3051)) ([60a9e00](https://github.com/adobe/spacecat-api-service/commit/60a9e00cae0b1616b1adab15ec9fd645ba9bdcbd))
+
 # [1.745.0](https://github.com/adobe/spacecat-api-service/compare/v1.744.0...v1.745.0) (2026-08-14)
 
 
