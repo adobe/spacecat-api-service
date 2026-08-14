@@ -48,7 +48,7 @@ describe('src/index.js authHandlers order contract', () => {
 
     // Path-agnostic handlers must come after the path-scoped HMAC handler so
     // webhook requests do not reach them and fail with a misleading 401.
-    ['JwtHandler', 'AdobeImsHandler', 'ScopedApiKeyHandler'].forEach((name) => {
+    ['JwtHandler', 'ScopedApiKeyHandler'].forEach((name) => {
       const idx = order.indexOf(name);
       expect(idx).to.be.greaterThan(-1, `${name} must be in AUTH_HANDLERS`);
       expect(ghIdx).to.be.lessThan(idx, `GitHubWebhookHmacHandler must come before ${name}`);
@@ -62,30 +62,30 @@ describe('src/index.js authHandlers order contract', () => {
 
     // Like the webhook handler, this is path-scoped to GET /config/.../redirects.txt
     // and must run before the path-agnostic handlers so an overlay request does not
-    // reach JwtHandler / AdobeImsHandler and fail with a misleading 401.
-    ['JwtHandler', 'AdobeImsHandler', 'ScopedApiKeyHandler'].forEach((name) => {
+    // reach JwtHandler and fail with a misleading 401.
+    ['JwtHandler', 'ScopedApiKeyHandler'].forEach((name) => {
       const idx = order.indexOf(name);
       expect(idx).to.be.greaterThan(-1, `${name} must be in AUTH_HANDLERS`);
       expect(asoIdx).to.be.lessThan(idx, `AsoOverlayKeyHandler must come before ${name}`);
     });
   });
 
-  it('places ApiKeyImsHandler before AdobeImsHandler so /tools/api-keys is matched first', () => {
-    // Per the IMS-to-JWT migration design (mysticat-architecture), the route-
-    // scoped ApiKeyImsHandler must run BEFORE the global AdobeImsHandler.
-    // - For /tools/api-keys the scoped handler validates and the global handler
-    //   never runs.
-    // - For other routes the scoped handler returns null and the global handler
-    //   takes over (preserves Auto-Fix until ASO-607 migrates).
+  it('keeps the route-scoped ApiKeyImsHandler but NOT the global AdobeImsHandler', () => {
+    // The global AdobeImsHandler — which backed direct `Authorization: Bearer
+    // <IMS token>` on every route — has been removed now that all consumers
+    // authenticate with JWT session tokens (SpaceCat IMS-removal). The route-
+    // scoped ApiKeyImsHandler survives as the sole IMS surface: it validates
+    // IMS tokens ONLY for /tools/api-keys (IaaS-only orgs that cannot mint a
+    // JWT) and returns null for every other path, so no global IMS backdoor is
+    // reintroduced.
     const order = parseAuthHandlersOrder();
     const apiKeyIdx = order.indexOf('ApiKeyImsHandler');
     const adobeImsIdx = order.indexOf('AdobeImsHandler');
 
-    expect(apiKeyIdx).to.be.greaterThan(-1, 'ApiKeyImsHandler must be in AUTH_HANDLERS');
-    expect(adobeImsIdx).to.be.greaterThan(-1, 'AdobeImsHandler must be in AUTH_HANDLERS');
-    expect(apiKeyIdx).to.be.lessThan(
-      adobeImsIdx,
-      'ApiKeyImsHandler must come before AdobeImsHandler',
+    expect(apiKeyIdx).to.be.greaterThan(-1, 'ApiKeyImsHandler must remain in AUTH_HANDLERS');
+    expect(adobeImsIdx).to.equal(
+      -1,
+      'AdobeImsHandler must NOT be in AUTH_HANDLERS (global IMS auth removed)',
     );
   });
 

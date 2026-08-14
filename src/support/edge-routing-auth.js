@@ -13,7 +13,6 @@
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { exchangePromiseToken, getCookieValue } from './utils.js';
-import AccessControlUtil from './access-control-util.js';
 
 // IMS service codes that represent the LLMO/Elmo product in the user's productContexts.
 // TODO: replace placeholder with the real IMS service code once confirmed.
@@ -109,29 +108,16 @@ export async function authorizeEdgeCdnRouting(context, {
   log.info(`[edge-routing-auth] Site ${siteId} has entitlement tier '${tier}'`);
 
   if (isPaid) {
-    // FACS-enrolled + deferred to the controller: the hybrid model is the
-    // source of truth for this org, so authorize via the state-layer capability
-    // on the site's brand (derived from the route — POST edge-optimize-config →
-    // llmo/can_configure) rather than the legacy IMS product-context profile.
-    // The wrapper only defers when the org is FACS-enrolled, so
-    // hasLlmoCapabilityForSite never falls back to the legacy isLLMOAdministrator
-    // claim here.
-    if (context.attributes?.facs?.enabled) {
-      const site = await context.dataAccess.Site.findById(siteId);
-      if (!site) {
-        // Data-integrity condition, not a capability rejection — log distinctly
-        // at warn so operators can tell it apart from a genuine authz denial.
-        log.warn(`[edge-routing-auth] Site ${siteId} not found during FACS capability check`);
-        const err = new Error('Site not found');
-        err.status = 403;
-        throw err;
-      }
-      const accessControlUtil = AccessControlUtil.fromContext(context);
-      if (!(await accessControlUtil.hasLlmoCapabilityForSite(site))) {
-        const err = new Error('User does not hold the required LLMO capability to configure CDN routing for this site');
-        err.status = 403;
-        throw err;
-      }
+    // FACS-enrolled paid orgs are authorized upstream by facsWrapper: site-scoped
+    // LLMO routes go through the secondary resource param (site → brands), so
+    // reaching this controller means the wrapper already admitted the request →
+    // allow. Gate on the JWT `facs_enabled` claim, NOT context.attributes.facs
+    // (only set when the wrapper DEFERS — no longer the case for site routes now
+    // that the secondary resolver decides them); mirrors hasLlmoCapabilityForSite.
+    // The former FACS-deferred branch (PR #2947) is superseded and removed. See
+    // mysticat-architecture/platform/decisions/facs-wrapper-secondary-resource-param.md.
+    const facsEnabled = context.attributes?.authInfo?.getProfile?.()?.facs_enabled === true;
+    if (facsEnabled) {
       return;
     }
 

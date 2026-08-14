@@ -12,8 +12,9 @@
 
 import { expect } from 'chai';
 import {
-  ORG_1_ID, BRAND_1_ID, SITE_1_ID, SERENITY_MOCK_WORKSPACE_ID, SERENITY_ORG_PARENT_WS_ID,
+  ORG_1_ID, BRAND_1_ID, SITE_1_ID,
 } from '../seed-ids.js';
+import { INTENT_ROOT_NAME } from '../../../../src/support/serenity/prompt-tags.js';
 
 /**
  * End-to-end tests for the /serenity/* surface (LLMO-5190), driven against the
@@ -351,8 +352,12 @@ export default function serenityTests(
         `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=`,
       );
       expect(roots.status).to.equal(200);
+      // The intent root is provisioned under its upstream name: Semrush hides a
+      // `$abv_tags$`-marked entry from the customer-facing Brand Presence tag
+      // filter, and a project provisioned here must not need the rename sweep
+      // (LLMO-6985) to come back for it.
       expect(roots.body.items.map((t) => t.name))
-        .to.have.members(['category', 'intent', 'origin', 'type', 'source']);
+        .to.have.members(['category', INTENT_ROOT_NAME, 'origin', 'type', 'source']);
       const categoryRoot = roots.body.items.find((t) => t.name === 'category');
       expect(res.body.parentId).to.equal(categoryRoot.id);
     });
@@ -426,7 +431,7 @@ export default function serenityTests(
       const roots = await getHttpClient().admin.get(
         `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=`,
       );
-      const intentRoot = roots.body.items.find((t) => t.name === 'intent');
+      const intentRoot = roots.body.items.find((t) => t.name === INTENT_ROOT_NAME);
       expect(intentRoot, 'the intent root should be provisioned').to.exist;
 
       const res = await createTag('ai', intentRoot.id);
@@ -828,96 +833,6 @@ export default function serenityTests(
     });
   });
 
-  // Dynamic-allocation kill-switch ON — drives the JIT top-up FRONTING end-to-end against the live
-  // metered User Manager mock (Rainer's review item #4). ORG_1 carries a parent workspace
-  // (SERENITY_ORG_PARENT_WS_ID) so BRAND_1's sub-workspace resolves a non-null parent id and
-  // the guard engages; the flag is a global env kill-switch read per request, toggled here around
-  // the block. The `__quota` / `__dump` mock control routes are injected by the postgres harness.
-  describe('Serenity API — dynamic allocation ON (metered JIT via the live UM mock)', () => {
-    const { setUmMockQuota, dumpUmMock } = mockControls;
-    const base = `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity`;
-    const US_GEO = 2840;
-    const CHILD = SERENITY_MOCK_WORKSPACE_ID; // BRAND_1's sub-workspace (the metered child)
-    const PARENT = SERENITY_ORG_PARENT_WS_ID; // ORG_1's parent workspace (advisory units pool)
-
-    const childTotal = (dump, dim) => {
-      const rec = (dump.workspace_resources || []).find((r) => r.id === CHILD);
-      // A missing record (shape mismatch / wiring regression) must fail with an ACTIONABLE message
-      // here, not surface downstream as the opaque "expected undefined to be above 0".
-      expect(rec, `expected a workspace_resources record for CHILD (${CHILD}) in the mock dump`)
-        .to.exist;
-      return rec.ai?.[dim]?.total;
-    };
-
-    // Skip cleanly if a wiring didn't inject the mock control routes (only the postgres harness has
-    // the live containers); this keeps the shared factory usable by any future non-metered wiring.
-    before(function skipWithoutMockControls() {
-      if (typeof setUmMockQuota !== 'function' || typeof dumpUmMock !== 'function') {
-        this.skip();
-      }
-    });
-
-    beforeEach(async () => {
-      await resetData();
-      await resetMocks();
-      process.env.SERENITY_DYNAMIC_ALLOCATION = 'true';
-      // Parent (units pool) amply provisioned; child seeded at ZERO total so a metered write must
-      // top it up. Both metered so the allocator's strict /resources reads resolve.
-      await setUmMockQuota(PARENT, { projects: 100, prompts: 100000 });
-      await setUmMockQuota(CHILD, {
-        projects: { used: 0, drafted: 0, total: 0 },
-        prompts: { used: 0, drafted: 0, total: 0 },
-      });
-    });
-
-    afterEach(() => {
-      delete process.env.SERENITY_DYNAMIC_ALLOCATION;
-      delete process.env.SERENITY_BRAND_AI_CEILING_PROMPTS;
-    });
-
-    it('tops up the sub-workspace via a live /resources transfer when a metered write needs headroom', async () => {
-      // create-market fronts PROJECT headroom before createProject: from a seeded 0 total the guard
-      // tops the child up to a whole block (>=1) with a REAL /resources transfer to the mock, then
-      // creates + publishes the project.
-      const created = await getHttpClient().admin.post(`${base}/markets`, {
-        market: 'US', languageCode: 'en', brandDomain: 'example.com', brandNames: ['Test Brand'],
-      });
-      expect(created.status).to.equal(201);
-
-      // Positive proof the flag-ON JIT engaged end-to-end over the wire: the child's PROJECT total
-      // grew from the seeded 0 via a live transfer. A flag-OFF run never fronts/transfers, so it
-      // would still read 0 — asserting the top-up AND that the kill-switch env toggle took effect
-      // for the request. (The prompt dimension's `texts × models` sizing is covered by the
-      // resource-manager unit tests; here the project carve is the decisive over-the-wire signal.)
-      const dump = await dumpUmMock();
-      expect(childTotal(dump, 'projects'), 'projects topped up from 0 via a live transfer')
-        .to.be.greaterThan(0);
-
-      // Smoke: the prompt write path also runs cleanly under the flag (fronts, then publishes).
-      const post = await getHttpClient().admin.post(`${base}/prompts`, {
-        prompts: [{ text: 'best trail running shoes?', geoTargetId: US_GEO, languageCode: 'en' }],
-      });
-      expect(post.status).to.equal(200);
-    });
-
-    it('a binding per-brand ceiling (LLMO-6190 gate) rejects a prompt write that would top up past the cap', async () => {
-      // A low prompts ceiling set in the env (Vault, in prod). The market create tops up PROJECTS
-      // only (the ceiling caps prompts, unset for projects) and publishes empty, so it still
-      // succeeds; the later prompt write needs a PROMPTS top-up from the seeded 0, which rounds to
-      // a whole block (100) and exceeds the cap (50) → brandAiLimit (409), over the wire.
-      process.env.SERENITY_BRAND_AI_CEILING_PROMPTS = '50';
-
-      const created = await getHttpClient().admin.post(`${base}/markets`, {
-        market: 'US', languageCode: 'en', brandDomain: 'example.com', brandNames: ['Test Brand'],
-      });
-      expect(created.status).to.equal(201);
-
-      const post = await getHttpClient().admin.post(`${base}/prompts`, {
-        prompts: [{ text: 'capped by the ceiling', geoTargetId: US_GEO, languageCode: 'en' }],
-      });
-      expect(post.status).to.equal(409);
-    });
-  });
   // Prompt authorship metadata (LLMO-6289): every native prompt write stamps the four-key
   // `metadata` block — `created_at`/`created_by` on the create, `updated_at`/`updated_by` on the
   // create AND on every subsequent edit — upstream on the Semrush prompt row.
@@ -1437,6 +1352,140 @@ export default function serenityTests(
       // sort independently.
       expect(await orderedMineIds('&sort=metadata.created_at&order=asc', mine))
         .to.deep.equal([a, b, c]);
+    });
+  });
+
+  describe('Serenity API — benchmark brand aliases survive a brand edit (live mock)', () => {
+    const { dumpPeMock, putPeBenchmark } = mockControls;
+    const brandPath = `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}`;
+    const serenityBase = `${brandPath}/serenity`;
+    // An alias no row of ours can produce, standing in for what Semrush's own brand resolution
+    // adds (`gm` on General Motors). If it is still on the benchmark after an unrelated edit, the
+    // write merged over the live list; if it is gone, the write replaced it.
+    const VENDOR_ALIAS = 'vendor resolved name';
+
+    before(function skipWithoutMockControls() {
+      if (typeof dumpPeMock !== 'function' || typeof putPeBenchmark !== 'function') {
+        this.skip();
+      }
+    });
+
+    beforeEach(async () => {
+      await resetData();
+      await resetMocks();
+    });
+
+    // Setup, not subject. The market create provisions the project; the own-brand benchmark is
+    // materialised separately, by the URL sync (`ensureOwnBrandBenchmark`), so a market alone
+    // leaves nothing for an alias write to land on. Both statuses are checked here so a refused
+    // setup fails on its own line rather than as a confusing "no such benchmark" later.
+    const createUsMarketWithBenchmark = async () => {
+      const market = await getHttpClient().admin.post(`${serenityBase}/markets`, {
+        market: 'US', languageCode: 'en', brandDomain: 'example.com', brandNames: ['Test Brand'],
+      });
+      expect(market.status).to.equal(201);
+      const urls = await getHttpClient().admin.patch(brandPath, {
+        urls: ['https://example.com/about'],
+      });
+      expect(urls.status).to.equal(200);
+    };
+
+    // The mock keys benchmarks per project (`benchmarks:{workspaceId}:{projectId}`), and the baked
+    // mock seed already supplies one such project. Flattening EVERY benchmark collection — and
+    // carrying each row's workspace/project along — is what keeps the lookup on the project the
+    // market under test resolved to rather than whichever collection the dump happens to list
+    // first. Same reason `storedPrompts` above flattens instead of picking one.
+    const storedBenchmarks = async () => {
+      const dump = await dumpPeMock();
+      const collections = Object.entries(dump)
+        .filter(([collection]) => collection.startsWith('benchmarks:'));
+      expect(collections.length, 'expected the PE mock to hold a benchmarks collection')
+        .to.be.greaterThan(0);
+      return collections.flatMap(([collection, rows]) => {
+        const [, workspaceId, projectId] = collection.split(':');
+        return (Array.isArray(rows) ? rows : []).map((row) => ({ workspaceId, projectId, row }));
+      });
+    };
+
+    const benchmarkNamed = async (name) => {
+      const all = await storedBenchmarks();
+      const found = all.find(({ row }) => row.brand_name === name);
+      // Naming the benchmarks that ARE stored turns a drift in how the own-brand benchmark is
+      // titled into a one-line diagnosis, instead of "expected undefined to exist".
+      const held = all.map(({ row }) => `${row.brand_name}=${JSON.stringify(row.brand_aliases || [])}`).join(' | ');
+      expect(found, `expected a benchmark named ${name}; mock holds: ${held || '(none)'}`).to.exist;
+      return found;
+    };
+
+    const aliasesOf = (row) => (row.brand_aliases || []).map((a) => a.toLowerCase());
+
+    it('keeps a vendor-added alias when the brand aliases are edited', async () => {
+      await createUsMarketWithBenchmark();
+
+      // Put the vendor's alias on the own-brand benchmark, as resolution would have.
+      const { workspaceId, projectId, row } = await benchmarkNamed('Test Brand');
+      await putPeBenchmark(workspaceId, projectId, row.id, {
+        brand_name: row.brand_name,
+        domain: row.domain,
+        brand_aliases: [...(row.brand_aliases || []), VENDOR_ALIAS],
+      });
+
+      const res = await getHttpClient().admin.patch(brandPath, {
+        brandAliases: [{ name: 'Test Alias', regions: ['WW'] }],
+      });
+      expect(res.status).to.equal(200);
+
+      const after = (await benchmarkNamed('Test Brand')).row;
+      expect(aliasesOf(after)).to.include(VENDOR_ALIAS);
+      // The edit's own alias lands too, in the lowercase spelling upstream uses
+      // when it creates one.
+      expect(after.brand_aliases).to.include('test alias');
+    });
+
+    it('removes an alias the edit dropped without taking the vendor-added one with it', async () => {
+      await createUsMarketWithBenchmark();
+      const seeded = await benchmarkNamed('Test Brand');
+      await putPeBenchmark(seeded.workspaceId, seeded.projectId, seeded.row.id, {
+        brand_name: seeded.row.brand_name,
+        domain: seeded.row.domain,
+        brand_aliases: [...(seeded.row.brand_aliases || []), VENDOR_ALIAS],
+      });
+
+      await getHttpClient().admin.patch(brandPath, {
+        brandAliases: [{ name: 'Temporary Alias', regions: ['WW'] }],
+      });
+      expect(aliasesOf((await benchmarkNamed('Test Brand')).row)).to.include('temporary alias');
+
+      // Dropping it from the brand must drop it upstream — the merge is additive over what the
+      // vendor holds, not over what we previously sent.
+      const res = await getHttpClient().admin.patch(brandPath, { brandAliases: [] });
+      expect(res.status).to.equal(200);
+
+      const after = (await benchmarkNamed('Test Brand')).row;
+      expect(aliasesOf(after)).to.not.include('temporary alias');
+      expect(aliasesOf(after)).to.include(VENDOR_ALIAS);
+    });
+
+    it('keeps a competitor benchmark\'s aliases when only its name changes', async () => {
+      await createUsMarketWithBenchmark();
+
+      await getHttpClient().admin.patch(brandPath, {
+        competitors: [{
+          name: 'Rival One', url: 'https://rival-one.example', aliases: ['Rival Incorporated'], regions: ['WW'],
+        }],
+      });
+      expect(aliasesOf((await benchmarkNamed('Rival One')).row)).to.include('rival incorporated');
+
+      // A rename carries no alias change. The write must still send `brand_aliases`: omitting the
+      // field does not leave the stored list alone, it clears it.
+      const res = await getHttpClient().admin.patch(brandPath, {
+        competitors: [{
+          name: 'Rival Uno', url: 'https://rival-one.example', aliases: ['Rival Incorporated'], regions: ['WW'],
+        }],
+      });
+      expect(res.status).to.equal(200);
+
+      expect(aliasesOf((await benchmarkNamed('Rival Uno')).row)).to.include('rival incorporated');
     });
   });
 }

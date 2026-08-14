@@ -21,8 +21,8 @@
  *
  * A single env boolean, DEFAULT OFF, read once per request off `context.env` —
  * the same shape the other global serenity toggles use
- * (`SERENITY_DYNAMIC_ALLOCATION` in dynamic-allocation-active.js,
- * `SERENITY_ALLOW_NON_IMS_AUTH` in rest-transport.js). When OFF, the create path
+ * (`SERENITY_ALLOW_WORKSPACE_DELETE`, `SERENITY_ALLOW_NON_IMS_AUTH` in
+ * rest-transport.js). When OFF, the create path
  * publishes inline byte-for-byte as before this change. Wired to Vault at
  * `dx_mysticat/<env>/api-service`.
  */

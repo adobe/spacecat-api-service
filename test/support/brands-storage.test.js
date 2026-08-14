@@ -25,6 +25,7 @@ import {
   getBrandCompetitors,
   getBrandBySite,
   listBrandIdsForSite,
+  listSiteIdsForBrands,
   isSemrushMarketMirrorSite,
   upsertBrand,
   updateBrand,
@@ -32,6 +33,8 @@ import {
   setBrandStatus,
   listRegions,
   setBrandClaimsEnabled,
+  readSerenityFlagScopes,
+  withSerenityState,
 } from '../../src/support/brands-storage.js';
 
 use(sinonChai);
@@ -760,6 +763,53 @@ describe('brands-storage', () => {
       from.withArgs('brand_sites').returns(createChainableQuery({ data: null, error: { message: 'nope' } }));
       await expect(listBrandIdsForSite(ORG_ID, SITE_ID, { from }))
         .to.be.rejectedWith(/Failed to resolve brand-site links for site: nope/);
+    });
+  });
+
+  describe('listSiteIdsForBrands', () => {
+    const BRAND_IDS = new Set(['brand-A', 'brand-B']);
+
+    it('returns empty set when postgrestClient / org / brandIds are missing or empty', async () => {
+      expect(await listSiteIdsForBrands(ORG_ID, BRAND_IDS, null)).to.deep.equal(new Set());
+      expect(await listSiteIdsForBrands(ORG_ID, BRAND_IDS, {})).to.deep.equal(new Set());
+      expect(await listSiteIdsForBrands('', BRAND_IDS, { from: () => {} })).to.deep.equal(new Set());
+      const noop = { from: () => {} };
+      expect(await listSiteIdsForBrands(ORG_ID, new Set(), noop)).to.deep.equal(new Set());
+      expect(await listSiteIdsForBrands(ORG_ID, null, noop)).to.deep.equal(new Set());
+    });
+
+    it('unions primary sites (brands.site_id) and linked sites (brand_sites.site_id)', async () => {
+      const from = sinon.stub();
+      from.withArgs('brands').returns(createChainableQuery({ data: [{ site_id: 'site-1' }], error: null }));
+      from.withArgs('brand_sites').returns(createChainableQuery({
+        data: [{ site_id: 'site-1' }, { site_id: 'site-2' }], error: null,
+      }));
+      const result = await listSiteIdsForBrands(ORG_ID, BRAND_IDS, { from });
+      expect(result).to.deep.equal(new Set(['site-1', 'site-2']));
+    });
+
+    it('accepts an array of brand ids', async () => {
+      const from = sinon.stub();
+      from.withArgs('brands').returns(createChainableQuery({ data: [{ site_id: 'site-1' }], error: null }));
+      from.withArgs('brand_sites').returns(createChainableQuery({ data: [], error: null }));
+      const result = await listSiteIdsForBrands(ORG_ID, ['brand-A'], { from });
+      expect(result).to.deep.equal(new Set(['site-1']));
+    });
+
+    it('throws when the brands query errors', async () => {
+      const from = sinon.stub();
+      from.withArgs('brands').returns(createChainableQuery({ data: null, error: { message: 'boom' } }));
+      from.withArgs('brand_sites').returns(createChainableQuery({ data: [], error: null }));
+      await expect(listSiteIdsForBrands(ORG_ID, BRAND_IDS, { from }))
+        .to.be.rejectedWith(/Failed to resolve sites for brands: boom/);
+    });
+
+    it('throws when the brand_sites query errors', async () => {
+      const from = sinon.stub();
+      from.withArgs('brands').returns(createChainableQuery({ data: [], error: null }));
+      from.withArgs('brand_sites').returns(createChainableQuery({ data: null, error: { message: 'nope' } }));
+      await expect(listSiteIdsForBrands(ORG_ID, BRAND_IDS, { from }))
+        .to.be.rejectedWith(/Failed to resolve brand-site links for brands: nope/);
     });
   });
 
@@ -3143,27 +3193,150 @@ describe('brands-storage', () => {
       await expect(deleteBrand(ORG_ID, BRAND_ID, null)).to.be.rejectedWith('PostgREST client is required');
     });
 
-    it('returns true when brand is found and soft-deleted', async () => {
-      const query = createChainableQuery({ data: { id: BRAND_ID }, error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+    it('renames the brand to {name}_deleted and returns true (LLMO-6978)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: { name: 'Acme', status: 'active' }, error: null }, // read name + status
+          { data: { id: BRAND_ID }, error: null }, // rename + soft-delete
+        ],
+      });
 
-      const result = await deleteBrand(ORG_ID, BRAND_ID, postgrestClient, 'user@test.com');
+      const result = await deleteBrand(ORG_ID, BRAND_ID, client, 'user@test.com');
+
       expect(result).to.be.true;
+      expect(client.capturedCalls.update).to.have.lengthOf(1);
+      expect(client.capturedCalls.update[0].row).to.deep.equal({
+        status: 'deleted',
+        name: 'Acme_deleted',
+        updated_by: 'user@test.com',
+      });
     });
 
-    it('returns false when brand not found', async () => {
-      const query = createChainableQuery({ data: null, error: null });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+    it('renames a brand with a NULL status (treated as live) rather than 404ing it', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: { name: 'Acme', status: null }, error: null }, // read name + status
+          { data: { id: BRAND_ID }, error: null }, // rename + soft-delete
+        ],
+      });
 
-      const result = await deleteBrand(ORG_ID, BRAND_ID, postgrestClient);
+      const result = await deleteBrand(ORG_ID, BRAND_ID, client, 'user@test.com');
+
+      expect(result).to.be.true;
+      expect(client.capturedCalls.update[0].row.name).to.equal('Acme_deleted');
+    });
+
+    it('succeeds idempotently without renaming when the brand is already deleted', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: { name: 'Acme_deleted', status: 'deleted' }, error: null }, // read
+        ],
+      });
+
+      const result = await deleteBrand(ORG_ID, BRAND_ID, client);
+
+      // Idempotent DELETE (→ 204), but no second write — the already-renamed
+      // name is left untouched so it is never re-suffixed.
+      expect(result).to.be.true;
+      expect(client.capturedCalls.update).to.have.lengthOf(0);
+    });
+
+    it('appends an incrementing index when {name}_deleted already exists (LLMO-6978)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: { name: 'Acme', status: 'active' }, error: null }, // read name + status
+          // first rename collides with an existing deleted "Acme_deleted"
+          { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint "uq_brand_name_per_org"' } },
+          { data: { id: BRAND_ID }, error: null }, // retry with _deleted2 succeeds
+        ],
+      });
+
+      const result = await deleteBrand(ORG_ID, BRAND_ID, client, 'user@test.com');
+
+      expect(result).to.be.true;
+      expect(client.capturedCalls.update.map((u) => u.row.name)).to.deep.equal([
+        'Acme_deleted',
+        'Acme_deleted2',
+      ]);
+    });
+
+    it('returns false when no live brand is found (already deleted / not found)', async () => {
+      const client = createTableMockClient({
+        brands: [{ data: null, error: null }], // read finds no non-deleted row
+      });
+
+      const result = await deleteBrand(ORG_ID, BRAND_ID, client);
+
       expect(result).to.be.false;
     });
 
-    it('throws on database error', async () => {
-      const query = createChainableQuery({ data: null, error: { message: 'delete failed' } });
-      const postgrestClient = { from: sinon.stub().returns(query) };
+    it('throws when the current-name read fails', async () => {
+      const client = createTableMockClient({
+        brands: [{ data: null, error: { message: 'read failed' } }],
+      });
 
-      await expect(deleteBrand(ORG_ID, BRAND_ID, postgrestClient)).to.be.rejectedWith('Failed to delete brand: delete failed');
+      await expect(deleteBrand(ORG_ID, BRAND_ID, client))
+        .to.be.rejectedWith('Failed to delete brand: read failed');
+    });
+
+    it('throws on a non-collision database error during the rename', async () => {
+      const client = createTableMockClient({
+        brands: [
+          { data: { name: 'Acme' }, error: null }, // read current name
+          { data: null, error: { message: 'delete failed' } }, // rename fails hard
+        ],
+      });
+
+      await expect(deleteBrand(ORG_ID, BRAND_ID, client))
+        .to.be.rejectedWith('Failed to delete brand: delete failed');
+    });
+
+    it('throws after exhausting the collision-retry budget', async () => {
+      const client = createTableMockClient({
+        brands: [
+          { data: { name: 'Acme', status: 'active' }, error: null }, // read name + status
+          // every rename attempt collides on the per-org name constraint
+          // (clamped: reused for all updates), so the loop keeps retrying.
+          { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint "uq_brand_name_per_org"' } },
+        ],
+      });
+
+      await expect(deleteBrand(ORG_ID, BRAND_ID, client))
+        .to.be.rejectedWith('could not free the name "Acme" after 100 attempts');
+    });
+
+    it('reports success when a concurrent delete already soft-deleted the row (guarded zero-row UPDATE)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: { name: 'Acme', status: 'active' }, error: null }, // read: still live
+          // Our guarded UPDATE (.not status eq deleted) matches zero rows because a
+          // racing deleteBrand already flipped this row to deleted between the read
+          // and the write — so we neither 404 nor re-suffix the already-renamed brand.
+          { data: null, error: null },
+        ],
+      });
+
+      const result = await deleteBrand(ORG_ID, BRAND_ID, client, 'user@test.com');
+
+      // Idempotent success: the racing caller completed the delete for us.
+      expect(result).to.be.true;
+      // Exactly one UPDATE, no extra retries — the write itself is the guard.
+      expect(client.capturedCalls.update).to.have.lengthOf(1);
+      expect(client.capturedCalls.update[0].row.name).to.equal('Acme_deleted');
+    });
+
+    it('surfaces a 23505 from a different unique constraint immediately instead of retrying', async () => {
+      const client = createTableMockClient({
+        brands: [
+          { data: { name: 'Acme', status: 'active' }, error: null }, // read name + status
+          // A 23505 that is NOT the per-org name collision — advancing the index
+          // can't resolve it, so it must surface right away, not burn 100 attempts.
+          { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint "brands_base_site_unique"' } },
+        ],
+      });
+
+      await expect(deleteBrand(ORG_ID, BRAND_ID, client))
+        .to.be.rejectedWith('Failed to delete brand: duplicate key value violates unique constraint "brands_base_site_unique"');
     });
   });
   describe('active->pending demotion guard (LLMO-5587)', () => {
@@ -3612,6 +3785,87 @@ describe('brands-storage', () => {
       });
 
       expect(result).to.be.null;
+    });
+  });
+
+  describe('derived serenity state on the brand payload', () => {
+    const OTHER_BRAND_ID = '33333333-3333-4333-8333-333333333333';
+    const ORG_STAMP = '2026-08-01T10:00:00Z';
+    const BRAND_STAMP = '2026-08-10T09:00:00Z';
+
+    const orgFlagRow = { flag_value: true, brand_id: null, updated_at: ORG_STAMP };
+    const brandFlagRow = (brandId, value) => ({
+      flag_value: value, brand_id: brandId, updated_at: BRAND_STAMP,
+    });
+
+    const flagClient = (flagRows, error = null) => createTableMockClient({
+      feature_flags: { data: flagRows, error },
+    });
+    const scopesFrom = (flagRows) => readSerenityFlagScopes(ORG_ID, flagClient(flagRows));
+    const someBrand = (id = BRAND_ID) => ({ id, name: 'TestBrand' });
+
+    it('inherits an active organization when the brand has no override', async () => {
+      const brand = withSerenityState(someBrand(), await scopesFrom([orgFlagRow]));
+      expect(brand.serenityActive).to.equal(true);
+      expect(brand.serenityActivatedAt).to.equal(ORG_STAMP);
+      // The rest of the payload passes through untouched.
+      expect(brand.name).to.equal('TestBrand');
+    });
+
+    it('reports a brand held back by a false override under an active organization', async () => {
+      const scopes = await scopesFrom([orgFlagRow, brandFlagRow(BRAND_ID, false)]);
+      const brand = withSerenityState(someBrand(), scopes);
+      expect(brand.serenityActive).to.equal(false);
+      // Nothing went live for this brand, so there is no activation moment.
+      expect(brand.serenityActivatedAt).to.be.null;
+    });
+
+    it('reports a released brand while its organization has no row, stamped from the brand row', async () => {
+      const scopes = await scopesFrom([brandFlagRow(BRAND_ID, true)]);
+      const brand = withSerenityState(someBrand(), scopes);
+      expect(brand.serenityActive).to.equal(true);
+      expect(brand.serenityActivatedAt).to.equal(BRAND_STAMP);
+    });
+
+    it('is inactive with no activation stamp when the flag is unset entirely', async () => {
+      const brand = withSerenityState(someBrand(), await scopesFrom([]));
+      expect(brand.serenityActive).to.equal(false);
+      expect(brand.serenityActivatedAt).to.be.null;
+    });
+
+    it('resolves a mixed organization per brand from ONE flag read', async () => {
+      // The whole point of the mid-migration state: two brands in one org, one
+      // released and one not, answered from a single feature_flags query.
+      const client = flagClient([brandFlagRow(BRAND_ID, true)]);
+      const scopes = await readSerenityFlagScopes(ORG_ID, client);
+
+      expect([someBrand(BRAND_ID), someBrand(OTHER_BRAND_ID)]
+        .map((b) => withSerenityState(b, scopes).serenityActive))
+        .to.deep.equal([true, false]);
+      expect(client.from.getCalls().filter((c) => c.args[0] === 'feature_flags'))
+        .to.have.lengthOf(1);
+    });
+
+    it('propagates a flag-read failure rather than reporting the brand inactive', async () => {
+      // The rows live in the same database as the brand read beside them, so an
+      // error here is a real fault, not a default-off signal.
+      await expect(readSerenityFlagScopes(ORG_ID, flagClient(null, { message: 'boom' })))
+        .to.be.rejectedWith('Failed to read feature flag serenity: boom');
+    });
+
+    it('leaves the brand readers free of the flag query, so internal reads do not pay for it', async () => {
+      // The derivation belongs to the handlers that return a brand payload. The
+      // readers are shared with ~20 internal call sites that never surface these
+      // fields, and must neither issue the query nor inherit its failure mode.
+      const postgrestClient = createTableMockClient({
+        brands: { data: makeBrandRow(), error: null },
+      });
+
+      const brand = await getBrandById(ORG_ID, BRAND_ID, postgrestClient);
+
+      expect(brand.id).to.equal(BRAND_ID);
+      expect(brand).to.not.have.property('serenityActive');
+      expect(postgrestClient.from).to.not.have.been.calledWith('feature_flags');
     });
   });
 });

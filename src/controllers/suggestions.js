@@ -49,6 +49,7 @@ import {
   getScheduleParams,
   buildExperimentMetadata,
   presignInsightsRawData,
+  isImpactMeasurementEligible,
 } from '../support/geo-experiment-helper.js';
 import { FixDto } from '../dto/fix.js';
 import { GeoExperimentDto } from '../dto/geo-experiment.js';
@@ -59,6 +60,7 @@ import {
   getHostName,
   getIsSummitPlgEnabled,
   isViewAsTrialRequest,
+  triggerGeoExperimentImpactMeasurement,
 } from '../support/utils.js';
 import AccessControlUtil, { X_PRODUCT_HEADER } from '../support/access-control-util.js';
 import { redactFeedbackContent } from '../support/feedback-redaction.js';
@@ -1343,6 +1345,19 @@ function SuggestionsController(ctx, sqs, env) {
       return forbidden('User does not belong to the organization or does not have sufficient permissions');
     }
 
+    // LLMO auto-fix: enforce the finer-grained LLMO capability for this site.
+    // LLMO logins never carry the ASO `auto_fix` scope, so the access check above
+    // only confirmed org membership; require the LLMO capability too. S2S callers
+    // were already authorized via CAP_FIX_ENTITY_CREATE and are not FACS subjects,
+    // so they are exempt.
+    if (
+      xProduct === 'LLMO'
+      && !s2sResult.allowed
+      && !await accessControlUtil.hasLlmoCapabilityForSite(site)
+    ) {
+      return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can trigger auto-fix'));
+    }
+
     const opportunity = await Opportunity.findById(opportunityId);
     if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound('Opportunity not found');
@@ -2494,6 +2509,75 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   /**
+   * Returns the impact-measurement insights ("results") for a geo experiment.
+   *
+   * Read-only counterpart to POST .../trigger-impact-measurement: that endpoint asks the
+   * engine to (re-)run measurement, this one just fetches the already-computed report. The
+   * insights JSON is written by Mystique/the engine to the Mystique assets bucket
+   * (S3_MYSTIQUE_BUCKET) at the key stored on the experiment as insightsLocation (see the
+   * spacecat-shared GeoExperiment model); each analysis's rawDataUrl is presigned so the UI
+   * can download the S3 detail blobs directly. Returns 404 when the experiment has no
+   * insights yet (impact measurement not complete).
+   */
+  const getGeoExperimentResults = async (context) => {
+    const { siteId, geoExperimentId } = context.params;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(geoExperimentId)) {
+      return badRequest('GeoExperiment ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
+    }
+
+    const geoExperiment = await GeoExperiment.findById(geoExperimentId);
+    if (!geoExperiment || geoExperiment.getSiteId() !== siteId) {
+      return notFound('GeoExperiment not found');
+    }
+
+    const notReadyMessage = `No results available for GeoExperiment ${geoExperimentId} yet `
+      + `(phase '${geoExperiment.getPhase()}', status '${geoExperiment.getStatus()}'). `
+      + 'Impact measurement has not produced insights.';
+
+    const insightsS3Key = geoExperiment.getInsightsLocation?.();
+    const { S3_MYSTIQUE_BUCKET: mystiqueBucket } = context.env;
+    if (!insightsS3Key || !mystiqueBucket) {
+      return notFound(notReadyMessage);
+    }
+
+    let insights;
+    try {
+      const { s3Client, GetObjectCommand } = context.s3;
+      const response = await s3Client.send(
+        new GetObjectCommand({ Bucket: mystiqueBucket, Key: insightsS3Key }),
+      );
+      const body = await response.Body.transformToString();
+      insights = JSON.parse(body);
+      // Presign each analysis's rawDataUrl so the UI can download the S3 detail blobs directly.
+      insights = await presignInsightsRawData(insights, context.s3, context.log);
+    } catch (s3Error) {
+      // Insights may not exist yet (e.g. impact measurement not yet complete).
+      context.log.info(`[geo-experiment] Could not fetch results for ${geoExperimentId}: ${s3Error.message}`);
+      return notFound(notReadyMessage);
+    }
+
+    return ok({
+      geoExperimentId,
+      status: geoExperiment.getStatus(),
+      phase: geoExperiment.getPhase(),
+      insights,
+    });
+  };
+
+  /**
    * Patches a geo experiment. All fields are patchable except
    * createdAt, updatedAt, and updatedBy (managed automatically).
    */
@@ -2590,6 +2674,53 @@ function SuggestionsController(ctx, sqs, env) {
 
     await geoExperiment.remove();
     return noContent();
+  };
+
+  /**
+   * Manually (re-)triggers Mystique impact measurement for a GeoExperiment. Only allowed once
+   * the experiment has reached post-analysis, with status in_progress or completed (see
+   * isImpactMeasurementEligible). Sends a TRIGGER_IMPACT_MEASUREMENT message to the
+   * llmo-experimentation-engine-queue; the engine re-validates eligibility and re-arms the
+   * experiment before resubmitting via its normal handlePostAnalysisCompleted path.
+   * See llmo-experimentation-engine's docs/decisions/004-manual-impact-measurement-retrigger.md.
+   */
+  const triggerImpactMeasurement = async (context) => {
+    const { siteId, geoExperimentId } = context.params;
+    const { authInfo: { profile } } = context.attributes;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(geoExperimentId)) {
+      return badRequest('GeoExperiment ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
+    }
+
+    const geoExperiment = await GeoExperiment.findById(geoExperimentId);
+    if (!geoExperiment || geoExperiment.getSiteId() !== siteId) {
+      return notFound('GeoExperiment not found');
+    }
+
+    if (!isImpactMeasurementEligible(geoExperiment)) {
+      return badRequest(`GeoExperiment ${geoExperimentId} is at phase '${geoExperiment.getPhase()}' / status '${geoExperiment.getStatus()}' - impact measurement can only be triggered at phase 'post_analysis_done', 'impact_measurement_started', or 'impact_measurement_done' with status 'in_progress' or 'completed'.`);
+    }
+
+    const triggeredBy = profile?.email || profile?.name || 'unknown';
+    await triggerGeoExperimentImpactMeasurement(geoExperimentId, triggeredBy, { sqs, env });
+
+    context.log.info(`[geo-experiment] Sent manual impact-measurement trigger for GeoExperiment ${geoExperimentId} (siteId: ${siteId}, phase: ${geoExperiment.getPhase()}, status: ${geoExperiment.getStatus()}, triggeredBy: ${triggeredBy})`);
+
+    return accepted({
+      message: `Triggered impact measurement for GeoExperiment ${geoExperimentId}. The experimentation engine will process it shortly.`,
+    });
   };
 
   const rollbackSuggestionFromEdge = async (context) => {
@@ -3101,8 +3232,10 @@ function SuggestionsController(ctx, sqs, env) {
     deploySuggestionToEdge,
     listGeoExperiments,
     getGeoExperiment,
+    getGeoExperimentResults,
     patchGeoExperiment,
     deleteGeoExperiment,
+    triggerImpactMeasurement,
     rollbackSuggestionFromEdge,
     previewSuggestions,
     fetchFromEdge,

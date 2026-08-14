@@ -15,6 +15,7 @@
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { isSemrushTransportError } from './errors.js';
+import { benchmarkAliases } from './aliases.js';
 import { resolveProjects } from './resolve-projects.js';
 
 /** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */
@@ -214,12 +215,14 @@ export async function ensureOwnBrandBenchmark(transport, workspaceId, projectId,
   if (!hasText(brand?.name) || ownDomain === null) {
     return null;
   }
+  // Create is the one point where we choose an alias's spelling: upstream keeps
+  // whatever an alias was created with, so a later PUT cannot re-case it. Use the
+  // lowercase form Semrush's own resolution would have stored.
+  const aliases = benchmarkAliases(brand.name, brand.aliases);
   const body = [{
     brand_name: brand.name,
     domain: brand.domain,
-    ...(Array.isArray(brand.aliases) && brand.aliases.length
-      ? { brand_aliases: brand.aliases }
-      : {}),
+    ...(aliases.length ? { brand_aliases: aliases } : {}),
   }];
   try {
     const created = await transport.createBenchmarks(workspaceId, projectId, body);

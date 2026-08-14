@@ -918,7 +918,7 @@ llmo-agentic-traffic-global:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: [ ]
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
   post:
     tags:
@@ -956,7 +956,7 @@ llmo-agentic-traffic-global:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: [ ]
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 
 llmo-config:
@@ -1283,7 +1283,7 @@ llmo-onboard-site:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - ims_key: []
+      - session_token: []
       - api_key: []
 
 llmo-offboard:
@@ -2045,7 +2045,7 @@ site-llmo-edge-optimize-config:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
   get:
     operationId: getSiteLlmoEdgeConfig
@@ -2084,7 +2084,7 @@ site-llmo-edge-optimize-config:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-llmo-edge-optimize-config-stage:
   parameters:
@@ -2136,7 +2136,7 @@ site-llmo-edge-optimize-config-stage:
       '503':
         $ref: './responses.yaml#/503'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-llmo-edge-optimize-routing:
   parameters:
@@ -2249,7 +2249,7 @@ site-llmo-edge-optimize-routing:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 llmo-strategy:
   parameters:
@@ -3508,6 +3508,107 @@ site-llmo-cloudfront-permissions:
     security:
       - api_key: [ ]
 
+site-llmo-cloudfront-log-delivery:
+  post:
+    tags:
+      - llmo
+    summary: Enable CDN access-log forwarding for one CloudFront distribution
+    description: |
+      Enables CloudWatch Logs delivery of the selected CloudFront distribution's access logs to
+      Adobe's cross-account cdn-logs destination, via the customer's connector role. Idempotent —
+      returns `alreadyExisted: true` and mutates nothing when forwarding is already set up. The
+      assume-role `externalId` is the per-session value from bootstrap; the delivery destination is
+      org-scoped, resolved server-side from the site's IMS organization.
+    operationId: enableLlmoCloudFrontLogDelivery
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/cloudfront-distribution-request'
+    responses:
+      '200':
+        description: The CDN log-delivery result for the distribution.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                created:
+                  type: boolean
+                alreadyExisted:
+                  type: boolean
+                deliverySourceName:
+                  type: string
+                deliveryId:
+                  type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-llmo-cloudfront-log-rescan:
+  post:
+    tags:
+      - llmo
+    summary: Re-scan and enable CDN log forwarding for all distributions
+    description: |
+      Idempotently enables CloudWatch Logs delivery for every CloudFront distribution in the
+      customer account. Intended for recovery/re-scan: e.g. after a new distribution is added or
+      a missed setup. Each distribution is attempted independently — one failure never aborts the
+      rest — and the response summarizes per-distribution outcomes.
+    operationId: rescanLlmoCloudFrontLogDelivery
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/cloudfront-connector-request'
+    responses:
+      '200':
+        description: Summary of the log-delivery re-scan across all distributions.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scanned:
+                  type: integer
+                created:
+                  type: integer
+                alreadyExisted:
+                  type: integer
+                failed:
+                  type: integer
+                distributions:
+                  type: array
+                  items:
+                    type: object
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
 cloudfront-connector-request:
   type: object
   required:
@@ -3773,7 +3874,7 @@ llmo-probe-edge-optimize:
         $ref: './responses.yaml#/500'
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-agentic-traffic-url-brand-presence:
@@ -3848,7 +3949,7 @@ llmo-agentic-traffic-url-brand-presence:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: [ ]
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 
 # ── Common parameter fragment (referenced inline below) ───────────────────────
@@ -3889,7 +3990,7 @@ llmo-agentic-traffic-kpis:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-agentic-traffic-kpis-trend:
@@ -3934,7 +4035,7 @@ llmo-agentic-traffic-kpis-trend:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-agentic-traffic-by-region:
@@ -3969,7 +4070,7 @@ llmo-agentic-traffic-by-region:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-agentic-traffic-by-category:
@@ -4003,7 +4104,7 @@ llmo-agentic-traffic-by-category:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-agentic-traffic-by-page-type:
@@ -4038,7 +4139,7 @@ llmo-agentic-traffic-by-page-type:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-agentic-traffic-by-status:
@@ -4073,7 +4174,7 @@ llmo-agentic-traffic-by-status:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-agentic-traffic-by-user-agent:
@@ -4121,7 +4222,7 @@ llmo-agentic-traffic-by-user-agent:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-agentic-traffic-by-url:
@@ -4206,7 +4307,7 @@ llmo-agentic-traffic-by-url:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-agentic-traffic-hits-by-urls:
@@ -4302,7 +4403,7 @@ llmo-agentic-traffic-hits-by-urls:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-agentic-traffic-urls-export:
@@ -4354,7 +4455,7 @@ llmo-agentic-traffic-urls-export:
         description: PostgREST, S3, or export queue not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-agentic-traffic-urls-export-status:
@@ -4391,7 +4492,7 @@ llmo-agentic-traffic-urls-export-status:
         description: S3 not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-agentic-traffic-filter-dimensions:
@@ -4429,7 +4530,7 @@ llmo-agentic-traffic-filter-dimensions:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-agentic-traffic-weeks:
@@ -4458,7 +4559,7 @@ llmo-agentic-traffic-weeks:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 # ── URL Inspector endpoints ────────────────────────────────────────────────────
@@ -4572,7 +4673,7 @@ url-inspector-stats:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
 
 url-inspector-owned-urls:
   parameters: *url-inspector-common-params
@@ -4640,7 +4741,7 @@ url-inspector-owned-urls:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
 
 url-inspector-trending-urls:
   parameters: *url-inspector-common-params
@@ -4713,7 +4814,7 @@ url-inspector-trending-urls:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
 
 url-inspector-cited-domains:
   parameters: *url-inspector-common-params
@@ -4783,7 +4884,7 @@ url-inspector-cited-domains:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
 
 url-inspector-domain-urls:
   parameters: *url-inspector-common-params
@@ -4794,7 +4895,9 @@ url-inspector-domain-urls:
     description: |
       Returns paginated URLs within a specific domain. Used as a Phase 2 drilldown
       from the cited-domains view. The underlying RPC does not accept brand, category,
-      or region filters — domain-level drilldown is already scoped by hostname.
+      or region filters — domain-level drilldown is already scoped by hostname when
+      provided. `hostname` is optional: when omitted, URLs across all source hosts
+      for the requested page are returned instead of a single-domain drilldown.
     operationId: getUrlInspectorDomainUrls
     parameters:
       - name: siteId
@@ -4803,8 +4906,8 @@ url-inspector-domain-urls:
         schema: { type: string, format: uuid }
       - name: hostname
         in: query
-        required: true
-        description: Domain hostname to drill into
+        required: false
+        description: Domain hostname to drill into. When omitted, URLs across all source hosts are returned.
         schema:
           type: string
           example: 'competitor.com'
@@ -4853,7 +4956,7 @@ url-inspector-domain-urls:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
 
 url-inspector-url-prompts:
   parameters: *url-inspector-common-params
@@ -4903,7 +5006,7 @@ url-inspector-url-prompts:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
 
 url-inspector-filter-dimensions:
   parameters: *url-inspector-common-params
@@ -4975,7 +5078,7 @@ url-inspector-filter-dimensions:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
 
 llmo-agentic-traffic-movers:
   parameters:
@@ -5021,7 +5124,7 @@ llmo-agentic-traffic-movers:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 brand-presence-filter-dimensions:
@@ -5068,7 +5171,7 @@ brand-presence-filter-dimensions:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 brand-presence-prompt-execution-status:
@@ -5121,7 +5224,7 @@ brand-presence-prompt-execution-status:
         description: PostgREST / mysticat not configured for this deployment
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 # ============ Referral Traffic PG (mysticat PostgREST) ============
@@ -5165,7 +5268,7 @@ llmo-referral-traffic-has-data:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-referral-traffic-filter-dimensions:
@@ -5199,7 +5302,7 @@ llmo-referral-traffic-filter-dimensions:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-referral-traffic-kpis:
@@ -5239,7 +5342,7 @@ llmo-referral-traffic-kpis:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-referral-traffic-trend:
@@ -5279,7 +5382,7 @@ llmo-referral-traffic-trend:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-referral-traffic-by-platform:
@@ -5318,7 +5421,7 @@ llmo-referral-traffic-by-platform:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-referral-traffic-by-region:
@@ -5354,7 +5457,7 @@ llmo-referral-traffic-by-region:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-referral-traffic-by-page-intent:
@@ -5390,7 +5493,7 @@ llmo-referral-traffic-by-page-intent:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-referral-traffic-by-url:
@@ -5466,7 +5569,7 @@ llmo-referral-traffic-by-url:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-referral-traffic-by-url-trend:
@@ -5521,7 +5624,7 @@ llmo-referral-traffic-by-url-trend:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-referral-traffic-by-device:
@@ -5560,7 +5663,7 @@ llmo-referral-traffic-by-device:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-referral-traffic-business-impact:
@@ -5612,7 +5715,7 @@ llmo-referral-traffic-business-impact:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 llmo-referral-traffic-weeks:
@@ -5643,7 +5746,7 @@ llmo-referral-traffic-weeks:
       '500': { $ref: './responses.yaml#/500' }
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -5685,7 +5788,7 @@ site-llmo-cloudflare-config:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-llmo-cloudflare-accounts:
   parameters:
@@ -5736,7 +5839,7 @@ site-llmo-cloudflare-accounts:
       '502':
         $ref: './responses.yaml#/502'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-llmo-cloudflare-zones:
   parameters:
@@ -5800,7 +5903,7 @@ site-llmo-cloudflare-zones:
       '502':
         $ref: './responses.yaml#/502'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-llmo-cloudflare-deploy:
   parameters:
@@ -5819,8 +5922,9 @@ site-llmo-cloudflare-deploy:
       account. The worker name is derived server-side from the site's base URL
       (`edge-optimize-router-<canonical-host>`, e.g. `edge-optimize-router-example-com`) and is
       not client-supplied. The worker is tagged with `adobe-llmo` plus the caller's identity, and
-      the `EDGE_OPTIMIZE_TARGET_HOST` plain-text binding is set to `targetHost`, and the site's
-      LLMO API key is set as the `EDGE_OPTIMIZE_API_KEY` secret.
+      the `EDGE_OPTIMIZE_TARGET_HOST` plain-text binding is set to the host derived server-side
+      from the site's base URL (a bare apex such as `example.com` is normalized to its `www` host),
+      and the site's LLMO API key is set as the `EDGE_OPTIMIZE_API_KEY` secret.
 
       The deploy is idempotent: if a worker we previously deployed (carrying the `adobe-llmo` tag)
       already exists, the response is `200` with `alreadyDeployed: true` and the secret is not
@@ -5842,20 +5946,12 @@ site-llmo-cloudflare-deploy:
             type: object
             required:
               - accountId
-              - targetHost
             properties:
               accountId:
                 type: string
                 description: Cloudflare account ID (32-character lowercase hex)
                 pattern: '^[0-9a-f]{32}$'
                 example: '0123456789abcdef0123456789abcdef'
-              targetHost:
-                type: string
-                description: >-
-                  Origin host the worker forwards optimized traffic to. Must belong to the
-                  site's domain — it has to equal the site's canonical host (base URL host
-                  minus a leading `www.`) or be a subdomain of it.
-                example: 'www.example.com'
     responses:
       '200':
         description: >-
@@ -5872,6 +5968,9 @@ site-llmo-cloudflare-deploy:
                   type: string
                 targetHost:
                   type: string
+                  description: >-
+                    The origin host the worker forwards to, derived server-side from the site's
+                    base URL and set as the `EDGE_OPTIMIZE_TARGET_HOST` binding.
                 alreadyDeployed:
                   type: boolean
                   description: >-
@@ -5925,7 +6024,7 @@ site-llmo-cloudflare-deploy:
                   type: boolean
                   description: True when the worker is live but its API key secret was not set
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-llmo-cloudflare-routes:
   parameters:
@@ -6039,7 +6138,7 @@ site-llmo-cloudflare-routes:
       '502':
         $ref: './responses.yaml#/502'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-llmo-akamai-config:
   parameters:
@@ -6099,7 +6198,7 @@ site-llmo-akamai-config:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-llmo-akamai-properties:
   parameters:
@@ -6148,7 +6247,7 @@ site-llmo-akamai-properties:
       '502':
         $ref: './responses.yaml#/502'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-llmo-akamai-plan:
   parameters:
@@ -6244,7 +6343,7 @@ site-llmo-akamai-plan:
       '502':
         $ref: './responses.yaml#/502'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-llmo-akamai-deploy:
   parameters:
@@ -6353,7 +6452,7 @@ site-llmo-akamai-deploy:
       '502':
         $ref: './responses.yaml#/502'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-llmo-akamai-activate:
   parameters:
@@ -6435,7 +6534,7 @@ site-llmo-akamai-activate:
       '502':
         $ref: './responses.yaml#/502'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-llmo-akamai-activation-status:
   parameters:
@@ -6523,6 +6622,151 @@ site-llmo-akamai-activation-status:
       '502':
         $ref: './responses.yaml#/502'
     security:
+      - session_token: [ ]
+
+site-llmo-akamai-deploy-status:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/akamaiHost'
+    - $ref: './parameters.yaml#/akamaiClientToken'
+    - $ref: './parameters.yaml#/akamaiClientSecret'
+    - $ref: './parameters.yaml#/akamaiAccessToken'
+    - $ref: './parameters.yaml#/akamaiAccountSwitchKey'
+    - name: propertyId
+      in: query
+      required: true
+      description: Akamai property ID (e.g. `prp_1253269`).
+      schema:
+        type: string
+        pattern: '^prp_[A-Za-z0-9]+$'
+    - name: contractId
+      in: query
+      required: true
+      description: Akamai contract ID (e.g. `ctr_1-ABC123`).
+      schema:
+        type: string
+        pattern: '^ctr_[A-Za-z0-9-]+$'
+    - name: groupId
+      in: query
+      required: true
+      description: Akamai group ID (e.g. `grp_18385`).
+      schema:
+        type: string
+        pattern: '^grp_[A-Za-z0-9]+$'
+    - name: version
+      in: query
+      required: false
+      description: >-
+        Specific property version to check (e.g. a prior deploy's `newVersion`). When omitted, the
+        latest version is checked — which is the version a deploy's createVersion produced.
+      schema:
+        type: integer
+        minimum: 1
+    - name: baseVersion
+      in: query
+      required: false
+      description: >-
+        The version the deploy was cloned from (the reviewed version). When supplied, the response
+        adds `freshWrite`: on a re-onboard a freshly-created version is a clone of its base, so
+        `deployed` alone can't tell a landed write from an inherited clone. Comparing the per-deploy
+        fetcher key against the base disambiguates it. The key value is compared server-side only,
+        never returned.
+      schema:
+        type: integer
+        minimum: 1
+    - name: validate
+      in: query
+      required: false
+      description: >-
+        When 'true', also run PAPI validation on the checked version and add `activatable`,
+        `errorCount`, a bounded `errors` array, and `warningCount` to the response — so the caller
+        can block activation and show the errors up front. Off by default (a plain presence read is
+        cheap); validation latency scales with rule-tree size, so time-box the request.
+      schema:
+        type: string
+        enum: ['true']
+  get:
+    operationId: getLlmoAkamaiDeployStatus
+    summary: Check whether the Optimize-at-Edge rule landed in a property version
+    description: |
+      Read-only. Re-reads live Akamai state to report whether the managed Optimize-at-Edge rule is
+      present in a property version. This is the source of truth when a deploy's own HTTP response
+      was lost to the CDN first-byte timeout: the backend keeps running and the write may have
+      completed after the caller received a 503, so the caller polls this to learn the real outcome.
+      Cheap by design (a version lookup plus one rule-tree read), so it never itself times out.
+
+      **Note:** This endpoint requires LLMO administrator access for the site.
+    tags:
+      - llmo
+    responses:
+      '200':
+        description: The deploy status
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                propertyId:
+                  type: string
+                version:
+                  type: integer
+                  description: The version that was checked.
+                latestVersion:
+                  type: integer
+                  description: >-
+                    The property's latest version. When `deployed` is false, this is the version to
+                    resume the write into.
+                deployed:
+                  type: boolean
+                  description: >-
+                    True when the Optimize-at-Edge rule is present in `version` — the definitive
+                    answer after a deploy whose HTTP response was not received.
+                managedRulesPresent:
+                  type: array
+                  items:
+                    type: string
+                  description: The managed rule names found at the top level of the checked version.
+                freshWrite:
+                  type: boolean
+                  description: >-
+                    Present only when `baseVersion` was supplied. True ⇒ this deploy's write is
+                    confirmed (the per-deploy fetcher key differs from the base clone). False ⇒ the
+                    version is an unwritten clone still carrying a previous onboard's rule. Absent ⇒
+                    not checked (first-onboard case, where `deployed` is already unambiguous).
+                activatable:
+                  type: boolean
+                  description: >-
+                    Present only when `validate=true`: whether the version has zero blocking
+                    validation errors (i.e. Akamai will accept it for activation).
+                errorCount:
+                  type: integer
+                  description: >-
+                    Present only when `validate=true` — the number of blocking validation errors.
+                errors:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: true
+                  description: >-
+                    Present only when `validate=true`: the validation errors (bounded to 25). Errors
+                    describe rules by name/path and never include injected secret header values.
+                warningCount:
+                  type: integer
+                  description: >-
+                    Present only when `validate=true` — the number of non-blocking warnings.
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '502':
+        $ref: './responses.yaml#/502'
+    security:
       - ims_key: [ ]
 
 akamai-property-ref:
@@ -6561,6 +6805,13 @@ akamai-property-ref:
       description: >-
         (deploy only) Optional property version to copy the new version from. Defaults to the
         property's latest version.
+    retryVersion:
+      type: integer
+      minimum: 1
+      description: >-
+        (deploy only) A version a PRIOR attempt already created but failed to write rules into.
+        When supplied, deploy RESUMES into it (writes directly, skipping createVersion) instead of
+        minting a fresh version — the guard against piling up empty versions on repeated retries.
 
 akamai-property:
   type: object

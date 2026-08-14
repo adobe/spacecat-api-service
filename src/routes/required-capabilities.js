@@ -60,6 +60,7 @@ export const INTERNAL_ROUTES = [
   // Geo experiment — write/delete endpoints used by DRS/UI
   'PATCH /sites/:siteId/geo-experiments/:geoExperimentId',
   'DELETE /sites/:siteId/geo-experiments/:geoExperimentId',
+  'POST /sites/:siteId/geo-experiments/:geoExperimentId/trigger-impact-measurement',
 
   // Slack - event subscriptions and commands use Slack's signature verification
   'GET /slack/events',
@@ -94,22 +95,27 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/deploy',
   'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/plan',
   'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/permissions',
+  'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-delivery',
+  'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-rescan',
   'PUT /sites/:siteId/llmo/opportunities-reviewed',
 
-  // LLMO Cloudflare onboarding - LLMO-admin self-service, gated by isLLMOAdministrator();
-  // uses a caller-supplied x-cloudflare-token, not S2S JWT
+  // LLMO Cloudflare onboarding - not S2S (uses a caller-supplied x-cloudflare-token,
+  // not an S2S JWT). Customer gate is now FACS llmo/can_configure via
+  // hasLlmoCapabilityForSite (isLLMOAdministrator fallback for non-FACS orgs).
   'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config',
   'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts',
   'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
   'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
   'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes',
 
-  // LLMO Akamai onboarding - LLMO-admin self-service, gated by isLLMOAdministrator();
-  // uses caller-supplied EdgeGrid credentials via x-akamai-* headers, not S2S JWT
+  // LLMO Akamai onboarding - not S2S (uses caller-supplied EdgeGrid credentials via
+  // x-akamai-* headers, not an S2S JWT). Customer gate is now FACS llmo/can_configure
+  // via hasLlmoCapabilityForSite (isLLMOAdministrator fallback for non-FACS orgs).
   'GET /sites/:siteId/llmo/cdn-onboard/akamai/config',
   'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties',
   'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan',
   'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy',
+  'GET /sites/:siteId/llmo/cdn-onboard/akamai/deploy-status',
   'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate',
   'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status',
 
@@ -510,6 +516,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/experiments': 'experiment:read',
   'GET /sites/:siteId/geo-experiments': 'site:read',
   'GET /sites/:siteId/geo-experiments/:geoExperimentId': 'site:read', // detail includes prompts
+  'GET /sites/:siteId/geo-experiments/:geoExperimentId/results': 'site:read', // impact-measurement insights
   'GET /sites/:siteId/metrics/:metric/:source': 'site:read',
   'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl': 'site:read',
   'GET /sites/:siteId/latest-metrics': 'site:read',
@@ -526,6 +533,7 @@ const routeRequiredCapabilities = {
   'POST /sites/:siteId/opportunities': 'opportunity:write',
   'PATCH /sites/:siteId/opportunities/:opportunityId': 'opportunity:write',
   'DELETE /sites/:siteId/opportunities/:opportunityId': 'opportunity:write',
+  'POST /sites/:siteId/opportunities/:opportunityId/validate': 'opportunity:write',
 
   // Suggestions
   'GET /sites/:siteId/opportunities/:opportunityId/suggestions': 'suggestion:read',
