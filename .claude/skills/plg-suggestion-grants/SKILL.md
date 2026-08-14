@@ -219,12 +219,28 @@ and a listing endpoint `GET /sites/:siteId/tokens/:tokenId/grants`
    `grant-suggestions-handler.js` never look at content quality, only
    `rank`/`traffic_domain`/`pageviews`. For each newly-granted suggestion:
    - **`broken-backlinks`**: take `data.urlsSuggested[0]` (the top
-     candidate) and fetch it (`WebFetch` or `curl -I`). Confirm it's live
-     (200, not 404/redirect-loop) and that its content plausibly matches
-     the broken URL's original intent — cross-reference `data.title` /
-     `data.aiRationale` for what the broken page was likely about. A
-     suggested redirect to an unrelated or dead page is a bad grant even if
-     it was the correctly top-ranked one.
+     candidate) and fetch it (`WebFetch` or open it in the browser). Confirm
+     it's live (200, not 404/redirect-loop) **and** that its content
+     plausibly matches the broken URL's original intent — cross-reference
+     `data.title` / `data.aiRationale` for what the broken page was likely
+     about. Two additional failure modes to check beyond a dead URL:
+     - **Stale content**: a 200 that displays "this promotion has ended",
+       "page no longer available", or similar expired-content signals is a
+       bad redirect even though the URL resolves. Check if a live parent
+       section page exists and prefer that instead.
+     - **Generic fallback**: if `urlsSuggested[0]` is the site homepage or
+       a catch-all page (e.g. `/member-support`), the AI couldn't find a
+       specific match. Check `data.title` / `data.aiRationale` for the
+       original topic, then search the site's `/sitemap.xml` to find a
+       topically-specific live page — almost always a better grant than the
+       homepage. If `urlsSuggested` has multiple entries, check them all
+       before settling on the homepage.
+     If none of `urlsSuggested` has a good destination and the broken URL
+     references a **discontinued product or feature** with no equivalent
+     anywhere in the sitemap, recommend **lowering this suggestion's
+     `rank`** so better suggestions consume the token quota first — an
+     unavoidable homepage redirect wastes a token slot that could serve a
+     real fix.
    - **`alt-text`**: for each `data.recommendations[]` entry, download
      `data.recommendations[].imageUrl` to the scratchpad (`curl -sL
      <imageUrl> -o <scratchpad>/img.png` — the `Read` tool only opens local
