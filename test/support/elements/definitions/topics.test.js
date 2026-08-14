@@ -20,6 +20,7 @@ import {
   transformOtherTagsForFilterDimensions,
 } from '../../../../src/support/elements/definitions/topics.js';
 import { DEFAULT_ELEMENT_MODEL } from '../../../../src/support/elements/constants.js';
+import { INTENT_ROOT_NAME, LEGACY_INTENT_ROOT_NAME } from '../../../../src/support/serenity/prompt-tags.js';
 
 // Mirrors the fixed keys elements-service.js's `getUrlInspectorFilterDimensions`
 // builds `result` with, plus the JS-unsafe names it also guards against.
@@ -334,15 +335,42 @@ describe('topics definitions', () => {
       expect(result[0].label).to.equal('Buy');
     });
 
-    it('adds parent_id/parent_label when the value contains a double underscore', () => {
-      const raw = { blocks: { value: [{ value: 'intent__Commercial__Buy' }] } };
-      const [item] = transformIntentsToFilterDimensions(raw);
-      expect(item).to.deep.equal({
-        id: 'intent__Commercial__Buy',
-        label: 'Buy',
-        parent_id: 'intent__Commercial',
-        parent_label: 'Commercial',
+    // Both spellings read the same way; parent_id is rebuilt from whichever
+    // prefix matched. LLMO-6986 drops the legacy row from this table.
+    [LEGACY_INTENT_ROOT_NAME, INTENT_ROOT_NAME].forEach((root) => {
+      it(`adds parent_id/parent_label under the \`${root}\` root`, () => {
+        const raw = { blocks: { value: [{ value: `${root}__Commercial__Buy` }] } };
+        const [item] = transformIntentsToFilterDimensions(raw);
+        expect(item).to.deep.equal({
+          id: `${root}__Commercial__Buy`,
+          label: 'Buy',
+          parent_id: `${root}__Commercial`,
+          parent_label: 'Commercial',
+        });
       });
+    });
+
+    // LLMO-6984: an Elements tag prefix is the `__`-joined tag PATH, so renaming
+    // the intent root renames the prefix. Both spellings are read while the rename
+    // sweeps projects one at a time.
+    it('reads the renamed root, keeping the prefix in id and stripping it from label', () => {
+      const raw = {
+        blocks: {
+          value: [
+            { value: `${INTENT_ROOT_NAME}__Informational` },
+            { value: `${INTENT_ROOT_NAME}__Transactional` },
+          ],
+        },
+      };
+      expect(transformIntentsToFilterDimensions(raw)).to.deep.equal([
+        { id: `${INTENT_ROOT_NAME}__Informational`, label: 'Informational' },
+        { id: `${INTENT_ROOT_NAME}__Transactional`, label: 'Transactional' },
+      ]);
+    });
+
+    it('does not double-count: the legacy prefix does not also match a renamed tag', () => {
+      const raw = { blocks: { value: [{ value: `${INTENT_ROOT_NAME}__Commercial` }] } };
+      expect(transformIntentsToFilterDimensions(raw)).to.have.length(1);
     });
   });
 
@@ -386,6 +414,27 @@ describe('topics definitions', () => {
       expect(result).to.not.have.property('intent');
       expect(result).to.not.have.property('source');
       expect(result.tags).to.deep.equal([]);
+    });
+
+    // The catch-all is what would otherwise expose the rename to customers: an
+    // unrecognised prefix becomes a dynamic group keyed by its raw upstream name,
+    // so a renamed project would grow a `$abv_tags$intent` group in the filter
+    // payload beside an empty `page_intents`.
+    it('claims the renamed intent prefix rather than grouping it under its raw name', () => {
+      const raw = {
+        blocks: {
+          value: [
+            { value: `${INTENT_ROOT_NAME}__Commercial` },
+            { value: INTENT_ROOT_NAME },
+            { value: 'type__branded' },
+          ],
+        },
+      };
+      const result = transformOtherTagsForFilterDimensions(raw);
+      expect(result).to.not.have.property(INTENT_ROOT_NAME);
+      expect(result.tags).to.deep.equal([]);
+      // An genuinely unknown prefix still surfaces — the catch-all keeps working.
+      expect(result.type).to.deep.equal([{ id: 'type__branded', label: 'branded' }]);
     });
 
     it('groups unknown prefix__value tags by their prefix', () => {

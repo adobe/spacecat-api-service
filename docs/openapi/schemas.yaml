@@ -845,11 +845,15 @@ SitePagedResponse:
 SiteSearchResponse:
   type: object
   description: |
-    Response for the `baseUrlContains` substring search on `GET /sites`. Unlike
-    `SitePagedResponse`, this path is not cursor-iterable: `pagination` carries no
-    `cursor`, paginates by `offset`, and echoes the trimmed `baseUrlContains` query so a
-    client can confirm the search was actually applied (an older deployment that ignores
-    `baseUrlContains` but honors `limit` would return `SitePagedResponse` with no echo).
+    Response for the filtered/sorted `GET /sites` mode, entered when any of
+    `baseUrlContains`, `deliveryType`, `isLive`, `sort`, `tier`, or `productCode` is
+    provided. Unlike `SitePagedResponse`, this path is not cursor-iterable: `pagination`
+    carries no `cursor`, paginates by `offset`, and echoes back only the filters/sort
+    that were actually applied, so a client can confirm the request was honored (an
+    older deployment that ignores one of these params but honors `limit` would return
+    this same envelope shape with unfiltered/unsorted sites and no echo for that param).
+    `tier` and/or `productCode` route the query through the entitlement-enrollment join
+    instead of the plain site query; the other filters/sort still compose with them.
   properties:
     sites:
       type: array
@@ -872,16 +876,50 @@ SiteSearchResponse:
           example: false
         baseUrlContains:
           description: |
-            The trimmed `baseUrlContains` query that was applied (3-256 chars). Echoed so
-            clients can confirm the search ran; absent on deployments that ignore the
-            param.
+            The trimmed `baseUrlContains` query that was applied (3-256 chars). Present
+            only when `baseUrlContains` was provided on the request; absent otherwise
+            (including on deployments that ignore the param).
           type: string
           example: "adobe"
+        deliveryType:
+          description: |
+            The `deliveryType` filter that was applied. Present only when
+            `deliveryType` was provided on the request.
+          type: string
+          enum: [aem_cs, aem_edge, aem_ams, aem_headless, other]
+          example: aem_edge
+        isLive:
+          description: |
+            The `isLive` filter that was applied, as a boolean. Present only when
+            `isLive` was provided on the request.
+          type: boolean
+          example: true
+        sort:
+          description: |
+            The applied sort, echoed in canonical `<field>:<direction>` form (the
+            implicit `:asc` direction is added when omitted from the request, so
+            `sort=updatedAt` echoes `updatedAt:asc`). Present only when `sort` was
+            provided on the request.
+          type: string
+          example: "updatedAt:desc"
+        tier:
+          description: |
+            The entitlement tier filter that was applied. Present only when `tier` was
+            provided on the request.
+          type: string
+          enum: [FREE_TRIAL, PAID, PLG]
+          example: PAID
+        productCode:
+          description: |
+            The entitlement product code filter that was applied. Present only when
+            `productCode` was provided on the request.
+          type: string
+          enum: [LLMO, ASO, ACO]
+          example: LLMO
       required:
         - limit
         - offset
         - hasMore
-        - baseUrlContains
   required:
     - sites
     - pagination
@@ -11859,7 +11897,10 @@ SerenityPrompt:
         upstream, so a prompt can carry two tags with the same bare name from
         different dimensions (a sub-category `human` and the `source` value
         `human`). Read a tag's dimension from `path[0].name`, never from its
-        own name.
+        own name — bearing in mind that `path[0].name` is the root's UPSTREAM
+        name, which for the intent dimension is `$abv_tags$intent`, or the
+        pre-rename `intent` on a project the rename has not reached. Match both
+        spellings when keying on that dimension.
     tagIds:
       type: array
       items: { type: string }
@@ -11907,7 +11948,10 @@ SerenityPromptTag:
     parentage. What varies is DEPTH, not endpoint: upstream omits `parent_id` and
     `path` on a dimension root and carries both on a descendant. This API
     normalizes that absence to `null`, so a tag whose `path` is `null` is a
-    dimension root and its own `name` is its dimension.
+    dimension root and its own `name` names its dimension upstream. Names are
+    passed through exactly as upstream holds them, so the intent root reads
+    `$abv_tags$intent` — or the pre-rename `intent` on a project the rename has
+    not reached. The dimension is `intent` either way.
   required: [id, name]
   properties:
     id:
@@ -12795,7 +12839,11 @@ SerenityUrlInspectorFilterDimensions:
       items: { $ref: '#/SerenityFilterDimensionItem' }
     page_intents:
       type: array
-      description: Distinct `intent__`-prefixed tags. `id` is the original `intent__`-prefixed tag value.
+      description: >-
+        Distinct intent-prefixed tags. The prefix is the intent root's name on that
+        project — `$abv_tags$intent__`, or `intent__` on a project the rename has not
+        reached yet — and `id` is the original tag value, carrying whichever prefix
+        that project uses.
       items: { $ref: '#/SerenityFilterDimensionItem' }
     origins:
       type: array
