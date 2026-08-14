@@ -1,3 +1,10 @@
+# [1.749.0](https://github.com/adobe/spacecat-api-service/compare/v1.748.0...v1.749.0) (2026-08-14)
+
+
+### Features
+
+* **ai-visibility:** flag-gated per-brand Semrush auth seam skeleton (inert) ([#3064](https://github.com/adobe/spacecat-api-service/issues/3064)) ([13728bd](https://github.com/adobe/spacecat-api-service/commit/13728bd788859ff0f1f376ee6344440a9a10e316)), closes [Hi#level](https://github.com/Hi/issues/level) [adobe/mysticat-architecture#248](https://github.com/adobe/mysticat-architecture/issues/248) [adobe/mysticat-architecture#248](https://github.com/adobe/mysticat-architecture/issues/248)
+
 # [1.748.0](https://github.com/adobe/spacecat-api-service/compare/v1.747.2...v1.748.0) (2026-08-14)
 
 
