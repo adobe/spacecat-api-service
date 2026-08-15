@@ -673,8 +673,6 @@ const routeFacsCapabilities = {
       // LLMO sheet-data row patches
       'PATCH /sites/:siteId/llmo/data/:dataSource/row': 'llmo/can_configure',
       'PATCH /sites/:siteId/llmo/data/:sheetType/:dataSource/row': 'llmo/can_configure',
-      // Preflight job create (site-scoped)
-      'POST /sites/:siteId/preflights': 'llmo/can_configure',
       // POSTs that S2S confirms are :write (not body-based queries).
       'POST /llmo/agentic-traffic/global': 'llmo/can_configure',
       'POST /sites/:siteId/traffic/predominant-type': 'llmo/can_configure',
@@ -895,9 +893,6 @@ const routeFacsCapabilities = {
       // eslint-disable-next-line max-len
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/source-visibility-headline': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats': 'llmo/can_view',
-      // Preflight (site-scoped reads)
-      'GET /sites/:siteId/preflights': 'llmo/can_view',
-      'GET /sites/:siteId/preflights/:preflightId': 'llmo/can_view',
       // Site-level scraper config read
       'GET /sites/:siteId/config/scraper': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/categories': 'llmo/can_view',
@@ -986,7 +981,6 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/geo-experiments/:geoExperimentId/validate': 'aso/can_edit',
       'POST /sites/:siteId/sandbox/audit': 'aso/can_edit',
       'POST /preflight/jobs': 'aso/can_edit',
-      'POST /sites/:siteId/preflights': 'aso/can_edit',
       'POST /sites/:siteId/brand-profile': 'aso/can_edit',
       'DELETE /sites/:siteId/suggestions/grants/:grantId': 'aso/can_edit',
 
@@ -1106,8 +1100,6 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/ims-org-access': 'aso/can_view',
       'GET /sites/:siteId/ims-org-access/:accessId': 'aso/can_view',
       'POST /sites/:siteId/graph': 'aso/can_view',
-      'GET /sites/:siteId/preflights': 'aso/can_view',
-      'GET /sites/:siteId/preflights/:preflightId': 'aso/can_view',
       'GET /preflight/jobs/:jobId': 'aso/can_view',
       'GET /sites/detect/jobs/:jobId': 'aso/can_view',
 
@@ -1320,8 +1312,6 @@ const routeFacsCapabilities = {
     // target / language / semrush prompt id / aio tag id), not SpaceCat
     // resources. The enclosing :brandId is the FACS resource for these routes.
     'semrushPromptId', 'geoTargetId', 'languageCode', 'tagId',
-    // Preflight job id — sub-resource of the enclosing :siteId.
-    'preflightId',
     // Filter / pagination / format params (not entities):
     'base64PageUrl', 'base64Url', 'baseURL', 'channel', 'cursor',
     'dataSource', 'deliveryType', 'endDate', 'eventType',

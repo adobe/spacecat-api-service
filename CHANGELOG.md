@@ -1,3 +1,74 @@
+# [1.749.0](https://github.com/adobe/spacecat-api-service/compare/v1.748.0...v1.749.0) (2026-08-14)
+
+
+### Features
+
+* **ai-visibility:** flag-gated per-brand Semrush auth seam skeleton (inert) ([#3064](https://github.com/adobe/spacecat-api-service/issues/3064)) ([13728bd](https://github.com/adobe/spacecat-api-service/commit/13728bd788859ff0f1f376ee6344440a9a10e316)), closes [Hi#level](https://github.com/Hi/issues/level) [adobe/mysticat-architecture#248](https://github.com/adobe/mysticat-architecture/issues/248) [adobe/mysticat-architecture#248](https://github.com/adobe/mysticat-architecture/issues/248)
+
+# [1.748.0](https://github.com/adobe/spacecat-api-service/compare/v1.747.2...v1.748.0) (2026-08-14)
+
+
+### Features
+
+* **ai-visibility:** llmo-6585 expose response completeness on prompts/responses ([#3053](https://github.com/adobe/spacecat-api-service/issues/3053)) ([3b00b9d](https://github.com/adobe/spacecat-api-service/commit/3b00b9d53d84ebc2177bc43835a73cfc55891b4f))
+
+## [1.747.2](https://github.com/adobe/spacecat-api-service/compare/v1.747.1...v1.747.2) (2026-08-14)
+
+
+### Bug Fixes
+
+* **suggestions:** include skip reason/detail, org name, and ASO link  ([#3061](https://github.com/adobe/spacecat-api-service/issues/3061)) ([58b2fa2](https://github.com/adobe/spacecat-api-service/commit/58b2fa25a799adc7735145e9437e61a0241a3b4f))
+
+## [1.747.1](https://github.com/adobe/spacecat-api-service/compare/v1.747.0...v1.747.1) (2026-08-14)
+
+
+### Bug Fixes
+
+* **plg:** auto-correct OTHER delivery type instead of alerting on mis… ([#3060](https://github.com/adobe/spacecat-api-service/issues/3060)) ([1154c30](https://github.com/adobe/spacecat-api-service/commit/1154c30d2b5e3f04e556e36c9ff7fd50cc665851))
+* **serenity:** surface renamed origin__ authorship root in filter dimensions (LLMO-7000) ([#3057](https://github.com/adobe/spacecat-api-service/issues/3057)) ([d36fb8f](https://github.com/adobe/spacecat-api-service/commit/d36fb8fea981577660559e052bc396b01865a137))
+
+# [1.747.0](https://github.com/adobe/spacecat-api-service/compare/v1.746.1...v1.747.0) (2026-08-14)
+
+
+### Features
+
+* **sites:** accept all entitlement tiers for the full-admin tier filter on GET /sites ([#3056](https://github.com/adobe/spacecat-api-service/issues/3056)) ([1425853](https://github.com/adobe/spacecat-api-service/commit/1425853747f3affa4239030eb9f50f8554353d48)), closes [#3046](https://github.com/adobe/spacecat-api-service/issues/3046) [#3046](https://github.com/adobe/spacecat-api-service/issues/3046)
+
+## [1.746.1](https://github.com/adobe/spacecat-api-service/compare/v1.746.0...v1.746.1) (2026-08-14)
+
+
+### Bug Fixes
+
+* **serenity:** stop benchmark alias writes from destroying what Semrush added ([#3044](https://github.com/adobe/spacecat-api-service/issues/3044)) ([e64cb17](https://github.com/adobe/spacecat-api-service/commit/e64cb171fb7a8a3311282be06bf3927752569aea)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+# [1.746.0](https://github.com/adobe/spacecat-api-service/compare/v1.745.0...v1.746.0) (2026-08-14)
+
+
+### Features
+
+* **slack:** show org name alongside imsOrgId in get-site output ([#3051](https://github.com/adobe/spacecat-api-service/issues/3051)) ([60a9e00](https://github.com/adobe/spacecat-api-service/commit/60a9e00cae0b1616b1adab15ec9fd645ba9bdcbd))
+
+# [1.745.0](https://github.com/adobe/spacecat-api-service/compare/v1.744.0...v1.745.0) (2026-08-14)
+
+
+### Features
+
+* allow tracking user activities for paying customers ([#3047](https://github.com/adobe/spacecat-api-service/issues/3047)) ([4a61588](https://github.com/adobe/spacecat-api-service/commit/4a61588b5c4d684cb760fe6ab997b382cc7547b5))
+
+# [1.744.0](https://github.com/adobe/spacecat-api-service/compare/v1.743.0...v1.744.0) (2026-08-13)
+
+
+### Features
+
+* **sites:** server-side filtering and sorting on GET /sites ([#3046](https://github.com/adobe/spacecat-api-service/issues/3046)) ([9516ebb](https://github.com/adobe/spacecat-api-service/commit/9516ebbc314bf1c184fa56b2564b1f228b8979b0))
+
+# [1.743.0](https://github.com/adobe/spacecat-api-service/compare/v1.742.0...v1.743.0) (2026-08-13)
+
+
+### Features
+
+* **serenity:** read intent tags under the renamed `$abv_tags$intent` root | LLMO-6984 ([#3043](https://github.com/adobe/spacecat-api-service/issues/3043)) ([b750b2e](https://github.com/adobe/spacecat-api-service/commit/b750b2e9899dfed84a2cd1bc0fbdeba7e2087c1f)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 # [1.742.0](https://github.com/adobe/spacecat-api-service/compare/v1.741.3...v1.742.0) (2026-08-13)
 
 

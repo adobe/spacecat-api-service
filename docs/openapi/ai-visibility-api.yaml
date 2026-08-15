@@ -997,6 +997,8 @@ ai-visibility-prompts-responses-latest:
       Returns the latest crawled prompt response for a specific prompt hash,
       including the full LLM response text and mentioned brands.
       Data from `PromptService/LastCrawledPromptByHash`.
+
+      The `date` field is normalized to ISO `YYYY-MM-DD` (null when absent).
     operationId: getAiVisibilityPromptsResponsesLatest
     parameters:
       - name: promptHash
@@ -1035,6 +1037,15 @@ ai-visibility-prompts-responses:
       Returns prompts with their full response details, including mentioned brands
       and relation data. Data from `PromptService/Prompts` combined with
       `Relations/Prompt` for response details.
+
+      Each `data[]` item additionally carries response completeness/provenance so a
+      consumer can distinguish a full LLM answer from a brief excerpt (LLMO-6585):
+      - `responseSource`: `full` | `excerpt` | `none` - origin of the `response` value.
+      - `responseComplete` (boolean): true only when a full relation response was used.
+      - `relationStatus`: `ok` | `error` | `skipped` - per-item relation-call outcome
+        (`error` means the relation call failed and `response` fell back to the excerpt;
+        `skipped` means the prompt lacked the identity needed to issue the call).
+      - `date`: execution date normalized to ISO `YYYY-MM-DD` (null when absent).
     operationId: getAiVisibilityPromptsResponses
     parameters:
       - *domainParam

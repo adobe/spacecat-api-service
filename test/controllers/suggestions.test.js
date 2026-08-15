@@ -57,6 +57,7 @@ describe('Suggestions Controller', () => {
   const SITE_ID = 'f964a7f8-5402-4b01-bd5b-1ab499bcf797';
   const SITE_ID_NOT_FOUND = '3c677e57-9a6a-441c-a556-262eb8b4fc0e';
   const SITE_ID_NOT_ENABLED = '07efc218-79f6-48b5-970e-deb0f88ce01b';
+  const ORGANIZATION_ID = '6d69b6c5-4c1f-4d6a-92ad-b2c1fdb4ff54';
 
   const mockSuggestionEntity = (suggData, removeStub) => ({
     getId() {
@@ -3331,6 +3332,86 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(200);
       expect(postSlackMessageStub).to.have.been.calledOnce;
       expect(postSlackMessageStub.firstCall.args[1]).to.include('Already handled elsewhere');
+    });
+
+    it('includes an ASO link in the PLG skip alert message when the site has an organization', async () => {
+      const postSlackMessageStub = sandbox.stub().resolves();
+      const ControllerWithSlack = await esmock.p('../../src/controllers/suggestions.js', {
+        '../../src/utils/slack/base.js': { postSlackMessage: postSlackMessageStub },
+      });
+
+      const plgSite = { ...makePlgSite('PLG'), getOrganizationId: sandbox.stub().returns(ORGANIZATION_ID) };
+      const organization = { getName: sandbox.stub().returns('Acme Corp') };
+      const da = {
+        ...mockSuggestionDataAccess,
+        Site: { findById: sandbox.stub().resolves(plgSite) },
+        Organization: { findById: sandbox.stub().resolves(organization) },
+      };
+      const ctrl = ControllerWithSlack({
+        dataAccess: da, pathInfo: { headers: {} }, ...authContext,
+      }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
+
+      const response = await ctrl.patchSuggestion({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
+        data: { status: 'SKIPPED', skipReason: 'TOO_RISKY' },
+        env: {
+          SLACK_PLG_SKIP_CHANNEL_ID: 'C_SKIP',
+          SLACK_BOT_TOKEN: 'xoxb-token',
+          EXPERIENCE_URL: 'https://experience.adobe.com',
+        },
+        ...context,
+        dataAccess: da,
+      });
+      await new Promise(setImmediate);
+
+      expect(response.status).to.equal(200);
+      expect(postSlackMessageStub).to.have.been.calledOnce;
+      expect(da.Organization.findById).to.have.been.calledWith(ORGANIZATION_ID);
+      expect(postSlackMessageStub.firstCall.args[1]).to.include('*IMS Org Name:* Acme Corp');
+      expect(postSlackMessageStub.firstCall.args[1]).to.include(
+        `https://experience.adobe.com/?organizationId=${ORGANIZATION_ID}#/sites-optimizer/sites/${SITE_ID}`,
+      );
+    });
+
+    it('omits IMS Org Name in the PLG skip alert message when the org lookup fails', async () => {
+      const postSlackMessageStub = sandbox.stub().resolves();
+      const ControllerWithSlack = await esmock.p('../../src/controllers/suggestions.js', {
+        '../../src/utils/slack/base.js': { postSlackMessage: postSlackMessageStub },
+      });
+
+      const plgSite = { ...makePlgSite('PLG'), getOrganizationId: sandbox.stub().returns(ORGANIZATION_ID) };
+      const da = {
+        ...mockSuggestionDataAccess,
+        Site: { findById: sandbox.stub().resolves(plgSite) },
+        Organization: { findById: sandbox.stub().rejects(new Error('org lookup failed')) },
+      };
+      const ctrl = ControllerWithSlack({
+        dataAccess: da, pathInfo: { headers: {} }, ...authContext,
+      }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
+
+      const response = await ctrl.patchSuggestion({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
+        data: { status: 'SKIPPED', skipReason: 'TOO_RISKY' },
+        env: {
+          SLACK_PLG_SKIP_CHANNEL_ID: 'C_SKIP',
+          SLACK_BOT_TOKEN: 'xoxb-token',
+          EXPERIENCE_URL: 'https://experience.adobe.com',
+        },
+        ...context,
+        dataAccess: da,
+      });
+      await new Promise(setImmediate);
+
+      expect(response.status).to.equal(200);
+      expect(postSlackMessageStub).to.have.been.calledOnce;
+      expect(postSlackMessageStub.firstCall.args[1]).to.not.include('IMS Org Name');
+      expect(postSlackMessageStub.firstCall.args[1]).to.include('ASO Link');
     });
 
     it('sends PLG skip Slack alert for each newly-SKIPPED suggestion via patchSuggestionsStatus', async () => {
