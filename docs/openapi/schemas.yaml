@@ -3243,6 +3243,11 @@ OpportunityUpdate:
         - 'Traffic acquisition'
 GeoExperimentValidationResponse:
   type: object
+  required:
+    - siteId
+    - geoExperimentId
+    - opportunityId
+    - status
   properties:
     siteId:
       type: string
