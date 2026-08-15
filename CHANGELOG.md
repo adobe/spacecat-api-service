@@ -1,3 +1,10 @@
+## [1.749.1](https://github.com/adobe/spacecat-api-service/compare/v1.749.0...v1.749.1) (2026-08-15)
+
+
+### Bug Fixes
+
+* move on-demand validation to /geo-experiments/:geoExperimentId/validate ([#3045](https://github.com/adobe/spacecat-api-service/issues/3045)) ([1dd3891](https://github.com/adobe/spacecat-api-service/commit/1dd38913ebe311983005dd69ab9a19ba13874c3e))
+
 # [1.749.0](https://github.com/adobe/spacecat-api-service/compare/v1.748.0...v1.749.0) (2026-08-14)
 
 
