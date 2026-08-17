@@ -198,47 +198,6 @@ site-opportunity:
     security:
       - session_token: [ ]
 
-site-opportunity-validate:
-  parameters:
-    - $ref: './parameters.yaml#/siteId'
-    - $ref: './parameters.yaml#/opportunityId'
-  post:
-    operationId: triggerSiteOpportunityValidation
-    summary: |
-      Trigger on-demand validation of a GeoExperiment's own suggestions against this
-      opportunity. Currently only supported for prerender opportunities. Fire-and-forget: queues
-      the validation and responds immediately; the result lands on the GeoExperiment's own
-      metadata and each covered suggestion's own data, not in this response.
-    tags:
-      - opportunities
-    requestBody:
-      required: true
-      content:
-        application/json:
-          schema:
-            $ref: './schemas.yaml#/OpportunityValidationRequest'
-    responses:
-      '202':
-        description: Validation queued
-        content:
-          application/json:
-            schema:
-              $ref: './schemas.yaml#/OpportunityValidationResponse'
-      '400':
-        $ref: './responses.yaml#/400'
-      '401':
-        $ref: './responses.yaml#/401'
-      '404':
-        $ref: './responses.yaml#/404'
-      '429':
-        $ref: './responses.yaml#/429'
-      '500':
-        $ref: './responses.yaml#/500'
-      '503':
-        $ref: './responses.yaml#/503'
-    security:
-      - ims_key: [ ]
-
 site-opportunity-suggestions:
   parameters:
     - $ref: './parameters.yaml#/siteId'
@@ -952,6 +911,50 @@ site-geo-experiment-trigger-impact-measurement:
         $ref: './responses.yaml#/403'
       '404':
         $ref: './responses.yaml#/404'
+    security:
+      - ims_key: [ ]
+
+site-geo-experiment-validate:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: geoExperimentId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: The GeoExperiment ID
+  post:
+    operationId: triggerGeoExperimentValidation
+    summary: Trigger on-demand validation of a geo experiment's own suggestions
+    description: |
+      Trigger on-demand validation of a GeoExperiment's own suggestions against its linked
+      opportunity. Currently only supported when the linked opportunity is of type `prerender`.
+      Fire-and-forget: queues the validation and responds immediately; the result lands on the
+      GeoExperiment's own metadata and each covered suggestion's own data, not in this response.
+    tags:
+      - geo-experiments
+    responses:
+      '202':
+        description: Validation queued
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/GeoExperimentValidationResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
     security:
       - ims_key: [ ]
 
