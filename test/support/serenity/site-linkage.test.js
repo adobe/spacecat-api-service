@@ -15,7 +15,7 @@ import sinon from 'sinon';
 
 import {
   ensureMarketSite,
-  resolveSiteDomain,
+  resolveSiteUrls,
   unlinkMarketSiteIfOrphaned,
   SERENITY_BRAND_SITE_TYPE,
 } from '../../../src/support/serenity/site-linkage.js';
@@ -186,14 +186,95 @@ describe('serenity site-linkage: ensureMarketSite', () => {
     expect(log.error).to.have.been.calledOnce;
   });
 
-  it('normalizes a full URL (scheme + path) to the hostname base URL', async () => {
+  it('normalizes a full URL but KEEPS its path when resolving the Site', async () => {
     Site.findByBaseURL.resolves(siteModel('site-9'));
     const result = await ensureMarketSite(ctx, {
       organizationId: ORG, brandId: BRAND, domain: 'https://www.acme.com/markets/fr?x=1', log,
     });
     expect(result).to.equal('site-9');
-    // Path/scheme/query/www stripped → same base URL as a bare-hostname caller.
-    expect(Site.findByBaseURL).to.have.been.calledOnceWith('https://acme.com');
+    // Scheme, query and www are stripped; the PATH is not. base_url is unique over
+    // the whole url, so the path is what identifies the Site.
+    expect(Site.findByBaseURL).to.have.been.calledOnceWith('https://acme.com/markets/fr');
+  });
+
+  it('resolves sibling subpath sites on one host to DIFFERENT base URLs', async () => {
+    // The defect this replaced: collapsing to the host resolved every sibling to
+    // the root site. Prod holds 440 subpath sites, and nba.com coexists with
+    // nba.com/kings, /knicks, /lakers and /timberwolves as five distinct rows.
+    Site.findByBaseURL.resolves(siteModel('site-9'));
+    for (const domain of ['nba.com', 'nba.com/kings', 'nba.com/knicks']) {
+      // eslint-disable-next-line no-await-in-loop
+      await ensureMarketSite(ctx, {
+        organizationId: ORG, brandId: BRAND, domain, log,
+      });
+    }
+    expect(Site.findByBaseURL.getCall(0).args[0]).to.equal('https://nba.com');
+    expect(Site.findByBaseURL.getCall(1).args[0]).to.equal('https://nba.com/kings');
+    expect(Site.findByBaseURL.getCall(2).args[0]).to.equal('https://nba.com/knicks');
+  });
+
+  it('resolves a subpath with and without a trailing slash to ONE base URL', async () => {
+    // composeBaseURL only strips a trailing slash at the domain root, so without the
+    // identity normalization these would be two different Sites.
+    Site.findByBaseURL.resolves(siteModel('site-9'));
+    await ensureMarketSite(ctx, {
+      organizationId: ORG, brandId: BRAND, domain: 'nba.com/kings/', log,
+    });
+    await ensureMarketSite(ctx, {
+      organizationId: ORG, brandId: BRAND, domain: 'nba.com/kings', log,
+    });
+    expect(Site.findByBaseURL.getCall(0).args[0]).to.equal('https://nba.com/kings');
+    expect(Site.findByBaseURL.getCall(1).args[0]).to.equal('https://nba.com/kings');
+  });
+
+  it('adopts an existing subpath Site stored WITH a trailing slash', async () => {
+    // Existing rows carry whatever slash the onboarding URL had — 8 of 1,718 in
+    // dev end in one. Looking up only the stripped spelling would miss them and
+    // create a near-duplicate Site that the uniqueness constraint cannot catch.
+    Site.findByBaseURL.onFirstCall().resolves(null);
+    Site.findByBaseURL.onSecondCall().resolves(siteModel('site-with-slash'));
+    const result = await ensureMarketSite(ctx, {
+      organizationId: ORG, brandId: BRAND, domain: 'airlessco.com/na/en/products', log,
+    });
+    expect(result).to.equal('site-with-slash');
+    expect(Site.findByBaseURL.firstCall.args[0]).to.equal('https://airlessco.com/na/en/products');
+    expect(Site.findByBaseURL.secondCall.args[0]).to.equal('https://airlessco.com/na/en/products/');
+    expect(Site.create).to.not.have.been.called;
+  });
+
+  it('does not retry a trailing slash for a host-only domain', async () => {
+    Site.findByBaseURL.resolves(null);
+    Site.create.resolves(siteModel('site-new'));
+    await ensureMarketSite(ctx, {
+      organizationId: ORG, brandId: BRAND, domain: 'acme.com', log,
+    });
+    expect(Site.findByBaseURL).to.have.been.calledOnce;
+    expect(Site.create).to.have.been.calledOnceWith({
+      baseURL: 'https://acme.com', organizationId: ORG, deliveryType: 'other',
+    });
+  });
+
+  it('creates the normalized (slash-free) spelling when neither exists', async () => {
+    Site.findByBaseURL.resolves(null);
+    Site.create.resolves(siteModel('site-new'));
+    await ensureMarketSite(ctx, {
+      organizationId: ORG, brandId: BRAND, domain: 'nba.com/kings/', log,
+    });
+    // New rows converge on one spelling regardless of how the caller wrote it.
+    expect(Site.create).to.have.been.calledOnceWith({
+      baseURL: 'https://nba.com/kings', organizationId: ORG, deliveryType: 'other',
+    });
+  });
+
+  it('still hands the SSRF guard a bare host, never a host+path', async () => {
+    // A path would never match the guard's host patterns, so a private host with a
+    // path must still be refused.
+    const result = await ensureMarketSite(ctx, {
+      organizationId: ORG, brandId: BRAND, domain: 'http://localhost/markets/fr', log,
+    });
+    expect(result).to.equal(null);
+    expect(Site.findByBaseURL).to.not.have.been.called;
+    expect(log.warn).to.have.been.calledOnce;
   });
 
   it('returns null when the domain does not resolve to a hostname', async () => {
@@ -311,7 +392,7 @@ describe('serenity site-linkage: ensureMarketSite', () => {
   });
 });
 
-describe('serenity site-linkage: resolveSiteDomain', () => {
+describe('serenity site-linkage: resolveSiteUrls', () => {
   let Site;
   let log;
   let dataAccess;
@@ -324,36 +405,58 @@ describe('serenity site-linkage: resolveSiteDomain', () => {
 
   afterEach(() => sinon.restore());
 
-  it('resolves a site id to its bare hostname (strips scheme/path)', async () => {
+  it('returns both values from ONE read', () => {
+    // The pair exists because `domain` must be a bare FQDN while `primary_url` is
+    // the url actually tracked — same site, two different correct answers. One
+    // read so they can never come from two different sites.
     Site.findById.resolves({ getBaseURL: () => 'https://www.acme.com/markets/fr' });
-    const result = await resolveSiteDomain(dataAccess, 'site-1', log);
-    expect(result).to.equal('www.acme.com');
-    expect(Site.findById).to.have.been.calledOnceWith('site-1');
+    return resolveSiteUrls(dataAccess, 'site-1', log).then((urls) => {
+      expect(urls).to.deep.equal({
+        domain: 'www.acme.com',
+        primaryUrl: 'www.acme.com/markets/fr',
+      });
+      expect(Site.findById).to.have.been.calledOnceWith('site-1');
+    });
   });
 
-  it('returns null for missing siteId', async () => {
-    expect(await resolveSiteDomain(dataAccess, '', log)).to.equal(null);
-    expect(await resolveSiteDomain(dataAccess, null, log)).to.equal(null);
+  it('primaryUrl is scheme-less so it matches the stored upstream value', async () => {
+    Site.findById.resolves({ getBaseURL: () => 'https://quickbooks.intuit.com/au/' });
+    const { primaryUrl } = await resolveSiteUrls(dataAccess, 'site-1', log);
+    expect(primaryUrl).to.equal('quickbooks.intuit.com/au');
+  });
+
+  it('a path-free site yields the same value for both', async () => {
+    Site.findById.resolves({ getBaseURL: () => 'https://acme.com' });
+    expect(await resolveSiteUrls(dataAccess, 'site-1', log)).to.deep.equal({
+      domain: 'acme.com',
+      primaryUrl: 'acme.com',
+    });
+  });
+
+  it('returns nulls for missing siteId', async () => {
+    const none = { domain: null, primaryUrl: null };
+    expect(await resolveSiteUrls(dataAccess, '', log)).to.deep.equal(none);
+    expect(await resolveSiteUrls(dataAccess, null, log)).to.deep.equal(none);
     expect(Site.findById).to.not.have.been.called;
   });
 
-  it('warns + null when Site data-access is unavailable', async () => {
-    const result = await resolveSiteDomain({ Site: {} }, 'site-1', log);
-    expect(result).to.equal(null);
+  it('warns + nulls when Site data-access is unavailable', async () => {
+    expect(await resolveSiteUrls({ Site: {} }, 'site-1', log))
+      .to.deep.equal({ domain: null, primaryUrl: null });
     expect(log.warn).to.have.been.calledOnce;
   });
 
-  it('warns + null when the site is not found', async () => {
+  it('warns + nulls when the site is not found', async () => {
     Site.findById.resolves(null);
-    const result = await resolveSiteDomain(dataAccess, 'site-missing', log);
-    expect(result).to.equal(null);
+    expect(await resolveSiteUrls(dataAccess, 'site-missing', log))
+      .to.deep.equal({ domain: null, primaryUrl: null });
     expect(log.warn).to.have.been.calledOnce;
   });
 
-  it('swallows a lookup rejection (null, logs warn)', async () => {
+  it('swallows a lookup rejection (nulls, logs warn)', async () => {
     Site.findById.rejects(new Error('timeout'));
-    const result = await resolveSiteDomain(dataAccess, 'site-1', log);
-    expect(result).to.equal(null);
+    expect(await resolveSiteUrls(dataAccess, 'site-1', log))
+      .to.deep.equal({ domain: null, primaryUrl: null });
     expect(log.warn).to.have.been.calledOnce;
   });
 });

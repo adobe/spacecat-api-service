@@ -87,6 +87,7 @@ function makeTransport(overrides = {}) {
     listProjects: sinon.stub().resolves({ items: [] }),
     getInitStatus: sinon.stub().resolves({ initialized: true }),
     createProject: sinon.stub().resolves({ id: 'new-proj' }),
+    updateProject: sinon.stub().resolves(null),
     publishProject: sinon.stub().resolves(null),
     deleteProject: sinon.stub().resolves(null),
     listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
@@ -993,6 +994,52 @@ describe('markets-subworkspace handlers', () => {
       }, log);
       expect(res.status).to.equal(400);
       expect(res.body.error).to.equal('unknownLanguage');
+    });
+
+    it('PATCHes the tracked url the create body cannot carry', async () => {
+      const transport = makeTransport();
+      const res = await handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, {
+        ...createBody, primaryUrl: 'nba.com/kings',
+      }, log);
+
+      expect(res.status).to.be.oneOf([200, 201]);
+      // Flat, with the required type — `model.ProjectUpdateRequest` has no
+      // `settings` member, and the nested spelling is accepted then ignored.
+      expect(transport.updateProject).to.have.been.calledOnceWith(sinon.match.string, 'new-proj', { type: 'ai', primary_url: 'nba.com/kings' });
+      // Before the publish, or the corrected value would sit in draft.
+      expect(transport.updateProject).to.have.been.calledBefore(transport.publishProject);
+    });
+
+    it('falls back to the brandDomain identity when no tracked url is supplied', async () => {
+      const transport = makeTransport();
+      await handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log);
+
+      expect(transport.updateProject.firstCall.args[2].primary_url)
+        .to.equal(createBody.brandDomain);
+    });
+
+    it('a failed primary_url PATCH is non-fatal — the market still goes live', async () => {
+      // This handler has no orphan-cleanup seam, and failing a whole market create
+      // because the tracked url could not be refined is worse than a market live on
+      // its apex — which is the state every market is in today. The data-service
+      // reconcile repairs primary_url in place afterwards.
+      const transport = makeTransport({
+        updateProject: sinon.stub().rejects(new Error('upstream 503')),
+      });
+      // Built here, not reused from the module-scope `log`: a fake created at module
+      // scope lands on sinon's default sandbox, where any other spec's
+      // sinon.restore() silently empties it and its call history then leaks between
+      // tests. See the sandbox rules in the repo CLAUDE.md.
+      const spyLog = { info: sinon.spy(), error: sinon.spy(), warn: sinon.spy() };
+      const res = await handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, {
+        ...createBody, primaryUrl: 'nba.com/kings',
+      }, spyLog);
+
+      expect(res.status).to.be.oneOf([200, 201]);
+      expect(transport.publishProject).to.have.been.called;
+      expect(spyLog.warn).to.have.been.calledWithMatch(
+        'SERENITY_MARKET_PRIMARY_URL_DIVERGENCE',
+      );
     });
 
     it('502s when createProject returns no id', async () => {

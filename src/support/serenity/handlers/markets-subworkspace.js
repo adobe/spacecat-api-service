@@ -12,7 +12,7 @@
 
 // @ts-check
 
-import { hasText } from '@adobe/spacecat-shared-utils';
+import { hasText, siteIdentityFromUrlString } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from '../../utils.js';
 import {
@@ -628,6 +628,35 @@ export async function handleCreateMarketSubworkspace(
     projectId = String(createResp?.id || '');
     if (!hasText(projectId)) {
       return { status: 502, body: { error: 'createNoProjectId', message: 'Upstream createProject returned no id' } };
+    }
+  }
+
+  // The url the project TRACKS. Create IGNORES `primary_url` — whatever spelling
+  // goes in comes back as the apex — so it can only be set by a PATCH, and that
+  // PATCH has to land before the publish below or the value stays in draft.
+  // Applied on the adopt-a-leftover-draft branch too: such a draft was created by
+  // an earlier attempt that never got this far, so it does not have the value yet.
+  // Sent FLAT, which is what `model.ProjectUpdateRequest` declares; the nested
+  // `settings.ai` spelling is accepted and ignored. `type` is required on any PATCH.
+  //
+  // Best-effort: this handler has no orphan-cleanup seam (unlike handleCreateMarket,
+  // which deletes and rethrows), and failing a whole market create because the
+  // tracked url could not be refined would be a worse outcome than a market that is
+  // live on the apex — the state every market is in today. A divergence is
+  // recoverable by the data-service reconcile, which repairs primary_url in place.
+  const primaryUrl = hasText(body.primaryUrl)
+    ? body.primaryUrl
+    : siteIdentityFromUrlString(body.brandDomain);
+  if (primaryUrl && hasText(primaryUrl)) {
+    try {
+      await transport.updateProject(workspaceId, projectId, {
+        type: 'ai',
+        primary_url: primaryUrl,
+      });
+    } catch (e) {
+      log?.warn?.('handleCreateMarketSubworkspace: SERENITY_MARKET_PRIMARY_URL_DIVERGENCE — could not set primary_url (non-fatal); market tracks its apex domain', {
+        workspaceId, projectId, primaryUrl, error: e?.message,
+      });
     }
   }
 

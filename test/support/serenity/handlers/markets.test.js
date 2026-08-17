@@ -196,6 +196,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const transport = {
       listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
 
@@ -249,6 +250,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const transport = {
       listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
 
@@ -262,6 +264,78 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     expect(transport.createProject.firstCall.args[1].domain).to.equal('acme.com');
   });
 
+  it('PATCHes the tracked url with the site path the domain cannot carry', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    dataAccess.Site.findById.resolves({ getBaseURL: () => 'https://nba.com/kings' });
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      updateProject: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', siteId: 'site-42', brandNames: ['Kings'],
+    }, fakeLog());
+
+    expect(result.status).to.equal(201);
+    // `domain` is the bare host (a path there is a hard 400 upstream) and the
+    // tracked url carries the path. Both come from the ONE Site read.
+    expect(transport.createProject.firstCall.args[1].domain).to.equal('nba.com');
+    expect(transport.updateProject.firstCall.args[2]).to.deep.equal({
+      type: 'ai', primary_url: 'nba.com/kings',
+    });
+    expect(dataAccess.Site.findById).to.have.been.calledOnce;
+  });
+
+  it('tracks the bare host when the caller supplies a brandDomain', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      updateProject: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', brandDomain: 'adobe.com', brandNames: ['Adobe'],
+    }, fakeLog());
+
+    expect(result.status).to.equal(201);
+    // A brandDomain is a bare domain by contract, so its identity is just its host —
+    // domain and tracked url agree, which is what an apex brand should look like.
+    expect(transport.updateProject.firstCall.args[2]).to.deep.equal({
+      type: 'ai', primary_url: 'adobe.com',
+    });
+  });
+
+  it('a failed primary_url PATCH cleans up the orphan and never publishes', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.Site.findById.resolves({ getBaseURL: () => 'https://nba.com/kings' });
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-orphan-patch' }),
+      updateProject: sinon.stub().rejects(new Error('upstream 503')),
+      publishProject: sinon.stub().resolves(),
+      deleteProject: sinon.stub().resolves(),
+    };
+
+    await expect(handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', siteId: 'site-42', brandNames: ['Kings'],
+    }, fakeLog())).to.be.rejectedWith('upstream 503');
+
+    // Publishing anyway would record a market as provisioned while it tracks the
+    // wrong url — the exact defect this change removes.
+    expect(transport.publishProject).to.not.have.been.called;
+    expect(transport.deleteProject).to.have.been.calledOnceWith(WORKSPACE, 'proj-orphan-patch');
+    expect(dataAccess.BrandSemrushProject.create).to.not.have.been.called;
+  });
+
   it('prefers an explicit brandDomain over the siteId (does not read the Site)', async () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
@@ -269,6 +343,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const transport = {
       listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
 
@@ -449,6 +524,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const transport = {
       listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-orphan-1' }),
+      updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().rejects(new Error('upstream 503')),
       deleteProject: sinon.stub().resolves(),
     };
@@ -462,7 +538,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     // Best-effort cleanup of the upstream project that failed to publish.
     expect(transport.deleteProject).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-orphan-1');
     expect(log.error).to.have.been.calledWithMatch(
-      'handleCreateMarket: publish failed; upstream project cleaned up',
+      'handleCreateMarket: provisioning failed; upstream project cleaned up',
       sinon.match({
         semrushProjectId: 'proj-orphan-1',
         geoTargetId: 2840,
@@ -482,6 +558,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const transport = {
       listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-orphan-3' }),
+      updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().rejects(new Error('upstream 503')),
       deleteProject: sinon.stub().rejects(new Error('cleanup network glitch')),
     };
@@ -496,7 +573,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
       sinon.match({ semrushProjectId: 'proj-orphan-3' }),
     );
     expect(log.error).to.have.been.calledWithMatch(
-      'handleCreateMarket: orphaned upstream project after publish failure',
+      'handleCreateMarket: orphaned upstream project after provisioning failure',
       sinon.match({ cleanedUp: false }),
     );
   });
@@ -513,6 +590,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const transport = {
       listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-orphan-2' }),
+      updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
     const log = fakeLog();
@@ -538,6 +616,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const transport = {
       listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
       createProject: sinon.stub().resolves({}), // missing id
+      updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub(),
     };
 
@@ -557,6 +636,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const transport = {
       listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-de', name: 'German' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-x' }),
+      updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
 
@@ -581,6 +661,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const transport = {
       listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-x' }),
+      updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
 
@@ -637,6 +718,7 @@ describe('handlers/markets.js — language-catalog cache (Important #8)', () => 
     const transport = {
       listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-1' }),
+      updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
 
@@ -666,6 +748,7 @@ describe('handlers/markets.js — language-catalog cache (Important #8)', () => 
       const transport = {
         listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
         createProject: sinon.stub().resolves({ id: 'proj-1' }),
+        updateProject: sinon.stub().resolves(),
         publishProject: sinon.stub().resolves(),
       };
 
@@ -1405,6 +1488,7 @@ describe('handlers/markets.js — handleUpdateModels', () => {
       addAiModel: sinon.stub().resolves(addResult),
       deleteAiModelsByIds: sinon.stub().resolves(deleteResult),
       // The model sync publishes after a real change so the new set goes live.
+      updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
   }
@@ -1992,6 +2076,7 @@ describe('handlers/markets.js — defensive branch coverage', () => {
           }],
         }),
       addAiModel: sinon.stub().resolves({}),
+      updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
     const log = fakeLog();

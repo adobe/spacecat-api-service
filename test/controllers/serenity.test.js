@@ -178,7 +178,7 @@ describe('SerenityController', () => {
   let updateBrandStub;
   let accessControlHasAccessStub;
   let ensureMarketSiteStub;
-  let resolveSiteDomainStub;
+  let resolveSiteUrlsStub;
   let unlinkMarketSiteIfOrphanedStub;
   let getBrandBaseSiteIdStub;
   let exchangePromiseTokenStub;
@@ -215,7 +215,9 @@ describe('SerenityController', () => {
     updateBrandStub = sinon.stub().resolves({ getId: () => BRAND, getStatus: () => 'active' });
     accessControlHasAccessStub = sinon.stub().resolves(true);
     ensureMarketSiteStub = sinon.stub().resolves('site-uuid-1');
-    resolveSiteDomainStub = sinon.stub().resolves('resolved.example.com');
+    resolveSiteUrlsStub = sinon.stub().resolves(
+      { domain: 'resolved.example.com', primaryUrl: 'resolved.example.com' },
+    );
     unlinkMarketSiteIfOrphanedStub = sinon.stub().resolves(true);
     getBrandBaseSiteIdStub = sinon.stub().resolves(null);
     exchangePromiseTokenStub = sinon.stub().resolves('exchanged-ims-token');
@@ -303,7 +305,7 @@ describe('SerenityController', () => {
       },
       '../../src/support/serenity/site-linkage.js': {
         ensureMarketSite: ensureMarketSiteStub,
-        resolveSiteDomain: resolveSiteDomainStub,
+        resolveSiteUrls: resolveSiteUrlsStub,
         unlinkMarketSiteIfOrphaned: unlinkMarketSiteIfOrphanedStub,
       },
       '../../src/support/utils.js': {
@@ -1380,7 +1382,7 @@ describe('SerenityController', () => {
 
     it('createMarket derives brandDomain from a supplied siteId and links THAT site (LLMO-6405)', async () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' } });
-      resolveSiteDomainStub.resolves('acme.com');
+      resolveSiteUrlsStub.resolves({ domain: 'acme.com', primaryUrl: 'acme.com/uk' });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const ctx = fakeContext({
         data: {
@@ -1389,17 +1391,21 @@ describe('SerenityController', () => {
       });
       const response = await controller.createMarket(ctx);
       expect(response.status).to.equal(201);
-      expect(resolveSiteDomainStub).to.have.been.calledOnceWith(ctx.dataAccess, 'site-onboarded');
+      expect(resolveSiteUrlsStub).to.have.been.calledOnceWith(ctx.dataAccess, 'site-onboarded');
       // Handler receives the derived brandDomain.
       const handlerBody = handlers.handleCreateMarketSubworkspace.firstCall.args[3];
       expect(handlerBody.brandDomain).to.equal('acme.com');
+      // ...and the tracked url alongside it. The handler has no Site access, so if
+      // the controller does not pass this the subpath is lost for good and the
+      // project silently tracks the parent domain.
+      expect(handlerBody.primaryUrl).to.equal('acme.com/uk');
       // ensureMarketSite links THAT site directly (siteId + derived domain).
       const opts = ensureMarketSiteStub.firstCall.args[1];
       expect(opts).to.include({ siteId: 'site-onboarded', domain: 'acme.com' });
     });
 
     it('createMarket 400s when a supplied siteId does not resolve to a domain', async () => {
-      resolveSiteDomainStub.resolves(null);
+      resolveSiteUrlsStub.resolves({ domain: null, primaryUrl: null });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.createMarket(fakeContext({
         data: {
@@ -1419,7 +1425,7 @@ describe('SerenityController', () => {
           market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'],
         },
       }));
-      expect(resolveSiteDomainStub).to.not.have.been.called;
+      expect(resolveSiteUrlsStub).to.not.have.been.called;
       const opts = ensureMarketSiteStub.firstCall.args[1];
       expect(opts.domain).to.equal('x.com');
       expect(opts.siteId).to.equal(undefined); // no siteId supplied → link by domain only
@@ -3102,7 +3108,7 @@ describe('SerenityController', () => {
 
     // Line 528: createMarket — `ctx.data || {}` in the subworkspace branch. The {}
     // fallback fires when ctx.data is absent in subworkspace mode.
-    it('createMarket passes {} body to subworkspace handler when ctx.data is absent', async () => {
+    it('createMarket passes an empty body with a derived primaryUrl when ctx.data is absent', async () => {
       resolveBrandWorkspaceStub.resolves({
         mode: 'subworkspace', workspaceId: 'sub-ws-1', parentWorkspaceId: WORKSPACE,
       });
@@ -3112,7 +3118,33 @@ describe('SerenityController', () => {
       ctx.data = undefined;
       const response = await controller.createMarket(ctx);
       expect(response.status).to.equal(200);
-      expect(handlers.handleCreateMarketSubworkspace.firstCall.args[3]).to.deep.equal({});
+      // `primaryUrl` is always set from the server-side derivation — null here,
+      // since there is no brandDomain to derive from. Always setting it is what
+      // stops a caller-supplied value from reaching Semrush unvalidated.
+      expect(handlers.handleCreateMarketSubworkspace.firstCall.args[3])
+        .to.deep.equal({ primaryUrl: null });
+    });
+
+    it('createMarket ignores a caller-supplied primaryUrl and derives its own', async () => {
+      resolveBrandWorkspaceStub.resolves({
+        mode: 'subworkspace', workspaceId: 'sub-ws-1', parentWorkspaceId: WORKSPACE,
+      });
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createMarket(fakeContext({
+        data: {
+          market: 'us',
+          languageCode: 'en',
+          brandDomain: 'acme.com',
+          brandNames: ['X'],
+          primaryUrl: 'evil.example.com/attacker-path',
+        },
+      }));
+      expect(response.status).to.equal(201);
+      // The field is not part of the create-market contract; a value on the request
+      // must never reach the Semrush project.
+      expect(handlers.handleCreateMarketSubworkspace.firstCall.args[3].primaryUrl)
+        .to.equal('acme.com');
     });
 
     // Line 370: createPrompts — `ctx.data || {}` in the flat-mode branch. The {}

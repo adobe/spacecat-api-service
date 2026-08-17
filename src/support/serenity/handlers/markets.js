@@ -12,7 +12,7 @@
 
 // @ts-check
 
-import { hasText } from '@adobe/spacecat-shared-utils';
+import { hasText, siteIdentityFromUrlString } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from '../../utils.js';
 import {
@@ -20,7 +20,8 @@ import {
 } from '../errors.js';
 import { normalizeLanguageCode, normalizeGeoTargetId } from '../validation.js';
 import { resolveLocation } from '../locations.js';
-import { resolveSiteDomain } from '../site-linkage.js';
+import { resolveSiteUrls } from '../site-linkage.js';
+import { createProvisionAndPublishProject } from '../project-provisioning.js';
 import { alertQuotaRejection } from '../quota-alerts.js';
 
 /** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
@@ -222,8 +223,8 @@ function validateCreateBody(body) {
     errors.push('languageCode must match ^[a-z]{2,3}(-[a-z]{2,4})?$');
   }
   // brandDomain OR siteId (LLMO-6405 Phase 2): a caller may supply the market's
-  // SpaceCat Site UUID instead of a raw domain — the controller derives the
-  // domain from it (resolveSiteDomain). One of the two is required.
+  // SpaceCat Site UUID instead of a raw domain — the controller derives both the
+  // domain and the tracked url from it (resolveSiteUrls). One of the two is required.
   if (!hasText(body?.brandDomain) && !hasText(body?.siteId)) {
     errors.push('brandDomain or siteId is required');
   }
@@ -380,9 +381,17 @@ export async function handleCreateMarket(
   // flat handler holds full `dataAccess` (incl. Site), so it self-derives — the
   // subworkspace handler cannot (narrowed dataAccess) and relies on the controller.
   // A supplied-but-unresolvable siteId is a hard 400 (never silently proceeds).
-  const brandDomain = hasText(body.brandDomain)
-    ? body.brandDomain
-    : await resolveSiteDomain(dataAccess, body.siteId, log);
+  // Both values come from ONE input — a caller-supplied brandDomain, or the Site
+  // behind body.siteId — because a project domained to one url while tracking
+  // another is worse than one tracking its apex: it looks deliberate. A supplied
+  // brandDomain is a bare domain by contract, so its identity is just its host;
+  // only the Site's own base URL can carry a subpath.
+  const { domain: brandDomain, primaryUrl } = hasText(body.brandDomain)
+    ? {
+      domain: body.brandDomain,
+      primaryUrl: siteIdentityFromUrlString(body.brandDomain),
+    }
+    : await resolveSiteUrls(dataAccess, body.siteId, log);
   if (!hasText(brandDomain)) {
     return {
       status: 400,
@@ -406,64 +415,33 @@ export async function handleCreateMarket(
     language_id: languageId,
   };
 
-  const createResp = await transport.createProject(semrushWorkspaceId, upstreamBody);
-  const semrushProjectId = String(createResp?.id || '');
-  if (!hasText(semrushProjectId)) {
-    return {
-      status: 502,
-      body: {
-        error: 'createNoProjectId',
-        message: 'Upstream createProject returned no id',
-      },
-    };
-  }
-
+  // create -> PATCH primary_url -> publish. The middle step is not optional for a
+  // brand whose site is a subdomain or a subpath: `domain` cannot carry a path and
+  // the upstream folds it to the registrable domain, so without the PATCH the
+  // project tracks the parent domain. See project-provisioning.js.
+  let semrushProjectId;
   try {
-    await transport.publishProject(semrushWorkspaceId, semrushProjectId);
-  } catch (e) {
-    // Best-effort upstream cleanup so the documented retry contract holds.
-    // A retry now sends a byte-identical `createProject` body (the name is
-    // derived from the slice, not freshly randomized), but Semrush accepts no
-    // idempotency key, so an identical body still creates a SECOND project
-    // rather than resolving to the first. The 409 gate can't catch it either —
-    // it only fires when a DB row exists, and never sees orphan upstream
-    // projects. Hence deleting the orphan here.
-    //
-    // Swallow the delete's own errors: the publishProject error is what we
-    // need to propagate to the caller, and we don't want a follow-on cleanup
-    // failure to mask it. Both outcomes are logged so an operator can still
-    // reconcile if cleanup itself fails.
-    let cleanedUp = false;
-    try {
-      await transport.deleteProject(semrushWorkspaceId, semrushProjectId);
-      cleanedUp = true;
-    } catch (cleanupErr) {
-      log?.error?.(
-        'handleCreateMarket: best-effort cleanup deleteProject failed; orphan upstream project remains',
-        {
-          brandId,
-          semrushWorkspaceId,
-          semrushProjectId,
-          geoTargetId: location.geoTargetId,
-          languageCode,
-          error: cleanupErr.message,
-        },
-      );
-    }
-    log?.error?.(
-      cleanedUp
-        ? 'handleCreateMarket: publish failed; upstream project cleaned up'
-        : 'handleCreateMarket: orphaned upstream project after publish failure',
+    semrushProjectId = await createProvisionAndPublishProject(
+      transport,
+      semrushWorkspaceId,
+      upstreamBody,
       {
-        brandId,
-        semrushWorkspaceId,
-        semrushProjectId,
-        geoTargetId: location.geoTargetId,
-        languageCode,
-        error: e.message,
-        cleanedUp,
+        primaryUrl,
+        log,
+        caller: 'handleCreateMarket',
+        logContext: { brandId, geoTargetId: location.geoTargetId, languageCode },
       },
     );
+  } catch (e) {
+    if (e.message === 'Upstream createProject returned no id') {
+      return {
+        status: 502,
+        body: {
+          error: 'createNoProjectId',
+          message: 'Upstream createProject returned no id',
+        },
+      };
+    }
     throw e;
   }
 

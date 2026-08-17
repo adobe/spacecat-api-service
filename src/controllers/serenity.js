@@ -15,7 +15,9 @@
 import {
   createResponse, forbidden, internalServerError, noContent, notFound, accepted,
 } from '@adobe/spacecat-shared-http-utils';
-import { hasText, isNonEmptyObject, isValidUUID } from '@adobe/spacecat-shared-utils';
+import {
+  hasText, isNonEmptyObject, isValidUUID, siteIdentityFromUrlString,
+} from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
 import { createSerenityTransport } from '../support/serenity/rest-transport.js';
@@ -81,7 +83,11 @@ import {
 } from '../support/brands-storage.js';
 import { ErrorWithStatusCode, resolveSemrushImsToken as resolveImsTokenViaPromise } from '../support/utils.js';
 import { hostnameFromUrlString } from '../support/url-utils.js';
-import { ensureMarketSite, resolveSiteDomain, unlinkMarketSiteIfOrphaned } from '../support/serenity/site-linkage.js';
+import {
+  ensureMarketSite,
+  resolveSiteUrls,
+  unlinkMarketSiteIfOrphaned,
+} from '../support/serenity/site-linkage.js';
 import { X_PROMISE_TOKEN_HEADER, PROMISE_TOKEN_REQUIRED_ERROR_CODE } from '../utils/constants.js';
 import { tombstoneAllForBrand, linkSiteToLiveRows } from '../support/serenity/mapping-rows.js';
 
@@ -779,16 +785,36 @@ function SerenityController(context, log, env) {
         // The subworkspace create handler has no Site access (narrowed dataAccess),
         // so derive the Semrush project domain from the supplied siteId HERE when
         // brandDomain is absent. A supplied-but-unresolvable siteId is a hard 400.
-        let effectiveBody = requestBody;
+        // `primaryUrl` is always DERIVED here, never taken from the request. It is
+        // not part of the documented create-market contract, and passing a caller's
+        // value straight through would put an unvalidated string on the Semrush
+        // project. Set unconditionally so a client that sends one is ignored rather
+        // than trusted.
+        let effectiveBody = {
+          ...requestBody,
+          primaryUrl: siteIdentityFromUrlString(requestBody.brandDomain),
+        };
         if (suppliedSiteId && !hasText(requestBody.brandDomain)) {
-          const derivedDomain = await resolveSiteDomain(ctx.dataAccess, suppliedSiteId, log);
+          // Both values from one read, for the same reason the domain is derived
+          // here at all: the handler has no Site access. Only `primaryUrl` can
+          // carry a subpath — `brandDomain` is a bare FQDN because a path there is
+          // rejected upstream.
+          const { domain: derivedDomain, primaryUrl: derivedPrimaryUrl } = await resolveSiteUrls(
+            ctx.dataAccess,
+            suppliedSiteId,
+            log,
+          );
           if (!derivedDomain || !hasText(derivedDomain)) {
             return createResponse(
               { error: 'invalidRequest', message: 'siteId did not resolve to a site domain' },
               400,
             );
           }
-          effectiveBody = { ...requestBody, brandDomain: derivedDomain };
+          effectiveBody = {
+            ...effectiveBody,
+            brandDomain: derivedDomain,
+            primaryUrl: derivedPrimaryUrl,
+          };
         }
         // Brand aliases are brand-level but region-scoped: the create handler
         // clamps each to the new market's region before writing brand_names.
@@ -1268,11 +1294,21 @@ function SerenityController(context, log, env) {
       const wasPending = brand.getStatus?.() === 'pending';
       // The Semrush project domain: the request's brandDomain, else derived from
       // the stashed draft primary URL (the wizard's "Save as pending" URL).
-      const suppliedUrlOrDomain = hasText(body.brandDomain)
-        || hasText(pendingSemrushProvisioning?.primaryUrl);
+      // One input, selected once, feeding both derivations — so the domain and the
+      // tracked url can never describe two different urls.
+      const brandUrlSource = hasText(body.brandDomain)
+        ? body.brandDomain
+        : pendingSemrushProvisioning?.primaryUrl;
+      const suppliedUrlOrDomain = hasText(brandUrlSource);
+      // A supplied brandDomain is passed through verbatim (it is already a bare
+      // domain by contract); only the stashed wizard URL needs reducing to a host.
       const brandDomain = hasText(body.brandDomain)
         ? body.brandDomain
-        : hostnameFromUrlString(pendingSemrushProvisioning?.primaryUrl);
+        : hostnameFromUrlString(brandUrlSource);
+      // The url the market's project should TRACK. The stashed wizard URL is the one
+      // place a subpath survives this far, and reducing it to a hostname for `domain`
+      // — which it has to be — was previously the end of it: the path was discarded.
+      const brandPrimaryUrl = siteIdentityFromUrlString(brandUrlSource);
 
       // ----- Pending-brand activation is ALWAYS sub-workspace-only (LLMO-6405) -----
       // Markets are Semrush projects added afterwards from the Markets tab, never
@@ -1461,6 +1497,7 @@ function SerenityController(context, log, env) {
           market: m.market,
           languageCode: m.languageCode,
           brandDomain,
+          primaryUrl: brandPrimaryUrl,
           brandNames: body.brandNames,
           brandDisplayName: body.brandDisplayName,
           name: m.name,

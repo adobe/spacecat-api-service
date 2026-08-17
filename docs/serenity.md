@@ -298,13 +298,25 @@ Two **org-level** catalogue routes are brand-independent (prefixed with `/v2/org
 4. resolveLanguageId(languageCode) via cached     -> 400 if language not in catalog
    `/v1/languages`
 5. POST /v1/workspaces/{ws}/projects              -> 502 envelope on upstream error
-6. POST .../publish                               -> 502 envelope, no row written
-7. BrandSemrushProject.create({...})              -> 201 with the new market
+6. PATCH .../projects/{pid} {type, primary_url}   -> 502 envelope, no row written
+7. POST .../publish                               -> 502 envelope, no row written
+8. BrandSemrushProject.create({...})              -> 201 with the new market
 ```
 
-If step 5 or 6 fails, no row is written and the caller may safely retry with the same body. The 409 gate catches the case where a previous attempt succeeded both upstream calls but failed the DB write — extremely unlikely in practice; covered by the integration tests in `test/it/`.
+Step 6 is not optional and cannot be folded into step 5. A project carries two URL-ish
+fields: `domain`, which must be a bare FQDN (a path is a hard 400, and the upstream folds
+whatever is sent to the registrable domain), and `settings.ai.primary_url`, which is the
+URL the project actually **tracks** and accepts a subdomain, a subpath, or both. Create
+**ignores** `primary_url` — sent in the create body it comes back as the apex, whatever
+spelling went in — so it can only be set by a PATCH, and that PATCH must land before the
+publish or the value stays in draft. `primary_url` is sent flat (`{type: 'ai',
+primary_url}`, the shape `model.ProjectUpdateRequest` declares) and read back nested at
+`settings.ai.primary_url`. Without it, a brand whose site is `nba.com/kings` is recorded
+against the whole of `nba.com`.
 
-**`brandDomain` OR `siteId` (LLMO-6405 Phase 2).** A market created from an already-onboarded URL can send `siteId` (the SpaceCat Site UUID) instead of a raw `brandDomain`. The server derives the Semrush project domain from that Site's `base_url` (`resolveSiteDomain`, same hostname normalization as every other brand→domain derivation; an unresolvable `siteId` is a 400). At least one of the two is required. In sub-workspace mode a supplied `siteId` also makes the post-201 mirror link **that** Site directly (skipping the domain→Site find-or-create — see below); the linked `siteId` then surfaces on the market DTO (`GET /serenity/markets[/:slice]`, both modes). The flat handler self-derives (it holds `dataAccess.Site`); the sub-workspace handler relies on the controller (its `dataAccess` is narrowed). When `siteId` is absent, behavior is byte-for-byte unchanged.
+If step 5, 6 or 7 fails, no row is written and the caller may safely retry with the same body. The 409 gate catches the case where a previous attempt succeeded both upstream calls but failed the DB write — extremely unlikely in practice; covered by the integration tests in `test/it/`.
+
+**`brandDomain` OR `siteId` (LLMO-6405 Phase 2).** A market created from an already-onboarded URL can send `siteId` (the SpaceCat Site UUID) instead of a raw `brandDomain`. The server derives **both** Semrush URL values from that Site's `base_url` in one read (`resolveSiteUrls`): the project `domain` (bare host, the same normalization as every other brand→domain derivation) and the project's tracked `primary_url` (host + path, scheme-less to match the stored upstream form). They come from one read so the two can never describe different URLs; an unresolvable `siteId` is a 400. `primary_url` is always derived server-side and never read from the request body. At least one of the two is required. In sub-workspace mode a supplied `siteId` also makes the post-201 mirror link **that** Site directly (skipping the domain→Site find-or-create — see below); the linked `siteId` then surfaces on the market DTO (`GET /serenity/markets[/:slice]`, both modes). The flat handler self-derives (it holds `dataAccess.Site`); the sub-workspace handler relies on the controller (its `dataAccess` is narrowed). When `siteId` is absent, behavior is byte-for-byte unchanged.
 
 ## Delete-market semantics
 
@@ -334,7 +346,7 @@ The DELETE is **not soft**. The UI must confirm with the user before invoking �
 
 For backwards compatibility and integrations, every Semrush market (project) is mirrored as a SpaceCat **Site** on our side. The domain model is the key thing to hold onto:
 
-- A **brand is a shell** with **no domain of its own** — like its Semrush sub-workspace. **Each market has its own primary URL/domain**, and that domain maps to a single Site (global `sites.base_url` uniqueness ⇒ at most one Site per domain). A brand whose markets span distinct domains therefore owns several market Sites.
+- A **brand is a shell** with **no domain of its own** — like its Semrush sub-workspace. **Each market has its own primary URL/domain**, and that URL maps to a single Site. `sites.base_url` is globally unique over the **whole URL including its path**, so one host can back several Sites: in prod 440 of 12,926 sites carry a subpath, and `nba.com` coexists with `nba.com/kings`, `/knicks`, `/lakers` and `/timberwolves` as five distinct rows. A brand whose markets span distinct URLs therefore owns several market Sites. Site lookup is by the full identity (host + path) for exactly this reason — resolving by host alone silently returns the root site for every subpath sibling.
 - The Site is linked to the owning brand via a **`brand_sites` row tagged `type='serenity'`** (`src/support/serenity/site-linkage.js` → `ensureMarketSite`; the marker names the owning feature, not the provider). The marker is load-bearing:
   - **`syncBrandSites` preserves it.** That function rebuilds `brand_sites` from `brand.urls` on every brand edit (delete-all-then-reinsert). A market's domain is generally **not** in `brand.urls`, so an unmarked row would be silently deleted on the next edit. The marker excludes these rows from the delete and keeps their type from being downgraded on re-upsert.
   - **`mapDbBrandToV2` excludes it.** A market's domain is not a brand URL, so `type='serenity'` rows never surface in the brand V2 response (`urls[]` / `siteIds`). Integrations resolve them via the `sites` / `brand_sites` tables directly.
