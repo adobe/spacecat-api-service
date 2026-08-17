@@ -14,10 +14,10 @@ import {
   ok, badRequest, notFound, forbidden, unauthorized, internalServerError, createResponse,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
-import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
+import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import CloudflareClient from '@adobe/spacecat-shared-cloudflare-client';
 import AccessControlUtil from '../../support/access-control-util.js';
-import { hasSubpath } from '../../support/edge-routing-utils.js';
+import { hasSubpath, resolveCanonicalHost } from '../../support/edge-routing-utils.js';
 import { auditHostname } from './llmo-utils.js';
 import {
   deriveWorkerName, hostInSiteDomain, registrableDomain, routePatternHost, routePatternHostGlob,
@@ -331,7 +331,7 @@ function LlmoCloudflareController(ctx) {
    * POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy
    * Body: { accountId }
    * The target host is NOT client-supplied — it is derived server-side from the site's own base
-   * URL (see calculateForwardedHost) so the worker always forwards to the canonical host for the
+   * URL (see resolveCanonicalHost) so the worker always forwards to the canonical host for the
    * site, consistent with how the other CDN integrations resolve the origin.
    * Fetches the Edge Optimize worker script from GitHub and deploys it under a name derived
    * from the site (see deriveWorkerName), tagging it with CF_WORKER_OWNER_TAG (+ the caller's
@@ -372,14 +372,14 @@ function LlmoCloudflareController(ctx) {
     const siteId = site.getId();
 
     // targetHost is derived server-side from the site's own base URL — never taken from the client
-    // — so the worker always forwards to the canonical host for the site. calculateForwardedHost
+    // — so the worker always forwards to the canonical host for the site. resolveCanonicalHost
     // normalizes a bare apex (example.com) to its www host, matching how audits/crawls resolve the
-    // origin and keeping host derivation consistent across CDNs (CloudFront uses the same helper).
-    // Known gap: sites served from the apex without a www record still resolve to www here; that
-    // is tracked as a follow-up enhancement.
+    // origin and keeping host derivation consistent across CDNs (CloudFront uses the same helper),
+    // but then confirms that synthesized www host actually resolves in DNS — sites served only from
+    // the apex (no www record) fall back to the apex instead of pointing the worker at a dead host.
     let targetHost;
     try {
-      targetHost = calculateForwardedHost(site.getBaseURL(), log);
+      targetHost = await resolveCanonicalHost(site.getBaseURL(), log);
     } catch (e) {
       log.error(auditLine(context, 'deploy-worker', 'target-host-failed', {
         severity: 'error', siteId, accountId, error: e.message,

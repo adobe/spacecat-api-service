@@ -15,6 +15,7 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
 import { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
+import { hasSubpath } from '../../../src/support/edge-routing-utils.js';
 
 use(sinonChai);
 
@@ -40,7 +41,7 @@ describe('LlmoCloudflareController', () => {
   let mockCfClient;
   let mockTokowakaClient;
   let mockFetch;
-  let mockCalculateForwardedHost;
+  let mockResolveCanonicalHost;
 
   before(async () => {
     // esmock is expensive, so wire it once. The mock factories deliberately read the mutable
@@ -54,13 +55,18 @@ describe('LlmoCloudflareController', () => {
         default: {
           createFrom: () => mockTokowakaClient,
         },
-        // Routed through a mutable stub (default: the real impl, set in beforeEach) so tests
-        // exercise the actual apex→www normalization but can also force a derivation failure.
-        calculateForwardedHost: (...args) => mockCalculateForwardedHost(...args),
       },
       '@adobe/spacecat-shared-utils': {
         hasText: (v) => typeof v === 'string' && v.trim().length > 0,
         tracingFetch: (...args) => mockFetch(...args),
+      },
+      '../../../src/support/edge-routing-utils.js': {
+        hasSubpath,
+        // Routed through a mutable stub (default: apex→www derivation via calculateForwardedHost,
+        // set in beforeEach) so tests exercise the real normalization but can also force a
+        // derivation failure. The DNS-follow behaviour of resolveCanonicalHost is unit-tested in
+        // edge-routing-utils.test.js; here we only assert the controller uses whatever it returns.
+        resolveCanonicalHost: (...args) => mockResolveCanonicalHost(...args),
       },
       '../../../src/support/access-control-util.js': {
         default: {
@@ -88,8 +94,9 @@ describe('LlmoCloudflareController', () => {
       fetchMetaconfig: sandbox.stub().resolves({ apiKeys: [LLMO_API_KEY] }),
     };
 
-    // Default to the real host-derivation helper; individual tests may override to force a throw.
-    mockCalculateForwardedHost = calculateForwardedHost;
+    // Default to the real apex→www host-derivation (no DNS); individual tests may override to
+    // force a throw or a specific resolved host.
+    mockResolveCanonicalHost = (baseURL, l) => calculateForwardedHost(baseURL, l);
 
     mockFetch = sandbox.stub().resolves({
       ok: true,
@@ -529,12 +536,28 @@ describe('LlmoCloudflareController', () => {
     });
 
     it('returns 500 when the target host cannot be derived from the site base URL', async () => {
-      mockCalculateForwardedHost = () => {
+      mockResolveCanonicalHost = () => {
         throw new Error('cannot derive host');
       };
       const res = await controller.deployWorker(mockContext);
       expect(res.status).to.equal(500);
       expect(mockCfClient.deployWorkerScript).to.not.have.been.called;
+    });
+
+    it('deploys with the apex host when resolveCanonicalHost falls back (no www DNS record)', async () => {
+      mockSite.getBaseURL = () => 'https://example.com';
+      // resolveCanonicalHost falls back to the apex when the synthesized www host does not resolve.
+      mockResolveCanonicalHost = async () => 'example.com';
+      mockCfClient.deployWorkerScript.resolves();
+      mockCfClient.setWorkerSecret.resolves();
+
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(200);
+
+      const binding = mockCfClient.deployWorkerScript.getCall(0).args[3];
+      expect(binding).to.deep.equal([
+        { name: 'EDGE_OPTIMIZE_TARGET_HOST', type: 'plain_text', text: 'example.com' },
+      ]);
     });
 
     it('returns 400 when CF token is missing', async () => {

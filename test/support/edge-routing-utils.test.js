@@ -425,6 +425,115 @@ describe('edge-routing-utils', () => {
     });
   });
 
+  describe('hostResolves', () => {
+    let dnsPromises;
+    let edgeUtilsResolve;
+
+    beforeEach(async () => {
+      dnsPromises = {
+        resolveCname: sandbox.stub().resolves([]),
+        resolve4: sandbox.stub().resolves([]),
+        resolve6: sandbox.stub().resolves([]),
+      };
+      edgeUtilsResolve = await esmock('../../src/support/edge-routing-utils.js', {
+        dns: { promises: dnsPromises },
+        '@adobe/spacecat-shared-utils': {
+          isObject: (v) => v !== null && typeof v === 'object' && !Array.isArray(v),
+          isValidUrl: () => true,
+          tracingFetch: sandbox.stub(),
+        },
+        '@adobe/spacecat-shared-tokowaka-client': {
+          calculateForwardedHost: calculateForwardedHostStub,
+        },
+      });
+    });
+
+    it('returns true when a CNAME record resolves', async () => {
+      dnsPromises.resolveCname.resolves(['origin.example.net']);
+      expect(await edgeUtilsResolve.hostResolves('www.example.com', log)).to.be.true;
+    });
+
+    it('returns true when an A record resolves', async () => {
+      dnsPromises.resolve4.resolves(['1.2.3.4']);
+      expect(await edgeUtilsResolve.hostResolves('www.example.com', log)).to.be.true;
+    });
+
+    it('returns true when an AAAA record resolves', async () => {
+      dnsPromises.resolve6.resolves(['2606:4700::1']);
+      expect(await edgeUtilsResolve.hostResolves('www.example.com', log)).to.be.true;
+    });
+
+    it('returns false and tolerates lookup rejections when no records resolve', async () => {
+      dnsPromises.resolveCname.rejects(new Error('ENOTFOUND'));
+      dnsPromises.resolve4.rejects(new Error('ENODATA'));
+      dnsPromises.resolve6.rejects(new Error('ETIMEOUT'));
+      expect(await edgeUtilsResolve.hostResolves('www.example.com', log)).to.be.false;
+    });
+
+    it('works without a logger (optional log)', async () => {
+      dnsPromises.resolve4.resolves(['1.2.3.4']);
+      expect(await edgeUtilsResolve.hostResolves('www.example.com')).to.be.true;
+    });
+  });
+
+  describe('resolveCanonicalHost', () => {
+    let dnsPromises;
+    let edgeUtilsResolve;
+
+    beforeEach(async () => {
+      dnsPromises = {
+        resolveCname: sandbox.stub().resolves([]),
+        resolve4: sandbox.stub().resolves([]),
+        resolve6: sandbox.stub().resolves([]),
+      };
+      edgeUtilsResolve = await esmock('../../src/support/edge-routing-utils.js', {
+        dns: { promises: dnsPromises },
+        '@adobe/spacecat-shared-utils': {
+          isObject: (v) => v !== null && typeof v === 'object' && !Array.isArray(v),
+          isValidUrl: () => true,
+          tracingFetch: sandbox.stub(),
+        },
+        '@adobe/spacecat-shared-tokowaka-client': {
+          calculateForwardedHost: calculateForwardedHostStub,
+        },
+      });
+    });
+
+    it('returns the host unchanged and skips DNS when it is already www', async () => {
+      calculateForwardedHostStub.returns('www.example.com');
+      const host = await edgeUtilsResolve.resolveCanonicalHost('https://www.example.com', log);
+      expect(host).to.equal('www.example.com');
+      expect(dnsPromises.resolve4).to.not.have.been.called;
+    });
+
+    it('returns the host unchanged and skips DNS for an existing subdomain', async () => {
+      calculateForwardedHostStub.returns('cdn.example.com');
+      const host = await edgeUtilsResolve.resolveCanonicalHost('https://cdn.example.com', log);
+      expect(host).to.equal('cdn.example.com');
+      expect(dnsPromises.resolve4).to.not.have.been.called;
+    });
+
+    it('uses the synthesized www host when it resolves in DNS', async () => {
+      calculateForwardedHostStub.returns('www.example.com');
+      dnsPromises.resolve4.withArgs('www.example.com').resolves(['1.2.3.4']);
+      const host = await edgeUtilsResolve.resolveCanonicalHost('https://example.com', log);
+      expect(host).to.equal('www.example.com');
+    });
+
+    it('falls back to the apex when the synthesized www host has no DNS records', async () => {
+      calculateForwardedHostStub.returns('www.gentingsingapore.com');
+      const host = await edgeUtilsResolve.resolveCanonicalHost('https://gentingsingapore.com', log);
+      expect(host).to.equal('gentingsingapore.com');
+      expect(log.info).to.have.been.calledWithMatch('falling back to apex gentingsingapore.com');
+    });
+
+    it('propagates the error when calculateForwardedHost throws on an unparseable URL', async () => {
+      calculateForwardedHostStub.throws(new Error('Error calculating forwarded host'));
+      await expect(edgeUtilsResolve.resolveCanonicalHost('https://example.com', log))
+        .to.be.rejectedWith('Error calculating forwarded host');
+    });
+  });
+
   describe('detectAemCsFastlyForDomain (integration)', () => {
     const badDomain = () => ({
       toString() {

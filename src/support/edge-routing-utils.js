@@ -71,6 +71,65 @@ export function getHostnameWithoutWww(url, log) {
 }
 
 /**
+ * Whether a hostname has any DNS record (CNAME, A, or AAAA) — i.e. it actually resolves.
+ * Never throws: a failed lookup (NXDOMAIN, SERVFAIL, timeout, …) is treated as "does not resolve"
+ * and returns false, mirroring the tolerant DNS handling used elsewhere in this module.
+ *
+ * @param {string} host - Hostname to resolve (e.g. 'www.example.com').
+ * @param {object} [log] - Logger.
+ * @returns {Promise<boolean>} True if any record type resolves, false otherwise.
+ */
+export async function hostResolves(host, log) {
+  const [cnames, ipv4, ipv6] = await Promise.all([
+    dns.resolveCname(host).catch(() => []),
+    dns.resolve4(host).catch(() => []),
+    dns.resolve6(host).catch(() => []),
+  ]);
+  const resolves = cnames.length > 0 || ipv4.length > 0 || ipv6.length > 0;
+  log?.info(`[edge-routing-utils] DNS check for ${host}: ${resolves ? 'resolves' : 'no records'}`);
+  return resolves;
+}
+
+/**
+ * Resolves the canonical origin host for a site's base URL, adding a DNS-follow step on top of
+ * calculateForwardedHost.
+ *
+ * calculateForwardedHost normalizes a bare apex (example.com) to its www host (www.example.com),
+ * matching how audits/crawls resolve the origin. But some sites are served only from the apex and
+ * have no www record — forcing www there points the worker at a host that does not exist (the
+ * gentingsingapore.com onboarding failure). So when the www host was synthesized from a bare apex,
+ * it is only used if it actually resolves in DNS; otherwise we fall back to the apex. Hosts that
+ * are already www or a subdomain are returned unchanged (calculateForwardedHost leaves them as-is,
+ * so no lookup is needed).
+ *
+ * @param {string} baseURL - Site base URL (must include scheme).
+ * @param {object} log - Logger.
+ * @returns {Promise<string>} The canonical origin host.
+ * @throws {Error} If the base URL is unparseable (propagated from calculateForwardedHost).
+ */
+export async function resolveCanonicalHost(baseURL, log) {
+  const candidate = calculateForwardedHost(baseURL, log);
+  const originalHost = new URL(baseURL).hostname.toLowerCase();
+
+  // calculateForwardedHost only rewrites a bare apex into www.<apex>. When it returns the original
+  // host unchanged (already www, or a subdomain) the candidate is authoritative — skip the lookup.
+  if (candidate.toLowerCase() === originalHost) {
+    return candidate;
+  }
+
+  // candidate is a www host synthesized from a bare apex — only trust it if it resolves.
+  if (await hostResolves(candidate, log)) {
+    return candidate;
+  }
+
+  log.info(
+    `[edge-routing-utils] Synthesized host ${candidate} has no DNS records; `
+    + `falling back to apex ${originalHost}`,
+  );
+  return originalHost;
+}
+
+/**
  * Returns true when a site baseURL contains a non-root pathname (e.g. https://example.com/docs).
  *
  * @param {string} baseURL - The site base URL.
