@@ -773,10 +773,10 @@ v2-serenity-activate:
       it on first call and persisting `brands.semrush_workspace_id`, which flips
       the brand into sub-workspace mode), then per supplied market creates-or-resumes a
       draft and publishes it once. Markets are caller-supplied (reactivation
-      re-supplies them — there is no stored market memory); a pending (draft)
-      brand falls back to its stashed `pending_semrush_provisioning`. Idempotent on
-      the workspace; per-market it is 409-safe (an already-live slice is reported,
-      not duplicated).
+      re-supplies them — there is no stored market memory). A pending (draft)
+      brand activates sub-workspace-only regardless of supplied markets — no
+      project is created. Idempotent on the workspace; per-market it is
+      409-safe (an already-live slice is reported, not duplicated).
 
       A primary URL/domain is REQUIRED to activate. Activation resolves the primary
       domain's Site and sets it as the brand's base site (`brands.site_id`) in the

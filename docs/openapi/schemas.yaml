@@ -3971,13 +3971,13 @@ Brand:
       readOnly: true
     pendingSemrushProvisioning:
       description: >-
-        Read-only. Deferred Semrush provisioning data for a pending (draft)
-        brand: the primary URL + initial market chosen at "Save as pending"
-        before the brand's sub-workspace + project exist. Fed into activation;
-        each market that provisions is removed and the field is nulled once none
-        remain (failed markets stay for retry). Null for a non-pending brand (or
-        a draft with no provisioning data yet). primaryUrl may be null (saved as
-        pending before a URL was entered).
+        Read-only. DEPRECATED (SITES-49448): the deferred Semrush provisioning
+        staging blob for a pending (draft) brand — the primary URL + initial
+        market chosen at "Save as pending" before the brand's sub-workspace +
+        project existed. No longer read or written by activation (a pending
+        brand's primary URL is now a Site selection written to baseSiteId at
+        create time); this is a historical remnant of a legacy draft, or null.
+        The column is slated for removal once existing legacy drafts drain.
       type: [object, 'null']
       readOnly: true
       properties:
@@ -7783,17 +7783,15 @@ V2SemrushRejectedAlias:
 V2PendingSemrushProvisioning:
   type: [object, 'null']
   description: >-
-    Deferred Semrush provisioning data for a pending (draft) brand: the primary
-    URL + initial markets (each with its chosen AI models/LLMs) collected at
-    "Save as pending" before the brand's sub-workspace + project exist, plus
-    whether activation should generate topics/prompts. Activation provisions each
-    market and removes it from the blob, nulling the field once none remain
-    (failed markets stay for retry). markets may be empty: with a primaryUrl a
-    single US/EN fallback project is provisioned; with neither a primaryUrl nor a
-    market a sub-workspace-only brand is provisioned. On a brand response this is
-    read-only and null for a non-pending brand. On a PATCH it is honored only
-    while the brand is (and stays) pending — the draft Markets tab appends a
-    market / edits a market's LLMs — and ignored otherwise.
+    DEPRECATED (SITES-49448): the deferred Semrush provisioning staging blob
+    (primary URL + initial markets collected at "Save as pending" before a
+    sub-workspace/project existed). The brand and market management model
+    replaced everything it staged — a pending brand's primary URL is now a Site
+    selection written to baseSiteId at create time, and activation no longer
+    reads or writes this field. Read-only on a brand response (a historical
+    remnant of a legacy draft, or null); always ignored on a PATCH regardless of
+    the brand's status. The column is slated for removal once existing legacy
+    drafts drain.
   properties:
     primaryUrl:
       type: [string, 'null']
@@ -8117,9 +8115,8 @@ V2BrandUpdateInput:
       allOf:
         - $ref: '#/V2PendingSemrushProvisioning'
       description: >-
-        Deferred Semrush provisioning data. Honored only while the brand is (and
-        stays) pending — the draft Markets tab appends a market / edits a
-        market's LLMs; silently ignored on a non-pending brand.
+        DEPRECATED (SITES-49448): always ignored on a PATCH, regardless of the
+        brand's status — no supplied value is ever persisted.
     expectedUpdatedAt:
       type: string
       format: date-time
@@ -12246,10 +12243,10 @@ SerenityActivateRequest:
 
     A PENDING (draft) brand activates SUB-WORKSPACE-ONLY: it ensures the brand's
     own Semrush sub-workspace and flips the brand active, with NO project. The
-    wizard's approve sends an EMPTY body `{}`; any `markets`/`brandDomain` (or the
-    legacy `pending_semrush_provisioning` stash) are IGNORED for provisioning. The
-    brand is anchored by its primary site (`brands.site_id`, set at create), and
-    markets are added afterwards from the Markets tab.
+    wizard's approve sends an EMPTY body `{}`; any `markets`/`brandDomain` are
+    IGNORED for provisioning. The brand is anchored by its primary site
+    (`brands.site_id`, set at create), and markets are added afterwards from the
+    Markets tab.
 
     An ALREADY-ACTIVE brand (reactivation / onboarding API) provisions the markets
     supplied in the body: per market it creates-or-resumes a draft project and
