@@ -14,7 +14,7 @@
 
 import { hasText } from '@adobe/spacecat-shared-utils';
 
-import { isSemrushTransportError } from './errors.js';
+import { isSemrushTransportError, isMeteredQuota, toQuotaExceededError } from './errors.js';
 import { benchmarkAliases } from './aliases.js';
 import { resolveProjects } from './resolve-projects.js';
 
@@ -296,21 +296,27 @@ export async function attachBrandUrlsToProject(
   return { created: entries.length };
 }
 
-// Best-effort republish after an edit-time change so the live view reflects it.
-// Swallows a quota 405 (publishing an empty-units child 405s as a disguised
-// quota rejection — same convention as the market-create path); any other
-// failure propagates so the edit hard-fails. Shared by the brand-URL and
-// CI-competitor edit re-syncs.
+// Republish after an edit-time change so the live view reflects it. Shared by the brand-URL,
+// CI-competitor, and tag edit re-syncs.
+//
+// SITES-49206: this used to swallow a quota 405 (publishing an empty-units child 405s as a
+// disguised quota rejection) and leave the project a draft instead of failing the edit. Semrush
+// no longer enforces AI project/prompt limits for proxy-routed LLMO workspaces (confirmed live,
+// including a direct empty-units publish probe against a throwaway workspace, 2026-08-17) — a
+// quota 405 here would mean Semrush is enforcing again, which every OTHER publish call site in
+// this codebase already treats as a real, surfaced error (classify via `isMeteredQuota`, throw
+// `toQuotaExceededError()`) rather than something to tolerate silently. This function now matches
+// that convention instead of being the one place a live re-enforcement would go unnoticed.
 /** @param {SerenityTransport} transport */
-export async function republishBestEffort(transport, workspaceId, projectId, log) {
+export async function republish(transport, workspaceId, projectId, log) {
   try {
     await transport.publishProject(workspaceId, projectId);
   } catch (e) {
-    if (isSemrushTransportError(e) && e.status === 405) {
-      log?.warn?.('brand-urls: republish skipped — quota 405, project left as draft', {
+    if (isMeteredQuota(e)) {
+      log?.warn?.('republish: quota exceeded — Semrush is enforcing AI limits again (see ADR-009)', {
         workspaceId, projectId,
       });
-      return;
+      throw toQuotaExceededError();
     }
     throw e;
   }
@@ -448,7 +454,7 @@ export async function syncBrandUrlsAcrossMarkets(
       }
       if (toCreate.length > 0 || toDelete.length > 0) {
         // eslint-disable-next-line no-await-in-loop
-        await republishBestEffort(transport, workspaceId, projectId, log);
+        await republish(transport, workspaceId, projectId, log);
       }
     } catch (e) {
       // A mid-fan-out failure must name WHICH market split so the brand-edit
