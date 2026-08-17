@@ -662,15 +662,15 @@ describe('LlmoCloudflareController', () => {
   describe('addRoute', () => {
     beforeEach(() => {
       mockContext.params = { siteId: SITE_ID };
-      // Pattern is no longer client-supplied — only zoneId is. The route pattern is derived
-      // server-side from the site's canonical host. Default the resolver to the apex so the
-      // derived pattern is 'example.com/*', matching the conflict fixtures below.
-      mockContext.data = { zoneId: ZONE_ID };
+      // The client supplies the pattern; only its ROOT host is normalized server-side. The site
+      // apex is example.com and the resolver returns the apex, so a root-host pattern like
+      // example.com/* is left unchanged — matching the conflict fixtures below.
+      mockContext.data = { zoneId: ZONE_ID, pattern: 'example.com/*' };
       mockResolveCanonicalHost = async () => 'example.com';
       mockCfClient.listRoutes.resolves([]);
     });
 
-    it('derives the route pattern from the site canonical host when no conflict exists', async () => {
+    it('adds the client route pattern targeting the derived worker when no conflict exists', async () => {
       const route = { id: ROUTE_ID, pattern: 'example.com/*', script: DERIVED_SCRIPT_NAME };
       mockCfClient.addRoute.resolves(route);
 
@@ -682,13 +682,50 @@ describe('LlmoCloudflareController', () => {
       expect(mockCfClient.addRoute).to.have.been.calledWith(ZONE_ID, 'example.com/*', DERIVED_SCRIPT_NAME);
     });
 
-    it('derives a www route pattern when the resolver returns a www host', async () => {
+    it('normalizes a root-host apex pattern to the derived www host, preserving the client path', async () => {
       mockResolveCanonicalHost = async () => 'www.example.com';
-      mockCfClient.addRoute.resolves({ id: ROUTE_ID, pattern: 'www.example.com/*', script: DERIVED_SCRIPT_NAME });
+      mockContext.data = { zoneId: ZONE_ID, pattern: 'example.com/blog/*' };
+      mockCfClient.addRoute.resolves({ id: ROUTE_ID, pattern: 'www.example.com/blog/*', script: DERIVED_SCRIPT_NAME });
 
       const res = await controller.addRoute(mockContext);
       expect(res.status).to.equal(200);
-      expect(mockCfClient.addRoute).to.have.been.calledWith(ZONE_ID, 'www.example.com/*', DERIVED_SCRIPT_NAME);
+      expect(mockCfClient.addRoute).to.have.been.calledWith(ZONE_ID, 'www.example.com/blog/*', DERIVED_SCRIPT_NAME);
+    });
+
+    it('normalizes a root-host www pattern to the apex for an apex-only site, preserving the path', async () => {
+      mockSite.getBaseURL = () => 'https://gentingsingapore.com';
+      mockResolveCanonicalHost = async () => 'gentingsingapore.com';
+      mockContext.data = { zoneId: ZONE_ID, pattern: 'www.gentingsingapore.com/ab/*' };
+      mockCfClient.addRoute.resolves({ id: ROUTE_ID, pattern: 'gentingsingapore.com/ab/*', script: 'edge-optimize-router-gentingsingapore-com' });
+
+      const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(200);
+      expect(mockCfClient.addRoute).to.have.been.calledWith(
+        ZONE_ID,
+        'gentingsingapore.com/ab/*',
+        'edge-optimize-router-gentingsingapore-com',
+      );
+    });
+
+    it('leaves a specific subdomain pattern unchanged (host normalization skipped)', async () => {
+      // A non-root host must not trigger derivation; the resolver would throw if wrongly called.
+      mockResolveCanonicalHost = sandbox.stub().rejects(new Error('resolver must not run for a non-root host'));
+      mockContext.data = { zoneId: ZONE_ID, pattern: 'shop.example.com/*' };
+      mockCfClient.addRoute.resolves({ id: ROUTE_ID, pattern: 'shop.example.com/*', script: DERIVED_SCRIPT_NAME });
+
+      const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(200);
+      expect(mockCfClient.addRoute).to.have.been.calledWith(ZONE_ID, 'shop.example.com/*', DERIVED_SCRIPT_NAME);
+    });
+
+    it('leaves a wildcard subdomain pattern unchanged (host normalization skipped)', async () => {
+      mockResolveCanonicalHost = sandbox.stub().rejects(new Error('resolver must not run for a wildcard host'));
+      mockContext.data = { zoneId: ZONE_ID, pattern: '*.example.com/*' };
+      mockCfClient.addRoute.resolves({ id: ROUTE_ID, pattern: '*.example.com/*', script: DERIVED_SCRIPT_NAME });
+
+      const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(200);
+      expect(mockCfClient.addRoute).to.have.been.calledWith(ZONE_ID, '*.example.com/*', DERIVED_SCRIPT_NAME);
     });
 
     it('returns 409 and does not add when another worker already routes the same host', async () => {
@@ -700,6 +737,20 @@ describe('LlmoCloudflareController', () => {
       expect(res.status).to.equal(409);
       const body = await res.json();
       expect(body.existingRoute).to.deep.equal(existing);
+      expect(body.conflictingRoutes).to.deep.equal([existing]);
+      expect(mockCfClient.addRoute).to.not.have.been.called;
+    });
+
+    it('returns 409 when a wildcard route to another worker covers the requested subdomain', async () => {
+      // Customer has *.example.com/* on another worker; onboarding targets a.example.com/* —
+      // adding our worker there would collide, so it must fail with 409.
+      mockContext.data = { zoneId: ZONE_ID, pattern: 'a.example.com/*' };
+      const existing = { id: ROUTE_ID, pattern: '*.example.com/*', script: 'customer-worker' };
+      mockCfClient.listRoutes.resolves([existing]);
+
+      const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(409);
+      const body = await res.json();
       expect(body.conflictingRoutes).to.deep.equal([existing]);
       expect(mockCfClient.addRoute).to.not.have.been.called;
     });
@@ -718,7 +769,7 @@ describe('LlmoCloudflareController', () => {
     });
 
     it('returns 409 when a broad "*example.com/*" route (no dot) on another worker covers the host', async () => {
-      // *example.com/* matches the apex too (wildcard = zero-or-more chars), so the derived
+      // *example.com/* matches the apex too (wildcard = zero-or-more chars), so onboarding
       // example.com/* must be blocked.
       const existing = { id: ROUTE_ID, pattern: '*example.com/*', script: 'customer-worker' };
       mockCfClient.listRoutes.resolves([existing]);
@@ -737,18 +788,6 @@ describe('LlmoCloudflareController', () => {
       const res = await controller.addRoute(mockContext);
       expect(res.status).to.equal(409);
       expect(mockCfClient.addRoute).to.not.have.been.called;
-    });
-
-    it('allows the derived apex route when only a "*.example.com/*" subdomain route exists on another worker', async () => {
-      // A dot-anchored *.example.com/* forces a subdomain and never matches the apex, so it must
-      // NOT block the derived example.com/* route.
-      const subdomainRoute = { id: ROUTE_ID, pattern: '*.example.com/*', script: 'other-worker' };
-      mockCfClient.listRoutes.resolves([subdomainRoute]);
-      mockCfClient.addRoute.resolves({ id: 'r2', pattern: 'example.com/*', script: DERIVED_SCRIPT_NAME });
-
-      const res = await controller.addRoute(mockContext);
-      expect(res.status).to.equal(200);
-      expect(mockCfClient.addRoute).to.have.been.calledWith(ZONE_ID, 'example.com/*', DERIVED_SCRIPT_NAME);
     });
 
     it('allows the route when an existing route on a different host points to another worker', async () => {
@@ -795,7 +834,8 @@ describe('LlmoCloudflareController', () => {
       expect(mockCfClient.addRoute).to.have.been.called;
     });
 
-    it('returns 500 when the route pattern cannot be derived from the site base URL', async () => {
+    it('returns 500 when the route host cannot be derived from the site base URL', async () => {
+      // Default pattern example.com/* is a root host, so host derivation runs and fails.
       mockResolveCanonicalHost = () => {
         throw new Error('cannot derive host');
       };
@@ -809,6 +849,20 @@ describe('LlmoCloudflareController', () => {
       mockContext.data = undefined;
       const res = await controller.addRoute(mockContext);
       expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when pattern is missing', async () => {
+      mockContext.data = { zoneId: ZONE_ID };
+      const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when the pattern targets a domain outside the site', async () => {
+      mockContext.data = { zoneId: ZONE_ID, pattern: 'evil.com/*' };
+      const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(400);
+      expect(mockCfClient.listRoutes).to.not.have.been.called;
+      expect(mockCfClient.addRoute).to.not.have.been.called;
     });
 
     it('returns 400 when a worker name cannot be derived from the site base URL', async () => {
@@ -826,13 +880,13 @@ describe('LlmoCloudflareController', () => {
     });
 
     it('returns 400 when zoneId is missing', async () => {
-      mockContext.data = {};
+      mockContext.data = { pattern: 'example.com/*' };
       const res = await controller.addRoute(mockContext);
       expect(res.status).to.equal(400);
     });
 
     it('returns 400 when zoneId is not a 32-char hex id', async () => {
-      mockContext.data = { zoneId: 'zone-456' };
+      mockContext.data = { zoneId: 'zone-456', pattern: 'example.com/*' };
       const res = await controller.addRoute(mockContext);
       expect(res.status).to.equal(400);
     });

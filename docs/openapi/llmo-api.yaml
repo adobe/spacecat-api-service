@@ -6041,17 +6041,20 @@ site-llmo-cloudflare-routes:
     description: |
       Creates a Cloudflare worker route in the given zone, targeting the service-owned worker
       derived from the site's base URL (`edge-optimize-router-<canonical-host>`) — the worker
-      name is not client-supplied. The route **pattern is also derived server-side**: its host is
-      the site's canonical host (resolved from the base URL via redirect/DNS follow, so an
-      apex-only site is routed on its apex rather than a dead `www`) and it covers every path on
-      that host (`<canonical-host>/*`). Only `zoneId` is supplied by the caller; it is a Cloudflare
-      identifier (not a SpaceCat entity), so it is passed in the request body.
+      name is not client-supplied. `zoneId` is a Cloudflare identifier (not a SpaceCat entity),
+      so it is supplied in the request body.
+
+      The caller supplies the route `pattern`, but when that pattern targets the site's **root
+      host** (its apex or the apex's `www`), the service **normalizes only the host** to the
+      canonical serving host resolved from the base URL (apex/`www` chosen by redirect/DNS follow,
+      so an apex-only site is routed on its apex rather than a dead `www`), preserving the
+      client-supplied path. Specific-subdomain and wildcard patterns are left as sent.
 
       Before creating the route the service fetches the zone's existing routes and protects the
       customer's current routing using wildcard-aware host-overlap detection (not just exact
       pattern-string matching): if any existing route **bound to a different worker** shares a
-      host with the derived pattern — e.g. a `*.example.com/*` route already covers the derived
-      `example.com/*` — the request is rejected with `409` and the conflicting routes are
+      host with the requested pattern — e.g. a `*.example.com/*` route already covers a requested
+      `a.example.com/*` — the request is rejected with `409` and the conflicting routes are
       returned in `conflictingRoutes`. If an overlapping route already points to our own derived
       worker, the request is idempotent and returns `200` with `alreadyRouted: true` without
       creating a duplicate.
@@ -6067,12 +6070,22 @@ site-llmo-cloudflare-routes:
             type: object
             required:
               - zoneId
+              - pattern
             properties:
               zoneId:
                 type: string
                 description: Cloudflare zone ID (32-character lowercase hex)
                 pattern: '^[0-9a-f]{32}$'
                 example: '0123456789abcdef0123456789abcdef'
+              pattern:
+                type: string
+                description: >-
+                  Cloudflare route pattern. Its host must belong to the site's domain — the
+                  host portion (after stripping any leading wildcard) has to equal the site's
+                  canonical host (base URL host minus a leading `www.`) or be a subdomain of it.
+                  When it targets the site's root host, the host is normalized server-side to the
+                  canonical serving host (apex/`www`) while the path is preserved.
+                example: 'www.example.com/*'
     responses:
       '200':
         description: >-

@@ -18,6 +18,7 @@ import {
   registrableDomain,
   routePatternHost,
   routePatternHostGlob,
+  routePatternPath,
   globsIntersect,
   routePatternsOverlap,
 } from '../../../src/controllers/llmo/llmo-cloudflare-utils.js';
@@ -104,6 +105,24 @@ describe('llmo-cloudflare-utils', () => {
 
     it('strips scheme and path and lowercases', () => {
       expect(routePatternHostGlob('https://WWW.Example.com/a/*')).to.equal('www.example.com');
+    });
+  });
+
+  describe('routePatternPath', () => {
+    it('returns the path glob after the host', () => {
+      expect(routePatternPath('example.com/blog/*')).to.equal('/blog/*');
+    });
+
+    it('returns "/*" when the pattern has a bare "/*" path', () => {
+      expect(routePatternPath('example.com/*')).to.equal('/*');
+    });
+
+    it('strips the scheme before extracting the path', () => {
+      expect(routePatternPath('https://example.com/a/b/*')).to.equal('/a/b/*');
+    });
+
+    it('defaults to "/*" when the pattern has no path', () => {
+      expect(routePatternPath('example.com')).to.equal('/*');
     });
   });
 

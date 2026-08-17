@@ -77,6 +77,18 @@ export const routePatternHostGlob = (pattern) => pattern
   .toLowerCase();
 
 /**
+ * The path glob of a route pattern: everything from the first "/" after the host, scheme stripped,
+ * defaulting to "/*" when the pattern carries no path (e.g. "example.com/blog/*" -> "/blog/*",
+ * "https://example.com/*" -> "/*", "example.com" -> "/*"). Lets callers swap a route's host while
+ * preserving the client-supplied path.
+ */
+export const routePatternPath = (pattern) => {
+  const withoutScheme = pattern.replace(/^https?:\/\//i, '');
+  const slashIndex = withoutScheme.indexOf('/');
+  return slashIndex === -1 ? '/*' : withoutScheme.slice(slashIndex);
+};
+
+/**
  * Whether two strings containing `*` wildcards can match a common string — i.e. their match-sets
  * intersect. Each `*` matches zero or more of any character, matching Cloudflare's route-pattern
  * operator ("The only supported operator is the wildcard (*), which matches zero or more of any
