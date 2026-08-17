@@ -1,3 +1,10 @@
+## [1.750.2](https://github.com/adobe/spacecat-api-service/compare/v1.750.1...v1.750.2) (2026-08-17)
+
+
+### Bug Fixes
+
+* **serenity:** handle tiered daily/weekly prompt resources in metered-405 canary ([#3076](https://github.com/adobe/spacecat-api-service/issues/3076)) ([fd24be4](https://github.com/adobe/spacecat-api-service/commit/fd24be47a1855921d54dd13c20bfdc2ee3e71710))
+
 ## [1.750.1](https://github.com/adobe/spacecat-api-service/compare/v1.750.0...v1.750.1) (2026-08-17)
 
 
