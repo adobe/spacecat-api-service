@@ -143,7 +143,7 @@ v2-serenity-prompts:
       '202':
         description: |
           Accepted for asynchronous processing (serenity-docs#33). Returned for
-          bulk/CSV imports (flat-mode brands with `deferPublish: true`): the
+          bulk/CSV imports (flat-mode brands with `async: true`): the
           request is enqueued as a classification job and the response carries a
           `jobId` to poll via `GET .../serenity/prompts/jobs/{jobId}`.
         content:
