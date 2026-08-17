@@ -1437,25 +1437,6 @@ describe('Semrush REST transport', () => {
     });
   });
 
-  describe('transferWorkspaceResources', () => {
-    it('POSTs the payload wrapped under `resources` to /v2/workspaces/{ws}/resources/transfer', async () => {
-      fetchStub.resolves(fetchOk(null));
-      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
-
-      const payload = { ai: { projects: 3, prompts: 1500 } };
-      await transport.transferWorkspaceResources(WORKSPACE_ID, payload);
-
-      const call = await callOf(fetchStub);
-      expect(call.method).to.equal('POST');
-      // V2: same aiProductResources `ai` shape proven live via createSubworkspace,
-      // wrapped under `resources` (WorkspaceResourcesTransferV2Form).
-      expect(call.url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/users/api/v2/workspaces/${WORKSPACE_ID}/resources/transfer`,
-      );
-      expect(JSON.parse(call.body)).to.deep.equal({ resources: payload });
-    });
-  });
-
   describe('deleteWorkspace (test-cleanup only)', () => {
     const DELETE_ENV = { ...TEST_ENV, SERENITY_ALLOW_WORKSPACE_DELETE: 'true' };
 
