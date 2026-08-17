@@ -89,6 +89,7 @@
 import { env, argv, exit } from 'node:process';
 import { parseArgs } from 'node:util';
 import { createSerenityTransport, SerenityTransportError } from '../src/support/serenity/rest-transport.js';
+import { resolvePromptDims, isZeroHeadroom } from './serenity-metered-405-canary-resources.mjs';
 
 function usageAndExit(message) {
   if (message) {
@@ -130,35 +131,10 @@ function printError(label, e) {
   }
 }
 
-const LEGACY_PROMPT_KEYS = ['prompts'];
-const TIERED_PROMPT_KEYS = ['daily_prompts', 'weekly_prompts'];
-
-function isUsedTotalPair(dim) {
-  return dim && typeof dim.used === 'number' && typeof dim.total === 'number';
-}
-
-// Normalizes the two AI-resources read shapes Semrush has been observed to return (see the header's
-// "Read-side shape drift" note): a legacy flat `prompts` dimension, or the current tiered
-// `daily_prompts` + `weekly_prompts` pair. Returns null when neither shape is present.
-function resolvePromptDims(aiResources) {
-  if (isUsedTotalPair(aiResources?.prompts)) {
-    return { shape: 'legacy', dims: LEGACY_PROMPT_KEYS.map((key) => ({ key, ...aiResources[key] })) };
-  }
-  const tiered = TIERED_PROMPT_KEYS.map((key) => ({ key, ...aiResources?.[key] }));
-  if (tiered.every((dim) => isUsedTotalPair(dim))) {
-    return { shape: 'tiered', dims: tiered };
-  }
-  return null;
-}
-
 function printDims(dims, label) {
   for (const dim of dims) {
     console.log(`${dim.key}.used:`, dim.used, ` ${dim.key}.total (${label}):`, dim.total);
   }
-}
-
-function isZeroHeadroom(dims) {
-  return dims.every((dim) => dim.total <= dim.used);
 }
 
 async function main() {
@@ -185,9 +161,13 @@ async function main() {
 
   if (promptsBefore.shape === 'legacy') {
     const [prompts] = promptsBefore.dims;
+    const projectsTotal = aiResourcesBefore?.projects?.total;
+    if (typeof projectsTotal !== 'number') {
+      usageAndExit('Could not read product_resources.ai.resources.projects.total from the workspace response — required to preserve it across the drain transfer');
+    }
     console.log(`Draining prompts.total to ${prompts.used} (an absolute transfer — zero prompt headroom left)...`);
     await transport.transferWorkspaceResources(subWorkspaceId, {
-      ai: { projects: aiResourcesBefore.projects.total, prompts: prompts.used },
+      ai: { projects: projectsTotal, prompts: prompts.used },
     });
   } else if (isZeroHeadroom(promptsBefore.dims)) {
     console.log('Tiered prompt resources are already at zero headroom on every tier — skipping the drain (the transfer write API has no documented tiered shape to drain further).');
