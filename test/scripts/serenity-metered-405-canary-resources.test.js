@@ -46,6 +46,15 @@ describe('serenity-metered-405-canary resource helpers', () => {
       expect(result.shape).to.equal('legacy');
     });
 
+    it('falls back to the tiered shape when prompts is present but malformed', () => {
+      const result = resolvePromptDims({
+        prompts: {},
+        daily_prompts: { used: 0, total: 0 },
+        weekly_prompts: { used: 0, total: 0 },
+      });
+      expect(result.shape).to.equal('tiered');
+    });
+
     it('returns null when only one of the two tiered dimensions is present', () => {
       expect(resolvePromptDims({ daily_prompts: { used: 0, total: 0 } })).to.equal(null);
     });
