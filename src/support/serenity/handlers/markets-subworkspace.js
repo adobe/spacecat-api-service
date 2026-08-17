@@ -428,6 +428,9 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
   for (const text of allTexts) {
     const typeValue = classifyBrandedTag(text, needles);
     const intentValue = intentByText.get(text) ?? INTENT_VALUE.INFORMATIONAL;
+    // `\0` cannot occur in either vocabulary value, so the composite key is
+    // collision-free. Keep it escaped — a literal byte makes whole-file scanners
+    // treat this file as binary and silently skip it.
     const key = `${typeValue}\0${intentValue}`;
     const bucket = byTagSet.get(key);
     if (bucket) {

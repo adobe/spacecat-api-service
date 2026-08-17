@@ -234,6 +234,11 @@ export function createElementsService(transport, log) {
       }
 
       // `(prompt, prompt_topic)` join key — unique within the single requested slice.
+      // `\0` is the separator because prompt text is free-form and may contain any
+      // printable character, including whatever would otherwise read as a delimiter.
+      // Only a NUL cannot occur in either field, so only a NUL keeps the composite
+      // key collision-free. Keep it escaped — a literal byte makes whole-file
+      // scanners treat this file as binary and silently skip it.
       const rowKey = (row) => `${row?.prompt ?? ''}\0${row?.prompt_topic ?? ''}`;
 
       // One intent-filtered call per intent value under one root spelling, in
