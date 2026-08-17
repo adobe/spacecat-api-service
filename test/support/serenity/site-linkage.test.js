@@ -16,6 +16,7 @@ import sinon from 'sinon';
 import {
   ensureMarketSite,
   resolveSiteDomain,
+  resolveSiteIdentity,
   unlinkMarketSiteIfOrphaned,
   SERENITY_BRAND_SITE_TYPE,
 } from '../../../src/support/serenity/site-linkage.js';
@@ -355,6 +356,38 @@ describe('serenity site-linkage: resolveSiteDomain', () => {
     const result = await resolveSiteDomain(dataAccess, 'site-1', log);
     expect(result).to.equal(null);
     expect(log.warn).to.have.been.calledOnce;
+  });
+});
+
+describe('serenity site-linkage: resolveSiteIdentity', () => {
+  let Site;
+  let log;
+  let dataAccess;
+
+  beforeEach(() => {
+    Site = { findById: sinon.stub() };
+    log = { warn: sinon.spy(), error: sinon.spy() };
+    dataAccess = { Site };
+  });
+
+  afterEach(() => sinon.restore());
+
+  it('splits a subpath site into host-only domain + full primaryUrl identity', async () => {
+    Site.findById.resolves({ getBaseURL: () => 'https://www.nba.com/kings/' });
+    const result = await resolveSiteIdentity(dataAccess, 'site-1', log);
+    expect(result).to.deep.equal({ domain: 'www.nba.com', primaryUrl: 'www.nba.com/kings' });
+  });
+
+  it('yields equal domain and primaryUrl for a path-free site', async () => {
+    Site.findById.resolves({ getBaseURL: () => 'https://example.com' });
+    const result = await resolveSiteIdentity(dataAccess, 'site-2', log);
+    expect(result).to.deep.equal({ domain: 'example.com', primaryUrl: 'example.com' });
+  });
+
+  it('returns null (not a partial object) when the site cannot be resolved', async () => {
+    Site.findById.resolves(null);
+    expect(await resolveSiteIdentity(dataAccess, 'missing', log)).to.equal(null);
+    expect(await resolveSiteIdentity(dataAccess, '', log)).to.equal(null);
   });
 });
 
