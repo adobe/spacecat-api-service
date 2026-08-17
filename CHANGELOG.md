@@ -1,3 +1,17 @@
+## [1.750.2](https://github.com/adobe/spacecat-api-service/compare/v1.750.1...v1.750.2) (2026-08-17)
+
+
+### Bug Fixes
+
+* **serenity:** handle tiered daily/weekly prompt resources in metered-405 canary ([#3076](https://github.com/adobe/spacecat-api-service/issues/3076)) ([fd24be4](https://github.com/adobe/spacecat-api-service/commit/fd24be47a1855921d54dd13c20bfdc2ee3e71710))
+
+## [1.750.1](https://github.com/adobe/spacecat-api-service/compare/v1.750.0...v1.750.1) (2026-08-17)
+
+
+### Bug Fixes
+
+* **ai-visibility:** scope gap-topics and competitors to subdomains ([#3072](https://github.com/adobe/spacecat-api-service/issues/3072)) ([797c12e](https://github.com/adobe/spacecat-api-service/commit/797c12e0af038d1e1c55360534108b2f8c634a16)), closes [Hi#level](https://github.com/Hi/issues/level) [#3](https://github.com/adobe/spacecat-api-service/issues/3) [#5](https://github.com/adobe/spacecat-api-service/issues/5) [#5](https://github.com/adobe/spacecat-api-service/issues/5) [#3](https://github.com/adobe/spacecat-api-service/issues/3)
+
 # [1.750.0](https://github.com/adobe/spacecat-api-service/compare/v1.749.1...v1.750.0) (2026-08-17)
 
 
