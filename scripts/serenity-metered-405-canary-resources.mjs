@@ -18,27 +18,42 @@
  * for the "Read-side shape drift" this exists to handle.
  */
 
-const LEGACY_PROMPT_KEYS = ['prompts'];
 const TIERED_PROMPT_KEYS = ['daily_prompts', 'weekly_prompts'];
 
 export function isUsedTotalPair(dim) {
   return Boolean(dim) && typeof dim.used === 'number' && typeof dim.total === 'number';
 }
 
+// Narrows a raw resource-dimension object down to exactly {key, used, total} — deliberately NOT a
+// spread of the source object, so unrelated vendor fields on the raw response never silently ride
+// along in `dims` (they're not needed downstream today, but `dims` shapes what a future write call
+// could serialize, so keeping it exact avoids that becoming a footgun later).
+function pickDim(key, source) {
+  return { key, used: source?.used, total: source?.total };
+}
+
 // Normalizes the two AI-resources read shapes Semrush has been observed to return: a legacy flat
 // `prompts` dimension, or the current tiered `daily_prompts` + `weekly_prompts` pair. Returns null
 // when neither shape is present.
 export function resolvePromptDims(aiResources) {
-  if (isUsedTotalPair(aiResources?.prompts)) {
-    return { shape: 'legacy', dims: LEGACY_PROMPT_KEYS.map((key) => ({ key, ...aiResources[key] })) };
+  const legacy = pickDim('prompts', aiResources?.prompts);
+  if (isUsedTotalPair(legacy)) {
+    return { shape: 'legacy', dims: [legacy] };
   }
-  const tiered = TIERED_PROMPT_KEYS.map((key) => ({ key, ...aiResources?.[key] }));
+  const tiered = TIERED_PROMPT_KEYS.map((key) => pickDim(key, aiResources?.[key]));
   if (tiered.every((dim) => isUsedTotalPair(dim))) {
     return { shape: 'tiered', dims: tiered };
   }
   return null;
 }
 
+// `dims` is always the 1-2 element array `resolvePromptDims` returns, never empty — but since this
+// is an exported, standalone helper, make the empty-input contract explicit rather than relying on
+// `Array.prototype.every`'s vacuous-true default (which would otherwise silently read "zero
+// headroom" for "no dimensions given").
 export function isZeroHeadroom(dims) {
+  if (!dims.length) {
+    return false;
+  }
   return dims.every((dim) => dim.total <= dim.used);
 }

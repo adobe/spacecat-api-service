@@ -77,5 +77,16 @@ describe('serenity-metered-405-canary resource helpers', () => {
     it('is false when any dimension still has headroom', () => {
       expect(isZeroHeadroom([{ used: 0, total: 0 }, { used: 1, total: 5 }])).to.equal(false);
     });
+
+    it('is false (not vacuously true) for an empty dims array', () => {
+      expect(isZeroHeadroom([])).to.equal(false);
+    });
+  });
+
+  describe('resolvePromptDims field narrowing', () => {
+    it('does not carry unrelated vendor fields through into dims', () => {
+      const result = resolvePromptDims({ prompts: { used: 1, total: 2, extra_vendor_field: 'x' } });
+      expect(result.dims[0]).to.deep.equal({ key: 'prompts', used: 1, total: 2 });
+    });
   });
 });
