@@ -1,3 +1,11 @@
+# [1.750.0](https://github.com/adobe/spacecat-api-service/compare/v1.749.1...v1.750.0) (2026-08-17)
+
+
+### Features
+
+* **dev:** mock POST /auth/login in the local dev server under SKIP_AUTH ([#3068](https://github.com/adobe/spacecat-api-service/issues/3068)) ([588d9a6](https://github.com/adobe/spacecat-api-service/commit/588d9a6d3aa20fb13c71712d89ccea04f61bd54a)), closes [Hi#level](https://github.com/Hi/issues/level)
+* **serenity:** audience-driven IMS promise pair for Semrush paths ([#3033](https://github.com/adobe/spacecat-api-service/issues/3033)) ([cecfd5e](https://github.com/adobe/spacecat-api-service/commit/cecfd5efce6be7880d7a41a1df1fba37df1b5717)), closes [Hi#level](https://github.com/Hi/issues/level) [adobe/spacecat-shared#1872](https://github.com/adobe/spacecat-shared/issues/1872) [adobe/spacecat-shared#1872](https://github.com/adobe/spacecat-shared/issues/1872)
+
 ## [1.749.1](https://github.com/adobe/spacecat-api-service/compare/v1.749.0...v1.749.1) (2026-08-15)
 
 
