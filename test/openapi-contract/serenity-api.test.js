@@ -38,7 +38,9 @@ function fakeLog() {
   };
 }
 
-function fakeContext({ params = {}, data = undefined, query = {} } = {}) {
+function fakeContext({
+  params = {}, data = undefined, query = {}, asyncJob = undefined,
+} = {}) {
   // Build a request.url from `query` so handlers that read params via extractQuery
   // (the ElementsController endpoints) see them. Handlers that read ctx.query
   // directly are unaffected (both are populated).
@@ -73,6 +75,9 @@ function fakeContext({ params = {}, data = undefined, query = {} } = {}) {
           getLanguageCode: () => 'en',
         }]),
       },
+      // Only consumed by getSerenityPromptClassificationJobStatus, whose fixture
+      // supplies a stub job via `asyncJob`.
+      ...(asyncJob ? { AsyncJob: asyncJob } : {}),
     },
     params: { spaceCatId: ORG, brandId: BRAND, ...params },
     data,
@@ -614,6 +619,33 @@ const FIXTURES = {
       closestDate: '2026-07-26T00:00:00Z',
     }],
   },
+  // Served by the controller directly off ctx.dataAccess.AsyncJob (no serenity
+  // handler), so it has no handlerName/serviceMethod. The stub job resolves as a
+  // COMPLETED classify job owned by BRAND, so the documented COMPLETED shape
+  // (bare {jobId, status} plus the SerenityCreatePromptsResponse `result`) is
+  // exercised against the schema.
+  getSerenityPromptClassificationJobStatus: {
+    expectedStatus: 200,
+    controllerMethod: 'getPromptClassificationJobStatus',
+    params: { jobId: '99999999-8888-7777-6666-555555555555' },
+    asyncJob: {
+      findById: () => Promise.resolve({
+        getId: () => '99999999-8888-7777-6666-555555555555',
+        getStatus: () => 'COMPLETED',
+        getMetadata: () => ({
+          jobType: 'serenity-classify-prompts',
+          brandId: BRAND,
+        }),
+        getResult: () => ({
+          created: [],
+          skipped: [],
+          failed: [],
+          published: true,
+        }),
+        getError: () => null,
+      }),
+    },
+  },
 };
 
 function makeAjv() {
@@ -753,7 +785,12 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         listGlobalModelCatalog: sinon.stub(),
         listLanguageCatalog: sinon.stub(),
       };
-      handlerStubs[fx.handlerName].resolves(fx.handlerResult);
+      // getSerenityPromptClassificationJobStatus reads ctx.dataAccess.AsyncJob
+      // directly rather than delegating to a serenity handler, so it has no
+      // handlerName to stub.
+      if (fx.handlerName) {
+        handlerStubs[fx.handlerName].resolves(fx.handlerResult);
+      }
 
       const SerenityController = (await esmock(
         '../../src/controllers/serenity.js',
@@ -855,6 +892,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         params: fx.params || {},
         data: fx.data,
         query: fx.query || {},
+        asyncJob: fx.asyncJob,
       });
       const controller = SerenityController(ctx, fakeLog());
       const response = await controller[fx.controllerMethod](ctx);
