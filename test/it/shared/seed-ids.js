@@ -197,6 +197,15 @@ export const ASYNC_JOB_1_ID = 'eeee1111-1111-4111-b111-111111111111'; // COMPLET
 export const ASYNC_JOB_2_ID = 'eeee2222-2222-4222-a222-222222222222'; // IN_PROGRESS site-detection job
 export const NON_EXISTENT_JOB_ID = 'eeee9999-9999-4999-b999-999999999999';
 
+// Serenity async prompt-classification jobs (serenity-docs#33). Both are
+// jobType 'serenity-classify-prompts'; ownership is carried in metadata.brandId.
+// SERENITY_CLASSIFY_JOB_1 belongs to BRAND_1 (happy path); the OTHER_BRAND job
+// carries a foreign brandId so the endpoint's ownership guard 404s it even
+// though its jobType matches. ASYNC_JOB_1 (a preflight job) covers the
+// wrong-jobType 404 for the same brand.
+export const SERENITY_CLASSIFY_JOB_1_ID = 'eeee3333-3333-4333-b333-333333333333';
+export const SERENITY_CLASSIFY_JOB_OTHER_BRAND_ID = 'eeee4444-4444-4444-a444-444444444444';
+
 // ── Consumers (S2S) ──
 
 export const CONSUMER_1_ID = '11111111-1111-4111-b112-111111111111';

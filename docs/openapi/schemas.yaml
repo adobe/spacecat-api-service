@@ -14113,8 +14113,7 @@ SerenityPromptClassificationJob:
       description: >-
         Present on COMPLETED. Mirrors the synchronous create response's
         per-prompt outcome (created / skipped / failed).
-      allOf:
-        - $ref: '#/SerenityCreatePromptsResponse'
+      $ref: '#/SerenityCreatePromptsResponse'
     error:
       type: object
       description: Present on FAILED.

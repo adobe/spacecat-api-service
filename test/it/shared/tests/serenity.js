@@ -13,6 +13,8 @@
 import { expect } from 'chai';
 import {
   ORG_1_ID, BRAND_1_ID, SITE_1_ID,
+  ASYNC_JOB_1_ID, NON_EXISTENT_JOB_ID,
+  SERENITY_CLASSIFY_JOB_1_ID, SERENITY_CLASSIFY_JOB_OTHER_BRAND_ID,
 } from '../seed-ids.js';
 import { INTENT_ROOT_NAME } from '../../../../src/support/serenity/prompt-tags.js';
 
@@ -1486,6 +1488,48 @@ export default function serenityTests(
       expect(res.status).to.equal(200);
 
       expect(aliasesOf((await benchmarkNamed('Rival Uno')).row)).to.include('rival incorporated');
+    });
+  });
+
+  describe('Serenity API — async prompt-classification job status (serenity-docs#33)', () => {
+    const base = `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity`;
+    const jobPath = (jobId) => `${base}/prompts/jobs/${jobId}`;
+
+    it('GET /serenity/prompts/jobs/:jobId returns 200 + the terminal status and result', async () => {
+      const res = await getHttpClient().admin.get(jobPath(SERENITY_CLASSIFY_JOB_1_ID));
+      expect(res.status).to.equal(200);
+      expect(res.body.jobId).to.equal(SERENITY_CLASSIFY_JOB_1_ID);
+      expect(res.body.status).to.equal('COMPLETED');
+      // COMPLETED surfaces the create-shaped result (created / skipped / failed).
+      expect(res.body.result).to.deep.equal({
+        created: [], skipped: [], failed: [], published: true,
+      });
+    });
+
+    it('404s a job owned by a different brand (ownership guard, no cross-brand leak)', async () => {
+      const res = await getHttpClient().admin.get(jobPath(SERENITY_CLASSIFY_JOB_OTHER_BRAND_ID));
+      expect(res.status).to.equal(404);
+    });
+
+    it('404s a job of a different type (jobType guard)', async () => {
+      // ASYNC_JOB_1 is a preflight job, not a serenity classify job.
+      const res = await getHttpClient().admin.get(jobPath(ASYNC_JOB_1_ID));
+      expect(res.status).to.equal(404);
+    });
+
+    it('404s an unknown job id', async () => {
+      const res = await getHttpClient().admin.get(jobPath(NON_EXISTENT_JOB_ID));
+      expect(res.status).to.equal(404);
+    });
+
+    it('400s a non-UUID job id', async () => {
+      const res = await getHttpClient().admin.get(jobPath('not-a-uuid'));
+      expect(res.status).to.equal(400);
+    });
+
+    it('403s a caller without access to the organization', async () => {
+      const res = await getHttpClient().user.get(jobPath(SERENITY_CLASSIFY_JOB_1_ID));
+      expect(res.status).to.equal(403);
     });
   });
 }

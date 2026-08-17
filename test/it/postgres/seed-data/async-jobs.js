@@ -10,10 +10,20 @@
  * governing permissions and limitations under the License.
  */
 
+import {
+  BRAND_1_ID,
+  SERENITY_CLASSIFY_JOB_1_ID,
+  SERENITY_CLASSIFY_JOB_OTHER_BRAND_ID,
+} from '../../shared/seed-ids.js';
+
 /**
  * Immutable baseline async jobs for IT tests.
  *
  * JOB_1: A completed preflight job referencing SITE_1.
+ *
+ * Serenity classify jobs (serenity-docs#33): a COMPLETED job owned by BRAND_1
+ * (happy path for the poll endpoint) and one carrying a foreign brandId (the
+ * endpoint's ownership guard 404s it even though its jobType matches).
  *
  * Note: AsyncJob only exists in v3 (PostgreSQL) — no DynamoDB equivalent.
  *
@@ -46,5 +56,35 @@ export const asyncJobs = [
     },
     started_at: '2025-01-20T10:00:00.000Z',
     ended_at: '2025-01-20T10:05:00.000Z',
+  },
+  {
+    id: SERENITY_CLASSIFY_JOB_1_ID,
+    status: 'COMPLETED',
+    result: {
+      created: [], skipped: [], failed: [], published: true,
+    },
+    metadata: {
+      jobType: 'serenity-classify-prompts',
+      brandId: BRAND_1_ID,
+      tags: ['serenity-classify-prompts'],
+    },
+    started_at: '2025-01-21T10:00:00.000Z',
+    ended_at: '2025-01-21T10:00:30.000Z',
+  },
+  {
+    id: SERENITY_CLASSIFY_JOB_OTHER_BRAND_ID,
+    status: 'COMPLETED',
+    result: {
+      created: [], skipped: [], failed: [], published: true,
+    },
+    metadata: {
+      jobType: 'serenity-classify-prompts',
+      // A brand other than BRAND_1 — the poll endpoint's ownership guard must
+      // 404 this for a BRAND_1 caller rather than leak another brand's job.
+      brandId: 'ffffffff-ffff-4fff-bfff-ffffffffffff',
+      tags: ['serenity-classify-prompts'],
+    },
+    started_at: '2025-01-21T11:00:00.000Z',
+    ended_at: '2025-01-21T11:00:30.000Z',
   },
 ];

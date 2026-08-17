@@ -657,7 +657,10 @@ function SerenityController(context, log, env) {
       if (!job
         || metadata.jobType !== CLASSIFY_PROMPTS_JOB_TYPE
         || metadata.brandId !== auth.brandUuid) {
-        return notFound(`Job not found: ${jobId}`);
+        // Static body — do not echo the caller-supplied id back. Log it
+        // server-side so the mismatch stays diagnosable.
+        log.info(`serenity: classification job not found or not accessible: ${jobId}`);
+        return notFound('Job not found');
       }
 
       const status = job.getStatus();

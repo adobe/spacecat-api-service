@@ -2868,6 +2868,37 @@ describe('SerenityController', () => {
       expect(response.status).to.equal(404);
     });
 
+    it('returns the bare {jobId, status} shape on CANCELLED (no result/error)', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.getPromptClassificationJobStatus(
+        ctxWithJob(makeJob({ status: 'CANCELLED' })),
+      );
+      expect(response.status).to.equal(200);
+      const body = await readBody(response);
+      expect(body).to.deep.equal({ jobId: JOB_ID, status: 'CANCELLED' });
+      expect(body).to.not.have.property('result');
+      expect(body).to.not.have.property('error');
+    });
+
+    it('500s when AsyncJob data-access is unavailable', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ params: { jobId: JOB_ID } });
+      // No AsyncJob on dataAccess → the guard returns 500 before any lookup.
+      delete ctx.dataAccess.AsyncJob;
+      const response = await controller.getPromptClassificationJobStatus(ctx);
+      expect(response.status).to.equal(500);
+    });
+
+    it('maps an unexpected error (findById throws) via mapError', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ params: { jobId: JOB_ID } });
+      ctx.dataAccess.AsyncJob = {
+        findById: sinon.stub().rejects(new Error('dynamo exploded')),
+      };
+      const response = await controller.getPromptClassificationJobStatus(ctx);
+      expect(response.status).to.equal(500);
+    });
+
     it('returns the authorize() error (403) when the caller lacks org access', async () => {
       accessControlHasAccessStub.resolves(false);
       const controller = SerenityController({ env: {} }, fakeLog(), {});
