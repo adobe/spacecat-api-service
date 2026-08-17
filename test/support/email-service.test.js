@@ -177,6 +177,19 @@ describe('email-service', () => {
       expect(result.error).to.equal('ADOBE_POSTOFFICE_ENDPOINT is not configured');
     });
 
+    it('should return error when LLMO_EMAIL_IMS_CLIENT_ID is not configured', async () => {
+      delete mockContext.env.LLMO_EMAIL_IMS_CLIENT_ID;
+
+      const result = await sendEmail(mockContext, {
+        recipients: ['test@example.com'],
+        templateName: 'test-template',
+      });
+
+      expect(result.success).to.be.false;
+      expect(result.error).to.equal('LLMO_EMAIL_IMS_CLIENT_ID is not configured');
+      expect(fetchStub).to.not.have.been.called;
+    });
+
     it('should return error when ADOBE_POSTOFFICE_ENDPOINT uses HTTP instead of HTTPS', async () => {
       mockContext.env.ADOBE_POSTOFFICE_ENDPOINT = 'http://postoffice.example.com';
 

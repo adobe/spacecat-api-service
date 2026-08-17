@@ -146,6 +146,9 @@ function TrialUsersController(ctx) {
         return createResponse({ message: `Trial user with this email already exists ${existingTrialUser.getId()}` }, 409);
       }
 
+      if (!env.EMAIL_IMS_CLIENT_ID) {
+        return internalServerError('EMAIL_IMS_CLIENT_ID is not configured');
+      }
       env.IMS_CLIENT_ID = env.EMAIL_IMS_CLIENT_ID;
       env.IMS_CLIENT_SECRET = env.EMAIL_IMS_CLIENT_SECRET;
       env.IMS_CLIENT_CODE = env.EMAIL_IMS_CLIENT_CODE;
