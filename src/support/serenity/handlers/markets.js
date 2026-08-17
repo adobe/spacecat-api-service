@@ -21,7 +21,7 @@ import {
 import { normalizeLanguageCode, normalizeGeoTargetId } from '../validation.js';
 import { resolveLocation } from '../locations.js';
 import { resolveSiteUrls } from '../site-linkage.js';
-import { createProvisionAndPublishProject } from '../project-provisioning.js';
+import { createProvisionAndPublishProject, CreateNoProjectIdError } from '../project-provisioning.js';
 import { alertQuotaRejection } from '../quota-alerts.js';
 
 /** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
@@ -433,7 +433,7 @@ export async function handleCreateMarket(
       },
     );
   } catch (e) {
-    if (e.message === 'Upstream createProject returned no id') {
+    if (e instanceof CreateNoProjectIdError) {
       return {
         status: 502,
         body: {

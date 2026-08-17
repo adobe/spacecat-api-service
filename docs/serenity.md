@@ -289,7 +289,7 @@ Two **org-level** catalogue routes are brand-independent (prefixed with `/v2/org
 
 ## The onboarding flow
 
-`POST /serenity/markets` writes a row to `brand_to_semrush_projects` **only after both upstream calls succeed**. The order is strict and the `findBySlice` 409 gate runs before any upstream call so safe retries are free:
+`POST /serenity/markets` writes a row to `brand_to_semrush_projects` **only after all three upstream calls succeed**. The order is strict and the `findBySlice` 409 gate runs before any upstream call so safe retries are free:
 
 ```
 1. validate body                                  -> 400 on missing/invalid fields
@@ -314,7 +314,7 @@ primary_url}`, the shape `model.ProjectUpdateRequest` declares) and read back ne
 `settings.ai.primary_url`. Without it, a brand whose site is `nba.com/kings` is recorded
 against the whole of `nba.com`.
 
-If step 5, 6 or 7 fails, no row is written and the caller may safely retry with the same body. The 409 gate catches the case where a previous attempt succeeded both upstream calls but failed the DB write — extremely unlikely in practice; covered by the integration tests in `test/it/`.
+If step 5, 6 or 7 fails, no row is written and the caller may safely retry with the same body. The 409 gate catches the case where a previous attempt succeeded all three upstream calls but failed the DB write — extremely unlikely in practice; covered by the integration tests in `test/it/`.
 
 **`brandDomain` OR `siteId` (LLMO-6405 Phase 2).** A market created from an already-onboarded URL can send `siteId` (the SpaceCat Site UUID) instead of a raw `brandDomain`. The server derives **both** Semrush URL values from that Site's `base_url` in one read (`resolveSiteUrls`): the project `domain` (bare host, the same normalization as every other brand→domain derivation) and the project's tracked `primary_url` (host + path, scheme-less to match the stored upstream form). They come from one read so the two can never describe different URLs; an unresolvable `siteId` is a 400. `primary_url` is always derived server-side and never read from the request body. At least one of the two is required. In sub-workspace mode a supplied `siteId` also makes the post-201 mirror link **that** Site directly (skipping the domain→Site find-or-create — see below); the linked `siteId` then surfaces on the market DTO (`GET /serenity/markets[/:slice]`, both modes). The flat handler self-derives (it holds `dataAccess.Site`); the sub-workspace handler relies on the controller (its `dataAccess` is narrowed). When `siteId` is absent, behavior is byte-for-byte unchanged.
 

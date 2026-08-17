@@ -13,7 +13,11 @@
 import { expect } from 'chai';
 import sinon from 'sinon';
 
-import { createProvisionAndPublishProject } from '../../../src/support/serenity/project-provisioning.js';
+import {
+  createProvisionAndPublishProject,
+  CreateNoProjectIdError,
+  primaryUrlPatchBody,
+} from '../../../src/support/serenity/project-provisioning.js';
 
 const WS = 'workspace-1';
 const CREATE_BODY = { name: 'US-en', type: 'ai', domain: 'nba.com' };
@@ -88,6 +92,24 @@ describe('serenity project-provisioning: createProvisionAndPublishProject', () =
     expect(transport.updateProject).to.not.have.been.called;
     expect(transport.publishProject).to.not.have.been.called;
     expect(transport.deleteProject).to.not.have.been.called;
+  });
+
+  it('throws CreateNoProjectIdError specifically, so the 502 mapping cannot be reworded away', async () => {
+    // The handler translates this into a 502 `createNoProjectId` that callers use to
+    // decide whether a retry is safe. Asserting the type — not the wording — is what
+    // keeps a message edit from silently downgrading that 502 to an unhandled 500.
+    transport.createProject.resolves({});
+
+    const err = await createProvisionAndPublishProject(transport, WS, CREATE_BODY, { log })
+      .then(() => null, (e) => e);
+    expect(err).to.be.instanceOf(CreateNoProjectIdError);
+  });
+
+  it('builds the PATCH body through primaryUrlPatchBody, so `type` is always present', () => {
+    // `type` is required on every project PATCH whatever field is being set, and
+    // omitting it is rejected upstream.
+    expect(primaryUrlPatchBody('nba.com/kings'))
+      .to.deep.equal({ type: 'ai', primary_url: 'nba.com/kings' });
   });
 
   it('a failed PATCH deletes the orphan, never publishes, and rethrows', async () => {

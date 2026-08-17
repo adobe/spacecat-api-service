@@ -17,6 +17,42 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 /** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */
 
 /**
+ * Thrown when the upstream accepts a create but returns no project id.
+ *
+ * A class rather than a message match: the handlers translate this into a 502
+ * (`createNoProjectId`) that callers use to decide whether a retry is safe, and a
+ * `e.message === '...'` comparison would stop matching the moment the wording is
+ * reworded — silently downgrading that 502 to an unhandled 500, with nothing in the
+ * type system or the suite to notice.
+ */
+export class CreateNoProjectIdError extends Error {
+  constructor() {
+    super('Upstream createProject returned no id');
+    this.name = 'CreateNoProjectIdError';
+  }
+}
+
+/**
+ * The PATCH body that sets the url an AIO project tracks.
+ *
+ * `type` is required on every project PATCH regardless of which field is being set,
+ * and omitting it is rejected upstream; `primary_url` goes FLAT, which is what
+ * `model.ProjectUpdateRequest` declares — the nested `settings.ai` spelling is
+ * accepted and ignored, so it would look like success while changing nothing. Both
+ * PATCH call sites build their body here so neither requirement has to be
+ * re-remembered per edit.
+ *
+ * Note the create body also carries `type: 'ai'`, but it is a different shape with
+ * different required fields and deliberately does not use this.
+ *
+ * @param {string} primaryUrl - the url the project should track, e.g. `nba.com/kings`.
+ * @returns {{type: 'ai', primary_url: string}} the PATCH body.
+ */
+export function primaryUrlPatchBody(primaryUrl) {
+  return { type: 'ai', primary_url: primaryUrl };
+}
+
+/**
  * Provisions one Semrush AIO project: create, then set the url it tracks, then
  * publish.
  *
@@ -63,7 +99,8 @@ import { hasText } from '@adobe/spacecat-shared-utils';
  * @param {object} [opts.logContext] - extra fields for the failure logs.
  * @param {string} [opts.caller] - name used to prefix the failure logs.
  * @returns {Promise<string>} the new project's id.
- * @throws when create returns no id, or when the PATCH or publish fails.
+ * @throws {CreateNoProjectIdError} when create returns no id.
+ * @throws when the PATCH or publish fails, after a best-effort cleanup delete.
  */
 export async function createProvisionAndPublishProject(
   transport,
@@ -76,7 +113,7 @@ export async function createProvisionAndPublishProject(
   const createResp = await transport.createProject(semrushWorkspaceId, createBody);
   const semrushProjectId = String(createResp?.id || '');
   if (!hasText(semrushProjectId)) {
-    throw new Error('Upstream createProject returned no id');
+    throw new CreateNoProjectIdError();
   }
 
   // Trimmed, not just `hasText`-checked: `hasText` counts whitespace as text, and a
@@ -86,10 +123,11 @@ export async function createProvisionAndPublishProject(
 
   try {
     if (trackedUrl) {
-      await transport.updateProject(semrushWorkspaceId, semrushProjectId, {
-        type: 'ai',
-        primary_url: trackedUrl,
-      });
+      await transport.updateProject(
+        semrushWorkspaceId,
+        semrushProjectId,
+        primaryUrlPatchBody(trackedUrl),
+      );
     }
     await transport.publishProject(semrushWorkspaceId, semrushProjectId);
   } catch (e) {
@@ -118,5 +156,3 @@ export async function createProvisionAndPublishProject(
 
   return semrushProjectId;
 }
-
-export default { createProvisionAndPublishProject };

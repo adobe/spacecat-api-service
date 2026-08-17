@@ -48,6 +48,7 @@ import { resolveProjects } from '../resolve-projects.js';
 import { buildReservedDomains, syncCompetitorBenchmarksForProject } from '../competitor-benchmarks.js';
 import { collectAliasNames } from '../brand-aliases.js';
 import { upsertMappingRow, tombstoneMappingRow } from '../mapping-rows.js';
+import { primaryUrlPatchBody } from '../project-provisioning.js';
 
 /** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
 /** @typedef {import('../rest-transport.js').ProjectCreateBody} ProjectCreateBody */
@@ -649,10 +650,11 @@ export async function handleCreateMarketSubworkspace(
     : siteIdentityFromUrlString(body.brandDomain);
   if (primaryUrl && hasText(primaryUrl)) {
     try {
-      await transport.updateProject(workspaceId, projectId, {
-        type: 'ai',
-        primary_url: primaryUrl,
-      });
+      await transport.updateProject(
+        workspaceId,
+        projectId,
+        primaryUrlPatchBody(primaryUrl),
+      );
     } catch (e) {
       log?.warn?.('handleCreateMarketSubworkspace: SERENITY_MARKET_PRIMARY_URL_DIVERGENCE — could not set primary_url (non-fatal); market tracks its apex domain', {
         workspaceId, projectId, primaryUrl, error: e?.message,
