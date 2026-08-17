@@ -44,10 +44,11 @@
 > parent step (below, and in the create/re-grant flow above) — was **never shipped this way**.
 > [ADR-008](../decisions/008-no-subworkspace-resource-carve.md) decided a sub-workspace carries no AI
 > resource allocation of its own, and [ADR-009](../decisions/009-remove-dormant-jit-allocator.md)
-> removed the JIT allocator that would have implemented it. `transferWorkspaceResources` in the
-> shipped `rest-transport.js` has **no production caller** — its only caller today is the manual
-> `scripts/serenity-metered-405-canary.mjs` probe. Do not treat the mentions below as a live caller
-> inventory for `transferWorkspaceResources`.
+> removed the JIT allocator that would have implemented it. `transferWorkspaceResources` had no
+> production caller — only the manual `scripts/serenity-metered-405-canary.mjs` probe — and
+> [ADR-010](../decisions/010-durable-limits-recheck-retires-canary.md) has since deleted both the
+> method and the script entirely. Do not treat the mentions below as a live caller inventory, or as
+> proof either still exists, for `transferWorkspaceResources`.
 
 **Status:** Plan · 2026-06-15
 **Implements:** `adobe/serenity-docs` PR #12 → `docs/discovery/brand-semrush-provisioning-v2-phase1-sync.md` (cited as *design §N*) and `…-v2-phase1-implementation.md`.
