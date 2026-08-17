@@ -434,6 +434,10 @@ Outbound calls to Semrush, plus the controller's 502/500 paths, ship to Splunk (
 index=dx_aem_engineering sourcetype=dx_aem_sites_spacecat_backend_<env> service=api-service "semrush" | head 50
 ```
 
+`SERENITY_MARKET_PRIMARY_URL_DIVERGENCE` fires only in **sub-workspace** mode, and it is expected to be rare rather than impossible. The two provisioning paths treat a failed `primary_url` PATCH differently on purpose. The **flat** handler treats it exactly like a failed publish: the project is deleted best-effort, the error is rethrown, and no mapping row is written — so the market simply does not exist and a retry is safe. The **sub-workspace** handler cannot do that; it adopts leftover drafts, provisions a taxonomy between create and publish, and publishes quota-tolerantly, so it has no orphan-cleanup seam, and failing a whole market create because the tracked url could not be refined is worse than a market live on its apex — the state every market is in today. It therefore logs this token and continues.
+
+What that means operationally: a market carrying this token is **live and usable**, but tracking its apex rather than its subpath. Nothing further is needed here — the `mysticat-data-service` reconcile repairs `primary_url` in place (PATCH + publish, non-destructive) on its next run, because it compares against live state. A token that keeps recurring for the same market across reconciles is the signal worth chasing.
+
 Greppable failure tokens worth alerting on: `SERENITY_MARKET_LINK_REJECTED` (the `brand_sites.type='serenity'` migration is not deployed in the env — every market create/activate then produces a Semrush project + Site with no link), `SERENITY_ACTIVATE_LINK_INCOMPLETE` (markets live upstream but the brand stayed pending because the site mirror failed), and `SERENITY_ACTIVATE_SAVE_DIVERGENCE` / `SERENITY_DEACTIVATE_SAVE_DIVERGENCE` (upstream succeeded but the status/pointer persist failed).
 
 Expected fields in the structured log payload:
