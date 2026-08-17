@@ -99,6 +99,33 @@ export const INTENT_ROOT_NAME = '$abv_tags$intent';
 export const LEGACY_INTENT_ROOT_NAME = DIMENSION.INTENT;
 
 /**
+ * The origin (authorship) dimension root name — who authored the prompt. Named
+ * after its dimension key, like the other roots.
+ */
+export const ORIGIN_ROOT_NAME = DIMENSION.ORIGIN;
+
+/**
+ * The pre-rename origin root name. Authorship shipped under a root literally
+ * named `source` before the rename to `origin` (LLMO-6270 §46,
+ * origin-dimension.md). The rename runs project by project from the migration
+ * CLI, so a project can carry either spelling until the sweep completes, and the
+ * Elements read path tolerates both.
+ *
+ * COLLISION — pinned to the literal `source`, NOT to {@link DIMENSION.SOURCE},
+ * even though the two coincide today: this is the *historical* wire spelling of
+ * authorship and must not drift if the producing-system dimension is ever
+ * renamed. The producing-system `source` dimension (LLMO-6270 §47) also emits
+ * `source__` tags, so a `source__` value is ambiguous — pre-rename authorship on
+ * an un-reshaped project, or a producing-system value on a reshaped one — and the
+ * two cannot be told apart at this prefix. The origins read tolerates `source__`
+ * for the un-reshaped case and accepts that producing-system values ride along on
+ * reshaped projects until a dedicated source dimension claims them. Unlike
+ * LLMO-6986's intent tolerance, this one is not cleanly observable from the read
+ * surface (producing-system `source__` masks it), so there is no transition log.
+ */
+export const LEGACY_ORIGIN_ROOT_NAME = 'source';
+
+/**
  * Every name reserved at the root level: the four roots named after their
  * dimension, plus BOTH intent spellings — the upstream `$abv_tags$intent` and
  * the pre-rename `intent`, which stays reserved while any project still carries

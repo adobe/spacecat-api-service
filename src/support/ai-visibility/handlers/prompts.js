@@ -16,7 +16,8 @@ import { PROMPTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/prompt/enums
 import {
   num, brandTarget, parseLimitOffset, resolveCountryForFts, requiredLlmFromQuery,
   llmToEngine, promptMatchesResponsesQuery, mentionedBrandRestLabel,
-  PROMPTS_RESPONSES_PROMPTS_SCAN_LIMIT,
+  PROMPTS_RESPONSES_PROMPTS_SCAN_LIMIT, toIsoDate, hasRelationIdentity,
+  relationStatusFor, deriveResponse,
 } from '../grpc-utils.js';
 
 export async function handlePromptsResponses(sp, clients) {
@@ -39,12 +40,18 @@ export async function handlePromptsResponses(sp, clients) {
   }
   const total = prompts.length;
   const page = prompts.slice(offset, offset + limit);
+  // Single identity predicate, reused by both the relation-call guard and
+  // `attempted[i]`, so the two cannot drift. `attempted[i]` records whether we
+  // actually issued the per-prompt relation call: without it a skipped prompt
+  // (missing identity → Promise.resolve(null)) is indistinguishable from a
+  // relation call that fulfilled with a null value, which hides why a row has no
+  // full response.
+  const attempted = page.map(hasRelationIdentity);
   const settled = await Promise.allSettled(
     page.map((p) => {
-      const { promptHash } = p;
+      if (!hasRelationIdentity(p)) { return Promise.resolve(null); }
+      const { promptHash, topicId } = p;
       const serpId = String(p.serpId ?? '');
-      const { topicId } = p;
-      if (!promptHash || !serpId || !topicId) { return Promise.resolve(null); }
       return clients.prRelationsClient.prompt({
         country, llm: p.llm || llm, promptHash, serpId, topicId,
       });
@@ -53,6 +60,14 @@ export async function handlePromptsResponses(sp, clients) {
   const relations = settled.map((s) => (s.status === 'fulfilled' ? s.value : null));
   const data = page.map((p, i) => {
     const rel = relations[i]?.value ?? null;
+    // Per-item relation status so callers (e.g. claims_extraction) can tell a real
+    // full response from a degraded one. `error` was previously swallowed silently.
+    const relationStatus = relationStatusFor({ attempted: attempted[i], settled: settled[i] });
+    // Response provenance. Preserves the exact legacy `response` value (nullish-coalesce
+    // chain) while exposing whether it came from the full relation response or the
+    // brief excerpt. LLMO-6585: claims must never be extracted from an excerpt that is
+    // mistaken for the full answer, so the excerpt fallback is now explicit, not silent.
+    const { response, responseSource, responseComplete } = deriveResponse(rel, p.briefResponse);
     return {
       prompt: p.prompt,
       promptHash: String(p.promptHash ?? ''),
@@ -60,8 +75,12 @@ export async function handlePromptsResponses(sp, clients) {
       topic: p.topicName,
       topicId: String(p.topicId ?? ''),
       engine: llmToEngine(p.llm || llm),
-      response: rel?.response ?? p.briefResponse ?? '',
+      response,
       responseExcerpt: p.briefResponse ?? '',
+      responseSource,
+      responseComplete,
+      relationStatus,
+      date: toIsoDate(rel?.date),
       citedPages: Array.isArray(rel?.sources) ? rel.sources : [],
       mentionedBrands: (rel?.mentionedBrands ?? []).map(mentionedBrandRestLabel).filter(Boolean),
       mentionedBrandsCount: num(p.mentionedBrandsCount),
@@ -103,7 +122,7 @@ export async function handlePromptsResponsesLatest(sp, clients) {
         response: v.response,
         citedPages: Array.isArray(v.sources) ? v.sources : [],
         mentionedBrands: (v.mentionedBrands ?? []).map(mentionedBrandRestLabel).filter(Boolean),
-        date: v.date ?? null,
+        date: toIsoDate(v.date),
       },
     },
   };

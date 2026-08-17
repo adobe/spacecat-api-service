@@ -5620,7 +5620,7 @@ describe('Brands Controller', () => {
         expect(upsertStub.firstCall.args[0].semrushSubWorkspaceId).to.equal(null);
       });
 
-      it('saves a pending draft WITHOUT a primary URL: no provisioning, market stashed (201)', async () => {
+      it('saves a pending draft: defers provisioning, writes no stash, no anchor (201)', async () => {
         const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
         const upsertStub = sinon.stub().resolves({ id: 'draft-id', name: 'New Brand', status: 'pending' });
         const controller = await buildController({
@@ -5645,109 +5645,12 @@ describe('Brands Controller', () => {
         expect(response.status).to.equal(201);
         // Provisioning is deferred for a draft.
         expect(provisionStub.called).to.equal(false);
-        // The market is stashed for activation; no primary URL yet.
+        // SITES-49448: a pending draft no longer stashes a deferred-provisioning blob.
         const upsertArgs = upsertStub.firstCall.args[0];
-        expect(upsertArgs.brand.pendingSemrushProvisioning).to.deep.equal({
-          primaryUrl: null,
-          markets: [{ market: 'us', languageCode: 'en' }],
-          generatePrompts: false,
-        });
+        expect(upsertArgs.brand.pendingSemrushProvisioning).to.equal(undefined);
         // A draft is never bound to a workspace at create time.
         expect(upsertArgs.semrushSubWorkspaceId).to.equal(null);
         expect(upsertArgs.forceBrandId).to.equal(null);
-      });
-
-      it('stashes the primary URL on a pending draft when one was entered (still no provisioning)', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
-        const upsertStub = sinon.stub().resolves({ id: 'draft-id', name: 'New Brand', status: 'pending' });
-        const controller = await buildController({
-          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
-        });
-
-        const response = await controller.createBrandForOrg({
-          ...context,
-          params: { spaceCatId: ORGANIZATION_ID },
-          data: {
-            name: 'New Brand',
-            status: 'pending',
-            urls: [{ value: 'https://acme.com/path' }],
-            semrushMarket: { market: 'us', languageCode: 'en' },
-          },
-          dataAccess: mockDataAccess,
-          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
-        });
-
-        expect(response.status).to.equal(201);
-        expect(provisionStub.called).to.equal(false);
-        expect(upsertStub.firstCall.args[0].brand.pendingSemrushProvisioning).to.deep.equal({
-          primaryUrl: 'https://acme.com/path',
-          markets: [{ market: 'us', languageCode: 'en' }],
-          generatePrompts: false,
-        });
-      });
-
-      it('stashes the primary URL from a bare STRING url entry on a pending draft', async () => {
-        // The wizard may send `urls` as plain strings rather than { value }
-        // objects; the pending primaryUrl resolution must accept either shape.
-        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
-        const upsertStub = sinon.stub().resolves({ id: 'draft-id', name: 'New Brand', status: 'pending' });
-        const controller = await buildController({
-          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
-        });
-
-        const response = await controller.createBrandForOrg({
-          ...context,
-          params: { spaceCatId: ORGANIZATION_ID },
-          data: {
-            name: 'New Brand',
-            status: 'pending',
-            // Plain strings, not { value } objects.
-            urls: ['https://acme.com/path'],
-            semrushMarket: { market: 'us', languageCode: 'en' },
-          },
-          dataAccess: mockDataAccess,
-          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
-        });
-
-        expect(response.status).to.equal(201);
-        expect(provisionStub.called).to.equal(false);
-        expect(upsertStub.firstCall.args[0].brand.pendingSemrushProvisioning).to.deep.equal({
-          primaryUrl: 'https://acme.com/path',
-          markets: [{ market: 'us', languageCode: 'en' }],
-          generatePrompts: false,
-        });
-      });
-
-      it('seeds the initial market modelIds from semrushModelIds on a pending draft (no provisioning)', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
-        const upsertStub = sinon.stub().resolves({ id: 'draft-id', name: 'New Brand', status: 'pending' });
-        const controller = await buildController({
-          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
-        });
-
-        const response = await controller.createBrandForOrg({
-          ...context,
-          params: { spaceCatId: ORGANIZATION_ID },
-          data: {
-            name: 'New Brand',
-            status: 'pending',
-            urls: [{ value: 'https://acme.com' }],
-            semrushMarket: { market: 'us', languageCode: 'en' },
-            // The wizard's model picks: unlike the direct path they are optional
-            // for a draft, but when present they seed the initial market.
-            semrushModelIds: ['chatgpt', 'perplexity'],
-          },
-          dataAccess: mockDataAccess,
-          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
-        });
-
-        expect(response.status).to.equal(201);
-        expect(provisionStub.called).to.equal(false);
-        expect(upsertStub.firstCall.args[0].brand.pendingSemrushProvisioning).to.deep.equal({
-          primaryUrl: 'https://acme.com',
-          markets: [{ market: 'us', languageCode: 'en', modelIds: ['chatgpt', 'perplexity'] }],
-          generatePrompts: false,
-        });
       });
 
       it('still requires market and languageCode even for a pending draft', async () => {
@@ -6079,10 +5982,10 @@ describe('Brands Controller', () => {
         expect(upsertStub.called).to.equal(false);
       });
 
-      it('stashes deferred provisioning for a PENDING serenity-active create (generatePrompts:false, no market)', async () => {
+      it('does not stash for a PENDING serenity-active create (generatePrompts:false, no market)', async () => {
         // In a serenity-active org a pending create is a Semrush create (the org flag
-        // decides mode, not the generatePrompts flag): it provisions nothing yet and
-        // stashes the deferred-provisioning blob for activation.
+        // decides mode, not the generatePrompts flag): it provisions nothing yet.
+        // SITES-49448: it no longer stashes a deferred-provisioning blob either.
         const upsertStub = sinon.stub().resolves({ id: 'draft-id', name: 'Draft', status: 'pending' });
         const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-x' });
         const controller = await buildCreateController({
@@ -6104,12 +6007,8 @@ describe('Brands Controller', () => {
 
         expect(response.status).to.equal(201);
         expect(provisionStub.called).to.equal(false);
-        // Treated as Semrush mode → deferred-provisioning stash written.
-        expect(upsertStub.firstCall.firstArg.brand.pendingSemrushProvisioning).to.deep.equal({
-          primaryUrl: null,
-          markets: [],
-          generatePrompts: false,
-        });
+        // Treated as Semrush mode, but SITES-49448: no deferred-provisioning stash.
+        expect(upsertStub.firstCall.firstArg.brand.pendingSemrushProvisioning).to.equal(undefined);
       });
     });
   });
@@ -6460,8 +6359,8 @@ describe('Brands Controller', () => {
     });
 
     it('strips pendingSemrushProvisioning from a PATCH when the brand is NOT pending (no runtime injection)', async () => {
-      // The describe-level postgrest mock resolves the brand with status:'active',
-      // so the pending-only guard strips the stash an attacker tried to inject.
+      // SITES-49448: the field is retired and never accepted from a client, so a
+      // stash an attacker tried to inject is stripped regardless of brand status.
       const updateBrandStub = sinon.stub()
         .resolves({ id: BRAND_UUID, semrushSubWorkspaceId: null });
       const controller = await buildUpdateController({
@@ -6492,9 +6391,10 @@ describe('Brands Controller', () => {
       expect(updates).to.not.have.property('pendingSemrushProvisioning');
     });
 
-    it('keeps pendingSemrushProvisioning on a PATCH when the brand IS pending (draft Markets-tab edit)', async () => {
-      // The draft Markets tab appends a market (with its LLMs) by PATCHing the
-      // stash; the pending-only guard must let it through for a pending brand.
+    it('strips pendingSemrushProvisioning on a PATCH even when the brand IS pending (SITES-49448: field retired)', async () => {
+      // The draft Markets-tab edit flow that mutated the stash is gone (elmo) and
+      // the blob is being retired, so a client-supplied value is stripped for a
+      // pending brand too — no PATCH can (re)populate the column on any brand.
       mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake(() => ({
         select: sandbox.stub().returnsThis(),
         eq: sandbox.stub().returnsThis(),
@@ -6524,7 +6424,7 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(200);
       expect(updateBrandStub).to.have.been.calledOnce;
       const { updates } = updateBrandStub.firstCall.args[0];
-      expect(updates.pendingSemrushProvisioning).to.deep.equal(stash);
+      expect(updates).to.not.have.property('pendingSemrushProvisioning');
     });
 
     it('strips pendingSemrushProvisioning when a PATCH would flip a pending brand to active', async () => {
