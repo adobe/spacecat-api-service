@@ -234,7 +234,7 @@ export function createElementsService(transport, log) {
       }
 
       // `(prompt, prompt_topic)` join key — unique within the single requested slice.
-      const rowKey = (row) => `${row?.prompt ?? ''} ${row?.prompt_topic ?? ''}`;
+      const rowKey = (row) => `${row?.prompt ?? ''}\0${row?.prompt_topic ?? ''}`;
 
       // One intent-filtered call per intent value under one root spelling, in
       // parallel (~one extra round-trip). Each call degrades independently and

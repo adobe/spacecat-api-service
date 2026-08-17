@@ -470,6 +470,21 @@ shared/tests/sites.js → postgres/sites.test.js (uses Docker PostgreSQL + Postg
 - Test DTO transformations
 - Test error handling and validation
 
+### No raw NUL bytes in tracked source
+
+**Write `\0`, never a literal U+0000 byte.** `test/no-nul-bytes.test.js` scans every
+tracked regular blob and fails on a raw NUL, because a file containing one is
+classified as binary by whole-file scanners — `grep -r`, recursive `rg`, `file` — which
+then skip it. The skip is silent: a search still returns hits from other files, so an
+incomplete result set reads as complete, and it is easy to conclude a symbol has no
+definition, no other callers, or no test coverage in a file that was never read.
+
+Git does not surface this, which is why nothing in review or CI reacted to it before.
+Git sniffs only the first 8000 bytes for a NUL, so a byte past that window leaves
+`git grep` and `git diff` behaving normally — and renders the byte as whitespace in a
+diff, so it looks like an ordinary space. The guard test is that missing signal, and it
+covers every tracked file type, not just JS.
+
 ## Configuration Hierarchy
 
 1. **Global Configuration** (`Configuration` model) - System-wide settings, queue URLs
