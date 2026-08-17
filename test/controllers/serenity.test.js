@@ -1827,6 +1827,27 @@ describe('SerenityController', () => {
       expect(opts).to.include({ organizationId: ORG, brandId: BRAND, domain: 'x.com' });
     });
 
+    it('activate passes a body-supplied market\'s modelIds into the options arg (LLMs applied at activation)', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      const brand = makeBrandModel({ getStatus: () => 'active' });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand,
+        data: {
+          brandDomain: 'x.com',
+          brandNames: ['X'],
+          markets: [{ market: 'us', languageCode: 'en', modelIds: ['chatgpt', 'perplexity'] }],
+        },
+      }));
+      expect(response.status).to.equal(200);
+      // modelIds are read from the OPTIONS arg (index 7), NOT the body (index 3) —
+      // handleCreateMarketSubworkspace destructures them from options.
+      const options = handlers.handleCreateMarketSubworkspace.firstCall.args[7];
+      expect(options.modelIds).to.deep.equal(['chatgpt', 'perplexity']);
+      // models present but no prompts → real units → must publish.
+      expect(options.publishMode).to.equal('require');
+    });
+
     it('activate does NOT mirror a Site (or downgrade) when no market goes live on an active brand — 207, stays active', async () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 502, body: { error: 'serenityUpstreamError' } });
       const brand = makeBrandModel({ getStatus: () => 'active' });
