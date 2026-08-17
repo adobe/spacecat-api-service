@@ -12,7 +12,7 @@
 
 import { expect } from 'chai';
 import {
-  ORG_1_ID, BRAND_1_ID, SITE_1_ID,
+  ORG_1_ID, ORG_3_ID, BRAND_1_ID, SITE_1_ID,
   ASYNC_JOB_1_ID, NON_EXISTENT_JOB_ID,
   SERENITY_CLASSIFY_JOB_1_ID, SERENITY_CLASSIFY_JOB_OTHER_BRAND_ID,
 } from '../seed-ids.js';
@@ -1528,7 +1528,12 @@ export default function serenityTests(
     });
 
     it('403s a caller without access to the organization', async () => {
-      const res = await getHttpClient().user.get(jobPath(SERENITY_CLASSIFY_JOB_1_ID));
+      // The `user` persona is a member of ORG_1 (it drives the write tests above),
+      // so a genuine no-access 403 needs an org it does NOT belong to. ORG_3 is
+      // such an org — hasAccess() fails in authorize() before any job lookup.
+      const res = await getHttpClient().user.get(
+        `/v2/orgs/${ORG_3_ID}/brands/${BRAND_1_ID}/serenity/prompts/jobs/${SERENITY_CLASSIFY_JOB_1_ID}`,
+      );
       expect(res.status).to.equal(403);
     });
   });
