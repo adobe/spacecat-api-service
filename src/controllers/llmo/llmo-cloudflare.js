@@ -20,8 +20,7 @@ import AccessControlUtil from '../../support/access-control-util.js';
 import { hasSubpath, resolveCanonicalHost } from '../../support/edge-routing-utils.js';
 import { auditHostname } from './llmo-utils.js';
 import {
-  deriveWorkerName, hostInSiteDomain, registrableDomain, routePatternHost, routePatternHostGlob,
-  routePatternsOverlap,
+  deriveWorkerName, registrableDomain, routePatternHostGlob, routePatternsOverlap,
 } from './llmo-cloudflare-utils.js';
 
 // Cap the conflicting-routes list returned in a 409 so a zone with many overlapping routes can't
@@ -502,12 +501,15 @@ function LlmoCloudflareController(ctx) {
 
   /**
    * POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes
-   * Body: { zoneId, pattern }
-   * Verifies server-side that the pattern targets the site's own domain and that no existing
-   * route in the zone already targets the same host (compared by resolved host, not raw pattern
-   * string) before creating it, so onboarding cannot silently add a second/overlapping route on
-   * a host the customer already routes. `zoneId` is a Cloudflare identifier (not a SpaceCat
-   * entity), so it is supplied in the body rather than the path.
+   * Body: { zoneId }
+   * The route pattern is NOT client-supplied — its host is derived server-side from the site's own
+   * base URL (see resolveCanonicalHost) and the worker runs on every path of that host, so the
+   * route always lands on the canonical host for the site (an apex-only site is routed on its apex,
+   * not a dead www), consistent with how the deploy endpoint derives the worker's targetHost.
+   * Before creating it, verifies that no existing route in the zone already targets the same host
+   * (compared by resolved host, not raw pattern string) so onboarding cannot silently add a
+   * second/overlapping route on a host the customer already routes. `zoneId` is a Cloudflare
+   * identifier (not a SpaceCat entity), so it is supplied in the body rather than the path.
    */
   const addRoute = async (context) => {
     const result = await getSiteAndCheckAccess(context);
@@ -527,7 +529,7 @@ function LlmoCloudflareController(ctx) {
       return nameError;
     }
 
-    const { zoneId, pattern } = context.data || {};
+    const { zoneId } = context.data || {};
 
     if (!hasText(zoneId)) {
       return badRequest('Missing zoneId in request body');
@@ -535,14 +537,24 @@ function LlmoCloudflareController(ctx) {
     if (!CF_ID_RE.test(zoneId)) {
       return badRequest('zoneId must be a 32-character hexadecimal Cloudflare zone ID');
     }
-    if (!hasText(pattern)) {
-      return badRequest('Missing pattern in request body');
-    }
-    if (!hostInSiteDomain(routePatternHost(pattern), site.getBaseURL())) {
-      return badRequest('route pattern must target the site\'s domain');
-    }
 
     const siteId = site.getId();
+
+    // The route pattern is derived server-side from the site's canonical host — never taken from
+    // the client — and covers every path on that host (`<host>/*`). resolveCanonicalHost prefers
+    // the host that actually serves (redirect/DNS follow) over a blind apex→www rewrite, so an
+    // apex-only site is routed on its apex instead of a dead www.
+    let pattern;
+    try {
+      const canonicalHost = await resolveCanonicalHost(site.getBaseURL(), log);
+      pattern = `${canonicalHost}/*`;
+    } catch (e) {
+      log.error(auditLine(context, 'add-route', 'pattern-derivation-failed', {
+        severity: 'error', siteId, zoneId, error: e.message,
+      }));
+      return internalServerError('Could not derive route pattern from site base URL');
+    }
+
     log.info(auditLine(context, 'add-route', 'started', {
       siteId, zoneId, scriptName, pattern,
     }));

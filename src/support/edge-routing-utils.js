@@ -90,17 +90,86 @@ export async function hostResolves(host, log) {
   return resolves;
 }
 
+// HTTP status codes that carry a Location header we follow when probing for the serving host.
+const REDIRECT_STATUSES = new Set([301, 302, 307, 308]);
+
 /**
- * Resolves the canonical origin host for a site's base URL, adding a DNS-follow step on top of
- * calculateForwardedHost.
+ * Probes a bare-apex base URL once (without auto-following redirects) to discover where it
+ * actually serves traffic, so we can prefer the host the origin points at over a synthesized www
+ * host. Never throws — an undetermined result returns null and the caller falls back to DNS.
+ *
+ *  - 2xx: the apex serves directly → returns the apex host.
+ *  - 3xx (301/302/307/308) to a host within the same registrable domain → returns that host (this
+ *    is the redirect-follow: an apex that 301s to its www is resolved to www, and vice versa).
+ *  - redirect off-domain, missing/invalid Location, other status, or network error → null.
+ *
+ * @param {string} baseURL - The apex base URL to probe (must include scheme).
+ * @param {string} apexHost - The apex hostname (lowercased) the URL was built from.
+ * @param {object} [log] - Logger.
+ * @returns {Promise<string|null>} The serving host, or null when undetermined.
+ */
+async function probeServingHost(baseURL, apexHost, log) {
+  let res;
+  try {
+    res = await fetch(baseURL, {
+      method: 'GET',
+      redirect: 'manual',
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    });
+  } catch (e) {
+    log?.info(`[edge-routing-utils] Canonical probe of ${baseURL} failed: ${e.message}`);
+    return null;
+  }
+
+  if (res.ok) {
+    log?.info(`[edge-routing-utils] Apex ${apexHost} serves directly (${res.status})`);
+    return apexHost;
+  }
+
+  if (!REDIRECT_STATUSES.has(res.status)) {
+    return null;
+  }
+
+  const location = res.headers.get('location');
+  if (!location) {
+    return null;
+  }
+
+  let redirectHost;
+  try {
+    redirectHost = new URL(location.startsWith('http') ? location : `https://${location}`)
+      .hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+
+  // Only follow the redirect when it stays on the same registrable domain (apex ↔ www), never to an
+  // unrelated host. getHostnameWithoutWww strips the www. so apex and www compare equal.
+  const redirectNoWww = redirectHost.startsWith('www.') ? redirectHost.slice(4) : redirectHost;
+  if (redirectNoWww !== apexHost) {
+    log?.info(
+      `[edge-routing-utils] Apex ${apexHost} redirects off-domain to ${redirectHost}; ignoring`,
+    );
+    return null;
+  }
+  log?.info(`[edge-routing-utils] Apex ${apexHost} redirects (${res.status}) to ${redirectHost}`);
+  return redirectHost;
+}
+
+/**
+ * Resolves the canonical origin host for a site's base URL, layering DNS- and redirect-follow on
+ * top of calculateForwardedHost.
  *
  * calculateForwardedHost normalizes a bare apex (example.com) to its www host (www.example.com),
  * matching how audits/crawls resolve the origin. But some sites are served only from the apex and
- * have no www record — forcing www there points the worker at a host that does not exist (the
- * gentingsingapore.com onboarding failure). So when the www host was synthesized from a bare apex,
- * it is only used if it actually resolves in DNS; otherwise we fall back to the apex. Hosts that
- * are already www or a subdomain are returned unchanged (calculateForwardedHost leaves them as-is,
- * so no lookup is needed).
+ * have no working www — forcing www there points the worker at a host that does not serve (the
+ * gentingsingapore.com onboarding failure). So when the www host was synthesized from a bare apex:
+ *   1. redirect-follow — probe the apex: if it serves directly (2xx) use the apex, and if it 301s
+ *      to a same-domain host use that host (an apex that redirects to www resolves to www);
+ *   2. DNS-follow — if the probe is undetermined, use the www host only if it resolves in DNS;
+ *   3. otherwise fall back to the apex.
+ * Hosts that are already www or a subdomain are returned unchanged (calculateForwardedHost leaves
+ * them as-is), so no probe or lookup is performed.
  *
  * @param {string} baseURL - Site base URL (must include scheme).
  * @param {object} log - Logger.
@@ -112,18 +181,25 @@ export async function resolveCanonicalHost(baseURL, log) {
   const originalHost = new URL(baseURL).hostname.toLowerCase();
 
   // calculateForwardedHost only rewrites a bare apex into www.<apex>. When it returns the original
-  // host unchanged (already www, or a subdomain) the candidate is authoritative — skip the lookup.
+  // host unchanged (already www, or a subdomain) the candidate is authoritative — skip all I/O.
   if (candidate.toLowerCase() === originalHost) {
     return candidate;
   }
 
-  // candidate is a www host synthesized from a bare apex — only trust it if it resolves.
+  // candidate is a www host synthesized from the bare apex `originalHost`.
+  const served = await probeServingHost(baseURL, originalHost, log);
+  if (served) {
+    return served;
+  }
+
+  // Probe undetermined (network error, opaque status, off-domain redirect) — trust the synthesized
+  // www host only if it resolves in DNS, otherwise fall back to the apex.
   if (await hostResolves(candidate, log)) {
     return candidate;
   }
 
   log.info(
-    `[edge-routing-utils] Synthesized host ${candidate} has no DNS records; `
+    `[edge-routing-utils] Synthesized host ${candidate} does not serve or resolve; `
     + `falling back to apex ${originalHost}`,
   );
   return originalHost;

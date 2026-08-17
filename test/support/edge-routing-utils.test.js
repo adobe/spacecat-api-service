@@ -480,6 +480,14 @@ describe('edge-routing-utils', () => {
     let dnsPromises;
     let edgeUtilsResolve;
 
+    // Reuses the outer fetchStub (reset per-test by the top-level beforeEach) for the probe.
+    // Builds a minimal fetch Response-like object for the manual-redirect probe.
+    const response = ({ ok = false, status = 200, location } = {}) => ({
+      ok,
+      status,
+      headers: { get: (h) => (h === 'location' ? (location ?? null) : null) },
+    });
+
     beforeEach(async () => {
       dnsPromises = {
         resolveCname: sandbox.stub().resolves([]),
@@ -491,7 +499,7 @@ describe('edge-routing-utils', () => {
         '@adobe/spacecat-shared-utils': {
           isObject: (v) => v !== null && typeof v === 'object' && !Array.isArray(v),
           isValidUrl: () => true,
-          tracingFetch: sandbox.stub(),
+          tracingFetch: fetchStub,
         },
         '@adobe/spacecat-shared-tokowaka-client': {
           calculateForwardedHost: calculateForwardedHostStub,
@@ -499,29 +507,80 @@ describe('edge-routing-utils', () => {
       });
     });
 
-    it('returns the host unchanged and skips DNS when it is already www', async () => {
+    it('returns the host unchanged and skips all I/O when it is already www', async () => {
       calculateForwardedHostStub.returns('www.example.com');
       const host = await edgeUtilsResolve.resolveCanonicalHost('https://www.example.com', log);
+      expect(host).to.equal('www.example.com');
+      expect(fetchStub).to.not.have.been.called;
+      expect(dnsPromises.resolve4).to.not.have.been.called;
+    });
+
+    it('returns the host unchanged and skips all I/O for an existing subdomain', async () => {
+      calculateForwardedHostStub.returns('cdn.example.com');
+      const host = await edgeUtilsResolve.resolveCanonicalHost('https://cdn.example.com', log);
+      expect(host).to.equal('cdn.example.com');
+      expect(fetchStub).to.not.have.been.called;
+      expect(dnsPromises.resolve4).to.not.have.been.called;
+    });
+
+    it('returns the apex when it serves directly (2xx) and skips the DNS check', async () => {
+      calculateForwardedHostStub.returns('www.gentingsingapore.com');
+      fetchStub.resolves(response({ ok: true, status: 200 }));
+      const host = await edgeUtilsResolve.resolveCanonicalHost('https://gentingsingapore.com', log);
+      expect(host).to.equal('gentingsingapore.com');
+      expect(dnsPromises.resolve4).to.not.have.been.called;
+    });
+
+    it('follows a same-domain 301 from the apex to www', async () => {
+      calculateForwardedHostStub.returns('www.example.com');
+      fetchStub.resolves(response({ status: 301, location: 'https://www.example.com/' }));
+      const host = await edgeUtilsResolve.resolveCanonicalHost('https://example.com', log);
       expect(host).to.equal('www.example.com');
       expect(dnsPromises.resolve4).to.not.have.been.called;
     });
 
-    it('returns the host unchanged and skips DNS for an existing subdomain', async () => {
-      calculateForwardedHostStub.returns('cdn.example.com');
-      const host = await edgeUtilsResolve.resolveCanonicalHost('https://cdn.example.com', log);
-      expect(host).to.equal('cdn.example.com');
-      expect(dnsPromises.resolve4).to.not.have.been.called;
+    it('follows a scheme-less same-domain redirect Location', async () => {
+      calculateForwardedHostStub.returns('www.example.com');
+      fetchStub.resolves(response({ status: 308, location: 'www.example.com/' }));
+      const host = await edgeUtilsResolve.resolveCanonicalHost('https://example.com', log);
+      expect(host).to.equal('www.example.com');
     });
 
-    it('uses the synthesized www host when it resolves in DNS', async () => {
+    it('ignores an off-domain redirect and uses the www host when it resolves in DNS', async () => {
       calculateForwardedHostStub.returns('www.example.com');
+      fetchStub.resolves(response({ status: 302, location: 'https://tracker.other.com/' }));
       dnsPromises.resolve4.withArgs('www.example.com').resolves(['1.2.3.4']);
       const host = await edgeUtilsResolve.resolveCanonicalHost('https://example.com', log);
       expect(host).to.equal('www.example.com');
     });
 
-    it('falls back to the apex when the synthesized www host has no DNS records', async () => {
+    it('treats a redirect with no Location header as undetermined and falls through to DNS', async () => {
+      calculateForwardedHostStub.returns('www.example.com');
+      fetchStub.resolves(response({ status: 301 }));
+      dnsPromises.resolve6.withArgs('www.example.com').resolves(['2606:4700::1']);
+      const host = await edgeUtilsResolve.resolveCanonicalHost('https://example.com', log);
+      expect(host).to.equal('www.example.com');
+    });
+
+    it('treats an unparseable redirect Location as undetermined and falls through to DNS', async () => {
+      calculateForwardedHostStub.returns('www.example.com');
+      fetchStub.resolves(response({ status: 301, location: 'http://' }));
+      dnsPromises.resolve4.withArgs('www.example.com').resolves(['1.2.3.4']);
+      const host = await edgeUtilsResolve.resolveCanonicalHost('https://example.com', log);
+      expect(host).to.equal('www.example.com');
+    });
+
+    it('treats a non-redirect non-2xx probe status as undetermined and falls through to DNS', async () => {
+      calculateForwardedHostStub.returns('www.example.com');
+      fetchStub.resolves(response({ ok: false, status: 500 }));
+      dnsPromises.resolve4.withArgs('www.example.com').resolves(['1.2.3.4']);
+      const host = await edgeUtilsResolve.resolveCanonicalHost('https://example.com', log);
+      expect(host).to.equal('www.example.com');
+    });
+
+    it('falls back to the apex when the probe errors and www has no DNS records', async () => {
       calculateForwardedHostStub.returns('www.gentingsingapore.com');
+      fetchStub.rejects(new Error('ETIMEDOUT'));
       const host = await edgeUtilsResolve.resolveCanonicalHost('https://gentingsingapore.com', log);
       expect(host).to.equal('gentingsingapore.com');
       expect(log.info).to.have.been.calledWithMatch('falling back to apex gentingsingapore.com');
