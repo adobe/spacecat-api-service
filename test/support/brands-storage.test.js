@@ -2604,6 +2604,8 @@ describe('brands-storage', () => {
   });
 
   describe('setBrandClaimsEnabled', () => {
+    const SITE_ID = '55555555-5555-4555-8555-555555555555';
+
     it('throws when postgrestClient is missing', async () => {
       await expect(setBrandClaimsEnabled({
         brandId: BRAND_ID, enabled: true, postgrestClient: null,
@@ -2624,7 +2626,7 @@ describe('brands-storage', () => {
 
     it('writes brand_claims_enabled, excludes deleted brands, and returns the updated brand', async () => {
       const client = createCapturingClient({
-        brands: [{ data: { id: BRAND_ID, name: 'Acme' }, error: null }],
+        brands: [{ data: { id: BRAND_ID, name: 'Acme', site_id: SITE_ID }, error: null }],
       });
 
       const result = await setBrandClaimsEnabled({
@@ -2636,7 +2638,9 @@ describe('brands-storage', () => {
       expect(brandsUpdate.row.updated_by).to.equal('slack:U1');
       const neqFilter = client.capturedCalls.neq.find((c) => c.table === 'brands' && c.col === 'status');
       expect(neqFilter?.val).to.equal('deleted');
-      expect(result).to.deep.equal({ id: BRAND_ID, name: 'Acme' });
+      // site_id (the brand's primary site) is returned so callers can toggle the
+      // per-site brand-claims audit in lock-step with the flag.
+      expect(result).to.deep.equal({ id: BRAND_ID, name: 'Acme', site_id: SITE_ID });
     });
 
     it('returns null when no brand matches the id', async () => {

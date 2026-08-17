@@ -17,12 +17,15 @@ import { extractURLFromSlackInput, postErrorMessage } from '../../../utils/slack
 
 const ENABLE_PHRASE = 'enable-brand-claims';
 const DISABLE_PHRASE = 'disable-brand-claims';
+const BRAND_CLAIMS_AUDIT_TYPE = 'brand-claims';
 
 /**
  * One command, two explicit keywords: `enable-brand-claims {brandId|baseURL}` and
  * `disable-brand-claims {brandId|baseURL}`. Flips the brand-scoped
  * `brand_claims_enabled` scheduling gate the mystique Brand Claims consumer reads
- * back (LLMO-5741). The verb is derived from which keyword was used — no on/off
+ * back (LLMO-5741) AND the per-site `brand-claims` audit handler in lock-step, so
+ * enabling opts the brand's primary site into the scheduled audit and disabling
+ * opts it back out. The verb is derived from which keyword was used — no on/off
  * argument to get wrong. The target may be a brand UUID (as before) or a site base
  * URL, which is resolved to its active brand — so operators can target a site
  * without a separate brand-id lookup.
@@ -40,7 +43,7 @@ function BrandClaimsCommand(context) {
   });
 
   const { dataAccess, log } = context;
-  const { Site } = dataAccess;
+  const { Site, Configuration } = dataAccess;
 
   const execute = async (message, slackContext) => {
     const { say, user } = slackContext;
@@ -66,6 +69,7 @@ function BrandClaimsCommand(context) {
       // parsed as a site base URL and resolved to that site's active brand
       // (no brand-id lookup).
       let brandId;
+      let site = null;
       if (isValidUUID(target)) {
         brandId = target;
       } else {
@@ -74,7 +78,7 @@ function BrandClaimsCommand(context) {
           await say(`:warning: '${target}' is not a valid brand ID (UUID) or site URL. ${baseCommand.usage()}`);
           return;
         }
-        const site = await Site.findByBaseURL(baseUrl);
+        site = await Site.findByBaseURL(baseUrl);
         if (!site) {
           await say(`:x: Site not found: \`${target}\``);
           return;
@@ -106,7 +110,33 @@ function BrandClaimsCommand(context) {
       }
 
       log.info(`brand-claims: ${enabled ? 'enabled' : 'disabled'} for brand ${brand.id} ("${brand.name}") by ${actor}`);
-      await say(`:white_check_mark: Brand claims *${enabled ? 'enabled' : 'disabled'}* for brand "${brand.name}" (${brand.id}).`);
+
+      // Keep the per-site `brand-claims` audit handler in lock-step with the
+      // brand flag: enabling opts the brand's primary site into the scheduled
+      // audit, disabling opts it back out. The URL branch already has the site;
+      // otherwise resolve the brand's primary site from the returned `site_id`.
+      let auditToggled = false;
+      if (!site && brand.site_id) {
+        site = await Site.findById(brand.site_id);
+      }
+      if (site) {
+        const configuration = await Configuration.findLatest();
+        if (enabled) {
+          configuration.enableHandlerForSite(BRAND_CLAIMS_AUDIT_TYPE, site);
+        } else {
+          configuration.disableHandlerForSite(BRAND_CLAIMS_AUDIT_TYPE, site);
+        }
+        await configuration.save();
+        auditToggled = true;
+        log.info(`brand-claims: ${enabled ? 'enabled' : 'disabled'} '${BRAND_CLAIMS_AUDIT_TYPE}' audit for site ${site.getId()} (${site.getBaseURL()})`);
+      } else {
+        log.warn(`brand-claims: brand ${brand.id} has no resolvable primary site; '${BRAND_CLAIMS_AUDIT_TYPE}' audit not ${enabled ? 'enabled' : 'disabled'}`);
+      }
+
+      const auditNote = auditToggled
+        ? ` The \`${BRAND_CLAIMS_AUDIT_TYPE}\` audit was ${enabled ? 'enabled' : 'disabled'} for ${site.getBaseURL()}.`
+        : ` :warning: No primary site resolved, so the \`${BRAND_CLAIMS_AUDIT_TYPE}\` audit was left unchanged.`;
+      await say(`:white_check_mark: Brand claims *${enabled ? 'enabled' : 'disabled'}* for brand "${brand.name}" (${brand.id}).${auditNote}`);
     } catch (error) {
       log.error(error);
       await postErrorMessage(say, error);
