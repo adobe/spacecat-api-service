@@ -14077,3 +14077,60 @@ OnboardingNotificationResponse:
         Present only when notified is false. Explains why no notification was
         sent (e.g. a duplicate request arrived within the per-org cooldown window).
       example: "recently notified"
+
+SerenityPromptClassificationJobAccepted:
+  type: object
+  required: [jobId, status]
+  description: >-
+    202 response from the bulk prompt-create path (serenity-docs#33): the import
+    was enqueued as an async classification job. Poll the job via
+    `GET .../serenity/prompts/jobs/{jobId}`.
+  properties:
+    jobId:
+      type: string
+      format: uuid
+      description: Id of the enqueued classification job.
+    status:
+      type: string
+      description: Job status at enqueue time (always IN_PROGRESS).
+      enum: [IN_PROGRESS]
+  example:
+    jobId: '99999999-8888-7777-6666-555555555555'
+    status: IN_PROGRESS
+
+SerenityPromptClassificationJob:
+  type: object
+  required: [jobId, status]
+  description: Status of an async Serenity prompt-classification job (serenity-docs#33).
+  properties:
+    jobId:
+      type: string
+      format: uuid
+    status:
+      type: string
+      enum: [IN_PROGRESS, COMPLETED, FAILED, CANCELLED]
+    result:
+      description: >-
+        Present on COMPLETED. Mirrors the synchronous create response's
+        per-prompt outcome (created / skipped / failed).
+      allOf:
+        - $ref: '#/SerenityCreatePromptsResponse'
+    error:
+      type: object
+      description: Present on FAILED.
+      properties:
+        code: { type: [string, 'null'] }
+        message: { type: [string, 'null'] }
+    needsReauth:
+      type: boolean
+      description: >-
+        Present and true only when the job failed because the promise token can
+        no longer be exchanged (code NEEDS_REAUTH); the caller must
+        re-authenticate and resubmit.
+  example:
+    jobId: '99999999-8888-7777-6666-555555555555'
+    status: FAILED
+    error:
+      code: NEEDS_REAUTH
+      message: promise token exchange requires re-authentication
+    needsReauth: true

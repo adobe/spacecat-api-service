@@ -140,6 +140,15 @@ v2-serenity-prompts:
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityCreatePromptsResponse' }
+      '202':
+        description: |
+          Accepted for asynchronous processing (serenity-docs#33). Returned for
+          bulk/CSV imports (flat-mode brands with `deferPublish: true`): the
+          request is enqueued as a classification job and the response carries a
+          `jobId` to poll via `GET .../serenity/prompts/jobs/{jobId}`.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityPromptClassificationJobAccepted' }
       '400': { $ref: './responses.yaml#/400' }
       '404':
         description: Organization, brand, or workspace not found, or serenity is not active for the organization.
@@ -148,6 +157,53 @@ v2-serenity-prompts:
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-prompts-job:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+    - name: jobId
+      in: path
+      required: true
+      description: Async classification job id returned by the 202 create response.
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: Poll an async prompt-classification job
+    description: |
+      Returns the status of a bulk prompt-classification job (serenity-docs#33)
+      enqueued by the `202` path of the create endpoint. Poll until `status` is
+      terminal (`COMPLETED`, `FAILED`, or `CANCELLED`). On `COMPLETED` the
+      per-prompt `result` mirrors the synchronous create response. On `FAILED`
+      with a dead promise token, `needsReauth: true` is set so the caller can
+      prompt a re-authentication and resubmit.
+    operationId: getSerenityPromptClassificationJobStatus
+    security:
+      - session_token: []
+    responses:
+      '200':
+        description: Job status retrieved.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityPromptClassificationJob' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Job not found for this brand, or serenity is not active for the brand.
       '500': { $ref: './responses.yaml#/500' }
 
 v2-serenity-prompt-by-id:

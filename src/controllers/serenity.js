@@ -33,7 +33,7 @@ import {
   BULK_PROMPTS_MAX_ITEMS,
   resolveCallerId,
 } from '../support/serenity/handlers/prompts.js';
-import { createAndEnqueueJob } from '../support/serenity/async-job-runner.js';
+import { createAndEnqueueJob, NEEDS_REAUTH_ERROR_CODE } from '../support/serenity/async-job-runner.js';
 import { CLASSIFY_PROMPTS_JOB_TYPE } from '../support/serenity/handlers/classify-prompts-job.js';
 import {
   handleListMarkets,
@@ -608,6 +608,70 @@ function SerenityController(context, log, env) {
           { orgId: ctx?.params?.spaceCatId },
         );
       return createResponse(result, 200);
+    } catch (e) {
+      return mapError(e, log);
+    }
+  };
+
+  /**
+   * Poll the status of an async prompt-classification job enqueued by
+   * `createPrompts` (serenity-docs#33). The enqueue path returns `202 {jobId}`;
+   * this is what the caller polls until the job reaches a terminal state.
+   *
+   * Auth mirrors the write path: the same `authorize(ctx)` brand-access +
+   * serenity-active gate, plus a defence-in-depth ownership check that the job's
+   * stored `metadata.brandId` matches the resolved brand — so a caller with
+   * access to brand A cannot read brand B's job by guessing its id — and a
+   * job-type guard so this endpoint only ever serves serenity classify jobs.
+   *
+   * Response:
+   *   - always: `{ jobId, status }` (status is the `AsyncJob` status:
+   *     IN_PROGRESS | COMPLETED | FAILED | CANCELLED).
+   *   - COMPLETED: `result` — the classify job's `{ created, skipped, failed }`.
+   *   - FAILED: `error` (`{ code, message }`), plus `needsReauth: true` when the
+   *     failure was a dead promise token (`code === NEEDS_REAUTH`), so the UI can
+   *     prompt a re-auth + resubmit rather than surfacing a generic failure.
+   */
+  const getPromptClassificationJobStatus = async (ctx) => {
+    try {
+      const auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { jobId } = ctx?.params || {};
+      if (!isValidUUID(jobId)) {
+        return createResponse(
+          { error: 'invalidRequest', message: 'jobId must be a UUID' },
+          400,
+        );
+      }
+      const AsyncJob = ctx?.dataAccess?.AsyncJob;
+      if (!AsyncJob || typeof AsyncJob.findById !== 'function') {
+        return internalServerError('AsyncJob data-access not available');
+      }
+      const job = await AsyncJob.findById(jobId);
+      const metadata = job?.getMetadata?.() || {};
+      // A wrong job type or a brand mismatch is reported as 404, not 403 — the
+      // same "no such job here" contract, revealing nothing about jobs the
+      // caller can't see.
+      if (!job
+        || metadata.jobType !== CLASSIFY_PROMPTS_JOB_TYPE
+        || metadata.brandId !== auth.brandUuid) {
+        return notFound(`Job not found: ${jobId}`);
+      }
+
+      const status = job.getStatus();
+      const body = { jobId: job.getId(), status };
+      if (status === 'COMPLETED') {
+        body.result = job.getResult() ?? null;
+      } else if (status === 'FAILED') {
+        const error = job.getError() || {};
+        body.error = { code: error.code ?? null, message: error.message ?? null };
+        if (error.code === NEEDS_REAUTH_ERROR_CODE) {
+          body.needsReauth = true;
+        }
+      }
+      return createResponse(body, 200);
     } catch (e) {
       return mapError(e, log);
     }
@@ -1766,6 +1830,7 @@ function SerenityController(context, log, env) {
   return {
     listPrompts,
     createPrompts,
+    getPromptClassificationJobStatus,
     updatePrompt,
     bulkDeletePrompts,
     listMarkets,

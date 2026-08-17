@@ -2757,6 +2757,128 @@ describe('SerenityController', () => {
     });
   });
 
+  describe('getPromptClassificationJobStatus (serenity-docs#33)', () => {
+    const JOB_ID = '99999999-8888-7777-6666-555555555555';
+
+    // Build a fake AsyncJob and attach it to the context's data-access layer
+    // (fakeContext does not provide AsyncJob by default).
+    function ctxWithJob(job, { jobId = JOB_ID, params = {} } = {}) {
+      const ctx = fakeContext({ params: { jobId, ...params } });
+      ctx.dataAccess.AsyncJob = {
+        findById: sinon.stub().resolves(job),
+      };
+      return ctx;
+    }
+
+    function makeJob({
+      status = 'IN_PROGRESS', result, error, metadata = {},
+    } = {}) {
+      return {
+        getId: () => JOB_ID,
+        getStatus: () => status,
+        getResult: () => result,
+        getError: () => error,
+        getMetadata: () => ({
+          jobType: 'serenity-classify-prompts', brandId: BRAND, ...metadata,
+        }),
+      };
+    }
+
+    it('returns 200 + status for an in-progress job', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.getPromptClassificationJobStatus(
+        ctxWithJob(makeJob({ status: 'IN_PROGRESS' })),
+      );
+      expect(response.status).to.equal(200);
+      expect(await readBody(response)).to.deep.equal({ jobId: JOB_ID, status: 'IN_PROGRESS' });
+    });
+
+    it('returns the classify result on COMPLETED', async () => {
+      const result = { created: [{ text: 'x' }], skipped: [], failed: [] };
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.getPromptClassificationJobStatus(
+        ctxWithJob(makeJob({ status: 'COMPLETED', result })),
+      );
+      expect(response.status).to.equal(200);
+      expect(await readBody(response)).to.deep.equal({ jobId: JOB_ID, status: 'COMPLETED', result });
+    });
+
+    it('surfaces needsReauth:true on FAILED with a NEEDS_REAUTH error code', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.getPromptClassificationJobStatus(
+        ctxWithJob(makeJob({
+          status: 'FAILED',
+          error: { code: 'NEEDS_REAUTH', message: 'promise token dead' },
+        })),
+      );
+      expect(response.status).to.equal(200);
+      expect(await readBody(response)).to.deep.equal({
+        jobId: JOB_ID,
+        status: 'FAILED',
+        error: { code: 'NEEDS_REAUTH', message: 'promise token dead' },
+        needsReauth: true,
+      });
+    });
+
+    it('does not set needsReauth on FAILED with a non-reauth error code', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.getPromptClassificationJobStatus(
+        ctxWithJob(makeJob({
+          status: 'FAILED',
+          error: { code: 'JOB_FAILED', message: 'boom' },
+        })),
+      );
+      expect(response.status).to.equal(200);
+      const body = await readBody(response);
+      expect(body).to.deep.equal({
+        jobId: JOB_ID,
+        status: 'FAILED',
+        error: { code: 'JOB_FAILED', message: 'boom' },
+      });
+      expect(body).to.not.have.property('needsReauth');
+    });
+
+    it('400s when jobId is not a UUID', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.getPromptClassificationJobStatus(
+        ctxWithJob(makeJob(), { jobId: 'not-a-uuid' }),
+      );
+      expect(response.status).to.equal(400);
+    });
+
+    it('404s when the job does not exist', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.getPromptClassificationJobStatus(ctxWithJob(null));
+      expect(response.status).to.equal(404);
+    });
+
+    it('404s when the job belongs to a different brand (ownership guard)', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.getPromptClassificationJobStatus(
+        ctxWithJob(makeJob({ metadata: { brandId: 'some-other-brand' } })),
+      );
+      expect(response.status).to.equal(404);
+    });
+
+    it('404s when the job is not a serenity classify job (jobType guard)', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.getPromptClassificationJobStatus(
+        ctxWithJob(makeJob({ metadata: { jobType: 'some-other-job' } })),
+      );
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns the authorize() error (403) when the caller lacks org access', async () => {
+      accessControlHasAccessStub.resolves(false);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = ctxWithJob(makeJob());
+      const response = await controller.getPromptClassificationJobStatus(ctx);
+      expect(response.status).to.equal(403);
+      // never reaches the job lookup
+      expect(ctx.dataAccess.AsyncJob.findById).to.not.have.been.called;
+    });
+  });
+
   describe('defensive branch coverage', () => {
     // Line 365-372: createPrompts flat-mode dispatch. The default
     // resolveBrandWorkspaceStub returns flat mode, so this reaches handleCreatePrompts.
