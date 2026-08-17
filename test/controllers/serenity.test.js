@@ -2794,7 +2794,13 @@ describe('SerenityController', () => {
         expect(enqueueArgs.metadata).to.deep.equal({
           // callerId captured at enqueue time (LLMO-6289) — no auth profile on the
           // test context, so it resolves to the `unknown` sentinel.
-          mode: 'create', brandId: BRAND, semrushWorkspaceId: WORKSPACE, prompts, callerId: 'unknown',
+          mode: 'create',
+          brandId: BRAND,
+          semrushWorkspaceId: WORKSPACE,
+          subworkspace: false,
+          parentWorkspaceId: WORKSPACE,
+          prompts,
+          callerId: 'unknown',
         });
         // The synchronous path never runs.
         expect(handlers.handleCreatePrompts).to.not.have.been.called;
@@ -2812,19 +2818,32 @@ describe('SerenityController', () => {
         expect(handlers.handleCreatePrompts).to.have.been.calledOnce;
       });
 
-      it('stays synchronous for subworkspace-mode brands even when deferPublish is true', async () => {
+      it('enqueues a serenity-classify-prompts job for subworkspace-mode brands too', async () => {
         resolveBrandWorkspaceStub.resolves({
           mode: 'subworkspace', workspaceId: SUBWS, parentWorkspaceId: WORKSPACE,
         });
-        handlers.handleCreatePromptsSubworkspace.resolves({ created: 1, failed: [] });
+        const prompts = [{ text: 'x', geoTargetId: 2840, languageCode: 'en' }];
         const controller = SerenityController({ env: {} }, fakeLog(), {});
         const response = await controller.createPrompts(fakeContext({
-          data: { deferPublish: true, prompts: [{ text: 'x', geoTargetId: 2840, languageCode: 'en' }] },
+          data: { deferPublish: true, prompts },
         }));
 
-        expect(response.status).to.equal(200);
-        expect(createAndEnqueueJobStub).to.not.have.been.called;
-        expect(handlers.handleCreatePromptsSubworkspace).to.have.been.calledOnce;
+        expect(response.status).to.equal(202);
+        const body = await readBody(response);
+        expect(body).to.deep.equal({ jobId: 'job-abc', status: 'IN_PROGRESS' });
+        expect(createAndEnqueueJobStub).to.have.been.calledOnce;
+        const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
+        expect(enqueueArgs.metadata).to.deep.equal({
+          mode: 'create',
+          brandId: BRAND,
+          semrushWorkspaceId: SUBWS,
+          subworkspace: true,
+          parentWorkspaceId: WORKSPACE,
+          prompts,
+          callerId: 'unknown',
+        });
+        // The synchronous subworkspace path never runs.
+        expect(handlers.handleCreatePromptsSubworkspace).to.not.have.been.called;
       });
 
       it('400s without enqueueing when deferPublish is true but prompts is empty', async () => {

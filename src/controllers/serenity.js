@@ -536,10 +536,13 @@ function SerenityController(context, log, env) {
       // length: `deferPublish` is the exact flag CSV-chunking already sets
       // (see handleCreatePrompts' docstring) precisely because a UI multi-add
       // never sets it, so a three-prompt UI add never pays queue+worker+publish
-      // latency. Flat-mode brands only for now — see this PR's report for why
-      // subworkspace-mode CSV import stays on the synchronous path.
+      // latency. Covers both flat and subworkspace-mode brands — the two modes
+      // only ever differed here in JIT resource-allocation guarding, and that
+      // machinery (createHeadroomGuard et al.) was removed org-wide once Semrush
+      // confirmed it no longer enforces AI project/prompt limits (SITES-49206,
+      // #2995), so there is nothing left to special-case.
       const body = ctx.data || {};
-      if (auth.mode !== 'subworkspace' && validateDeferPublish(body)) {
+      if (validateDeferPublish(body)) {
         const prompts = Array.isArray(body.prompts) ? body.prompts : [];
         if (prompts.length === 0) {
           return createResponse(
@@ -559,6 +562,12 @@ function SerenityController(context, log, env) {
             mode: 'create',
             brandId: auth.brandUuid,
             semrushWorkspaceId: auth.workspaceId,
+            // subworkspace mode resolves slice→project via a live listing
+            // (buildSliceProjectMap) rather than the BrandSemrushProject DB
+            // mapping flat mode uses — the worker needs to know which lookup to
+            // use. Kept distinct from `mode` above, which means create-vs-reclassify.
+            subworkspace: auth.mode === 'subworkspace',
+            parentWorkspaceId: auth.parentWorkspaceId ?? '',
             prompts,
             // Authorship (LLMO-6289): capture the caller id at enqueue time — from
             // the auth profile, never the forwarded upstream bearer — so the async
