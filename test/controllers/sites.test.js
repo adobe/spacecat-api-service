@@ -770,6 +770,103 @@ describe('Sites Controller', () => {
     });
   });
 
+  it('deep-merges hlxConfig, preserving existing content.source on partial patch', async () => {
+    const site = sites[0];
+    site.setHlxConfig({
+      content: { source: { type: 'markup', url: 'https://content.example/' } },
+      code: { source: { type: 'github', url: 'https://github.com/old/repo' } },
+    });
+    site.save = sandbox.spy(site.save);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        hlxConfig: {
+          rso: { owner: 'newOwner', site: 'newSite' },
+          code: { source: { type: 'github', url: 'https://github.com/new/repo' } },
+        },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+    const updatedSite = await response.json();
+    expect(updatedSite.hlxConfig).to.deep.equal({
+      content: { source: { type: 'markup', url: 'https://content.example/' } },
+      code: { source: { type: 'github', url: 'https://github.com/new/repo' } },
+      rso: { owner: 'newOwner', site: 'newSite' },
+    });
+  });
+
+  it('deletes an hlxConfig sub-key when patched with null', async () => {
+    const site = sites[0];
+    site.setHlxConfig({
+      content: { source: { type: 'markup', url: 'https://content.example/' } },
+      rso: { owner: 'owner', site: 'site' },
+    });
+    site.save = sandbox.spy(site.save);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { hlxConfig: { content: null } },
+      ...defaultAuthAttributes,
+    });
+
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+    const updatedSite = await response.json();
+    expect(updatedSite.hlxConfig).to.deep.equal({
+      rso: { owner: 'owner', site: 'site' },
+    });
+  });
+
+  it('leaves hlxConfig unchanged when the patch omits it', async () => {
+    const site = sites[0];
+    const existingHlxConfig = {
+      content: { source: { type: 'markup', url: 'https://content.example/' } },
+    };
+    site.setHlxConfig(existingHlxConfig);
+    site.save = sandbox.spy(site.save);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { deliveryType: 'other' },
+      ...defaultAuthAttributes,
+    });
+
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+    const updatedSite = await response.json();
+    expect(updatedSite.hlxConfig).to.deep.equal(existingHlxConfig);
+  });
+
+  it('deep-merges deliveryConfig, preserving omitted sub-keys on partial patch', async () => {
+    const site = sites[0];
+    site.setDeliveryConfig({
+      programId: '12652',
+      environmentId: '16854',
+      authorURL: 'https://author-p12652-e16854-cmstg.adobeaemcloud.com/',
+    });
+    site.save = sandbox.spy(site.save);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { deliveryConfig: { siteId: '1234' } },
+      ...defaultAuthAttributes,
+    });
+
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+    const updatedSite = await response.json();
+    expect(updatedSite.deliveryConfig).to.deep.equal({
+      programId: '12652',
+      environmentId: '16854',
+      authorURL: 'https://author-p12652-e16854-cmstg.adobeaemcloud.com/',
+      siteId: '1234',
+    });
+  });
+
   it('returns forbidden when trying to update organizationId', async () => {
     const site = sites[0];
     site.save = sandbox.spy(site.save);

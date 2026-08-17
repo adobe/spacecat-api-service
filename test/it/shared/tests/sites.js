@@ -942,6 +942,36 @@ export default function siteTests(getHttpClient, resetData) {
         expect(after.status).to.equal(200);
         expect(after.body.baseURL).to.equal(SITE_1_BASE_URL);
       });
+
+      it('deep-merges hlxConfig on a partial patch, preserving content.source (SITES-49362)', async () => {
+        const http = getHttpClient();
+        // Seed a crosswalk-shaped hlxConfig (content.source.type=markup).
+        const seed = await http.user.patch(`/sites/${testSiteId}`, {
+          hlxConfig: {
+            content: { source: { type: 'markup', url: 'https://author.example/bin/franklin.delivery/o/s/main' } },
+            rso: {
+              owner: 'o', site: 's', ref: 'main', tld: 'aem.live',
+            },
+          },
+        });
+        expect(seed.status).to.equal(200);
+        expect(seed.body.hlxConfig.content.source.type).to.equal('markup');
+
+        // A partial patch touching only rso must NOT drop the sibling content.source.
+        const res = await http.user.patch(`/sites/${testSiteId}`, {
+          hlxConfig: {
+            rso: {
+              owner: 'o', site: 's2', ref: 'main', tld: 'aem.live',
+            },
+          },
+        });
+        expect(res.status).to.equal(200);
+        expect(res.body.hlxConfig.content.source).to.deep.equal({
+          type: 'markup',
+          url: 'https://author.example/bin/franklin.delivery/o/s/main',
+        });
+        expect(res.body.hlxConfig.rso.site).to.equal('s2');
+      });
     });
 
     describe('PATCH /sites/:siteId/config/scraper', () => {
