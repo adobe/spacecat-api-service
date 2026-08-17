@@ -59,6 +59,7 @@ function makeTransport(overrides = {}) {
     listProjects: sinon.stub().resolves({ items: [] }),
     getInitStatus: sinon.stub().resolves({ initialized: true }),
     createProject: sinon.stub().resolves({ id: 'new-proj' }),
+    updateProject: sinon.stub().resolves(null),
     publishProject: sinon.stub().resolves(null),
     deleteProject: sinon.stub().resolves(null),
     listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
@@ -276,6 +277,40 @@ describe('markets-subworkspace handlers', () => {
       });
       expect(transport.createProject).to.have.been.calledOnce;
       expect(transport.publishProject).to.have.been.calledOnce;
+    });
+
+    it('PATCHes settings.ai.primary_url from body.primaryUrl before publishing (#348)', async () => {
+      const transport = makeTransport();
+      const body = { ...createBody, brandDomain: 'nba.com', primaryUrl: 'https://www.nba.com/kings/' };
+      const res = await handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, body, log);
+      expect(res.status).to.equal(201);
+      expect(transport.updateProject).to.have.been.calledOnceWith(WS, 'new-proj', {
+        type: 'ai',
+        settings: { ai: { primary_url: 'www.nba.com/kings' } },
+      });
+      // set before publish so it's part of the published version
+      expect(transport.updateProject).to.have.been.calledBefore(transport.publishProject);
+    });
+
+    it('falls back to brandDomain for primary_url when body.primaryUrl is absent (#348)', async () => {
+      const transport = makeTransport();
+      await handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log);
+      expect(transport.updateProject).to.have.been.calledOnceWith(WS, 'new-proj', {
+        type: 'ai',
+        settings: { ai: { primary_url: 'example.com' } },
+      });
+    });
+
+    it('a failed primary_url PATCH is best-effort — market still publishes 201 (#348)', async () => {
+      const transport = makeTransport({
+        updateProject: sinon.stub().rejects(new Error('patch boom')),
+      });
+      const spyLog = { info: () => {}, error: () => {}, warn: sinon.spy() };
+      const b = makeBrand();
+      const res = await handleCreateMarketSubworkspace(transport, b, PARENT, createBody, spyLog);
+      expect(res.status).to.equal(201);
+      expect(transport.publishProject).to.have.been.calledOnce;
+      expect(spyLog.warn).to.have.been.called;
     });
 
     it('accepts siteId in place of brandDomain — validation passes (LLMO-6405)', async () => {

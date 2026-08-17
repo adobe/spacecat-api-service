@@ -66,7 +66,10 @@ export function initialMarketProjectName(market, languageCode) {
  * @param {string} params.brandName - brand display name (sub-workspace title + brand_name).
  * @param {string} params.market - ISO-2 country code for the initial market.
  * @param {string} params.languageCode - BCP-47 language code for the initial market.
- * @param {string} params.brandDomain - brand domain for the upstream project.
+ * @param {string} params.brandDomain - brand domain (host-only) for the upstream project.
+ * @param {string} [params.primaryUrl] - the full URL the brand tracks (may carry a
+ *   subdomain/subpath), written to `settings.ai.primary_url` (serenity-docs#348).
+ *   Falls back to `brandDomain` when absent.
  * @param {string[]} [params.modelIds] - AI models (LLMs) to attach to the
  *   project. This is always the brand's FIRST-EVER market (the sub-workspace
  *   is freshly created below), so an empty/omitted list resolves to the
@@ -115,7 +118,7 @@ export function initialMarketProjectName(market, languageCode) {
  *   best-effort and never throw.
  */
 export async function provisionBrandSubworkspace(context, {
-  spaceCatId, brandId, brandName, market, languageCode, brandDomain,
+  spaceCatId, brandId, brandName, market, languageCode, brandDomain, primaryUrl,
   modelIds = [], brandAliases = [], brandUrlSources = null, competitors = [],
   generateTopics = true, writeDeadline = computeWriteDeadline(),
 }, log = console) {
@@ -228,6 +231,9 @@ export async function provisionBrandSubworkspace(context, {
         market: resolvedMarket,
         languageCode: resolvedLanguageCode,
         brandDomain,
+        // #348: the full tracked URL for settings.ai.primary_url; the handler
+        // normalizes it and falls back to brandDomain when absent.
+        primaryUrl,
         brandNames: [brandName],
         brandDisplayName: brandName,
         name: initialMarketProjectName(resolvedMarket, resolvedLanguageCode),

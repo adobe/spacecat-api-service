@@ -33,7 +33,7 @@ import {
 } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode, getImsUserToken, resolveSemrushImsToken } from '../support/utils.js';
-import { hostnameFromUrlString } from '../support/url-utils.js';
+import { hostnameFromUrlString, siteIdentityFromUrlString } from '../support/url-utils.js';
 import {
   STATUS_BAD_REQUEST,
 } from '../utils/constants.js';
@@ -116,6 +116,21 @@ function brandDomainFromPayload(brandData) {
     .map((u) => (typeof u === 'string' ? u : u?.value))
     .find(hasText);
   return hostnameFromUrlString(first);
+}
+
+/**
+ * Derives the brand's full "site identity" (host + any subdomain/subpath) from a
+ * brand-create payload's URLs — the value written to Semrush's
+ * `settings.ai.primary_url` (serenity-docs#348), distinct from the host-only
+ * `domain` {@link brandDomainFromPayload} returns. Same first-URL selection.
+ * Returns null when no usable URL is present.
+ */
+function brandPrimaryUrlFromPayload(brandData) {
+  const urls = Array.isArray(brandData?.urls) ? brandData.urls : [];
+  const first = urls
+    .map((u) => (typeof u === 'string' ? u : u?.value))
+    .find(hasText);
+  return siteIdentityFromUrlString(first);
 }
 
 /**
@@ -1679,6 +1694,7 @@ function BrandsController(ctx, log, env) {
             market,
             languageCode,
             brandDomain,
+            primaryUrl: brandPrimaryUrlFromPayload(brandData) ?? undefined,
             modelIds,
             generateTopics: generatePrompts,
             brandAliases,

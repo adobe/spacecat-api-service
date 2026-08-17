@@ -19,7 +19,8 @@ import { ErrorWithStatusCode } from '../../utils.js';
 import { ERROR_CODES, isUpstreamGone, isSemrushTransportError } from '../errors.js';
 import { normalizeLanguageCode, normalizeGeoTargetId } from '../validation.js';
 import { resolveLocation } from '../locations.js';
-import { resolveSiteDomain } from '../site-linkage.js';
+import { resolveSiteIdentity } from '../site-linkage.js';
+import { siteIdentityFromUrlString } from '../../url-utils.js';
 
 const LANGUAGE_CACHE_TTL_MS = 60 * 60 * 1000;
 export const MAX_MODEL_IDS = 50;
@@ -340,9 +341,23 @@ export async function handleCreateMarket(
   // flat handler holds full `dataAccess` (incl. Site), so it self-derives — the
   // subworkspace handler cannot (narrowed dataAccess) and relies on the controller.
   // A supplied-but-unresolvable siteId is a hard 400 (never silently proceeds).
-  const brandDomain = hasText(body.brandDomain)
-    ? body.brandDomain
-    : await resolveSiteDomain(dataAccess, body.siteId, log);
+  // Derive BOTH values a Semrush project tracks from the same source
+  // (serenity-docs#348): host-only `domain` (unchanged) and the full
+  // `primaryUrl` identity (may carry subdomain/subpath) written to
+  // `settings.ai.primary_url`. A caller-threaded `body.primaryUrl` (the raw
+  // tracked URL) wins over the host-only `brandDomain` fallback.
+  let brandDomain;
+  let brandPrimaryUrl;
+  if (hasText(body.brandDomain)) {
+    brandDomain = body.brandDomain;
+    brandPrimaryUrl = siteIdentityFromUrlString(
+      hasText(body.primaryUrl) ? body.primaryUrl : body.brandDomain,
+    );
+  } else {
+    const identity = await resolveSiteIdentity(dataAccess, body.siteId, log);
+    brandDomain = identity?.domain ?? null;
+    brandPrimaryUrl = identity?.primaryUrl ?? null;
+  }
   if (!hasText(brandDomain)) {
     return {
       status: 400,
@@ -375,6 +390,28 @@ export async function handleCreateMarket(
         message: 'Upstream createProject returned no id',
       },
     };
+  }
+
+  // serenity-docs#348: set `settings.ai.primary_url` (the tracked URL, kept
+  // distinct from the host-only `domain`) via PATCH before publish — Semrush
+  // ignores it on create. Best-effort: a failed PATCH must not abort an
+  // otherwise-valid market; the data-service backfill reconciles it later.
+  // Truthy check (not hasText) so tsc narrows `string | null` -> `string`.
+  if (brandPrimaryUrl) {
+    try {
+      await transport.updateProject(semrushWorkspaceId, semrushProjectId, {
+        type: 'ai',
+        settings: { ai: { primary_url: brandPrimaryUrl } },
+      });
+    } catch (e) {
+      log?.warn?.('handleCreateMarket: best-effort primary_url PATCH failed; project left without primary_url', {
+        brandId,
+        semrushWorkspaceId,
+        semrushProjectId,
+        primaryUrl: brandPrimaryUrl,
+        error: e.message,
+      });
+    }
   }
 
   try {
