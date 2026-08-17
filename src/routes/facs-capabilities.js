@@ -1268,6 +1268,24 @@ const routeFacsCapabilities = {
   },
 
   /**
+   * Per-product COMPOSITE primary resource (opt-in). When the PRIMARY resource resolves
+   * for a listed product, `facsWrapper` delegates the grant decision to the resolver named
+   * by `resolver` (registered in `compositeResolvers`, see
+   * `src/support/facs-composite-resolvers.js`) instead of the plain state-layer read — for a
+   * product whose primary resource is scoped by an extra qualifier.
+   *
+   * ASO: the `site` primary is scoped by an opportunity-type qualifier
+   * (`facs_access_mappings.composite_key_value_1`; 'all' = site-wide). `asoOpportunityComposite`
+   * enforces (site × opportunity-type): opportunity-item routes grant on 'all' OR the
+   * opportunity's own type; the opportunity list defers to the controller for result-filtering;
+   * every other ASO site route grants on any active site binding carrying the capability.
+   * See mysticat-architecture/platform/decisions/rebac-composite-resource-key.md.
+   */
+  PRODUCTS_FACS_COMPOSITE_RESOURCE: {
+    ASO: { resourceType: 'site', resolver: 'asoOpportunityComposite' },
+  },
+
+  /**
    * Every `:param` from `src/routes/index.js` that no product currently
    * treats as a FACS resource. Together with the union of every product's
    * resource aliases above, this exhaustively classifies every `:param`
