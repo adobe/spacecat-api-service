@@ -33,6 +33,9 @@ export async function getEmailServiceToken(context) {
 
   try {
     const tokenPayload = await imsClient.getServiceAccessToken();
+    if (!tokenPayload?.access_token) {
+      throw new Error('IMS returned no access token');
+    }
     return tokenPayload.access_token;
   } catch (error) {
     context.log.error('[email-service] Failed to acquire IMS token', { error: error.message });

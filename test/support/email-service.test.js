@@ -261,6 +261,19 @@ describe('email-service', () => {
       expect(result.error).to.equal('IMS unavailable');
     });
 
+    it('should return error when IMS returns no access token', async () => {
+      imsClientInstance.getServiceAccessToken.resolves({});
+
+      const result = await sendEmail(mockContext, {
+        recipients: ['test@example.com'],
+        templateName: 'test-template',
+      });
+
+      expect(result.success).to.be.false;
+      expect(result.error).to.equal('IMS returned no access token');
+      expect(fetchStub).to.not.have.been.called;
+    });
+
     it('should use custom locale when provided', async () => {
       fetchStub.resolves({ status: 200, text: async () => 'OK' });
 
