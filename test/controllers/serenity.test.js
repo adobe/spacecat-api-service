@@ -2771,18 +2771,19 @@ describe('SerenityController', () => {
       expect(handlers.handleCreatePromptsSubworkspace).not.to.have.been.called;
     });
 
-    // serenity-docs#33: CSV import routes to the async job runner instead of the
-    // synchronous classify/create/publish path. `deferPublish: true` is the exact
-    // flag CSV-chunking already sets (a UI multi-add never sets it), so routing
-    // is by source, not array length.
-    describe('CSV import async routing (serenity-docs#33)', () => {
-      it('enqueues a serenity-classify-prompts job and returns 202 when deferPublish is true (flat mode)', async () => {
+    // serenity-docs#33 (+#2/#3): bulk import routes to the async job runner via a
+    // DEDICATED `async: true` flag — NOT `deferPublish`. `deferPublish` stays a
+    // synchronous publish-batching hint; keying async off its own flag keeps the
+    // sync CSV-chunking client (which sets deferPublish on non-final chunks)
+    // working synchronously and untouched.
+    describe('async bulk routing (serenity-docs#33)', () => {
+      it('enqueues a serenity-classify-prompts job and returns 202 when async is true (flat mode)', async () => {
         const controller = SerenityController({ env: {} }, fakeLog(), {});
         const prompts = [{
           text: 'What is your return policy?', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'],
         }];
         const response = await controller.createPrompts(fakeContext({
-          data: { deferPublish: true, prompts },
+          data: { async: true, prompts },
         }));
 
         expect(response.status).to.equal(202);
@@ -2800,7 +2801,21 @@ describe('SerenityController', () => {
         expect(handlers.handleCreatePrompts).to.not.have.been.called;
       });
 
-      it('stays synchronous (no enqueue) when deferPublish is absent, even for a large batch', async () => {
+      // Regression guard for the #2 collision: deferPublish alone MUST stay
+      // synchronous now that it no longer triggers async.
+      it('stays synchronous when deferPublish is true but async is absent (collision guard)', async () => {
+        handlers.handleCreatePrompts.resolves({ created: 1, failed: [] });
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.createPrompts(fakeContext({
+          data: { deferPublish: true, prompts: [{ text: 'x', geoTargetId: 2840, languageCode: 'en' }] },
+        }));
+
+        expect(response.status).to.equal(200);
+        expect(createAndEnqueueJobStub).to.not.have.been.called;
+        expect(handlers.handleCreatePrompts).to.have.been.calledOnce;
+      });
+
+      it('stays synchronous (no enqueue) when async is absent, even for a large batch', async () => {
         handlers.handleCreatePrompts.resolves({ created: 1, failed: [] });
         const controller = SerenityController({ env: {} }, fakeLog(), {});
         const response = await controller.createPrompts(fakeContext({
@@ -2812,14 +2827,24 @@ describe('SerenityController', () => {
         expect(handlers.handleCreatePrompts).to.have.been.calledOnce;
       });
 
-      it('stays synchronous for subworkspace-mode brands even when deferPublish is true', async () => {
+      it('400s when async is not a boolean', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.createPrompts(fakeContext({
+          data: { async: 'yes', prompts: [{ text: 'x', geoTargetId: 2840, languageCode: 'en' }] },
+        }));
+
+        expect(response.status).to.equal(400);
+        expect(createAndEnqueueJobStub).to.not.have.been.called;
+      });
+
+      it('stays synchronous for subworkspace-mode brands even when async is true', async () => {
         resolveBrandWorkspaceStub.resolves({
           mode: 'subworkspace', workspaceId: SUBWS, parentWorkspaceId: WORKSPACE,
         });
         handlers.handleCreatePromptsSubworkspace.resolves({ created: 1, failed: [] });
         const controller = SerenityController({ env: {} }, fakeLog(), {});
         const response = await controller.createPrompts(fakeContext({
-          data: { deferPublish: true, prompts: [{ text: 'x', geoTargetId: 2840, languageCode: 'en' }] },
+          data: { async: true, prompts: [{ text: 'x', geoTargetId: 2840, languageCode: 'en' }] },
         }));
 
         expect(response.status).to.equal(200);
@@ -2827,23 +2852,23 @@ describe('SerenityController', () => {
         expect(handlers.handleCreatePromptsSubworkspace).to.have.been.calledOnce;
       });
 
-      it('400s without enqueueing when deferPublish is true but prompts is empty', async () => {
+      it('400s without enqueueing when async is true but prompts is empty', async () => {
         const controller = SerenityController({ env: {} }, fakeLog(), {});
         const response = await controller.createPrompts(fakeContext({
-          data: { deferPublish: true, prompts: [] },
+          data: { async: true, prompts: [] },
         }));
 
         expect(response.status).to.equal(400);
         expect(createAndEnqueueJobStub).to.not.have.been.called;
       });
 
-      it('400s without enqueueing when deferPublish is true and prompts exceeds the max item cap', async () => {
+      it('400s without enqueueing when async is true and prompts exceeds the max item cap', async () => {
         const controller = SerenityController({ env: {} }, fakeLog(), {});
         const tooMany = Array.from({ length: 501 }, (_, i) => ({
           text: `p${i}`, geoTargetId: 2840, languageCode: 'en',
         }));
         const response = await controller.createPrompts(fakeContext({
-          data: { deferPublish: true, prompts: tooMany },
+          data: { async: true, prompts: tooMany },
         }));
 
         expect(response.status).to.equal(400);

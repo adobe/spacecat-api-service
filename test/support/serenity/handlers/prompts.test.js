@@ -25,6 +25,7 @@ import {
   normalizePromptInput,
   makeIntentInjector,
   validateDeferPublish,
+  validateAsync,
   reconcilePublishErrors,
   resolveCallerId,
   buildCreateMetadata,
@@ -2567,6 +2568,17 @@ describe('handlers/prompts.js — deferPublish (serenity-docs#32 CSV-chunking)',
     expect(validateDeferPublish({ deferPublish: true })).to.equal(true);
     expect(() => validateDeferPublish({ deferPublish: 'yes' }))
       .to.throw(ErrorWithStatusCode, /deferPublish must be a boolean/);
+  });
+
+  it('validateAsync resolves absent/false/true and rejects a non-boolean (serenity-docs#33)', () => {
+    expect(validateAsync({})).to.equal(false);
+    expect(validateAsync({ async: false })).to.equal(false);
+    expect(validateAsync({ async: true })).to.equal(true);
+    expect(() => validateAsync({ async: 'yes' }))
+      .to.throw(ErrorWithStatusCode, /async must be a boolean/);
+    // async and deferPublish are independent flags: neither implies the other.
+    expect(validateAsync({ deferPublish: true })).to.equal(false);
+    expect(validateDeferPublish({ async: true })).to.equal(false);
   });
 
   it('skips the trailing publish and reports published:false when deferPublish is true', async () => {

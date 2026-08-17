@@ -12027,7 +12027,20 @@ SerenityCreatePromptsRequest:
         carries `published: false`). Used for chunked CSV imports, where the
         client posts several chunks and issues a single publish after the last
         one (serenity-docs#32). Omitted/false publishes once at the end of the
-        call as usual.
+        call as usual. This is a synchronous-path hint only and does NOT trigger
+        async processing — use `async` for that.
+    async:
+      type: boolean
+      default: false
+      description: >
+        When true (flat-mode brands only), the request is processed
+        ASYNCHRONOUSLY: instead of classifying + creating + publishing inline,
+        the whole write is enqueued to a background job and the endpoint returns
+        202 with a job id to poll via
+        `GET .../serenity/prompts/jobs/{jobId}` (serenity-docs#33). Deliberately
+        distinct from `deferPublish` (a synchronous publish-batching hint) so
+        that the synchronous CSV-chunking client is never routed to async
+        unexpectedly. Omitted/false processes synchronously as usual.
 
 SerenityCreatePromptsResponse:
   type: object

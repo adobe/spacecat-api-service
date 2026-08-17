@@ -193,6 +193,30 @@ export function validateDeferPublish(body) {
 }
 
 /**
+ * Whether a bulk-create request opts into the ASYNC job runner (serenity-docs#33).
+ *
+ * This is a DEDICATED trigger, deliberately separate from `deferPublish`. The
+ * two are unrelated concerns and must not be conflated: `deferPublish` is a
+ * publish-batching hint on the synchronous path (defer the upstream publish
+ * until the last chunk), whereas `async` routes the whole write off the request
+ * path onto the SQS worker and returns 202 + a job id to poll. Overloading
+ * `deferPublish` for both meant the sync CSV-chunking client (which sets
+ * `deferPublish: true` on every non-final chunk) silently got 202s it did not
+ * expect. Keying async off its own explicit flag lets that client keep working
+ * synchronously untouched, and makes async strictly opt-in.
+ *
+ * @param {object} body - request body.
+ * @returns {boolean} true when `async === true`.
+ */
+export function validateAsync(body) {
+  const asyncFlag = body?.async;
+  if (asyncFlag !== undefined && typeof asyncFlag !== 'boolean') {
+    throw new ErrorWithStatusCode('async must be a boolean', 400);
+  }
+  return asyncFlag === true;
+}
+
+/**
  * Builds the prompt's tag list from the upstream item: one entry per tag,
  * carrying its id, bare name, parent id and root-first ancestry breadcrumb.
  *

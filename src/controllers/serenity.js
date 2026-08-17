@@ -29,7 +29,7 @@ import {
   handleCreatePrompts,
   handleUpdatePrompt,
   handleBulkDeletePrompts,
-  validateDeferPublish,
+  validateAsync,
   BULK_PROMPTS_MAX_ITEMS,
   resolveCallerId,
 } from '../support/serenity/handlers/prompts.js';
@@ -530,16 +530,18 @@ function SerenityController(context, log, env) {
       if (auth.error) {
         return auth.error;
       }
-      // serenity-docs#33: CSV import is the ONLY bulk write path that routes to
-      // the async job runner — every other write path (single create, single
-      // edit, UI multi-add) stays synchronous. Routing is by SOURCE, not array
-      // length: `deferPublish` is the exact flag CSV-chunking already sets
-      // (see handleCreatePrompts' docstring) precisely because a UI multi-add
-      // never sets it, so a three-prompt UI add never pays queue+worker+publish
-      // latency. Flat-mode brands only for now — see this PR's report for why
-      // subworkspace-mode CSV import stays on the synchronous path.
+      // serenity-docs#33 + #2/#3: async routing is keyed off a DEDICATED
+      // `async: true` flag, NOT `deferPublish`. `deferPublish` is a publish-
+      // batching hint on the synchronous CSV-chunking path (set on every non-
+      // final chunk); conflating the two made that sync client silently receive
+      // 202s it never handled. Keying async off its own explicit opt-in keeps
+      // every existing write path — single create/edit, UI multi-add, and the
+      // sync CSV-chunking client — synchronous and untouched, and makes the
+      // async job runner strictly opt-in for callers that will poll the job.
+      // Flat-mode brands only for now — subworkspace-mode CSV import stays on
+      // the synchronous path (see the #33 report).
       const body = ctx.data || {};
-      if (auth.mode !== 'subworkspace' && validateDeferPublish(body)) {
+      if (auth.mode !== 'subworkspace' && validateAsync(body)) {
         const prompts = Array.isArray(body.prompts) ? body.prompts : [];
         if (prompts.length === 0) {
           return createResponse(
