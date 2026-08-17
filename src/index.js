@@ -119,6 +119,7 @@ import AuditPolicyController from './controllers/audit-policy.js';
 import SerenityController from './controllers/serenity.js';
 import ElementsController from './controllers/elements.js';
 import ProxyController from './controllers/proxy.js';
+import Brand24Controller from './controllers/brand24.js';
 import OnboardingController from './controllers/onboarding.js';
 import GitHubWebhookHmacHandler from './support/github-webhook-hmac-handler.js';
 import AsoOverlayKeyHandler from './support/aso-overlay-key-handler.js';
@@ -301,6 +302,7 @@ async function run(request, context) {
     const serenityController = SerenityController(context, log, context.env);
     const elementsController = ElementsController(context, log, context.env);
     const proxyController = ProxyController();
+    const brand24Controller = Brand24Controller(context, log, context.env);
     const taskManagementController = TaskManagementController(context);
     const onboardingController = OnboardingController(context, log, context.env);
     const promptSuggestionSchedulesController = PromptSuggestionSchedulesController(context);
@@ -369,6 +371,7 @@ async function run(request, context) {
       serenityController,
       elementsController,
       proxyController,
+      brand24Controller,
       taskManagementController,
       onboardingController,
       redirectsController,

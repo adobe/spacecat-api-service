@@ -109,6 +109,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} serenityController - Serenity API controller (prompts + markets).
  * @param {Object} elementsController - Elements API controller (Semrush Elements wrappers).
  * @param {Object} proxyController - URL proxy controller for client-side previews.
+ * @param {Object} brand24Controller - Brand24 API proxy controller (POC — Offsite Visibility).
  * @param {Object} taskManagementController - Task-management (Jira ticket creation) controller.
  * @param {Object} onboardingController - Semrush onboarding notification controller.
  * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
@@ -180,6 +181,7 @@ export default function getRouteHandlers(
   serenityController,
   elementsController,
   proxyController,
+  brand24Controller,
   taskManagementController,
   onboardingController,
   redirectsController,
@@ -496,6 +498,7 @@ export default function getRouteHandlers(
     'DELETE /tools/api-keys/:id': apiKeyController.deleteApiKey,
     'GET /tools/api-keys': apiKeyController.getApiKeys,
     'GET /tools/proxy': proxyController.getPreview,
+    'GET /tools/brand24': brand24Controller.getData,
     'GET /monitoring/drs-bp-pg-audit': drsBpPgAuditController.getProjectionAudit,
 
     // Hybrid permission model — state-layer management + capability
