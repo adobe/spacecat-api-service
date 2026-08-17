@@ -105,6 +105,8 @@ async function buildResolveData(org, site, context, asoEntitlement) {
  * - Omitted keys keep their existing value in `base`.
  * - A `null` value deletes the key.
  * - Plain objects are merged recursively; arrays and non-object values replace.
+ * - Dangerous keys (`__proto__`/`constructor`/`prototype`) are ignored to
+ *   prevent prototype pollution from an untrusted request body.
  *
  * @param {object} base - Existing value.
  * @param {object} patch - Incoming partial patch.
@@ -113,7 +115,9 @@ async function buildResolveData(org, site, context, asoEntitlement) {
 function deepMerge(base, patch) {
   const result = { ...(isObject(base) ? base : {}) };
   for (const [key, value] of Object.entries(patch)) {
-    if (value === null) {
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+      // Ignore prototype-pollution vectors from the request body.
+    } else if (value === null) {
       delete result[key];
     } else if (isObject(value) && isObject(result[key])) {
       result[key] = deepMerge(result[key], value);

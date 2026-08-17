@@ -867,6 +867,26 @@ describe('Sites Controller', () => {
     });
   });
 
+  it('ignores __proto__ keys in a config patch to prevent prototype pollution', async () => {
+    const site = sites[0];
+    site.setHlxConfig({ rso: { owner: 'o' } });
+    site.save = sandbox.spy(site.save);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        hlxConfig: JSON.parse('{"__proto__": {"polluted": true}, "rso": {"site": "s"}}'),
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(200);
+    // Object.prototype must not have been polluted.
+    expect({}.polluted).to.equal(undefined);
+    const updatedSite = await response.json();
+    expect(updatedSite.hlxConfig).to.deep.equal({ rso: { owner: 'o', site: 's' } });
+  });
+
   it('returns forbidden when trying to update organizationId', async () => {
     const site = sites[0];
     site.save = sandbox.spy(site.save);
