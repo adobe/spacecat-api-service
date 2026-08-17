@@ -14,7 +14,12 @@ import { expect } from 'chai';
 
 import {
   DIMENSION,
-  DIMENSION_ROOT_NAMES,
+  DIMENSION_PROVISION_ORDER,
+  RESERVED_ROOT_NAMES,
+  INTENT_ROOT_NAME,
+  LEGACY_INTENT_ROOT_NAME,
+  rootNameOfDimension,
+  dimensionOfRootName,
   ORIGIN_VALUE,
   INTENT_VALUE,
   TYPE_VALUE,
@@ -39,16 +44,16 @@ describe('serenity prompt-tags taxonomy', () => {
     it('includes the five roots, all bare-named (membership, never a count)', () => {
       // Membership, not set-equality — a further open root is contemplated
       // (source-dimension.md header), so nothing may key on the root count.
-      expect([...DIMENSION_ROOT_NAMES]).to.include.members([
+      expect([...DIMENSION_PROVISION_ORDER]).to.include.members([
         'category', 'intent', 'origin', 'type', 'source',
       ]);
-      DIMENSION_ROOT_NAMES.forEach((n) => expect(n).to.not.include(':'));
+      DIMENSION_PROVISION_ORDER.forEach((n) => expect(n).to.not.include(':'));
     });
 
     it('splits the roots into open (category, source) and closed (intent, origin, type)', () => {
       expect([...OPEN_DIMENSIONS]).to.deep.equal([DIMENSION.CATEGORY, DIMENSION.SOURCE]);
       expect([...CLOSED_DIMENSIONS]).to.deep.equal(['intent', 'origin', 'type']);
-      expect([...ALL_DIMENSIONS].sort()).to.deep.equal([...DIMENSION_ROOT_NAMES].sort());
+      expect([...ALL_DIMENSIONS].sort()).to.deep.equal([...DIMENSION_PROVISION_ORDER].sort());
     });
 
     it('is server-owned for everything except category (write-guard / create-semantics axis)', () => {
@@ -67,9 +72,34 @@ describe('serenity prompt-tags taxonomy', () => {
       expect(isDimensionRootName('Running Shoes')).to.equal(false);
     });
 
+    it('reserves BOTH intent spellings, so neither can be shadowed mid-rename', () => {
+      expect(isDimensionRootName(INTENT_ROOT_NAME)).to.equal(true);
+      expect(isDimensionRootName(LEGACY_INTENT_ROOT_NAME)).to.equal(true);
+      expect([...RESERVED_ROOT_NAMES]).to.include(INTENT_ROOT_NAME);
+    });
+
+    it('maps a dimension to its upstream root name, and back', () => {
+      // Only `intent` differs from its key: Semrush hides a `$abv_tags$`-marked
+      // entry from the customer-facing Brand Presence tag filter.
+      expect(rootNameOfDimension(DIMENSION.INTENT)).to.equal(INTENT_ROOT_NAME);
+      expect(dimensionOfRootName(INTENT_ROOT_NAME)).to.equal(DIMENSION.INTENT);
+      // The pre-rename name IS the key, so the fold is identity for it and a
+      // mid-rename project answers the same dimension as a renamed one.
+      expect(dimensionOfRootName(LEGACY_INTENT_ROOT_NAME)).to.equal(DIMENSION.INTENT);
+      DIMENSION_PROVISION_ORDER
+        .filter((d) => d !== DIMENSION.INTENT)
+        .forEach((d) => {
+          expect(rootNameOfDimension(d)).to.equal(d);
+          expect(dimensionOfRootName(d)).to.equal(d);
+        });
+      // Nothing outside the taxonomy is rewritten in either direction.
+      expect(rootNameOfDimension('Running Shoes')).to.equal('Running Shoes');
+      expect(dimensionOfRootName('Running Shoes')).to.equal('Running Shoes');
+    });
+
     it('is frozen (immutable single source of truth)', () => {
       expect(Object.isFrozen(DIMENSION)).to.equal(true);
-      expect(Object.isFrozen(DIMENSION_ROOT_NAMES)).to.equal(true);
+      expect(Object.isFrozen(DIMENSION_PROVISION_ORDER)).to.equal(true);
       expect(Object.isFrozen(CLOSED_DIMENSION_VALUES)).to.equal(true);
     });
   });

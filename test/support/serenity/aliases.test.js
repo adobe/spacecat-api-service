@@ -15,6 +15,10 @@ import { expect } from 'chai';
 import {
   dedupeAliases,
   sameAliasSet,
+  sameAliasSetExact,
+  benchmarkAliases,
+  mergeBenchmarkAliases,
+  aliasKeysOwnedByOthers,
   rejectedAliasesFrom,
 } from '../../../src/support/serenity/aliases.js';
 
@@ -47,6 +51,108 @@ describe('serenity alias helpers', () => {
       expect(sameAliasSet([], null)).to.equal(true);
       expect(sameAliasSet(undefined, [])).to.equal(true);
       expect(sameAliasSet(['A'], [])).to.equal(false);
+    });
+  });
+
+  describe('sameAliasSetExact', () => {
+    it('is order-insensitive but case-SENSITIVE', () => {
+      expect(sameAliasSetExact(['A', 'b'], ['b', 'A'])).to.equal(true);
+      expect(sameAliasSetExact([' A ', 'b'], ['A', 'b'])).to.equal(true);
+      expect(sameAliasSetExact(['A', 'b'], ['a', 'b'])).to.equal(false);
+    });
+
+    it('detects a genuine difference and treats empty / non-array as the empty set', () => {
+      expect(sameAliasSetExact(['A'], ['A', 'a'])).to.equal(false);
+      expect(sameAliasSetExact([], null)).to.equal(true);
+      expect(sameAliasSetExact(undefined, ['A'])).to.equal(false);
+      expect(sameAliasSetExact(['A', ''], ['A'])).to.equal(true);
+    });
+
+    it('does not call two same-size sets equal when their members differ', () => {
+      expect(sameAliasSetExact(['A', 'B'], ['A', 'C'])).to.equal(false);
+    });
+  });
+
+  describe('benchmarkAliases', () => {
+    it('returns one lowercase spelling per alias, plus the benchmark name', () => {
+      expect(benchmarkAliases('Ford', ['Ford Motor', 'FoMoCo']))
+        .to.deep.equal(['ford motor', 'fomoco', 'ford']);
+    });
+
+    it('yields just the name when the brand has no aliases', () => {
+      expect(benchmarkAliases('Bass Pro', [])).to.deep.equal(['bass pro']);
+      expect(benchmarkAliases('Bass Pro', null)).to.deep.equal(['bass pro']);
+    });
+
+    it('collapses two spellings of one alias, so a 409 pair cannot be built', () => {
+      // Upstream folds case to identify an alias and refuses a list holding both.
+      expect(benchmarkAliases('GMC', ['GMC', 'gmc'])).to.deep.equal(['gmc']);
+      expect(benchmarkAliases('Acme', ['ACME', 'acme'])).to.deep.equal(['acme']);
+    });
+
+    it('tolerates a missing name and empty entries', () => {
+      expect(benchmarkAliases('', ['Acme', '  '])).to.deep.equal(['acme']);
+      expect(benchmarkAliases(null, ['Acme'])).to.deep.equal(['acme']);
+      expect(benchmarkAliases('Acme', [])).to.deep.equal(['acme']);
+    });
+  });
+
+  describe('mergeBenchmarkAliases', () => {
+    it('carries forward live values the desired set does not know', () => {
+      // 'gm' is Semrush's own enrichment — a plain replace would drop it.
+      expect(mergeBenchmarkAliases(['gm', 'onstar'], ['onstar', 'guardian']))
+        .to.deep.equal(['gm', 'onstar', 'guardian']);
+    });
+
+    it('keeps the live spelling of an alias already there', () => {
+      // A PUT cannot re-case an alias upstream already stores.
+      expect(mergeBenchmarkAliases(['Bass Pro'], ['bass pro'])).to.deep.equal(['Bass Pro']);
+    });
+
+    it('applies the preferred spelling only to an alias it creates', () => {
+      expect(mergeBenchmarkAliases(['Bass Pro'], ['bass pro', 'outdoor world']))
+        .to.deep.equal(['Bass Pro', 'outdoor world']);
+    });
+
+    it('drops a removed alias whatever its casing', () => {
+      expect(mergeBenchmarkAliases(['Old', 'Keep'], ['keep'], ['old']))
+        .to.deep.equal(['Keep']);
+    });
+
+    it('keeps a removed value the desired set still asks for', () => {
+      expect(mergeBenchmarkAliases(['Acme'], ['acme'], ['Acme'])).to.deep.equal(['acme']);
+    });
+
+    it('trims, drops empties, and tolerates non-array inputs', () => {
+      expect(mergeBenchmarkAliases([' A ', '', null], [' b '])).to.deep.equal(['A', 'b']);
+      expect(mergeBenchmarkAliases(null, null)).to.deep.equal([]);
+      expect(mergeBenchmarkAliases(['A'], null, null)).to.deep.equal(['A']);
+      expect(mergeBenchmarkAliases(['A'], ['A'], [''])).to.deep.equal(['A']);
+    });
+  });
+
+  describe('aliasKeysOwnedByOthers', () => {
+    const benchmarks = [
+      { id: 'a', brand_name: 'Rival One', brand_aliases: ['rival one', 'R1'] },
+      { id: 'b', brand_name: 'Rival Two', brand_aliases: ['rival two'] },
+      { id: 'c', brand_name: '', brand_aliases: null },
+    ];
+
+    it('collects every other benchmark\'s name and aliases, case-folded', () => {
+      expect([...aliasKeysOwnedByOthers(benchmarks, 'a')].sort())
+        .to.deep.equal(['rival two']);
+      expect([...aliasKeysOwnedByOthers(benchmarks, 'b')].sort())
+        .to.deep.equal(['r1', 'rival one']);
+    });
+
+    it('excludes nothing when no owner id is given', () => {
+      expect([...aliasKeysOwnedByOthers(benchmarks)].sort())
+        .to.deep.equal(['r1', 'rival one', 'rival two']);
+    });
+
+    it('tolerates a non-array listing and blank values', () => {
+      expect(aliasKeysOwnedByOthers(null, 'a').size).to.equal(0);
+      expect(aliasKeysOwnedByOthers([{ id: 'x', brand_name: '  ' }], 'y').size).to.equal(0);
     });
   });
 

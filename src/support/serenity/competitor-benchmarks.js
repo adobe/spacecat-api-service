@@ -20,7 +20,14 @@ import {
   marketOf,
   republishBestEffort,
 } from './brand-urls.js';
-import { dedupeAliases, sameAliasSet, rejectedAliasesFrom } from './aliases.js';
+import {
+  dedupeAliases,
+  sameAliasSetExact,
+  benchmarkAliases,
+  mergeBenchmarkAliases,
+  aliasKeysOwnedByOthers,
+  rejectedAliasesFrom,
+} from './aliases.js';
 import { resolveProjects } from './resolve-projects.js';
 
 /** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */
@@ -141,16 +148,22 @@ export function removedCompetitorDomains(oldCompetitors, newCompetitors) {
   return [...removed];
 }
 
-// Builds the `{ brand_name, domain, brand_aliases? }` benchmark create/update
-// body from a collected competitor. `brand_aliases` is omitted when empty so the
-// upstream payload stays minimal (and an alias-less update clears nothing it
-// shouldn't — the PUT replaces the full benchmark, so we always send the
-// computed set, empty meaning "no aliases").
-function benchmarkBody(c) {
+// Builds the `{ brand_name, domain, brand_aliases }` benchmark create/update body
+// from a collected competitor.
+//
+// `brand_aliases` is ALWAYS sent, even when empty. Omitting the field does not
+// leave the stored list alone — it clears it (live-verified 2026-08-13: a PUT of
+// `{brand_name, domain}` over a benchmark holding two aliases emptied it). An
+// update that means to change only the name must therefore still carry the aliases
+// it wants to keep.
+//
+// `aliases` is the already-resolved list to send: on create the preferred spellings
+// for the competitor, on update those merged over the benchmark's live list.
+function benchmarkBody(c, aliases) {
   return {
     brand_name: c.name,
     domain: c.domain,
-    ...(c.aliases.length > 0 ? { brand_aliases: c.aliases } : {}),
+    brand_aliases: aliases,
   };
 }
 
@@ -176,6 +189,11 @@ function benchmarkBody(c) {
  * @param {object} [log] - optional logger ({ info? }).
  * @param {Set<string>} [reservedDomains=new Set()] - the brand's own normalized
  *   domains, excluded so a competitor can't be one of the brand's properties.
+ * @param {Array<{name?: string, url?: string, regions?: string[], aliases?: string[]}>}
+ *   [previousCompetitors=[]] - the competitors as they were BEFORE this edit. Run
+ *   through the same region filter, so per domain the aliases this edit dropped from
+ *   THIS market are the only values removed from that benchmark; the rest of its live
+ *   list (Semrush's enrichment) is carried forward.
  * @returns {Promise<{created: number, updated: number, deleted: number,
  *   changed: boolean, rejected: {domain: string, aliases: string[]}[]}>}
  */
@@ -188,6 +206,7 @@ export async function syncCompetitorBenchmarksForProject(
   market,
   log,
   reservedDomains = new Set(),
+  previousCompetitors = [],
 ) {
   const desired = collectCompetitorBenchmarks(competitors, market, reservedDomains);
   const removedSet = new Set(
@@ -202,10 +221,13 @@ export async function syncCompetitorBenchmarksForProject(
     };
   }
 
-  const resp = await transport.listBenchmarks(workspaceId, projectId);
+  // Read the DRAFT view: the writes below act on the draft, so diffing the
+  // published list would compare against a stale snapshot on any project that
+  // already has pending changes.
+  const resp = await transport.listBenchmarks(workspaceId, projectId, { draft: true });
   const benchmarks = Array.isArray(resp?.aio_benchmarks) ? resp.aio_benchmarks : [];
 
-  // Domain → competitor (non-main) benchmark { id, aliases }, for update/delete.
+  // Domain → competitor (non-main) benchmark { id, name, aliases }, for update/delete.
   const competitorByDomain = new Map();
   const presentDomains = new Set();
   for (const b of benchmarks) {
@@ -224,7 +246,43 @@ export async function syncCompetitorBenchmarksForProject(
     }
   }
 
+  // The aliases this edit dropped per domain, on this market's region filter.
+  const previousByDomain = new Map(
+    collectCompetitorBenchmarks(previousCompetitors, market, reservedDomains)
+      .map((c) => [c.domain, c.aliases]),
+  );
+
   const toCreate = desired.filter((c) => !presentDomains.has(c.domain));
+  // Domain → the alias list to PUT, for the competitors that already have a
+  // benchmark: the derived set merged over what is live there, minus the aliases
+  // this edit dropped. Computed once and reused by the drift check and the write.
+  // An alias another benchmark in this project already owns must never be offered:
+  // upstream refuses it with a 409 that fails the WHOLE write, so on a batched
+  // create it would take every other competitor in the batch with it. The aliases
+  // we derive make that reachable — a competitor's own lowercase name can collide
+  // with a sibling benchmark's name or alias — so they are filtered here, against
+  // the listing already in hand.
+  const ownedElsewhere = (ownId) => aliasKeysOwnedByOthers(benchmarks, ownId);
+  const allowed = (list, ownId) => {
+    const owned = ownedElsewhere(ownId);
+    return list.filter((a) => !owned.has(a.toLowerCase()));
+  };
+
+  const plannedAliases = new Map();
+  for (const c of desired) {
+    const existing = competitorByDomain.get(c.domain);
+    if (existing) {
+      const keptKeys = new Set(c.aliases.map((a) => a.toLowerCase()));
+      const removed = (previousByDomain.get(c.domain) || [])
+        .filter((a) => !keptKeys.has(a.toLowerCase()));
+      plannedAliases.set(c.domain, mergeBenchmarkAliases(
+        existing.aliases,
+        allowed(benchmarkAliases(c.name, c.aliases), existing.id),
+        removed,
+      ));
+    }
+  }
+
   // Update an existing competitor benchmark when its display name OR its alias
   // set drifted. The benchmark is keyed by domain, so a rename that keeps the
   // same URL (e.g. "test1234" → "test12345" on test1234.de) would otherwise
@@ -238,7 +296,9 @@ export async function syncCompetitorBenchmarksForProject(
     // the desired one (a genuine rename). An absent upstream name is left alone
     // rather than backfilled, so a benchmark we did not name is never touched.
     const nameDrifted = existing.name !== '' && existing.name !== c.name;
-    return nameDrifted || !sameAliasSet(existing.aliases, c.aliases);
+    // Compared with casing significant; the merge keeps live spellings, so this is
+    // quiet in the steady state.
+    return nameDrifted || !sameAliasSetExact(existing.aliases, plannedAliases.get(c.domain));
   });
   const toDelete = [...removedSet]
     .map((d) => competitorByDomain.get(d)?.id)
@@ -247,14 +307,29 @@ export async function syncCompetitorBenchmarksForProject(
   let created = 0;
   let updated = 0;
   let deleted = 0;
+  // A created benchmark has no live list to merge over, so it takes the preferred
+  // spellings as they are — the one moment we get to choose them, since upstream
+  // keeps whatever spelling an alias was created with.
+  const createdAliases = new Map(
+    toCreate.map((c) => [c.domain, allowed(benchmarkAliases(c.name, c.aliases))]),
+  );
   if (toCreate.length > 0) {
-    await transport.createBenchmarks(workspaceId, projectId, toCreate.map(benchmarkBody));
+    await transport.createBenchmarks(
+      workspaceId,
+      projectId,
+      toCreate.map((c) => benchmarkBody(c, createdAliases.get(c.domain))),
+    );
     created = toCreate.length;
   }
   for (const c of toUpdate) {
     const { id } = competitorByDomain.get(c.domain);
     // eslint-disable-next-line no-await-in-loop
-    await transport.updateBenchmark(workspaceId, projectId, id, benchmarkBody(c));
+    await transport.updateBenchmark(
+      workspaceId,
+      projectId,
+      id,
+      benchmarkBody(c, plannedAliases.get(c.domain)),
+    );
     updated += 1;
   }
   if (toDelete.length > 0) {
@@ -262,21 +337,45 @@ export async function syncCompetitorBenchmarksForProject(
     deleted = toDelete.length;
   }
 
-  // Capture aliases Semrush rejected on the benchmarks we just wrote with aliases.
-  // Only re-read when an alias-bearing create or any update happened (a plain
-  // create-without-aliases or a delete can't produce rejections).
+  // Report the aliases a benchmark we just wrote is not carrying, so the caller can
+  // warn the operator. Only re-read when an alias-bearing write happened.
+  //
+  // Values THIS sync removed also land in `rejected_brand_aliases` (live-verified
+  // 2026-08-13), so they are filtered out per domain — flagging the operator's own
+  // deletion back at them is noise, not a warning.
   let rejected = [];
-  const wroteAliases = toUpdate.length > 0 || toCreate.some((c) => c.aliases.length > 0);
+  const wroteAliases = toUpdate.length > 0
+    || toCreate.some((c) => (createdAliases.get(c.domain) || []).length > 0);
   if (wroteAliases) {
-    const desiredAliasDomains = new Set(
-      desired.filter((c) => c.aliases.length > 0).map((c) => c.domain),
+    const desiredAliasDomains = new Set([
+      ...toUpdate.map((c) => c.domain),
+      ...toCreate.filter((c) => (createdAliases.get(c.domain) || []).length > 0)
+        .map((c) => c.domain),
+    ]);
+    const removedKeysByDomain = new Map(
+      desired.map((c) => {
+        const keptKeys = new Set(c.aliases.map((a) => a.toLowerCase()));
+        return [
+          c.domain,
+          new Set((previousByDomain.get(c.domain) || [])
+            .map((a) => a.toLowerCase())
+            .filter((a) => !keptKeys.has(a))),
+        ];
+      }),
     );
-    const after = await transport.listBenchmarks(workspaceId, projectId);
+    // Draft again — the writes above are not published yet.
+    const after = await transport.listBenchmarks(workspaceId, projectId, { draft: true });
     const list = Array.isArray(after?.aio_benchmarks) ? after.aio_benchmarks : [];
     rejected = rejectedAliasesFrom(list, (b) => {
       const d = normalizeBenchmarkDomain(b?.domain);
       return b?.main_brand !== true && d !== null && desiredAliasDomains.has(d);
-    });
+    })
+      .map((r) => {
+        const key = normalizeBenchmarkDomain(r.domain ?? '');
+        const dropped = (key !== null && removedKeysByDomain.get(key)) || new Set();
+        return { ...r, aliases: r.aliases.filter((a) => !dropped.has(String(a).toLowerCase())) };
+      })
+      .filter((r) => r.aliases.length > 0);
   }
 
   if (created > 0 || updated > 0 || deleted > 0) {
@@ -311,6 +410,10 @@ export async function syncCompetitorBenchmarksForProject(
  * @param {Array<object>|null} [prefetchedProjects=null] - a pre-fetched project listing
  *   to reuse (the brand-edit path lists once and shares it across the URL/competitor/alias
  *   syncs); null/undefined lists here. An explicit `[]` reuses the prefetch (no re-list).
+ * @param {Array<{name?: string, url?: string, regions?: string[], aliases?: string[]}>}
+ *   [previousCompetitors=[]] - the competitors as they were BEFORE this edit (the same
+ *   list `removedDomains` was computed from), so each benchmark's alias write removes
+ *   only what this edit dropped and carries Semrush's enrichment forward.
  * @returns {Promise<{markets: number, created: number, updated: number,
  *   deleted: number, rejected: {projectId: string, market: string,
  *   domain: string|null, aliases: string[]}[]}>}
@@ -323,6 +426,7 @@ export async function syncCompetitorBenchmarksAcrossMarkets(
   log,
   brandOwnUrls = [],
   prefetchedProjects = null,
+  previousCompetitors = [],
 ) {
   // Reuse a pre-fetched project listing when supplied (the brand-edit path lists
   // once and shares it across the URL/competitor/alias syncs), else list here.
@@ -361,6 +465,7 @@ export async function syncCompetitorBenchmarksAcrossMarkets(
         market,
         log,
         reservedDomains,
+        previousCompetitors,
       );
       created += result.created;
       updated += result.updated;

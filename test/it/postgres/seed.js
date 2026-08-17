@@ -12,6 +12,7 @@
 
 /* eslint-disable no-await-in-loop */
 import { execSync } from 'child_process';
+import { createHash } from 'crypto';
 
 import { POSTGREST_WRITER_JWT } from '../shared/postgrest-jwt.js';
 import { organizations } from './seed-data/organizations.js';
@@ -94,6 +95,9 @@ async function insertRows(table, rows, { asWriter = false } = {}) {
  * organizations with ON DELETE RESTRICT, so grants must be cleared before
  * deleting organizations. access_grant_logs and facs_access_mappings use TEXT
  * columns (no FK to organizations) but are cleared for test isolation.
+ * blackboard_fact has no FK to organizations/sites either (website_id is a
+ * plain varchar, mystique-owned) - it isn't touched by the organizations
+ * CASCADE, so it's cleared explicitly here too (see seedAuditScopePages below).
  */
 function clearData() {
   execSync(
@@ -106,6 +110,7 @@ function clearData() {
     + 'DELETE FROM consumers;'
     + 'DELETE FROM async_jobs;'
     + 'DELETE FROM projection_audit;'
+    + 'DELETE FROM blackboard_fact;'
     + 'DELETE FROM organizations;'
     + '"',
     { stdio: 'pipe', timeout: 10_000 },
@@ -154,6 +159,68 @@ export function seedReferralPresence(siteId, sources = []) {
     `docker exec ${POSTGRES_CONTAINER} psql -U postgres -d ${POSTGRES_DB} -v ON_ERROR_STOP=1 -c "${statements.join(' ')}"`,
     { stdio: 'pipe', timeout: 10_000 },
   );
+}
+
+/**
+ * Seeds page_inventory rows for `siteId` via the real
+ * `wrpc_upsert_page_inventory_discovery_batch` RPC (the production write path -
+ * writer JWT - same call mysticat-data-service's own test_audit_scope_pages.py
+ * makes), then marks the requested subset "in scope" by inserting a matching
+ * `d_page_in_scope` blackboard_fact row per page (B4, SITES-46351).
+ *
+ * blackboard_fact has no PostgREST write grant for any role ("Facts written
+ * exclusively by Mystique" - see mysticat-data-service CLAUDE.md's PostgREST
+ * grant matrix), so those rows are inserted directly via psql as the `postgres`
+ * superuser, bypassing PostgREST entirely - the same approach seedReferralPresence
+ * above uses for a table PostgREST can't write to. page_id mirrors production's
+ * per-page fact key (`page-<md5(url)>`): mysticat-data-service's
+ * `coerce_scope_for_fact` always writes a page-scoped fact and refuses a NULL
+ * page_id, and a second active fact sharing a page_id would collide on
+ * `ix_blackboard_fact_unique_active`.
+ *
+ * Keep `siteId`/`pages` inputs trusted constants only (canonical seed UUIDs and
+ * fixed test URLs), never request-derived values - the blackboard_fact insert
+ * below is string-interpolated into a shell command.
+ *
+ * @param {string} siteId - Site the pages belong to (a canonical seed UUID).
+ * @param {Array<{ url: string, urlPath: string, inScope?: boolean }>} pages
+ */
+export async function seedAuditScopePages(siteId, pages) {
+  const res = await fetch(`${POSTGREST_URL}/rpc/wrpc_upsert_page_inventory_discovery_batch`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${POSTGREST_WRITER_JWT}`,
+    },
+    body: JSON.stringify({
+      p_site_id: siteId,
+      p_rows: pages.map((p) => ({ url: p.url, url_path: p.urlPath, last_modified: null })),
+      p_discovery_source: 'sitemap',
+      p_updated_by: 'it-seed',
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Failed to seed page_inventory: ${res.status} ${text}`);
+  }
+
+  const inScopeInserts = pages
+    .filter((p) => p.inScope)
+    .map((p) => {
+      const pageId = `page-${createHash('md5').update(p.url).digest('hex')}`;
+      // Escaped so the outer psql `-c "..."` shell argument (double-quoted) passes
+      // the literal JSON double-quotes through instead of terminating early.
+      const value = `{\\"url\\": \\"${p.url}\\"}`;
+      return 'INSERT INTO blackboard_fact '
+        + '(key, value, fact_type, confidence, source, website_id, page_id, is_global, version, is_obsolete) '
+        + `VALUES ('d_page_in_scope', '${value}'::jsonb, 'selection', 1.0, 'it-seed', '${siteId}', '${pageId}', false, 1, false);`;
+    });
+  if (inScopeInserts.length > 0) {
+    execSync(
+      `docker exec ${POSTGRES_CONTAINER} psql -U postgres -d ${POSTGRES_DB} -v ON_ERROR_STOP=1 -c "${inScopeInserts.join(' ')}"`,
+      { stdio: 'pipe', timeout: 10_000 },
+    );
+  }
 }
 
 /**

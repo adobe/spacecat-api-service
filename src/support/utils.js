@@ -13,6 +13,7 @@ import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { ImsPromiseClient } from '@adobe/spacecat-shared-ims-client';
+import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import URI from 'urijs';
 import {
   hasText,
@@ -37,6 +38,7 @@ import {
   STATUS_BAD_REQUEST,
   STATUS_UNAUTHORIZED,
   X_PROMISE_TOKEN_HEADER,
+  X_PROMISE_AUDIENCE_HEADER,
   PROMISE_TOKEN_REQUIRED_ERROR_CODE,
 } from '../utils/constants.js';
 import { updateRumConfig } from './rum-config-service.js';
@@ -383,6 +385,33 @@ export const triggerA11yCodefixForOpportunity = async (
   site.getId(),
   { opportunityId, opportunityType, aggregationKey },
 );
+
+/**
+ * Sends a message to the llmo-experimentation-engine-queue to manually (re-)trigger Mystique
+ * impact measurement for a GeoExperiment (see adobe/spacecat-infrastructure#655 for the queue,
+ * llmo-experimentation-engine's docs/decisions/004-manual-impact-measurement-retrigger.md for the
+ * handler contract).
+ *
+ * NOTE: this does NOT create or start an experiment. It only requests the impact-measurement
+ * report for an already-existing GeoExperiment that is ongoing or completed. The experiment must
+ * already exist; the engine re-validates eligibility itself before resubmitting and no-ops if the
+ * experiment is not in a measurable state.
+ *
+ * @param {string} geoExperimentId - The GeoExperiment ID to trigger measurement for.
+ * @param {string} triggeredBy - Identity of the caller, for the engine's log line
+ *   (e.g. an IMS user id/email resolved from the request's auth profile).
+ * @param {Object} lambdaContext - The Lambda context object (sqs, env).
+ * @return {Promise} - A promise representing the SQS send operation.
+ */
+export const triggerGeoExperimentImpactMeasurement = async (
+  geoExperimentId,
+  triggeredBy,
+  lambdaContext,
+) => lambdaContext.sqs.sendMessage(lambdaContext.env.LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL, {
+  type: 'TRIGGER_IMPACT_MEASUREMENT',
+  geoExperimentId,
+  triggeredBy: triggeredBy || 'unknown',
+});
 
 // todo: prototype - untested
 /* c8 ignore start */
@@ -785,8 +814,39 @@ export function getImsUserTokenStrict(context) {
 }
 
 /**
+ * Resolves which IMS promise-token pair a request selects, from the optional
+ * `x-promise-audience` header. Absent/empty => `undefined` (the default pair,
+ * unchanged behavior); `semrush` => the dedicated Semrush pair. Any other value
+ * throws 400 (fail closed) rather than silently minting/exchanging on the wrong
+ * pair. The pair selector is forwarded to `ImsPromiseClient.createFrom`.
+ * @param {object} context - The request context.
+ * @returns {string|undefined} The ImsPromiseClient pair selector, or undefined.
+ * @throws {ErrorWithStatusCode} 400 when the header carries an unknown audience.
+ */
+export function resolvePromisePair(context) {
+  const raw = context?.pathInfo?.headers?.[X_PROMISE_AUDIENCE_HEADER];
+  if (!hasText(raw)) {
+    return undefined;
+  }
+  const audience = raw.trim();
+  if (audience.toLowerCase() === 'semrush') {
+    return ImsPromiseClient.PROMISE_PAIR.SEMRUSH;
+  }
+  // Reflect the rejected value back, but sanitize (strip CR/LF and non-ASCII, per
+  // the repo's header-hygiene convention) and bound its length so a hostile header
+  // cannot inject into or bloat the 400 body / logs.
+  throw new ErrorWithStatusCode(
+    `Unknown promise audience: ${cleanupHeaderValue(audience).slice(0, 40)}`,
+    STATUS_BAD_REQUEST,
+  );
+}
+
+/**
  * Get an IMS promise token from the authorization header in context.
  * @param {object} context - The context of the request.
+ * @param {string} [pair] - Optional IMS promise-pair selector (see
+ *   {@link resolvePromisePair}). Selects which emitter client-id/secret/definition
+ *   set mints the token. Omitted => the default pair.
  * @returns {Promise<{
  *   promise_token: string,
  *   expires_in: number,
@@ -794,7 +854,7 @@ export function getImsUserTokenStrict(context) {
  * }>} - The promise token response.
  * @throws {ErrorWithStatusCode} - If the Authorization header is missing.
  */
-export async function getIMSPromiseToken(context) {
+export async function getIMSPromiseToken(context, pair) {
   // get IMS promise token and attach to queue message
   let userToken;
   try {
@@ -805,6 +865,7 @@ export async function getIMSPromiseToken(context) {
   const imsPromiseClient = ImsPromiseClient.createFrom(
     context,
     ImsPromiseClient.CLIENT_TYPE.EMITTER,
+    { pair },
   );
 
   return imsPromiseClient.getPromiseToken(
@@ -817,10 +878,13 @@ export async function getIMSPromiseToken(context) {
  * Exchange a promise token for an IMS access token.
  * @param {object} context - The context of the request.
  * @param {string} promiseToken - The promise token to exchange (e.g. from request payload).
+ * @param {string} [pair] - Optional IMS promise-pair selector (see
+ *   {@link resolvePromisePair}). Omitted => the default pair. MUST match the pair
+ *   that minted the token, or IMS rejects the exchange.
  * @returns {Promise<{ access_token: string }>} The access token response.
  * @throws {ErrorWithStatusCode} - If the promise token is missing.
  */
-export async function exchangePromiseToken(context, promiseToken) {
+export async function exchangePromiseToken(context, promiseToken, pair) {
   if (!promiseToken) {
     throw new ErrorWithStatusCode('Missing promise token', STATUS_BAD_REQUEST);
   }
@@ -828,6 +892,7 @@ export async function exchangePromiseToken(context, promiseToken) {
   const imsClient = ImsPromiseClient.createFrom(
     context,
     ImsPromiseClient.CLIENT_TYPE.CONSUMER,
+    { pair },
   );
 
   const accessToken = (await imsClient.exchangeToken(
@@ -897,7 +962,8 @@ export function resolveCallerImsUserId(context) {
  * @param {(context: object) => string} [fallback] - Called when no promise token is
  *   present; defaults to `getImsUserTokenStrict`.
  * @returns {Promise<string>} The IMS access token to forward upstream.
- * @throws {ErrorWithStatusCode} 401 when neither a promise token nor the fallback works.
+ * @throws {ErrorWithStatusCode} 401 when neither a promise token nor the fallback works;
+ *   400 when `x-promise-audience` carries an unknown value (see {@link resolvePromisePair}).
  */
 export async function resolveSemrushImsToken(
   context,
@@ -905,6 +971,7 @@ export async function resolveSemrushImsToken(
   logLabel = 'utils',
   fallback = getImsUserTokenStrict,
 ) {
+  const pair = resolvePromisePair(context);
   const promiseTokenHeader = context?.pathInfo?.headers?.[X_PROMISE_TOKEN_HEADER];
   if (hasText(promiseTokenHeader)) {
     let decoded = promiseTokenHeader;
@@ -914,7 +981,7 @@ export async function resolveSemrushImsToken(
       // Bearer-style tokens may contain literal %; use as-is.
     }
     try {
-      return await exchangePromiseToken(context, decoded);
+      return await exchangePromiseToken(context, decoded, pair);
     } catch (e) {
       log?.error(`${logLabel}: promise token exchange failed`, { error: e?.message });
       throw new ErrorWithStatusCode('Invalid or expired promise token', STATUS_UNAUTHORIZED);

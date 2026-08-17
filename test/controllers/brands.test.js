@@ -3193,7 +3193,13 @@ describe('Brands Controller', () => {
 
       expect(response.status).to.equal(200);
       const body = await response.json();
-      expect(body).to.deep.equal(SAMPLE_BRAND);
+      // The handler derives the per-brand serenity fields onto the payload; the
+      // stubbed reader supplies everything else.
+      expect(body).to.deep.equal({
+        ...SAMPLE_BRAND,
+        serenityActive: false,
+        serenityActivatedAt: null,
+      });
       expect(resolveLlmoOnboardingModeStub).to.have.been.calledOnce;
       const [orgArg, , optsArg] = resolveLlmoOnboardingModeStub.firstCall.args;
       expect(orgArg).to.equal(ORGANIZATION_ID);
@@ -5614,7 +5620,7 @@ describe('Brands Controller', () => {
         expect(upsertStub.firstCall.args[0].semrushSubWorkspaceId).to.equal(null);
       });
 
-      it('saves a pending draft WITHOUT a primary URL: no provisioning, market stashed (201)', async () => {
+      it('saves a pending draft: defers provisioning, writes no stash, no anchor (201)', async () => {
         const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
         const upsertStub = sinon.stub().resolves({ id: 'draft-id', name: 'New Brand', status: 'pending' });
         const controller = await buildController({
@@ -5639,109 +5645,12 @@ describe('Brands Controller', () => {
         expect(response.status).to.equal(201);
         // Provisioning is deferred for a draft.
         expect(provisionStub.called).to.equal(false);
-        // The market is stashed for activation; no primary URL yet.
+        // SITES-49448: a pending draft no longer stashes a deferred-provisioning blob.
         const upsertArgs = upsertStub.firstCall.args[0];
-        expect(upsertArgs.brand.pendingSemrushProvisioning).to.deep.equal({
-          primaryUrl: null,
-          markets: [{ market: 'us', languageCode: 'en' }],
-          generatePrompts: false,
-        });
+        expect(upsertArgs.brand.pendingSemrushProvisioning).to.equal(undefined);
         // A draft is never bound to a workspace at create time.
         expect(upsertArgs.semrushSubWorkspaceId).to.equal(null);
         expect(upsertArgs.forceBrandId).to.equal(null);
-      });
-
-      it('stashes the primary URL on a pending draft when one was entered (still no provisioning)', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
-        const upsertStub = sinon.stub().resolves({ id: 'draft-id', name: 'New Brand', status: 'pending' });
-        const controller = await buildController({
-          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
-        });
-
-        const response = await controller.createBrandForOrg({
-          ...context,
-          params: { spaceCatId: ORGANIZATION_ID },
-          data: {
-            name: 'New Brand',
-            status: 'pending',
-            urls: [{ value: 'https://acme.com/path' }],
-            semrushMarket: { market: 'us', languageCode: 'en' },
-          },
-          dataAccess: mockDataAccess,
-          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
-        });
-
-        expect(response.status).to.equal(201);
-        expect(provisionStub.called).to.equal(false);
-        expect(upsertStub.firstCall.args[0].brand.pendingSemrushProvisioning).to.deep.equal({
-          primaryUrl: 'https://acme.com/path',
-          markets: [{ market: 'us', languageCode: 'en' }],
-          generatePrompts: false,
-        });
-      });
-
-      it('stashes the primary URL from a bare STRING url entry on a pending draft', async () => {
-        // The wizard may send `urls` as plain strings rather than { value }
-        // objects; the pending primaryUrl resolution must accept either shape.
-        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
-        const upsertStub = sinon.stub().resolves({ id: 'draft-id', name: 'New Brand', status: 'pending' });
-        const controller = await buildController({
-          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
-        });
-
-        const response = await controller.createBrandForOrg({
-          ...context,
-          params: { spaceCatId: ORGANIZATION_ID },
-          data: {
-            name: 'New Brand',
-            status: 'pending',
-            // Plain strings, not { value } objects.
-            urls: ['https://acme.com/path'],
-            semrushMarket: { market: 'us', languageCode: 'en' },
-          },
-          dataAccess: mockDataAccess,
-          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
-        });
-
-        expect(response.status).to.equal(201);
-        expect(provisionStub.called).to.equal(false);
-        expect(upsertStub.firstCall.args[0].brand.pendingSemrushProvisioning).to.deep.equal({
-          primaryUrl: 'https://acme.com/path',
-          markets: [{ market: 'us', languageCode: 'en' }],
-          generatePrompts: false,
-        });
-      });
-
-      it('seeds the initial market modelIds from semrushModelIds on a pending draft (no provisioning)', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
-        const upsertStub = sinon.stub().resolves({ id: 'draft-id', name: 'New Brand', status: 'pending' });
-        const controller = await buildController({
-          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
-        });
-
-        const response = await controller.createBrandForOrg({
-          ...context,
-          params: { spaceCatId: ORGANIZATION_ID },
-          data: {
-            name: 'New Brand',
-            status: 'pending',
-            urls: [{ value: 'https://acme.com' }],
-            semrushMarket: { market: 'us', languageCode: 'en' },
-            // The wizard's model picks: unlike the direct path they are optional
-            // for a draft, but when present they seed the initial market.
-            semrushModelIds: ['chatgpt', 'perplexity'],
-          },
-          dataAccess: mockDataAccess,
-          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
-        });
-
-        expect(response.status).to.equal(201);
-        expect(provisionStub.called).to.equal(false);
-        expect(upsertStub.firstCall.args[0].brand.pendingSemrushProvisioning).to.deep.equal({
-          primaryUrl: 'https://acme.com',
-          markets: [{ market: 'us', languageCode: 'en', modelIds: ['chatgpt', 'perplexity'] }],
-          generatePrompts: false,
-        });
       });
 
       it('still requires market and languageCode even for a pending draft', async () => {
@@ -6073,10 +5982,10 @@ describe('Brands Controller', () => {
         expect(upsertStub.called).to.equal(false);
       });
 
-      it('stashes deferred provisioning for a PENDING serenity-active create (generatePrompts:false, no market)', async () => {
+      it('does not stash for a PENDING serenity-active create (generatePrompts:false, no market)', async () => {
         // In a serenity-active org a pending create is a Semrush create (the org flag
-        // decides mode, not the generatePrompts flag): it provisions nothing yet and
-        // stashes the deferred-provisioning blob for activation.
+        // decides mode, not the generatePrompts flag): it provisions nothing yet.
+        // SITES-49448: it no longer stashes a deferred-provisioning blob either.
         const upsertStub = sinon.stub().resolves({ id: 'draft-id', name: 'Draft', status: 'pending' });
         const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-x' });
         const controller = await buildCreateController({
@@ -6098,12 +6007,8 @@ describe('Brands Controller', () => {
 
         expect(response.status).to.equal(201);
         expect(provisionStub.called).to.equal(false);
-        // Treated as Semrush mode → deferred-provisioning stash written.
-        expect(upsertStub.firstCall.firstArg.brand.pendingSemrushProvisioning).to.deep.equal({
-          primaryUrl: null,
-          markets: [],
-          generatePrompts: false,
-        });
+        // Treated as Semrush mode, but SITES-49448: no deferred-provisioning stash.
+        expect(upsertStub.firstCall.firstArg.brand.pendingSemrushProvisioning).to.equal(undefined);
       });
     });
   });
@@ -6163,9 +6068,11 @@ describe('Brands Controller', () => {
       syncBrandAliasesAcrossMarkets = sinon.stub().resolves({ rejected: [] }),
       getBrandCompetitors = sinon.stub().resolves([]),
       getBrandById,
-      // Serenity active by default so a sync-field edit reaches the re-sync block.
-      // The inactive case overrides this to assert the gate rejects.
-      isSerenityActiveForOrg = sinon.stub().resolves(true),
+      // Serenity active for the brand by default so a sync-field edit reaches the
+      // re-sync block. The inactive case overrides this to assert the gate rejects.
+      // The edit path resolves PER BRAND, so one org can hold a released brand and
+      // an unreleased one at the same time.
+      isSerenityActiveForBrand = sinon.stub().resolves(true),
       // Serenity-UI OFF by default: the org is mid-migration, so Semrush failures
       // are absorbed. Tests that assert failures propagate override this to true.
       isSerenityUiActiveForOrg = sinon.stub().resolves(false),
@@ -6189,7 +6096,7 @@ describe('Brands Controller', () => {
         '../../src/support/serenity/competitor-benchmarks.js': { syncCompetitorBenchmarksAcrossMarkets },
         '../../src/support/serenity/brand-aliases.js': { syncBrandAliasesAcrossMarkets },
         '../../src/support/serenity/serenity-active.js': {
-          isSerenityActiveForOrg,
+          isSerenityActiveForBrand,
           isSerenityUiActiveForOrg,
         },
       };
@@ -6288,9 +6195,10 @@ describe('Brands Controller', () => {
         updateBrand: updateBrandStub,
         syncBrandUrlsAcrossMarkets: syncStub,
         createSerenityTransport: createTransportStub,
-        // Inactive org, but the brand still carries a backfilled workspace pointer.
+        // Inactive brand, but it still carries a backfilled workspace pointer —
+        // provisioned by an earlier wave, not yet released.
         getBrandById: sinon.stub().resolves({ id: BRAND_UUID, semrushSubWorkspaceId: 'ws-9' }),
-        isSerenityActiveForOrg: serenityActiveStub,
+        isSerenityActiveForBrand: serenityActiveStub,
       });
 
       const response = await controller.updateBrandForOrg({
@@ -6306,10 +6214,13 @@ describe('Brands Controller', () => {
       expect(updateBrandStub.called).to.equal(false);
       expect(syncStub.called).to.equal(false);
       expect(createTransportStub.called).to.equal(false);
-      // The gate must be asked about THIS org (2nd positional arg = spaceCatId).
+      // The gate must be asked about THIS org AND THIS brand (2nd and 3rd
+      // positional args) — asking about the org alone would give every brand it
+      // owns the same answer, which is what this change exists to end.
       expect(serenityActiveStub).to.have.been.calledWith(
         sinon.match.any,
         ORGANIZATION_ID,
+        BRAND_UUID,
         sinon.match.any,
       );
     });
@@ -6324,7 +6235,7 @@ describe('Brands Controller', () => {
         syncBrandUrlsAcrossMarkets: syncStub,
         createSerenityTransport: createTransportStub,
         getBrandById: sinon.stub().resolves({ id: BRAND_UUID }), // no semrushSubWorkspaceId → flat
-        isSerenityActiveForOrg: sinon.stub().resolves(false),
+        isSerenityActiveForBrand: sinon.stub().resolves(false),
       });
 
       const response = await controller.updateBrandForOrg({
@@ -6448,8 +6359,8 @@ describe('Brands Controller', () => {
     });
 
     it('strips pendingSemrushProvisioning from a PATCH when the brand is NOT pending (no runtime injection)', async () => {
-      // The describe-level postgrest mock resolves the brand with status:'active',
-      // so the pending-only guard strips the stash an attacker tried to inject.
+      // SITES-49448: the field is retired and never accepted from a client, so a
+      // stash an attacker tried to inject is stripped regardless of brand status.
       const updateBrandStub = sinon.stub()
         .resolves({ id: BRAND_UUID, semrushSubWorkspaceId: null });
       const controller = await buildUpdateController({
@@ -6480,9 +6391,10 @@ describe('Brands Controller', () => {
       expect(updates).to.not.have.property('pendingSemrushProvisioning');
     });
 
-    it('keeps pendingSemrushProvisioning on a PATCH when the brand IS pending (draft Markets-tab edit)', async () => {
-      // The draft Markets tab appends a market (with its LLMs) by PATCHing the
-      // stash; the pending-only guard must let it through for a pending brand.
+    it('strips pendingSemrushProvisioning on a PATCH even when the brand IS pending (SITES-49448: field retired)', async () => {
+      // The draft Markets-tab edit flow that mutated the stash is gone (elmo) and
+      // the blob is being retired, so a client-supplied value is stripped for a
+      // pending brand too — no PATCH can (re)populate the column on any brand.
       mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake(() => ({
         select: sandbox.stub().returnsThis(),
         eq: sandbox.stub().returnsThis(),
@@ -6512,7 +6424,7 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(200);
       expect(updateBrandStub).to.have.been.calledOnce;
       const { updates } = updateBrandStub.firstCall.args[0];
-      expect(updates.pendingSemrushProvisioning).to.deep.equal(stash);
+      expect(updates).to.not.have.property('pendingSemrushProvisioning');
     });
 
     it('strips pendingSemrushProvisioning when a PATCH would flip a pending brand to active', async () => {
@@ -7997,7 +7909,22 @@ describe('Brands Controller', () => {
         listJobs: sinon.stub().resolves([]),
         submitPromptGenerationJob: sinon.stub().resolves({ job_id: 'pg-1' }),
         createBrandPresenceSchedule: sinon.stub().resolves({ scheduleId: 'sch-1' }),
+        submitJob: sinon.stub().resolves({ job_id: 'ps-1' }),
+        createSchedule: sinon.stub().resolves({ scheduleId: 'ps-sch-1' }),
       },
+      // Recurring prompt-suggestion provisioning (the shared module) is stubbed at
+      // its boundary so activation tests exercise the wiring, not the real
+      // TierClient/DRS tier logic (covered by the support module's own tests).
+      isPayingLlmoSiteStub = sinon.stub().resolves(false),
+      // Default: empty results (as if DRS returned nothing) so existing exact-body
+      // assertions are unaffected; wiring tests override this to assert the call.
+      ensurePromptSuggestionSchedulesStub = sinon.stub().resolves({
+        results: [],
+        allSucceeded: true,
+      }),
+      // Default: returns null (as if the brand-profile agent isn't configured / autorun off),
+      // so existing exact-body assertions are unaffected; wiring tests override this.
+      triggerBrandProfileAgentStub = sinon.stub().resolves(null),
     } = {}) {
       const getBrandByIdStub = typeof getBrandByIdResult === 'function'
         ? getBrandByIdResult
@@ -8051,6 +7978,13 @@ describe('Brands Controller', () => {
         '../../src/controllers/llmo/llmo-onboarding.js': {
           postLlmoAlert: postLlmoAlertStub,
         },
+        '../../src/support/prompt-suggestion-schedules.js': {
+          isPayingLlmoSite: isPayingLlmoSiteStub,
+          ensurePromptSuggestionSchedules: ensurePromptSuggestionSchedulesStub,
+        },
+        '../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: triggerBrandProfileAgentStub,
+        },
       });
 
       return {
@@ -8061,6 +7995,9 @@ describe('Brands Controller', () => {
         resolveBrandUuidStub,
         postLlmoAlertStub,
         fakeDrsClient,
+        isPayingLlmoSiteStub,
+        ensurePromptSuggestionSchedulesStub,
+        triggerBrandProfileAgentStub,
       };
     }
 
@@ -8881,6 +8818,136 @@ describe('Brands Controller', () => {
       const response = await controller.activateBrandForOrg(buildActivateRequest());
       expect(response.status).to.equal(409);
     });
+
+    // -------------------------------------------------------------------------
+    // Recurring prompt-suggestion provisioning (Path C wiring) — the gap that
+    // left brands added to an existing org via activate with no auto-generated
+    // prompt strategies. Mirrors onboarding's activateBrandAndGeneratePrompts.
+    // -------------------------------------------------------------------------
+
+    it('provisions recurring prompt-suggestion pipelines on activation', async () => {
+      const {
+        controller, ensurePromptSuggestionSchedulesStub, isPayingLlmoSiteStub,
+      } = await buildActivateController({
+        ensurePromptSuggestionSchedulesStub: sinon.stub().resolves({
+          results: [
+            { providerId: 'prompt_generation_semrush', status: 'submitted' },
+            { providerId: 'prompt_generation_agentic_traffic', status: 'submitted' },
+            { providerId: 'prompt_generation_synthetic_personas', status: 'submitted' },
+          ],
+          allSucceeded: true,
+        }),
+      });
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: true }),
+      );
+
+      expect(response.status).to.equal(200);
+      expect(isPayingLlmoSiteStub).to.have.been.calledOnce;
+      expect(ensurePromptSuggestionSchedulesStub).to.have.been.calledOnce;
+      const args = ensurePromptSuggestionSchedulesStub.firstCall.args[0];
+      expect(args.siteId).to.equal(SITE_ID);
+      expect(args.isPaying).to.equal(false);
+      expect(args.drsClient).to.exist;
+      const body = await response.json();
+      expect(body.promptSuggestionSchedules).to.have.lengthOf(3);
+    });
+
+    it('provisions prompt-suggestion pipelines even when generatePrompts is false', async () => {
+      // Unconditional: every active brand is monitored, unlike the one-shot
+      // base_url job which is generatePrompts-gated.
+      const { controller, ensurePromptSuggestionSchedulesStub } = await buildActivateController();
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: false }),
+      );
+
+      expect(response.status).to.equal(200);
+      expect(ensurePromptSuggestionSchedulesStub).to.have.been.calledOnce;
+    });
+
+    it('passes isPaying=true through for a paying site (recurring schedules)', async () => {
+      const { controller, ensurePromptSuggestionSchedulesStub } = await buildActivateController({
+        isPayingLlmoSiteStub: sinon.stub().resolves(true),
+      });
+
+      await controller.activateBrandForOrg(buildActivateRequest({ generatePrompts: true }));
+
+      expect(ensurePromptSuggestionSchedulesStub.firstCall.args[0].isPaying).to.equal(true);
+    });
+
+    it('keeps the activation a 200 when prompt-suggestion provisioning reports failures', async () => {
+      const { controller } = await buildActivateController({
+        ensurePromptSuggestionSchedulesStub: sinon.stub().resolves({
+          results: [{ providerId: 'prompt_generation_semrush', status: 'failed', error: 'boom' }],
+          allSucceeded: false,
+        }),
+      });
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: true }),
+      );
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.status).to.equal('active');
+    });
+
+    // -------------------------------------------------------------------------
+    // Brand-profile agent ("Brandaid") trigger — closes the gap where a brand
+    // added via activate had no brand profile, hard-failing Semrush/Synthetic
+    // prompt-gen. (#3014)
+    // -------------------------------------------------------------------------
+
+    it('triggers the brand-profile agent on activation', async () => {
+      const { controller, triggerBrandProfileAgentStub } = await buildActivateController({
+        triggerBrandProfileAgentStub: sinon.stub().resolves('brand-profile-site-123-brand-activation-abc'),
+      });
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: true }),
+      );
+
+      expect(response.status).to.equal(200);
+      expect(triggerBrandProfileAgentStub).to.have.been.calledOnce;
+      const args = triggerBrandProfileAgentStub.firstCall.args[0];
+      expect(args.site).to.exist;
+      expect(args.reason).to.equal('brand-activation');
+      const body = await response.json();
+      expect(body.brandProfileExecutionName).to.equal('brand-profile-site-123-brand-activation-abc');
+    });
+
+    it('triggers brand-profile even when generatePrompts is false', async () => {
+      const { controller, triggerBrandProfileAgentStub } = await buildActivateController({
+        triggerBrandProfileAgentStub: sinon.stub().resolves('exec-1'),
+      });
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: false }),
+      );
+
+      expect(response.status).to.equal(200);
+      expect(triggerBrandProfileAgentStub).to.have.been.calledOnce;
+    });
+
+    it('keeps activation a 200 (and still provisions schedules) when the brand-profile trigger throws', async () => {
+      const ensureStub = sinon.stub().resolves({ results: [], allSucceeded: true });
+      const { controller } = await buildActivateController({
+        triggerBrandProfileAgentStub: sinon.stub().rejects(new Error('sfn boom')),
+        ensurePromptSuggestionSchedulesStub: ensureStub,
+      });
+
+      const response = await controller.activateBrandForOrg(
+        buildActivateRequest({ generatePrompts: true }),
+      );
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.status).to.equal('active');
+      // Its own try/catch means the throw doesn't skip prompt-suggestion provisioning.
+      expect(ensureStub).to.have.been.calledOnce;
+    });
   });
 
   describe('deleteBrandForOrg', () => {
@@ -8892,6 +8959,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          not: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
@@ -9323,6 +9391,7 @@ describe('Brands Controller — region removal consistency guard (LLMO-5645)', (
   async function mountController({ blocking = {}, oldRegion = ['US', 'DE'], updateBrand } = {}) {
     const findStub = stub().resolves(blocking);
     const updateStub = updateBrand || stub().resolves({ id: BRAND_UUID, region: ['US'] });
+    const scopesStub = stub().resolves({ orgRow: null, brandRows: new Map() });
     const Mocked = await esmock('../../src/controllers/brands.js', {
       '../../src/support/prompts-storage.js': {
         resolveBrandUuid: stub().resolves(BRAND_UUID),
@@ -9331,6 +9400,10 @@ describe('Brands Controller — region removal consistency guard (LLMO-5645)', (
       '../../src/support/brands-storage.js': {
         getBrandById: stub().resolves({ id: BRAND_UUID, region: oldRegion }),
         updateBrand: updateStub,
+        // The handler resolves the serenity rollout rows for the response payload.
+        // Irrelevant to the region guard, but the real one would query the stub
+        // client here.
+        readSerenityFlagScopes: scopesStub,
       },
       '../../src/support/access-control-util.js': {
         default: {
@@ -9338,8 +9411,30 @@ describe('Brands Controller — region removal consistency guard (LLMO-5645)', (
         },
       },
     });
-    return { Mocked, findStub, updateStub };
+    return {
+      Mocked, findStub, updateStub, scopesStub,
+    };
   }
+
+  it('reads the serenity rollout rows BEFORE the write, so a flag-read fault cannot 500 a committed edit', async () => {
+    // Load-bearing ordering. updateBrand commits the row and its child syncs, and
+    // the Semrush re-sync that follows deliberately absorbs its own failures so a
+    // persisted edit is never reported as a 500. Resolving these rows afterwards
+    // would reintroduce exactly that: a throw between the commit and the response,
+    // which also skips the re-sync.
+    const { Mocked, updateStub, scopesStub } = await mountController({ blocking: {} });
+    const ctx = buildContext();
+    const controller = Mocked(ctx, loggerStub, mockEnv);
+
+    const response = await controller.updateBrandForOrg({
+      ...ctx,
+      params: { spaceCatId: ORG_ID, brandId: BRAND_UUID },
+      data: { region: ['US'] },
+    });
+
+    expect(response.status).to.equal(200);
+    expect(scopesStub.calledBefore(updateStub)).to.be.true;
+  });
 
   it('allows the region change and updates the brand when no prompt blocks removal', async () => {
     const { Mocked, findStub, updateStub } = await mountController({ blocking: {} });

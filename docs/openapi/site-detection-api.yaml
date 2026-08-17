@@ -4,7 +4,7 @@ site-detection-jobs:
       - site-detection
     security:
       - api_key: [ ]
-      - ims_key: [ ]
+      - session_token: [ ]
     summary: Submit a new site detection async job
     description: |
       Triggers an async site detection job for the given domain.
@@ -60,7 +60,7 @@ site-detection-job-status:
       - site-detection
     security:
       - api_key: [ ]
-      - ims_key: [ ]
+      - session_token: [ ]
     summary: Get site detection job status and result
     description: |
       Returns the current status and (once completed) the result of a site detection job.

@@ -26,7 +26,7 @@ paths:
         '500':
           $ref: './responses.yaml#/500'
       security:
-        - ims_key: [ ]
+        - session_token: [ ]
     post:
       tags:
         - user-activities
@@ -76,4 +76,4 @@ paths:
         '500':
           $ref: './responses.yaml#/500'
       security:
-        - ims_key: [ ]
+        - session_token: [ ]

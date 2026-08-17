@@ -17,6 +17,7 @@ import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
 
 import { TAG_IDS, dimensionTreeLevels, makeListProjectTagsStub } from '../fixtures/tag-tree.js';
+import { INTENT_ROOT_NAME } from '../../../../src/support/serenity/prompt-tags.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
 
 use(chaiAsPromised);
@@ -53,6 +54,27 @@ function makeTransport(overrides = {}) {
 function makeEmptyTreeTransport(overrides = {}) {
   return makeTransport({
     listProjectTags: makeListProjectTagsStub({ '': [] }),
+    ...overrides,
+  });
+}
+
+// A transport whose `source` root is DESCENDABLE. The default fixture reports
+// children_count:0 on the `source` root so tree walks (findTagsInTree) skip it;
+// this bumps it so the walk descends and resolves a `source` value — the state
+// reachable after WP-S5 / the reconciles seed the root on live projects, and the
+// only state in which the LLMO-6665 guard is exercised. Shared by the flat-mode
+// and subworkspace update describes.
+function makeSourceDescendableTransport(overrides = {}) {
+  const levels = dimensionTreeLevels();
+  // Derive the count from the fixture's own source level rather than hardcoding a
+  // literal, so it can't drift if the fixture gains/loses a seeded `source` value
+  // (mysticatbot suggestion).
+  const sourceChildCount = (levels[TAG_IDS.sourceRoot] ?? []).length;
+  levels[''] = levels[''].map(
+    (r) => (r.name === 'source' ? { ...r, children_count: sourceChildCount } : r),
+  );
+  return makeTransport({
+    listProjectTags: makeListProjectTagsStub(levels),
     ...overrides,
   });
 }
@@ -145,7 +167,7 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       const createProjectTags = sinon.stub();
       createProjectTags.onFirstCall().resolves([
         { id: 'r-category', name: 'category' },
-        { id: 'r-intent', name: 'intent' },
+        { id: 'r-intent', name: INTENT_ROOT_NAME },
         { id: 'r-origin', name: 'origin' },
         { id: 'r-type', name: 'type' },
         { id: 'r-source', name: 'source' },
@@ -166,7 +188,8 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       );
 
       expect(res.status).to.equal(201);
-      expect(createProjectTags.firstCall.args[2]).to.deep.equal(['category', 'intent', 'origin', 'type', 'source']);
+      expect(createProjectTags.firstCall.args[2])
+        .to.deep.equal(['category', INTENT_ROOT_NAME, 'origin', 'type', 'source']);
       expect(createProjectTags.secondCall.args[2]).to.deep.equal(['Footwear']);
       expect(createProjectTags.secondCall.args[3]).to.deep.equal({ parentId: 'r-category' });
       expect(res.body).to.include({ id: 'new-cat', parentId: 'r-category' });
@@ -194,7 +217,7 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       // The roots were attempted; the category itself never was.
       expect(transport.createProjectTags).to.have.been.calledOnce;
       expect(transport.createProjectTags.firstCall.args[2])
-        .to.deep.equal(['category', 'intent', 'origin', 'type', 'source']);
+        .to.deep.equal(['category', INTENT_ROOT_NAME, 'origin', 'type', 'source']);
     });
 
     it('502s when the upstream create response carries no usable id', async () => {
@@ -232,7 +255,7 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
     it('400s a name that shadows a reserved dimension root', async () => {
       const transport = makeTransport();
       const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
-      for (const name of ['category', 'intent', 'origin', 'type']) {
+      for (const name of ['category', 'intent', 'origin', 'type', INTENT_ROOT_NAME]) {
         // eslint-disable-next-line no-await-in-loop
         await expect(handler.handleCreateTag(
           transport,
@@ -955,7 +978,7 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
     it('400s on a rename to a reserved dimension root name', async () => {
       const transport = makeTransport();
       const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
-      for (const name of ['category', 'intent', 'origin', 'type']) {
+      for (const name of ['category', 'intent', 'origin', 'type', INTENT_ROOT_NAME]) {
         // eslint-disable-next-line no-await-in-loop
         await expect(handler.handleUpdateTag(
           transport,
@@ -1196,12 +1219,13 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       );
     });
 
-    // A closed-dimension value is a descendant too, so it is renameable through
-    // the same path — the dimension root above it is what is protected.
-    // The vocabulary is fixed. Every resolve-or-create keys on the bare name under
-    // the root, so renaming `human` would make the next write mint a SECOND `human`
-    // and silently orphan every prompt still carrying the first.
-    it('400s a rename of a closed-dimension value', async () => {
+    // A server-owned value is a descendant too, so it is renameable through
+    // the same path — the dimension root above it is what is protected. The
+    // vocabulary is authored by the server. Every resolve-or-create keys on the
+    // bare name under the root, so renaming `human` would make the next write
+    // mint a SECOND `human` and silently orphan every prompt still carrying the
+    // first.
+    it('400s a rename of a closed server-owned value (origin)', async () => {
       const transport = makeTransport();
       const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
       const err = await handler.handleUpdateTag(
@@ -1215,7 +1239,85 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       ).then(() => null, (e) => e);
 
       expect(err.status).to.equal(400);
-      expect(err.message).to.match(/closed "origin" dimension cannot be renamed or re-parented/);
+      expect(err.message).to.match(/server-owned "origin" dimension cannot be renamed or re-parented/);
+      expect(transport.updateProjectTag).to.not.have.been.called;
+    });
+
+    // LLMO-6984 regression. The guard reads the target's DIMENSION, so it must keep
+    // holding whichever name the project's intent root carries. Were the raw upstream
+    // name to reach it, `$abv_tags$intent` would not be in SERVER_OWNED_DIMENSIONS and
+    // the guard would fail OPEN on exactly the projects the rename has reached — the
+    // client could then rename `Informational`, and the next server write would mint a
+    // second one beside it.
+    [
+      { label: 'renamed', levels: dimensionTreeLevels() },
+      { label: 'pre-rename', levels: dimensionTreeLevels({}, { legacyIntentRoot: true }) },
+    ].forEach(({ label, levels }) => {
+      it(`400s a rename of an intent value on a ${label} project`, async () => {
+        const transport = makeTransport({ listProjectTags: makeListProjectTagsStub(levels) });
+        const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+        const err = await handler.handleUpdateTag(
+          transport,
+          dataAccess,
+          BRAND,
+          WORKSPACE,
+          TAG_IDS.intentCommercial,
+          { name: 'Shopping', geoTargetId: 2840, languageCode: 'en' },
+          fakeLog(),
+        ).then(() => null, (e) => e);
+
+        expect(err.status).to.equal(400);
+        expect(err.message).to.match(/server-owned "intent" dimension cannot be renamed or re-parented/);
+        expect(transport.updateProjectTag).to.not.have.been.called;
+      });
+    });
+
+    // LLMO-6665 regression. `source` is server-owned but OPEN, so it is
+    // deliberately absent from CLOSED_DIMENSIONS — the guard must key on the
+    // OWNERSHIP axis (isServerOwnedDimension), not the closed-vocabulary one, or
+    // a client can rename/re-parent a server-owned `source` value once its root
+    // is seeded on live projects. Renaming `config` would hide it, not move it,
+    // and the next server write would mint a SECOND `config` under the same root,
+    // splitting prompts across two ids for one producing system. The descendable
+    // `source` root comes from the shared makeSourceDescendableTransport helper.
+    it('400s a rename of a source value — server-owned though OPEN (LLMO-6665)', async () => {
+      const transport = makeSourceDescendableTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const err = await handler.handleUpdateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        TAG_IDS.sourceConfig,
+        { name: 'config-renamed', geoTargetId: 2840, languageCode: 'en' },
+        fakeLog(),
+      ).then(() => null, (e) => e);
+
+      expect(err.status).to.equal(400);
+      expect(err.message).to.match(/server-owned "source" dimension cannot be renamed or re-parented/);
+      expect(transport.updateProjectTag).to.not.have.been.called;
+    });
+
+    it('400s a re-parent of a source value (LLMO-6665)', async () => {
+      const transport = makeSourceDescendableTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const err = await handler.handleUpdateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        TAG_IDS.sourceConfig,
+        {
+          name: 'config',
+          parentId: TAG_IDS.sourceSemrush,
+          geoTargetId: 2840,
+          languageCode: 'en',
+        },
+        fakeLog(),
+      ).then(() => null, (e) => e);
+
+      expect(err.status).to.equal(400);
+      expect(err.message).to.match(/server-owned "source" dimension cannot be renamed or re-parented/);
       expect(transport.updateProjectTag).to.not.have.been.called;
     });
 
@@ -1559,6 +1661,49 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
 
       expect(err.status).to.equal(400);
       expect(err.message).to.match(/must not be a descendant of the tag/);
+      expect(transport.updateProjectTag).to.not.have.been.called;
+    });
+
+    // Defense-in-depth for LLMO-6665: the source guard lives in the shared
+    // buildUpdatePayload, so it must refuse a server-owned `source` rename on the
+    // subworkspace route too, not only in flat mode (self-review should-fix).
+    it('400s a rename of a source value — shared server-owned guard (LLMO-6665)', async () => {
+      const handler = await loadHandler(sinon.stub().resolves({ id: 'proj-sub-1' }));
+      const transport = makeSourceDescendableTransport();
+      const err = await handler.handleUpdateTagSubworkspace(
+        transport,
+        WORKSPACE,
+        TAG_IDS.sourceConfig,
+        { name: 'config-renamed', geoTargetId: 2840, languageCode: 'en' },
+        fakeLog(),
+      ).then(() => null, (e) => e);
+
+      expect(err.status).to.equal(400);
+      expect(err.message).to.match(/server-owned "source" dimension cannot be renamed or re-parented/);
+      expect(transport.updateProjectTag).to.not.have.been.called;
+    });
+
+    // Completes the flat/subworkspace symmetry for LLMO-6665: the server-owned
+    // guard fires before the placement check in buildUpdatePayload, so a source
+    // RE-PARENT is refused on the subworkspace route too, same as flat mode.
+    it('400s a re-parent of a source value — shared server-owned guard (LLMO-6665)', async () => {
+      const handler = await loadHandler(sinon.stub().resolves({ id: 'proj-sub-1' }));
+      const transport = makeSourceDescendableTransport();
+      const err = await handler.handleUpdateTagSubworkspace(
+        transport,
+        WORKSPACE,
+        TAG_IDS.sourceConfig,
+        {
+          name: 'config',
+          parentId: TAG_IDS.sourceSemrush,
+          geoTargetId: 2840,
+          languageCode: 'en',
+        },
+        fakeLog(),
+      ).then(() => null, (e) => e);
+
+      expect(err.status).to.equal(400);
+      expect(err.message).to.match(/server-owned "source" dimension cannot be renamed or re-parented/);
       expect(transport.updateProjectTag).to.not.have.been.called;
     });
 

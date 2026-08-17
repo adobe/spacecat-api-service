@@ -724,7 +724,7 @@ describe('AuditPolicyController — E3 listRevisions', () => {
       rpc: sinon.stub(),
     };
     const controller = loadController();
-    const res = await controller.listRevisions(buildContext({ client, params: { limit: '2' } }));
+    const res = await controller.listRevisions(buildContext({ client, data: { limit: '2' } }));
     expect(res.status).to.equal(200);
     const body = await res.json();
     expect(body.items[0].version).to.equal(4);
@@ -741,7 +741,7 @@ describe('AuditPolicyController — E3 listRevisions', () => {
       rpc: sinon.stub(),
     };
     const controller = loadController();
-    await controller.listRevisions(buildContext({ client, params: { limit: '9999' } }));
+    await controller.listRevisions(buildContext({ client, data: { limit: '9999' } }));
     expect(limitSpy).to.have.been.calledWith(200);
   });
 
@@ -753,7 +753,7 @@ describe('AuditPolicyController — E3 listRevisions', () => {
       rpc: sinon.stub(),
     };
     const controller = loadController();
-    await controller.listRevisions(buildContext({ client, params: { limit: '-5' } }));
+    await controller.listRevisions(buildContext({ client, data: { limit: '-5' } }));
     expect(limitSpy).to.have.been.calledWith(1);
   });
 
@@ -774,7 +774,7 @@ describe('AuditPolicyController — E3 listRevisions', () => {
     const controller = loadController();
     // encodeCursor(Number.MAX_SAFE_INTEGER) — far beyond MAX_CURSOR_VERSION
     const tamperedCursor = Buffer.from(String(Number.MAX_SAFE_INTEGER), 'utf8').toString('base64url');
-    const ctx = buildContext({ client, params: { cursor: tamperedCursor } });
+    const ctx = buildContext({ client, data: { cursor: tamperedCursor } });
     const res = await controller.listRevisions(ctx);
     expect(res.status).to.equal(400);
     expect(ltSpy).to.not.have.been.called;
@@ -784,7 +784,7 @@ describe('AuditPolicyController — E3 listRevisions', () => {
   it('returns 400 for a malformed (non-numeric) cursor', async () => {
     const client = buildClient();
     const controller = loadController();
-    const res = await controller.listRevisions(buildContext({ client, params: { cursor: 'not-base64-number' } }));
+    const res = await controller.listRevisions(buildContext({ client, data: { cursor: 'not-base64-number' } }));
     expect(res.status).to.equal(400);
   });
 
@@ -804,7 +804,7 @@ describe('AuditPolicyController — E3 listRevisions', () => {
     };
     const controller = loadController();
     const cursor = Buffer.from('5', 'utf8').toString('base64url');
-    await controller.listRevisions(buildContext({ client, params: { cursor } }));
+    await controller.listRevisions(buildContext({ client, data: { cursor } }));
     expect(ltSpy).to.have.been.calledWith('version', 5);
   });
 
@@ -1077,7 +1077,7 @@ describe('AuditPolicyController — listRevisions updatedBy identity resolution'
 
 describe('AuditPolicyController — E4-E6 scope-read 501 stubs', () => {
   afterEach(() => sinon.restore());
-  for (const fn of ['getScopePages', 'getScopeSummary', 'getScopeSections']) {
+  for (const fn of ['getScopeSummary', 'getScopeSections']) {
     it(`${fn} returns 501 for an authorized caller`, async () => {
       const controller = loadController();
       const res = await controller[fn](buildContext());
@@ -1089,4 +1089,112 @@ describe('AuditPolicyController — E4-E6 scope-read 501 stubs', () => {
       expect(res.status).to.equal(403);
     });
   }
+});
+
+describe('AuditPolicyController — E4 getScopePages', () => {
+  afterEach(() => sinon.restore());
+
+  const buildRow = (url, path) => ({
+    url,
+    url_path: path,
+    discovery_source: ['sitemap'],
+    last_modified: '2026-01-01T00:00:00.000000+00:00',
+    lifecycle_state: 'active',
+  });
+
+  // Real PostgREST client chaining: select/eq/order/gt are synchronous and chainable
+  // (returnsThis); only the terminal limit() call resolves { data, error } — mirrors
+  // the E3 listRevisions fake client above.
+  function buildScopeClient({ rows = [], error = null } = {}) {
+    const orderSpy = sinon.stub().returnsThis();
+    const limitSpy = sinon.stub().resolves({ data: rows, error });
+    const gtSpy = sinon.stub().returnsThis();
+    const eqSpy = sinon.stub().returns({ order: orderSpy, limit: limitSpy, gt: gtSpy });
+    const client = {
+      from: () => ({ select: () => ({ eq: eqSpy }) }),
+      rpc: sinon.stub(),
+    };
+    return {
+      client, orderSpy, limitSpy, gtSpy, eqSpy,
+    };
+  }
+
+  it('returns DTO-mapped items for the site (short page, no cursor)', async () => {
+    const rows = [buildRow('https://example.com/a', '/a')];
+    const { client } = buildScopeClient({ rows });
+    const controller = loadController();
+    const res = await controller.getScopePages(buildContext({ client, data: { limit: '2' } }));
+    expect(res.status).to.equal(200);
+    const body = await res.json();
+    expect(body.items).to.deep.equal([{
+      url: 'https://example.com/a',
+      urlPath: '/a',
+      discoverySource: ['sitemap'],
+      lastModified: '2026-01-01T00:00:00.000Z',
+      lifecycleState: 'active',
+    }]);
+    expect(body.cursor).to.be.undefined;
+  });
+
+  it('applies site_id filter, url ascending order, and clamped limit', async () => {
+    const {
+      client, eqSpy, orderSpy, limitSpy,
+    } = buildScopeClient({ rows: [] });
+    const controller = loadController();
+    await controller.getScopePages(buildContext({ client, data: { limit: '9999' } }));
+    expect(eqSpy).to.have.been.calledWith('site_id', SITE_ID);
+    expect(orderSpy).to.have.been.calledWith('url', { ascending: true });
+    expect(limitSpy).to.have.been.calledWith(200);
+  });
+
+  it('emits a cursor encoding the last url when a full page is returned', async () => {
+    const rows = [
+      buildRow('https://example.com/a', '/a'),
+      buildRow('https://example.com/b', '/b'),
+    ];
+    const { client } = buildScopeClient({ rows });
+    const controller = loadController();
+    const res = await controller.getScopePages(buildContext({ client, data: { limit: '2' } }));
+    const body = await res.json();
+    expect(body.cursor).to.equal(Buffer.from('https://example.com/b', 'utf8').toString('base64url'));
+  });
+
+  it('decodes a provided cursor and applies .gt(url, decoded)', async () => {
+    const { client, gtSpy } = buildScopeClient({ rows: [] });
+    const controller = loadController();
+    const cursor = Buffer.from('https://example.com/a', 'utf8').toString('base64url');
+    await controller.getScopePages(buildContext({ client, data: { cursor } }));
+    expect(gtSpy).to.have.been.calledWith('url', 'https://example.com/a');
+  });
+
+  it('returns 400 for a malformed cursor instead of silently falling back to page 1', async () => {
+    // Buffer.from(str, 'base64url') does not throw on invalid input - it decodes leniently
+    // to garbage bytes - so this must be caught by a round-trip/format check, not try/catch.
+    const { client, gtSpy, limitSpy } = buildScopeClient({ rows: [] });
+    const controller = loadController();
+    const res = await controller.getScopePages(
+      buildContext({ client, data: { cursor: '!!!not-valid!!!' } }),
+    );
+    expect(res.status).to.equal(400);
+    expect(gtSpy).to.not.have.been.called;
+    expect(limitSpy).to.not.have.been.called;
+  });
+
+  it('returns 403 when the caller fails read authorization, without querying pages', async () => {
+    const client = buildClient();
+    const fromSpy = sinon.spy(client, 'from');
+    const controller = loadController(sinon.stub().resolves(false));
+    const res = await controller.getScopePages(buildContext({ client }));
+    expect(res.status).to.equal(403);
+    expect(fromSpy).to.not.have.been.called;
+  });
+
+  it('returns 500 and logs the PostgREST error when the read fails', async () => {
+    const { client } = buildScopeClient({ rows: null, error: { code: '500', message: 'boom' } });
+    const controller = loadController();
+    const ctx = buildContext({ client });
+    const res = await controller.getScopePages(ctx);
+    expect(ctx.log.error).to.have.been.calledWith(sinon.match(/500.*boom/));
+    expect(res.status).to.equal(500);
+  });
 });

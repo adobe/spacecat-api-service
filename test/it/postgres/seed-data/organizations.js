@@ -27,8 +27,8 @@ export const organizations = [
     name: 'Test Org Accessible',
     ims_org_id: 'AAAAAAAABBBBBBBBCCCCCCCC@AdobeOrg',
     // Org-level Semrush parent workspace: gives subworkspace brands under ORG_1 (e.g. BRAND_1) a
-    // non-null parentWorkspaceId, which the dynamic-allocation JIT guard requires to engage and
-    // reads as the advisory units pool on a top-up. Import the shared constant (not a literal) so
+    // non-null parentWorkspaceId, required on the sub-workspace create/bind path by
+    // ensureSubworkspace/assertNotParent. Import the shared constant (not a literal) so
     // a mock-seed change updates both sides in lock-step — see its own doc in seed-ids.js for why
     // it deliberately aliases SERENITY_MOCK_PROJECT_ID rather than being a fresh, unique id.
     semrush_workspace_id: SERENITY_ORG_PARENT_WS_ID,

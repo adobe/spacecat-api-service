@@ -18,7 +18,7 @@ trigger-onboarding:
       identity and the Semrush workspace ID is resolved from the organization.
     operationId: triggerOnboarding
     security:
-      - ims_key: []
+      - session_token: []
     responses:
       '200':
         description: Notification sent.

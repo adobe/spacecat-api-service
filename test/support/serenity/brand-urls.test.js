@@ -243,8 +243,9 @@ describe('brand-urls helpers', () => {
         createBenchmarks: sandbox.stub().resolves({ ids: ['new-1'], existing_count: 0 }),
       };
       expect(await ensureOwnBrandBenchmark(transport, WS, PID, BRAND, undefined)).to.equal('new-1');
+      // The create carries the lowercase forms Semrush's own resolution would add.
       expect(transport.createBenchmarks).to.have.been.calledOnceWith(WS, PID, [
-        { brand_name: 'Acme', domain: 'https://acme.com', brand_aliases: ['acme inc'] },
+        { brand_name: 'Acme', domain: 'https://acme.com', brand_aliases: ['acme inc', 'acme'] },
       ]);
     });
 

@@ -23,6 +23,7 @@ import {
   NON_EXISTENT_ORG_ID,
   NON_EXISTENT_SITE_ID,
 } from '../seed-ids.js';
+import { upsertFeatureFlag } from '../../../../src/support/feature-flags-storage.js';
 
 /**
  * Integration tests for the LLMO-4716 (org, site) → brand resolver endpoint.
@@ -49,24 +50,23 @@ import {
 export default function brandForOrgSiteTests(getHttpClient, resetData, getPostgrestClient) {
   describe('GET /v2/orgs/:spaceCatId/sites/:siteId/brand (LLMO-4716)', () => {
     /**
-     * Sets a feature flag for the given org. Used to set brandalf=true (the
-     * primary gate) and brandalf_migration=true (the dual-publish window
-     * Adobe is in today).
+     * Sets an org-level feature flag for the given org. Used to set
+     * brandalf=true (the primary gate) and brandalf_migration=true (the
+     * dual-publish window Adobe is in today).
+     *
+     * Goes through the production storage helper rather than its own PostgREST
+     * write, so the setup path stays valid under whatever shape the table's
+     * unique key has.
      */
     async function setFlag(orgId, flagName, value) {
-      const pg = getPostgrestClient();
-      const { error } = await pg
-        .from('feature_flags')
-        .upsert({
-          organization_id: orgId,
-          product: 'LLMO',
-          flag_name: flagName,
-          flag_value: value,
-          updated_by: 'it-setup',
-        }, { onConflict: 'organization_id,product,flag_name' });
-      if (error) {
-        throw new Error(`Failed to set ${flagName} flag: ${error.message}`);
-      }
+      await upsertFeatureFlag({
+        organizationId: orgId,
+        product: 'LLMO',
+        flagName,
+        value,
+        updatedBy: 'it-setup',
+        postgrestClient: getPostgrestClient(),
+      });
     }
 
     const setBrandalfTrue = (orgId) => setFlag(orgId, 'brandalf', true);

@@ -17,6 +17,7 @@ import sinon from 'sinon';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 
 import TierClient from '@adobe/spacecat-shared-tier-client';
+import DrsClient from '@adobe/spacecat-shared-drs-client';
 
 import EntitlementsController from '../../src/controllers/entitlements.js';
 import AccessControlUtil from '../../src/support/access-control-util.js';
@@ -92,6 +93,7 @@ describe('Entitlements Controller', () => {
     const mockAccessControlUtilInstance = {
       hasAccess: sandbox.stub().resolves(true),
       hasAdminAccess: sandbox.stub().returns(true),
+      hasS2SAdminAccess: sandbox.stub().returns(true),
     };
 
     // Stub AccessControlUtil.fromContext to return our mock instance
@@ -660,6 +662,9 @@ describe('Entitlements Controller', () => {
         entitlement: mockCreatedEntitlement,
         siteEnrollment: mockCreatedSiteEnrollment,
       });
+      // Prior-tier read used to detect a trial→paid transition. Default: no prior
+      // entitlement, and mockCreatedEntitlement is FREE_TRIAL, so no reaction fires.
+      mockTierClient.checkValidEntitlement = sandbox.stub().resolves({ entitlement: null });
     });
 
     it('should ensure entitlement + site enrollment for admin user with ASO product', async () => {
@@ -953,6 +958,286 @@ describe('Entitlements Controller', () => {
 
       expect(context.log.error).to.have.been.calledWith(
         `Error ensuring entitlement for site ${siteId}: ${siteErr.message}`,
+      );
+    });
+
+    describe('LLMO trial→paid prompt-suggestion reaction', () => {
+      const buildEntitlement = (tier) => ({
+        getId: () => 'entitlement-site-123',
+        getOrganizationId: () => organizationId,
+        getProductCode: () => 'LLMO',
+        getTier: () => tier,
+        getQuotas: () => ({}),
+        getCreatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedBy: () => 'admin@example.com',
+      });
+
+      let fakeDrsClient;
+
+      beforeEach(() => {
+        fakeDrsClient = {
+          isConfigured: sandbox.stub().returns(true),
+          createSchedule: sandbox.stub().resolves({ scheduleId: 's', alreadyExisted: false }),
+          submitJob: sandbox.stub().resolves({ job_id: 'j' }),
+        };
+        sandbox.stub(DrsClient, 'createFrom').returns(fakeDrsClient);
+      });
+
+      const buildContext = () => ({
+        params: { siteId },
+        data: { productCode: 'LLMO', tier: 'PAID' },
+        log: {
+          info: sinon.stub(), debug: sinon.stub(), warn: sinon.stub(), error: sinon.stub(),
+        },
+      });
+
+      it('fires recurring-schedule provisioning on a trial→paid transition', async () => {
+        mockTierClient.checkValidEntitlement.resolves({ entitlement: buildEntitlement('FREE_TRIAL') });
+        mockTierClient.createEntitlement.resolves({
+          entitlement: buildEntitlement('PAID'),
+          siteEnrollment: mockCreatedSiteEnrollment,
+        });
+
+        const result = await entitlementController.createSiteEntitlement(buildContext());
+
+        expect(result.status).to.equal(201);
+        // One recurring schedule per prompt-suggestion pipeline.
+        expect(fakeDrsClient.createSchedule).to.have.been.calledThrice;
+        expect(fakeDrsClient.submitJob).to.not.have.been.called;
+      });
+
+      it('does not fire on a paid→paid no-op', async () => {
+        mockTierClient.checkValidEntitlement.resolves({ entitlement: buildEntitlement('PAID') });
+        mockTierClient.createEntitlement.resolves({
+          entitlement: buildEntitlement('PAID'),
+          siteEnrollment: mockCreatedSiteEnrollment,
+        });
+
+        const result = await entitlementController.createSiteEntitlement(buildContext());
+
+        expect(result.status).to.equal(201);
+        expect(fakeDrsClient.createSchedule).to.not.have.been.called;
+      });
+
+      it('does not fire for a non-LLMO product even on trial→paid', async () => {
+        mockTierClient.checkValidEntitlement.resolves({ entitlement: buildEntitlement('FREE_TRIAL') });
+        mockTierClient.createEntitlement.resolves({
+          entitlement: { ...buildEntitlement('PAID'), getProductCode: () => 'ASO' },
+          siteEnrollment: mockCreatedSiteEnrollment,
+        });
+        const context = buildContext();
+        context.data = { productCode: 'ASO', tier: 'PAID' };
+
+        const result = await entitlementController.createSiteEntitlement(context);
+
+        expect(result.status).to.equal(201);
+        expect(fakeDrsClient.createSchedule).to.not.have.been.called;
+      });
+
+      it('never fails the entitlement op when the reaction throws', async () => {
+        mockTierClient.checkValidEntitlement.resolves({ entitlement: buildEntitlement('FREE_TRIAL') });
+        mockTierClient.createEntitlement.resolves({
+          entitlement: buildEntitlement('PAID'),
+          siteEnrollment: mockCreatedSiteEnrollment,
+        });
+        // DRS client creation throws — reaction helper must swallow it.
+        DrsClient.createFrom.throws(new Error('DRS unavailable'));
+
+        const result = await entitlementController.createSiteEntitlement(buildContext());
+
+        expect(result.status).to.equal(201);
+      });
+    });
+  });
+
+  describe('patchEntitlement', () => {
+    const imsOrgId = 'ABCDEF1234567890@AdobeOrg';
+    let orgWithImsOrg;
+    let llmoEntitlement;
+    let log;
+
+    const makeContext = (overrides = {}) => ({
+      params: { organizationId },
+      data: { productCode: 'LLMO', tier: 'PAID' },
+      log,
+      attributes: {
+        authInfo: new AuthInfo()
+          .withType('jwt')
+          .withProfile({ is_admin: true, email: 'admin@AdobeID' })
+          .withAuthenticated(true),
+      },
+      ...overrides,
+    });
+
+    beforeEach(() => {
+      log = { info: sinon.stub(), error: sinon.stub() };
+
+      orgWithImsOrg = {
+        getId: () => organizationId,
+        getImsOrgId: () => imsOrgId,
+      };
+
+      llmoEntitlement = {
+        getId: () => 'ent1',
+        getOrganizationId: () => organizationId,
+        getProductCode: () => 'LLMO',
+        getTier: () => 'FREE_TRIAL',
+        getQuotas: () => ({}),
+        getCreatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedBy: () => 'admin@AdobeID',
+        setTier: sinon.stub(),
+        setUpdatedBy: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      mockDataAccess.Organization.findById = sandbox.stub().resolves(orgWithImsOrg);
+      mockDataAccess.Entitlement.allByOrganizationId = sandbox.stub().resolves([llmoEntitlement]);
+    });
+
+    it('updates the tier of the matching entitlement and returns it', async () => {
+      const context = makeContext();
+
+      const result = await entitlementController.patchEntitlement(context);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body).to.have.property('id', 'ent1');
+      expect(body).to.have.property('productCode', 'LLMO');
+
+      expect(llmoEntitlement.setTier).to.have.been.calledOnceWith('PAID');
+      expect(llmoEntitlement.setUpdatedBy).to.have.been.calledOnceWith('admin@AdobeID');
+      expect(llmoEntitlement.save).to.have.been.calledOnce;
+    });
+
+    it('does not use TierClient', async () => {
+      const spy = sandbox.spy(TierClient, 'createForOrg');
+      await entitlementController.patchEntitlement(makeContext());
+      expect(spy).to.not.have.been.called;
+    });
+
+    it('logs an audit trail with actor and ims org', async () => {
+      await entitlementController.patchEntitlement(makeContext());
+
+      expect(log.info).to.have.been.calledOnce;
+      const line = log.info.firstCall.args[0];
+      expect(line).to.include('[entitlement-tier-update]');
+      expect(line).to.include('entitlement=ent1');
+      expect(line).to.include('productCode=LLMO');
+      expect(line).to.include(`organizationId=${organizationId}`);
+      expect(line).to.include(`imsOrgId=${imsOrgId}`);
+      expect(line).to.include('tier FREE_TRIAL -> PAID');
+      expect(line).to.include('actor=admin@AdobeID');
+    });
+
+    it('attributes the trail to "system" when unauthenticated', async () => {
+      const context = makeContext({ attributes: {} });
+      await entitlementController.patchEntitlement(context);
+      expect(llmoEntitlement.setUpdatedBy).to.have.been.calledOnceWith('system');
+      expect(log.info.firstCall.args[0]).to.include('actor=system');
+    });
+
+    it('returns forbidden for a regular (non-S2S) admin', async () => {
+      const adminOnlyInstance = {
+        hasAccess: sandbox.stub().resolves(true),
+        hasAdminAccess: sandbox.stub().returns(true),
+        hasS2SAdminAccess: sandbox.stub().returns(false),
+      };
+      AccessControlUtil.fromContext.restore();
+      sandbox.stub(AccessControlUtil, 'fromContext').returns(adminOnlyInstance);
+      const adminOnlyController = EntitlementsController({
+        dataAccess: mockDataAccess,
+        attributes: {
+          authInfo: new AuthInfo().withType('jwt').withProfile({ is_admin: true }).withAuthenticated(true),
+        },
+      });
+
+      const result = await adminOnlyController.patchEntitlement(makeContext());
+
+      expect(result.status).to.equal(403);
+      const body = await result.json();
+      expect(body.message).to.equal('Unauthorized');
+      expect(llmoEntitlement.setTier).to.not.have.been.called;
+    });
+
+    it('returns forbidden when caller is not an S2S admin', async () => {
+      const nonAdminInstance = {
+        hasAccess: sandbox.stub().resolves(true),
+        hasAdminAccess: sandbox.stub().returns(false),
+        hasS2SAdminAccess: sandbox.stub().returns(false),
+      };
+      AccessControlUtil.fromContext.restore();
+      sandbox.stub(AccessControlUtil, 'fromContext').returns(nonAdminInstance);
+      const nonAdminController = EntitlementsController({
+        dataAccess: mockDataAccess,
+        attributes: {
+          authInfo: new AuthInfo().withType('jwt').withProfile({}).withAuthenticated(true),
+        },
+      });
+
+      const result = await nonAdminController.patchEntitlement(makeContext());
+
+      expect(result.status).to.equal(403);
+      const body = await result.json();
+      expect(body.message).to.equal('Unauthorized');
+    });
+
+    it('returns bad request for invalid organization ID', async () => {
+      const result = await entitlementController.patchEntitlement(
+        makeContext({ params: { organizationId: 'not-a-uuid' } }),
+      );
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Organization ID required');
+    });
+
+    it('returns bad request for invalid product code', async () => {
+      const result = await entitlementController.patchEntitlement(
+        makeContext({ data: { productCode: 'INVALID', tier: 'PAID' } }),
+      );
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('Invalid product code');
+    });
+
+    it('returns bad request for missing/invalid tier', async () => {
+      const result = await entitlementController.patchEntitlement(
+        makeContext({ data: { productCode: 'LLMO', tier: 'GOLD' } }),
+      );
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('Invalid tier');
+    });
+
+    it('returns not found when organization does not exist', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      const result = await entitlementController.patchEntitlement(makeContext());
+      expect(result.status).to.equal(404);
+      const body = await result.json();
+      expect(body.message).to.equal('Organization not found');
+    });
+
+    it('returns not found when no entitlement exists for the product', async () => {
+      mockDataAccess.Entitlement.allByOrganizationId.resolves([]);
+      const result = await entitlementController.patchEntitlement(makeContext());
+      expect(result.status).to.equal(404);
+      const body = await result.json();
+      expect(body.message).to.equal(`No LLMO entitlement found for organization ${organizationId}`);
+    });
+
+    it('returns internal server error when save fails', async () => {
+      const saveErr = new Error('save failed');
+      llmoEntitlement.save.rejects(saveErr);
+      const context = makeContext();
+
+      const result = await entitlementController.patchEntitlement(context);
+
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.equal('Failed to update entitlement');
+      expect(context.log.error).to.have.been.calledWith(
+        `Error updating entitlement for organization ${organizationId}: ${saveErr.message}`,
       );
     });
   });

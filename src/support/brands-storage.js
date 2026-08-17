@@ -13,6 +13,11 @@
 import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
 
 import { SERENITY_BRAND_SITE_TYPE } from './serenity/site-linkage.js';
+import { readFeatureFlagScopes, resolveFlagRowForBrand } from './feature-flags-storage.js';
+import {
+  SERENITY_FEATURE_FLAG_NAME,
+  SERENITY_FEATURE_FLAG_PRODUCT,
+} from './serenity/serenity-active.js';
 
 /**
  * PostgREST select string — joins all normalized child tables.
@@ -27,6 +32,13 @@ const BRAND_SELECT = [
   'brand_sites(site_id, paths, type, sites(base_url))',
   'brand_urls(url)',
 ].join(', ');
+
+// LLMO-6978: on delete a brand is renamed to `{name}_deleted` to free its
+// original name for reuse (see deleteBrand). A same-named deleted brand already
+// present bumps the suffix to `_deleted2`, `_deleted3`, ... Each colliding
+// rename costs one round-trip, so this caps a pathological loop (a customer
+// deleting the same name hundreds of times) rather than any expected volume.
+const MAX_DELETED_NAME_ATTEMPTS = 100;
 
 // Re-landed from Igor Grubic's #2504 (LLMO-5183): map the data-layer
 // chk_active_brand_has_site_id CheckViolation to a typed 400 (covers the race
@@ -145,6 +157,79 @@ function parseUrlParts(urlString) {
 }
 
 /**
+ * Reads the organization's `LLMO/serenity` rows — its own and every brand's
+ * override — in one query, for {@link withSerenityState}.
+ *
+ * One query serves a whole response: a 16-brand list resolves from a single read,
+ * not sixteen. Read fresh rather than through `serenity-active.js`'s cache: that
+ * cache exists to keep request-time gates off the DB, whereas this value is
+ * payload the UI renders, and a brand shown as active seconds after its wave
+ * released it is worth one indexed read.
+ *
+ * Consequence, accepted deliberately: for up to one cache TTL after a flip this
+ * payload and the request-time gates can disagree, in whichever direction the flip
+ * went. A brand released mid-TTL reports `serenityActive: true` while a gate on a
+ * not-yet-expired entry still refuses it; a brand rolled back reports `false` while
+ * a gate still admits it. The window is bounded by `BRAND_CACHE_TTL_MS`, the gates
+ * are the authority and fail closed, and no write is half-applied by it, so the
+ * alternative (routing this read through the gate cache, which is keyed on a
+ * request context rather than a PostgREST client) is not worth the coupling.
+ *
+ * A failure propagates: the rows live in the same database as the brand read that
+ * just succeeded, so an error here is a real fault, not a reason to report every
+ * brand as inactive. On a write path, resolve BEFORE the write, so that fault
+ * cannot turn an edit that already committed into a 500.
+ *
+ * @param {string} organizationId - SpaceCat organization UUID.
+ * @param {object} postgrestClient - PostgREST client.
+ * @returns {Promise<{orgRow: object|null, brandRows: Map<string, object>}>}
+ */
+export async function readSerenityFlagScopes(organizationId, postgrestClient) {
+  return readFeatureFlagScopes({
+    organizationId,
+    product: SERENITY_FEATURE_FLAG_PRODUCT,
+    flagName: SERENITY_FEATURE_FLAG_NAME,
+    postgrestClient,
+  });
+}
+
+/**
+ * Adds the derived per-brand serenity fields to a brand payload: whether the
+ * Semrush-backed experience is live for THIS brand, and when it went live.
+ *
+ * Resolved from the brand's own override row falling back to the organization's,
+ * so no consumer re-implements the resolution rule — project-elmo-ui reads
+ * `serenityActive` to decide whether a brand is on the Semrush read path and
+ * whether its classic-UI editors are locked, and an organization mid-migration
+ * has both answers among its brands.
+ *
+ * Applied by the handlers that return a brand payload rather than inside the
+ * readers, so that the internal reads which never surface these fields — the
+ * brand-claims Slack commands, the elements authorizers, site attach, the
+ * opportunities controller, and the edit handler's own pre-write guards — neither
+ * pay for the flag query nor inherit its failure mode.
+ *
+ * @param {object} brand - Brand in V2 config shape, from {@link mapDbBrandToV2}.
+ * @param {{orgRow: object|null, brandRows: Map<string, object>}} scopes - From
+ *   {@link readSerenityFlagScopes}.
+ * @returns {object} The brand, with the two derived fields set.
+ */
+export function withSerenityState(brand, scopes) {
+  const row = resolveFlagRowForBrand(scopes, brand.id);
+  const serenityActive = row?.flag_value === true;
+  return {
+    ...brand,
+    // Independent of `semrushSubWorkspaceId`, which is set when the brand is
+    // provisioned — a brand can be bound for waves before it is released.
+    serenityActive,
+    // The resolved row's `updated_at`, the same timestamp operator tooling reads
+    // as the migration date — the column is NOT NULL, so an active brand always
+    // has one. Null while inactive, since nothing has gone live.
+    serenityActivatedAt: serenityActive ? row.updated_at : null,
+  };
+}
+
+/**
  * Maps a DB brand row (with all joined child tables) to the V2 config shape
  * the UI expects.
  *
@@ -153,6 +238,12 @@ function parseUrlParts(urlString) {
  * URL's base resolves to a site row in the org — and `siteId` for onboarded
  * entries. Legacy brands with no `brand_urls` rows fall back to the
  * `brand_sites` expansion, where every entry is by definition onboarded.
+ *
+ * The derived per-brand serenity fields are NOT set here — a handler returning
+ * this payload to a client adds them with {@link withSerenityState}.
+ *
+ * @param {object} row - DB brand row with joined child tables.
+ * @returns {object} Brand in V2 config shape.
  */
 function mapDbBrandToV2(row) {
   // The set of base URLs the brand explicitly lists as its own (brand_urls).
@@ -996,6 +1087,55 @@ export async function listBrandIdsForSite(organizationId, siteId, postgrestClien
 }
 
 /**
+ * Inverse of {@link listBrandIdsForSite}: given a set of brand ids, resolve
+ * every site within the org linked to at least one of them — the union of the
+ * brands' OWN primary sites (`brands.site_id`) and any `brand_sites` links.
+ *
+ * Used by ReBAC-filtered collection endpoints (list-sites, list-projects) under
+ * a `brand`-scoped product (LLMO) to narrow the org's sites to those the caller
+ * may view, by first resolving the caller's viewable brands then mapping those
+ * brands back to sites. Two org-scoped reads regardless of collection size —
+ * scales with the (small) set of viewable brands, never a per-site N+1.
+ *
+ * @param {string} organizationId - SpaceCat organization UUID
+ * @param {Set<string>|string[]} brandIds - brand ids the caller may view
+ * @param {object} postgrestClient - PostgREST client
+ * @returns {Promise<Set<string>>} site ids linked to any of `brandIds` (empty when none)
+ */
+export async function listSiteIdsForBrands(organizationId, brandIds, postgrestClient) {
+  const ids = [...(brandIds ?? [])].filter(hasText);
+  if (!postgrestClient?.from || !hasText(organizationId) || ids.length === 0) {
+    return new Set();
+  }
+
+  const [ownRes, linkedRes] = await Promise.all([
+    postgrestClient
+      .from('brands')
+      .select('site_id')
+      .eq('organization_id', organizationId)
+      .eq('status', 'active')
+      .in('id', ids),
+    postgrestClient
+      .from('brand_sites')
+      .select('site_id')
+      .eq('organization_id', organizationId)
+      .in('brand_id', ids),
+  ]);
+
+  if (ownRes.error) {
+    throw new Error(`Failed to resolve sites for brands: ${ownRes.error.message}`);
+  }
+  if (linkedRes.error) {
+    throw new Error(`Failed to resolve brand-site links for brands: ${linkedRes.error.message}`);
+  }
+
+  const siteIds = new Set();
+  (ownRes.data || []).forEach((row) => hasText(row.site_id) && siteIds.add(row.site_id));
+  (linkedRes.data || []).forEach((row) => hasText(row.site_id) && siteIds.add(row.site_id));
+  return siteIds;
+}
+
+/**
  * Creates or updates a brand in the normalized brands table,
  * including all nested child tables (aliases, competitors, social, earned, sites).
  *
@@ -1445,31 +1585,124 @@ export async function updateBrand({
 }
 
 /**
- * Soft-deletes a brand by setting status to 'deleted'.
+ * Soft-deletes a brand, renaming it to `{name}_deleted` so its original name is
+ * freed for reuse (LLMO-6978).
+ *
+ * The `brands` table has a per-org unique constraint on `name`
+ * (`uq_brand_name_per_org`) that spans deleted rows, so a soft-deleted brand
+ * that kept its original name would keep that name "taken" and block a customer
+ * from recreating a brand with the same name. To avoid that, the delete renames
+ * the brand to `{name}_deleted` in the same UPDATE that flips its status to
+ * `deleted`. If a same-named deleted brand already exists in the org (e.g. the
+ * customer created + deleted "Acme" more than once), an incrementing index is
+ * appended (`{name}_deleted2`, `{name}_deleted3`, ...) until the name is free —
+ * the only re-collision case is a customer literally naming a brand `..._deleted`.
+ *
+ * A brand that is already `deleted` short-circuits (returns true → idempotent
+ * 204) WITHOUT re-renaming, so a repeated delete never double-suffixes an
+ * already-renamed brand (`Acme_deleted` → `Acme_deleted_deleted`). Any other
+ * status — including a NULL status, which the rest of the code treats as a live
+ * brand — is renamed as normal. This early check is a JS `status === 'deleted'`
+ * guard rather than a SQL `status != 'deleted'` filter, which would also
+ * exclude NULL-status rows (`NULL <> 'deleted'` is NULL) and leave them
+ * undeletable. To also close the read-then-write race, the UPDATE itself is
+ * filtered with PostgREST `.not('status', 'eq', 'deleted')` — which DOES match
+ * NULL-status rows — so a concurrent delete that already renamed the row turns
+ * our UPDATE into a zero-row no-op (reported as success) instead of
+ * re-suffixing it.
+ *
+ * A colliding rename surfaces as a `23505` on the per-org name constraint
+ * (`uq_brand_name_per_org`, the only unique column this UPDATE touches), which
+ * we resolve by advancing the index and retrying; any other 23505 is surfaced
+ * rather than retried. Race-safe against concurrent deletes of same-named
+ * brands (the rename is keyed by brand id, so a re-run recomputes the same
+ * target and is idempotent).
+ *
+ * Backfilling brands deleted before this change (which kept their original
+ * names) is a separate one-off data migration and is intentionally out of scope
+ * here — this governs only the forward-looking delete path.
  *
  * @param {string} organizationId - SpaceCat organization UUID
  * @param {string} brandId - Brand UUID
  * @param {object} postgrestClient - PostgREST client
  * @param {string} [updatedBy] - User performing the operation
- * @returns {Promise<boolean>} True if deleted, false if not found
+ * @returns {Promise<boolean>} True if the brand is deleted (freshly soft-deleted,
+ *   or already deleted — DELETE stays idempotent), false if no such brand exists
  */
 export async function deleteBrand(organizationId, brandId, postgrestClient, updatedBy = 'system') {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required');
   }
 
-  const { data, error } = await postgrestClient
+  // Read the brand's current name (and status) so we can rename it on delete.
+  const { data: brand, error: readError } = await postgrestClient
     .from('brands')
-    .update({ status: 'deleted', updated_by: updatedBy })
+    .select('name, status')
     .eq('organization_id', organizationId)
     .eq('id', brandId)
-    .select('id')
     .maybeSingle();
 
-  if (error) {
-    throw new Error(`Failed to delete brand: ${error.message}`);
+  if (readError) {
+    throw new Error(`Failed to delete brand: ${readError.message}`);
   }
-  return !!data;
+  // Genuinely not found → false (404).
+  if (!brand) {
+    return false;
+  }
+  // Already soft-deleted → succeed idempotently (matches the pre-LLMO-6978
+  // behavior where a repeat delete returned 204) WITHOUT re-renaming, so an
+  // already-renamed name is never re-suffixed (`Acme_deleted_deleted`).
+  if (brand.status === 'deleted') {
+    return true;
+  }
+
+  // Try `{name}_deleted`, then `{name}_deleted2`, `{name}_deleted3`, ... until a
+  // free name lands. A collision rejects the UPDATE with a 23505 (a same-named
+  // brand was already deleted, or two deletes race) — advance the index and
+  // retry rather than surfacing a 500. The UPDATE is keyed by brand id, so a
+  // concurrent re-run recomputes the same target name and stays idempotent.
+  for (let index = 1; index <= MAX_DELETED_NAME_ATTEMPTS; index += 1) {
+    const deletedName = index === 1
+      ? `${brand.name}_deleted`
+      : `${brand.name}_deleted${index}`;
+
+    // eslint-disable-next-line no-await-in-loop -- sequential retry on name collision
+    const { error } = await postgrestClient
+      .from('brands')
+      .update({ status: 'deleted', name: deletedName, updated_by: updatedBy })
+      .eq('organization_id', organizationId)
+      .eq('id', brandId)
+      // Make the write itself the concurrency guard: only a still-live row is
+      // renamed. If a concurrent deleteBrand already flipped this row to
+      // `deleted` between our SELECT above and this UPDATE, we match zero rows
+      // instead of re-suffixing an already-renamed brand (`Acme_deleted` →
+      // `Acme_deleted2`). PostgREST `.not(...eq...)` still matches NULL-status
+      // rows (unlike a bare `status != 'deleted'`), so NULL-status live brands
+      // stay deletable.
+      .not('status', 'eq', 'deleted')
+      .select('id')
+      .maybeSingle();
+
+    if (!error) {
+      // Either we renamed + soft-deleted the row, OR a racing caller already
+      // soft-deleted it so our status-guarded UPDATE matched zero rows — either
+      // way the brand is now deleted, so report success idempotently.
+      return true;
+    }
+    // A 23505 on our per-org name constraint means `{name}_deletedN` is taken —
+    // advance the index and retry. Any other 23505 (a different unique
+    // constraint) can't be resolved by renaming, so surface it immediately
+    // rather than burning the whole retry budget on an unresolvable violation.
+    if (error.code !== '23505' || !error.message?.includes('uq_brand_name_per_org')) {
+      throw new Error(`Failed to delete brand: ${error.message}`);
+    }
+    // else: `{name}_deletedN` is taken — fall through and try the next index.
+  }
+
+  throw new Error(
+    `Failed to delete brand: could not free the name "${brand.name}" after `
+    + `${MAX_DELETED_NAME_ATTEMPTS} attempts`,
+  );
 }
 
 /**

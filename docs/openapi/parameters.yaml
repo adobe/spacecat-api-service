@@ -35,7 +35,9 @@ deliveryType:
     $ref: './schemas.yaml#/DeliveryType'
 tier:
   name: tier
-  description: Entitlement tier to filter by
+  description: >-
+    Entitlement tier to filter by. Includes PRE_ONBOARD (internal-only, not
+    customer-visible) since GET /sites/by-tier/{tier} is admin-only.
   in: path
   required: true
   schema:
@@ -44,6 +46,7 @@ tier:
       - PAID
       - FREE_TRIAL
       - PLG
+      - PRE_ONBOARD
 productCodeQuery:
   name: productCode
   description: Optional product code to further filter the result (e.g. LLMO)

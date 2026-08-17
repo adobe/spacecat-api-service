@@ -11,7 +11,7 @@
  */
 
 import { expect } from 'chai';
-import { SITE_1_ID, SITE_3_ID } from '../seed-ids.js';
+import { SITE_1_ID, SITE_1_BASE_URL, SITE_3_ID } from '../seed-ids.js';
 
 /**
  * Shared Audit Policy contract tests (SITES-47306).
@@ -30,10 +30,20 @@ import { SITE_1_ID, SITE_3_ID } from '../seed-ids.js';
  * SITE_3_ID (ORG_2, "denied") for the cross-org 403 check — see
  * test/it/shared/tests/audit-urls.js for the same SITE_1/SITE_3 convention.
  *
+ * The `GET /audit-scope/pages` (E4, SITES-46351) describe block below reads
+ * `v_audit_scope_pages`, a data-service view added in mysticat-data-service
+ * migration `20260729162246_audit_scope_pages_view.sql`, first released in
+ * mysticat-data-service v5.81.0 — the docker-compose.yml pin above must stay
+ * at or above that tag for this describe block to pass. See seedAuditScopePages
+ * in test/it/postgres/seed.js.
+ *
  * @param {() => object} getHttpClient - Getter returning the initialized HTTP client
  * @param {() => Promise<void>} resetData - Truncates all data and re-seeds baseline
+ * @param {(siteId: string, pages: Array<{ url: string, urlPath: string,
+ *   inScope?: boolean }>) => Promise<void>} seedAuditScopePages - Seeds
+ *   page_inventory + matching d_page_in_scope facts for a site (see seed.js).
  */
-export default function auditPolicyTests(getHttpClient, resetData) {
+export default function auditPolicyTests(getHttpClient, resetData, seedAuditScopePages) {
   describe('Audit Policy', () => {
     before(() => resetData());
 
@@ -93,10 +103,75 @@ export default function auditPolicyTests(getHttpClient, resetData) {
       }
     });
 
+    it('paginates revisions with limit + cursor read from the query string', async () => {
+      // Regression test: listRevisions must read limit/cursor from context.data (query
+      // string), not context.params (path segments) - the route has no :limit/:cursor
+      // path segments, so a context.params read is a silent no-op in production.
+      const http = getHttpClient();
+      const firstPage = await http.admin.get(`/sites/${SITE_1_ID}/audit-policy/revisions?limit=1`);
+      expect(firstPage.status).to.equal(200);
+      expect(firstPage.body.items).to.have.length(1);
+      expect(firstPage.body.cursor).to.be.a('string').and.not.empty;
+
+      const secondPage = await http.admin.get(
+        `/sites/${SITE_1_ID}/audit-policy/revisions?limit=1&cursor=${firstPage.body.cursor}`,
+      );
+      expect(secondPage.status).to.equal(200);
+      expect(secondPage.body.items).to.have.length(1);
+      expect(secondPage.body.items[0].version).to.be.lessThan(firstPage.body.items[0].version);
+    });
+
     it('API-15: scope-read endpoints return 501 pre-implementation', async () => {
       const http = getHttpClient();
       const res = await http.admin.get(`/sites/${SITE_1_ID}/audit-scope/summary`);
       expect(res.status).to.equal(501);
+    });
+
+    describe('GET /audit-scope/pages (E4)', () => {
+      const pageA = { url: `${SITE_1_BASE_URL}/audit-scope-a`, urlPath: '/audit-scope-a', inScope: true };
+      const pageB = { url: `${SITE_1_BASE_URL}/audit-scope-b`, urlPath: '/audit-scope-b', inScope: true };
+      const pageC = { url: `${SITE_1_BASE_URL}/audit-scope-c`, urlPath: '/audit-scope-c', inScope: false };
+
+      before(() => seedAuditScopePages(SITE_1_ID, [pageA, pageB, pageC]));
+
+      it('returns only in-scope pages, ordered by url, with the DTO shape', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get(`/sites/${SITE_1_ID}/audit-scope/pages`);
+        expect(res.status).to.equal(200);
+        const { items } = res.body;
+        expect(items.map((i) => i.url)).to.deep.equal([pageA.url, pageB.url]);
+        expect(items[0]).to.have.keys(['url', 'urlPath', 'discoverySource', 'lastModified', 'lifecycleState']);
+        expect(items[0].urlPath).to.equal(pageA.urlPath);
+        expect(items[0].discoverySource).to.deep.equal(['sitemap']);
+        expect(items[0].lifecycleState).to.equal('discovered');
+      });
+
+      it('paginates with limit + cursor', async () => {
+        const http = getHttpClient();
+        const firstPage = await http.admin.get(`/sites/${SITE_1_ID}/audit-scope/pages?limit=1`);
+        expect(firstPage.status).to.equal(200);
+        expect(firstPage.body.items.map((i) => i.url)).to.deep.equal([pageA.url]);
+        expect(firstPage.body.cursor).to.be.a('string').and.not.empty;
+
+        // A full page (items.length === limit) always emits a cursor, even when it's the
+        // last page - getScopePages accepts one harmless extra request rather than doing a
+        // second query to check for more rows (same tradeoff listRevisions makes), so don't
+        // assert cursor absence here. Assert the second page advances with no overlap instead,
+        // mirroring test/it/shared/tests/sites.js's cursor-pagination convention.
+        const secondPage = await http.admin.get(
+          `/sites/${SITE_1_ID}/audit-scope/pages?limit=1&cursor=${firstPage.body.cursor}`,
+        );
+        expect(secondPage.status).to.equal(200);
+        expect(secondPage.body.items.map((i) => i.url)).to.deep.equal([pageB.url]);
+        const firstPageUrls = new Set(firstPage.body.items.map((i) => i.url));
+        secondPage.body.items.forEach((i) => expect(firstPageUrls.has(i.url)).to.be.false);
+      });
+
+      it('user: denied for a cross-org site', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${SITE_3_ID}/audit-scope/pages`);
+        expect(res.status).to.equal(403);
+      });
     });
   });
 }

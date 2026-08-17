@@ -40,6 +40,7 @@ import {
   makeListProjectTagsStub,
   makeProvisioningTransportStubs,
 } from '../fixtures/tag-tree.js';
+import { INTENT_ROOT_NAME } from '../../../../src/support/serenity/prompt-tags.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -2295,7 +2296,7 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
       // `config` beneath the `source` root — the create path stamps the derived
       // origin AND source as well as the computed type.
       expect(createProjectTags.firstCall.args[2]).to.deep.equal([
-        'category', 'intent', 'origin', 'type', 'source',
+        'category', INTENT_ROOT_NAME, 'origin', 'type', 'source',
       ]);
       expect(createProjectTags.firstCall.args[3]).to.deep.equal({});
       expect(createProjectTags.secondCall.args[2]).to.deep.equal(['branded']);
@@ -2309,10 +2310,11 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
       expect(createProjectTags.getCall(3).args[2]).to.deep.equal(['config']);
       expect(createProjectTags.getCall(3).args[3]).to.deep.equal({ parentId: 'created::source' });
       expect(createProjectTags.getCall(4).args[2]).to.deep.equal(['Informational']);
-      expect(createProjectTags.getCall(4).args[3]).to.deep.equal({ parentId: 'created::intent' });
+      expect(createProjectTags.getCall(4).args[3])
+        .to.deep.equal({ parentId: `created::${INTENT_ROOT_NAME}` });
       expect(result.created[0].tagIds).to.deep.equal([
         'tag-cat-1', 'created:created::type:branded', 'created:created::origin:human',
-        'created:created::source:config', 'created:created::intent:Informational',
+        'created:created::source:config', `created:created::${INTENT_ROOT_NAME}:Informational`,
       ]);
     });
   });
@@ -2883,6 +2885,12 @@ describe('handlers/prompts.js — per-item source override (LLMO-6556)', () => {
       const { value, reason } = normalizePromptInput({ ...base, source: 'Semrush' });
       expect(reason).to.equal(null);
       expect(value.source).to.equal('semrush');
+    });
+
+    it('accepts strategy-chat (chat-originated Track prompts)', () => {
+      const { value, reason } = normalizePromptInput({ ...base, source: 'strategy-chat' });
+      expect(reason).to.equal(null);
+      expect(value.source).to.equal('strategy-chat');
     });
 
     it('rejects an unknown source (closed vocabulary — select, never invent)', () => {

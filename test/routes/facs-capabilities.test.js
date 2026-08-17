@@ -93,6 +93,7 @@ describe('routeFacsCapabilities', () => {
         'INTERNAL_ROUTES',
         'PRODUCTS_ROUTES',
         'PRODUCTS_FACS_RESOURCE_PARAM_ALIASES',
+        'PRODUCTS_FACS_SECONDARY_RESOURCE',
         'FACS_NON_RESOURCE_PARAMS',
       );
     });

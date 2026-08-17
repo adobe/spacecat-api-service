@@ -22,7 +22,11 @@ import {
   mergeIntoTree,
   buildRuleTreePatch,
   managedRuleNames,
+  detectManagedRuleNames,
+  estimateRuleTreeComplexity,
+  getManagedFetcherKey,
   redactSecrets,
+  redactPapiErrors,
 } from '../../../src/controllers/llmo/llmo-akamai-utils.js';
 
 const HOSTNAME = 'www.example.com';
@@ -196,6 +200,105 @@ describe('llmo-akamai-utils', () => {
         cfg.ruleNames.routing,
         cfg.ruleNames.failoverTest,
       ]);
+    });
+  });
+
+  describe('detectManagedRuleNames', () => {
+    it('returns [] for a tree with no managed rules', () => {
+      const tree = { rules: { children: [{ name: 'Existing' }, { name: 'Other' }] } };
+      expect(detectManagedRuleNames(tree)).to.deep.equal([]);
+    });
+
+    it('detects the wrapped layout (parent at top level)', () => {
+      const tree = { rules: { children: [{ name: 'Existing' }, { name: 'Optimize at Edge' }] } };
+      expect(detectManagedRuleNames(tree)).to.deep.equal(['Optimize at Edge']);
+    });
+
+    it('detects the legacy flat layout and a trailing-space name, deduped', () => {
+      const tree = {
+        rules: {
+          children: [
+            { name: 'Optimize at Edge Routing' },
+            { name: 'EdgeOptimize Failover - Test Header' },
+            { name: 'Optimize at Edge ' }, // legacy trailing space
+          ],
+        },
+      };
+      const found = detectManagedRuleNames(tree);
+      expect(found).to.include.members([
+        'Optimize at Edge',
+        'Optimize at Edge Routing',
+        'EdgeOptimize Failover - Test Header',
+      ]);
+      expect(found).to.have.length(3);
+    });
+
+    it('is safe on a missing/empty tree', () => {
+      expect(detectManagedRuleNames(undefined)).to.deep.equal([]);
+      expect(detectManagedRuleNames({})).to.deep.equal([]);
+      expect(detectManagedRuleNames({ rules: {} })).to.deep.equal([]);
+    });
+  });
+
+  describe('estimateRuleTreeComplexity', () => {
+    it('sums behaviors + criteria recursively across the tree', () => {
+      const tree = {
+        rules: {
+          behaviors: [{ name: 'a' }, { name: 'b' }], // 2
+          criteria: [{ name: 'c' }], // 1
+          children: [
+            { behaviors: [{ name: 'd' }], criteria: [], children: [] }, // 1
+            { behaviors: [], criteria: [{ name: 'e' }, { name: 'f' }] }, // 2
+          ],
+        },
+      };
+      expect(estimateRuleTreeComplexity(tree)).to.equal(6);
+    });
+
+    it('is safe on empty/missing input', () => {
+      expect(estimateRuleTreeComplexity(undefined)).to.equal(0);
+      expect(estimateRuleTreeComplexity({})).to.equal(0);
+      expect(estimateRuleTreeComplexity({ rules: {} })).to.equal(0);
+    });
+  });
+
+  describe('getManagedFetcherKey', () => {
+    const treeWithKey = (key) => ({
+      rules: {
+        children: [{
+          name: 'Optimize at Edge',
+          children: [{
+            name: 'Optimize at Edge Routing',
+            behaviors: [
+              { name: 'origin', options: {} },
+              {
+                name: 'modifyIncomingRequestHeader',
+                options: { customHeaderName: 'x-edgeoptimize-fetcher-key', headerValue: key },
+              },
+            ],
+          }],
+        }],
+      },
+    });
+
+    it('extracts the fetcher-key header value from the managed rule', () => {
+      expect(getManagedFetcherKey(treeWithKey('abc123'))).to.equal('abc123');
+    });
+
+    it('returns null when there is no managed fetcher-key header', () => {
+      const tree = { rules: { children: [{ name: 'Existing', behaviors: [{ name: 'origin' }] }] } };
+      expect(getManagedFetcherKey(tree)).to.equal(null);
+    });
+
+    it('is safe on empty/missing input', () => {
+      expect(getManagedFetcherKey(undefined)).to.equal(null);
+      expect(getManagedFetcherKey({})).to.equal(null);
+      expect(getManagedFetcherKey({ rules: {} })).to.equal(null);
+    });
+
+    it('distinguishes two versions minted with different keys', () => {
+      expect(getManagedFetcherKey(treeWithKey('K1')))
+        .to.not.equal(getManagedFetcherKey(treeWithKey('K2')));
     });
   });
 
@@ -508,6 +611,47 @@ describe('llmo-akamai-utils', () => {
       expect(byHeader('x-edgeoptimize-fetcher-key').options.headerValue).to.equal('***');
       // a tree without a rules root is returned unchanged
       expect(redactSecrets({})).to.deep.equal({});
+    });
+  });
+
+  describe('redactPapiErrors', () => {
+    const KEY = 'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789';
+
+    it('returns null/undefined unchanged', () => {
+      expect(redactPapiErrors(null)).to.equal(null);
+      expect(redactPapiErrors(undefined)).to.equal(undefined);
+    });
+
+    it('redacts an explicitly-known secret value from a string detail', () => {
+      const detail = `origin header set to ${KEY} rejected`;
+      expect(redactPapiErrors(detail, [KEY])).to.equal('origin header set to *** rejected');
+    });
+
+    it('redacts a 64-hex minted key with no explicit secret hint', () => {
+      expect(redactPapiErrors(`value ${KEY}`, [])).to.equal('value ***');
+    });
+
+    it('redacts a value following a secret header name', () => {
+      const detail = 'behavior modifyOutgoingRequestHeader x-edgeoptimize-api-key: sk-live-9f2b bad';
+      expect(redactPapiErrors(detail, [])).to.contain('x-edgeoptimize-api-key: ***');
+      expect(redactPapiErrors(detail, [])).to.not.contain('sk-live-9f2b');
+    });
+
+    it('scrubs secrets inside an errors array, preserving shape', () => {
+      const errors = [{ type: 'x', detail: `set ${KEY} here`, errorLocation: '#/rules' }];
+      const out = redactPapiErrors(errors, [KEY]);
+      expect(out).to.be.an('array').with.length(1);
+      expect(out[0].detail).to.equal('set *** here');
+      expect(out[0].errorLocation).to.equal('#/rules');
+    });
+
+    it('bounds a large errors array to the max entries', () => {
+      const errors = Array.from({ length: 40 }, (_, i) => ({ detail: `e${i}` }));
+      expect(redactPapiErrors(errors, [], 25)).to.have.length(25);
+    });
+
+    it('ignores short/non-string extra secrets', () => {
+      expect(redactPapiErrors('a=1', ['a', 123, null])).to.equal('a=1');
     });
   });
 });

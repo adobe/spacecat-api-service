@@ -26,6 +26,21 @@
  * design doc says 405s as a disguised quota rejection (as opposed to a genuine Method-Not-Allowed).
  * It prints the raw response status, headers, and body so a human can re-confirm the shape.
  *
+ * SECOND READING (SITES-49206 / ADR-009): after the JIT allocator's removal this script is also the
+ * interim per-environment re-check that Semrush is still NOT enforcing AI limits — and under that
+ * premise its meaning INVERTS the LLMO-6190 labels used below. A publish that SUCCEEDS at zero
+ * headroom is the HEALTHY result (the premise holds); the disguised 405 this was built to capture
+ * now means Semrush is ENFORCING AGAIN — the signal to re-introduce the allocator from history. The
+ * on-screen `expected` / `UNEXPECTED` console text still speaks the fixture-capture language, so it
+ * reads the opposite way from the premise check. `main()` exits 0 in both branches: the operator
+ * reads the printed publish outcome, not an exit code.
+ *
+ * DELETE-LAST COUPLING: this script is the sole remaining caller of the transport's
+ * `transferWorkspaceResources` (the step-2 drain). Deleting this script strands that method, and
+ * deleting that method breaks this script — serenity-docs#72 §10.7 retires the two together with
+ * the §10.6 classifier. The step-1 read `getWorkspaceResources` is NOT part of this coupling:
+ * `elements.js` `checkAccess` (the brand-presence access banner) keeps it alive independently.
+ *
  * WHY THIS CAN'T RUN IN CI OR BE RUN BY the implementing agent: it needs a live IMS bearer token
  * and a real Semrush sub-workspace id — neither exists in this environment. A human with
  * Semrush/IMS dev-environment credentials must run it manually.
@@ -41,19 +56,30 @@
  *
  * What it does:
  *   1. Reads the sub-workspace's current AI resources (GET .../resources).
- *   2. Sets `prompts.total` to its current `used` (an absolute transfer to zero headroom) —
- *      draining the SAME dimension the disguised-405 is documented against (workspace doc §5).
- *      Prints the before/after totals so the operator can confirm this and can restore it after
- *      (this script does NOT restore it — see "cleanup" below).
+ *   2. Sets prompt headroom to zero — an absolute transfer of `total` down to `used`, draining the
+ *      SAME dimension the disguised-405 is documented against (workspace doc §5). Prints the
+ *      before/after totals so the operator can confirm this and can restore it after (this script
+ *      does NOT restore it — see "cleanup" below).
+ *
+ *      Read-side shape drift (found 2026-08-17, SITES-49206 canary run): Semrush's AI product
+ *      resources used to report a single flat `prompts.{used,total}`; some workspaces now instead
+ *      report tiered `daily_prompts.{used,total}` / `weekly_prompts.{used,total}`, with no flat
+ *      `prompts` key at all. This script handles BOTH shapes on read. The `resources/transfer`
+ *      WRITE contract (`handlers.aiProductResources`), however, still only accepts a flat `prompts`
+ *      number — there is no documented tiered write shape. So for a tiered workspace this script
+ *      can only DRAIN when both tiers are already at `total: 0` (nothing to do — skips the transfer
+ *      call and proceeds straight to step 3); it refuses to guess a write shape for a tiered
+ *      workspace that still has real headroom, and exits with an explanation instead.
  *   3. Creates (or reuses, with --project-id) a minimal AI project, attaches a model, drafts one
  *      prompt, and publishes — expected to 405 with the disguised metered-quota body.
  *   4. Prints the FULL raw error: status, `error.body`, and (if present) any response headers
  *      SerenityTransportError captured — everything needed to pin a fixture.
  *
  * Cleanup: this script does NOT delete the project or restore the drained allocation — it's meant
- * to run against a disposable dev/throwaway sub-workspace. Re-run `ensureAiHeadroom`/an ordinary
- * API top-up (or just re-activate the brand) afterwards if the workspace needs to keep working, or
- * decommission the throwaway workspace entirely.
+ * to run against a disposable dev/throwaway sub-workspace. To restore headroom afterwards (legacy
+ * flat-`prompts` workspaces only — see the shape-drift note above), transfer `prompts.total` back
+ * up (the inverse of step 2 — a `transferWorkspaceResources` call, or just re-activate the brand)
+ * if the workspace needs to keep working, or decommission the throwaway workspace entirely.
  *
  * If the captured body's SHAPE ever changes (e.g. the gateway starts returning JSON for this
  * rejection too), `isMeteredQuota` and its pinned fixture in `test/support/serenity/errors.test.js`
@@ -63,6 +89,7 @@
 import { env, argv, exit } from 'node:process';
 import { parseArgs } from 'node:util';
 import { createSerenityTransport, SerenityTransportError } from '../src/support/serenity/rest-transport.js';
+import { resolvePromptDims, isZeroHeadroom } from './serenity-metered-405-canary-resources.mjs';
 
 function usageAndExit(message) {
   if (message) {
@@ -104,24 +131,62 @@ function printError(label, e) {
   }
 }
 
+function printDims(dims, label) {
+  for (const dim of dims) {
+    console.log(`${dim.key}.used:`, dim.used, ` ${dim.key}.total (${label}):`, dim.total);
+  }
+}
+
 async function main() {
   console.log(`Reading current AI resources for sub-workspace ${subWorkspaceId}...`);
   const before = await transport.getWorkspaceResources(subWorkspaceId);
-  const prompts = before?.product_resources?.ai?.resources?.prompts;
-  if (!prompts || typeof prompts.used !== 'number' || typeof prompts.total !== 'number') {
-    usageAndExit('Could not read product_resources.ai.resources.prompts.{used,total} from the workspace response — dumping raw response instead');
+  const aiResourcesBefore = before?.product_resources?.ai?.resources;
+  const promptsBefore = resolvePromptDims(aiResourcesBefore);
+  if (!promptsBefore) {
+    console.error('Raw ai.resources (unrecognized shape):', JSON.stringify(aiResourcesBefore, null, 2));
+    usageAndExit('Could not find a flat `prompts.{used,total}` or a complete tiered `daily_prompts`/`weekly_prompts` pair in product_resources.ai.resources — see the raw dump above');
   }
-  console.log('prompts.used:', prompts.used, ' prompts.total (before):', prompts.total);
+  printDims(promptsBefore.dims, 'before');
 
   if (opts['dry-run']) {
-    console.log('\n--dry-run: would drain prompts.total to', prompts.used, 'then create+publish a project to trigger the disguised 405. Exiting without making changes.');
+    if (promptsBefore.shape === 'legacy') {
+      console.log('\n--dry-run: would drain prompts.total to prompts.used, then create+publish a project to trigger the disguised 405. Exiting without making changes.');
+    } else if (isZeroHeadroom(promptsBefore.dims)) {
+      console.log('\n--dry-run: tiered prompt resources already at zero headroom — would skip the drain (unsupported for this shape, see header) and create+publish directly. Exiting without making changes.');
+    } else {
+      console.log('\n--dry-run: tiered prompt resources have real headroom, which this script cannot drain (the transfer write API only supports the legacy flat `prompts` field — see header). A real run would exit here without publishing.');
+    }
     return;
   }
 
-  console.log(`Draining prompts.total to ${prompts.used} (an absolute transfer — zero prompt headroom left)...`);
-  await transport.transferWorkspaceResources(subWorkspaceId, {
-    ai: { projects: before.product_resources.ai.resources.projects.total, prompts: prompts.used },
-  });
+  if (promptsBefore.shape === 'legacy') {
+    const [prompts] = promptsBefore.dims;
+    const projectsTotal = aiResourcesBefore?.projects?.total;
+    if (typeof projectsTotal !== 'number') {
+      usageAndExit('Could not read product_resources.ai.resources.projects.total from the workspace response — required to preserve it across the drain transfer');
+    }
+    console.log(`Draining prompts.total to ${prompts.used} (an absolute transfer — zero prompt headroom left)...`);
+    await transport.transferWorkspaceResources(subWorkspaceId, {
+      ai: { projects: projectsTotal, prompts: prompts.used },
+    });
+  } else if (isZeroHeadroom(promptsBefore.dims)) {
+    console.log('Tiered prompt resources are already at zero headroom on every tier — skipping the drain (the transfer write API has no documented tiered shape to drain further).');
+  } else {
+    usageAndExit('This workspace uses the tiered daily_prompts/weekly_prompts shape with real headroom remaining, and the resources/transfer write API only accepts a flat `prompts` field (no documented tiered write shape) — this script cannot safely drain it. Use a workspace already at daily_prompts.total===0 && weekly_prompts.total===0, or extend transferWorkspaceResources once Semrush documents the tiered write contract.');
+  }
+
+  // Re-read AFTER the drain (or no-op) and print the post-drain totals. Without this, "did the
+  // drain land?" is an open confounder on the premise-confirming reading (a publish that succeeds
+  // against GENUINELY zero headroom confirms Semrush is not enforcing — but a publish that succeeds
+  // because the drain silently no-op'd proves nothing). This is the "after" half the header
+  // advertises.
+  const after = await transport.getWorkspaceResources(subWorkspaceId);
+  const promptsAfter = resolvePromptDims(after?.product_resources?.ai?.resources);
+  const zeroHeadroom = promptsAfter && isZeroHeadroom(promptsAfter.dims);
+  if (promptsAfter) {
+    printDims(promptsAfter.dims, 'after drain');
+  }
+  console.log(zeroHeadroom ? '— zero headroom confirmed' : '— ⚠ HEADROOM REMAINS: the drain did not land (or the read shape changed again); the publish result below is inconclusive either way');
 
   let projectId = opts['project-id'];
   if (!projectId) {
@@ -172,11 +237,17 @@ async function main() {
   );
 
   try {
-    console.log('Publishing with zero prompt headroom — expecting the disguised metered-quota 405...');
+    console.log('Publishing with zero prompt headroom — LLMO-6190 fixture capture expects the disguised metered-quota 405...');
     await transport.publishProject(subWorkspaceId, projectId);
-    console.log('\nUNEXPECTED: publish succeeded. The workspace may not actually be at zero headroom, or the disguised-405 only fires with drafted prompts present — try creating a prompt on the project before publishing.');
+    console.log('\npublish SUCCEEDED at zero headroom. Read this against the "after drain" totals printed above:');
+    console.log('  • if zero headroom was confirmed there — this is the ADR-009 premise-confirming result: Semrush is NOT enforcing AI limits (no allocator needed).');
+    console.log('  • if HEADROOM REMAINS was printed — inconclusive: the drain did not land (or the disguised-405 only fires with drafted prompts present — try a prompt first).');
+    console.log('(The legacy label for this branch was "UNEXPECTED"; that reflects the LLMO-6190 fixture-capture goal, not the ADR-009 premise check — see the header.)');
   } catch (e) {
     printError('publishProject result (this is what isMeteredQuota must match)', e);
+    if (e instanceof SerenityTransportError && e.status === 405) {
+      console.log('\nA disguised 405 at confirmed-zero headroom is the LLMO-6190 fixture; under the ADR-009 premise it ALSO means Semrush is enforcing AI limits again — the signal to re-introduce the allocator from history (ADR-009).');
+    }
   }
 
   console.log('\nDone. This script did NOT restore the drained allocation or delete the canary project — clean up the throwaway workspace manually.');

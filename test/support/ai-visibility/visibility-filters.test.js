@@ -11,6 +11,7 @@
  */
 
 import { expect } from 'chai';
+import { COUNTRY_ENUM } from '@quazar/ai-seo-ts/common/types_pb.js';
 import {
   SR_AI_SEO_SUPPORTED_MARKET_CODES,
   SR_VISIBILITY_MARKETS_CATALOG,
@@ -30,10 +31,15 @@ describe('visibility-filters', () => {
       }
     });
 
-    it('contains expected market codes', () => {
+    it('stays synchronized with the vendored COUNTRY enum', () => {
+      const countryEnumCodes = Object.keys(COUNTRY_ENUM)
+        .filter((code) => /^[A-Z]{2}$/.test(code))
+        .sort((a, b) => a.localeCompare(b));
+      expect(SR_AI_SEO_SUPPORTED_MARKET_CODES).to.deep.equal(countryEnumCodes);
       expect(SR_AI_SEO_SUPPORTED_MARKET_CODES).to.include.members([
         'US', 'UK', 'DE', 'FR', 'JP',
         'HK', 'ID', 'KR', 'MY', 'PH', 'SG', 'TH', 'TR', 'TW', 'VN',
+        'NZ', 'AF',
       ]);
     });
   });
@@ -81,6 +87,8 @@ describe('visibility-filters', () => {
       expect(normalizeMarketToken('DE')).to.equal('DE');
       expect(normalizeMarketToken('jp')).to.equal('JP');
       expect(normalizeMarketToken('sg')).to.equal('SG');
+      expect(normalizeMarketToken('nz')).to.equal('NZ');
+      expect(normalizeMarketToken('af')).to.equal('AF');
     });
 
     it('defaults unknown codes to US', () => {
@@ -253,9 +261,10 @@ describe('visibility-filters', () => {
     });
 
     it('includes searchParams country in filters', () => {
-      const sp = new URLSearchParams({ country: 'FR' });
+      const sp = new URLSearchParams({ country: 'NZ' });
       const result = attachSrFiltersToSuccessfulBody(200, {}, sp);
-      expect(result.srFilters.markets).to.include('FR');
+      expect(result.srFilters.markets).to.include('NZ');
+      expect(result.srFilters.marketsCatalog).to.include('NZ');
     });
 
     it('includes searchParams engine in filters', () => {

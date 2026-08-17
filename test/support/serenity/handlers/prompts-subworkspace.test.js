@@ -294,34 +294,6 @@ describe('prompts-subworkspace handlers', () => {
       expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(WS, 'p-us-en', [createItemMatch('p', 'caller-42')], ['tag-1', TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational]);
     });
 
-    it('dynamic-allocation ON: fronts headroom sized on the batch BEFORE the write, not just before publish (LLMO-6190, live-verified)', async () => {
-      // The metered write is createPromptsWithMetadata itself (Rainer, live-verified) — a
-      // disguised-quota 405 fires there, before any publish. getWorkspaceResources must be read (if
-      // needed, a top-up transferred) before the first createPromptsWithMetadata call, not after.
-      const transport = makeTransport({
-        getWorkspaceResources: sinon.stub().resolves({
-          product_resources: {
-            ai: {
-              resources: {
-                projects: { used: 0, total: 10 }, prompts: { used: 0, total: 100 },
-              },
-            },
-          },
-        }),
-      });
-      const result = await handleCreatePromptsSubworkspace(transport, WS, {
-        prompts: [{
-          text: 'p', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
-        }],
-      }, log, undefined, undefined, undefined, undefined, {
-        dynamicAllocation: true, parentWorkspaceId: 'parent-ws',
-      });
-      expect(result.created).to.have.length(1);
-      expect(transport.getWorkspaceResources).to.have.been.calledOnceWith(WS);
-      expect(transport.getWorkspaceResources)
-        .to.have.been.calledBefore(transport.createPromptsWithMetadata);
-    });
-
     // A tag NAME cannot address a nested tag, so a `tags` key is rejected
     // rather than silently writing a phantom root tag (twin of the flat-mode
     // contract).

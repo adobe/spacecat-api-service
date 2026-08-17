@@ -25,7 +25,9 @@ import { fetchOwnedUrlsTraffic, mergeOwnedUrlsTraffic } from '../support/element
 import { mapWithConcurrency } from '../support/elements/concurrency.js';
 import { addDaysToDate } from '../support/elements/week-utils.js';
 import { resolveBrandWorkspace } from '../support/serenity/workspace-resolver.js';
-import { createSerenityTransport, SerenityTransportError } from '../support/serenity/rest-transport.js';
+import { isSerenityActiveForBrand } from '../support/serenity/serenity-active.js';
+import { createSerenityTransport } from '../support/serenity/rest-transport.js';
+import { SerenityTransportError } from '../support/serenity/serenity-transport-error.js';
 import { cachedOk } from '../support/cached-response.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { ErrorWithStatusCode, resolveSemrushImsToken } from '../support/utils.js';
@@ -376,6 +378,14 @@ async function authorizeOrg(ctx) {
   if (!brand) {
     return { error: notFound('Brand not found for this organization') };
   }
+  // Per-brand serenity gate. Without it an unmigrated brand falls through to
+  // `resolveBrandWorkspace`'s flat mode and every read here — the brand-presence
+  // stats and the workspace-access probe — runs against the org's shared PARENT
+  // workspace, answering for the org instead of for the brand. A brand that has
+  // not been released to Semrush has no business on this surface at all.
+  if (!await isSerenityActiveForBrand(ctx, spaceCatId, brandIdParam, ctx?.log)) {
+    return { error: notFound('Serenity is not active for this brand') };
+  }
   const { workspaceId } = await resolveBrandWorkspace(ctx, spaceCatId, brandIdParam);
   if (!hasText(workspaceId)) {
     return { error: notFound('Brand has no resolvable Semrush workspace') };
@@ -417,6 +427,18 @@ async function authorizeBrandSubWorkspace(ctx, log) {
   const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
   if (!brandUuid) {
     return { error: notFound(`Brand not found for organization: ${brandId}`) };
+  }
+  // Per-brand serenity gate, ahead of the sub-workspace requirement below: a
+  // brand can be provisioned (sub-workspace bound, so mode is 'subworkspace')
+  // long before its wave releases it, and until then its prompts must be read
+  // from the legacy corpus rather than from Semrush.
+  if (!await isSerenityActiveForBrand(ctx, spaceCatId, brandUuid, log)) {
+    return {
+      error: createResponse(
+        { error: 'serenityInactive', message: 'Serenity is not active for this brand' },
+        404,
+      ),
+    };
   }
   const { mode, workspaceId, parentWorkspaceId } = await resolveBrandWorkspace(
     ctx,
@@ -1238,10 +1260,9 @@ export default function ElementsController(context, log, env) {
    *     /url-inspector/domain-urls
    * Phase 2 of the Cited Third-Party tree: expand a cited domain → its URLs.
    * Same Semrush element as owned-urls (Stats-per-URL 9af5ed83) minus the trend
-   * element and the Postgres traffic hybrid, filtered to a single domain
-   * (required `hostname`) client-side instead of `domain_type='Owned'`.
+   * element and the Postgres traffic hybrid, optionally filtered to a single
+   * domain (`hostname`) client-side instead of `domain_type='Owned'`.
    */
-  /* c8 ignore start -- LLMO-6160 POC endpoint; unit tests intentionally deferred */
   const listDomainUrls = async (ctx) => {
     try {
       const auth = await authorizeOrg(ctx);
@@ -1273,13 +1294,6 @@ export default function ElementsController(context, log, env) {
         return badRequest(`Date range must not exceed ${MAX_RANGE_DAYS} days`);
       }
 
-      // hostname (aka domain) is the domain to drill into — required (the UI only
-      // calls this after a domain row is expanded).
-      const hostname = query.hostname || query.domain;
-      if (!hasText(hostname)) {
-        return badRequest('hostname is required for domain URL drilldown');
-      }
-
       const service = await buildService(ctx);
 
       const { BrandSemrushProject } = ctx?.dataAccess ?? {};
@@ -1301,9 +1315,13 @@ export default function ElementsController(context, log, env) {
       } else {
         projects = await service.getOwnedUrlProjects(workspaceId, { brandSemrushProjects });
       }
+      // Normalize whitespace-only hostname to "no filter" explicitly at the API
+      // boundary, rather than relying on the transform's downstream `.trim()`.
+      const hostname = (query.hostname || query.domain || '').trim() || undefined;
 
-      // The transform host-filters, sorts by citations desc, and slices client-side
-      // (Semrush has no server-side pagination); totalCount is the full post-filter count.
+      // The transform optionally host-filters, sorts by citations desc, and slices
+      // client-side (Semrush has no server-side pagination); totalCount is the full
+      // post-filter count.
       const result = await service.getDomainUrls(workspaceId, {
         projects,
         hostname,
@@ -1321,7 +1339,6 @@ export default function ElementsController(context, log, env) {
       return mapError(e, log);
     }
   };
-  /* c8 ignore stop */
 
   /**
    * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/market-tracking-trends

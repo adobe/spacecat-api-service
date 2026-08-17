@@ -16,10 +16,11 @@ import {
 import { hasText, isObject, isValidUUID } from '@adobe/spacecat-shared-utils';
 import AccessControlUtil from '../support/access-control-util.js';
 import { UnauthorizedProductError } from '../support/errors.js';
-import { AuditPolicyDto, AuditPolicyRevisionDto } from '../dto/audit-policy.js';
+import { AuditPolicyDto, AuditPolicyRevisionDto, AuditScopePageDto } from '../dto/audit-policy.js';
 
 const POLICY_TABLE = 'audit_policy';
 const REVISION_TABLE = 'audit_policy_revision';
+const SCOPE_PAGES_VIEW = 'v_audit_scope_pages';
 const UPSERT_RPC = 'wrpc_upsert_audit_policy';
 
 // getAuthor() stamps updated_by with an IMS user GUID for most auth paths (profile.email is
@@ -71,6 +72,23 @@ function decodeCursor(c) {
 
 function encodeCursor(version) {
   return Buffer.from(String(version), 'utf8').toString('base64url');
+}
+
+// Cursor for the scope page list encodes the last row's `url` string (opaque base64url) -
+// distinct from the version-int cursor above. `Buffer.from(c, 'base64url')` does not throw
+// on malformed input - it decodes leniently to garbage bytes - so validity is checked by
+// re-encoding the decoded value and comparing it back to the original string. Callers must
+// distinguish "no cursor supplied" from "invalid cursor supplied" themselves via hasText(c).
+function decodePageCursor(c) {
+  const decoded = Buffer.from(c, 'base64url').toString('utf8');
+  if (!hasText(decoded) || Buffer.from(decoded, 'utf8').toString('base64url') !== c) {
+    return null;
+  }
+  return decoded;
+}
+
+function encodePageCursor(url) {
+  return Buffer.from(String(url), 'utf8').toString('base64url');
 }
 
 // Guards against a fulfilled-but-nullish IMS profile (a not-found/deactivated user that resolves
@@ -324,10 +342,10 @@ export default function AuditPolicyController() {
     }
     const { siteId, client } = auth;
     const limit = Math.min(
-      Math.max(Number.parseInt(context.params?.limit, 10) || DEFAULT_PAGE, 1),
+      Math.max(Number.parseInt(context.data?.limit, 10) || DEFAULT_PAGE, 1),
       MAX_PAGE,
     );
-    const rawCursor = context.params?.cursor;
+    const rawCursor = context.data?.cursor;
     let cursor = null;
     if (hasText(rawCursor)) {
       cursor = decodeCursor(rawCursor);
@@ -357,6 +375,40 @@ export default function AuditPolicyController() {
     return ok({ items, ...(nextCursor ? { cursor: nextCursor } : {}) });
   }
 
+  async function getScopePages(context) {
+    const auth = await authorizeRead(context);
+    if (auth.error) {
+      return auth.error;
+    }
+    const { siteId, client } = auth;
+    const limit = Math.min(
+      Math.max(Number.parseInt(context.data?.limit, 10) || DEFAULT_PAGE, 1),
+      MAX_PAGE,
+    );
+    const rawCursor = context.data?.cursor;
+    let cursor = null;
+    if (hasText(rawCursor)) {
+      cursor = decodePageCursor(rawCursor);
+      if (cursor === null) {
+        return badRequest('cursor is invalid or out of range');
+      }
+    }
+
+    let q = client.from(SCOPE_PAGES_VIEW).select('*').eq('site_id', siteId);
+    if (cursor !== null) {
+      q = q.gt('url', cursor);
+    }
+    const { data, error } = await q.order('url', { ascending: true }).limit(limit);
+    if (error) {
+      context.log?.error?.(`audit-policy getScopePages failed: ${error.code} ${error.message}`);
+      return internalServerError('Failed to read audit scope pages');
+    }
+    const items = (data || []).map(AuditScopePageDto.toJSON);
+    const nextCursor = items.length === limit
+      ? encodePageCursor(items[items.length - 1].url) : undefined;
+    return ok({ items, ...(nextCursor ? { cursor: nextCursor } : {}) });
+  }
+
   async function notImplemented(context) {
     const auth = await authorizeRead(context);
     if (auth.error) {
@@ -364,7 +416,6 @@ export default function AuditPolicyController() {
     }
     return createResponse({ message: 'Not implemented yet.' }, 501);
   }
-  const getScopePages = notImplemented;
   const getScopeSummary = notImplemented;
   const getScopeSections = notImplemented;
 

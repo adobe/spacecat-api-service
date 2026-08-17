@@ -36,9 +36,11 @@ export const INTENT_ENRICH_CONCURRENCY = 5;
  *   the shape Semrush's own UI sends for this element.
  * - **tags** — each value becomes its own `tags contains <value>` clause; multiple
  *   tags are AND-ed (a prompt must carry all). Callers pass the FULL prefixed tag
- *   value — the element's tag taxonomy varies by workspace (`type__`, `category__`,
- *   `intent__`, `source__`, `topic__`), so no prefix is assumed here. e.g. pass
- *   `type__branded` for the branded count, `category__Brand` for a category filter.
+ *   value — the prefix is the tag's root name, which varies by workspace and, for
+ *   the intent dimension, by how far the `$abv_tags$intent` rename has reached
+ *   (`type__`, `category__`, `$abv_tags$intent__`, `source__`, `topic__`), so no
+ *   prefix is assumed here. e.g. pass `type__branded` for the branded count,
+ *   `category__Brand` for a category filter.
  * - **projectIds** — a `CBF_project` `or` group; omitted → all projects in the
  *   (sub-)workspace. The UI already surfaces these as `semrush_project_id` via the
  *   URL Inspector filter-dimensions `regions`.

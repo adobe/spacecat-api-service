@@ -12,6 +12,7 @@
  */
 
 import { expect } from 'chai';
+import { SEARCH_TYPE_ENUM } from '@quazar/ai-seo-ts/v2/source/enums_pb.js';
 import {
   COUNTRY_ENUM,
   LLM_ENUM,
@@ -25,6 +26,7 @@ import {
   TOPIC_OPPORTUNITY_PROMPTS_MAX_PAGES,
   num,
   brandTarget,
+  resolveSearchType,
   parseLimitOffset,
   normalizeCountryForGrpc,
   resolveCountry,
@@ -66,6 +68,10 @@ import {
   settledValueOrElse,
   settledFulfilledMap,
   buildTextFilterQl,
+  toIsoDate,
+  hasRelationIdentity,
+  relationStatusFor,
+  deriveResponse,
 } from '../../../src/support/ai-visibility/grpc-utils.js';
 
 function sp(query) {
@@ -104,6 +110,122 @@ describe('grpc-utils', () => {
     });
     it('settledFulfilledMap returns fallback when rejected', () => {
       expect(settledFulfilledMap({ status: 'rejected', reason: new Error('x') }, () => 1, null)).to.equal(null);
+    });
+  });
+
+  describe('toIsoDate', () => {
+    it('formats a protobuf Date struct into YYYY-MM-DD', () => {
+      expect(toIsoDate({
+        $typeName: 'semrush...Date', year: 2026, month: 7, day: 3,
+      })).to.equal('2026-07-03');
+    });
+
+    it('pads single-digit month and day', () => {
+      expect(toIsoDate({ year: 2024, month: 1, day: 9 })).to.equal('2024-01-09');
+    });
+
+    it('passes an already-formatted string through unchanged', () => {
+      expect(toIsoDate('2026-08-01')).to.equal('2026-08-01');
+    });
+
+    it('returns null for null', () => {
+      expect(toIsoDate(null)).to.be.null;
+    });
+
+    it('returns null for undefined', () => {
+      expect(toIsoDate(undefined)).to.be.null;
+    });
+
+    it('returns null when year/month/day is partial', () => {
+      expect(toIsoDate({ year: 2024, month: 6 })).to.be.null;
+      expect(toIsoDate({ year: 2024, day: 6 })).to.be.null;
+      expect(toIsoDate({ month: 6, day: 6 })).to.be.null;
+    });
+  });
+
+  describe('hasRelationIdentity', () => {
+    it('returns true when promptHash, serpId, and topicId are all present', () => {
+      expect(hasRelationIdentity({ promptHash: 'h', serpId: 's', topicId: 't' })).to.be.true;
+    });
+
+    it('returns true when serpId is numeric 0 (string-coerced, non-empty)', () => {
+      expect(hasRelationIdentity({ promptHash: 'h', serpId: 0, topicId: 't' })).to.be.true;
+    });
+
+    it('returns false when promptHash is missing', () => {
+      expect(hasRelationIdentity({ serpId: 's', topicId: 't' })).to.be.false;
+    });
+
+    it('returns false when topicId is missing', () => {
+      expect(hasRelationIdentity({ promptHash: 'h', serpId: 's' })).to.be.false;
+    });
+
+    it('returns false when serpId is missing/undefined', () => {
+      expect(hasRelationIdentity({ promptHash: 'h', topicId: 't' })).to.be.false;
+    });
+
+    it('returns false when serpId is empty string', () => {
+      expect(hasRelationIdentity({ promptHash: 'h', serpId: '', topicId: 't' })).to.be.false;
+    });
+  });
+
+  describe('relationStatusFor', () => {
+    it('returns skipped when not attempted', () => {
+      expect(relationStatusFor({ attempted: false, settled: { status: 'fulfilled' } })).to.equal('skipped');
+    });
+
+    it('returns error when attempted and settled rejected', () => {
+      expect(relationStatusFor({ attempted: true, settled: { status: 'rejected' } })).to.equal('error');
+    });
+
+    it('returns ok when attempted and settled fulfilled', () => {
+      expect(relationStatusFor({ attempted: true, settled: { status: 'fulfilled' } })).to.equal('ok');
+    });
+  });
+
+  describe('deriveResponse', () => {
+    it('uses the full relation response when present', () => {
+      const result = deriveResponse({ response: 'Full answer' }, 'excerpt');
+      expect(result).to.deep.equal({
+        response: 'Full answer',
+        responseSource: 'full',
+        responseComplete: true,
+      });
+    });
+
+    it('falls back to the excerpt when the relation is null', () => {
+      const result = deriveResponse(null, 'brief text');
+      expect(result).to.deep.equal({
+        response: 'brief text',
+        responseSource: 'excerpt',
+        responseComplete: false,
+      });
+    });
+
+    it('falls back to the excerpt when rel.response is null', () => {
+      const result = deriveResponse({ response: null }, 'brief text');
+      expect(result).to.deep.equal({
+        response: 'brief text',
+        responseSource: 'excerpt',
+        responseComplete: false,
+      });
+    });
+
+    it('reports responseSource=none when neither a full response nor an excerpt exists', () => {
+      const result = deriveResponse(null, undefined);
+      expect(result).to.deep.equal({
+        response: '',
+        responseSource: 'none',
+        responseComplete: false,
+      });
+    });
+
+    it('reports responseComplete=false when the full response is an empty string', () => {
+      const result = deriveResponse({ response: '' }, 'excerpt');
+      // relResponse === '' is != null, so it still counts as "full", just incomplete
+      expect(result.responseSource).to.equal('full');
+      expect(result.response).to.equal('');
+      expect(result.responseComplete).to.equal(false);
     });
   });
 
@@ -242,6 +364,35 @@ describe('grpc-utils', () => {
     });
   });
 
+  describe('resolveSearchType', () => {
+    it('returns DOMAIN for an apex domain', () => {
+      expect(resolveSearchType('intuit.com')).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+    });
+    it('returns DOMAIN for a bare www host', () => {
+      expect(resolveSearchType('www.intuit.com')).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+    });
+    it('returns SUBDOMAIN for a non-www subdomain', () => {
+      expect(resolveSearchType('quickbooks.intuit.com')).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
+    });
+    it('returns SUBDOMAIN for a deep subdomain', () => {
+      expect(resolveSearchType('a.b.intuit.com')).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
+    });
+    it('handles multi-part TLDs: apex is DOMAIN', () => {
+      expect(resolveSearchType('example.co.uk')).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+    });
+    it('handles multi-part TLDs: subdomain is SUBDOMAIN', () => {
+      expect(resolveSearchType('blog.example.co.uk')).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
+    });
+    it('ignores scheme and path when present', () => {
+      expect(resolveSearchType('https://quickbooks.intuit.com/foo')).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
+    });
+    it('defaults to DOMAIN for empty or unparseable input', () => {
+      expect(resolveSearchType('')).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+      expect(resolveSearchType(null)).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+      expect(resolveSearchType(undefined)).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+    });
+  });
+
   describe('parseLimitOffset', () => {
     it('defaults limit to 100 and offset to 0 when absent', () => {
       expect(parseLimitOffset(sp(''))).to.deep.equal({ limit: 100, offset: 0 });
@@ -300,6 +451,8 @@ describe('grpc-utils', () => {
     it('maps valid country codes via COUNTRY_ENUM', () => {
       expect(normalizeCountryForGrpc('US')).to.equal(COUNTRY_ENUM.US);
       expect(normalizeCountryForGrpc('DE')).to.equal(COUNTRY_ENUM.DE);
+      expect(normalizeCountryForGrpc('NZ')).to.equal(COUNTRY_ENUM.NZ);
+      expect(normalizeCountryForGrpc('AF')).to.equal(COUNTRY_ENUM.AF);
     });
 
     it('defaults to US for unknown country', () => {
@@ -387,6 +540,8 @@ describe('grpc-utils', () => {
     it('returns country string for known enum value', () => {
       expect(restCountryFromGrpcRequestCountry(COUNTRY_ENUM.US)).to.equal('US');
       expect(restCountryFromGrpcRequestCountry(COUNTRY_ENUM.DE)).to.equal('DE');
+      expect(restCountryFromGrpcRequestCountry(COUNTRY_ENUM.NZ)).to.equal('NZ');
+      expect(restCountryFromGrpcRequestCountry(COUNTRY_ENUM.AF)).to.equal('AF');
     });
 
     it('returns undefined for unknown numeric value', () => {

@@ -670,6 +670,11 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
                 mode: 'subworkspace', workspaceId: WORKSPACE, parentWorkspaceId: 'parent-ws',
               }),
             },
+            // Both authorizers gate on the brand resolving serenity-active; ON so
+            // the documented success shapes are exercised, not the inactive 404.
+            '../../src/support/serenity/serenity-active.js': {
+              isSerenityActiveForBrand: () => Promise.resolve(true),
+            },
             '../../src/support/access-control-util.js': {
               default: { fromContext: () => ({ hasAccess: () => Promise.resolve(true) }) },
             },
@@ -817,11 +822,11 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             ensureSubworkspace: handlerStubs.ensureSubworkspace,
             decommissionBrandWorkspace: handlerStubs.decommissionBrandWorkspace,
           },
-          // Serenity is active for the org (org-wide LLMO/serenity flag ON) so
-          // the documented success shapes are exercised rather than the
-          // inactive-org 404.
+          // Serenity resolves active for the brand (its own LLMO/serenity override,
+          // or the org's row in the absence of one) so the documented success
+          // shapes are exercised rather than the inactive-brand 404.
           '../../src/support/serenity/serenity-active.js': {
-            isSerenityActiveForOrg: () => Promise.resolve(true),
+            isSerenityActiveForBrand: () => Promise.resolve(true),
           },
           // activate reads brand-level aliases/URLs/competitors once per batch, and
           // persists the active-flip + primary site (brands.site_id) via updateBrand;

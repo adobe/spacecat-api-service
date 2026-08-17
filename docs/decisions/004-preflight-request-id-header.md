@@ -1,5 +1,16 @@
 # ADR-004: Preflight Request-ID Header
 
+## Status
+Superseded (2026-08-13)
+
+> **Superseded.** The request-ID threading described here targeted the "beta"
+> (later renamed `createPreflight`) HTTP-to-Mystique preflight path, which was
+> removed from spacecat-api-service in **SITES-48935** (the site-scoped Preflight
+> surface moved to Mystique, SITES-48932). The `createBetaPreflightJob` /
+> `getBetaPreflightJobStatusAndResult` names used below are obsolete, and
+> `x-preflight-request-id` / `preflightRequestId` are no longer present in the
+> codebase. Retained for historical context.
+
 ## Context
 
 `spacecat-api-service` is the Node.js (helix-universal) API layer that sits between the Preflight MFE and Mystique. It receives POST requests from the MFE and via API to create and poll preflight jobs, then calls Mystique's `POST /v1/preflight/analyze` endpoint.
