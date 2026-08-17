@@ -3241,31 +3241,24 @@ OpportunityUpdate:
       description: Optional list of tags
       example:
         - 'Traffic acquisition'
-OpportunityValidationRequest:
+GeoExperimentValidationResponse:
   type: object
   required:
+    - siteId
     - geoExperimentId
-  properties:
-    geoExperimentId:
-      description: |
-        ID of a GeoExperiment whose own suggestions should be re-validated. The result is
-        written to that GeoExperiment's own metadata (and each covered suggestion's own data),
-        not this opportunity.
-      type: string
-      format: uuid
-      example: 'e3c4a7a2-8b5b-4e3c-9d5a-8c3d4e5f6a7b'
-OpportunityValidationResponse:
-  type: object
+    - opportunityId
+    - status
   properties:
     siteId:
+      type: string
+      format: uuid
+    geoExperimentId:
       type: string
       format: uuid
     opportunityId:
       type: string
       format: uuid
-    geoExperimentId:
-      type: string
-      format: uuid
+      description: The opportunity linked to this GeoExperiment, used to select the validator.
     status:
       type: string
       enum:

@@ -31,6 +31,7 @@ import {
 } from '@adobe/spacecat-shared-utils';
 
 import {
+  Audit,
   Suggestion as SuggestionModel,
   GeoExperiment as GeoExperimentModel,
   REVIEW_SOURCES,
@@ -93,6 +94,16 @@ const EXPERIMENT_NAME_BY_OPPORTUNITY_TYPE = {
 
 const getExperimentName = (opportunityType) => EXPERIMENT_NAME_BY_OPPORTUNITY_TYPE[opportunityType]
   || `${opportunityType.charAt(0).toUpperCase()}${opportunityType.slice(1).replace(/-/g, ' ')}`;
+
+// The underlying opportunity type is generic (opportunityId, not prerenderOpportunityId) so a
+// future opportunity type can be added later without reshaping the route. This map is the one
+// place that gates which opportunity types are actually supported today, and which
+// import-worker message type knows how to validate each one — adding a second type means
+// adding an entry here (and building that type's own resolver/comparator on the import-worker
+// side); no other abstraction exists yet, per YAGNI.
+const VALIDATION_MESSAGE_TYPE_BY_OPPORTUNITY_TYPE = {
+  [Audit.AUDIT_TYPES.PRERENDER]: 'optimize-at-edge-enabled-marking',
+};
 
 async function isSitePlgTier(site, log) {
   try {
@@ -162,11 +173,27 @@ async function postPlgSuggestionSkipAlert(site, opportunity, suggestion, context
     const suggestionId = suggestion.getId?.() ?? 'unknown';
     const skipReason = suggestion.getSkipReason?.() ?? null;
     const skipDetail = suggestion.getSkipDetail?.() ?? null;
+    const organizationId = site.getOrganizationId?.() ?? null;
+
+    let orgName = null;
+    if (organizationId) {
+      try {
+        const org = await context.dataAccess.Organization.findById(organizationId);
+        orgName = org?.getName?.() || null;
+      } catch (orgLookupError) {
+        log.warn(`Failed to look up org name for PLG suggestion skip alert: ${orgLookupError.message}`);
+      }
+    }
 
     let message = ':no_entry_sign: *PLG Customer Skipped a Suggestion*\n\n'
       + `• *Site:* \`${siteBaseURL}\`\n`
-      + `• *Site ID:* \`${site.getId()}\`\n`
-      + `• *Opportunity Type:* \`${opportunityType}\`\n`
+      + `• *Site ID:* \`${site.getId()}\``;
+
+    if (orgName) {
+      message += `\n• *IMS Org Name:* ${orgName}`;
+    }
+
+    message += `\n• *Opportunity Type:* \`${opportunityType}\`\n`
       + `• *Opportunity ID:* \`${opportunityId}\`\n`
       + `• *Suggestion ID:* \`${suggestionId}\``;
 
@@ -175,6 +202,12 @@ async function postPlgSuggestionSkipAlert(site, opportunity, suggestion, context
     }
     if (skipDetail) {
       message += `\n• *Skip Detail:* \`${skipDetail}\``;
+    }
+
+    if (organizationId) {
+      const experienceUrl = env.EXPERIENCE_URL || 'https://experience.adobe.com';
+      const asoUrl = `${experienceUrl}/?organizationId=${organizationId}#/sites-optimizer/sites/${site.getId()}`;
+      message += `\n• *ASO Link:* ${asoUrl}`;
     }
 
     await postSlackMessage(channelId, message, token);
@@ -332,7 +365,7 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   const {
-    Opportunity, Suggestion, SuggestionGrant, Site, GeoExperiment,
+    Opportunity, Suggestion, SuggestionGrant, Site, GeoExperiment, Configuration,
   } = dataAccess;
 
   if (!isObject(Opportunity)) {
@@ -2723,6 +2756,79 @@ function SuggestionsController(ctx, sqs, env) {
     });
   };
 
+  /**
+   * Triggers on-demand validation of a GeoExperiment's own suggestions. Lets the deploy-to-edge
+   * experimentation flow trigger the same S3-vs-live-edge content validation the hourly
+   * optimize-at-edge-enabled-marking job runs, scoped to one GeoExperiment's own suggestions.
+   *
+   * This is a validation of the GeoExperiment itself (not of its linked opportunity), so
+   * geoExperimentId lives in the route, matching the sibling GeoExperiment routes
+   * (PATCH/DELETE/trigger-impact-measurement). The linked opportunity is only used internally
+   * to determine which import-worker message type knows how to validate this GeoExperiment's
+   * suggestions.
+   *
+   * Fire-and-forget: enqueues an SQS message to import-worker's existing "imports" queue and
+   * responds immediately — this endpoint does not wait for or return the validation outcome
+   * itself. The result lands on GeoExperiment.metadata.validation and each covered Suggestion's
+   * own data.validation, not opportunity.data.validation (a geoExperimentId run only covers a
+   * scoped subset of suggestions, so writing the site-wide opportunity field would corrupt the
+   * bulk job's cache).
+   */
+  const triggerGeoExperimentValidation = async (context) => {
+    const { siteId, geoExperimentId } = context.params;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(geoExperimentId)) {
+      return badRequest('GeoExperiment ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
+    }
+
+    const geoExperiment = await GeoExperiment.findById(geoExperimentId);
+    if (!geoExperiment || geoExperiment.getSiteId() !== siteId) {
+      return notFound('GeoExperiment not found');
+    }
+
+    const opportunityId = geoExperiment.getOpportunityId();
+    if (!opportunityId) {
+      return badRequest('GeoExperiment has no linked opportunity to validate');
+    }
+
+    const opportunity = await Opportunity.findById(opportunityId);
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      return notFound('Opportunity not found');
+    }
+
+    const opportunityType = opportunity.getType();
+    const messageType = VALIDATION_MESSAGE_TYPE_BY_OPPORTUNITY_TYPE[opportunityType];
+    if (!messageType) {
+      return badRequest(`Validation not supported for opportunity type '${opportunityType}'`);
+    }
+
+    const configuration = await Configuration.findLatest();
+    await sqs.sendMessage(configuration.getQueues().imports, {
+      type: messageType,
+      siteId,
+      validateOnly: true,
+      geoExperimentId,
+    });
+
+    context.log.info(`[geo-experiment-validation] queued validation for site ${siteId}, geoExperiment ${geoExperimentId}, opportunity ${opportunityId}`);
+
+    return accepted({
+      siteId, geoExperimentId, opportunityId, status: 'queued',
+    });
+  };
+
   const rollbackSuggestionFromEdge = async (context) => {
     const { siteId, opportunityId } = context.params;
     const { authInfo: { profile } } = context.attributes;
@@ -3236,6 +3342,7 @@ function SuggestionsController(ctx, sqs, env) {
     patchGeoExperiment,
     deleteGeoExperiment,
     triggerImpactMeasurement,
+    triggerGeoExperimentValidation,
     rollbackSuggestionFromEdge,
     previewSuggestions,
     fetchFromEdge,

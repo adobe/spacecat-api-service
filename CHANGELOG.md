@@ -1,3 +1,53 @@
+## [1.749.1](https://github.com/adobe/spacecat-api-service/compare/v1.749.0...v1.749.1) (2026-08-15)
+
+
+### Bug Fixes
+
+* move on-demand validation to /geo-experiments/:geoExperimentId/validate ([#3045](https://github.com/adobe/spacecat-api-service/issues/3045)) ([1dd3891](https://github.com/adobe/spacecat-api-service/commit/1dd38913ebe311983005dd69ab9a19ba13874c3e))
+
+# [1.749.0](https://github.com/adobe/spacecat-api-service/compare/v1.748.0...v1.749.0) (2026-08-14)
+
+
+### Features
+
+* **ai-visibility:** flag-gated per-brand Semrush auth seam skeleton (inert) ([#3064](https://github.com/adobe/spacecat-api-service/issues/3064)) ([13728bd](https://github.com/adobe/spacecat-api-service/commit/13728bd788859ff0f1f376ee6344440a9a10e316)), closes [Hi#level](https://github.com/Hi/issues/level) [adobe/mysticat-architecture#248](https://github.com/adobe/mysticat-architecture/issues/248) [adobe/mysticat-architecture#248](https://github.com/adobe/mysticat-architecture/issues/248)
+
+# [1.748.0](https://github.com/adobe/spacecat-api-service/compare/v1.747.2...v1.748.0) (2026-08-14)
+
+
+### Features
+
+* **ai-visibility:** llmo-6585 expose response completeness on prompts/responses ([#3053](https://github.com/adobe/spacecat-api-service/issues/3053)) ([3b00b9d](https://github.com/adobe/spacecat-api-service/commit/3b00b9d53d84ebc2177bc43835a73cfc55891b4f))
+
+## [1.747.2](https://github.com/adobe/spacecat-api-service/compare/v1.747.1...v1.747.2) (2026-08-14)
+
+
+### Bug Fixes
+
+* **suggestions:** include skip reason/detail, org name, and ASO link  ([#3061](https://github.com/adobe/spacecat-api-service/issues/3061)) ([58b2fa2](https://github.com/adobe/spacecat-api-service/commit/58b2fa25a799adc7735145e9437e61a0241a3b4f))
+
+## [1.747.1](https://github.com/adobe/spacecat-api-service/compare/v1.747.0...v1.747.1) (2026-08-14)
+
+
+### Bug Fixes
+
+* **plg:** auto-correct OTHER delivery type instead of alerting on mis… ([#3060](https://github.com/adobe/spacecat-api-service/issues/3060)) ([1154c30](https://github.com/adobe/spacecat-api-service/commit/1154c30d2b5e3f04e556e36c9ff7fd50cc665851))
+* **serenity:** surface renamed origin__ authorship root in filter dimensions (LLMO-7000) ([#3057](https://github.com/adobe/spacecat-api-service/issues/3057)) ([d36fb8f](https://github.com/adobe/spacecat-api-service/commit/d36fb8fea981577660559e052bc396b01865a137))
+
+# [1.747.0](https://github.com/adobe/spacecat-api-service/compare/v1.746.1...v1.747.0) (2026-08-14)
+
+
+### Features
+
+* **sites:** accept all entitlement tiers for the full-admin tier filter on GET /sites ([#3056](https://github.com/adobe/spacecat-api-service/issues/3056)) ([1425853](https://github.com/adobe/spacecat-api-service/commit/1425853747f3affa4239030eb9f50f8554353d48)), closes [#3046](https://github.com/adobe/spacecat-api-service/issues/3046) [#3046](https://github.com/adobe/spacecat-api-service/issues/3046)
+
+## [1.746.1](https://github.com/adobe/spacecat-api-service/compare/v1.746.0...v1.746.1) (2026-08-14)
+
+
+### Bug Fixes
+
+* **serenity:** stop benchmark alias writes from destroying what Semrush added ([#3044](https://github.com/adobe/spacecat-api-service/issues/3044)) ([e64cb17](https://github.com/adobe/spacecat-api-service/commit/e64cb171fb7a8a3311282be06bf3927752569aea)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 # [1.746.0](https://github.com/adobe/spacecat-api-service/compare/v1.745.0...v1.746.0) (2026-08-14)
 
 

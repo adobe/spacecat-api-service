@@ -11,7 +11,12 @@
  */
 
 import { resolveElementModel, SEP } from '../constants.js';
-import { INTENT_ROOT_NAME, LEGACY_INTENT_ROOT_NAME } from '../../serenity/prompt-tags.js';
+import {
+  INTENT_ROOT_NAME,
+  LEGACY_INTENT_ROOT_NAME,
+  ORIGIN_ROOT_NAME,
+  LEGACY_ORIGIN_ROOT_NAME,
+} from '../../serenity/prompt-tags.js';
 
 /**
  * Builds the payload for the Topics (Tags) filter-dimensions element (row 3).
@@ -160,34 +165,61 @@ export function transformIntentsToFilterDimensions(raw) {
 }
 
 /**
- * Extracts only "source__"-prefixed entries → `{ id: original tag, label }`,
- * plus `parent_id`/`parent_label` when the tag encodes a "Parent__Child"
- * hierarchy.
+ * The origin (authorship) dimension's root names, and therefore its Elements tag
+ * prefixes — the current `origin` and the pre-rename `source`. The Elements tag
+ * encoding is the `__`-joined tag PATH, so a dimension's prefix is literally its
+ * root's name, and the rename (LLMO-7000, mirroring the intent rename of
+ * LLMO-6984) changes what these tags look like on the wire. The rename runs
+ * project by project, so both shapes are read; a project's authorship carries one
+ * or the other.
+ *
+ * `source__` is deliberately kept, not just for un-reshaped projects: it is the
+ * pre-rename authorship spelling AND the new producing-system dimension's prefix,
+ * and the two cannot be told apart here (see LEGACY_ORIGIN_ROOT_NAME). Producing-
+ * system values therefore ride along under `origins` on reshaped projects until a
+ * dedicated source dimension claims them; the tolerance drops to `origin__` alone
+ * once no live project carries the pre-rename authorship spelling.
+ */
+const ORIGIN_ROOT_NAMES = [ORIGIN_ROOT_NAME, LEGACY_ORIGIN_ROOT_NAME];
+
+/**
+ * Extracts the origin-prefixed entries → `{ id: original tag, label }`, plus
+ * `parent_id`/`parent_label` when the tag encodes a "Parent__Child" hierarchy.
+ *
+ * `id` stays the original tag value, which is what a caller passes back as a
+ * `tags` filter, so it carries whichever prefix that project actually uses. The
+ * `label` is the bare value either way — the rename touches only the root.
+ *
  * @param {object} raw - Raw response from the Elements API.
  * @returns {FilterDimensionItem[]}
  */
 export function transformOriginsToFilterDimensions(raw) {
-  return extractByPrefix(raw, 'source')
-    .map(({ original, stripped }) => ({ id: original, ...splitParent(stripped, 'source__') }));
+  return ORIGIN_ROOT_NAMES.flatMap((root) => {
+    const marker = `${root}${SEP}`;
+    return extractByPrefix(raw, root)
+      .map(({ original, stripped }) => ({ id: original, ...splitParent(stripped, marker) }));
+  });
 }
 
 const KNOWN_TAG_PREFIXES = [
   'topic__',
   'category__',
   ...INTENT_ROOT_NAMES.map((root) => `${root}${SEP}`),
-  'source__',
+  ...ORIGIN_ROOT_NAMES.map((root) => `${root}${SEP}`),
 ];
 
 /**
  * Extracts every tag NOT already covered by {@link KNOWN_TAG_PREFIXES} —
- * `topic__`, `category__`, `source__` and both intent spellings — so
+ * `topic__`, `category__`, and both the intent and origin spellings
+ * (`$abv_tags$intent__`/`intent__`, `origin__`/`source__`) — so
  * newly-introduced Semrush tag types (e.g. `type__branded`) surface in the
  * response without a code change per prefix.
  *
- * Both intent spellings are covered, so a renamed project's tags are claimed by
- * `page_intents` rather than resurfacing here as a dynamic `$abv_tags$intent`
- * group — this catch-all is where an unrecognised dimension would otherwise leak
- * into the filter payload under its raw upstream name.
+ * Both intent and both origin spellings are covered, so a renamed project's tags
+ * are claimed by `page_intents`/`origins` rather than resurfacing here as a
+ * dynamic `$abv_tags$intent`/`origin` group — this catch-all is where an
+ * unrecognised dimension would otherwise leak into the filter payload under its
+ * raw upstream name.
  *
  * - `prefix__value` tags are grouped by their prefix into a dynamic key
  *   (e.g. `{ type: [{ id: 'type__branded', label: 'branded' }, ...] }`), unless

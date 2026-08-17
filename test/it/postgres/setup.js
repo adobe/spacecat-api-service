@@ -223,6 +223,38 @@ export const dumpUmMock = () => dumpMock(UM_MOCK_BASE, 'UM');
 export const dumpPeMock = () => dumpMock(PE_MOCK_BASE, 'PE');
 
 /**
+ * Replaces a benchmark on the Project Engine mock through the vendor's own update route, the way
+ * Semrush's brand resolution would have — the mock has no control route for this, and none should
+ * be added: the point is to leave the benchmark in a state only the vendor can produce.
+ *
+ * A benchmark carries alias values Semrush added itself (`gm` on General Motors, the misspelling
+ * `pixlar` on pixlr). We hold no row for those, so nothing in our own derivation can reconstruct
+ * one — which is exactly what makes them the test subject for a merge-over-live write. Seeding one
+ * here and asserting it is still present after an unrelated brand edit is the only way to prove the
+ * write merged rather than replaced.
+ *
+ * Full-replace semantics, mirroring the vendor: `brand_aliases` is the complete list, and `domain`
+ * is required.
+ *
+ * @param {string} workspaceId - the sub-workspace holding the project
+ * @param {string} projectId - the project holding the benchmark
+ * @param {string} benchmarkId - the benchmark to replace
+ * @param {{brand_name: string, domain: string, brand_aliases: string[]}} body - the new state
+ * @returns {Promise<void>}
+ */
+export async function putPeBenchmark(workspaceId, projectId, benchmarkId, body) {
+  const url = `${PE_MOCK_BASE}/v1/workspaces/${workspaceId}/projects/${projectId}/ai_models/benchmarks/${benchmarkId}`;
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', authorization: 'Bearer it-seed' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw new Error(`PE mock benchmark PUT failed (${res.status}) for ${benchmarkId}`);
+  }
+}
+
+/**
  * Creates the MinIO bucket used by IT tests if it does not already exist.
  * MinIO is S3-compatible so `NoSuchBucket` errors are replaced by `HeadBucket 404`.
  */

@@ -25,7 +25,6 @@
     "src/support/url-utils.js",
     "src/controllers/serenity.js",
     "src/controllers/brands.js",
-    "src/dto/preflight.js",
     "src/serenity-prompt-classification/**/*.js",
     // Type-level assertions, checked by tsc and never executed by mocha. Only the
     // base-tier ones: `test/types/strict/` asserts errors this tier suppresses, so

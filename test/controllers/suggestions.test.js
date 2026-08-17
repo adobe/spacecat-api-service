@@ -57,6 +57,7 @@ describe('Suggestions Controller', () => {
   const SITE_ID = 'f964a7f8-5402-4b01-bd5b-1ab499bcf797';
   const SITE_ID_NOT_FOUND = '3c677e57-9a6a-441c-a556-262eb8b4fc0e';
   const SITE_ID_NOT_ENABLED = '07efc218-79f6-48b5-970e-deb0f88ce01b';
+  const ORGANIZATION_ID = '6d69b6c5-4c1f-4d6a-92ad-b2c1fdb4ff54';
 
   const mockSuggestionEntity = (suggData, removeStub) => ({
     getId() {
@@ -172,6 +173,7 @@ describe('Suggestions Controller', () => {
     'patchGeoExperiment',
     'deleteGeoExperiment',
     'triggerImpactMeasurement',
+    'triggerGeoExperimentValidation',
     'rollbackSuggestionFromEdge',
     'previewSuggestions',
     'fetchFromEdge',
@@ -3330,6 +3332,86 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(200);
       expect(postSlackMessageStub).to.have.been.calledOnce;
       expect(postSlackMessageStub.firstCall.args[1]).to.include('Already handled elsewhere');
+    });
+
+    it('includes an ASO link in the PLG skip alert message when the site has an organization', async () => {
+      const postSlackMessageStub = sandbox.stub().resolves();
+      const ControllerWithSlack = await esmock.p('../../src/controllers/suggestions.js', {
+        '../../src/utils/slack/base.js': { postSlackMessage: postSlackMessageStub },
+      });
+
+      const plgSite = { ...makePlgSite('PLG'), getOrganizationId: sandbox.stub().returns(ORGANIZATION_ID) };
+      const organization = { getName: sandbox.stub().returns('Acme Corp') };
+      const da = {
+        ...mockSuggestionDataAccess,
+        Site: { findById: sandbox.stub().resolves(plgSite) },
+        Organization: { findById: sandbox.stub().resolves(organization) },
+      };
+      const ctrl = ControllerWithSlack({
+        dataAccess: da, pathInfo: { headers: {} }, ...authContext,
+      }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
+
+      const response = await ctrl.patchSuggestion({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
+        data: { status: 'SKIPPED', skipReason: 'TOO_RISKY' },
+        env: {
+          SLACK_PLG_SKIP_CHANNEL_ID: 'C_SKIP',
+          SLACK_BOT_TOKEN: 'xoxb-token',
+          EXPERIENCE_URL: 'https://experience.adobe.com',
+        },
+        ...context,
+        dataAccess: da,
+      });
+      await new Promise(setImmediate);
+
+      expect(response.status).to.equal(200);
+      expect(postSlackMessageStub).to.have.been.calledOnce;
+      expect(da.Organization.findById).to.have.been.calledWith(ORGANIZATION_ID);
+      expect(postSlackMessageStub.firstCall.args[1]).to.include('*IMS Org Name:* Acme Corp');
+      expect(postSlackMessageStub.firstCall.args[1]).to.include(
+        `https://experience.adobe.com/?organizationId=${ORGANIZATION_ID}#/sites-optimizer/sites/${SITE_ID}`,
+      );
+    });
+
+    it('omits IMS Org Name in the PLG skip alert message when the org lookup fails', async () => {
+      const postSlackMessageStub = sandbox.stub().resolves();
+      const ControllerWithSlack = await esmock.p('../../src/controllers/suggestions.js', {
+        '../../src/utils/slack/base.js': { postSlackMessage: postSlackMessageStub },
+      });
+
+      const plgSite = { ...makePlgSite('PLG'), getOrganizationId: sandbox.stub().returns(ORGANIZATION_ID) };
+      const da = {
+        ...mockSuggestionDataAccess,
+        Site: { findById: sandbox.stub().resolves(plgSite) },
+        Organization: { findById: sandbox.stub().rejects(new Error('org lookup failed')) },
+      };
+      const ctrl = ControllerWithSlack({
+        dataAccess: da, pathInfo: { headers: {} }, ...authContext,
+      }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
+
+      const response = await ctrl.patchSuggestion({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
+        data: { status: 'SKIPPED', skipReason: 'TOO_RISKY' },
+        env: {
+          SLACK_PLG_SKIP_CHANNEL_ID: 'C_SKIP',
+          SLACK_BOT_TOKEN: 'xoxb-token',
+          EXPERIENCE_URL: 'https://experience.adobe.com',
+        },
+        ...context,
+        dataAccess: da,
+      });
+      await new Promise(setImmediate);
+
+      expect(response.status).to.equal(200);
+      expect(postSlackMessageStub).to.have.been.calledOnce;
+      expect(postSlackMessageStub.firstCall.args[1]).to.not.include('IMS Org Name');
+      expect(postSlackMessageStub.firstCall.args[1]).to.include('ASO Link');
     });
 
     it('sends PLG skip Slack alert for each newly-SKIPPED suggestion via patchSuggestionsStatus', async () => {
@@ -11401,6 +11483,176 @@ describe('Suggestions Controller', () => {
           type: 'TRIGGER_IMPACT_MEASUREMENT',
           geoExperimentId: GEO_EXP_ID,
           triggeredBy: 'unknown',
+        },
+      );
+    });
+  });
+
+  describe('triggerGeoExperimentValidation', () => {
+    const GEO_EXP_ID = 'b1b2c3d4-e5f6-7890-abcd-ef1234567890';
+
+    function createMockGeoExperiment({
+      siteId = SITE_ID,
+      opportunityId = OPPORTUNITY_ID,
+    } = {}) {
+      return {
+        getId: () => GEO_EXP_ID,
+        getSiteId: () => siteId,
+        getOpportunityId: () => opportunityId,
+      };
+    }
+
+    function createMockOpportunity({
+      siteId = SITE_ID,
+      type = 'prerender',
+    } = {}) {
+      return {
+        getId: () => OPPORTUNITY_ID,
+        getSiteId: () => siteId,
+        getType: () => type,
+      };
+    }
+
+    beforeEach(() => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(createMockGeoExperiment());
+      mockSuggestionDataAccess.Opportunity.findById.withArgs(OPPORTUNITY_ID)
+        .resolves(createMockOpportunity());
+      mockConfiguration.findLatest.resolves({
+        getQueues: () => ({ imports: 'https://imports-queue' }),
+      });
+    });
+
+    it('returns 400 for invalid siteId', async () => {
+      const response = await suggestionsController.triggerGeoExperimentValidation({
+        ...context,
+        params: { siteId: 'bad', geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(400);
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('returns 400 for invalid geoExperimentId', async () => {
+      const response = await suggestionsController.triggerGeoExperimentValidation({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: 'bad' },
+      });
+      expect(response.status).to.equal(400);
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('returns 404 when site not found', async () => {
+      const response = await suggestionsController.triggerGeoExperimentValidation({
+        ...context,
+        params: { siteId: SITE_ID_NOT_FOUND, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(404);
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('returns 403 without site access', async () => {
+      AccessControlUtil.prototype.hasAccess.restore();
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
+      const response = await suggestionsController.triggerGeoExperimentValidation({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(403);
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('returns 404 when GeoExperiment not found', async () => {
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(null);
+      const response = await suggestionsController.triggerGeoExperimentValidation({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(404);
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('returns 404 when GeoExperiment belongs to another site', async () => {
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(
+        createMockGeoExperiment({ siteId: 'other-site-id' }),
+      );
+      const response = await suggestionsController.triggerGeoExperimentValidation({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(404);
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('returns 400 when the GeoExperiment has no linked opportunity', async () => {
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(
+        createMockGeoExperiment({ opportunityId: null }),
+      );
+      const response = await suggestionsController.triggerGeoExperimentValidation({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(400);
+      expect(mockSuggestionDataAccess.Opportunity.findById).to.not.have.been.called;
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('returns 404 when the linked opportunity is not found', async () => {
+      mockSuggestionDataAccess.Opportunity.findById.withArgs(OPPORTUNITY_ID).resolves(null);
+      const response = await suggestionsController.triggerGeoExperimentValidation({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(404);
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('returns 404 when the linked opportunity belongs to another site', async () => {
+      mockSuggestionDataAccess.Opportunity.findById.withArgs(OPPORTUNITY_ID).resolves(
+        createMockOpportunity({ siteId: 'other-site-id' }),
+      );
+      const response = await suggestionsController.triggerGeoExperimentValidation({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(404);
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('returns 400 when the linked opportunity type is not supported', async () => {
+      mockSuggestionDataAccess.Opportunity.findById.withArgs(OPPORTUNITY_ID).resolves(
+        createMockOpportunity({ type: 'content' }),
+      );
+      const response = await suggestionsController.triggerGeoExperimentValidation({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.match(/not supported for opportunity type 'content'/);
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('queues the validation and returns 202 on the happy path', async () => {
+      const response = await suggestionsController.triggerGeoExperimentValidation({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(202);
+      const body = await response.json();
+      expect(body).to.deep.equal({
+        siteId: SITE_ID,
+        geoExperimentId: GEO_EXP_ID,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'queued',
+      });
+      expect(mockSqs.sendMessage).to.have.been.calledOnceWithExactly(
+        'https://imports-queue',
+        {
+          type: 'optimize-at-edge-enabled-marking',
+          siteId: SITE_ID,
+          validateOnly: true,
+          geoExperimentId: GEO_EXP_ID,
         },
       );
     });

@@ -373,6 +373,93 @@ describe('AI Visibility – prompts handlers', () => {
       expect(res.body.data[0].mentionedBrands).to.deep.equal([]);
     });
 
+    it('normalizes a protobuf Date object on the response into an ISO YYYY-MM-DD string', async () => {
+      clients.promptClient.prompts.resolves({
+        prompts: [{
+          prompt: 'Q', promptHash: 'h', serpId: 's', topicId: 't', topicName: 'T', llm: 1, mentionedBrandsCount: 0, sourcesCount: 0,
+        }],
+      });
+      clients.prRelationsClient.prompt.resolves({
+        value: {
+          response: 'Full',
+          sources: [],
+          mentionedBrands: [],
+          date: {
+            $typeName: 'semrush...Date', year: 2026, month: 7, day: 3,
+          },
+        },
+      });
+      const sp = new URLSearchParams('domain=example.com');
+      const res = await handlePromptsResponses(sp, clients);
+      expect(res.body.data[0].date).to.equal('2026-07-03');
+    });
+
+    it('marks a full relation response complete (source=full, relationStatus=ok) and passes date through', async () => {
+      clients.promptClient.prompts.resolves({
+        prompts: [{
+          prompt: 'Q', promptHash: 'h', serpId: 's', topicId: 't', topicName: 'T', llm: 1, mentionedBrandsCount: 0, sourcesCount: 0, briefResponse: 'excerpt',
+        }],
+      });
+      clients.prRelationsClient.prompt.resolves({
+        value: {
+          response: 'Full answer', sources: [], mentionedBrands: [], date: '2026-08-01',
+        },
+      });
+      const sp = new URLSearchParams('domain=example.com');
+      const res = await handlePromptsResponses(sp, clients);
+      expect(res.body.data[0].response).to.equal('Full answer');
+      expect(res.body.data[0].responseSource).to.equal('full');
+      expect(res.body.data[0].responseComplete).to.equal(true);
+      expect(res.body.data[0].relationStatus).to.equal('ok');
+      expect(res.body.data[0].date).to.equal('2026-08-01');
+    });
+
+    it('flags a silent excerpt fallback when the relation call rejects (source=excerpt, incomplete, error)', async () => {
+      clients.promptClient.prompts.resolves({
+        prompts: [{
+          prompt: 'Q', promptHash: 'h', serpId: 's', topicId: 't', topicName: 'T', llm: 1, mentionedBrandsCount: 0, sourcesCount: 0, briefResponse: 'fallback text',
+        }],
+      });
+      clients.prRelationsClient.prompt.rejects(new Error('upstream'));
+      const sp = new URLSearchParams('domain=example.com');
+      const res = await handlePromptsResponses(sp, clients);
+      // legacy behaviour preserved: response still carries the excerpt text
+      expect(res.body.data[0].response).to.equal('fallback text');
+      // new: the degradation is now explicit instead of silent
+      expect(res.body.data[0].responseSource).to.equal('excerpt');
+      expect(res.body.data[0].responseComplete).to.equal(false);
+      expect(res.body.data[0].relationStatus).to.equal('error');
+    });
+
+    it('marks relationStatus=skipped when prompt identity is missing', async () => {
+      clients.promptClient.prompts.resolves({
+        prompts: [{
+          prompt: 'Q', llm: 1, mentionedBrandsCount: 0, sourcesCount: 0,
+        }],
+      });
+      const sp = new URLSearchParams('domain=example.com');
+      const res = await handlePromptsResponses(sp, clients);
+      expect(res.body.data[0].relationStatus).to.equal('skipped');
+      expect(res.body.data[0].responseSource).to.equal('none');
+      expect(res.body.data[0].responseComplete).to.equal(false);
+      expect(clients.prRelationsClient.prompt.called).to.be.false;
+    });
+
+    it('reports responseSource=none when neither a full response nor an excerpt exists', async () => {
+      clients.promptClient.prompts.resolves({
+        prompts: [{
+          prompt: 'Q', promptHash: 'h', serpId: 's', topicId: 't', topicName: 'T', llm: 1, mentionedBrandsCount: 0, sourcesCount: 0,
+        }],
+      });
+      clients.prRelationsClient.prompt.resolves({ value: null });
+      const sp = new URLSearchParams('domain=example.com');
+      const res = await handlePromptsResponses(sp, clients);
+      expect(res.body.data[0].response).to.equal('');
+      expect(res.body.data[0].responseSource).to.equal('none');
+      expect(res.body.data[0].responseComplete).to.equal(false);
+      expect(res.body.data[0].relationStatus).to.equal('ok');
+    });
+
     it('uses prompt llm for relation request when available', async () => {
       clients.promptClient.prompts.resolves({
         prompts: [{

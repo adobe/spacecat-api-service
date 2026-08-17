@@ -20,7 +20,12 @@ import {
   transformOtherTagsForFilterDimensions,
 } from '../../../../src/support/elements/definitions/topics.js';
 import { DEFAULT_ELEMENT_MODEL } from '../../../../src/support/elements/constants.js';
-import { INTENT_ROOT_NAME, LEGACY_INTENT_ROOT_NAME } from '../../../../src/support/serenity/prompt-tags.js';
+import {
+  INTENT_ROOT_NAME,
+  LEGACY_INTENT_ROOT_NAME,
+  ORIGIN_ROOT_NAME,
+  LEGACY_ORIGIN_ROOT_NAME,
+} from '../../../../src/support/serenity/prompt-tags.js';
 
 // Mirrors the fixed keys elements-service.js's `getUrlInspectorFilterDimensions`
 // builds `result` with, plus the JS-unsafe names it also guards against.
@@ -394,11 +399,72 @@ describe('topics definitions', () => {
       expect(item.label).to.equal('direct');
     });
 
-    it('excludes non-source entries', () => {
+    it('excludes entries under no origin root', () => {
       const raw = { blocks: { value: [{ value: 'topic__SEO' }, { value: 'source__organic' }] } };
       const result = transformOriginsToFilterDimensions(raw);
       expect(result).to.have.length(1);
       expect(result[0].id).to.equal('source__organic');
+    });
+
+    // Both spellings read the same way; parent_id is rebuilt from whichever
+    // prefix matched. The tolerance drops to `origin__` alone once no live
+    // project carries the pre-rename `source__` authorship spelling.
+    [LEGACY_ORIGIN_ROOT_NAME, ORIGIN_ROOT_NAME].forEach((root) => {
+      it(`adds parent_id/parent_label under the \`${root}\` root`, () => {
+        const raw = { blocks: { value: [{ value: `${root}__Team__ai` }] } };
+        const [item] = transformOriginsToFilterDimensions(raw);
+        expect(item).to.deep.equal({
+          id: `${root}__Team__ai`,
+          label: 'ai',
+          parent_id: `${root}__Team`,
+          parent_label: 'Team',
+        });
+      });
+    });
+
+    // LLMO-7000: the authorship root was renamed `source` -> `origin`, so real
+    // authorship values now arrive as `origin__ai` / `origin__human`. They must
+    // land in `origins`, not leak through the catch-all as a stray `origin` group
+    // (see transformOtherTagsForFilterDimensions).
+    it('reads the renamed `origin` root, keeping the prefix in id and stripping it from label', () => {
+      const raw = {
+        blocks: {
+          value: [
+            { value: `${ORIGIN_ROOT_NAME}__ai` },
+            { value: `${ORIGIN_ROOT_NAME}__human` },
+          ],
+        },
+      };
+      expect(transformOriginsToFilterDimensions(raw)).to.deep.equal([
+        { id: `${ORIGIN_ROOT_NAME}__ai`, label: 'ai' },
+        { id: `${ORIGIN_ROOT_NAME}__human`, label: 'human' },
+      ]);
+    });
+
+    // A reshaped project carries authorship under `origin__` and producing-system
+    // values under `source__`; both surface here while the `source__` tolerance
+    // stands — they cannot be told apart at the prefix. `origin__` is read first,
+    // matching the ORIGIN_ROOT_NAMES order.
+    it('reads renamed authorship and pre-rename/producing-system source together', () => {
+      const raw = {
+        blocks: {
+          value: [
+            { value: `${ORIGIN_ROOT_NAME}__ai` },
+            { value: `${ORIGIN_ROOT_NAME}__human` },
+            { value: 'source__config' },
+          ],
+        },
+      };
+      expect(transformOriginsToFilterDimensions(raw)).to.deep.equal([
+        { id: `${ORIGIN_ROOT_NAME}__ai`, label: 'ai' },
+        { id: `${ORIGIN_ROOT_NAME}__human`, label: 'human' },
+        { id: 'source__config', label: 'config' },
+      ]);
+    });
+
+    it('does not double-count: the legacy prefix does not also match a renamed tag', () => {
+      const raw = { blocks: { value: [{ value: `${ORIGIN_ROOT_NAME}__ai` }] } };
+      expect(transformOriginsToFilterDimensions(raw)).to.have.length(1);
     });
   });
 
@@ -407,11 +473,12 @@ describe('topics definitions', () => {
       expect(transformOtherTagsForFilterDimensions(null)).to.deep.equal({ tags: [] });
     });
 
-    it('excludes known-prefixed entries (topic/category/intent/source)', () => {
+    it('excludes known-prefixed entries (topic/category/intent/origin/source)', () => {
       const result = transformOtherTagsForFilterDimensions(RAW_MIXED);
       expect(result).to.not.have.property('topic');
       expect(result).to.not.have.property('category');
       expect(result).to.not.have.property('intent');
+      expect(result).to.not.have.property('origin');
       expect(result).to.not.have.property('source');
       expect(result.tags).to.deep.equal([]);
     });
@@ -434,6 +501,26 @@ describe('topics definitions', () => {
       expect(result).to.not.have.property(INTENT_ROOT_NAME);
       expect(result.tags).to.deep.equal([]);
       // An genuinely unknown prefix still surfaces — the catch-all keeps working.
+      expect(result.type).to.deep.equal([{ id: 'type__branded', label: 'branded' }]);
+    });
+
+    // LLMO-7000: the renamed origin prefix must be claimed by `origins`, not
+    // grouped under its raw `origin` name in the catch-all — the customer-visible
+    // half of the defect (real authorship options vanishing from the Origin
+    // dropdown, resurfacing as a stray dynamic group).
+    it('claims the renamed origin prefix rather than grouping it under its raw name', () => {
+      const raw = {
+        blocks: {
+          value: [
+            { value: `${ORIGIN_ROOT_NAME}__ai` },
+            { value: ORIGIN_ROOT_NAME },
+            { value: 'type__branded' },
+          ],
+        },
+      };
+      const result = transformOtherTagsForFilterDimensions(raw);
+      expect(result).to.not.have.property(ORIGIN_ROOT_NAME);
+      expect(result.tags).to.deep.equal([]);
       expect(result.type).to.deep.equal([{ id: 'type__branded', label: 'branded' }]);
     });
 
