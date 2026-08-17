@@ -99,7 +99,8 @@ export async function sendEmail(context, {
       method: 'POST',
       headers: {
         Accept: 'application/json',
-        Authorization: `IMS ${accessToken}`,
+        Authorization: `Bearer ${accessToken}`,
+        'x-api-key': env.LLMO_EMAIL_IMS_CLIENT_ID,
         'Content-Type': 'application/json',
       },
       body,

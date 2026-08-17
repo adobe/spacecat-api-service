@@ -160,7 +160,8 @@ function TrialUsersController(ctx) {
         method: 'POST',
         headers: {
           Accept: 'application/xml',
-          Authorization: `IMS ${imsTokenPayload.access_token}`,
+          Authorization: `Bearer ${imsTokenPayload.access_token}`,
+          'x-api-key': env.EMAIL_IMS_CLIENT_ID,
           'Content-Type': 'application/xml',
         },
         body: emailPayload,

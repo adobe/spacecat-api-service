@@ -99,7 +99,8 @@ describe('email-service', () => {
       expect(url).to.include('templateName=test-template');
       expect(url).to.include('locale=en_US');
       expect(options.method).to.equal('POST');
-      expect(options.headers.Authorization).to.equal('IMS test-token');
+      expect(options.headers.Authorization).to.equal('Bearer test-token');
+      expect(options.headers['x-api-key']).to.equal('client-id');
       expect(options.headers['Content-Type']).to.equal('application/json');
       expect(options.headers.Accept).to.equal('application/json');
       const body = JSON.parse(options.body);
@@ -161,7 +162,7 @@ describe('email-service', () => {
       expect(result.success).to.be.true;
       expect(ImsClientStub.createFrom).to.not.have.been.called;
       const [, options] = fetchStub.firstCall.args;
-      expect(options.headers.Authorization).to.equal('IMS provided-token');
+      expect(options.headers.Authorization).to.equal('Bearer provided-token');
     });
 
     it('should return error when ADOBE_POSTOFFICE_ENDPOINT is not configured', async () => {
