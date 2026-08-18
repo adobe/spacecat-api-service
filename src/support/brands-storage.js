@@ -927,15 +927,16 @@ export async function getBrandBySite(organizationId, siteId, postgrestClient, lo
 /**
  * Sets the brand-scoped `brand_claims_enabled` scheduling gate (LLMO-5741),
  * keyed on the brand UUID (the PK), so operators can enable/disable Brand Claims
- * for a brand directly. Returns the updated `{ id, name }` or null when no brand
- * matches the id.
+ * for a brand directly. Returns the updated `{ id, name, site_id }` or null when
+ * no brand matches the id. `site_id` (the brand's primary site) lets callers keep
+ * the per-site `brand-claims` audit toggle in lock-step with this flag.
  *
  * @param {Object} params
  * @param {string} params.brandId - Brand UUID.
  * @param {boolean} params.enabled - Target flag value.
  * @param {Object} params.postgrestClient - PostgREST client.
  * @param {string} [params.updatedBy] - Audit actor.
- * @returns {Promise<{id: string, name: string}|null>}
+ * @returns {Promise<{id: string, name: string, site_id: string|null}|null>}
  */
 export async function setBrandClaimsEnabled({
   brandId,
@@ -960,7 +961,7 @@ export async function setBrandClaimsEnabled({
     // Do not flip the flag on a soft-deleted brand (matches the .neq guard used
     // across brands-storage); a deleted brand returns no row -> null.
     .neq('status', 'deleted')
-    .select('id, name')
+    .select('id, name, site_id')
     .maybeSingle();
 
   if (error) {
