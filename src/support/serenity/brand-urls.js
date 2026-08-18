@@ -88,8 +88,9 @@ export function normalizeBenchmarkDomain(value) {
 // The skip below exists to stop the SAME string being listed twice (the benchmark
 // already shows the domain), so it must compare the whole url, not just its host:
 // `https://nba.com/kings` and a benchmark reading `nba.com` are visibly different
-// entries, and the path is the part that says which brand this is. Null identity
-// (an unparseable url) is not bare — leave it to the primaries check it fails.
+// entries, and the path is the part that says which brand this is. A url whose
+// host matched a primary but that the identity cannot parse counts as bare, which
+// is what it was treated as before this distinction existed.
 function isBarePrimaryDomainUrl(url, primaries) {
   const host = normalizeBenchmarkDomain(url);
   if (host === null || !primaries.has(host)) {
