@@ -18,7 +18,7 @@ import {
   regionApplies,
   normalizeBenchmarkDomain,
   marketOf,
-  republishBestEffort,
+  republish,
 } from './brand-urls.js';
 import {
   dedupeAliases,
@@ -72,8 +72,8 @@ export function collectAliasNames(aliases, market) {
  * Re-syncs a brand's aliases onto every market/project in its sub-workspace (the
  * brand-edit path). For each project: region-filter the aliases for that market,
  * then — when drifted — PATCH the project's `brand_names` (display name + aliases)
- * and PUT its own-brand benchmark's `brand_aliases`, republishing (best-effort)
- * when anything changed. PATCH/PUT errors propagate so the edit hard-fails (an
+ * and PUT its own-brand benchmark's `brand_aliases`, republishing when anything
+ * changed. PATCH/PUT/republish errors propagate so the edit hard-fails (an
  * already-live brand must not silently diverge). `rejected` aggregates the aliases
  * Semrush refused per market, so the caller can surface them.
  *
@@ -234,7 +234,7 @@ export async function syncBrandAliasesAcrossMarkets(
 
       if (changed) {
         // eslint-disable-next-line no-await-in-loop
-        await republishBestEffort(transport, workspaceId, projectId, log);
+        await republish(transport, workspaceId, projectId, log);
       }
     } catch (e) {
       // Name WHICH market split so the brand-edit hard-fail (brands.js) is

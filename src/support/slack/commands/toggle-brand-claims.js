@@ -24,8 +24,8 @@ const DISABLE_PHRASE = 'disable-brand-claims';
  * `brand_claims_enabled` scheduling gate the mystique Brand Claims consumer reads
  * back (LLMO-5741). The verb is derived from which keyword was used — no on/off
  * argument to get wrong. The target may be a brand UUID (as before) or a site base
- * URL, which is resolved to its active brand — so operators can use the same
- * argument they pass to `run-brand-claims` without a separate brand-id lookup.
+ * URL, which is resolved to its active brand — so operators can target a site
+ * without a separate brand-id lookup.
  *
  * @param {Object} context - The context object.
  * @returns {Object} The command object.
@@ -63,8 +63,8 @@ function BrandClaimsCommand(context) {
       }
 
       // A UUID is treated as a brand ID (original behavior); anything else is
-      // parsed as a site base URL and resolved to that site's active brand, so the
-      // same argument works here and in `run-brand-claims` (no brand-id lookup).
+      // parsed as a site base URL and resolved to that site's active brand
+      // (no brand-id lookup).
       let brandId;
       if (isValidUUID(target)) {
         brandId = target;

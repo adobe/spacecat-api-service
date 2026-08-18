@@ -20,6 +20,7 @@ import {
   GapTopicsTotalsResponseSchema,
 } from '@quazar/ai-seo-ts/v2/topic/messages_pb.js';
 import { ExportResponseSchema } from '@quazar/ai-seo-ts/v2/common/messages_pb.js';
+import { SEARCH_TYPE_ENUM } from '@quazar/ai-seo-ts/v2/source/enums_pb.js';
 import { handleGapTopics } from '../../../../../../src/support/ai-visibility/handlers/v1/topic/gap-topics.js';
 import { handleGapTopicsTotals } from '../../../../../../src/support/ai-visibility/handlers/v1/topic/gap-topics-totals.js';
 import { handleGapTopicsExport } from '../../../../../../src/support/ai-visibility/handlers/v1/topic/gap-topics-export.js';
@@ -58,6 +59,16 @@ describe('AI Visibility – v1 gap-topics target_date (LLMO-5963)', () => {
       await handleGapTopics(sp(`${BASE}&date=2026-07`), clients);
       expect(clients.topicClient.gapTopics.firstCall.args[0].targetDate).to.be.undefined;
     });
+
+    it('resolves search_type DOMAIN for an apex domain', async () => {
+      await handleGapTopics(sp('domain=intuit.com&competitors=rival.com'), clients);
+      expect(clients.topicClient.gapTopics.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+    });
+
+    it('resolves search_type SUBDOMAIN for a non-www subdomain', async () => {
+      await handleGapTopics(sp('domain=quickbooks.intuit.com&competitors=rival.com'), clients);
+      expect(clients.topicClient.gapTopics.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
+    });
   });
 
   describe('handleGapTopicsTotals', () => {
@@ -70,6 +81,16 @@ describe('AI Visibility – v1 gap-topics target_date (LLMO-5963)', () => {
       await handleGapTopicsTotals(sp(`${BASE}&date=2026-07`), clients);
       expect(clients.topicClient.gapTopicsTotals.firstCall.args[0].targetDate).to.be.undefined;
     });
+
+    it('resolves search_type DOMAIN for an apex domain', async () => {
+      await handleGapTopicsTotals(sp('domain=intuit.com&competitors=rival.com'), clients);
+      expect(clients.topicClient.gapTopicsTotals.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+    });
+
+    it('resolves search_type SUBDOMAIN for a non-www subdomain', async () => {
+      await handleGapTopicsTotals(sp('domain=quickbooks.intuit.com&competitors=rival.com'), clients);
+      expect(clients.topicClient.gapTopicsTotals.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
+    });
   });
 
   describe('handleGapTopicsExport', () => {
@@ -81,6 +102,16 @@ describe('AI Visibility – v1 gap-topics target_date (LLMO-5963)', () => {
     it('drops a month-only YYYY-MM date', async () => {
       await handleGapTopicsExport(sp(`${BASE}&date=2026-07`), clients);
       expect(clients.topicClient.gapTopicsExport.firstCall.args[0].request.targetDate).to.be.undefined;
+    });
+
+    it('resolves search_type DOMAIN for an apex domain on the nested request', async () => {
+      await handleGapTopicsExport(sp('domain=intuit.com&competitors=rival.com'), clients);
+      expect(clients.topicClient.gapTopicsExport.firstCall.args[0].request.searchType).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+    });
+
+    it('resolves search_type SUBDOMAIN for a non-www subdomain on the nested request', async () => {
+      await handleGapTopicsExport(sp('domain=quickbooks.intuit.com&competitors=rival.com'), clients);
+      expect(clients.topicClient.gapTopicsExport.firstCall.args[0].request.searchType).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
     });
   });
 });

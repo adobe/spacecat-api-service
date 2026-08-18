@@ -112,20 +112,22 @@ describe('serenity project-provisioning: createProvisionAndPublishProject', () =
       .to.deep.equal({ type: 'ai', primary_url: 'nba.com/kings' });
   });
 
-  it('a failed PATCH deletes the orphan, never publishes, and rethrows', async () => {
-    // A created-but-unpublished draft is the same artefact a failed publish leaves,
-    // so it gets the same cleanup. Publishing anyway would record a project as
-    // provisioned while it tracks the wrong url — the defect this change removes.
+  it('a failed PATCH still publishes — the market is kept, the divergence logged', async () => {
+    // Deleting an otherwise-valid project because a refinement could not be applied
+    // trades a recoverable degradation for no market at all. A market left on its
+    // apex is the state every market was in before this change, and the one the
+    // data-service reconcile repairs in place.
     transport.updateProject.rejects(new Error('upstream 503'));
 
-    await expect(createProvisionAndPublishProject(transport, WS, CREATE_BODY, {
+    const projectId = await createProvisionAndPublishProject(transport, WS, CREATE_BODY, {
       primaryUrl: 'nba.com/kings', log, caller: 'handleCreateMarket',
-    })).to.be.rejectedWith('upstream 503');
+    });
 
-    expect(transport.publishProject).to.not.have.been.called;
-    expect(transport.deleteProject).to.have.been.calledOnceWith(WS, 'proj-1');
-    expect(log.error).to.have.been.calledWithMatch(
-      'handleCreateMarket: provisioning failed; upstream project cleaned up',
+    expect(projectId).to.equal('proj-1');
+    expect(transport.publishProject).to.have.been.calledOnceWith(WS, 'proj-1');
+    expect(transport.deleteProject).to.not.have.been.called;
+    expect(log.warn).to.have.been.calledWithMatch(
+      'handleCreateMarket: SERENITY_MARKET_PRIMARY_URL_DIVERGENCE',
     );
   });
 

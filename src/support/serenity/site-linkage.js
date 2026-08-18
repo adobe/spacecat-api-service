@@ -322,16 +322,15 @@ export async function ensureMarketSite(ctx, {
 }
 
 /**
- * Resolves a Site UUID to BOTH values a Semrush project needs, from ONE read.
+ * Resolves a SpaceCat Site UUID to BOTH URL-ish values a Semrush project tracks:
+ * the host-only `domain` (grouping key, `hostnameFromUrlString`) and the full
+ * `primaryUrl` "site identity" (`siteIdentityFromUrlString`, keeping any
+ * subdomain/subpath). The two are deliberately distinct — `domain` is
+ * eTLD+1-normalized upstream and rejects a path, while `primaryUrl` is the URL
+ * the brand actually owns (serenity-docs#348), written to
+ * `settings.ai.primary_url`. Sharing one Site fetch keeps them consistent.
  *
- * The two are not interchangeable and must not be derived separately:
- *
- * - `domain` is the bare host. A path there is a hard 400, and the upstream folds
- *   whatever is sent to the registrable domain (eTLD+1) anyway.
- * - `primaryUrl` is the url the project actually TRACKS — host plus path, no
- *   scheme. It accepts a subdomain, a subpath, or both.
- *
- * Returned together because they describe one site and resolving them from two
+ * Returned together because they describe one site, and resolving them from two
  * reads invites two answers: a project domained to one url while tracking another
  * is worse than one that tracks its apex, because it looks deliberate. It also
  * halves the Site lookups on the market-create path.
@@ -340,27 +339,29 @@ export async function ensureMarketSite(ctx, {
  * a value written from here compares equal to the one read back and drift
  * detection does not report a difference that is not there.
  *
+ * Best-effort: returns null (never throws) on missing input, unavailable
+ * data-access, an unknown site, or a lookup failure.
+ *
  * @param {object} dataAccess - `ctx.dataAccess` (reads `dataAccess.Site`).
  * @param {string|null|undefined} siteId - the SpaceCat Site UUID to resolve.
  * @param {object} [log] - logger.
- * @returns {Promise<{domain: string|null, primaryUrl: string|null}>} both values,
- *   each null when unresolvable.
+ * @returns {Promise<{domain: string|null, primaryUrl: string|null}|null>} the
+ *   derived values, or null when the site cannot be resolved.
  */
-export async function resolveSiteUrls(dataAccess, siteId, log) {
-  const none = { domain: null, primaryUrl: null };
+export async function resolveSiteIdentity(dataAccess, siteId, log) {
   if (!siteId || !hasText(siteId)) {
-    return none;
+    return null;
   }
   const Site = dataAccess?.Site;
   if (!Site || typeof Site.findById !== 'function') {
-    log?.warn?.('resolveSiteUrls: Site data-access unavailable; cannot resolve site urls', { siteId });
-    return none;
+    log?.warn?.('resolveSiteIdentity: Site data-access unavailable; cannot resolve site', { siteId });
+    return null;
   }
   try {
     const site = await Site.findById(siteId);
     if (!site) {
-      log?.warn?.('resolveSiteUrls: site not found', { siteId });
-      return none;
+      log?.warn?.('resolveSiteIdentity: site not found', { siteId });
+      return null;
     }
     const baseURL = site.getBaseURL();
     return {
@@ -368,8 +369,8 @@ export async function resolveSiteUrls(dataAccess, siteId, log) {
       primaryUrl: siteIdentityFromUrlString(baseURL),
     };
   } catch (e) {
-    log?.warn?.('resolveSiteUrls: lookup failed (non-fatal)', { siteId, error: e.message });
-    return none;
+    log?.warn?.('resolveSiteIdentity: lookup failed (non-fatal)', { siteId, error: e.message });
+    return null;
   }
 }
 

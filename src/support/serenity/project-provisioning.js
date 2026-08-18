@@ -83,10 +83,11 @@ export function primaryUrlPatchBody(primaryUrl) {
  * and never sees orphan upstream projects. The cleanup's own errors are swallowed
  * so they cannot mask the real one, and both outcomes are logged.
  *
- * A failed PATCH is treated exactly like a failed publish. It leaves the same
- * artefact — a created but unpublished draft — and letting it through would
- * publish a project recorded as provisioned while tracking the wrong url, which is
- * the defect this whole change exists to remove.
+ * A failed PATCH does NOT abort the create. It is logged under a greppable token
+ * and the publish proceeds, leaving a live market tracking its apex — the state
+ * every market was in before this change, and one the data-service reconcile
+ * repairs in place. Deleting an otherwise-valid project because a refinement could
+ * not be applied trades a recoverable degradation for no market at all.
  *
  * @param {SerenityTransport} transport - the Semrush transport.
  * @param {string} semrushWorkspaceId - the (sub-)workspace to create in.
@@ -100,7 +101,8 @@ export function primaryUrlPatchBody(primaryUrl) {
  * @param {string} [opts.caller] - name used to prefix the failure logs.
  * @returns {Promise<string>} the new project's id.
  * @throws {CreateNoProjectIdError} when create returns no id.
- * @throws when the PATCH or publish fails, after a best-effort cleanup delete.
+ * @throws when the publish fails, after a best-effort cleanup delete. A failed
+ *   PATCH never throws.
  */
 export async function createProvisionAndPublishProject(
   transport,
@@ -121,14 +123,28 @@ export async function createProvisionAndPublishProject(
   // verbatim, replacing a correct apex default with blanks.
   const trackedUrl = typeof primaryUrl === 'string' ? primaryUrl.trim() : '';
 
-  try {
-    if (trackedUrl) {
+  if (trackedUrl) {
+    try {
       await transport.updateProject(
         semrushWorkspaceId,
         semrushProjectId,
         primaryUrlPatchBody(trackedUrl),
       );
+    } catch (e) {
+      log?.warn?.(
+        `${caller}: SERENITY_MARKET_PRIMARY_URL_DIVERGENCE — could not set primary_url (non-fatal); market tracks its apex domain`,
+        {
+          ...logContext,
+          semrushWorkspaceId,
+          semrushProjectId,
+          primaryUrl: trackedUrl,
+          error: e.message,
+        },
+      );
     }
+  }
+
+  try {
     await transport.publishProject(semrushWorkspaceId, semrushProjectId);
   } catch (e) {
     let cleanedUp = false;

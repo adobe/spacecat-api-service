@@ -15,7 +15,7 @@ import sinon from 'sinon';
 
 import {
   ensureMarketSite,
-  resolveSiteUrls,
+  resolveSiteIdentity,
   unlinkMarketSiteIfOrphaned,
   SERENITY_BRAND_SITE_TYPE,
 } from '../../../src/support/serenity/site-linkage.js';
@@ -420,7 +420,7 @@ describe('serenity site-linkage: ensureMarketSite', () => {
   });
 });
 
-describe('serenity site-linkage: resolveSiteUrls', () => {
+describe('serenity site-linkage: resolveSiteIdentity', () => {
   let Site;
   let log;
   let dataAccess;
@@ -433,58 +433,53 @@ describe('serenity site-linkage: resolveSiteUrls', () => {
 
   afterEach(() => sinon.restore());
 
-  it('returns both values from ONE read', () => {
+  it('returns both values from ONE read', async () => {
     // The pair exists because `domain` must be a bare FQDN while `primary_url` is
     // the url actually tracked — same site, two different correct answers. One
     // read so they can never come from two different sites.
     Site.findById.resolves({ getBaseURL: () => 'https://www.acme.com/markets/fr' });
-    return resolveSiteUrls(dataAccess, 'site-1', log).then((urls) => {
-      expect(urls).to.deep.equal({
-        domain: 'www.acme.com',
-        primaryUrl: 'www.acme.com/markets/fr',
-      });
-      expect(Site.findById).to.have.been.calledOnceWith('site-1');
+    const result = await resolveSiteIdentity(dataAccess, 'site-1', log);
+    expect(result).to.deep.equal({
+      domain: 'www.acme.com',
+      primaryUrl: 'www.acme.com/markets/fr',
     });
+    expect(Site.findById).to.have.been.calledOnceWith('site-1');
   });
 
   it('primaryUrl is scheme-less so it matches the stored upstream value', async () => {
     Site.findById.resolves({ getBaseURL: () => 'https://quickbooks.intuit.com/au/' });
-    const { primaryUrl } = await resolveSiteUrls(dataAccess, 'site-1', log);
+    const { primaryUrl } = await resolveSiteIdentity(dataAccess, 'site-1', log);
     expect(primaryUrl).to.equal('quickbooks.intuit.com/au');
   });
 
   it('a path-free site yields the same value for both', async () => {
     Site.findById.resolves({ getBaseURL: () => 'https://acme.com' });
-    expect(await resolveSiteUrls(dataAccess, 'site-1', log)).to.deep.equal({
+    expect(await resolveSiteIdentity(dataAccess, 'site-1', log)).to.deep.equal({
       domain: 'acme.com',
       primaryUrl: 'acme.com',
     });
   });
 
-  it('returns nulls for missing siteId', async () => {
-    const none = { domain: null, primaryUrl: null };
-    expect(await resolveSiteUrls(dataAccess, '', log)).to.deep.equal(none);
-    expect(await resolveSiteUrls(dataAccess, null, log)).to.deep.equal(none);
+  it('returns null (not a partial object) for a missing siteId', async () => {
+    expect(await resolveSiteIdentity(dataAccess, '', log)).to.equal(null);
+    expect(await resolveSiteIdentity(dataAccess, null, log)).to.equal(null);
     expect(Site.findById).to.not.have.been.called;
   });
 
-  it('warns + nulls when Site data-access is unavailable', async () => {
-    expect(await resolveSiteUrls({ Site: {} }, 'site-1', log))
-      .to.deep.equal({ domain: null, primaryUrl: null });
+  it('warns + returns null when Site data-access is unavailable', async () => {
+    expect(await resolveSiteIdentity({ Site: {} }, 'site-1', log)).to.equal(null);
     expect(log.warn).to.have.been.calledOnce;
   });
 
-  it('warns + nulls when the site is not found', async () => {
+  it('warns + returns null when the site is not found', async () => {
     Site.findById.resolves(null);
-    expect(await resolveSiteUrls(dataAccess, 'site-missing', log))
-      .to.deep.equal({ domain: null, primaryUrl: null });
+    expect(await resolveSiteIdentity(dataAccess, 'site-missing', log)).to.equal(null);
     expect(log.warn).to.have.been.calledOnce;
   });
 
-  it('swallows a lookup rejection (nulls, logs warn)', async () => {
+  it('swallows a lookup rejection (null, logs warn)', async () => {
     Site.findById.rejects(new Error('timeout'));
-    expect(await resolveSiteUrls(dataAccess, 'site-1', log))
-      .to.deep.equal({ domain: null, primaryUrl: null });
+    expect(await resolveSiteIdentity(dataAccess, 'site-1', log)).to.equal(null);
     expect(log.warn).to.have.been.calledOnce;
   });
 });

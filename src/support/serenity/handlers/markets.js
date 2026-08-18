@@ -20,7 +20,7 @@ import {
 } from '../errors.js';
 import { normalizeLanguageCode, normalizeGeoTargetId } from '../validation.js';
 import { resolveLocation } from '../locations.js';
-import { resolveSiteUrls } from '../site-linkage.js';
+import { resolveSiteIdentity } from '../site-linkage.js';
 import { createProvisionAndPublishProject, CreateNoProjectIdError } from '../project-provisioning.js';
 import { alertQuotaRejection } from '../quota-alerts.js';
 
@@ -381,17 +381,23 @@ export async function handleCreateMarket(
   // flat handler holds full `dataAccess` (incl. Site), so it self-derives — the
   // subworkspace handler cannot (narrowed dataAccess) and relies on the controller.
   // A supplied-but-unresolvable siteId is a hard 400 (never silently proceeds).
-  // Both values come from ONE input — a caller-supplied brandDomain, or the Site
-  // behind body.siteId — because a project domained to one url while tracking
-  // another is worse than one tracking its apex: it looks deliberate. A supplied
-  // brandDomain is a bare domain by contract, so its identity is just its host;
-  // only the Site's own base URL can carry a subpath.
-  const { domain: brandDomain, primaryUrl } = hasText(body.brandDomain)
-    ? {
-      domain: body.brandDomain,
-      primaryUrl: siteIdentityFromUrlString(body.brandDomain),
-    }
-    : await resolveSiteUrls(dataAccess, body.siteId, log);
+  // Both values come from ONE input — a caller-threaded url, a caller-supplied
+  // brandDomain, or the Site behind body.siteId — because a project domained to
+  // one url while tracking another is worse than one tracking its apex: it looks
+  // deliberate. `domain` stays host-only (a path there is a hard 400 upstream);
+  // `primaryUrl` keeps whatever subdomain or subpath the source carried.
+  let brandDomain;
+  let primaryUrl;
+  if (hasText(body.brandDomain)) {
+    brandDomain = body.brandDomain;
+    primaryUrl = siteIdentityFromUrlString(
+      hasText(body.primaryUrl) ? body.primaryUrl : body.brandDomain,
+    );
+  } else {
+    const identity = await resolveSiteIdentity(dataAccess, body.siteId, log);
+    brandDomain = identity?.domain ?? null;
+    primaryUrl = identity?.primaryUrl ?? null;
+  }
   if (!hasText(brandDomain)) {
     return {
       status: 400,

@@ -117,6 +117,7 @@ async function requeuePending(context, job, semrushWorkspaceId, items) {
   const newJob = await createAndEnqueueJob(context, {
     jobType: CLASSIFY_PROMPTS_JOB_TYPE,
     promiseToken: currentMetadata.promiseToken,
+    promisePair: currentMetadata.promisePair,
     metadata: {
       mode: 'reclassify', semrushWorkspaceId, items, requeueDepth: currentDepth + 1,
     },

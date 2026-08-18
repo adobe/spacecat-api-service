@@ -242,6 +242,83 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     expect(upstreamBody.brand_names).to.deep.equal(['Adobe']);
   });
 
+  it('PATCHes settings.ai.primary_url from body.primaryUrl before publishing (#348)', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      updateProject: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US',
+      languageCode: 'en',
+      brandDomain: 'nba.com',
+      primaryUrl: 'https://www.nba.com/kings/',
+      brandNames: ['NBA'],
+    }, fakeLog());
+
+    expect(result.status).to.equal(201);
+    expect(transport.updateProject).to.have.been.calledOnceWith(WORKSPACE, 'proj-new', {
+      type: 'ai',
+      primary_url: 'www.nba.com/kings',
+    });
+    // set before publish so it's part of the published version
+    expect(transport.updateProject).to.have.been.calledBefore(transport.publishProject);
+  });
+
+  it('falls back to brandDomain for primary_url when body.primaryUrl is absent (#348)', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      updateProject: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US',
+      languageCode: 'en',
+      brandDomain: 'adobe.com',
+      brandNames: ['Adobe'],
+    }, fakeLog());
+
+    expect(result.status).to.equal(201);
+    expect(transport.updateProject).to.have.been.calledOnceWith(WORKSPACE, 'proj-new', {
+      type: 'ai',
+      primary_url: 'adobe.com',
+    });
+  });
+
+  it('a failed primary_url PATCH is best-effort — market still publishes 201 (#348)', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      updateProject: sinon.stub().rejects(new Error('patch boom')),
+      publishProject: sinon.stub().resolves(),
+    };
+    const log = fakeLog();
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US',
+      languageCode: 'en',
+      brandDomain: 'adobe.com',
+      brandNames: ['Adobe'],
+    }, log);
+
+    expect(result.status).to.equal(201);
+    expect(transport.publishProject).to.have.been.calledOnce;
+    expect(log.warn).to.have.been.called;
+  });
+
   it('derives brandDomain from a supplied siteId when brandDomain is absent (LLMO-6405)', async () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
@@ -313,9 +390,10 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     });
   });
 
-  it('a failed primary_url PATCH cleans up the orphan and never publishes', async () => {
+  it('a failed primary_url PATCH keeps the market — it publishes on its apex', async () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
     dataAccess.Site.findById.resolves({ getBaseURL: () => 'https://nba.com/kings' });
     const transport = {
       listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
@@ -324,16 +402,25 @@ describe('handlers/markets.js — handleCreateMarket', () => {
       publishProject: sinon.stub().resolves(),
       deleteProject: sinon.stub().resolves(),
     };
+    const log = fakeLog();
 
-    await expect(handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
       market: 'US', languageCode: 'en', siteId: 'site-42', brandNames: ['Kings'],
-    }, fakeLog())).to.be.rejectedWith('upstream 503');
+    }, log);
 
-    // Publishing anyway would record a market as provisioned while it tracks the
-    // wrong url — the exact defect this change removes.
-    expect(transport.publishProject).to.not.have.been.called;
-    expect(transport.deleteProject).to.have.been.calledOnceWith(WORKSPACE, 'proj-orphan-patch');
-    expect(dataAccess.BrandSemrushProject.create).to.not.have.been.called;
+    // The subpath identity was derived from the Site and attempted...
+    expect(transport.updateProject).to.have.been.calledOnceWith(
+      WORKSPACE,
+      'proj-orphan-patch',
+      { type: 'ai', primary_url: 'nba.com/kings' },
+    );
+    // ...and its failure does not cost the customer the market. It goes live on
+    // `nba.com`, which is where every market sat before this change, and the
+    // data-service reconcile repairs the tracked url in place.
+    expect(result.status).to.equal(201);
+    expect(transport.publishProject).to.have.been.calledOnce;
+    expect(transport.deleteProject).to.not.have.been.called;
+    expect(log.warn).to.have.been.called;
   });
 
   it('prefers an explicit brandDomain over the siteId (does not read the Site)', async () => {
