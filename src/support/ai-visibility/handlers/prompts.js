@@ -78,7 +78,11 @@ function decodeCursor(cursor) {
 function parseAllLimit(sp) {
   const raw = sp.get('limit');
   let n = raw == null || String(raw).trim() === '' ? Number.NaN : Number(raw);
-  if (!Number.isFinite(n) || n <= 0) { n = PROMPTS_RESPONSES_ALL_DEFAULT_LIMIT; }
+  // Guard `< 1`, not `<= 0`: a fractional value in (0,1) would otherwise pass and
+  // `Math.floor` it to 0, so the backend returns 0 rows, `fetchedCount === limit`
+  // holds (0 === 0), and the cursor is re-emitted at the same offset — an unbounded
+  // loop for a cursor-following caller. Any value below 1 falls back to the default.
+  if (!Number.isFinite(n) || n < 1) { n = PROMPTS_RESPONSES_ALL_DEFAULT_LIMIT; }
   return Math.min(Math.floor(n), PROMPTS_RESPONSES_ALL_MAX_LIMIT);
 }
 

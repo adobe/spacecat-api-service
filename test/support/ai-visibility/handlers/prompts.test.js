@@ -689,6 +689,15 @@ describe('AI Visibility – prompts handlers', () => {
       expect(clients.promptClient.prompts.firstCall.args[0].range.limit).to.equal(200);
     });
 
+    it('falls back to the default limit for a fractional limit in (0,1) (guards the same-offset cursor loop)', async () => {
+      clients.promptClient.prompts.resolves({ prompts: [] });
+      const sp = new URLSearchParams('domain=example.com&limit=0.5');
+      await handlePromptsResponsesAll(sp, clients);
+      // Math.floor(0.5) === 0 would make the backend return 0 rows and re-emit the
+      // cursor at the same offset; the guard must fall back to the default (100).
+      expect(clients.promptClient.prompts.firstCall.args[0].range.limit).to.equal(100);
+    });
+
     it('filters by promptQuery but advances the cursor by rows fetched', async () => {
       clients.promptClient.prompts.resolves({
         prompts: [
@@ -775,6 +784,16 @@ describe('AI Visibility – prompts handlers', () => {
       const res = await handlePromptsResponsesBatch(null, clients);
       expect(res.status).to.equal(400);
       expect(res.body.error).to.equal('missing_domain');
+    });
+
+    it('returns 400 when body is an array (Array.isArray guard)', async () => {
+      const res = await handlePromptsResponsesBatch(
+        [{ promptHash: 'h', serpId: 's', topicId: 't' }],
+        clients,
+      );
+      expect(res.status).to.equal(400);
+      expect(res.body.error).to.equal('missing_domain');
+      expect(clients.prRelationsClient.prompt.called).to.be.false;
     });
 
     it('returns 400 when items is missing or empty', async () => {
