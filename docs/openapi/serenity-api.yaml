@@ -430,6 +430,76 @@ v2-serenity-market-by-slice:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
 
+# ─── Query Fan-out (status + coverage, read-only) ─────────────────────────────
+
+v2-serenity-query-fanout-status:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+    - name: runId
+      in: path
+      required: true
+      description: Semrush Query Fan-out run id (the `id` returned by the upstream create-run call; also surfaced as `workflow_id` on coverage rows).
+      schema: { type: string }
+  get:
+    tags: [serenity]
+    summary: Check an existing Query Fan-out run and, once succeeded, read its coverage table
+    description: |
+      READ-ONLY today: this endpoint does not start a new run. It resolves the
+      brand's Semrush workspace (dual-mode: sub-workspace, falling back to the
+      org's parent workspace), checks the given run's status via the upstream
+      Query Fan-out gateway (`GET /enterprise/data-builder/gateway/api/v1/
+      query-fanouts/{runId}?workspace_id={workspaceId}`), and — once `status`
+      is `succeeded` — fetches the run's coverage table from the Elements API
+      (element `9f8bb77f-008e-4c80-8f3c-059986a045cd`, scoped via the
+      `CBF_workflow_id` filter). A run must already exist for this workspace;
+      create one out-of-band today (see the `serenity-query-fanouts` Postman
+      collection's "Create run" request). See
+      `docs/plans/2026-08-18-serenity-query-fanout-status.md` for the phased
+      plan to add run-creation + async polling here.
+
+      Like the other Semrush-forwarding /serenity/* routes, the caller's IMS
+      token is forwarded upstream: send either `x-promise-token` (minted via
+      `POST /auth/promise`, preferred — works with a plain session_token on
+      `Authorization`) or (internal-only) a raw IMS bearer.
+    operationId: getSerenityQueryFanoutStatus
+    security:
+      - session_token: []
+    responses:
+      '200':
+        description: |
+          Run status retrieved. While `status` is `queued`/`running`/`failed`,
+          only `runId`/`workspaceId`/`status` are populated. Once `succeeded`,
+          `rowCount`/`topics`/`data` are also populated.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityQueryFanoutStatus' }
+      '400': { $ref: './responses.yaml#/400' }
+      '401':
+        description: Caller did not authenticate via IMS and sent no x-promise-token.
+      '403':
+        description: Caller lacks access to the organization.
+      '404':
+        description: Organization not found, brand not found for this organization, the brand has no resolvable Semrush workspace, or the run id does not exist in this workspace.
+      '502':
+        description: Upstream (Query Fan-out gateway or Elements API) returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
 # ─── Tags & Models (per-slice) ────────────────────────────────────────────────
 
 v2-serenity-tags:

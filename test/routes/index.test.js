@@ -612,6 +612,10 @@ describe('getRouteHandlers', () => {
     listWorkspaceProjects: sinon.stub(),
   };
 
+  const mockSerenityQueryFanoutController = {
+    getQueryFanoutStatus: sinon.stub(),
+  };
+
   const mockElementsController = {
     listUrlInspectorFilterDimensions: sinon.stub(),
   };
@@ -732,6 +736,7 @@ describe('getRouteHandlers', () => {
       mockAgenticCategoriesController,
       mockAgenticPageTypesController,
       mockSerenityController,
+      mockSerenityQueryFanoutController,
       mockElementsController,
       mockProxyController,
       mockTaskManagementController,
@@ -1008,6 +1013,7 @@ describe('getRouteHandlers', () => {
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/query-fanouts/:runId',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId',

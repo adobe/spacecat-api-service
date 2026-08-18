@@ -867,6 +867,7 @@ const routeFacsCapabilities = {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/query-fanouts/:runId': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'llmo/can_view',
       // Org-level Serenity catalog reads (no brandId).
@@ -1311,7 +1312,7 @@ const routeFacsCapabilities = {
     // Serenity proxy params — identifiers from the upstream API (geo
     // target / language / semrush prompt id / aio tag id), not SpaceCat
     // resources. The enclosing :brandId is the FACS resource for these routes.
-    'semrushPromptId', 'geoTargetId', 'languageCode', 'tagId',
+    'semrushPromptId', 'geoTargetId', 'languageCode', 'tagId', 'runId',
     // Filter / pagination / format params (not entities):
     'base64PageUrl', 'base64Url', 'baseURL', 'channel', 'cursor',
     'dataSource', 'deliveryType', 'endDate', 'eventType',

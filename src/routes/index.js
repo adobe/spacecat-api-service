@@ -107,6 +107,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} agenticCategoriesController - Agentic URL category rules controller.
  * @param {Object} agenticPageTypesController - Agentic URL page-type rules controller.
  * @param {Object} serenityController - Serenity API controller (prompts + markets).
+ * @param {Object} serenityQueryFanoutController - Serenity Query Fan-out status/coverage.
  * @param {Object} elementsController - Elements API controller (Semrush Elements wrappers).
  * @param {Object} proxyController - URL proxy controller for client-side previews.
  * @param {Object} taskManagementController - Task-management (Jira ticket creation) controller.
@@ -178,6 +179,7 @@ export default function getRouteHandlers(
   agenticCategoriesController,
   agenticPageTypesController,
   serenityController,
+  serenityQueryFanoutController,
   elementsController,
   proxyController,
   taskManagementController,
@@ -245,6 +247,7 @@ export default function getRouteHandlers(
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': serenityController.createMarket,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': serenityController.getMarket,
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': serenityController.deleteMarket,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/query-fanouts/:runId': serenityQueryFanoutController.getQueryFanoutStatus,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': serenityController.listTags,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': serenityController.createTag,
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId': serenityController.updateTag,

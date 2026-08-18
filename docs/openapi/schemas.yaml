@@ -12204,6 +12204,57 @@ SerenityMarketListResponse:
       type: array
       items: { $ref: '#/SerenityMarket' }
 
+SerenityQueryFanoutTopicSummary:
+  type: object
+  required: [name, count]
+  description: Per-topic row count within a fan-out coverage table, for a quick breadth check without scanning `data`.
+  properties:
+    name:
+      type: string
+      description: The fanned-out topic name (`topic_name` on each coverage row).
+    count:
+      type: integer
+      minimum: 0
+
+SerenityQueryFanoutStatus:
+  type: object
+  required: [runId, workspaceId, status]
+  description: |
+    Status of an existing Semrush Query Fan-out run, keyed by `(workspaceId, runId)`.
+    This surface is READ-ONLY today — it checks a run that already exists; it does not
+    create one (see the `serenity-query-fanouts` Postman collection for the manual
+    "Create run" step, and docs/plans/2026-08-18-serenity-query-fanout-status.md for the
+    phased plan to add that here).
+  properties:
+    runId:
+      type: string
+      description: The Semrush Query Fan-out run id (`workflow_id` on coverage rows).
+    workspaceId:
+      type: string
+      description: The brand's resolved Semrush workspace id (sub-workspace, falling back to the org parent).
+    status:
+      type: string
+      enum: [queued, running, succeeded, failed, unknown]
+    rowCount:
+      type: integer
+      minimum: 0
+      description: Present only once `status` is `succeeded`. Number of rows in `data`.
+    topics:
+      type: array
+      description: Present only once `status` is `succeeded`.
+      items: { $ref: '#/SerenityQueryFanoutTopicSummary' }
+    data:
+      type: array
+      description: |
+        Present only once `status` is `succeeded`. The raw fan-out coverage rows
+        (Semrush Elements API element `9f8bb77f-008e-4c80-8f3c-059986a045cd`), scoped
+        to this run via `CBF_workflow_id`. Unbounded — can be several hundred rows;
+        callers with large-payload concerns should expect this to move to an S3
+        pointer in a future revision (see the design doc's Open Questions).
+      items:
+        type: object
+        additionalProperties: true
+
 SerenityMarketDetail:
   description: |
     A single market slice, including the resolved upstream `semrushProjectId`.
