@@ -1,3 +1,10 @@
+# [1.751.0](https://github.com/adobe/spacecat-api-service/compare/v1.750.2...v1.751.0) (2026-08-18)
+
+
+### Features
+
+* admin-gated x-view-full-experience override to bypass PLG limiting (SITES-49888) ([#3087](https://github.com/adobe/spacecat-api-service/issues/3087)) ([6fe15e3](https://github.com/adobe/spacecat-api-service/commit/6fe15e3e72bb8a17006e6028f3599bef65e6329d)), closes [OneAdobe/experience-success-studio-ui#2199](https://github.com/OneAdobe/experience-success-studio-ui/issues/2199)
+
 ## [1.750.2](https://github.com/adobe/spacecat-api-service/compare/v1.750.1...v1.750.2) (2026-08-17)
 
 
