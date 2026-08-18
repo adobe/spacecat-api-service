@@ -999,6 +999,12 @@ SiteUpdate:
     name:
       description: The name of the site
       type: string
+    baseURL:
+      description: >-
+        The base URL of the site. Changing the URL of a site attached to a
+        Semrush-managed brand is only supported when the new URL shares the
+        same registrable domain (subdomain/subpath edits) — see PATCH /sites/{siteId}.
+      $ref: '#/URL'
     deliveryType:
       description: The type of the delivery this site is using
       $ref: '#/DeliveryType'

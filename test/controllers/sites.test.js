@@ -153,12 +153,18 @@ describe('Sites Controller', () => {
   let updateRumConfigStub;
   let getBrandBySiteStub;
   let isSemrushMarketMirrorSiteStub;
+  let resolveSemrushImsTokenStub;
+  let createSerenityTransportStub;
+  let propagateSiteUrlToSemrushStub;
   let SitesControllerMocked;
 
   before(async () => {
     updateRumConfigStub = sandbox.stub().resolves(true);
     getBrandBySiteStub = sandbox.stub().resolves(null);
     isSemrushMarketMirrorSiteStub = sandbox.stub().resolves(false);
+    resolveSemrushImsTokenStub = sandbox.stub().resolves('ims-token-abc');
+    createSerenityTransportStub = sandbox.stub().returns({ name: 'fake-transport' });
+    propagateSiteUrlToSemrushStub = sandbox.stub().resolves({ projectsUpdated: 0 });
     SitesControllerMocked = (await esmock('../../src/controllers/sites.js', {
       '../../src/support/rum-config-service.js': {
         updateRumConfig: updateRumConfigStub,
@@ -166,6 +172,15 @@ describe('Sites Controller', () => {
       '../../src/support/brands-storage.js': {
         getBrandBySite: getBrandBySiteStub,
         isSemrushMarketMirrorSite: isSemrushMarketMirrorSiteStub,
+      },
+      '../../src/support/utils.js': {
+        resolveSemrushImsToken: resolveSemrushImsTokenStub,
+      },
+      '../../src/support/serenity/rest-transport.js': {
+        createSerenityTransport: createSerenityTransportStub,
+      },
+      '../../src/support/serenity/site-url-propagation.js': {
+        propagateSiteUrlToSemrush: propagateSiteUrlToSemrushStub,
       },
     })).default;
   });
@@ -180,6 +195,12 @@ describe('Sites Controller', () => {
     getBrandBySiteStub.resolves(null);
     isSemrushMarketMirrorSiteStub.reset();
     isSemrushMarketMirrorSiteStub.resolves(false);
+    resolveSemrushImsTokenStub.reset();
+    resolveSemrushImsTokenStub.resolves('ims-token-abc');
+    createSerenityTransportStub.reset();
+    createSerenityTransportStub.returns({ name: 'fake-transport' });
+    propagateSiteUrlToSemrushStub.reset();
+    propagateSiteUrlToSemrushStub.resolves({ projectsUpdated: 0 });
 
     mockDataAccess = {
       Audit: {
@@ -905,11 +926,47 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Updating organization ID is not allowed');
   });
 
-  it('returns forbidden when changing the URL of a site attached to a Semrush-managed brand', async () => {
+  it('propagates the URL change to Semrush and persists it for the brand\'s own primary site', async () => {
     const site = sites[0];
     site.save = sandbox.spy(site.save);
     getBrandBySiteStub.reset();
-    getBrandBySiteStub.resolves({ semrushSubWorkspaceId: 'sub-ws-123' });
+    getBrandBySiteStub.resolves({
+      id: 'brand-1', name: 'Acme', semrushSubWorkspaceId: 'sub-ws-123', brandAliases: [],
+    });
+    const postgrestClient = { from: () => {} };
+
+    // Same registrable domain as the site's current https://site1.com — a subpath edit.
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { baseURL: 'https://site1.com/new-path', deliveryType: 'other' },
+      dataAccess: { services: { postgrestClient } },
+      ...defaultAuthAttributes,
+    });
+
+    expect(getBrandBySiteStub).to.have.been.calledOnce;
+    expect(resolveSemrushImsTokenStub).to.have.been.calledOnce;
+    expect(createSerenityTransportStub).to.have.been.calledOnce;
+    expect(propagateSiteUrlToSemrushStub).to.have.been.calledOnce;
+    const call = propagateSiteUrlToSemrushStub.getCall(0).args[0];
+    expect(call).to.include({
+      workspaceId: 'sub-ws-123',
+      brandId: 'brand-1',
+      siteId: SITE_IDS[0],
+      newBaseURL: 'https://site1.com/new-path',
+    });
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+    const updated = await response.json();
+    expect(updated).to.have.property('baseURL', 'https://site1.com/new-path');
+  });
+
+  it('returns unprocessable entity when a Semrush-attached site\'s URL would change registrable domain', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    getBrandBySiteStub.reset();
+    getBrandBySiteStub.resolves({
+      id: 'brand-1', name: 'Acme', semrushSubWorkspaceId: 'sub-ws-123', brandAliases: [],
+    });
     const postgrestClient = { from: () => {} };
 
     const response = await sitesController.updateSite({
@@ -920,13 +977,60 @@ describe('Sites Controller', () => {
     });
     const error = await response.json();
 
-    expect(getBrandBySiteStub).to.have.been.calledOnce;
+    expect(propagateSiteUrlToSemrushStub).to.have.not.been.called;
     expect(site.save).to.have.not.been.called;
-    expect(response.status).to.equal(403);
+    expect(response.status).to.equal(422);
     expect(error).to.have.property(
       'message',
-      'Updating the URL of a site attached to a Semrush-managed brand is not allowed',
+      'Changing the registrable domain of a site attached to a Semrush-managed brand is not '
+        + 'supported; only same-domain URL edits (subdomain/subpath) are allowed',
     );
+    expect(error).to.have.property('code', 'crossDomainNotSupported');
+  });
+
+  it('returns conflict when the new baseURL collides with another existing site', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    mockDataAccess.Site.findByBaseURL.resolves(sites[1]); // a DIFFERENT site than the one edited
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { baseURL: 'https://site2.com', deliveryType: 'other' },
+      ...defaultAuthAttributes,
+    });
+    const error = await response.json();
+
+    expect(getBrandBySiteStub).to.have.not.been.called;
+    expect(site.save).to.have.not.been.called;
+    expect(response.status).to.equal(409);
+    expect(error).to.have.property('message', 'A site with this baseURL already exists');
+    expect(error).to.have.property('code', 'siteUrlTaken');
+  });
+
+  it('surfaces a Semrush quota-exceeded propagation failure as 409 and does not persist the URL', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    getBrandBySiteStub.reset();
+    getBrandBySiteStub.resolves({
+      id: 'brand-1', name: 'Acme', semrushSubWorkspaceId: 'sub-ws-123', brandAliases: [],
+    });
+    const quotaError = new Error('AI resource allocation quota exceeded');
+    quotaError.status = 409;
+    quotaError.code = 'quotaExceeded';
+    propagateSiteUrlToSemrushStub.rejects(quotaError);
+    const postgrestClient = { from: () => {} };
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { baseURL: 'https://site1.com/new-path', deliveryType: 'other' },
+      dataAccess: { services: { postgrestClient } },
+      ...defaultAuthAttributes,
+    });
+    const error = await response.json();
+
+    expect(site.save).to.have.not.been.called;
+    expect(response.status).to.equal(409);
+    expect(error).to.have.property('code', 'quotaExceeded');
   });
 
   it('allows changing the URL of a site not attached to a Semrush-managed brand', async () => {

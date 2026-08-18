@@ -28,12 +28,14 @@ import {
   isArray,
   getStoredMetrics,
   isValidUUID,
+  isValidUrl,
   deepEqual,
   isNonEmptyObject,
   canonicalizeUrl,
   composeBaseURL,
   getBaseURLPathPrefix,
 } from '@adobe/spacecat-shared-utils';
+import { getDomain } from 'tldts';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
@@ -48,7 +50,7 @@ import { validateRepoUrl } from '../utils/validations.js';
 import { applyFieldProjection } from '../utils/field-projection.js';
 import {
   wwwUrlResolver, resolveWwwUrl, getAsoEntitlement, getAsoTier, CUSTOMER_VISIBLE_TIERS,
-  isInternalOrg,
+  isInternalOrg, resolveSemrushImsToken,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { CAP_SITE_READ_ALL, CAP_SITE_CREATE } from '../routes/capability-constants.js';
@@ -62,6 +64,9 @@ import {
   resolveProductCode,
 } from '../support/tier-provisioning.js';
 import { getBrandBySite, isSemrushMarketMirrorSite } from '../support/brands-storage.js';
+import { createSerenityTransport } from '../support/serenity/rest-transport.js';
+import { propagateSiteUrlToSemrush } from '../support/serenity/site-url-propagation.js';
+import { isSemrushTransportError, unwrapTransportCause, ERROR_CODES } from '../support/serenity/errors.js';
 import { listViewableResourceIds } from '../support/state-access-mapping-utils.js';
 import { requirePostgrestForFacsMappings } from '../support/postgrest-availability.js';
 import { isFacsRebacResource } from '../routes/facs-capabilities.js';
@@ -1194,43 +1199,48 @@ function SitesController(ctx, log, env) {
       return badRequest('Request body required');
     }
 
-    // A site's URL is immutable once it backs a Semrush-managed brand. That brand's
-    // tracked domain lives on its Semrush projects/markets, which have no
-    // domain-update path (the domain is set only at project-create time), so
-    // letting the SpaceCat site URL drift would desync the site from its Semrush
-    // projects. Only the URL is gated here — every other site field stays editable.
-    // The brand lookup runs only when a URL change is actually requested, so the
-    // common patch path (no baseURL) pays no extra query.
-    //
-    // TODO (~2026-07-07): Semrush is expected to support changing a project's
-    // primary URL — which is its main (own-brand, `main_brand: true`) benchmark
-    // domain, see ensureOwnBrandBenchmark in support/serenity/brand-urls.js — in
-    // ~2 weeks (heads-up received 2026-06-23). Once available, relax this guard to
-    // propagate the new URL to each market's main benchmark (and republish) instead
-    // of blocking the edit.
+    // A site's URL backing a Semrush-managed brand can be changed, but only for the
+    // brand's OWN primary site, and only to a URL on the same registrable domain — see
+    // serenity-docs#349. A market-mirror site (linked via brand_sites, type='serenity')
+    // stays immutable: whether/how a mirror should follow a rename is a separate, open
+    // decision (issue #349 workstream 4) this change does not make. The brand lookup
+    // runs only when a URL change is actually requested, so the common patch path (no
+    // baseURL) pays no extra query.
     if (hasText(requestBody.baseURL) && requestBody.baseURL !== site.getBaseURL()) {
+      if (!isValidUrl(requestBody.baseURL)) {
+        return badRequest('baseURL must be a valid URL');
+      }
+
+      const collidingSite = await Site.findByBaseURL(requestBody.baseURL);
+      if (collidingSite && collidingSite.getId() !== site.getId()) {
+        return createResponse({
+          message: 'A site with this baseURL already exists',
+          code: 'siteUrlTaken',
+        }, 409);
+      }
+
       const postgrestClient = context.dataAccess?.services?.postgrestClient;
       if (postgrestClient?.from) {
-        // Two ways a site can back a Semrush-managed brand, both immutable:
+        // Two ways a site can back a Semrush-managed brand:
         //  - the brand's OWN primary site (brands.site_id) — getBrandBySite, or
         //  - a Semrush market mirror linked via brand_sites (type='serenity'),
         //    which a serenity brand shell (no brands.site_id) reaches ONLY here.
         // The lookups can throw on a transient PostgREST error; map that to a 5xx
         // rather than letting it escape this catch-less handler as an opaque 500.
-        let attachedToSemrushBrand = false;
+        let attachedBrand = null;
+        let isMirror = false;
         try {
-          const attachedBrand = await getBrandBySite(
+          attachedBrand = await getBrandBySite(
             site.getOrganizationId(),
             site.getId(),
             postgrestClient,
             log,
           );
-          attachedToSemrushBrand = hasText(attachedBrand?.semrushSubWorkspaceId)
-            || await isSemrushMarketMirrorSite(
-              site.getOrganizationId(),
-              site.getId(),
-              postgrestClient,
-            );
+          isMirror = !attachedBrand && await isSemrushMarketMirrorSite(
+            site.getOrganizationId(),
+            site.getId(),
+            postgrestClient,
+          );
         } catch (lookupError) {
           log.error('updateSite: failed to resolve Semrush-brand attachment for URL-immutability guard', {
             siteId: site.getId(),
@@ -1238,13 +1248,70 @@ function SitesController(ctx, log, env) {
           });
           return internalServerError('Could not verify whether this site URL is editable; please retry');
         }
-        if (attachedToSemrushBrand) {
+
+        // v1 scope: market-mirror sites stay immutable (see comment above).
+        if (isMirror) {
           return forbidden('Updating the URL of a site attached to a Semrush-managed brand is not allowed');
+        }
+
+        if (hasText(attachedBrand?.semrushSubWorkspaceId)) {
+          const currentDomain = getDomain(new URL(site.getBaseURL()).hostname);
+          const nextDomain = getDomain(new URL(requestBody.baseURL).hostname);
+          if (currentDomain !== nextDomain) {
+            return createResponse({
+              message: 'Changing the registrable domain of a site attached to a Semrush-managed '
+                + 'brand is not supported; only same-domain URL edits (subdomain/subpath) are allowed',
+              code: ERROR_CODES.CROSS_DOMAIN_NOT_SUPPORTED,
+            }, 422);
+          }
+
+          try {
+            await propagateSiteUrlToSemrush({
+              dataAccess: context.dataAccess,
+              transport: createSerenityTransport({
+                env: context.env,
+                imsToken: await resolveSemrushImsToken(context, log, 'sites'),
+              }),
+              workspaceId: attachedBrand.semrushSubWorkspaceId,
+              brandId: attachedBrand.id,
+              siteId: site.getId(),
+              brandIdentity: { name: attachedBrand.name, aliases: attachedBrand.brandAliases },
+              newBaseURL: requestBody.baseURL,
+              log,
+            });
+          } catch (propagationError) {
+            const err = unwrapTransportCause(propagationError);
+            log.error('updateSite: Semrush URL propagation failed', {
+              siteId: site.getId(),
+              brandId: attachedBrand.id,
+              status: err?.status,
+              error: err?.message,
+            });
+            if (isSemrushTransportError(err)) {
+              // Never echo an upstream message (it embeds the gateway host + workspace/
+              // project UUIDs) — mirrors the brands.js re-sync's error hygiene.
+              return createResponse({ message: 'Failed to update the tracked URL in Semrush' }, 502);
+            }
+            const status = err?.status || 500;
+            return createResponse({
+              message: status === 500 ? 'Failed to update the tracked URL in Semrush' : err.message,
+              ...(err?.code ? { code: err.code } : {}),
+            }, status);
+            // toQuotaExceededError() sets status=409, code='quotaExceeded' — passes through above.
+          }
+          // NOT persisted on failure: the Semrush call runs BEFORE site.save() below, so a
+          // thrown error here returns before `updates` is ever set for baseURL.
         }
       }
     }
 
     let updates = false;
+
+    if (hasText(requestBody.baseURL) && requestBody.baseURL !== site.getBaseURL()) {
+      site.setBaseURL(requestBody.baseURL);
+      updates = true;
+    }
+
     if (isBoolean(requestBody.isLive) && requestBody.isLive !== site.getIsLive()) {
       site.toggleLive();
       updates = true;
