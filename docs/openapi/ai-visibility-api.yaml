@@ -1065,6 +1065,95 @@ ai-visibility-prompts-responses:
     security:
       - api_key: []
 
+ai-visibility-prompts-responses-batch:
+  post:
+    tags: [ai-visibility]
+    summary: Bulk-hydrate prompt responses for caller-supplied identities
+    description: |
+      Hydrates up to 500 caller-supplied prompt identities into their full LLM
+      responses, cited pages, and mentioned brands. Data from `Relations/Prompt`.
+      Feeds the Brand Claims ingestion consumer (LLMO-7026), replacing the
+      DRS-produced Brand Presence sheet as the data source.
+
+      The response is **order-stable and never drops an item**: `data[i]`
+      corresponds to `items[i]` for the full request length. A backend failure is
+      surfaced as `relationStatus: "error"`; an identity lacking the fields needed
+      to issue the relation call (e.g. an empty `serpId`) is surfaced as
+      `relationStatus: "skipped"`. No item is omitted or reordered, so callers can
+      zip the response back onto their input by index, and `requested` always equals
+      the number of items sent.
+
+      Slice defaults: a per-item `country`/`engine` overrides the top-level default;
+      the top-level value applies only when the item omits it. Because batch reads
+      the relation call (no brief-excerpt fallback), `responseSource` is the
+      `full | none` subset of the shared enum.
+    operationId: postAiVisibilityPromptsResponsesBatch
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/AiVisibilityPromptsResponsesBatchRequest'
+    responses:
+      '200':
+        description: Prompt responses hydrated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityPromptsResponsesBatchResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
+ai-visibility-prompts-responses-all:
+  get:
+    tags: [ai-visibility]
+    summary: Traverse a whole brand's prompt responses via cursor
+    description: |
+      Walks an entire brand's prompt/response corpus page by page via an opaque
+      cursor. Each `data[]` item carries the same shape as
+      `GET /llmo/ai-visibility/prompts/responses`. Feeds the Brand Claims ingestion
+      consumer (LLMO-7027).
+
+      Pagination is cursor-based: `nextCursor` is an opaque base64url token; pass it
+      back as `cursor` for the next page. `nextCursor` is `null` on the last page.
+      When the upstream offset ceiling is reached before the corpus is exhausted,
+      the page is still returned with HTTP 200 and the envelope signals the stop
+      explicitly — `truncated: true` and `truncationReason: "backend_offset_ceiling"`
+      — never a silent truncation.
+
+      `executionDate` is the capture date (ISO `YYYY-MM-DD`) echoed once for the page
+      and also carried per item. `snapshotId` is best-effort and may be `null`.
+    operationId: getAiVisibilityPromptsResponsesAll
+    parameters:
+      - *domainParam
+      - *countryParam
+      - *regionParam
+      - *engineParam
+      - *limitParam
+      - name: cursor
+        in: query
+        required: false
+        description: Opaque base64url pagination cursor from a prior page's `nextCursor`.
+        schema:
+          type: string
+      - name: promptQuery
+        in: query
+        required: false
+        description: Optional case-insensitive prompt-text filter.
+        schema:
+          type: string
+    responses:
+      '200':
+        description: Prompt responses page retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AiVisibilityPromptsResponsesAllResponse'
+      <<: *errorResponses
+    security:
+      - api_key: []
+
 ai-visibility-topics-research-stats:
   get:
     tags: [ai-visibility]

@@ -37,6 +37,8 @@ import {
 import {
   handlePromptsResponses,
   handlePromptsResponsesLatest,
+  handlePromptsResponsesAll,
+  handlePromptsResponsesBatch,
 } from '../support/ai-visibility/handlers/prompts.js';
 import {
   handleTopicsResearchStats,
@@ -107,6 +109,7 @@ const ROUTE_MAP = [
   ['/competitors/metrics', handleCompetitorsMetrics],
   ['/meta', handleMeta],
   ['/prompts/responses/latest', handlePromptsResponsesLatest],
+  ['/prompts/responses/all', handlePromptsResponsesAll],
   ['/prompts/responses', handlePromptsResponses],
   ['/topics/research/stats', handleTopicsResearchStats],
   ['/topics/research/prompts', handleTopicsResearchPrompts],
@@ -222,6 +225,43 @@ function wrapHandler(handlerFn, relPath, log) {
   };
 }
 
+/**
+ * Wrapper for JSON-body (POST) AI Visibility handlers. Unlike {@link wrapHandler} — which
+ * reads the query string into `URLSearchParams` — this passes the parsed request body
+ * (`context.data`) straight through, since the `/batch` body carries a nested `items`
+ * array that URLSearchParams cannot represent. The response is returned verbatim (no
+ * `srFilters` attachment): the batch envelope is `{ data, requested }` only (spec §5.1).
+ *
+ * @param {(body: object, clients: object) => Promise<{status:number, body:object}>} handlerFn
+ * @param {string} relPath
+ * @param {object} log
+ */
+function wrapBodyHandler(handlerFn, relPath, log) {
+  return async (context) => {
+    let clients;
+    try {
+      clients = getGrpcClients(context.env);
+    } catch (e) {
+      log.error('AI Visibility gRPC transport init failed', e);
+      return createResponse(
+        {
+          error: 'aiVisibilityNotConfigured',
+          message: 'AI Visibility is not configured.',
+        },
+        503,
+      );
+    }
+    const body = isNonEmptyObject(context.data) ? context.data : {};
+    try {
+      const result = await handlerFn(body, clients);
+      return createResponse(result.body, result.status);
+    } catch (e) {
+      log.error(`AI Visibility handler error [${relPath}]`, e);
+      return internalServerError('AI Visibility request failed');
+    }
+  };
+}
+
 function AiVisibilityController(context, log, _) {
   if (!isNonEmptyObject(context)) {
     throw new Error('Context required');
@@ -240,6 +280,14 @@ function AiVisibilityController(context, log, _) {
       .join('')}`;
     handlers[methodName] = wrapHandler(handlerFn, relPath, log);
   }
+
+  // POST body handler — registered outside ROUTE_MAP because it consumes the parsed
+  // request body rather than query params (see wrapBodyHandler).
+  handlers.postPromptsResponsesBatch = wrapBodyHandler(
+    handlePromptsResponsesBatch,
+    '/prompts/responses/batch',
+    log,
+  );
 
   return handlers;
 }

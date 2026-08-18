@@ -38,6 +38,8 @@ describe('AiVisibilityController', () => {
   let mockHandleMeta;
   let mockHandlePromptsResponses;
   let mockHandlePromptsResponsesLatest;
+  let mockHandlePromptsResponsesAll;
+  let mockHandlePromptsResponsesBatch;
   let mockHandleTopicsResearchStats;
   let mockHandleTopicsResearch;
   let mockHandleTopicsStats;
@@ -146,6 +148,12 @@ describe('AiVisibilityController', () => {
       .stub()
       .resolves({ status: 200, body: {} });
     mockHandlePromptsResponsesLatest = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
+    mockHandlePromptsResponsesAll = sandbox
+      .stub()
+      .resolves({ status: 200, body: {} });
+    mockHandlePromptsResponsesBatch = sandbox
       .stub()
       .resolves({ status: 200, body: {} });
     mockHandleTopicsResearchStats = sandbox
@@ -284,6 +292,8 @@ describe('AiVisibilityController', () => {
       '../../src/support/ai-visibility/handlers/prompts.js': {
         handlePromptsResponses: mockHandlePromptsResponses,
         handlePromptsResponsesLatest: mockHandlePromptsResponsesLatest,
+        handlePromptsResponsesAll: mockHandlePromptsResponsesAll,
+        handlePromptsResponsesBatch: mockHandlePromptsResponsesBatch,
       },
       '../../src/support/ai-visibility/handlers/topics.js': {
         handleTopicsResearchStats: mockHandleTopicsResearchStats,
@@ -724,6 +734,66 @@ describe('AiVisibilityController', () => {
     });
   });
 
+  describe('wrapBodyHandler – POST /prompts/responses/batch', () => {
+    it('passes the parsed request body (not URLSearchParams) to the handler', async () => {
+      const handlers = AiVisibilityController({ some: 'data' }, log, env);
+      mockHandlePromptsResponsesBatch.resolves({ status: 200, body: { data: [], requested: 0 } });
+      const context = { env, data: { domain: 'adobe.com', items: [] } };
+      await handlers.postPromptsResponsesBatch(context);
+
+      expect(mockHandlePromptsResponsesBatch.calledOnce).to.be.true;
+      const [body, clients] = mockHandlePromptsResponsesBatch.firstCall.args;
+      expect(body).to.deep.equal({ domain: 'adobe.com', items: [] });
+      expect(clients).to.equal(fakeClients);
+    });
+
+    it('returns createResponse with the handler status/body and does not attach srFilters', async () => {
+      const handlers = AiVisibilityController({ some: 'data' }, log, env);
+      mockHandlePromptsResponsesBatch.resolves({ status: 200, body: { data: [1], requested: 1 } });
+      const context = { env, data: { domain: 'adobe.com', items: [{}] } };
+      await handlers.postPromptsResponsesBatch(context);
+
+      expect(mockNormalize.called).to.be.false;
+      expect(mockAttachFilters.called).to.be.false;
+      expect(mockCreateResponse.calledWith({ data: [1], requested: 1 }, 200)).to.be.true;
+    });
+
+    it('passes through a non-200 handler result', async () => {
+      const handlers = AiVisibilityController({ some: 'data' }, log, env);
+      mockHandlePromptsResponsesBatch.resolves({ status: 400, body: { error: 'missing_domain' } });
+      const context = { env, data: {} };
+      await handlers.postPromptsResponsesBatch(context);
+      expect(mockCreateResponse.firstCall.args[1]).to.equal(400);
+    });
+
+    it('defaults to an empty body when context.data is absent', async () => {
+      const handlers = AiVisibilityController({ some: 'data' }, log, env);
+      mockHandlePromptsResponsesBatch.resolves({ status: 400, body: { error: 'missing_domain' } });
+      const context = { env };
+      await handlers.postPromptsResponsesBatch(context);
+      const [body] = mockHandlePromptsResponsesBatch.firstCall.args;
+      expect(body).to.deep.equal({});
+    });
+
+    it('returns 503 when getGrpcClients throws', async () => {
+      mockGetGrpcClients.throws(new Error('credentials missing'));
+      const handlers = AiVisibilityController({ some: 'data' }, log, env);
+      const context = { env, data: { domain: 'adobe.com', items: [{}] } };
+      await handlers.postPromptsResponsesBatch(context);
+      expect(mockCreateResponse.firstCall.args[1]).to.equal(503);
+      expect(mockHandlePromptsResponsesBatch.called).to.be.false;
+    });
+
+    it('returns internalServerError when the handler throws', async () => {
+      mockHandlePromptsResponsesBatch.rejects(new Error('boom'));
+      const handlers = AiVisibilityController({ some: 'data' }, log, env);
+      const context = { env, data: { domain: 'adobe.com', items: [{}] } };
+      const result = await handlers.postPromptsResponsesBatch(context);
+      expect(mockInternalServerError.calledWith('AI Visibility request failed')).to.be.true;
+      expect(result.status).to.equal(500);
+    });
+  });
+
   describe('all handler routes are wired', () => {
     const handlerMap = () => ({
       getBrandsStats: mockHandleBrandStats,
@@ -738,6 +808,8 @@ describe('AiVisibilityController', () => {
       getCompetitorsMetrics: mockHandleCompetitorsMetrics,
       getMeta: mockHandleMeta,
       getPromptsResponsesLatest: mockHandlePromptsResponsesLatest,
+      getPromptsResponsesAll: mockHandlePromptsResponsesAll,
+      postPromptsResponsesBatch: mockHandlePromptsResponsesBatch,
       getPromptsResponses: mockHandlePromptsResponses,
       getTopicsResearchStats: mockHandleTopicsResearchStats,
       getTopicsResearchPrompts: mockHandleTopicsResearchPrompts,

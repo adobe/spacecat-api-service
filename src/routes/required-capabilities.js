@@ -728,6 +728,8 @@ const routeRequiredCapabilities = {
   'GET /llmo/ai-visibility/competitors/metrics': 'report:read',
   'GET /llmo/ai-visibility/meta': 'report:read',
   'GET /llmo/ai-visibility/prompts/responses/latest': 'report:read',
+  'GET /llmo/ai-visibility/prompts/responses/all': 'report:read',
+  'POST /llmo/ai-visibility/prompts/responses/batch': 'report:read',
   'GET /llmo/ai-visibility/prompts/responses': 'report:read',
   'GET /llmo/ai-visibility/topics/research/stats': 'report:read',
   'GET /llmo/ai-visibility/topics/research/prompts': 'report:read',
