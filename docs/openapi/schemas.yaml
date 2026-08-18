@@ -12167,10 +12167,22 @@ SerenityMarket:
       description: Upstream Semrush AIO project id for this slice (sub-workspace mode only).
     domain:
       description: |
-        The market's own domain (its primary URL host, e.g. "example.com").
-        Each market has its own primary URL/domain — the brand itself has none.
-        Additive, sub-workspace mode only. Surfaced so the market overview can
-        display it. Null when the upstream project carries no domain.
+        The registrable domain the market's upstream project is filed under
+        (e.g. "example.com"). Each market has its own domain — the brand itself
+        has none. It cannot carry a path, so for a market whose site is a
+        subdomain or a subpath it names the parent rather than the tracked site;
+        read `primaryUrl` for that. Additive, sub-workspace mode only. Null when
+        the upstream project carries no domain.
+      oneOf:
+        - type: string
+        - type: 'null'
+    primaryUrl:
+      description: |
+        The url the market's upstream project actually analyses (Semrush
+        `settings.ai.primary_url`) — host plus path, scheme-less, e.g.
+        "nba.com/lakers". This is the value the market overview displays, since
+        it is the only one that distinguishes markets sharing a domain. Additive,
+        sub-workspace mode only. Null when the upstream project carries none.
       oneOf:
         - type: string
         - type: 'null'
