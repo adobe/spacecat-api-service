@@ -254,12 +254,13 @@ export async function handlePromptsResponsesAll(sp, clients) {
   // Advance the cursor by the number of rows the backend returned, before any client-side
   // filtering, so traversal stays correct regardless of `promptQuery`.
   const fetchedCount = fetched.length;
-  const selected = promptQuery
-    ? fetched.filter((p) => promptMatchesResponsesQuery(p.prompt, promptQuery))
-    : fetched;
-  const attempted = selected.map(hasRelationIdentity);
+  // Hydrate the full fetched page (pre-filter) so `executionDate` reflects the page's
+  // snapshot even when `promptQuery` removes the dated rows. Concurrency is bounded by
+  // `limit` (<= PROMPTS_RESPONSES_ALL_MAX_LIMIT); API Gateway rate-limiting is the
+  // operational control against upstream gRPC saturation.
+  const attempted = fetched.map(hasRelationIdentity);
   const settled = await Promise.allSettled(
-    selected.map((p) => {
+    fetched.map((p) => {
       if (!hasRelationIdentity(p)) { return Promise.resolve(null); }
       const { promptHash, topicId } = p;
       const serpId = String(p.serpId ?? '');
@@ -269,13 +270,22 @@ export async function handlePromptsResponsesAll(sp, clients) {
     }),
   );
   const relations = settled.map((s) => (s.status === 'fulfilled' ? s.value : null));
-  const data = selected.map((p, i) => buildPromptResponseItem(
+  const allItems = fetched.map((p, i) => buildPromptResponseItem(
     p,
     relations[i]?.value ?? null,
     attempted[i],
     settled[i],
     llm,
   ));
+  // Page-level snapshot date, taken from the pre-filter set so a fully-filtered page
+  // still reports the date the backend served.
+  const executionDate = allItems.find((d) => d.date)?.date ?? null;
+  // `promptQuery` is a client-side filter applied after hydration; the cursor still
+  // advances by the backend fetch count, so a filtered page may be empty (or shorter
+  // than `limit`) while `nextCursor` remains non-null.
+  const data = promptQuery
+    ? allItems.filter((it) => promptMatchesResponsesQuery(it.prompt, promptQuery))
+    : allItems;
   const nextOffset = offset + fetchedCount;
   let nextCursor = null;
   let truncated = false;
@@ -289,7 +299,6 @@ export async function handlePromptsResponsesAll(sp, clients) {
       nextCursor = encodeCursor(nextOffset);
     }
   }
-  const executionDate = data.find((d) => d.date)?.date ?? null;
   return {
     status: 200,
     body: {
@@ -341,6 +350,9 @@ export async function handlePromptsResponsesBatch(body, clients) {
   const topEngine = typeof b.engine === 'string' ? b.engine : undefined;
   const llmForItem = (it) => engineToLlm(it.engine ?? topEngine) ?? LLM_ENUM.ALL;
   const attempted = items.map(hasRelationIdentity);
+  // Up to PROMPTS_RESPONSES_BATCH_MAX_ITEMS (500) relation calls fan out here; that
+  // ceiling plus API Gateway rate-limiting is the control against upstream gRPC
+  // saturation (no per-request concurrency limiter — matches the ai-visibility handlers).
   const settled = await Promise.allSettled(
     items.map((it) => {
       if (!hasRelationIdentity(it)) { return Promise.resolve(null); }

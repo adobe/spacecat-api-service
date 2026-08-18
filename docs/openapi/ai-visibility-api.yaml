@@ -1124,6 +1124,11 @@ ai-visibility-prompts-responses-all:
 
       `executionDate` is the capture date (ISO `YYYY-MM-DD`) echoed once for the page
       and also carried per item. `snapshotId` is best-effort and may be `null`.
+
+      `promptQuery` is a **client-side** filter applied after the page is fetched and
+      hydrated. The cursor advances by the backend fetch count, not the filtered count,
+      so a filtered page may be empty (or shorter than `limit`) while `nextCursor` is
+      still non-null — keep paging until `nextCursor` is `null`.
     operationId: getAiVisibilityPromptsResponsesAll
     parameters:
       - *domainParam

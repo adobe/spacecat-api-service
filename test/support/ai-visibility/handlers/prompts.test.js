@@ -709,6 +709,36 @@ describe('AI Visibility – prompts handlers', () => {
       expect(res.body.nextCursor).to.be.null;
     });
 
+    it('derives executionDate from the pre-filter page even when promptQuery drops the dated row', async () => {
+      clients.promptClient.prompts.resolves({
+        prompts: [
+          {
+            prompt: 'keep this exact prompt', promptHash: 'h0', serpId: 's0', topicName: 'T', topicId: 't0', llm: 1, mentionedBrandsCount: 0, sourcesCount: 0,
+          },
+          {
+            prompt: 'drop different prompt entirely', promptHash: 'h1', serpId: 's1', topicName: 'T', topicId: 't1', llm: 1, mentionedBrandsCount: 0, sourcesCount: 0,
+          },
+        ],
+      });
+      // kept row has no date; the filtered-out row carries the page snapshot date.
+      clients.prRelationsClient.prompt
+        .onFirstCall().resolves({ value: null })
+        .onSecondCall().resolves({
+          value: {
+            response: 'R', sources: [], mentionedBrands: [], date: '2026-08-09',
+          },
+        });
+      const sp = new URLSearchParams('domain=example.com&promptQuery=keep+this+exact+prompt');
+      const res = await handlePromptsResponsesAll(sp, clients);
+      expect(res.body.data).to.have.length(1);
+      expect(res.body.data[0].prompt).to.equal('keep this exact prompt');
+      expect(res.body.data[0].date).to.be.null;
+      // executionDate comes from the pre-filter set, so the page still reports the snapshot
+      expect(res.body.executionDate).to.equal('2026-08-09');
+      // both fetched rows were hydrated (pre-filter), not just the kept one
+      expect(clients.prRelationsClient.prompt.callCount).to.equal(2);
+    });
+
     it('carries per-item relation status through the shared builder', async () => {
       clients.promptClient.prompts.resolves({
         prompts: [{
