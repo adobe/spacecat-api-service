@@ -111,16 +111,9 @@ function BrandClaimsCommand(context) {
 
       log.info(`brand-claims: ${enabled ? 'enabled' : 'disabled'} for brand ${brand.id} ("${brand.name}") by ${actor}`);
 
-      // Keep the per-site `brand-claims` audit handler in lock-step with the
-      // brand flag: enabling opts the brand's primary site into the scheduled
-      // audit, disabling opts it back out. The URL branch already has the site;
-      // otherwise resolve the brand's primary site from the returned `site_id`.
-      //
-      // The brand flag is already committed to Postgres at this point, so the
-      // audit toggle runs in its own try/catch: a failure here leaves the two
-      // halves out of sync (flag flipped, audit not), so we surface that partial
-      // state to the operator rather than a generic error that hides which half
-      // succeeded.
+      // Toggle the per-site audit in lock-step with the (already-committed) brand
+      // flag; own try/catch so a failure reports the partial state, not a generic
+      // error that hides which half succeeded.
       const verb = enabled ? 'enabled' : 'disabled';
       let auditToggled = false;
       let auditError = null;
@@ -139,8 +132,7 @@ function BrandClaimsCommand(context) {
           auditToggled = true;
           log.info(`brand-claims: ${verb} '${BRAND_CLAIMS_AUDIT_TYPE}' audit for site ${site.getId()} (${site.getBaseURL()})`);
         } else if (brand.site_id) {
-          // site_id points at a site that no longer resolves (soft-deleted /
-          // unreachable) — distinct from a brand that never had a primary site.
+          // site_id set but the site no longer resolves (soft-deleted/unreachable).
           log.warn(`brand-claims: brand ${brand.id} primary site ${brand.site_id} not found; '${BRAND_CLAIMS_AUDIT_TYPE}' audit not ${verb}`);
         } else {
           log.warn(`brand-claims: brand ${brand.id} has no primary site; '${BRAND_CLAIMS_AUDIT_TYPE}' audit not ${verb}`);
