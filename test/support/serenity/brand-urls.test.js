@@ -26,6 +26,7 @@ import {
   syncBrandUrlsAcrossMarkets,
 } from '../../../src/support/serenity/brand-urls.js';
 import { SerenityTransportError } from '../../../src/support/serenity/rest-transport.js';
+import { ERROR_CODES } from '../../../src/support/serenity/errors.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -243,8 +244,9 @@ describe('brand-urls helpers', () => {
         createBenchmarks: sandbox.stub().resolves({ ids: ['new-1'], existing_count: 0 }),
       };
       expect(await ensureOwnBrandBenchmark(transport, WS, PID, BRAND, undefined)).to.equal('new-1');
+      // The create carries the lowercase forms Semrush's own resolution would add.
       expect(transport.createBenchmarks).to.have.been.calledOnceWith(WS, PID, [
-        { brand_name: 'Acme', domain: 'https://acme.com', brand_aliases: ['acme inc'] },
+        { brand_name: 'Acme', domain: 'https://acme.com', brand_aliases: ['acme inc', 'acme'] },
       ]);
     });
 
@@ -412,10 +414,10 @@ describe('brand-urls helpers', () => {
 
     it('diffs against the DRAFT view, so a removal still lands on an unpublished project', async () => {
       // A brand URL is written into the project's DRAFT; only a publish promotes it
-      // into the published view. `republishBestEffort` swallows a quota 405, which
-      // leaves the project unpublished — so the published view reports an EMPTY set
-      // while the draft holds the rows. Diffing the published view there would make
-      // `toDelete` empty and a user's removal would silently never reach Semrush.
+      // into the published view. Creates/deletes act on the draft before this sync's
+      // own republish runs, so the published view can legitimately lag the draft at
+      // read time — diffing the published view there would make `toDelete` empty and
+      // a user's removal would silently never reach Semrush.
       const sources = { urls: ['https://acme.com'] };
       const listBrandUrls = sandbox.stub();
       // Published view: stale/empty (the pending rows are invisible to it).
@@ -433,8 +435,7 @@ describe('brand-urls helpers', () => {
         listBrandUrls,
         createBrandUrls: sandbox.stub().resolves({}),
         deleteBrandUrls: sandbox.stub().resolves({}),
-        // The republish quota-405 that strands the project as a draft in the first place.
-        publishProject: sandbox.stub().rejects(new SerenityTransportError(405, 'quota')),
+        publishProject: sandbox.stub().resolves({}),
       };
 
       const result = await syncBrandUrlsAcrossMarkets(transport, sources, WS, undefined);
@@ -577,21 +578,48 @@ describe('brand-urls helpers', () => {
       expect(result).to.deep.equal({ markets: 0, created: 0, deleted: 0 });
     });
 
-    it('tolerates a quota 405 on republish (best-effort)', async () => {
+    it('propagates a quotaExceeded 409 when republish 405s on quota (SITES-49206)', async () => {
+      // Pinned disguised-405 shape (LLMO-6190, live-verified): a bare string/HTML body, never
+      // JSON — isMeteredQuota keys on this SHAPE, not the bare status. Semrush no longer enforces
+      // AI limits, so this used-to-be-tolerated case now means it's enforcing again and must
+      // surface, not get swallowed.
       const sources = { urls: ['https://acme.com'] };
-      const warn = sandbox.stub();
       const transport = {
         listProjects: sandbox.stub().resolves({ items: [projectWith('p-us', 'us')] }),
         listBenchmarks: sandbox.stub().resolves(benchOk()),
         listBrandUrls: sandbox.stub().resolves({ brand_urls: [] }),
         createBrandUrls: sandbox.stub().resolves({}),
         deleteBrandUrls: sandbox.stub().resolves({}),
-        publishProject: sandbox.stub().rejects(new SerenityTransportError(405, 'quota')),
+        publishProject: sandbox.stub().rejects(
+          new SerenityTransportError(405, 'publish failed: 405', '<html>405 Not Allowed</html>'),
+        ),
       };
-      const logger = { warn, info: () => {} };
-      const result = await syncBrandUrlsAcrossMarkets(transport, sources, WS, logger);
-      expect(result).to.deep.equal({ markets: 1, created: 1, deleted: 0 });
-      expect(warn).to.have.been.called;
+      const err = await syncBrandUrlsAcrossMarkets(transport, sources, WS, undefined)
+        .then(() => null, (e) => e);
+      expect(err).to.not.equal(null);
+      expect(err.status).to.equal(409);
+      expect(err.code).to.equal(ERROR_CODES.QUOTA_EXCEEDED);
+    });
+
+    it('propagates a genuine JSON-bodied 405 through republish (not misclassified as quota)', async () => {
+      // isMeteredQuota keys on body SHAPE (string = disguised quota, JSON = a genuine app-level
+      // error), so a real "Method Not Allowed" (JSON body) must NOT be swallowed or misclassified
+      // as quotaExceeded — it must propagate as the ordinary 405 upstream error. This boundary was
+      // previously pinned in markets-subworkspace.test.js's now-deleted best-effort suite; this is
+      // the equivalent coverage for the shared `republish` function (SITES-49206).
+      const sources = { urls: ['https://acme.com'] };
+      const transport = {
+        listProjects: sandbox.stub().resolves({ items: [projectWith('p-us', 'us')] }),
+        listBenchmarks: sandbox.stub().resolves(benchOk()),
+        listBrandUrls: sandbox.stub().resolves({ brand_urls: [] }),
+        createBrandUrls: sandbox.stub().resolves({}),
+        deleteBrandUrls: sandbox.stub().resolves({}),
+        publishProject: sandbox.stub().rejects(
+          new SerenityTransportError(405, 'Method Not Allowed', { message: 'Method Not Allowed' }),
+        ),
+      };
+      await expect(syncBrandUrlsAcrossMarkets(transport, sources, WS, undefined))
+        .to.be.rejectedWith(/Method Not Allowed/);
     });
 
     it('propagates a non-405 republish failure (hard-fail)', async () => {

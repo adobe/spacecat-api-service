@@ -207,7 +207,15 @@ export function validateDeferPublish(body) {
  * `GET /aio/tags` — and the two objects compare equal for the same id (verified
  * live 2026-07-10). What varies is DEPTH, not endpoint: a ROOT tag omits
  * `parent_id` and `path` entirely, while a descendant carries both. So a tag
- * with no `path` is a root, and its own name is its dimension.
+ * with no `path` is a root, and its own name names its dimension.
+ *
+ * Names are passed through as upstream holds them, root breadcrumb included, so
+ * a root's name is not always the bare dimension key: the intent root is named
+ * `$abv_tags$intent` on a project the rename (LLMO-6984) has reached, and
+ * `intent` on one it has not. Folding either spelling to the dimension key here
+ * would put a name in `path[]` beside an id that upstream does not hold under
+ * it, so this stays a faithful mirror and a consumer that keys on the intent
+ * dimension matches both spellings.
  *
  * String-form tags (a defensive upstream fallback) carry a name but no id, and
  * are surfaced with an empty id rather than dropped.
@@ -380,9 +388,8 @@ export async function handleListPrompts(
  * @param {object} log
  * @param {(fn: () => Promise<any>) => Promise<any>} [wrapPublish] - wraps each project's
  *   `publishProject` call (default identity — a plain call, byte-for-byte the pre-existing
- *   behavior). The subworkspace create-prompts caller passes `headroom.retryOnQuota` (LLMO-6190
- *   item 4) so a disguised metered-405 gets ONE bounded top-up+retry per project BEFORE it is
- *   recorded as a failure; flat-mode callers omit this param, so flat mode is untouched.
+ *   behavior). Retained as a per-project injection seam for a future publish-retry wrapper
+ *   (§10.3); no caller passes a non-identity wrapper today, so every publish is a plain call.
  * @param {{ env?: object | null, orgId?: string | null, brandId?: string | null } | null}
  *   [alertContext] - serenity-docs#72 §5: when supplied, fires the (deduplicated, fire-and-forget)
  *   Slack quota-rejection alert for a classified disguised-405 — every prior caller omitted this,

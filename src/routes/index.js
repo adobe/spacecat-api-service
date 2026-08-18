@@ -113,8 +113,6 @@ function isStaticRoute(routePattern) {
  * @param {Object} onboardingController - Semrush onboarding notification controller.
  * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
  * @param {Object} auditPolicyController - Audit policy + audit scope controller.
- * @param {Object} opportunityValidationController - On-demand opportunity validation
- *   controller.
  * @param {Object} promptSuggestionSchedulesController - LLMO prompt-suggestion schedule controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
@@ -186,7 +184,6 @@ export default function getRouteHandlers(
   onboardingController,
   redirectsController,
   auditPolicyController,
-  opportunityValidationController,
   promptSuggestionSchedulesController,
 ) {
   const staticRoutes = {};
@@ -326,9 +323,6 @@ export default function getRouteHandlers(
     'GET /projects/by-project-name/:projectName/sites': projectsController.getSitesByProjectName,
     'POST /preflight/jobs': preflightController.createPreflightJob,
     'GET /preflight/jobs/:jobId': preflightController.getPreflightJobStatusAndResult,
-    'POST /sites/:siteId/preflights': preflightController.createPreflight,
-    'GET /sites/:siteId/preflights': preflightController.getAllPreflights,
-    'GET /sites/:siteId/preflights/:preflightId': preflightController.getPreflightById,
     'POST /sites/detect/jobs': siteDetectionController.createSiteDetectionJob,
     'GET /sites/detect/jobs/:jobId': siteDetectionController.getSiteDetectionJobStatus,
     'GET /sites': sitesController.getAll,
@@ -395,7 +389,6 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/opportunities': opportunitiesController.createOpportunity,
     'PATCH /sites/:siteId/opportunities/:opportunityId': opportunitiesController.patchOpportunity,
     'DELETE /sites/:siteId/opportunities/:opportunityId': opportunitiesController.removeOpportunity,
-    'POST /sites/:siteId/opportunities/:opportunityId/validate': opportunityValidationController.triggerValidation,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions': suggestionsController.getAllForOpportunity,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit/:cursor': suggestionsController.getAllForOpportunityPaged,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit': suggestionsController.getAllForOpportunityPaged,
@@ -420,6 +413,7 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/geo-experiments/:geoExperimentId': suggestionsController.patchGeoExperiment,
     'DELETE /sites/:siteId/geo-experiments/:geoExperimentId': suggestionsController.deleteGeoExperiment,
     'POST /sites/:siteId/geo-experiments/:geoExperimentId/trigger-impact-measurement': suggestionsController.triggerImpactMeasurement,
+    'POST /sites/:siteId/geo-experiments/:geoExperimentId/validate': suggestionsController.triggerGeoExperimentValidation,
     'GET /sites/:siteId/traffic/paid': paidController.getTopPaidPages,
     'GET /sites/:siteId/traffic/paid/page-type-platform-campaign': trafficController.getPaidTrafficByPageTypePlatformCampaign,
     'GET /sites/:siteId/traffic/paid/url-page-type': trafficController.getPaidTrafficByUrlPageType,

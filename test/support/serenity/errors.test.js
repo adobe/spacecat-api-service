@@ -19,8 +19,6 @@ import { ProjectEngineApiError } from '@adobe/spacecat-shared-project-engine-cli
 import {
   isUpstreamGone,
   ERROR_CODES,
-  isPoolExhausted,
-  isWorkspaceNotReady,
   isMeteredQuota,
   isRateLimited,
   toQuotaExceededError,
@@ -102,15 +100,13 @@ describe('serenity error classification', () => {
       expect(ERROR_CODES.MARKET_NOT_FOUND).to.equal('marketNotFound');
       expect(ERROR_CODES.AMBIGUOUS_WORKSPACE).to.equal('ambiguousWorkspace');
       expect(ERROR_CODES.LINKED_SUBWORKSPACES).to.equal('linkedSubworkspaces');
-      expect(ERROR_CODES.ORG_POOL_EXHAUSTED).to.equal('orgPoolExhausted');
-      expect(ERROR_CODES.BRAND_AI_LIMIT).to.equal('brandAiLimit');
       expect(ERROR_CODES.PUBLISH_QUOTA_EXHAUSTED).to.equal('publishQuotaExhausted');
       expect(ERROR_CODES.QUOTA_EXCEEDED).to.equal('quotaExceeded');
       expect(Object.isFrozen(ERROR_CODES)).to.be.true;
     });
   });
 
-  // serenity-docs#72 §2/§4.1 — case 1 (brand carve exhausted, allocator OFF, production today).
+  // serenity-docs#72 §2/§4.1 — the disguised-405 metered-quota rejection as a stable token.
   describe('toQuotaExceededError', () => {
     it('returns a 409 ErrorWithStatusCode carrying the quotaExceeded token', () => {
       const e = toQuotaExceededError();
@@ -118,50 +114,14 @@ describe('serenity error classification', () => {
       expect(e.code).to.equal(ERROR_CODES.QUOTA_EXCEEDED);
     });
 
-    it('the message carries no internal ids/upstream detail (client-safe, mirrors orgPoolExhausted/brandAiLimit)', () => {
+    it('the message carries no internal ids/upstream detail (client-safe)', () => {
       const e = toQuotaExceededError();
       expect(e.message).to.not.match(/workspace|project|semrush/i);
     });
   });
 
-  describe('dynamic-allocation classifiers (body/message, not status alone)', () => {
+  describe('metered-quota + rate-limit classifiers (body/message, not status alone)', () => {
     const err = (status, body) => new SerenityTransportError(status, 'upstream', body);
-
-    it('isPoolExhausted: only a 422 whose message says insufficient units', () => {
-      expect(isPoolExhausted(err(422, { message: 'insufficient available units in subscription' }))).to.be.true;
-      expect(isPoolExhausted(err(422, { message: 'workspace not ready' }))).to.be.false; // transient, not exhaustion
-      expect(isPoolExhausted(err(422, {}))).to.be.false; // object without a message → no match
-      expect(isPoolExhausted(err(500, { message: 'insufficient available units' }))).to.be.false;
-      expect(isPoolExhausted(new Error('x'))).to.be.false;
-    });
-
-    it('isPoolExhausted: also matches a ProjectEngineApiError 422 with the units message', () => {
-      expect(isPoolExhausted(peErr(422, { message: 'insufficient available units' }))).to.be.true;
-      expect(isPoolExhausted(peErr(422, { message: 'workspace not ready' }))).to.be.false;
-      expect(isPoolExhausted(peErr(500, { message: 'insufficient available units' }))).to.be.false;
-    });
-
-    it('isPoolExhausted: matches a bare STRING body (bodyText string path), both error types', () => {
-      // The gateway can return a bare text body (not JSON); bodyText lowercases it and matches.
-      expect(isPoolExhausted(err(422, 'Insufficient Available Units in subscription'))).to.be.true;
-      expect(isPoolExhausted(peErr(422, 'insufficient available units'))).to.be.true;
-    });
-
-    it('isPoolExhausted: a null/empty body is not a match (bodyText falsy-body path)', () => {
-      // unwrap normalises an empty upstream body to null; bodyText must yield '' → no match.
-      expect(isPoolExhausted(err(422, null))).to.be.false;
-      expect(isPoolExhausted(peErr(422, null))).to.be.false;
-    });
-
-    it('isWorkspaceNotReady: only the transient 422 lock', () => {
-      expect(isWorkspaceNotReady(err(422, { message: 'workspace not ready' }))).to.be.true;
-      expect(isWorkspaceNotReady(err(422, { message: 'insufficient available units' }))).to.be.false;
-    });
-
-    it('isWorkspaceNotReady: also matches a ProjectEngineApiError transient 422 lock', () => {
-      expect(isWorkspaceNotReady(peErr(422, { message: 'workspace not ready' }))).to.be.true;
-      expect(isWorkspaceNotReady(peErr(422, { message: 'insufficient available units' }))).to.be.false;
-    });
 
     it('isMeteredQuota: keys on body SHAPE, not content — a string body is the disguised quota rejection, a JSON body is a genuine app-level error', () => {
       // Live-verified pinned fixture (Rainer, LLMO-6190, LLMO-Dev-2) — the real disguised-405 body

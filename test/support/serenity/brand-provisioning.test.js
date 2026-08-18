@@ -231,11 +231,6 @@ describe('provisionBrandSubworkspace', () => {
       competitors: [],
       env: { SEMRUSH_PROJECTS_BASE_URL: 'https://gw.example' },
       publishMode: 'require',
-      // Dynamic-allocation kill-switch defaults OFF (env unset) and the per-brand ceiling defaults
-      // undefined (no ceiling env set) — onboarding is now threaded the same as every other
-      // subworkspace write path (LLMO-6190).
-      dynamicAllocation: false,
-      ceiling: undefined,
       // Caller identity for the created_* stamp (LLMO-6289); the test context
       // has no auth profile → the `unknown` sentinel.
       callerId: 'unknown',
@@ -244,19 +239,6 @@ describe('provisionBrandSubworkspace', () => {
     expect(brandStub.getName()).to.equal('Acme');
     expect(brandStub.getId()).to.equal('brand-1');
     expect(brandStub.getSemrushSubWorkspaceId()).to.equal(undefined);
-  });
-
-  it('threads the dynamic-allocation flag + per-brand ceiling from env into the handler options (LLMO-6190 — onboarding was previously silently excluded)', async () => {
-    const { provisionBrandSubworkspace } = await loadModule({
-      resolveWorkspaceId, handleCreateMarketSubworkspace,
-    });
-    const ctx = buildContext();
-    ctx.env.SERENITY_DYNAMIC_ALLOCATION = 'true';
-    ctx.env.SERENITY_BRAND_AI_CEILING_PROMPTS = '5000';
-    await provisionBrandSubworkspace(ctx, baseParams);
-    const options = handleCreateMarketSubworkspace.firstCall.args[7];
-    expect(options.dynamicAllocation).to.equal(true);
-    expect(options.ceiling).to.deep.equal({ prompts: 5000 });
   });
 
   it('forwards a caller-supplied writeDeadline to the create handler (computed once at request entry, not defaulted here)', async () => {
@@ -298,7 +280,7 @@ describe('provisionBrandSubworkspace', () => {
     });
   });
 
-  it('falls back to US/EN and publishes best-effort when generateTopics is false with no market or models', async () => {
+  it('falls back to US/EN and still requires publish when generateTopics is false with no market or models', async () => {
     const { provisionBrandSubworkspace } = await loadModule({
       resolveWorkspaceId, handleCreateMarketSubworkspace,
     });
@@ -315,10 +297,12 @@ describe('provisionBrandSubworkspace', () => {
     expect(body.market).to.equal('US');
     expect(body.languageCode).to.equal('en');
     expect(body.name).to.equal(undefined);
-    // No prompts + no models → empty units → best-effort publish (leaves a draft).
+    // SITES-49206: no prompts + no models used to mean "empty units" → best-effort publish
+    // (leaves a draft). Semrush no longer enforces AI limits, so this now still requires publish
+    // like every other create.
     expect(options.generateTopics).to.equal(false);
     expect(options.topicCap).to.equal(0);
-    expect(options.publishMode).to.equal('best-effort');
+    expect(options.publishMode).to.equal('require');
   });
 
   it('leaves the initial market a DRAFT (publishMode "skip") when SERENITY_DEFER_PUBLISH is on (LLMO-5492)', async () => {
@@ -473,7 +457,6 @@ describe('provisionBrandSubworkspace', () => {
 
   function makeCleanupTransport(overrides = {}) {
     return {
-      transferWorkspaceResources: sinon.stub().resolves({}),
       listProjects: sinon.stub().resolves({ items: [] }),
       deleteProject: sinon.stub().resolves(null),
       deleteWorkspace: sinon.stub().resolves(null),
@@ -513,7 +496,6 @@ describe('provisionBrandSubworkspace', () => {
       expect(e.status).to.equal(502);
     }
     expect(transport.deleteProject).to.have.been.calledOnceWithExactly(NEW_WS, 'proj-1');
-    expect(transport.transferWorkspaceResources).to.not.have.been.called;
     expect(transport.deleteWorkspace).to.not.have.been.called;
   });
 
@@ -541,7 +523,6 @@ describe('provisionBrandSubworkspace', () => {
       expect(e.status).to.equal(500);
     }
     expect(transport.listProjects.called).to.equal(false);
-    expect(transport.transferWorkspaceResources.called).to.equal(false);
     expect(transport.deleteWorkspace.called).to.equal(false);
   });
 });
@@ -726,7 +707,6 @@ describe('emptyProvisionedWorkspace', () => {
 
   function makeTransport(overrides = {}) {
     return {
-      transferWorkspaceResources: sinon.stub().resolves({}),
       listProjects: sinon.stub().resolves({ items: [] }),
       deleteProject: sinon.stub().resolves(null),
       deleteWorkspace: sinon.stub().resolves(null),
@@ -765,7 +745,6 @@ describe('emptyProvisionedWorkspace', () => {
     const log = { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() };
     await emptyProvisionedWorkspace(buildAuthedContext(), NEW_WS, 'org-1', log);
     expect(transport.deleteProject).to.have.been.calledOnceWithExactly(NEW_WS, 'p1');
-    expect(transport.transferWorkspaceResources).to.not.have.been.called;
     expect(transport.deleteWorkspace.called).to.equal(false);
     expect(log.error.called).to.equal(false);
     expect(log.info.called).to.equal(true);
@@ -791,7 +770,6 @@ describe('emptyProvisionedWorkspace', () => {
     const transport = makeTransport();
     const { emptyProvisionedWorkspace } = await loadWithTransport(transport);
     await emptyProvisionedWorkspace(buildAuthedContext(), '', 'org-1', { error: sinon.stub() });
-    expect(transport.transferWorkspaceResources.called).to.equal(false);
     expect(transport.deleteWorkspace.called).to.equal(false);
   });
 
@@ -859,7 +837,6 @@ describe('defensive branch coverage', () => {
             listProjects,
             deleteProject: sinon.stub().resolves(null),
             deleteWorkspace: sinon.stub().resolves(null),
-            transferWorkspaceResources: sinon.stub().resolves({}),
           }),
           SerenityTransportError,
         },

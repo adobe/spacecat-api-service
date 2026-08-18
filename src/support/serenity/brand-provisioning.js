@@ -22,7 +22,6 @@ import { deleteAllProjects, ensureSubworkspace } from './workspace-lifecycle.js'
 import { handleCreateMarketSubworkspace } from './handlers/markets-subworkspace.js';
 import { isSerenityDeferPublishEnabled } from './defer-publish-active.js';
 import { computeWriteDeadline } from './intent-classification.js';
-import { isDynamicAllocationEnabled, resolveBrandAiCeiling } from './dynamic-allocation-active.js';
 import { resolveCanonicalDefaultModelIds } from './default-models.js';
 import { resolveCallerId } from './handlers/prompts.js';
 
@@ -176,13 +175,6 @@ export async function provisionBrandSubworkspace(context, {
     ? modelIds
     : await resolveCanonicalDefaultModelIds(transport, log);
 
-  // Dynamic-allocation kill-switch + per-brand ceiling (LLMO-6190): brand creation is onboarding,
-  // and §3/§4a of the design require an onboarded-while-ON brand to get JIT top-up on its first
-  // metered op like every other subworkspace write path (activate, create-market, create-prompts,
-  // update-models). Threaded here so brand creation is not silently excluded from the allocator.
-  const dynamicAllocation = isDynamicAllocationEnabled(context.env);
-  const ceiling = resolveBrandAiCeiling(context.env, log);
-
   /** @type {string|null} */
   let capturedWorkspaceId = null;
   // Set ONLY when ensureSubworkspace freshly created the sub-workspace. A workspace it
@@ -223,21 +215,15 @@ export async function provisionBrandSubworkspace(context, {
 
   // LLMO-5492 publish-after-populate: defer-publish flag ON → leave the project a
   // DRAFT ('skip') for a later finalize step (prompts + models pushed, published
-  // once). OFF (default) preserves inline publish: a project with models OR
-  // generated prompts has real units and must publish ('require'); an empty
-  // project would publish "empty units" (a disguised quota 405), so leave it a
-  // draft ('best-effort') instead of failing the create. Checked against
-  // resolvedModelIds, not the raw caller-supplied modelIds: LLMO-6554 resolves an
-  // empty/omitted modelIds to the canonical net-new default, so resolvedModelIds
-  // is non-empty in the common case — checking the raw list would wrongly fall
-  // through to 'best-effort' (leaving a model-bearing project as an unpublished
-  // draft) whenever the caller omitted modelIds.
-  /** @type {'require' | 'best-effort' | 'skip'} */
-  let publishMode = 'best-effort';
+  // once). OFF (default) publishes inline regardless of whether the project has
+  // any models/prompts attached: SITES-49206 confirmed Semrush no longer enforces
+  // AI limits, so an empty-units publish no longer 405s and there is no more
+  // 'best-effort' mode to fall back to (a quota 405 now always propagates as a
+  // real "Quota exceeded" error — see `handleCreateMarketSubworkspace`).
+  /** @type {'require' | 'skip'} */
+  let publishMode = 'require';
   if (isSerenityDeferPublishEnabled(context.env)) {
     publishMode = 'skip';
-  } else if ((Array.isArray(resolvedModelIds) && resolvedModelIds.length > 0) || generateTopics) {
-    publishMode = 'require';
   }
 
   let result;
@@ -277,8 +263,6 @@ export async function provisionBrandSubworkspace(context, {
         brandUrlSources,
         competitors,
         publishMode,
-        dynamicAllocation,
-        ceiling,
         brandCollection: context?.dataAccess?.Brand,
         onWorkspaceCreated: (id) => { createdWorkspaceId = id; },
         // Caller identity for the created_* stamp on generated prompts (LLMO-6289),

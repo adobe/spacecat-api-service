@@ -77,6 +77,22 @@ function expectSiteListDto(site) {
 }
 
 /**
+ * Returns true if every element is <= the previous one (ties allowed) — used to
+ * assert `sort=<field>:desc` ordering without hardcoding the expected sequence.
+ */
+function isNonIncreasing(values) {
+  return values.every((v, i) => i === 0 || v <= values[i - 1]);
+}
+
+/**
+ * Returns true if every element is >= the previous one (ties allowed) — used to
+ * assert `sort=<field>:asc` ordering without hardcoding the expected sequence.
+ */
+function isNonDecreasing(values) {
+  return values.every((v, i) => i === 0 || v >= values[i - 1]);
+}
+
+/**
  * Shared Site endpoint tests.
  * Runs identically against both DynamoDB (v2) and PostgreSQL (v3).
  *
@@ -245,6 +261,190 @@ export default function siteTests(getHttpClient, resetData) {
       it('user: baseUrlContains still returns 403 (authz parity with the list endpoint)', async () => {
         const http = getHttpClient();
         const res = await http.user.get('/sites?baseUrlContains=semrush');
+        expect(res.status).to.equal(403);
+      });
+
+      // ── deliveryType / isLive / sort (server-side filter/sort mode) ──
+      // Like baseUrlContains, these enter the offset-paginated envelope and exercise
+      // the REAL PostgREST `eq`/`and`/`order` path end-to-end: exact-match facet
+      // filtering, AND-combination across facets, and real ORDER BY for sort —
+      // against actual seeded rows (not a stub).
+      it('admin: deliveryType filters to only matching sites and echoes the value', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?deliveryType=aem_edge');
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('object').that.has.all.keys('sites', 'pagination');
+        expect(res.body.pagination).to.include({ hasMore: false, deliveryType: 'aem_edge' });
+        // Seed has 5 aem_edge sites (SITE_1, SITE_3, SITE_4, and the two LLMO
+        // fixtures); the rest are aem_cs (1, site2) and other (1, the market mirror).
+        expect(res.body.sites).to.be.an('array').with.lengthOf(5);
+        res.body.sites.forEach((s) => expect(s.deliveryType).to.equal('aem_edge'));
+      });
+
+      it('admin: deliveryType + baseUrlContains combine with AND, not OR', async () => {
+        const http = getHttpClient();
+        const res = await http
+          .admin.get('/sites?deliveryType=aem_edge&baseUrlContains=example.com');
+        expect(res.status).to.equal(200);
+        expect(res.body.pagination).to.include({
+          hasMore: false, deliveryType: 'aem_edge', baseUrlContains: 'example.com',
+        });
+        // All 5 aem_edge sites happen to be *.example.com, so AND yields the same 5
+        // as deliveryType alone; if the where-builder ever regressed to OR this would
+        // instead be 6 (also picking up the aem_cs site2.example.com).
+        expect(res.body.sites).to.be.an('array').with.lengthOf(5);
+        res.body.sites.forEach((s) => {
+          expect(s.deliveryType).to.equal('aem_edge');
+          expect(s.baseURL.toLowerCase()).to.include('example.com');
+        });
+      });
+
+      it('admin: isLive=true returns only live sites', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?isLive=true');
+        expect(res.status).to.equal(200);
+        expect(res.body.pagination).to.include({ hasMore: false, isLive: true });
+        // 6 of the 7 seeded sites are live; only site2.example.com is not.
+        expect(res.body.sites).to.be.an('array').with.lengthOf(6);
+        res.body.sites.forEach((s) => expect(s.isLive).to.equal(true));
+      });
+
+      it('admin: isLive=false returns only non-live sites', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?isLive=false');
+        expect(res.status).to.equal(200);
+        expect(res.body.pagination).to.include({ hasMore: false, isLive: false });
+        expect(res.body.sites).to.be.an('array').with.lengthOf(1);
+        res.body.sites.forEach((s) => expect(s.isLive).to.equal(false));
+      });
+
+      it('admin: sort=updatedAt:desc orders sites by non-increasing updatedAt', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?sort=updatedAt:desc');
+        expect(res.status).to.equal(200);
+        expect(res.body.pagination).to.include({ hasMore: false, sort: 'updatedAt:desc' });
+        expect(res.body.sites).to.be.an('array').with.lengthOf(7);
+        const updatedAts = res.body.sites.map((s) => new Date(s.updatedAt).getTime());
+        expect(isNonIncreasing(updatedAts)).to.equal(true);
+      });
+
+      it('admin: sort=baseURL:asc orders sites by non-decreasing baseURL', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?sort=baseURL:asc');
+        expect(res.status).to.equal(200);
+        expect(res.body.pagination).to.include({ hasMore: false, sort: 'baseURL:asc' });
+        expect(res.body.sites).to.be.an('array').with.lengthOf(7);
+        const baseUrls = res.body.sites.map((s) => s.baseURL);
+        expect(isNonDecreasing(baseUrls)).to.equal(true);
+      });
+
+      it('admin: deliveryType is rejected with 400 when not a recognized value', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?deliveryType=nope');
+        expect(res.status).to.equal(400);
+      });
+
+      it('admin: sort is rejected with 400 when the field is not recognized', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?sort=bogus:desc');
+        expect(res.status).to.equal(400);
+      });
+
+      it('admin: isLive is rejected with 400 when not "true" or "false"', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?isLive=maybe');
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: deliveryType still returns 403 (authz parity with the list endpoint)', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get('/sites?deliveryType=aem_edge');
+        expect(res.status).to.equal(403);
+      });
+
+      // ── tier / productCode (server-side entitlement-enrollment filter) ──
+      // Exercises the REAL entitlement/enrollment join end-to-end (not a stub), via
+      // Site.allByEnrollmentFiltered, against actual seeded rows. Seed enrollments:
+      // ENTITLEMENT_1 (LLMO, FREE_TRIAL, ORG_1) -> SITE_ENROLLMENT_1 -> SITE_1 only;
+      // ENTITLEMENT_3 (LLMO, PAID, ORG_3) -> SITE_ENROLLMENT_2/3 -> SITE_1 and SITE_4;
+      // ENTITLEMENT_2 (ASO, PAID, ORG_1) has no site enrollment at all. `GET /sites`
+      // is already a cross-tenant admin/S2S-readAll view with no org-scoping (see the
+      // "no exclusion" test above, which returns sites from ORG_1/2/3 alike), so tier/
+      // productCode composing across orgs here does not widen that existing scope.
+      it('admin: tier=FREE_TRIAL returns only the site enrolled at that tier and echoes tier', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?tier=FREE_TRIAL');
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('object').that.has.all.keys('sites', 'pagination');
+        expect(res.body.pagination).to.include({ hasMore: false, tier: 'FREE_TRIAL' });
+        expect(res.body.sites).to.be.an('array').with.lengthOf(1);
+        expect(res.body.sites[0].id).to.equal(SITE_1_ID);
+        expectSiteListDto(res.body.sites[0]);
+      });
+
+      it('admin: tier=PAID returns every site enrolled at that tier across orgs and echoes tier', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?tier=PAID');
+        expect(res.status).to.equal(200);
+        expect(res.body.pagination).to.include({ hasMore: false, tier: 'PAID' });
+        // ENTITLEMENT_3 (LLMO, PAID) is enrolled by SITE_1 (ORG_1) and SITE_4 (ORG_3);
+        // ENTITLEMENT_2 (ASO, PAID) has no enrollment and contributes nothing.
+        const ids = res.body.sites.map((s) => s.id);
+        expect(ids.sort()).to.deep.equal([SITE_1_ID, SITE_4_ID].sort());
+      });
+
+      it('admin: tier + baseUrlContains compose with AND, narrowing to the matching site', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?tier=PAID&baseUrlContains=delegate');
+        expect(res.status).to.equal(200);
+        expect(res.body.pagination).to.include({
+          hasMore: false, tier: 'PAID', baseUrlContains: 'delegate',
+        });
+        // tier=PAID alone yields {SITE_1, SITE_4}; only SITE_4's baseURL
+        // (site4-delegate.example.com) contains "delegate" — if the where-builder ever
+        // regressed to OR this would instead return both sites.
+        expect(res.body.sites).to.be.an('array').with.lengthOf(1);
+        expect(res.body.sites[0].id).to.equal(SITE_4_ID);
+      });
+
+      it('admin: tier + productCode compose, narrowing to sites enrolled under that product', async () => {
+        const http = getHttpClient();
+        // ENTITLEMENT_2 (ASO, PAID) has no site enrollment, unlike ENTITLEMENT_3
+        // (LLMO, PAID) — proves productCode genuinely narrows the join rather than
+        // being ignored once tier is already present.
+        const res = await http.admin.get('/sites?tier=PAID&productCode=ASO');
+        expect(res.status).to.equal(200);
+        expect(res.body.pagination).to.include({ hasMore: false, tier: 'PAID', productCode: 'ASO' });
+        expect(res.body.sites).to.be.an('array').that.is.empty;
+      });
+
+      it('admin: tier=PRE_ONBOARD is accepted (internal-only, not customer-visible) since this filter is already admin-gated', async () => {
+        const http = getHttpClient();
+        // Mirrors the sibling GET /sites/by-tier/PRE_ONBOARD IT test: no PRE_ONBOARD
+        // entitlement is seeded above, so this only asserts the value is ACCEPTED
+        // (200, echoed in pagination) rather than rejected with 400, not that any
+        // specific site is returned.
+        const res = await http.admin.get('/sites?tier=PRE_ONBOARD');
+        expect(res.status).to.equal(200);
+        expect(res.body.pagination).to.include({ hasMore: false, tier: 'PRE_ONBOARD' });
+        expect(res.body.sites).to.be.an('array');
+      });
+
+      it('admin: tier is rejected with 400 when not a recognized value', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?tier=BOGUS_TIER');
+        expect(res.status).to.equal(400);
+      });
+
+      it('admin: productCode is rejected with 400 when not a recognized value', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?productCode=BOGUS_PRODUCT');
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: tier still returns 403 (authz parity with the list endpoint)', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get('/sites?tier=PAID');
         expect(res.status).to.equal(403);
       });
     });

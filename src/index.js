@@ -84,7 +84,6 @@ import LlmoCloudFrontController from './controllers/llmo/llmo-cloudfront.js';
 import LlmoAkamaiController from './controllers/llmo/llmo-akamai.js';
 import LlmoMysticatController from './controllers/llmo/llmo-mysticat-controller.js';
 import LlmoOpportunitiesController from './controllers/llmo/opportunities/llmo-opportunities-controller.js';
-import OpportunityValidationController from './controllers/llmo/opportunities/opportunity-validation-controller.js';
 import PromptSuggestionSchedulesController from './controllers/llmo/prompt-suggestion-schedules.js';
 import FanoutReportController from './controllers/llmo/fanout-report.js';
 import UserActivitiesController from './controllers/user-activities.js';
@@ -165,7 +164,7 @@ function localCORSWrapper(fn) {
       response.headers.set(
         'Access-Control-Allow-Headers',
         'Content-Type, Authorization, x-api-key, x-ims-org-id, x-client-type, x-import-api-key, '
-        + 'x-trigger-audits, x-requested-with, origin, accept, x-view-as-trial, x-product, x-promise-token',
+        + 'x-trigger-audits, x-requested-with, origin, accept, x-view-as-trial, x-product, x-promise-token, x-promise-audience',
       );
       response.headers.set('Access-Control-Max-Age', '86400');
     }
@@ -228,7 +227,7 @@ async function run(request, context) {
   if (method === 'OPTIONS') {
     return noContent({
       'access-control-allow-methods': 'GET, HEAD, PATCH, POST, OPTIONS, DELETE',
-      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key, x-client-type, x-trigger-audits, x-view-as-trial, x-promise-token',
+      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key, x-client-type, x-trigger-audits, x-view-as-trial, x-promise-token, x-promise-audience',
       'access-control-max-age': '86400',
       'access-control-allow-origin': '*',
     });
@@ -304,7 +303,6 @@ async function run(request, context) {
     const proxyController = ProxyController();
     const taskManagementController = TaskManagementController(context);
     const onboardingController = OnboardingController(context, log, context.env);
-    const opportunityValidationController = OpportunityValidationController();
     const promptSuggestionSchedulesController = PromptSuggestionSchedulesController(context);
 
     const routeHandlers = getRouteHandlers(
@@ -375,7 +373,6 @@ async function run(request, context) {
       onboardingController,
       redirectsController,
       auditPolicyController,
-      opportunityValidationController,
       promptSuggestionSchedulesController,
     );
 
@@ -408,9 +405,6 @@ async function run(request, context) {
       }
       if (params.jobId && !isValidUUIDAnyVersion(params.jobId)) {
         return badRequest('Job Id is invalid. Please provide a valid UUID.');
-      }
-      if (params.preflightId && !isValidUUID(params.preflightId)) {
-        return badRequest('Preflight Id is invalid. Please provide a valid UUID.');
       }
       if (params.connectionId && !isValidUUIDAnyVersion(params.connectionId)) {
         return badRequest('Connection Id is invalid. Please provide a valid UUID.');

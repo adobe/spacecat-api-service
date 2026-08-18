@@ -72,14 +72,6 @@ export const DEFAULT_TIMEOUT_MS = 15_000;
 /** @typedef {MetadataBatchBody['items'][number]['metadata']} PromptMetadataPatch */
 
 /**
- * The `resources` allocation object shared by the v2 child-create and the v2 resources
- * transfer. It is REQUIRED on child-create: every field inside it is optional, so `{}` is
- * the contract's way to express "no allocation".
- *
- * @typedef {UmSchemas['handlers.createWorkspaceV2Resources']} WorkspaceResources
- */
-
-/**
  * The env keys this transport reads. All optional: each is resolved defensively and a
  * missing gateway origin raises a 503 `configurationError` rather than a runtime bug.
  *
@@ -1055,10 +1047,15 @@ export function createSerenityTransport({ env, imsToken }) {
     /**
      * GET /v1/workspaces/{ws}/resources — the workspace's own AI resources
      * (`NewWorkspaceResources`: `product_resources.ai.resources.{projects,prompts,weekly_prompts}`
-     * as `{ used, drafted, total }`). Read by the dynamic-allocation allocator before a metered op
-     * (child headroom) and against the MASTER workspace for the org pool (`free = total − used`).
+     * as `{ used, drafted, total }`).
      * NOTE: use this on the master id for the pool — `/parent/resources` returns the workspace's
      * OWN allocation, not the master pool (live-verified 2026-07-02).
+     *
+     * NOTE (SITES-49206): the just-in-time allocator that read this before a metered op was removed
+     * once Semrush stopped enforcing AI limits for proxy-routed LLMO workspaces. This read has a
+     * live production caller — `elements.js` `checkAccess` (GET .../brand-presence/access,
+     * LLMO-6747) probes it with the user's IMS token and reads a 401/403 as `hasAccess: false` —
+     * and stays regardless of allocator/canary history (see ADR-010).
      *
      * @param {string} workspaceId
      */
@@ -1081,32 +1078,6 @@ export function createSerenityTransport({ env, imsToken }) {
       return unwrap('GET', await users.GET(
         '/v1/workspaces/{id}/family',
         { params: { path: { id: parentWorkspaceId } } },
-      ));
-    },
-
-    /**
-     * POST /v2/workspaces/{ws}/resources/transfer — set a sub-workspace's AI resource totals
-     * (ABSOLUTE, not a delta), drawing the difference from / returning it to the parent pool.
-     * A public user-token endpoint (workspace doc §5/§7). The only callers are the just-in-time
-     * allocator's `transferOnce` / `transferAndSettle` (`resource-manager.js`) — top-up before a
-     * metered write, best-effort surplus release after a delete or model change. The sub-workspace
-     * lifecycle itself never calls this: a child is created with no allocation and never carries
-     * one (see `workspace-lifecycle.js`).
-     * V2 wraps the resources under a `resources` key (WorkspaceResourcesTransferV2Form
-     * → createWorkspaceV2Resources); `payload` is the bare resources object
-     * (`{ ai: { projects, prompts } }`, the aiProductResources shape), so wrap it
-     * here. That `ai` shape is the SAME one already proven live as the v2 child-create
-     * `resources` body (createSubworkspace), so this is contract-compatible — the v1
-     * route's documented body (flat WorkspaceResources, no `ai` key) never matched
-     * what we send. The exact allocation values remain a Gate-A live-smoke pin.
-     *
-     * @param {string} workspaceId
-     * @param {WorkspaceResources} payload - bare resources object, wrapped here.
-     */
-    async transferWorkspaceResources(workspaceId, payload) {
-      return unwrap('POST', await users.POST(
-        '/v2/workspaces/{id}/resources/transfer',
-        { params: { path: { id: workspaceId } }, body: { resources: payload } },
       ));
     },
 
@@ -1233,12 +1204,27 @@ export function createSerenityTransport({ env, imsToken }) {
      * brand carries `main_brand: true`; its `id` is the `benchmark_id` the brand
      * URL endpoints require. Returns `{ aio_benchmarks: [...] }`.
      *
+     * The default is the PUBLISHED view, exactly as for the brand URLs below: a
+     * benchmark that has been created or updated but not yet published is INVISIBLE
+     * to it (live-verified 2026-08-13 — create → the benchmark is absent from the
+     * default list and present under `?draft=true`; the project publish then promotes
+     * it). Benchmark writes act on the DRAFT, so a diff meant to converge the draft
+     * must read the draft; reading the published view compares against a stale
+     * snapshot whenever the project has unpublished changes.
+     *
      * @param {string} workspaceId
      * @param {string} projectId
+     * @param {object} [opts]
+     * @param {boolean} [opts.draft=false] - read the draft (pending) view.
      */
-    async listBenchmarks(workspaceId, projectId) {
+    async listBenchmarks(workspaceId, projectId, { draft = false } = {}) {
       return projects.listBenchmarks(
-        { params: { path: { id: workspaceId, project_id: projectId } } },
+        {
+          params: {
+            path: { id: workspaceId, project_id: projectId },
+            ...(draft ? { query: { draft: true } } : {}),
+          },
+        },
       );
     },
 
@@ -1289,8 +1275,22 @@ export function createSerenityTransport({ env, imsToken }) {
      * benchmark's `brand_aliases` (own-brand or a competitor) when the alias set
      * changes but the domain does not — the create/delete pair cannot express an
      * in-place alias edit. Upstream PUT confirmed live on prod 2026-06-24
-     * (OPTIONS .../benchmarks/{bid} → 405 allow: PUT). Semrush may silently reject
-     * some aliases; read them back from `listBenchmarks` (`rejected_brand_aliases`).
+     * (OPTIONS .../benchmarks/{bid} → 405 allow: PUT); re-verified 2026-08-13, and
+     * it is the ONLY write on a benchmark — there is no PATCH and no alias
+     * sub-resource, unlike `brand_urls` and `products`.
+     *
+     * Three behaviours to hold in mind, all live-verified 2026-08-13:
+     * - A field left OUT of the body is cleared, not preserved: a PUT of
+     *   `{brand_name, domain}` empties `brand_aliases`. Always send the full list.
+     * - `domain` is required in practice (a body without it 400s on `primary_url`),
+     *   even though the generated request type marks nothing required.
+     * - An alias is identified case-insensitively and keeps the spelling it was
+     *   created with, so a PUT cannot re-case one, and two spellings of the same
+     *   alias in one list are refused with a 409 that fails the whole write.
+     *
+     * `rejected_brand_aliases` on the read model is the set of aliases the benchmark
+     * knows but does not currently apply — which includes ones a previous write
+     * removed, so it is NOT a list of values Semrush refused.
      *
      * @param {string} workspaceId
      * @param {string} projectId

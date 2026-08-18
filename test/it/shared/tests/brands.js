@@ -236,4 +236,64 @@ export default function brandsTests(getHttpClient, resetData) {
       expect(reuse.body.baseSiteId).to.equal(SITE_2_ID);
     });
   });
+
+  describe('Brands v2 delete frees the name for reuse (LLMO-6978)', () => {
+    before(() => resetData());
+
+    it('renames a deleted brand to {name}_deleted so the name can be recreated, indexing repeats', async () => {
+      const http = getHttpClient();
+      const NAME = 'Reusable Name Brand';
+
+      // 1. Create a brand, then soft-delete it. Deleting must free the name by
+      //    renaming the row to `${NAME}_deleted` (uq_brand_name_per_org spans
+      //    deleted rows, so keeping the original name would block recreation).
+      const createA = await http.admin.post(`/v2/orgs/${ORG_1_ID}/brands`, {
+        name: NAME, region: ['US'],
+      });
+      expect(createA.status).to.equal(201);
+      const brandAId = createA.body.id;
+
+      const deleteA = await http.admin.delete(`/v2/orgs/${ORG_1_ID}/brands/${brandAId}`);
+      expect(deleteA.status).to.equal(204);
+
+      // 2. Recreating a brand with the ORIGINAL name now succeeds (previously
+      //    rejected by uq_brand_name_per_org) and yields a NEW brand id.
+      const createB = await http.admin.post(`/v2/orgs/${ORG_1_ID}/brands`, {
+        name: NAME, region: ['US'],
+      });
+      expect(createB.status).to.equal(201);
+      expect(createB.body.id).to.not.equal(brandAId);
+      const brandBId = createB.body.id;
+
+      // 3. Deleting the second same-named brand collides with the first deleted
+      //    `${NAME}_deleted`, so it must take the `_deleted2` index (exercises the
+      //    23505 retry path against the real per-org unique constraint).
+      const deleteB = await http.admin.delete(`/v2/orgs/${ORG_1_ID}/brands/${brandBId}`);
+      expect(deleteB.status).to.equal(204);
+
+      // 4. The name is still free — a third create with the same name succeeds.
+      const createC = await http.admin.post(`/v2/orgs/${ORG_1_ID}/brands`, {
+        name: NAME, region: ['US'],
+      });
+      expect(createC.status).to.equal(201);
+      expect(createC.body.id).to.not.equal(brandAId);
+      expect(createC.body.id).to.not.equal(brandBId);
+
+      // 5. The two deleted rows carry the indexed `_deleted` names; the live list
+      //    (which excludes deleted brands) shows exactly one brand with the name.
+      const deletedList = await http.admin.get(`/v2/orgs/${ORG_1_ID}/brands?status=deleted`);
+      expect(deletedList.status).to.equal(200);
+      const deletedNames = deletedList.body.brands
+        .filter((b) => b.name === `${NAME}_deleted` || b.name === `${NAME}_deleted2`)
+        .map((b) => b.name)
+        .sort();
+      expect(deletedNames).to.deep.equal([`${NAME}_deleted`, `${NAME}_deleted2`]);
+
+      const liveList = await http.admin.get(`/v2/orgs/${ORG_1_ID}/brands`);
+      expect(liveList.status).to.equal(200);
+      const liveWithName = liveList.body.brands.filter((b) => b.name === NAME);
+      expect(liveWithName).to.have.lengthOf(1);
+      expect(liveWithName[0].id).to.equal(createC.body.id);
+    });
+  });
 }

@@ -61,6 +61,7 @@ export const INTERNAL_ROUTES = [
   'PATCH /sites/:siteId/geo-experiments/:geoExperimentId',
   'DELETE /sites/:siteId/geo-experiments/:geoExperimentId',
   'POST /sites/:siteId/geo-experiments/:geoExperimentId/trigger-impact-measurement',
+  'POST /sites/:siteId/geo-experiments/:geoExperimentId/validate',
 
   // Slack - event subscriptions and commands use Slack's signature verification
   'GET /slack/events',
@@ -416,10 +417,6 @@ const routeRequiredCapabilities = {
   // preflight jobs (legacy)
   'POST /preflight/jobs': 'site:write',
   'GET /preflight/jobs/:jobId': 'site:read',
-  // preflight site-scoped endpoints
-  'POST /sites/:siteId/preflights': 'site:write',
-  'GET /sites/:siteId/preflights': 'site:read',
-  'GET /sites/:siteId/preflights/:preflightId': 'site:read',
   // Preflight checks - proxies user's Bearer token to AEM Author; end-user UI only
   'POST /sites/:siteId/autofix-checks': 'site:read',
 
@@ -533,7 +530,6 @@ const routeRequiredCapabilities = {
   'POST /sites/:siteId/opportunities': 'opportunity:write',
   'PATCH /sites/:siteId/opportunities/:opportunityId': 'opportunity:write',
   'DELETE /sites/:siteId/opportunities/:opportunityId': 'opportunity:write',
-  'POST /sites/:siteId/opportunities/:opportunityId/validate': 'opportunity:write',
 
   // Suggestions
   'GET /sites/:siteId/opportunities/:opportunityId/suggestions': 'suggestion:read',

@@ -41,4 +41,10 @@ export async function unknownMembersAreReported(transport) {
   // A real method must stay clean, so the assertion above cannot pass merely because the
   // whole value went untyped.
   await transport.listLanguages();
+
+  // Compile-time gate for `getWorkspaceResources`: its only caller (`elements.js` `checkAccess`)
+  // is off any type-checked call path, so naming it here means a rename or removal in
+  // `rest-transport.js` is reported as TS2339 under the strict tier rather than only breaking
+  // that caller at runtime.
+  await transport.getWorkspaceResources('ws-1');
 }

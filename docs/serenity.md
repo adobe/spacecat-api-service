@@ -454,44 +454,26 @@ that: a brand's first market-add demanded the child's project total be raised to
 pool that could not cover it, and the whole request died as a generic 502 before it ever reached
 project creation.
 
-Just-in-time allocation (below) remains wired as the fallback for a tenant that ever lands **with**
-limits enforced; it reads a child's real headroom and maps pool exhaustion to a typed
-409 `orgPoolExhausted` rather than an opaque 502.
+The parent-pool premise was re-checked, not assumed: a manual metered-405 canary drove the real
+transport against a throwaway sub-workspace and published into zero headroom, per environment
+(dev/stage/prod, SITES-49206, 2026-08-17) — publish succeeded at zero headroom in all three,
+confirming the premise. That interim, manual, one-time check is now retired; the **durable**
+re-check is the retained disguised-405 classifier (`isMeteredQuota` / `toQuotaExceededError`,
+`errors.js`) observing every real production publish continuously, backed by
+`quota-alerts.js`/`allocation-metrics.js` alerting — see [ADR-010](decisions/010-durable-limits-recheck-retires-canary.md)
+for why this resolves the "durable re-check" question ADR-009 left open, and
+[ADR-009](decisions/009-remove-dormant-jit-allocator.md) for the original removal.
 
-### When to turn the JIT allocator on
-
-`SERENITY_DYNAMIC_ALLOCATION` is OFF in every deployed environment, and nothing in the codebase
-detects `limits_enabled` — so the flip is an operator decision, not an automatic one. The signal to
-make it is **`quotaExceeded` (409) appearing for a tenant while the allocator is off**. With no
-allocation to exhaust, that error can only mean the upstream refused a metered write on its own
-terms, which is what a limits-enforcing parent looks like from our side. Confirm with
-`GET /enterprise/users/api/v1/workspaces/{parentId}` (check `limits_enabled` on the `ai` product),
-then set `SERENITY_DYNAMIC_ALLOCATION=true` at `dx_mysticat/{env}/api-service`.
-
-## Dynamic AI resource allocation — operations (LLMO-6191)
-
-The JIT top-up allocator (`SERENITY_DYNAMIC_ALLOCATION`, default OFF — see
-`src/support/serenity/dynamic-allocation-active.js`) has its own operational surface, separate from
-the request-path proxy documented above:
-
-- **Metrics/SLIs:** `src/support/serenity/allocation-metrics.js` emits CloudWatch EMF metrics
-  (namespace `Mysticat/SerenityAllocation`) — pool-free ratio, top-up latency, rejection/retry/
-  release-outcome counters, and the hot-path (topped-up vs not) ratio. See that file's module doc
-  for the full catalog and the pager-worthy/dashboard-only split.
-- **Zombie-workspace recovery:** see
-  [`docs/runbooks/serenity-zombie-workspace-recovery.md`](./runbooks/serenity-zombie-workspace-recovery.md)
-  for diagnosing and recovering a sub-workspace stuck `workspaceBusy` after a partially-applied
-  transfer, and for the alerting/paging guidance.
-- **Rightsizing sweep:** `scripts/serenity-rightsizing-sweep.mjs` is a one-time backfill that
-  lowers sub-workspaces carved under the historical flat allocation down to their actual usage,
-  using `releaseAiSurplus` as the reclaim primitive. Nothing carves any more, so this only ever
-  applies to children provisioned before that stopped. Run `--dry-run` first —
-  see the script's own header comment for full usage and the auth caveat (requires an operator
-  IMS token; there is no service-account path to Semrush in this repo).
-- **Cross-container serialization:** `src/support/serenity/resource-lock.js` only serializes
-  same-container contention. The cross-container gap and the options considered for closing it are
-  recorded in
-  [`docs/decisions/007-cross-container-resource-lock.md`](./decisions/007-cross-container-resource-lock.md).
+> **Removed (SITES-49206):** the just-in-time (JIT) top-up allocator
+> (`SERENITY_DYNAMIC_ALLOCATION`, `resource-manager.js`, `dynamic-allocation-active.js`,
+> `resource-lock.js`) and its operational surface — the "when to turn it on" flip, the
+> zombie-workspace runbook, and the rightsizing sweep — have been deleted. Semrush no longer enforces
+> AI limits for proxy-routed LLMO workspaces, so there is no allocation to top up, exhaust, or
+> reclaim. `allocation-metrics.js` is **trimmed, not deleted** — `recordRejection` and
+> `recordMeteredQuotaClassifier` stay, since the disguised-405 quota classification still uses them.
+> The no-carve behaviour above is unconditional. See
+> [ADR-009](decisions/009-remove-dormant-jit-allocator.md) (the removal), and ADR-007 / ADR-008
+> (superseded).
 
 ## Dev environment smoke tests
 

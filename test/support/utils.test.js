@@ -37,6 +37,7 @@ import {
   validateSiteForRedirects,
   sendAutofixMessage,
   isViewAsTrialRequest,
+  isViewFullExperienceRequest,
   getImsUserTokenStrict,
   resolveCallerImsUserId,
   sendGlobalImportRunMessage,
@@ -743,6 +744,52 @@ describe('utils', () => {
 
       expect(result).to.be.false;
     });
+
+    it('bypasses PLG limiting (returns false) when x-view-full-experience is set and caller has admin access', async () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-full-experience': 'true' } },
+      };
+      // Entitlement is PLG, but the admin override must win and short-circuit to false
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub().resolves({ getTier: () => 'PLG' }),
+      };
+      const accessControlUtil = { hasAdminAccess: () => true };
+
+      const result = await getIsSummitPlgEnabled(site, context, requestContext, accessControlUtil);
+
+      expect(result).to.be.false;
+      // entitlement lookup must not be reached — the override short-circuits first
+      expect(context.dataAccess.Entitlement.findByOrganizationIdAndProductCode)
+        .to.not.have.been.called;
+    });
+
+    it('does NOT bypass PLG limiting for x-view-full-experience when caller lacks admin access', async () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-full-experience': 'true' } },
+      };
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub().resolves({ getTier: () => 'PLG' }),
+      };
+      const accessControlUtil = { hasAdminAccess: () => false };
+
+      const result = await getIsSummitPlgEnabled(site, context, requestContext, accessControlUtil);
+
+      // falls through to the entitlement check → PLG → limiting still applies
+      expect(result).to.be.true;
+    });
+
+    it('does NOT bypass PLG limiting for x-view-full-experience when no accessControlUtil is provided', async () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-full-experience': 'true' } },
+      };
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub().resolves({ getTier: () => 'PLG' }),
+      };
+
+      const result = await getIsSummitPlgEnabled(site, context, requestContext);
+
+      expect(result).to.be.true;
+    });
   });
 
   describe('getAsoEntitlement / getAsoTier', () => {
@@ -880,6 +927,44 @@ describe('utils', () => {
 
     it('returns false when pathInfo is undefined', () => {
       expect(isViewAsTrialRequest({})).to.be.false;
+    });
+  });
+
+  describe('isViewFullExperienceRequest', () => {
+    it('returns true when both x-client-type and x-view-full-experience headers are correct', () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-full-experience': 'true' } },
+      };
+      expect(isViewFullExperienceRequest(requestContext)).to.be.true;
+    });
+
+    it('returns false when x-client-type is not sites-optimizer-ui', () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'other-client', 'x-view-full-experience': 'true' } },
+      };
+      expect(isViewFullExperienceRequest(requestContext)).to.be.false;
+    });
+
+    it('returns false when x-view-full-experience header is absent', () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui' } },
+      };
+      expect(isViewFullExperienceRequest(requestContext)).to.be.false;
+    });
+
+    it('returns false when x-view-full-experience is not "true"', () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-full-experience': 'false' } },
+      };
+      expect(isViewFullExperienceRequest(requestContext)).to.be.false;
+    });
+
+    it('returns false when requestContext is undefined', () => {
+      expect(isViewFullExperienceRequest(undefined)).to.be.false;
+    });
+
+    it('returns false when pathInfo is undefined', () => {
+      expect(isViewFullExperienceRequest({})).to.be.false;
     });
   });
 
@@ -1928,6 +2013,127 @@ describe('utils', () => {
       const token = await resolveSemrushImsToken(context, { error: sinon.stub() }, 'label');
 
       expect(token).to.equal('ims-token');
+    });
+  });
+
+  describe('resolvePromisePair', () => {
+    let resolvePromisePair;
+
+    beforeEach(async () => {
+      ({ resolvePromisePair } = await esmock('../../src/support/utils.js', {
+        '@adobe/spacecat-shared-ims-client': {
+          ImsPromiseClient: {
+            PROMISE_PAIR: { SEMRUSH: 'SEMRUSH' },
+            CLIENT_TYPE: { CONSUMER: 'consumer', EMITTER: 'emitter' },
+          },
+        },
+      }));
+    });
+
+    const ctx = (audience) => ({
+      pathInfo: { headers: audience ? { 'x-promise-audience': audience } : {} },
+    });
+
+    it('returns undefined when the audience header is absent', () => {
+      expect(resolvePromisePair(ctx())).to.equal(undefined);
+    });
+
+    it('returns undefined when the audience header is empty', () => {
+      expect(resolvePromisePair(ctx(''))).to.equal(undefined);
+    });
+
+    it('returns the SEMRUSH pair for x-promise-audience: semrush', () => {
+      expect(resolvePromisePair(ctx('semrush'))).to.equal('SEMRUSH');
+    });
+
+    it('is case-insensitive on the audience value', () => {
+      expect(resolvePromisePair(ctx('SemRush'))).to.equal('SEMRUSH');
+    });
+
+    it('trims surrounding whitespace before matching', () => {
+      expect(resolvePromisePair(ctx('  semrush  '))).to.equal('SEMRUSH');
+    });
+
+    it('throws 400 on an unknown audience', () => {
+      let err;
+      try {
+        resolvePromisePair(ctx('bogus'));
+      } catch (e) {
+        err = e;
+      }
+      expect(err).to.exist;
+      expect(err.message).to.contain('Unknown promise audience: bogus');
+      expect(err.status).to.equal(400);
+    });
+
+    it('sanitizes CR/LF from the reflected value in the 400 message', () => {
+      let err;
+      try {
+        resolvePromisePair(ctx('bad\r\ninjected'));
+      } catch (e) {
+        err = e;
+      }
+      expect(err.status).to.equal(400);
+      expect(err.message).to.not.contain('\n');
+      expect(err.message).to.not.contain('\r');
+    });
+  });
+
+  describe('resolveSemrushImsToken audience selection', () => {
+    let resolveSemrushImsToken;
+    let createFromStub;
+    let exchangeTokenStub;
+
+    beforeEach(async () => {
+      exchangeTokenStub = sinon.stub().resolves({ access_token: 'exchanged' });
+      createFromStub = sinon.stub().returns({ exchangeToken: exchangeTokenStub });
+      ({ resolveSemrushImsToken } = await esmock('../../src/support/utils.js', {
+        '@adobe/spacecat-shared-ims-client': {
+          ImsPromiseClient: {
+            createFrom: createFromStub,
+            PROMISE_PAIR: { SEMRUSH: 'SEMRUSH' },
+            CLIENT_TYPE: { CONSUMER: 'consumer', EMITTER: 'emitter' },
+          },
+        },
+      }));
+    });
+
+    const ctx = (headers) => ({ pathInfo: { headers } });
+
+    it('selects the SEMRUSH consumer pair when x-promise-audience: semrush accompanies the token', async () => {
+      await resolveSemrushImsToken(
+        ctx({ 'x-promise-token': 'pt', 'x-promise-audience': 'semrush' }),
+        { error: sinon.stub() },
+        'label',
+      );
+      const [, type, opts] = createFromStub.firstCall.args;
+      expect(type).to.equal('consumer');
+      expect(opts).to.deep.equal({ pair: 'SEMRUSH' });
+    });
+
+    it('uses the default pair (undefined) when no audience header is present', async () => {
+      await resolveSemrushImsToken(
+        ctx({ 'x-promise-token': 'pt' }),
+        { error: sinon.stub() },
+        'label',
+      );
+      const [, , opts] = createFromStub.firstCall.args;
+      expect(opts).to.deep.equal({ pair: undefined });
+    });
+
+    it('throws 400 and never exchanges when the audience is unknown', async () => {
+      let err;
+      try {
+        await resolveSemrushImsToken(
+          ctx({ 'x-promise-token': 'pt', 'x-promise-audience': 'bogus' }),
+          { error: sinon.stub() },
+          'label',
+        );
+      } catch (e) {
+        err = e;
+      }
+      expect(err?.status).to.equal(400);
+      expect(createFromStub).to.not.have.been.called;
     });
   });
 

@@ -198,6 +198,7 @@ describe('Sites Controller', () => {
         all: sandbox.stub().resolves(sites),
         allByDeliveryType: sandbox.stub().resolves(sites),
         allByEnrollmentAndTier: sandbox.stub().resolves(sites),
+        allByEnrollmentFiltered: sandbox.stub().resolves(sites),
         allWithLatestAudit: sandbox.stub().resolves(sites),
         allByOrganizationId: sandbox.stub().resolves(sites),
         create: sandbox.stub().resolves(sites[0]),
@@ -1295,7 +1296,8 @@ describe('Sites Controller', () => {
       expect(mockDataAccess.Site.all).to.have.been.calledOnce;
       const [firstArg, opts] = mockDataAccess.Site.all.firstCall.args;
       expect(firstArg).to.deep.equal({});
-      expect(opts.order).to.equal('asc');
+      // No `sort` param → explicit default orderBy (baseURL asc), not left implicit.
+      expect(opts.orderBy).to.deep.equal({ attribute: 'baseURL', direction: 'asc' });
       expect(opts.limit).to.equal(11); // effectiveLimit (10) + 1
 
       // Invoke the captured `where` builder with the real (attrs, op) signature:
@@ -1526,7 +1528,7 @@ describe('Sites Controller', () => {
       const error = await result.json();
 
       expect(result.status).to.equal(400);
-      expect(error).to.have.property('message', 'cursor is not supported with baseUrlContains; use offset');
+      expect(error).to.have.property('message', 'cursor is not supported with filters or sort; use offset');
       expect(mockDataAccess.Site.all).to.not.have.been.called;
     });
 
@@ -1541,7 +1543,7 @@ describe('Sites Controller', () => {
       expect(body.pagination).to.deep.equal({
         limit: 50, offset: 0, hasMore: false, baseUrlContains: 'site',
       });
-      expect(loggerStub.warn).to.have.been.calledWithMatch(/\[sites\]\[baseUrlContains\] unexpected Site\.all shape/);
+      expect(loggerStub.warn).to.have.been.calledWithMatch(/\[sites\]\[filtered\] unexpected Site\.all shape/);
     });
 
     it('logs a prefixed error and re-throws when the Site.all search query rejects', async () => {
@@ -1552,7 +1554,385 @@ describe('Sites Controller', () => {
         sitesController.getAll({ ...context, data: { baseUrlContains: 'site' } }),
       ).to.be.rejectedWith('boom');
 
-      expect(loggerStub.error).to.have.been.calledWithMatch(/\[sites\]\[baseUrlContains\] query failed/);
+      expect(loggerStub.error).to.have.been.calledWithMatch(/\[sites\]\[filtered\] query failed/);
+    });
+
+    it('logs a prefixed error and re-throws when the enrollment-filtered query rejects', async () => {
+      // Mirror of the Site.all error-path test for the tier/productCode branch —
+      // the try/catch wraps BOTH data-access calls with the same prefixed log.
+      const boom = new Error('boom');
+      mockDataAccess.Site.allByEnrollmentFiltered.rejects(boom);
+
+      await expect(
+        sitesController.getAll({ ...context, data: { tier: 'PAID' } }),
+      ).to.be.rejectedWith('boom');
+
+      expect(loggerStub.error).to.have.been.calledWithMatch(/\[sites\]\[filtered\] query failed/);
+    });
+
+    it('filters by deliveryType alone using an eq where and the offset envelope', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+      const res = await sitesController.getAll({ ...context, data: { deliveryType: 'aem_edge', limit: '10' } });
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.pagination).to.include({ limit: 10, offset: 0, deliveryType: 'aem_edge' });
+      const [, opts] = mockDataAccess.Site.all.firstCall.args;
+      const op = { eq: (f, v) => ({ type: 'eq', field: f, value: v }), and: (...c) => ({ type: 'and', conditions: c }) };
+      const expr = opts.where({ deliveryType: 'delivery_type' }, op);
+      expect(expr).to.deep.equal({ type: 'eq', field: 'delivery_type', value: 'aem_edge' });
+    });
+
+    it('composes baseUrlContains AND isLive via op.and', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+      await sitesController.getAll({ ...context, data: { baseUrlContains: 'sem', isLive: 'true' } });
+      const [, opts] = mockDataAccess.Site.all.firstCall.args;
+      const op = {
+        ilike: (f, v) => ({ type: 'ilike', field: f, value: v }),
+        eq: (f, v) => ({ type: 'eq', field: f, value: v }),
+        and: (...c) => ({ type: 'and', conditions: c }),
+      };
+      const expr = opts.where({ baseURL: 'base_url', isLive: 'is_live' }, op);
+      expect(expr.type).to.equal('and');
+      expect(expr.conditions).to.deep.equal([
+        { type: 'ilike', field: 'base_url', value: '%sem%' },
+        { type: 'eq', field: 'is_live', value: true },
+      ]);
+    });
+
+    it('composes all three of baseUrlContains, deliveryType and isLive into one op.and', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+      await sitesController.getAll({
+        ...context,
+        data: { baseUrlContains: 'sem', deliveryType: 'aem_edge', isLive: 'false' },
+      });
+      const [, opts] = mockDataAccess.Site.all.firstCall.args;
+      const op = {
+        ilike: (f, v) => ({ type: 'ilike', field: f, value: v }),
+        eq: (f, v) => ({ type: 'eq', field: f, value: v }),
+        and: (...c) => ({ type: 'and', conditions: c }),
+      };
+      const expr = opts.where(
+        { baseURL: 'base_url', deliveryType: 'delivery_type', isLive: 'is_live' },
+        op,
+      );
+      expect(expr.type).to.equal('and');
+      expect(expr.conditions).to.deep.equal([
+        { type: 'ilike', field: 'base_url', value: '%sem%' },
+        { type: 'eq', field: 'delivery_type', value: 'aem_edge' },
+        { type: 'eq', field: 'is_live', value: false },
+      ]);
+    });
+
+    it('passes orderBy from a valid sort param and echoes it', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+      const res = await sitesController.getAll({ ...context, data: { sort: 'updatedAt:desc' } });
+      const body = await res.json();
+      const [, opts] = mockDataAccess.Site.all.firstCall.args;
+      expect(opts.orderBy).to.deep.equal({ attribute: 'updatedAt', direction: 'desc' });
+      expect(body.pagination.sort).to.equal('updatedAt:desc');
+    });
+
+    it('defaults an omitted sort direction to asc and echoes the canonical <field>:<direction>', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+      // `sort=baseURL` with no `:direction` → implicit asc.
+      const res = await sitesController.getAll({ ...context, data: { sort: 'baseURL' } });
+      const body = await res.json();
+      const [, opts] = mockDataAccess.Site.all.firstCall.args;
+      expect(opts.orderBy).to.deep.equal({ attribute: 'baseURL', direction: 'asc' });
+      // Echo is normalized to the canonical form, not the raw verbatim `baseURL`.
+      expect(body.pagination.sort).to.equal('baseURL:asc');
+    });
+
+    it('passes BOTH orderBy and where on the same call when sort combines with a filter', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+      const res = await sitesController.getAll({
+        ...context,
+        data: { deliveryType: 'aem_edge', sort: 'updatedAt:desc' },
+      });
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.pagination).to.include({ deliveryType: 'aem_edge', sort: 'updatedAt:desc' });
+      const [, opts] = mockDataAccess.Site.all.firstCall.args;
+      expect(opts.orderBy).to.deep.equal({ attribute: 'updatedAt', direction: 'desc' });
+      const op = { eq: (f, v) => ({ type: 'eq', field: f, value: v }), and: (...c) => ({ type: 'and', conditions: c }) };
+      const expr = opts.where({ deliveryType: 'delivery_type' }, op);
+      expect(expr).to.deep.equal({ type: 'eq', field: 'delivery_type', value: 'aem_edge' });
+    });
+
+    it('rejects invalid deliveryType, isLive, sort field, and sort direction with 400', async () => {
+      for (const data of [
+        { deliveryType: 'nope' }, { isLive: 'maybe' },
+        { sort: 'bogus:desc' }, { sort: 'updatedAt:sideways' },
+        { sort: 'updatedAt:desc:extra' },
+      ]) {
+        // eslint-disable-next-line no-await-in-loop
+        const res = await sitesController.getAll({ ...context, data });
+        expect(res.status, JSON.stringify(data)).to.equal(400);
+      }
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+    });
+
+    it('returns 400 when cursor is combined with any filter/sort', async () => {
+      const res = await sitesController.getAll({ ...context, data: { cursor: 'c', deliveryType: 'aem_edge' } });
+      expect(res.status).to.equal(400);
+    });
+
+    // ── tier / productCode (server-side enrollment filter) ──
+    // When present, the filtered branch calls Site.allByEnrollmentFiltered
+    // (shipped in @adobe/spacecat-shared-data-access 4.21.0) instead of Site.all,
+    // passing the SAME where/orderBy/limit/cursor the branch already builds.
+
+    it('tier alone calls Site.allByEnrollmentFiltered (not Site.all), with the same opts, and echoes tier', async () => {
+      mockDataAccess.Site.allByEnrollmentFiltered.resolves(sites);
+
+      const result = await sitesController.getAll({
+        ...context,
+        data: { tier: 'PAID', limit: '10' },
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.pagination).to.deep.equal({
+        limit: 10, offset: 0, hasMore: false, tier: 'PAID',
+      });
+
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+      expect(mockDataAccess.Site.allByEnrollmentFiltered).to.have.been.calledOnce;
+      const [filter, opts] = mockDataAccess.Site.allByEnrollmentFiltered.firstCall.args;
+      expect(filter).to.deep.equal({ tier: 'PAID', productCode: undefined });
+      // No `sort` param → same explicit default orderBy the non-enrollment Site.all
+      // branch gets (baseURL asc), so both branches return the SAME default order.
+      // allByEnrollmentFiltered ignores an `order` option, so this MUST be orderBy.
+      expect(opts.orderBy).to.deep.equal({ attribute: 'baseURL', direction: 'asc' });
+      expect(opts.limit).to.equal(11); // effectiveLimit (10) + 1
+      expect(opts.cursor).to.equal(Buffer.from(JSON.stringify({ offset: 0 })).toString('base64'));
+    });
+
+    it('accepts tier=PRE_ONBOARD for a full admin (not just CUSTOMER_VISIBLE_TIERS) and calls Site.allByEnrollmentFiltered', async () => {
+      // This filter path is already full-admin-gated (see the 403 tests below), so it
+      // accepts the full Entitlement.TIERS set - same as the sibling admin-only
+      // GET /sites/by-tier endpoint (getAllByEnrollmentAndTier) - not just the
+      // customer-visible subset.
+      mockDataAccess.Site.allByEnrollmentFiltered.resolves(sites);
+
+      const result = await sitesController.getAll({
+        ...context,
+        data: { tier: 'PRE_ONBOARD' },
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.pagination).to.include({ tier: 'PRE_ONBOARD' });
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+      expect(mockDataAccess.Site.allByEnrollmentFiltered).to.have.been.calledOnce;
+      const [filter] = mockDataAccess.Site.allByEnrollmentFiltered.firstCall.args;
+      expect(filter).to.deep.equal({ tier: 'PRE_ONBOARD', productCode: undefined });
+    });
+
+    it('with no sort, the enrollment and non-enrollment branches receive an IDENTICAL default orderBy', async () => {
+      // Regression: Site.all defaults (via its all-index) to baseURL asc, while
+      // Site.allByEnrollmentFiltered defaults to updatedAt desc and ignores `order`.
+      // The controller must pass the SAME explicit orderBy to both so the default
+      // page order does not silently change when a tier/productCode filter is added.
+      mockDataAccess.Site.all.resolves(sites);
+      mockDataAccess.Site.allByEnrollmentFiltered.resolves(sites);
+
+      await sitesController.getAll({ ...context, data: { deliveryType: 'aem_edge' } });
+      await sitesController.getAll({ ...context, data: { tier: 'PAID' } });
+
+      const [, nonEnrollmentOpts] = mockDataAccess.Site.all.firstCall.args;
+      const [, enrollmentOpts] = mockDataAccess.Site.allByEnrollmentFiltered.firstCall.args;
+      expect(enrollmentOpts.orderBy).to.deep.equal(nonEnrollmentOpts.orderBy);
+      expect(enrollmentOpts.orderBy).to.deep.equal({ attribute: 'baseURL', direction: 'asc' });
+    });
+
+    it('sets hasMore:true and trims the body to the limit when the enrollment branch returns N+1 rows', async () => {
+      // The N+1 hasMore detection is shared with Site.all: effectiveLimit = 1, so
+      // allByEnrollmentFiltered returning 2 rows means "more exists".
+      mockDataAccess.Site.allByEnrollmentFiltered.resolves(sites); // 2 rows
+      const res = await sitesController.getAll({ ...context, data: { tier: 'PAID', limit: '1' } });
+      const body = await res.json();
+      expect(res.status).to.equal(200);
+      expect(body.sites).to.be.an('array').with.lengthOf(1); // trimmed to effectiveLimit
+      expect(body.pagination).to.deep.equal({
+        limit: 1, offset: 0, hasMore: true, tier: 'PAID',
+      });
+    });
+
+    it('tier + productCode calls Site.allByEnrollmentFiltered with both and echoes both', async () => {
+      mockDataAccess.Site.allByEnrollmentFiltered.resolves(sites);
+
+      const result = await sitesController.getAll({
+        ...context,
+        data: { tier: 'PAID', productCode: 'LLMO' },
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.pagination).to.include({ tier: 'PAID', productCode: 'LLMO' });
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+      const [filter] = mockDataAccess.Site.allByEnrollmentFiltered.firstCall.args;
+      expect(filter).to.deep.equal({ tier: 'PAID', productCode: 'LLMO' });
+    });
+
+    it('tier + baseUrlContains + deliveryType compose into the same where passed to allByEnrollmentFiltered', async () => {
+      mockDataAccess.Site.allByEnrollmentFiltered.resolves(sites);
+
+      const result = await sitesController.getAll({
+        ...context,
+        data: { tier: 'PAID', baseUrlContains: 'sem', deliveryType: 'aem_edge' },
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.pagination).to.include({
+        tier: 'PAID', baseUrlContains: 'sem', deliveryType: 'aem_edge',
+      });
+
+      // Invoke the captured `where` builder with the real (attrs, op) signature, exactly
+      // like the baseUrlContains+isLive composition test above.
+      const [, opts] = mockDataAccess.Site.allByEnrollmentFiltered.firstCall.args;
+      const op = {
+        ilike: (f, v) => ({ type: 'ilike', field: f, value: v }),
+        eq: (f, v) => ({ type: 'eq', field: f, value: v }),
+        and: (...c) => ({ type: 'and', conditions: c }),
+      };
+      const expr = opts.where({ baseURL: 'base_url', deliveryType: 'delivery_type' }, op);
+      expect(expr.type).to.equal('and');
+      expect(expr.conditions).to.deep.equal([
+        { type: 'ilike', field: 'base_url', value: '%sem%' },
+        { type: 'eq', field: 'delivery_type', value: 'aem_edge' },
+      ]);
+    });
+
+    it('composes isLive (boolean) with tier and passes it in the where to allByEnrollmentFiltered', async () => {
+      mockDataAccess.Site.allByEnrollmentFiltered.resolves(sites);
+
+      const result = await sitesController.getAll({
+        ...context,
+        data: { tier: 'PAID', isLive: 'false' },
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.pagination).to.include({ tier: 'PAID', isLive: false });
+
+      const [, opts] = mockDataAccess.Site.allByEnrollmentFiltered.firstCall.args;
+      const op = {
+        eq: (f, v) => ({ type: 'eq', field: f, value: v }),
+        and: (...c) => ({ type: 'and', conditions: c }),
+      };
+      // isLive is the only site-table condition here → returned bare (not wrapped in
+      // op.and) and boolean-valued (false, not the string 'false').
+      const expr = opts.where({ isLive: 'is_live' }, op);
+      expect(expr).to.deep.equal({ type: 'eq', field: 'is_live', value: false });
+    });
+
+    it('productCode alone (no tier) calls Site.allByEnrollmentFiltered with tier undefined', async () => {
+      mockDataAccess.Site.allByEnrollmentFiltered.resolves(sites);
+
+      const result = await sitesController.getAll({
+        ...context,
+        data: { productCode: 'LLMO' },
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.pagination).to.include({ productCode: 'LLMO' });
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+      expect(mockDataAccess.Site.allByEnrollmentFiltered).to.have.been.calledOnce;
+      const [filter] = mockDataAccess.Site.allByEnrollmentFiltered.firstCall.args;
+      expect(filter).to.deep.equal({ tier: undefined, productCode: 'LLMO' });
+    });
+
+    it('returns 400 for an invalid tier and calls neither Site.all nor Site.allByEnrollmentFiltered', async () => {
+      const result = await sitesController.getAll({
+        ...context,
+        data: { tier: 'BOGUS_TIER' },
+      });
+      const error = await result.json();
+      expect(result.status).to.equal(400);
+      // Mirrors the sibling GET /sites/by-tier wording (getAllByEnrollmentAndTier).
+      expect(error.message).to.match(/^Tier must be one of:/);
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+      expect(mockDataAccess.Site.allByEnrollmentFiltered).to.not.have.been.called;
+    });
+
+    it('returns 400 for an invalid productCode and calls neither Site.all nor Site.allByEnrollmentFiltered', async () => {
+      const result = await sitesController.getAll({
+        ...context,
+        data: { productCode: 'BOGUS_PRODUCT' },
+      });
+      expect(result.status).to.equal(400);
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+      expect(mockDataAccess.Site.allByEnrollmentFiltered).to.not.have.been.called;
+    });
+
+    it('returns 400 when cursor is combined with tier', async () => {
+      const result = await sitesController.getAll({
+        ...context,
+        data: { cursor: 'c', tier: 'PAID' },
+      });
+      expect(result.status).to.equal(400);
+      expect(mockDataAccess.Site.allByEnrollmentFiltered).to.not.have.been.called;
+    });
+
+    it('returns 403 when a read-only admin requests tier filtering (full admin required)', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false, is_read_only_admin: true });
+
+      const result = await sitesController.getAll({
+        ...context,
+        data: { tier: 'PAID' },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Filtering sites by tier or productCode requires admin access');
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+      expect(mockDataAccess.Site.allByEnrollmentFiltered).to.not.have.been.called;
+    });
+
+    it('returns 403 (not 400 or 200) when a read-only admin requests tier=PRE_ONBOARD - the admin-access guard runs before tier enum validation', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false, is_read_only_admin: true });
+
+      const result = await sitesController.getAll({
+        ...context,
+        data: { tier: 'PRE_ONBOARD' },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Filtering sites by tier or productCode requires admin access');
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+      expect(mockDataAccess.Site.allByEnrollmentFiltered).to.not.have.been.called;
+    });
+
+    it('returns 403 when a read-only admin requests productCode filtering (full admin required)', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false, is_read_only_admin: true });
+
+      const result = await sitesController.getAll({
+        ...context,
+        data: { productCode: 'LLMO' },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Filtering sites by tier or productCode requires admin access');
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+      expect(mockDataAccess.Site.allByEnrollmentFiltered).to.not.have.been.called;
+    });
+
+    it('uses Site.all (not allByEnrollmentFiltered) when neither tier nor productCode is present', async () => {
+      mockDataAccess.Site.all.resolves(sites);
+
+      const result = await sitesController.getAll({
+        ...context,
+        data: { deliveryType: 'aem_edge' },
+      });
+
+      expect(result.status).to.equal(200);
+      expect(mockDataAccess.Site.all).to.have.been.calledOnce;
+      expect(mockDataAccess.Site.allByEnrollmentFiltered).to.not.have.been.called;
     });
   });
 
@@ -1633,8 +2013,26 @@ describe('Sites Controller', () => {
       expect(body.pagination).to.include({ baseUrlContains: 'site' });
       expect(body.pagination).to.not.have.property('cursor');
       expect(loggerStub.info).to.have.been.calledWithMatch(
-        /\[s2s-readall\] GET \/sites \(baseUrlContains\) granted clientId=svc-1 consumerId=consumer-id-1 capability=site:readAll count=2 requestId=req-s2s-baseurlcontains-1/,
+        /\[s2s-readall\] GET \/sites \(filtered\) granted clientId=svc-1 consumerId=consumer-id-1 capability=site:readAll count=2 requestId=req-s2s-baseurlcontains-1/,
       );
+    });
+
+    it('denies S2S consumer with site:readAll when tier is requested (full admin required)', async () => {
+      context.s2sConsumer = makeS2SConsumer();
+      mockDataAccess.Consumer.findByClientIdAndImsOrgId
+        .resolves(makeFreshConsumer({ capabilities: ['site:readAll'] }));
+
+      const result = await sitesController.getAll({ ...context, data: { tier: 'PAID' } });
+      const body = await result.json();
+
+      // The S2S readAll check itself passes (proven by the Consumer lookup running) —
+      // it's the NEW admin-only guard for tier/productCode that denies here, not the
+      // base GET /sites authz.
+      expect(mockDataAccess.Consumer.findByClientIdAndImsOrgId).to.have.been.calledOnce;
+      expect(result.status).to.equal(403);
+      expect(body).to.have.property('message', 'Filtering sites by tier or productCode requires admin access');
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+      expect(mockDataAccess.Site.allByEnrollmentFiltered).to.not.have.been.called;
     });
 
     it('denies S2S consumer with only site:read (no readAll)', async () => {

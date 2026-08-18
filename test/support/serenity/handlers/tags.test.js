@@ -17,7 +17,9 @@ import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
 
 import { TAG_IDS, dimensionTreeLevels, makeListProjectTagsStub } from '../fixtures/tag-tree.js';
+import { INTENT_ROOT_NAME } from '../../../../src/support/serenity/prompt-tags.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
+import { ERROR_CODES } from '../../../../src/support/serenity/errors.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -128,22 +130,29 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       expect(transport.publishProject).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-1');
     });
 
-    it('still returns 201 when the post-create republish 405s on quota (left as draft)', async () => {
+    it('propagates a quotaExceeded 409 when the post-create republish 405s on quota (SITES-49206)', async () => {
+      // Pinned disguised-405 shape (LLMO-6190, live-verified): a bare string/HTML body, never
+      // JSON — isMeteredQuota keys on this SHAPE, not the bare status.
       const transport = makeTransport({
-        publishProject: sinon.stub().rejects(new SerenityTransportError(405, 'quota')),
+        publishProject: sinon.stub().rejects(
+          new SerenityTransportError(405, 'publish failed: 405', '<html>405 Not Allowed</html>'),
+        ),
       });
       const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
-      const res = await handler.handleCreateTag(
+      // SITES-49206: `republish` (brand-urls.js) no longer swallows a quota 405 — Semrush no
+      // longer enforces AI limits, so a 405 here means it's enforcing again and must surface as
+      // the stable quotaExceeded 409 token, matching every other publish call site.
+      const err = await handler.handleCreateTag(
         transport,
         dataAccess,
         BRAND,
         WORKSPACE,
         validBody,
         fakeLog(),
-      );
-      // The quota-405 disguise is swallowed by republishBestEffort — the create
-      // itself must not fail just because the follow-up publish was rejected.
-      expect(res.status).to.equal(201);
+      ).then(() => null, (e) => e);
+      expect(err).to.not.equal(null);
+      expect(err.status).to.equal(409);
+      expect(err.code).to.equal(ERROR_CODES.QUOTA_EXCEEDED);
       expect(transport.publishProject).to.have.been.calledOnce;
     });
 
@@ -166,7 +175,7 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       const createProjectTags = sinon.stub();
       createProjectTags.onFirstCall().resolves([
         { id: 'r-category', name: 'category' },
-        { id: 'r-intent', name: 'intent' },
+        { id: 'r-intent', name: INTENT_ROOT_NAME },
         { id: 'r-origin', name: 'origin' },
         { id: 'r-type', name: 'type' },
         { id: 'r-source', name: 'source' },
@@ -187,7 +196,8 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       );
 
       expect(res.status).to.equal(201);
-      expect(createProjectTags.firstCall.args[2]).to.deep.equal(['category', 'intent', 'origin', 'type', 'source']);
+      expect(createProjectTags.firstCall.args[2])
+        .to.deep.equal(['category', INTENT_ROOT_NAME, 'origin', 'type', 'source']);
       expect(createProjectTags.secondCall.args[2]).to.deep.equal(['Footwear']);
       expect(createProjectTags.secondCall.args[3]).to.deep.equal({ parentId: 'r-category' });
       expect(res.body).to.include({ id: 'new-cat', parentId: 'r-category' });
@@ -215,7 +225,7 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       // The roots were attempted; the category itself never was.
       expect(transport.createProjectTags).to.have.been.calledOnce;
       expect(transport.createProjectTags.firstCall.args[2])
-        .to.deep.equal(['category', 'intent', 'origin', 'type', 'source']);
+        .to.deep.equal(['category', INTENT_ROOT_NAME, 'origin', 'type', 'source']);
     });
 
     it('502s when the upstream create response carries no usable id', async () => {
@@ -253,7 +263,7 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
     it('400s a name that shadows a reserved dimension root', async () => {
       const transport = makeTransport();
       const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
-      for (const name of ['category', 'intent', 'origin', 'type']) {
+      for (const name of ['category', 'intent', 'origin', 'type', INTENT_ROOT_NAME]) {
         // eslint-disable-next-line no-await-in-loop
         await expect(handler.handleCreateTag(
           transport,
@@ -976,7 +986,7 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
     it('400s on a rename to a reserved dimension root name', async () => {
       const transport = makeTransport();
       const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
-      for (const name of ['category', 'intent', 'origin', 'type']) {
+      for (const name of ['category', 'intent', 'origin', 'type', INTENT_ROOT_NAME]) {
         // eslint-disable-next-line no-await-in-loop
         await expect(handler.handleUpdateTag(
           transport,
@@ -1239,6 +1249,35 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       expect(err.status).to.equal(400);
       expect(err.message).to.match(/server-owned "origin" dimension cannot be renamed or re-parented/);
       expect(transport.updateProjectTag).to.not.have.been.called;
+    });
+
+    // LLMO-6984 regression. The guard reads the target's DIMENSION, so it must keep
+    // holding whichever name the project's intent root carries. Were the raw upstream
+    // name to reach it, `$abv_tags$intent` would not be in SERVER_OWNED_DIMENSIONS and
+    // the guard would fail OPEN on exactly the projects the rename has reached — the
+    // client could then rename `Informational`, and the next server write would mint a
+    // second one beside it.
+    [
+      { label: 'renamed', levels: dimensionTreeLevels() },
+      { label: 'pre-rename', levels: dimensionTreeLevels({}, { legacyIntentRoot: true }) },
+    ].forEach(({ label, levels }) => {
+      it(`400s a rename of an intent value on a ${label} project`, async () => {
+        const transport = makeTransport({ listProjectTags: makeListProjectTagsStub(levels) });
+        const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+        const err = await handler.handleUpdateTag(
+          transport,
+          dataAccess,
+          BRAND,
+          WORKSPACE,
+          TAG_IDS.intentCommercial,
+          { name: 'Shopping', geoTargetId: 2840, languageCode: 'en' },
+          fakeLog(),
+        ).then(() => null, (e) => e);
+
+        expect(err.status).to.equal(400);
+        expect(err.message).to.match(/server-owned "intent" dimension cannot be renamed or re-parented/);
+        expect(transport.updateProjectTag).to.not.have.been.called;
+      });
     });
 
     // LLMO-6665 regression. `source` is server-owned but OPEN, so it is

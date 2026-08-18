@@ -546,9 +546,9 @@ v2-serenity-tags:
                 description: |
                   A BARE value — no dimension prefix. Must not contain ':' and
                   must not be one of the reserved dimension root names
-                  (`category`, `intent`, `source`, `type`). For a closed
-                  dimension it must exactly match one of that dimension's fixed
-                  enum values.
+                  (`category`, `intent`, `origin`, `type`, `source`,
+                  `$abv_tags$intent`). For a closed dimension it must exactly
+                  match one of that dimension's fixed enum values.
               geoTargetId:
                 type: integer
                 minimum: 1
@@ -687,7 +687,8 @@ v2-serenity-tag-by-id:
                 description: |
                   The tag's new BARE name — no dimension prefix. Must not
                   contain ':' and must not be one of the reserved dimension root
-                  names (`category`, `intent`, `source`, `type`).
+                  names (`category`, `intent`, `origin`, `type`, `source`,
+                  `$abv_tags$intent`).
               parentId:
                 type: string
                 description: |
@@ -1095,7 +1096,10 @@ v2-serenity-url-inspector-filter-dimensions:
 
       `topics`/`categories`/`page_intents`/`origins` are derived from the same
       underlying Topics element response, split apart by their `topic__`/
-      `category__`/`intent__`/`source__` tag prefix. Any other tag prefix Semrush
+      `category__`/`$abv_tags$intent__`/`source__` tag prefix. A tag prefix is the
+      name of the dimension's root tag, so `page_intents` also claims the
+      pre-rename `intent__` prefix on a project the intent rename has not reached.
+      Any other tag prefix Semrush
       introduces later (e.g. `type__branded`) surfaces automatically as an extra
       array property keyed by that prefix. Bare prefix declarations with no
       value (e.g. a lone `category` row) are ignored. `content_types` is

@@ -71,7 +71,6 @@ function makeTransport(overrides = {}) {
     createSubworkspace: sinon.stub().resolves({ id: SUB_WS, status: 'not ready' }),
     getWorkspaceStatus: sinon.stub().resolves({ status: 'created' }),
     listWorkspaceFamily: sinon.stub().resolves([]),
-    transferWorkspaceResources: sinon.stub().resolves(null),
     listProjects: sinon.stub().resolves({ items: [] }),
     deleteProject: sinon.stub().resolves(null),
     deleteWorkspace: sinon.stub().resolves(null),
@@ -106,7 +105,6 @@ describe('workspace-lifecycle', () => {
       expect(result).to.equal(SUB_WS);
       // No allocation is ever transferred onto a bound sub-workspace — the readiness settle is
       // the whole of this branch's upstream work.
-      expect(transport.transferWorkspaceResources).to.not.have.been.called;
       expect(transport.getWorkspaceStatus).to.have.been.calledOnceWith(SUB_WS);
       expect(transport.createSubworkspace).to.not.have.been.called;
       expect(brand.save).to.not.have.been.called;
@@ -126,7 +124,6 @@ describe('workspace-lifecycle', () => {
       // be refused for capacity (issue #2922).
       expect(transport.createSubworkspace)
         .to.have.been.calledOnceWithExactly(PARENT_WS, EXPECTED_TITLE);
-      expect(transport.transferWorkspaceResources).to.not.have.been.called;
       expect(transport.getWorkspaceStatus).to.have.been.calledTwice;
       expect(brand.setSemrushSubWorkspaceId).to.have.been.calledOnceWithExactly(SUB_WS);
       expect(brand.save).to.have.been.calledOnce;
@@ -470,7 +467,6 @@ describe('workspace-lifecycle', () => {
         expect(result).to.equal('winner-ws');
         // No teardown of the adopted workspace.
         expect(transport.deleteProject).to.not.have.been.called;
-        expect(transport.transferWorkspaceResources).to.not.have.been.called;
         expect(brand.setSemrushSubWorkspaceId).to.not.have.been.called;
       });
 
@@ -704,7 +700,6 @@ describe('workspace-lifecycle', () => {
 
       await expect(ensureSubworkspace(transport, brand, PARENT_WS, log, NOOP_TIMING))
         .to.be.rejectedWith(/must not be the organization parent workspace/);
-      expect(transport.transferWorkspaceResources).to.not.have.been.called;
     });
 
     it('refuses to persist a created workspace that IS the org parent', async () => {
@@ -738,7 +733,6 @@ describe('workspace-lifecycle', () => {
 
       expect(result).to.equal('winner-ws');
       expect(transport.listProjects).to.have.been.calledWith(SUB_WS);
-      expect(transport.transferWorkspaceResources).to.not.have.been.called;
       expect(transport.deleteWorkspace).to.not.have.been.called;
       // The winner's pointer is NOT clobbered.
       expect(brand.setSemrushSubWorkspaceId).to.not.have.been.called;
@@ -793,8 +787,6 @@ describe('workspace-lifecycle', () => {
       expect(resB).to.equal('ws-B');
       expect(brandA.setSemrushSubWorkspaceId).to.have.been.calledOnceWithExactly('ws-A');
       expect(brandB.setSemrushSubWorkspaceId).to.have.been.calledOnceWithExactly('ws-B');
-      expect(transportA.transferWorkspaceResources).to.not.have.been.called;
-      expect(transportB.transferWorkspaceResources).to.not.have.been.called;
     });
 
     it('tolerates a failed release when adopting a concurrent winner', async () => {
@@ -831,7 +823,6 @@ describe('workspace-lifecycle', () => {
       expect(transport.deleteProject).to.have.been.calledWith(SUB_WS, 'p2');
       // The shell is never deleted (production never deletes a sub-workspace) and carries no
       // allocation to reclaim, so decommission issues no resource transfer at all.
-      expect(transport.transferWorkspaceResources).to.not.have.been.called;
       expect(transport.deleteWorkspace).to.not.have.been.called;
       const infoLine = localLog.info.getCalls().find((c) => /emptied projects/.test(c.args[0]));
       expect(infoLine, 'expected an emptied-projects info summary').to.exist;
@@ -857,7 +848,6 @@ describe('workspace-lifecycle', () => {
 
       await expect(decommissionBrandWorkspace(transport, SUB_WS, log))
         .to.be.rejectedWith(SerenityTransportError);
-      expect(transport.transferWorkspaceResources).to.not.have.been.called;
       expect(transport.deleteWorkspace).to.not.have.been.called;
     });
 
@@ -877,7 +867,6 @@ describe('workspace-lifecycle', () => {
       await decommissionBrandWorkspace(transport, '', log);
 
       expect(transport.listProjects).to.not.have.been.called;
-      expect(transport.transferWorkspaceResources).to.not.have.been.called;
       expect(transport.deleteWorkspace).to.not.have.been.called;
     });
 
@@ -889,7 +878,6 @@ describe('workspace-lifecycle', () => {
       await expect(decommissionBrandWorkspace(transport, PARENT_WS, log, PARENT_WS))
         .to.be.rejectedWith(/must not be the organization parent workspace/);
       expect(transport.deleteProject).to.not.have.been.called;
-      expect(transport.transferWorkspaceResources).to.not.have.been.called;
       expect(transport.deleteWorkspace).to.not.have.been.called;
     });
 
@@ -918,7 +906,6 @@ describe('workspace-lifecycle', () => {
         expect(e.code).to.equal('linkedSubworkspaces');
       }
       expect(transport.deleteProject).to.not.have.been.called;
-      expect(transport.transferWorkspaceResources).to.not.have.been.called;
     });
 
     it('ignores the target own id in the family listing and proceeds (guard enabled)', async () => {
@@ -936,7 +923,6 @@ describe('workspace-lifecycle', () => {
       );
 
       expect(transport.deleteProject).to.have.been.calledOnceWithExactly(SUB_WS, 'p1');
-      expect(transport.transferWorkspaceResources).to.not.have.been.called;
       expect(transport.deleteWorkspace).to.not.have.been.called;
     });
 
@@ -953,7 +939,6 @@ describe('workspace-lifecycle', () => {
 
       expect(transport.listWorkspaceFamily).to.not.have.been.called;
       expect(transport.deleteProject).to.have.been.calledOnceWithExactly(SUB_WS, 'p1');
-      expect(transport.transferWorkspaceResources).to.not.have.been.called;
       expect(transport.deleteWorkspace).to.not.have.been.called;
     });
   });
@@ -1008,7 +993,6 @@ describe('workspace-lifecycle', () => {
         );
 
         expect(transport.deleteProject).to.have.been.calledOnceWithExactly(SUB_WS, 'p1');
-        expect(transport.transferWorkspaceResources).to.not.have.been.called;
       });
     });
 
@@ -1022,7 +1006,6 @@ describe('workspace-lifecycle', () => {
         await decommissionBrandWorkspace(transport, SUB_WS, log);
 
         expect(transport.deleteProject).to.not.have.been.called;
-        expect(transport.transferWorkspaceResources).to.not.have.been.called;
         expect(transport.deleteWorkspace).to.not.have.been.called;
       });
     });
