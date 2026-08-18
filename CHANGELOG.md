@@ -1,3 +1,10 @@
+## [1.751.1](https://github.com/adobe/spacecat-api-service/compare/v1.751.0...v1.751.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* **serenity:** remove empty-units best-effort quota-405 swallow (SITES-49206) ([#3082](https://github.com/adobe/spacecat-api-service/issues/3082)) ([4164996](https://github.com/adobe/spacecat-api-service/commit/416499600d598d1c19167b0e1faf7615054fd016))
+
 # [1.751.0](https://github.com/adobe/spacecat-api-service/compare/v1.750.2...v1.751.0) (2026-08-18)
 
 
