@@ -37,6 +37,7 @@ import {
   validateSiteForRedirects,
   sendAutofixMessage,
   isViewAsTrialRequest,
+  isViewFullExperienceRequest,
   getImsUserTokenStrict,
   resolveCallerImsUserId,
   sendGlobalImportRunMessage,
@@ -743,6 +744,52 @@ describe('utils', () => {
 
       expect(result).to.be.false;
     });
+
+    it('bypasses PLG limiting (returns false) when x-view-full-experience is set and caller has admin access', async () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-full-experience': 'true' } },
+      };
+      // Entitlement is PLG, but the admin override must win and short-circuit to false
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub().resolves({ getTier: () => 'PLG' }),
+      };
+      const accessControlUtil = { hasAdminAccess: () => true };
+
+      const result = await getIsSummitPlgEnabled(site, context, requestContext, accessControlUtil);
+
+      expect(result).to.be.false;
+      // entitlement lookup must not be reached — the override short-circuits first
+      expect(context.dataAccess.Entitlement.findByOrganizationIdAndProductCode)
+        .to.not.have.been.called;
+    });
+
+    it('does NOT bypass PLG limiting for x-view-full-experience when caller lacks admin access', async () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-full-experience': 'true' } },
+      };
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub().resolves({ getTier: () => 'PLG' }),
+      };
+      const accessControlUtil = { hasAdminAccess: () => false };
+
+      const result = await getIsSummitPlgEnabled(site, context, requestContext, accessControlUtil);
+
+      // falls through to the entitlement check → PLG → limiting still applies
+      expect(result).to.be.true;
+    });
+
+    it('does NOT bypass PLG limiting for x-view-full-experience when no accessControlUtil is provided', async () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-full-experience': 'true' } },
+      };
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub().resolves({ getTier: () => 'PLG' }),
+      };
+
+      const result = await getIsSummitPlgEnabled(site, context, requestContext);
+
+      expect(result).to.be.true;
+    });
   });
 
   describe('getAsoEntitlement / getAsoTier', () => {
@@ -880,6 +927,44 @@ describe('utils', () => {
 
     it('returns false when pathInfo is undefined', () => {
       expect(isViewAsTrialRequest({})).to.be.false;
+    });
+  });
+
+  describe('isViewFullExperienceRequest', () => {
+    it('returns true when both x-client-type and x-view-full-experience headers are correct', () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-full-experience': 'true' } },
+      };
+      expect(isViewFullExperienceRequest(requestContext)).to.be.true;
+    });
+
+    it('returns false when x-client-type is not sites-optimizer-ui', () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'other-client', 'x-view-full-experience': 'true' } },
+      };
+      expect(isViewFullExperienceRequest(requestContext)).to.be.false;
+    });
+
+    it('returns false when x-view-full-experience header is absent', () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui' } },
+      };
+      expect(isViewFullExperienceRequest(requestContext)).to.be.false;
+    });
+
+    it('returns false when x-view-full-experience is not "true"', () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-full-experience': 'false' } },
+      };
+      expect(isViewFullExperienceRequest(requestContext)).to.be.false;
+    });
+
+    it('returns false when requestContext is undefined', () => {
+      expect(isViewFullExperienceRequest(undefined)).to.be.false;
+    });
+
+    it('returns false when pathInfo is undefined', () => {
+      expect(isViewFullExperienceRequest({})).to.be.false;
     });
   });
 
