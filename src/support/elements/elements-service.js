@@ -234,8 +234,9 @@ export function createElementsService(transport, log) {
       const rowKey = (row) => `${row?.prompt ?? ''}\0${row?.prompt_topic ?? ''}`;
 
       // One intent-filtered call per intent value, in parallel (~one extra
-      // round-trip). Each call degrades independently.
-      const fetchIntentRound = () => mapWithConcurrency(
+      // round-trip). Each call degrades independently. Started here rather than at
+      // the join below so it runs alongside the base call, not after it.
+      const intentRound = mapWithConcurrency(
         Object.values(INTENT_VALUE),
         INTENT_ENRICH_CONCURRENCY,
         async (value) => {
@@ -264,8 +265,7 @@ export function createElementsService(transport, log) {
         },
       );
 
-      // Base call runs alongside the intent round rather than after it.
-      const [base, intentResults] = await Promise.all([basePromise, fetchIntentRound()]);
+      const [base, intentResults] = await Promise.all([basePromise, intentRound]);
 
       // (prompt, prompt_topic) → own intent. A prompt carries exactly one intent
       // tag, so within a single slice it appears in at most one filtered result.

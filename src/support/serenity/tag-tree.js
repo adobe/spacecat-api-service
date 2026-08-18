@@ -309,13 +309,20 @@ export async function ensureDimensionRoots(transport, semrushWorkspaceId, projec
 
   // Same guardrail for the intent rename, and cheaper: `byName` already indexes every
   // name at this level, so the pre-rename spelling can be checked without a re-read.
-  // Minting `$abv_tags$intent` beside a populated bare `intent` root splits the
-  // dimension and strands every prompt tagged under the old one, so a project the
-  // rename missed must not pass through silently.
-  if (createdNames.includes(INTENT_ROOT_NAME) && byName.has(DIMENSION.INTENT)) {
+  // A bare `intent` root beside `$abv_tags$intent` splits the dimension — the prompts
+  // tagged under the pre-rename root are stranded, and the unmarked root is visible in
+  // the customer-facing Brand Presence tag filter.
+  //
+  // Reported on state, not on the moment of minting. The split outlives the call that
+  // created it: once both roots exist, every later pass resolves the marked root by
+  // name and creates nothing, so a mint-only check would go quiet on exactly the
+  // projects that are still broken. Neither the rename (which refuses a project
+  // carrying both names) nor the reshape (which refuses the bare one) can resolve it,
+  // so it needs a human — and the only thing that surfaces it is this line.
+  if (byName.has(DIMENSION.INTENT)) {
     log?.warn?.(
-      'ensureDimensionRoots: minted a fresh `$abv_tags$intent` root while a pre-rename '
-      + '`intent` root is still present — the intent rename may have missed this project',
+      'ensureDimensionRoots: a pre-rename `intent` root is present beside '
+      + `\`${INTENT_ROOT_NAME}\` — the intent dimension is split on this project`,
       { semrushWorkspaceId, projectId, event: 'intent-rename-split-root' },
     );
   }

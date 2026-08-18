@@ -96,8 +96,8 @@ export const INTENT_ROOT_NAME = `${HIDDEN_TAG_MARKER}intent`;
  * `intent`. Anything outside the taxonomy maps to itself, so a caller gets the
  * name it asked for rather than `undefined` flowing into a create.
  *
- * Defined here, above {@link RESERVED_ROOT_NAMES}, because that list is derived
- * through it.
+ * {@link RESERVED_ROOT_NAMES} is derived through this function, so a change to the
+ * mapping widens or narrows what a customer tag may not shadow.
  *
  * @param {string} dimension - a dimension key.
  * @returns {string} the upstream root name.

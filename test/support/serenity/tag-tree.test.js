@@ -334,9 +334,11 @@ describe('serenity tag-tree', () => {
       expect(roots.get('source')).to.equal('r-source-other');
     });
 
-    it('ignores a leftover bare `intent` root beside the renamed one', async () => {
-      // A stale empty `intent` root that survived the rename. It is not a second
-      // intent dimension: the root is resolved by its upstream name only.
+    it('resolves the renamed root and reports a bare `intent` root beside it', async () => {
+      // A bare `intent` root sitting beside the renamed one. Resolution is unaffected
+      // — the root is found by its upstream name only — but the project is in the
+      // split state, which no rename or reshape can repair on its own, so the pass
+      // must say so even though it creates nothing.
       const levels = dimensionTreeLevels();
       const transport = {
         listProjectTags: makeListProjectTagsStub({
@@ -354,9 +356,10 @@ describe('serenity tag-tree', () => {
       const roots = await ensureDimensionRoots(transport, WS, PROJECT, log);
       expect(roots.get('intent')).to.equal(TAG_IDS.intentRoot);
       expect(transport.createProjectTags).to.not.have.been.called;
-      // The split-root warn is for a root this call MINTED beside a pre-rename one.
-      // Nothing was created here, so a leftover bare root alone must not trip it.
-      expect(log.warn).to.not.have.been.calledWithMatch(/intent rename may have missed/);
+      // Nothing was minted, and it still warns: the split is a STATE, and a check that
+      // only fired at the moment of minting would stay silent on every later pass over
+      // exactly the projects that are still broken.
+      expect(log.warn).to.have.been.calledWithMatch(/intent dimension is split/);
     });
 
     it('creates a fresh `origin` root, leaving a legacy `source` root untouched', async () => {
@@ -631,7 +634,7 @@ describe('serenity tag-tree', () => {
       // would silently add `$abv_tags$intent` to the batch and still pass.
       expect(createProjectTags).to.have.been.calledOnce;
       expect(createProjectTags.firstCall.args[2]).to.deep.equal(['origin']);
-      expect(log.warn).to.not.have.been.calledWithMatch(/intent rename may have missed/);
+      expect(log.warn).to.not.have.been.calledWithMatch(/intent dimension is split/);
     });
 
     // The intent counterpart: a project the rename never reached still names its
@@ -658,7 +661,7 @@ describe('serenity tag-tree', () => {
       expect(createProjectTags.firstCall.args[2]).to.include(INTENT_ROOT_NAME);
       expect(roots.get('intent')).to.equal(`new-${INTENT_ROOT_NAME}`);
       // And it is loud rather than silent.
-      expect(log.warn).to.have.been.calledWithMatch(/intent rename may have missed/);
+      expect(log.warn).to.have.been.calledWithMatch(/intent dimension is split/);
     });
 
     // The common case must stay quiet, or the warn is noise nobody reads.
@@ -671,7 +674,7 @@ describe('serenity tag-tree', () => {
       );
       const log = fakeLog();
       await ensureDimensionRoots({ listProjectTags, createProjectTags }, WS, PROJECT, log);
-      expect(log.warn).to.not.have.been.calledWithMatch(/intent rename may have missed/);
+      expect(log.warn).to.not.have.been.calledWithMatch(/intent dimension is split/);
     });
   });
 
