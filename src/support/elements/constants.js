@@ -47,6 +47,30 @@ export function isAllPlatforms(value) {
   return typeof value === 'string' && value.trim().toLowerCase() === ALL_PLATFORMS;
 }
 
+/**
+ * True when a brand-presence model/platform filter should aggregate across ALL of the
+ * brand's models rather than scope to a single one — i.e. the value is ABSENT (empty /
+ * non-string) OR the explicit {@link ALL_PLATFORMS} sentinel. When true, the affected
+ * brand-presence element payloads OMIT the `CBF_model` filter, so Semrush returns the
+ * deduped cross-model aggregate across whatever models produced data (the brand's enabled
+ * models) — LLMO-7093.
+ *
+ * Distinct from {@link isAllPlatforms}, which matches ONLY the literal `'all'` string: this
+ * ALSO treats the absent value as "all models". The Serenity "All Platforms" UI omits the
+ * `platform` query param entirely (project-elmo-ui#2888), so for these endpoints "no
+ * platform" means "all platforms" — NOT the {@link DEFAULT_ELEMENT_MODEL} single-model
+ * default that {@link resolveElementModel} would otherwise apply. (The `url-prompts`
+ * endpoint deliberately keeps the `absent → default model` behaviour and uses the plain
+ * {@link isAllPlatforms} check instead; only the brand-presence family opts into
+ * `absent → aggregate`.)
+ *
+ * @param {string} [value] - Raw value from the `model` or `platform` query param.
+ * @returns {boolean}
+ */
+export function isAllModelsFilter(value) {
+  return typeof value !== 'string' || value.trim().length === 0 || isAllPlatforms(value);
+}
+
 export const ELEMENT_MODELS = Object.freeze([
   'google-ai-mode',
   'grok-3',

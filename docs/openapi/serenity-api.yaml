@@ -1306,10 +1306,15 @@ v2-serenity-brand-presence-sentiment-overview:
         description: |
           AI model to scope sentiment to. Accepts a Semrush Elements model name
           directly, or a SpaceCat/UI platform code (translated server-side).
-          Defaults to `search-gpt` when omitted or unrecognized.
+          Omitted (the "All Platforms" default) or the `all` sentinel → the
+          all-model aggregate across every model the brand has data for
+          (`CBF_model` filter dropped, Semrush aggregates server-side); an
+          unrecognized value falls back to the single default `search-gpt`
+          (LLMO-7093).
         schema:
           type: string
           x-canonical-values:
+            - all
             - google-ai-mode
             - grok-3
             - google-ai-overview
@@ -1641,10 +1646,15 @@ v2-serenity-brand-presence-stats:
         description: |
           AI model to scope stats to. Accepts a Semrush Elements model name
           directly, or a SpaceCat/UI platform code (translated server-side).
-          Defaults to `search-gpt` when omitted or unrecognized.
+          Omitted (the "All Platforms" default) or the `all` sentinel → the
+          all-model aggregate across every model the brand has data for
+          (`CBF_model` filter dropped, Semrush aggregates server-side); an
+          unrecognized value falls back to the single default `search-gpt`
+          (LLMO-7093).
         schema:
           type: string
           x-canonical-values:
+            - all
             - google-ai-mode
             - grok-3
             - google-ai-overview
@@ -2196,10 +2206,15 @@ v2-serenity-market-tracking-trends:
         description: |
           AI model to scope the trends to. Accepts a Semrush Elements model name
           directly, or a SpaceCat/UI platform code (translated server-side).
-          Defaults to `search-gpt` when omitted or unrecognized.
+          Omitted (the "All Platforms" default) or the `all` sentinel → the
+          all-model aggregate across every model the brand has data for
+          (`CBF_model` filter dropped, Semrush aggregates server-side); an
+          unrecognized value falls back to the single default `search-gpt`
+          (LLMO-7093).
         schema:
           type: string
           x-canonical-values:
+            - all
             - google-ai-mode
             - grok-3
             - google-ai-overview
@@ -2325,10 +2340,15 @@ v2-serenity-kpi-headlines:
         description: |
           AI model to scope the headlines to. Accepts a Semrush Elements model
           name directly, or a SpaceCat/UI platform code (translated
-          server-side). Defaults to `search-gpt` when omitted or unrecognized.
+          server-side). Omitted (the "All Platforms" default) or the `all`
+          sentinel → the all-model aggregate across every model the brand has
+          data for (`CBF_model` filter dropped, Semrush aggregates server-side);
+          an unrecognized value falls back to the single default `search-gpt`
+          (LLMO-7093).
         schema:
           type: string
           x-canonical-values:
+            - all
             - google-ai-mode
             - grok-3
             - google-ai-overview
@@ -2463,10 +2483,15 @@ v2-serenity-source-visibility-headline:
         description: |
           AI model to scope the headline to. Accepts a Semrush Elements model
           name directly, or a SpaceCat/UI platform code (translated
-          server-side). Defaults to `search-gpt` when omitted or unrecognized.
+          server-side). Omitted (the "All Platforms" default) or the `all`
+          sentinel → the all-model aggregate across every model the brand has
+          data for (`CBF_model` filter dropped, Semrush aggregates server-side);
+          an unrecognized value falls back to the single default `search-gpt`
+          (LLMO-7093).
         schema:
           type: string
           x-canonical-values:
+            - all
             - google-ai-mode
             - grok-3
             - google-ai-overview
@@ -2596,10 +2621,15 @@ v2-serenity-competitor-summary:
         description: |
           AI model to scope the totals to. Accepts a Semrush Elements model name
           directly, or a SpaceCat/UI platform code (translated server-side).
-          Defaults to `search-gpt` when omitted or unrecognized.
+          Omitted (the "All Platforms" default) or the `all` sentinel → the
+          all-model aggregate across every model the brand has data for
+          (`CBF_model` filter dropped, Semrush aggregates server-side); an
+          unrecognized value falls back to the single default `search-gpt`
+          (LLMO-7093).
         schema:
           type: string
           x-canonical-values:
+            - all
             - google-ai-mode
             - grok-3
             - google-ai-overview
