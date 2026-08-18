@@ -39,9 +39,10 @@
 > parent-equality guard remains always-on.
 >
 > **Superseded by ADR-008 / ADR-009 (2026-08, SITES-49206):** the resource-carve design this plan
-> describes — `createChildWorkspace`'s mandatory non-zero `resources.ai` sizing, `ensureChildWorkspace`'s
-> create/re-grant sizing, and `decommissionBrandWorkspace`'s `transferWorkspaceResources` release-to-
-> parent step (below, and in the create/re-grant flow above) — was **never shipped this way**.
+> describes — `createChildWorkspace`'s mandatory non-zero `resources.ai` sizing,
+> `ensureChildWorkspace`'s create/re-grant sizing, and `decommissionBrandWorkspace`'s
+> `transferWorkspaceResources` release-to-parent step (below, and in the create/re-grant flow
+> above) — was **never shipped this way**.
 > [ADR-008](../decisions/008-no-subworkspace-resource-carve.md) decided a sub-workspace carries no AI
 > resource allocation of its own, and [ADR-009](../decisions/009-remove-dormant-jit-allocator.md)
 > removed the JIT allocator that would have implemented it. `transferWorkspaceResources` had no
