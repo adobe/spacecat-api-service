@@ -41,6 +41,26 @@ export function hostnameFromUrlString(value) {
 }
 
 /**
+ * Extracts the path of a URL — e.g. for logging a failed upstream call's
+ * `endpoint`, where the host adds nothing (it is fixed per environment) and
+ * the path is what identifies the operation. Returns undefined for a missing
+ * or unparseable URL.
+ *
+ * @param {string | undefined | null} url
+ * @returns {string | undefined}
+ */
+export function endpointOf(url) {
+  if (!url) {
+    return undefined;
+  }
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Derives a stable "site identity" from a URL or host string: the lowercased
  * host PLUS its normalized path, no scheme/credentials/port/query/fragment.
  * Unlike {@link hostnameFromUrlString} (host only) this keeps the path, so a
