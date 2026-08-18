@@ -108,6 +108,32 @@ export function modelsCountOf(project) {
   return nonNegativeIntOf(project?.settings?.ai?.models_stats?.models_count);
 }
 
+/**
+ * The url a project TRACKS (`settings.ai.primary_url`), or null when absent.
+ *
+ * Asymmetric between write and read: it is SENT flat (`primary_url` on
+ * `model.ProjectUpdateRequest`) and READ BACK nested under `settings.ai`. Both
+ * spellings are accepted so a future upstream change to either shape does not
+ * silently blank the field.
+ *
+ * Distinct from the project's `domain`: `domain` cannot carry a path and the
+ * upstream folds it to the registrable domain, so a market on `nba.com/lakers`
+ * has `domain: 'nba.com'` and only this value names the site it actually
+ * analyses.
+ */
+export function primaryUrlOf(project) {
+  const ai = project?.settings?.ai;
+  for (const candidate of [ai?.primary_url, project?.primary_url]) {
+    // Trim BEFORE the emptiness test: hasText accepts a whitespace-only string,
+    // which would otherwise surface as '' and render as a blank url.
+    const trimmed = hasText(candidate) ? String(candidate).trim() : '';
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+  return null;
+}
+
 // Deterministic ordering key for the duplicate-slice "oldest wins" rule. The
 // key is built from the IMMUTABLE `created_at` plus the (immutable) project id
 // ONLY — it deliberately does NOT fall back to `updated_at`. The v1 list view
@@ -135,7 +161,9 @@ function orderKey(project) {
  * the UI's cross-market usage summary and omitted when upstream reports no
  * usable count. `modelsCount` (enabled AI models) is its metered-usage
  * companion — a market's real allocation usage is promptsCount × modelsCount —
- * with the same omit-when-unusable contract.
+ * with the same omit-when-unusable contract. `domain` and `primaryUrl` are both
+ * carried because they answer different questions: the registrable domain the
+ * project is filed under, and the url it actually analyses.
  */
 export function projectToSlice(project, brandId) {
   const promptsCount = promptsCountOf(project);
@@ -150,10 +178,14 @@ export function projectToSlice(project, brandId) {
     updatedAt: project?.updated_at ?? project?.published_at ?? null,
     status: mapPublishStatus(project?.publish_status),
     semrushProjectId: hasText(project?.id) ? String(project.id) : null,
-    // The project's domain (its primary URL host) — surfaced so the market
-    // overview can show it. Echoed at the project's top level on the v1 read
-    // view (the same field brand-urls re-sync reads back). Null when absent.
+    // The project's domain (the registrable domain it is filed under) — echoed at
+    // the project's top level on the v1 read view (the same field brand-urls
+    // re-sync reads back). Null when absent.
     domain: hasText(project?.domain) ? String(project.domain) : null,
+    // The url the project actually analyses — host plus path, so it is what the
+    // market overview shows. `domain` cannot carry one, so the two differ for
+    // every market whose site is a subdomain or a subpath. Null when absent.
+    primaryUrl: primaryUrlOf(project),
     // Omitted (not null) when absent/invalid — flat mode never carries the key,
     // so subworkspace mode matches that contract for the no-count case.
     ...(promptsCount === null ? {} : { promptsCount }),

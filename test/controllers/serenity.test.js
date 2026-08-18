@@ -1438,10 +1438,12 @@ describe('SerenityController', () => {
       const response = await controller.createMarket(ctx);
       expect(response.status).to.equal(201);
       expect(resolveSiteIdentityStub).to.have.been.calledOnceWith(ctx.dataAccess, 'site-onboarded');
-      // Handler receives the derived brandDomain (host-only) AND the full
-      // primary_url identity threaded from the site (#348).
+      // Handler receives the derived brandDomain.
       const handlerBody = handlers.handleCreateMarketSubworkspace.firstCall.args[3];
       expect(handlerBody.brandDomain).to.equal('acme.com');
+      // ...and the tracked url alongside it. The handler has no Site access, so if
+      // the controller does not pass this the subpath is lost for good and the
+      // project silently tracks the parent domain.
       expect(handlerBody.primaryUrl).to.equal('acme.com/markets');
       // ensureMarketSite links THAT site directly (siteId + derived domain).
       const opts = ensureMarketSiteStub.firstCall.args[1];
@@ -2934,7 +2936,7 @@ describe('SerenityController', () => {
 
     // Line 528: createMarket — `ctx.data || {}` in the subworkspace branch. The {}
     // fallback fires when ctx.data is absent in subworkspace mode.
-    it('createMarket passes {} body to subworkspace handler when ctx.data is absent', async () => {
+    it('createMarket passes an empty body with a derived primaryUrl when ctx.data is absent', async () => {
       resolveBrandWorkspaceStub.resolves({
         mode: 'subworkspace', workspaceId: 'sub-ws-1', parentWorkspaceId: WORKSPACE,
       });
@@ -2944,7 +2946,33 @@ describe('SerenityController', () => {
       ctx.data = undefined;
       const response = await controller.createMarket(ctx);
       expect(response.status).to.equal(200);
-      expect(handlers.handleCreateMarketSubworkspace.firstCall.args[3]).to.deep.equal({});
+      // `primaryUrl` is always set from the server-side derivation — null here,
+      // since there is no brandDomain to derive from. Always setting it is what
+      // stops a caller-supplied value from reaching Semrush unvalidated.
+      expect(handlers.handleCreateMarketSubworkspace.firstCall.args[3])
+        .to.deep.equal({ primaryUrl: null });
+    });
+
+    it('createMarket ignores a caller-supplied primaryUrl and derives its own', async () => {
+      resolveBrandWorkspaceStub.resolves({
+        mode: 'subworkspace', workspaceId: 'sub-ws-1', parentWorkspaceId: WORKSPACE,
+      });
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createMarket(fakeContext({
+        data: {
+          market: 'us',
+          languageCode: 'en',
+          brandDomain: 'acme.com',
+          brandNames: ['X'],
+          primaryUrl: 'evil.example.com/attacker-path',
+        },
+      }));
+      expect(response.status).to.equal(201);
+      // The field is not part of the create-market contract; a value on the request
+      // must never reach the Semrush project.
+      expect(handlers.handleCreateMarketSubworkspace.firstCall.args[3].primaryUrl)
+        .to.equal('acme.com');
     });
 
     // Line 370: createPrompts — `ctx.data || {}` in the flat-mode branch. The {}
