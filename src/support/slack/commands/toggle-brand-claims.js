@@ -115,28 +115,50 @@ function BrandClaimsCommand(context) {
       // brand flag: enabling opts the brand's primary site into the scheduled
       // audit, disabling opts it back out. The URL branch already has the site;
       // otherwise resolve the brand's primary site from the returned `site_id`.
+      //
+      // The brand flag is already committed to Postgres at this point, so the
+      // audit toggle runs in its own try/catch: a failure here leaves the two
+      // halves out of sync (flag flipped, audit not), so we surface that partial
+      // state to the operator rather than a generic error that hides which half
+      // succeeded.
+      const verb = enabled ? 'enabled' : 'disabled';
       let auditToggled = false;
-      if (!site && brand.site_id) {
-        site = await Site.findById(brand.site_id);
-      }
-      if (site) {
-        const configuration = await Configuration.findLatest();
-        if (enabled) {
-          configuration.enableHandlerForSite(BRAND_CLAIMS_AUDIT_TYPE, site);
-        } else {
-          configuration.disableHandlerForSite(BRAND_CLAIMS_AUDIT_TYPE, site);
+      let auditError = null;
+      try {
+        if (!site && brand.site_id) {
+          site = await Site.findById(brand.site_id);
         }
-        await configuration.save();
-        auditToggled = true;
-        log.info(`brand-claims: ${enabled ? 'enabled' : 'disabled'} '${BRAND_CLAIMS_AUDIT_TYPE}' audit for site ${site.getId()} (${site.getBaseURL()})`);
-      } else {
-        log.warn(`brand-claims: brand ${brand.id} has no resolvable primary site; '${BRAND_CLAIMS_AUDIT_TYPE}' audit not ${enabled ? 'enabled' : 'disabled'}`);
+        if (site) {
+          const configuration = await Configuration.findLatest();
+          if (enabled) {
+            configuration.enableHandlerForSite(BRAND_CLAIMS_AUDIT_TYPE, site);
+          } else {
+            configuration.disableHandlerForSite(BRAND_CLAIMS_AUDIT_TYPE, site);
+          }
+          await configuration.save();
+          auditToggled = true;
+          log.info(`brand-claims: ${verb} '${BRAND_CLAIMS_AUDIT_TYPE}' audit for site ${site.getId()} (${site.getBaseURL()})`);
+        } else if (brand.site_id) {
+          // site_id points at a site that no longer resolves (soft-deleted /
+          // unreachable) — distinct from a brand that never had a primary site.
+          log.warn(`brand-claims: brand ${brand.id} primary site ${brand.site_id} not found; '${BRAND_CLAIMS_AUDIT_TYPE}' audit not ${verb}`);
+        } else {
+          log.warn(`brand-claims: brand ${brand.id} has no primary site; '${BRAND_CLAIMS_AUDIT_TYPE}' audit not ${verb}`);
+        }
+      } catch (err) {
+        auditError = err;
+        log.error(`brand-claims: '${BRAND_CLAIMS_AUDIT_TYPE}' audit toggle failed for brand ${brand.id}`, err);
       }
 
-      const auditNote = auditToggled
-        ? ` The \`${BRAND_CLAIMS_AUDIT_TYPE}\` audit was ${enabled ? 'enabled' : 'disabled'} for ${site.getBaseURL()}.`
-        : ` :warning: No primary site resolved, so the \`${BRAND_CLAIMS_AUDIT_TYPE}\` audit was left unchanged.`;
-      await say(`:white_check_mark: Brand claims *${enabled ? 'enabled' : 'disabled'}* for brand "${brand.name}" (${brand.id}).${auditNote}`);
+      let auditNote;
+      if (auditToggled) {
+        auditNote = ` The \`${BRAND_CLAIMS_AUDIT_TYPE}\` audit was ${verb} for ${site.getBaseURL()}.`;
+      } else if (auditError) {
+        auditNote = ` :warning: The brand flag was ${verb}, but toggling the \`${BRAND_CLAIMS_AUDIT_TYPE}\` audit failed: ${auditError.message}. Re-run the command or toggle the audit manually.`;
+      } else {
+        auditNote = ` :warning: No primary site resolved, so the \`${BRAND_CLAIMS_AUDIT_TYPE}\` audit was left unchanged.`;
+      }
+      await say(`:white_check_mark: Brand claims *${verb}* for brand "${brand.name}" (${brand.id}).${auditNote}`);
     } catch (error) {
       log.error(error);
       await postErrorMessage(say, error);

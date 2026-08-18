@@ -157,6 +157,35 @@ describe('BrandClaimsCommand', () => {
       expect(slackContext.say.calledWithMatch(/No primary site resolved/)).to.be.true;
     });
 
+    it('warns when brand.site_id is set but Site.findById returns null', async () => {
+      setBrandClaimsEnabledStub.resolves({ id: BRAND_ID, name: 'Acme', site_id: SITE_ID });
+      context.dataAccess.Site.findById.resolves(null);
+
+      const command = BrandClaimsCommand(context);
+      await command.execute(`enable-brand-claims ${BRAND_ID}`, slackContext);
+
+      expect(context.dataAccess.Site.findById).to.have.been.calledWith(SITE_ID);
+      expect(mockConfiguration.enableHandlerForSite).to.not.have.been.called;
+      expect(mockConfiguration.save).to.not.have.been.called;
+      expect(slackContext.say.calledWithMatch(/Brand claims \*enabled\* for brand "Acme"/)).to.be.true;
+      expect(slackContext.say.calledWithMatch(/No primary site resolved/)).to.be.true;
+    });
+
+    it('reports partial state when the flag flips but the audit toggle fails', async () => {
+      setBrandClaimsEnabledStub.resolves(BRAND);
+      mockConfiguration.save.rejects(new Error('config write boom'));
+
+      const command = BrandClaimsCommand(context);
+      await command.execute(`enable-brand-claims ${BRAND_ID}`, slackContext);
+
+      // Flag was flipped (setBrandClaimsEnabled resolved) but the audit toggle threw.
+      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('brand-claims', mockSite);
+      expect(slackContext.say.calledWithMatch(/Brand claims \*enabled\* for brand "Acme"/)).to.be.true;
+      expect(slackContext.say.calledWithMatch(/the brand flag was enabled, but toggling the `brand-claims` audit failed: config write boom/i)).to.be.true;
+      // The generic error handler must NOT fire — we handle this inline.
+      expect(slackContext.say.calledWithMatch(/Something went wrong/)).to.be.false;
+    });
+
     it('errors when the site URL resolves to no site', async () => {
       context.dataAccess.Site.findByBaseURL.resolves(null);
 
