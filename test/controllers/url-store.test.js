@@ -654,6 +654,70 @@ describe('UrlStore Controller', () => {
       // Root path should keep trailing slash
       expect(mockDataAccess.AuditUrl.create.firstCall.args[0].url).to.equal('https://example.com/');
     });
+
+    it('converts youtube.com/watch?v= URLs to the youtu.be short form', async () => {
+      context.data = [{ url: 'https://www.youtube.com/watch?v=zEb4ucxTI2Y', audits: ['youtube-analysis'] }];
+      mockDataAccess.AuditUrl.create.resolves(mockAuditUrls[0]);
+      await urlStoreController.addUrls(context);
+      expect(mockDataAccess.AuditUrl.create.firstCall.args[0].url)
+        .to.equal('https://youtu.be/zEb4ucxTI2Y');
+    });
+
+    it('drops other params when shortening youtube.com/watch URLs', async () => {
+      context.data = [{ url: 'https://www.youtube.com/watch?v=zEb4ucxTI2Y&list=PL123&t=30s', audits: [] }];
+      mockDataAccess.AuditUrl.create.resolves(mockAuditUrls[0]);
+      await urlStoreController.addUrls(context);
+      expect(mockDataAccess.AuditUrl.create.firstCall.args[0].url)
+        .to.equal('https://youtu.be/zEb4ucxTI2Y');
+    });
+
+    it('shortens youtube watch URLs on m. and bare hosts and over http', async () => {
+      context.data = [{ url: 'http://m.youtube.com/watch?v=abc123', audits: [] }];
+      mockDataAccess.AuditUrl.create.resolves(mockAuditUrls[0]);
+      await urlStoreController.addUrls(context);
+      expect(mockDataAccess.AuditUrl.create.firstCall.args[0].url)
+        .to.equal('https://youtu.be/abc123');
+    });
+
+    it('leaves an already-short youtu.be URL unchanged', async () => {
+      context.data = [{ url: 'https://youtu.be/abc123', audits: [] }];
+      mockDataAccess.AuditUrl.create.resolves(mockAuditUrls[0]);
+      await urlStoreController.addUrls(context);
+      expect(mockDataAccess.AuditUrl.create.firstCall.args[0].url)
+        .to.equal('https://youtu.be/abc123');
+    });
+
+    it('treats distinct youtube video URLs as distinct entries', async () => {
+      context.data = [
+        { url: 'https://www.youtube.com/watch?v=zEb4ucxTI2Y', audits: [] },
+        { url: 'https://www.youtube.com/watch?v=smzPh9dgJew', audits: [] },
+      ];
+      mockDataAccess.AuditUrl.create.resolves(mockAuditUrls[0]);
+      const result = await urlStoreController.addUrls(context);
+      expect(result.status).to.equal(201);
+      expect(mockDataAccess.AuditUrl.create.callCount).to.equal(2);
+      const createdUrls = mockDataAccess.AuditUrl.create.getCalls().map((c) => c.args[0].url);
+      expect(createdUrls).to.have.members([
+        'https://youtu.be/zEb4ucxTI2Y',
+        'https://youtu.be/smzPh9dgJew',
+      ]);
+    });
+
+    it('still strips query params for youtube non-watch paths', async () => {
+      context.data = [{ url: 'https://www.youtube.com/results?search_query=cats', audits: [] }];
+      mockDataAccess.AuditUrl.create.resolves(mockAuditUrls[0]);
+      await urlStoreController.addUrls(context);
+      expect(mockDataAccess.AuditUrl.create.firstCall.args[0].url)
+        .to.equal('https://www.youtube.com/results');
+    });
+
+    it('still strips query params for non-youtube URLs', async () => {
+      context.data = [{ url: 'https://example.com/watch?v=zEb4ucxTI2Y', audits: [] }];
+      mockDataAccess.AuditUrl.create.resolves(mockAuditUrls[0]);
+      await urlStoreController.addUrls(context);
+      expect(mockDataAccess.AuditUrl.create.firstCall.args[0].url)
+        .to.equal('https://example.com/watch');
+    });
   });
 
   describe('updateUrls', () => {
