@@ -1336,10 +1336,25 @@ function SerenityController(context, log, env) {
       // Markets are Semrush projects added afterwards from the Markets tab, never
       // auto-created at activation — so a pending brand activates to just its
       // sub-workspace (the anchor, persisted by ensureSubworkspace) plus a status
-      // flip. The brand's primary site (brands.site_id) was set at create.
+      // flip. The brand's primary site (brands.site_id) was set at create for
+      // every brand created after LLMO-6405 — but SITES-49449 tightened
+      // chk_active_brand_has_site_id to require site_id unconditionally, so a
+      // legacy pre-LLMO-6405 pending brand with none would otherwise provision a
+      // live sub-workspace upstream and THEN fail the active-flip write with a
+      // raw DB constraint violation. Guard it upfront instead of wasting that
+      // provisioning call, mirroring the flat-brand activate handler's own guard
+      // (brands.js) for the same legacy-drain scenario.
       // Reactivation of an already ACTIVE brand (body-driven markets) is handled
       // by the branches below.
       if (wasPending) {
+        const existingSiteId = await getBrandBaseSiteId(
+          /** @type {string} */ (ctx?.params?.spaceCatId),
+          brandUuid,
+          ctx.dataAccess.services.postgrestClient,
+        );
+        if (!existingSiteId) {
+          throw new ErrorWithStatusCode(`Brand has no onboarded primary site: ${brandUuid}`, 400);
+        }
         const pendingWorkspaceId = await ensureSubworkspace(
           transport,
           brand,

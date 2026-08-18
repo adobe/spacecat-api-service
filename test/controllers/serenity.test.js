@@ -1929,11 +1929,29 @@ describe('SerenityController', () => {
       expect(ensureSubworkspaceStub).to.not.have.been.called;
     });
 
+    it('activate 400s a pending brand with no primary site instead of provisioning a doomed sub-workspace (SITES-49449)', async () => {
+      // getBrandBaseSiteIdStub defaults to resolves(null) — a legacy pre-LLMO-6405
+      // pending brand that never got a site_id. chk_active_brand_has_site_id now
+      // requires site_id unconditionally, so ensureSubworkspace must never run:
+      // a live sub-workspace would provision upstream and then the active-flip
+      // save would still fail with a raw DB constraint violation.
+      const brand = makeBrandModel({});
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({ brand, data: { brandNames: ['X'] } }));
+      expect(response.status).to.equal(400);
+      expect(ensureSubworkspaceStub).to.not.have.been.called;
+      expect(brand.setStatus).to.not.have.been.called;
+      expect(brand.save).to.not.have.been.called;
+    });
+
     it('activate of a pending brand with an empty body is sub-workspace-only (200, no project)', async () => {
       // LLMO-6405: a pending brand activates to just its sub-workspace + a status
       // flip. The wizard supplies no markets/URL; none are needed — no project is
       // created.
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      // SITES-49449: chk_active_brand_has_site_id requires site_id unconditionally —
+      // the brand's primary site was set at create (LLMO-6405), verified upfront.
+      getBrandBaseSiteIdStub.resolves('primary-site');
       const brand = makeBrandModel({});
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.activate(fakeContext({ brand, data: { brandNames: ['X'] } }));
@@ -1955,6 +1973,7 @@ describe('SerenityController', () => {
       // Sub-workspace ensured upstream but the active-status save diverges → the
       // brand stays pending; a retry converges (the sub-workspace 409s idempotently).
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      getBrandBaseSiteIdStub.resolves('primary-site');
       const brand = makeBrandModel({ save: sinon.stub().rejects(new Error('db down')) });
       const log = fakeLog();
       const controller = SerenityController({ env: {} }, log, {});
@@ -2807,6 +2826,7 @@ describe('SerenityController', () => {
     // primary URL these route to the sub-workspace-only activation (200).
     it('activate falls back to {} body when ctx.data is absent (pending brand → sub-workspace-only 200)', async () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      getBrandBaseSiteIdStub.resolves('primary-site');
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const ctx = fakeContext();
       ctx.data = undefined;
