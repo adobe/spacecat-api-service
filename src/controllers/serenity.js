@@ -80,7 +80,7 @@ import {
   getBrandAliases, getBrandUrlSources, getBrandCompetitors, updateBrand, getBrandBaseSiteId,
 } from '../support/brands-storage.js';
 import { ErrorWithStatusCode, resolveSemrushImsToken as resolveImsTokenViaPromise } from '../support/utils.js';
-import { ensureMarketSite, resolveSiteDomain, unlinkMarketSiteIfOrphaned } from '../support/serenity/site-linkage.js';
+import { ensureMarketSite, resolveSiteIdentity, unlinkMarketSiteIfOrphaned } from '../support/serenity/site-linkage.js';
 import { X_PROMISE_TOKEN_HEADER, PROMISE_TOKEN_REQUIRED_ERROR_CODE } from '../utils/constants.js';
 import { tombstoneAllForBrand, linkSiteToLiveRows } from '../support/serenity/mapping-rows.js';
 
@@ -780,14 +780,22 @@ function SerenityController(context, log, env) {
         // brandDomain is absent. A supplied-but-unresolvable siteId is a hard 400.
         let effectiveBody = requestBody;
         if (suppliedSiteId && !hasText(requestBody.brandDomain)) {
-          const derivedDomain = await resolveSiteDomain(ctx.dataAccess, suppliedSiteId, log);
-          if (!derivedDomain || !hasText(derivedDomain)) {
+          // Resolve BOTH the host-only domain and the full primary_url identity
+          // (serenity-docs#348) from the site in one lookup; thread primaryUrl so
+          // the narrowed-dataAccess subworkspace handler can PATCH it (it cannot
+          // re-fetch the Site itself).
+          const identity = await resolveSiteIdentity(ctx.dataAccess, suppliedSiteId, log);
+          if (!identity?.domain || !hasText(identity.domain)) {
             return createResponse(
               { error: 'invalidRequest', message: 'siteId did not resolve to a site domain' },
               400,
             );
           }
-          effectiveBody = { ...requestBody, brandDomain: derivedDomain };
+          effectiveBody = {
+            ...requestBody,
+            brandDomain: identity.domain,
+            primaryUrl: identity.primaryUrl ?? undefined,
+          };
         }
         // Brand aliases are brand-level but region-scoped: the create handler
         // clamps each to the new market's region before writing brand_names.
@@ -1255,8 +1263,21 @@ function SerenityController(context, log, env) {
       const generatePrompts = body.generatePrompts === true;
       const wasPending = brand.getStatus?.() === 'pending';
       // The Semrush project domain: the request's brandDomain.
+      // SITES-49448 retired the pending_semrush_provisioning stash, so brandDomain
+      // now comes from the request body only (no stashed-URL fallback).
       const { brandDomain } = body;
       const suppliedUrlOrDomain = hasText(brandDomain);
+      // serenity-docs#348: the FULL tracked URL (subdomain/subpath preserved),
+      // threaded to the market handler so it PATCHes `settings.ai.primary_url`.
+      // Unlike `brandDomain` above (host-only) this keeps the raw tracked URL
+      // intact; the handler normalizes it via `siteIdentityFromUrlString`.
+      // Precedence mirrors markets.js (body.primaryUrl > body.brandDomain): a
+      // body-threaded full URL wins, else the host-only body.brandDomain as a
+      // last resort. (The stashed-wizard-URL tier is gone with SITES-49448.)
+      const brandDomainFallback = hasText(brandDomain) ? brandDomain : null;
+      const brandPrimaryUrl = hasText(body.primaryUrl)
+        ? body.primaryUrl
+        : brandDomainFallback;
 
       // ----- Pending-brand activation is ALWAYS sub-workspace-only (LLMO-6405) -----
       // Markets are Semrush projects added afterwards from the Markets tab, never
@@ -1439,6 +1460,7 @@ function SerenityController(context, log, env) {
           market: m.market,
           languageCode: m.languageCode,
           brandDomain,
+          primaryUrl: brandPrimaryUrl ?? undefined,
           brandNames: body.brandNames,
           brandDisplayName: body.brandDisplayName,
           name: m.name,
