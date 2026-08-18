@@ -454,17 +454,15 @@ that: a brand's first market-add demanded the child's project total be raised to
 pool that could not cover it, and the whole request died as a generic 502 before it ever reached
 project creation.
 
-The parent-pool premise is re-checked, not assumed: `scripts/serenity-metered-405-canary.mjs`
-drives the real transport against a throwaway sub-workspace and publishes into zero headroom. Read
-the outcome by what the publish does, not by an exit code (it exits 0 either way): a publish that
-**succeeds** at zero headroom confirms the premise holds, whereas the disguised **405** the script
-was built to capture now means Semrush is enforcing again — the signal to re-introduce the allocator
-from history. (The script's on-screen `expected`/`UNEXPECTED` labels are LLMO-6190 fixture-capture
-language and read the opposite way round — see its header.) It is a **manual** per-environment run
-(live IMS token + a real sub-workspace id; nothing schedules it), and serenity-docs#72 §10.7 retires
-it together with the §10.6 quota classifier — so it is the interim re-check, not the durable one. The
-durable re-check beyond §10.6 is an open question that §10.6 must settle (see
-[ADR-009](decisions/009-remove-dormant-jit-allocator.md)).
+The parent-pool premise was re-checked, not assumed: a manual metered-405 canary drove the real
+transport against a throwaway sub-workspace and published into zero headroom, per environment
+(dev/stage/prod, SITES-49206, 2026-08-17) — publish succeeded at zero headroom in all three,
+confirming the premise. That interim, manual, one-time check is now retired; the **durable**
+re-check is the retained disguised-405 classifier (`isMeteredQuota` / `toQuotaExceededError`,
+`errors.js`) observing every real production publish continuously, backed by
+`quota-alerts.js`/`allocation-metrics.js` alerting — see [ADR-010](decisions/010-durable-limits-recheck-retires-canary.md)
+for why this resolves the "durable re-check" question ADR-009 left open, and
+[ADR-009](decisions/009-remove-dormant-jit-allocator.md) for the original removal.
 
 > **Removed (SITES-49206):** the just-in-time (JIT) top-up allocator
 > (`SERENITY_DYNAMIC_ALLOCATION`, `resource-manager.js`, `dynamic-allocation-active.js`,
