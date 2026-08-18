@@ -350,11 +350,14 @@ async function replaceChildRows(table, brandId, rows, onConflict, postgrestClien
  * @param {object} postgrestClient - PostgREST client
  * @param {string} siteId - Candidate `brands.site_id`
  * @param {string} organizationId - SpaceCat organization UUID the brand belongs to
- * @param {string} brandName - Brand name, for the error message only
+ * @param {string} brandLabel - Whatever identifies the brand in the caller's context,
+ *   for the error message only — upsertBrand passes the brand name (not yet
+ *   persisted, so no id exists yet), updateBrand passes the brand id (no
+ *   guaranteed name on hand there without an extra fetch).
  * @throws {Error} status 409, code 'brand_site_org_mismatch', if the site does not
  *   belong to organizationId (including if it doesn't exist at all)
  */
-async function assertSiteBelongsToOrg(postgrestClient, siteId, organizationId, brandName) {
+async function assertSiteBelongsToOrg(postgrestClient, siteId, organizationId, brandLabel) {
   const { data: anchorSite, error: anchorSiteError } = await postgrestClient
     .from('sites')
     .select('id')
@@ -363,12 +366,12 @@ async function assertSiteBelongsToOrg(postgrestClient, siteId, organizationId, b
     .maybeSingle();
   if (anchorSiteError) {
     throw new Error(
-      `Failed to verify primary site org for brand "${brandName}": ${anchorSiteError.message}`,
+      `Failed to verify primary site org for brand "${brandLabel}": ${anchorSiteError.message}`,
     );
   }
   if (!anchorSite) {
     const err = new Error(
-      `Cannot anchor brand "${brandName}" to site ${siteId} — that site `
+      `Cannot anchor brand "${brandLabel}" to site ${siteId} — that site `
       + `does not belong to organization ${organizationId}.`,
     );
     err.status = 409;

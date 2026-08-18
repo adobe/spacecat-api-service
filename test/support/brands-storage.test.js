@@ -978,7 +978,7 @@ describe('brands-storage', () => {
   // so tests can verify which filters were applied to queries.
   function createCapturingClient(tableMap) {
     const calls = {
-      upsert: [], update: [], delete: [], or: [], neq: [],
+      upsert: [], update: [], delete: [], or: [], neq: [], eq: [],
     };
     const callCounts = {};
     const makeQuery = (table) => {
@@ -1020,6 +1020,12 @@ describe('brands-storage', () => {
           if (prop === 'neq') {
             return (col, val) => {
               calls.neq.push({ table, col, val });
+              return new Proxy({}, handler);
+            };
+          }
+          if (prop === 'eq') {
+            return (col, val) => {
+              calls.eq.push({ table, col, val });
               return new Proxy({}, handler);
             };
           }
@@ -1377,6 +1383,14 @@ describe('brands-storage', () => {
       expect(err.code).to.equal('brand_site_org_mismatch');
       expect(err.message).to.contain('other-orgs-site');
       expect(client.capturedCalls.upsert).to.have.lengthOf(0);
+
+      // Verify the guard queried with the RIGHT siteId/organizationId pair,
+      // not just that a `sites` lookup happened at all — a swapped or
+      // mismatched pair here would still 409 in this test's fake, but would
+      // be a real cross-tenant hole against a real database.
+      const sitesEq = client.capturedCalls.eq.filter((c) => c.table === 'sites');
+      expect(sitesEq).to.deep.include({ table: 'sites', col: 'id', val: 'other-orgs-site' });
+      expect(sitesEq).to.deep.include({ table: 'sites', col: 'organization_id', val: ORG_ID });
     });
 
     it('does not warn when re-upserting with the same site_id', async () => {
@@ -2519,6 +2533,13 @@ describe('brands-storage', () => {
       expect(err.status).to.equal(409);
       expect(err.code).to.equal('brand_site_org_mismatch');
       expect(postgrestClient.capturedCalls.update).to.have.lengthOf(0);
+
+      // Same query-argument check as upsertBrand's guard test — proves the
+      // guard used THIS brand's org and THIS candidate site, not just that
+      // some sites lookup happened.
+      const sitesEq = postgrestClient.capturedCalls.eq.filter((c) => c.table === 'sites');
+      expect(sitesEq).to.deep.include({ table: 'sites', col: 'id', val: 'other-orgs-site' });
+      expect(sitesEq).to.deep.include({ table: 'sites', col: 'organization_id', val: ORG_ID });
     });
 
     it('sets baseSiteId when brand has no site_id yet', async () => {
