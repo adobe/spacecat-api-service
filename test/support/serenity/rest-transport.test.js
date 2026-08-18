@@ -1535,10 +1535,33 @@ describe('Semrush REST transport', () => {
         expect(err).to.be.instanceOf(SerenityTransportError);
         expect(err.status).to.equal(503);
         expect(err.body).to.deep.equal({ code: 'unavailable' });
+        // SITES-49993: structured request descriptor for the upstream-error log.
+        expect(err.method).to.equal('GET');
         expect(fetchStub.callCount).to.equal(3);
       } finally {
         clock.restore();
       }
+    });
+
+    // SITES-49993: unwrap attaches the upstream URL path as `endpoint` so the
+    // controller's log line carries it as a queryable field. A hand-built
+    // Response has an empty `url`, so pin one via defineProperty.
+    it('attaches the upstream URL path as endpoint on SerenityTransportError (SITES-49993)', async () => {
+      const resp = fetchFail(422, { code: 'bad_request' });
+      Object.defineProperty(resp, 'url', {
+        value: `https://adobe-hackathon.semrush.com/enterprise/users/api/v1/workspaces/${WORKSPACE_ID}/status`,
+      });
+      fetchStub.resolves(resp);
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+      let err;
+      try {
+        await transport.getWorkspaceStatus(WORKSPACE_ID);
+      } catch (e) {
+        err = e;
+      }
+      expect(err).to.be.instanceOf(SerenityTransportError);
+      expect(err.method).to.equal('GET');
+      expect(err.endpoint).to.equal(`/enterprise/users/api/v1/workspaces/${WORKSPACE_ID}/status`);
     });
 
     it('falls back to raw text when the upstream body is not JSON (after exhausting GET retries)', async () => {

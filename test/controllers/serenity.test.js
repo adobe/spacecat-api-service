@@ -916,6 +916,29 @@ describe('SerenityController', () => {
       expect(log.error).to.have.been.calledWithMatch('Serenity controller error');
     });
 
+    // SITES-49993: when authorize() itself throws (before returning), the
+    // hoisted `auth` is still undefined — the fallback log line must still
+    // carry the route ids from params, with no brandUuid/workspaceId keys.
+    it('logs route ids on the fallback when authorize throws before resolving', async () => {
+      const boom = new Error('db down');
+      const log = fakeLog();
+      const controller = SerenityController({ env: {} }, log, {});
+      const ctx = fakeContext();
+      ctx.dataAccess.Organization.findById = sinon.stub().rejects(boom);
+      const response = await controller.listMarkets(ctx);
+      expect(response.status).to.equal(500);
+      const call = log.error.getCalls().find(
+        (c) => typeof c.args[0] === 'string' && c.args[0].startsWith('Serenity controller error {'),
+      );
+      expect(call).to.exist;
+      const payload = JSON.parse(call.args[0].slice('Serenity controller error '.length));
+      expect(payload.spaceCatId).to.equal(ORG);
+      expect(payload.brandId).to.equal(BRAND);
+      expect(payload).to.not.have.property('brandUuid');
+      expect(payload).to.not.have.property('workspaceId');
+      expect(call.args[1]).to.equal(boom);
+    });
+
     // LLMO-6386: a Project Engine call now throws ProjectEngineApiError directly (adaptPE gone).
     // mapError's widened branch must map it to the SAME HTTP envelope the old transport error
     // produced, redacting the body/message. ProjectEngineApiError does NOT extend
@@ -931,6 +954,31 @@ describe('SerenityController', () => {
       expect(JSON.stringify(body)).not.to.match(/leak/);
       // The raw "Project Engine ..." message must never reach the client.
       expect(JSON.stringify(body)).not.to.match(/Project Engine/);
+    });
+
+    // SITES-49993: a Semrush upstream failure logs ONE structured line — the
+    // JSON payload embedded in the message carries the upstream status/method/
+    // body plus the tenant ids threaded from the route (ProjectEngineApiError
+    // itself carries no ids), so Logs Insights can group failures by tenant
+    // and upstream reason.
+    it('logs one structured line with upstream status/method/body and tenant ids (SITES-49993)', async () => {
+      handlers.handleListMarkets.rejects(
+        new ProjectEngineApiError(403, 'GET', { detail: 'workspace role missing' }),
+      );
+      const log = fakeLog();
+      const controller = SerenityController({ env: {} }, log, {});
+      await controller.listMarkets(fakeContext());
+      const call = log.error.getCalls().find(
+        (c) => typeof c.args[0] === 'string' && c.args[0].startsWith('Serenity upstream error {'),
+      );
+      expect(call).to.exist;
+      const payload = JSON.parse(call.args[0].slice('Serenity upstream error '.length));
+      expect(payload.status).to.equal(403);
+      expect(payload.method).to.equal('GET');
+      expect(payload.spaceCatId).to.equal(ORG);
+      expect(payload.brandId).to.equal(BRAND);
+      expect(payload.workspaceId).to.equal(WORKSPACE);
+      expect(payload.body).to.include('workspace role missing');
     });
 
     it('upstream ProjectEngineApiError 401 propagates as 401 authenticationRequired (redacted)', async () => {

@@ -73,6 +73,7 @@ import { ensureMarketSite } from '../support/serenity/site-linkage.js';
 import { upsertMappingRow, linkSiteToLiveRows } from '../support/serenity/mapping-rows.js';
 import { createSerenityTransport } from '../support/serenity/rest-transport.js';
 import { isSemrushTransportError, unwrapTransportCause } from '../support/serenity/errors.js';
+import { logUpstreamError } from '../support/serenity/upstream-log.js';
 import { syncBrandUrlsAcrossMarkets } from '../support/serenity/brand-urls.js';
 import { syncBrandAliasesAcrossMarkets } from '../support/serenity/brand-aliases.js';
 import { resolveProjects } from '../support/serenity/resolve-projects.js';
@@ -149,6 +150,21 @@ function brandDomainFromPayload(brandData) {
  */
 function brandPrimaryUrlFromPayload(brandData) {
   return siteIdentityFromUrlString(brandUrlFromPayload(brandData));
+}
+
+/**
+ * Tenant ids for the structured upstream-error log line (SITES-49993). The
+ * legacy routes name the org param `organizationId`, the v2 routes
+ * `spaceCatId` — normalised onto one queryable field name.
+ * @param {object} [context]
+ * @returns {Record<string, unknown>}
+ */
+function reqCtxOf(context) {
+  const params = context?.params ?? {};
+  return {
+    spaceCatId: params.spaceCatId ?? params.organizationId,
+    brandId: params.brandId,
+  };
 }
 
 /**
@@ -308,7 +324,12 @@ function BrandsController(ctx, log, env) {
     return params;
   }
 
-  function createErrorResponse(error) {
+  /**
+   * @param {unknown} error
+   * @param {Record<string, unknown>} [reqCtx] - tenant ids for the structured
+   *   upstream-error log line (SITES-49993); see {@link reqCtxOf}.
+   */
+  function createErrorResponse(error, reqCtx = {}) {
     // A Semrush upstream error's message embeds the gateway URL (internal host +
     // workspace/project UUIDs); never echo it to the client (body or x-error
     // header). Return a generic message and keep the detail to the log. Mirrors
@@ -321,6 +342,10 @@ function BrandsController(ctx, log, env) {
     // flattening to the generic 502. See unwrapTransportCause (errors.js).
     const err = unwrapTransportCause(error);
     if (isSemrushTransportError(err)) {
+      // One structured, queryable line with the upstream status/body and the
+      // tenant ids — the line Logs Insights groups on. The per-handler
+      // log.error above each call site adds its handler-specific context.
+      logUpstreamError(log, 'Brands upstream error', err, reqCtx);
       const status = (err.status === 401 || err.status === 403) ? err.status : 502;
       const message = status === 502 ? 'Upstream request failed' : 'Upstream authorization failed';
       return createResponse({ message }, status, { [HEADER_ERROR]: message });
@@ -391,7 +416,7 @@ function BrandsController(ctx, log, env) {
       return createResponse(brands, 200);
     } catch (error) {
       log.error(`Error getting brands for organization: ${organizationId}`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -499,7 +524,7 @@ function BrandsController(ctx, log, env) {
       return createResponse(brandGuidelines, 200);
     } catch (error) {
       log.error(`Error getting brand guidelines for site: ${siteId}`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -568,7 +593,7 @@ function BrandsController(ctx, log, env) {
       return createResponse(result, 200);
     } catch (error) {
       log.error(`Error listing prompts for brand ${brandId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -622,7 +647,7 @@ function BrandsController(ctx, log, env) {
       return ok(prompt);
     } catch (error) {
       log.error(`Error getting prompt ${promptId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -715,10 +740,10 @@ function BrandsController(ctx, log, env) {
     } catch (error) {
       if (error?.status === 409) {
         log.warn(`Prompt unique-constraint conflict for brand ${brandId} (org ${spaceCatId}): ${error.message}`);
-        return createErrorResponse(error);
+        return createErrorResponse(error, reqCtxOf(context));
       }
       log.error(`Error creating prompts for brand ${brandId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -777,7 +802,7 @@ function BrandsController(ctx, log, env) {
       return ok(prompt);
     } catch (error) {
       log.error(`Error updating prompt ${promptId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -833,7 +858,7 @@ function BrandsController(ctx, log, env) {
       return noContent();
     } catch (error) {
       log.error(`Error deleting prompt ${promptId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -892,7 +917,7 @@ function BrandsController(ctx, log, env) {
       return createResponse(result, 200);
     } catch (error) {
       log.error(`Error bulk deleting prompts for brand ${brandId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -948,7 +973,7 @@ function BrandsController(ctx, log, env) {
       return createResponse({ results }, 200);
     } catch (error) {
       log.error('Error checking prompts existence', { brandId, error });
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -995,7 +1020,7 @@ function BrandsController(ctx, log, env) {
       return createResponse(stats, 200);
     } catch (error) {
       log.error('Error fetching prompt stats', { brandId, error });
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1044,7 +1069,7 @@ function BrandsController(ctx, log, env) {
       return ok(withSerenityState(brand, serenityScopes));
     } catch (error) {
       log.error(`Error getting brand ${brandId} for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1116,7 +1141,7 @@ function BrandsController(ctx, log, env) {
         `Error resolving brand for org ${spaceCatId} site ${siteId}:`,
         error,
       );
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1181,7 +1206,7 @@ function BrandsController(ctx, log, env) {
       return createResponse({ brands }, 200);
     } catch (error) {
       log.error(`Error listing brands for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1216,7 +1241,7 @@ function BrandsController(ctx, log, env) {
       return createResponse({ categories }, 200);
     } catch (error) {
       log.error(`Error listing categories for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1288,7 +1313,7 @@ function BrandsController(ctx, log, env) {
       } else {
         log.error(`Error creating category for organization ${spaceCatId}:`, error);
       }
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1347,7 +1372,7 @@ function BrandsController(ctx, log, env) {
       } else {
         log.error(`Error updating category ${categoryId} for organization ${spaceCatId}:`, error);
       }
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1397,7 +1422,7 @@ function BrandsController(ctx, log, env) {
       return noContent();
     } catch (error) {
       log.error(`Error deleting category ${categoryId} for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1435,7 +1460,7 @@ function BrandsController(ctx, log, env) {
       return createResponse({ topics }, 200);
     } catch (error) {
       log.error(`Error listing topics for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1491,7 +1516,7 @@ function BrandsController(ctx, log, env) {
       } else {
         log.error(`Error creating topic for organization ${spaceCatId}:`, error);
       }
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1540,7 +1565,7 @@ function BrandsController(ctx, log, env) {
       return ok(updated);
     } catch (error) {
       log.error(`Error updating topic ${topicId} for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1587,7 +1612,7 @@ function BrandsController(ctx, log, env) {
       return noContent();
     } catch (error) {
       log.error(`Error deleting topic ${topicId} for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1900,7 +1925,7 @@ function BrandsController(ctx, log, env) {
         });
         await emptyProvisionedWorkspace(context, provisionedWorkspaceId, spaceCatId, log);
       }
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -2342,7 +2367,7 @@ function BrandsController(ctx, log, env) {
         emitBrandStaleWriteRejected(context, 'updateBrand');
       }
       log.error(`Error updating brand ${brandId} for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -2390,7 +2415,7 @@ function BrandsController(ctx, log, env) {
       return noContent();
     } catch (error) {
       log.error(`Error deleting brand ${brandId} for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -2744,7 +2769,7 @@ function BrandsController(ctx, log, env) {
       } catch (alertError) {
         log.error(`Failed to post activation-failure alert for brand ${brandId}:`, alertError);
       }
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -2808,7 +2833,7 @@ function BrandsController(ctx, log, env) {
       return ok(withSerenityState(updated, serenityScopes));
     } catch (error) {
       log.error(`Error transitioning status for brand ${brandId} in organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 

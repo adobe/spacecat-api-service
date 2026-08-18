@@ -5360,6 +5360,43 @@ describe('Brands Controller', () => {
         expect(upsertStub.called).to.equal(false);
       });
 
+      // SITES-49993: while the client sees only the generic message,
+      // createErrorResponse logs ONE structured line — JSON in the message —
+      // with the upstream status/method/endpoint/body and the tenant ids, so
+      // Logs Insights can group Semrush failures by tenant and upstream reason.
+      it('logs one structured line with upstream status/body and tenant ids (SITES-49993)', async () => {
+        loggerStub.error.resetHistory();
+        const leakUrl = 'https://gw.internal/enterprise/workspaces/ws-9/projects/proj-abc/aio';
+        const provisionStub = sinon.stub().rejects(
+          new SerenityTransportError(502, `Semrush POST ${leakUrl} failed: 502`, { detail: 'pool exhausted' }, {
+            method: 'POST', endpoint: '/enterprise/workspaces/ws-9/projects/proj-abc/aio',
+          }),
+        );
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub,
+          upsertBrand: sinon.stub().resolves({ id: 'x' }),
+        });
+
+        await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        const call = loggerStub.error.getCalls().find(
+          (c) => typeof c.args[0] === 'string' && c.args[0].startsWith('Brands upstream error {'),
+        );
+        expect(call).to.exist;
+        const payload = JSON.parse(call.args[0].slice('Brands upstream error '.length));
+        expect(payload.status).to.equal(502);
+        expect(payload.method).to.equal('POST');
+        expect(payload.endpoint).to.equal('/enterprise/workspaces/ws-9/projects/proj-abc/aio');
+        expect(payload.spaceCatId).to.equal(ORGANIZATION_ID);
+        expect(payload.body).to.include('pool exhausted');
+      });
+
       it('maps a 401 Semrush upstream error on provisioning to HTTP 401 + generic auth message', async () => {
         // The 401/403 side of createErrorResponse's status ternary: the upstream
         // status is preserved rather than flattened to 502, and the message is the
