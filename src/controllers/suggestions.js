@@ -426,7 +426,7 @@ function SuggestionsController(ctx, sqs, env) {
    * @returns {Promise<Array>} Filtered suggestion entities.
    */
   const filterByGrantStatus = async (site, suggestions, context) => {
-    if (!await getIsSummitPlgEnabled(site, ctx, context)) {
+    if (!await getIsSummitPlgEnabled(site, ctx, context, accessControlUtil)) {
       return suggestions;
     }
     try {
@@ -493,7 +493,7 @@ function SuggestionsController(ctx, sqs, env) {
         return notFound('Opportunity not found');
       }
     }
-    if (opportunity && await getIsSummitPlgEnabled(site, ctx, context)) {
+    if (opportunity && await getIsSummitPlgEnabled(site, ctx, context, accessControlUtil)) {
       try {
         await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
       /* c8 ignore next 3 */
@@ -783,7 +783,7 @@ function SuggestionsController(ctx, sqs, env) {
     if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound();
     }
-    if (await getIsSummitPlgEnabled(site, ctx, context)
+    if (await getIsSummitPlgEnabled(site, ctx, context, accessControlUtil)
       && !(await SuggestionGrant.isSuggestionGranted(suggestion.getId()))) {
       return notFound('Suggestion not found');
     }
@@ -1457,7 +1457,7 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     // Block auto-deploy on non-granted suggestions for summit-plg users
-    if (await getIsSummitPlgEnabled(site, ctx, context)) {
+    if (await getIsSummitPlgEnabled(site, ctx, context, accessControlUtil)) {
       const { notGrantedIds } = await SuggestionGrant.splitSuggestionsByGrantStatus(suggestionIds);
       if (notGrantedIds.length > 0) {
         const trialSuffix = isViewAsTrialRequest(context)
