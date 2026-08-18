@@ -1489,13 +1489,10 @@ function SerenityController(context, log, env) {
               // the project is published empty (no prompts) — today's default.
               generateTopics: generatePrompts,
               topicCap: generatePrompts ? MAX_TOPICS_ON_CREATE : 0,
-              // A project with neither models nor generated prompts publishes
-              // "empty units" → Semrush's disguised quota 405. Tolerate it
-              // (best-effort, leaves a draft) rather than failing activation; a
-              // project with models OR prompts has real units and must publish.
-              publishMode: marketModelIds.length > 0 || generatePrompts
-                ? 'require'
-                : 'best-effort',
+              // SITES-49206: Semrush no longer enforces AI limits, so an empty-units
+              // publish no longer 405s — every market now publishes with 'require'
+              // regardless of whether it has models/prompts attached.
+              publishMode: 'require',
               brandAliases,
               brandUrlSources,
               competitors,

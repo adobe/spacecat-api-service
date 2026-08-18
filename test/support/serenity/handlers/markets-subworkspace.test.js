@@ -642,58 +642,9 @@ describe('markets-subworkspace handlers', () => {
     // rather than passing 'quota' as the (unused) `message` arg (MysticatBot review).
     const quota405 = () => new SerenityTransportError(405, 'publish failed: 405', '<html>405 Not Allowed</html>');
 
-    it('best-effort publish swallows a quota 405 and keeps the project a draft', async () => {
-      const transport = makeTransport({
-        publishProject: sinon.stub().rejects(quota405()),
-      });
-      const res = await handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log, null, null, { publishMode: 'best-effort' });
-      expect(res.status).to.equal(201);
-      expect(res.body.published).to.equal(false);
-      expect(transport.publishProject).to.have.been.calledOnce;
-    });
-
-    // MysticatBot review (blocking): the best-effort branch's `toQuotaExceededError()` call is
-    // side-effect-only (its return value is discarded) purely to emit the `recordRejection`
-    // CloudWatch metric — assert that side effect directly so a future edit that drops the line
-    // as apparently-dead-code fails a test instead of silently going metric-blind. Spies on
-    // `toQuotaExceededError` itself (the entry's DIRECT dependency) rather than reaching two hops
-    // through to `allocation-metrics.js` (an errors.js-internal dependency esmock does not
-    // transitively override from this entry point), while still calling through to the real
-    // implementation so the emitted error/thrown-vs-swallowed behavior is unchanged.
-    it('best-effort publish emits the quotaExceeded rejection metric even though it swallows the error', async () => {
-      const errorsModule = await import('../../../../src/support/serenity/errors.js');
-      const toQuotaExceededError = sinon.spy(errorsModule.toQuotaExceededError);
-      const { handleCreateMarketSubworkspace: mocked } = await esmock(
-        '../../../../src/support/serenity/handlers/markets-subworkspace.js',
-        { '../../../../src/support/serenity/errors.js': { ...errorsModule, toQuotaExceededError } },
-      );
-      const transport = makeTransport({
-        publishProject: sinon.stub().rejects(quota405()),
-      });
-      await mocked(transport, makeBrand(), PARENT, createBody, log, null, null, { publishMode: 'best-effort' });
-      expect(toQuotaExceededError).to.have.been.calledOnce;
-    });
-
-    it('best-effort publish re-throws a non-405 upstream error', async () => {
-      const transport = makeTransport({
-        publishProject: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
-      });
-      await expect(handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log, null, null, { publishMode: 'best-effort' })).to.be.rejectedWith(/boom/);
-    });
-
-    // MysticatBot review: isMeteredQuota keys on body SHAPE (string = disguised quota, JSON = a
-    // genuine app-level error), so a real "Method Not Allowed" (JSON body) must NOT be swallowed
-    // or misclassified as quotaExceeded — it must propagate as the ordinary 405 upstream error.
-    it('best-effort publish re-throws a genuine JSON-bodied 405 (not misclassified as quota)', async () => {
-      const transport = makeTransport({
-        publishProject: sinon.stub().rejects(
-          new SerenityTransportError(405, 'Method Not Allowed', { message: 'Method Not Allowed' }),
-        ),
-      });
-      await expect(
-        handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log, null, null, { publishMode: 'best-effort' }),
-      ).to.be.rejectedWith(/Method Not Allowed/);
-    });
+    // SITES-49206: 'best-effort' publish mode was removed — Semrush no longer enforces AI limits,
+    // so every publish (including empty-units) now goes through 'require' below, which already
+    // covers the quota-405-swallow-vs-propagate distinction that used to need a separate mode.
 
     // serenity-docs#72 §2/§4.1 — case 1 (brand carve exhausted, allocator OFF): a quota 405 on a
     // REQUIRED publish must surface as the stable `quotaExceeded` 409 token, not the raw upstream
@@ -874,23 +825,6 @@ describe('markets-subworkspace handlers', () => {
         [genItemMatch('most comfortable sandals')],
         [...GENERATED_IDS, TAG_IDS.typeNonBranded],
       );
-    });
-
-    it('best-effort publish marks the project published when the publish succeeds', async () => {
-      const transport = makeTransport();
-      const res = await handleCreateMarketSubworkspace(
-        transport,
-        makeBrand(),
-        PARENT,
-        createBody,
-        log,
-        null,
-        null,
-        { publishMode: 'best-effort' },
-      );
-      expect(res.status).to.equal(201);
-      expect(res.body.published).to.equal(true);
-      expect(transport.publishProject).to.have.been.calledOnce;
     });
 
     it('reads topics from the { items: [...] } envelope shape returned by getBrandTopics', async () => {

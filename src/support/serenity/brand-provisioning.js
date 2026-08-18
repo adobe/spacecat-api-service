@@ -215,21 +215,15 @@ export async function provisionBrandSubworkspace(context, {
 
   // LLMO-5492 publish-after-populate: defer-publish flag ON → leave the project a
   // DRAFT ('skip') for a later finalize step (prompts + models pushed, published
-  // once). OFF (default) preserves inline publish: a project with models OR
-  // generated prompts has real units and must publish ('require'); an empty
-  // project would publish "empty units" (a disguised quota 405), so leave it a
-  // draft ('best-effort') instead of failing the create. Checked against
-  // resolvedModelIds, not the raw caller-supplied modelIds: LLMO-6554 resolves an
-  // empty/omitted modelIds to the canonical net-new default, so resolvedModelIds
-  // is non-empty in the common case — checking the raw list would wrongly fall
-  // through to 'best-effort' (leaving a model-bearing project as an unpublished
-  // draft) whenever the caller omitted modelIds.
-  /** @type {'require' | 'best-effort' | 'skip'} */
-  let publishMode = 'best-effort';
+  // once). OFF (default) publishes inline regardless of whether the project has
+  // any models/prompts attached: SITES-49206 confirmed Semrush no longer enforces
+  // AI limits, so an empty-units publish no longer 405s and there is no more
+  // 'best-effort' mode to fall back to (a quota 405 now always propagates as a
+  // real "Quota exceeded" error — see `handleCreateMarketSubworkspace`).
+  /** @type {'require' | 'skip'} */
+  let publishMode = 'require';
   if (isSerenityDeferPublishEnabled(context.env)) {
     publishMode = 'skip';
-  } else if ((Array.isArray(resolvedModelIds) && resolvedModelIds.length > 0) || generateTopics) {
-    publishMode = 'require';
   }
 
   let result;
