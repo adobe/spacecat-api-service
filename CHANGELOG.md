@@ -1,3 +1,10 @@
+## [1.752.1](https://github.com/adobe/spacecat-api-service/compare/v1.752.0...v1.752.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* **brands:** remove dead brand-level semrushWorkspaceId field ([#3089](https://github.com/adobe/spacecat-api-service/issues/3089)) ([a30dd4c](https://github.com/adobe/spacecat-api-service/commit/a30dd4ccfe45c4eeee83acc1aef4cf8b8a2b7907)), closes [adobe/mysticat-data-service#927](https://github.com/adobe/mysticat-data-service/issues/927) [#3088](https://github.com/adobe/spacecat-api-service/issues/3088)
+
 # [1.752.0](https://github.com/adobe/spacecat-api-service/compare/v1.751.1...v1.752.0) (2026-08-18)
 
 
