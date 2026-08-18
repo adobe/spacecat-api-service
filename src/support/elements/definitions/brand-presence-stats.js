@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { resolveElementModel, isAllModelsFilter } from '../constants.js';
+import { buildModelFilter } from '../constants.js';
 
 /**
  * Payload builders + response transformers backing `GET .../brand-presence/stats`
@@ -65,12 +65,12 @@ export function transformStatsSimpleNumericResponse(raw) {
 export function buildStatsTotalExecutionsPayload({
   model, platform, startDate, endDate, projectIds, brandName,
 }) {
-  const requestedModel = model || platform;
+  const modelFilter = buildModelFilter(model || platform);
   const filters = [
     { op: 'or', filters: [{ op: 'eq', val: brandName, col: 'CBF_ws_brand' }] },
   ];
-  if (!isAllModelsFilter(requestedModel)) {
-    filters.push({ op: 'or', filters: [{ op: 'eq', val: resolveElementModel(requestedModel), col: 'CBF_model' }] });
+  if (modelFilter) {
+    filters.push(modelFilter);
   }
   const projectFilter = orProjectFilter('CBF_project', projectIds);
   if (projectFilter) {
@@ -95,12 +95,12 @@ export const transformStatsTotalExecutionsResponse = transformStatsSimpleNumeric
 export function buildStatsMentionsPayload({
   model, platform, startDate, endDate, projectIds, brandName,
 }) {
-  const requestedModel = model || platform;
+  const modelFilter = buildModelFilter(model || platform, { wrap: false });
   const filters = [
     { op: 'eq', val: brandName, col: 'CBF_ws_brand' },
   ];
-  if (!isAllModelsFilter(requestedModel)) {
-    filters.push({ op: 'eq', val: resolveElementModel(requestedModel), col: 'CBF_model' });
+  if (modelFilter) {
+    filters.push(modelFilter);
   }
   const projectFilter = orProjectFilter('CBF_project', projectIds);
   if (projectFilter) {
@@ -121,12 +121,12 @@ export const transformStatsMentionsResponse = transformStatsSimpleNumericRespons
 export function buildStatsVisibilityPayload({
   model, platform, startDate, endDate, projectIds, brandName,
 }) {
-  const requestedModel = model || platform;
+  const modelFilter = buildModelFilter(model || platform);
   const filters = [
     { op: 'eq', val: brandName, col: 'CBF_ws_brand' },
   ];
-  if (!isAllModelsFilter(requestedModel)) {
-    filters.push({ op: 'or', filters: [{ op: 'eq', val: resolveElementModel(requestedModel), col: 'CBF_model' }] });
+  if (modelFilter) {
+    filters.push(modelFilter);
   }
   const projectFilter = orProjectFilter('CBF_project', projectIds);
   if (projectFilter) {
@@ -153,12 +153,12 @@ export function transformStatsVisibilityResponse(raw) {
 export function buildStatsCitationsPayload({
   model, platform, startDate, endDate, projectIds, brandName,
 }) {
-  const requestedModel = model || platform;
+  const modelFilter = buildModelFilter(model || platform, { wrap: false });
   const filters = [
     { op: 'eq', val: brandName, col: 'CBF_brand' },
   ];
-  if (!isAllModelsFilter(requestedModel)) {
-    filters.push({ op: 'eq', val: resolveElementModel(requestedModel), col: 'CBF_model' });
+  if (modelFilter) {
+    filters.push(modelFilter);
   }
   const projectFilter = orProjectFilter('CBF_projects', projectIds);
   if (projectFilter) {

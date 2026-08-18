@@ -11,7 +11,7 @@
  */
 
 import { hasText } from '@adobe/spacecat-shared-utils';
-import { resolveElementModel, isAllModelsFilter } from '../constants.js';
+import { buildModelFilter } from '../constants.js';
 import { dateToIsoWeek } from '../week-utils.js';
 
 /**
@@ -62,12 +62,12 @@ import { dateToIsoWeek } from '../week-utils.js';
 function buildMarketTrendPayload({
   model, platform, startDate, endDate, projectIds = [], projectCol,
 }) {
-  const requestedModel = model || platform;
-  const advancedFilters = [];
   // "All platforms" (param absent or 'all') → omit CBF_model so Semrush aggregates across
   // every model that produced data; otherwise scope to the single resolved model (LLMO-7093).
-  if (!isAllModelsFilter(requestedModel)) {
-    advancedFilters.push({ op: 'or', filters: [{ op: 'eq', val: resolveElementModel(requestedModel), col: 'CBF_model' }] });
+  const modelFilter = buildModelFilter(model || platform);
+  const advancedFilters = [];
+  if (modelFilter) {
+    advancedFilters.push(modelFilter);
   }
   if (Array.isArray(projectIds) && projectIds.length > 0) {
     advancedFilters.push({

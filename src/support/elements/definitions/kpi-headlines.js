@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { resolveElementModel, isAllModelsFilter } from '../constants.js';
+import { buildModelFilter } from '../constants.js';
 import { addDaysToDate } from '../week-utils.js';
 
 /**
@@ -68,15 +68,15 @@ export function derivePreviousPeriod(startDate, endDate) {
 export function buildKpiHeadlinePayload({
   brandName, model, platform, startDate, endDate, projectIds = [], category,
 }) {
-  const requestedModel = model || platform;
+  // "All platforms" (param absent or 'all') → omit CBF_model so Semrush aggregates across
+  // every model that produced data; otherwise scope to the single resolved model (LLMO-7093).
+  const modelFilter = buildModelFilter(model || platform);
   const { comparisonStartDate, comparisonEndDate } = derivePreviousPeriod(startDate, endDate);
   const filters = [
     { op: 'eq', val: brandName, col: 'CBF_ws_brand' },
   ];
-  // "All platforms" (param absent or 'all') → omit CBF_model so Semrush aggregates across
-  // every model that produced data; otherwise scope to the single resolved model (LLMO-7093).
-  if (!isAllModelsFilter(requestedModel)) {
-    filters.push({ op: 'or', filters: [{ op: 'eq', val: resolveElementModel(requestedModel), col: 'CBF_model' }] });
+  if (modelFilter) {
+    filters.push(modelFilter);
   }
   if (Array.isArray(projectIds) && projectIds.length > 0) {
     filters.push(orFilter('CBF_project', projectIds));
@@ -148,7 +148,9 @@ export function transformBrandUrlsResponse(raw) {
 export function buildSourceVisibilityPayload({
   brandUrls, model, platform, startDate, endDate, projectIds = [], category,
 }) {
-  const requestedModel = model || platform;
+  // "All platforms" (param absent or 'all') → omit CBF_model so Semrush aggregates across
+  // every model that produced data; otherwise scope to the single resolved model (LLMO-7093).
+  const modelFilter = buildModelFilter(model || platform);
   const { comparisonStartDate, comparisonEndDate } = derivePreviousPeriod(startDate, endDate);
   const filters = [
     {
@@ -156,10 +158,8 @@ export function buildSourceVisibilityPayload({
       filters: (brandUrls ?? []).map((val) => ({ op: 'url_match', val, col: 'CBF_brand_urls' })),
     },
   ];
-  // "All platforms" (param absent or 'all') → omit CBF_model so Semrush aggregates across
-  // every model that produced data; otherwise scope to the single resolved model (LLMO-7093).
-  if (!isAllModelsFilter(requestedModel)) {
-    filters.push({ op: 'or', filters: [{ op: 'eq', val: resolveElementModel(requestedModel), col: 'CBF_model' }] });
+  if (modelFilter) {
+    filters.push(modelFilter);
   }
   if (Array.isArray(projectIds) && projectIds.length > 0) {
     filters.push(orFilter('CBF_project', projectIds));

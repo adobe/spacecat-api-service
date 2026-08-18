@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { resolveElementModel, isAllModelsFilter } from '../constants.js';
+import { buildModelFilter } from '../constants.js';
 import { dateToIsoWeek } from '../week-utils.js';
 
 // Legacy default window is a rolling 28 days (see defaultDateRange in
@@ -82,16 +82,16 @@ function defaultDateRange() {
 export function buildSentimentOverviewPayload({
   model, platform, startDate, endDate, category, projectId, projectIds,
 } = {}) {
-  const requestedModel = model || platform;
+  // "All platforms" (param absent or 'all') → omit CBF_model so Semrush aggregates across
+  // every model that produced data; otherwise scope to the single resolved model (LLMO-7093).
+  const modelFilter = buildModelFilter(model || platform);
   const defaults = defaultDateRange();
   const start = startDate || defaults.startDate;
   const end = endDate || defaults.endDate;
 
   const advancedFilters = [];
-  // "All platforms" (param absent or 'all') → omit CBF_model so Semrush aggregates across
-  // every model that produced data; otherwise scope to the single resolved model (LLMO-7093).
-  if (!isAllModelsFilter(requestedModel)) {
-    advancedFilters.push({ op: 'or', filters: [{ op: 'eq', val: resolveElementModel(requestedModel), col: 'CBF_model' }] });
+  if (modelFilter) {
+    advancedFilters.push(modelFilter);
   }
   // Project scoping: this element scopes by CBF_project (one or more Semrush project ids),
   // NOT a top-level project_id. Supplied by the caller via the `projectId` query param.
