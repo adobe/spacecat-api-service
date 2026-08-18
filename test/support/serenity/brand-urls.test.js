@@ -145,6 +145,27 @@ describe('brand-urls helpers', () => {
       ]);
     });
 
+    it('KEEPS a subpath url on a primary host', () => {
+      // A project's `domain` cannot carry a path — the upstream folds it to the
+      // registrable domain — so `nba.com/kings` is not the string the benchmark
+      // already shows, and it is the part that says which brand this is. Matching
+      // on the host alone dropped a subpath brand's own url from brand_urls
+      // entirely (serenity-docs#348).
+      const sources = { urls: ['https://nba.com', 'https://nba.com/kings', 'https://www.nba.com/knicks'] };
+      const primaries = primaryDomainSet(['nba.com']);
+      expect(collectBrandUrlEntries(sources, 'us', primaries)).to.deep.equal([
+        { url: 'https://nba.com/kings', type: BRAND_URL_TYPE.WEBSITE },
+        { url: 'https://www.nba.com/knicks', type: BRAND_URL_TYPE.WEBSITE },
+      ]);
+    });
+
+    it('still skips a primary-host url whose only path is a bare slash', () => {
+      // `https://acme.com/` IS the string the benchmark shows; the identity
+      // normalizes the trailing slash away, so it stays skipped.
+      const sources = { urls: ['https://acme.com/'] };
+      expect(collectBrandUrlEntries(sources, 'us', primaryDomainSet(['acme.com']))).to.deep.equal([]);
+    });
+
     it('keeps all website urls when no primary domains are given', () => {
       const sources = { urls: ['https://acme.com', 'https://www.acme.com'] };
       // Empty skip set → nothing skipped (both kept; www vs apex are two rows).

@@ -71,7 +71,7 @@ export const SERENITY_BRAND_SITE_TYPE = 'serenity';
  * @param {object} [opts]
  * @param {string} [opts.organizationId] - the brand's organization UUID.
  * @param {string} [opts.brandId] - the brand UUID.
- * @param {string} [opts.domain] - the market/project domain or primary URL. Tolerates
+ * @param {string|null} [opts.domain] - the market/project domain or primary URL. Tolerates
  *   a bare hostname ("example.com") or a full URL ("https://example.com/x"); it is
  *   normalized to the hostname via hostnameFromUrlString (the single source of truth
  *   for brand -> Semrush project domain derivation) so all call sites resolve to the
@@ -232,17 +232,39 @@ export async function ensureMarketSite(ctx, {
     log?.warn?.('ensureMarketSite: domain is not a public hostname; refusing to mirror as a Site', { brandId, domain, hostname });
     return null;
   }
+  // A resolved hostname does NOT imply a resolved identity. WHATWG collapses the
+  // slash run in `https:///foo.example.com/bar` and reads the first path segment
+  // as the host, so a leading-slash input yields a public hostname while the
+  // identity — which rejects a leading '/' — yields null. Composing from null
+  // throws, and this function's contract is best-effort/never-throw (brands.js:
+  // "a throw here would tear down a live brand's workspace"). The live route is
+  // activate-retry, where brandDomain validation is presence-only. Skip rather
+  // than fall back to the hostname: `/foo.example.com/bar` naming the site
+  // `foo.example.com` is the parser's artifact, not the caller's intent.
+  if (!identity || !hasText(identity)) {
+    log?.warn?.('ensureMarketSite: domain did not resolve to a site identity; skipping', { brandId, domain, hostname });
+    return null;
+  }
   // Compose from the identity, not the raw input: composeBaseURL strips a trailing
   // slash only at the domain root, so `nba.com/kings/` and `nba.com/kings` would
   // otherwise compose to two different base URLs and resolve to two different
   // Sites. The identity has already normalized that away.
   //
-  // No fallback to `hostname` here: both derive from one parse of the same input,
-  // and the only input the identity rejects on its own — a leading '/' — yields an
-  // empty hostname too, which returned above. A fallback would be an unreachable
-  // branch pretending to be a safety net, so the non-null is asserted rather than
-  // guarded.
-  const baseURL = composeBaseURL(/** @type {string} */ (identity));
+  // Host and path are composed separately because composeBaseURL is a hostname
+  // helper: it lowercases the WHOLE string, which would fold `acme.com/OMES` onto
+  // `/omes`. Paths are case-sensitive on most origins, so a lowercased base_url
+  // both misses an existing row spelled with capitals and gives downstream
+  // fetchers a URL the origin may 404. Running it on the host alone keeps every
+  // host-level normalization the rest of the system applies — port, trailing dot,
+  // `www.`, scheme — and leaves the path exactly as the identity produced it.
+  //
+  // No extra lookup for the previously-composed all-lowercase spelling: prod holds
+  // 3 sites whose path carries capitals and 6 on a `www.` host, and not one of
+  // them is a brand's primary site, a brand_sites link, or a market's site. So
+  // there is no row for such a lookup to find, only a round-trip on every create.
+  const [identityHost, ...identitySegments] = identity.split('/');
+  const identityPath = identitySegments.length > 0 ? `/${identitySegments.join('/')}` : '';
+  const baseURL = `${composeBaseURL(identityHost)}${identityPath}`;
 
   try {
     // base_url is unique over the whole url including its path, so a host may back

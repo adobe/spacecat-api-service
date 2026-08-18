@@ -30,6 +30,7 @@ import {
   hasText,
   isNonEmptyObject,
   isValidUUID,
+  siteIdentityFromUrlString,
 } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode, getImsUserToken, resolveSemrushImsToken } from '../support/utils.js';
@@ -116,17 +117,38 @@ const BRAND_GUIDANCE_MAX_LENGTH = 4000;
 const BRAND_GUIDANCE_FIELDS = ['brandContext', 'mentionSentimentGuidance'];
 
 /**
+ * The brand's primary URL as the create payload spells it: the first non-empty
+ * entry in `urls`, tolerating bare hostnames, missing schemes, and both payload
+ * shapes (a plain string or `{ value }`). One input for both derivations below,
+ * so the project's `domain` and the url it tracks can never describe two
+ * different urls. Null when no usable URL is present.
+ */
+function brandUrlFromPayload(brandData) {
+  const urls = Array.isArray(brandData?.urls) ? brandData.urls : [];
+  return urls
+    .map((u) => (typeof u === 'string' ? u : u?.value))
+    .find(hasText) ?? null;
+}
+
+/**
  * Derives the brand domain (hostname) from a brand-create payload's URLs, used as
- * the Semrush project `domain` when provisioning a Semrush-mode brand. Takes the
- * first non-empty URL (the primary), tolerating bare hostnames and missing
- * schemes. Returns null when no usable URL is present.
+ * the Semrush project `domain` when provisioning a Semrush-mode brand. Host-only
+ * on purpose: `domain` must be a bare FQDN — a path there is a hard 400 upstream,
+ * and the upstream folds it to the registrable domain regardless. Returns null
+ * when no usable URL is present.
  */
 function brandDomainFromPayload(brandData) {
-  const urls = Array.isArray(brandData?.urls) ? brandData.urls : [];
-  const first = urls
-    .map((u) => (typeof u === 'string' ? u : u?.value))
-    .find(hasText);
-  return hostnameFromUrlString(first);
+  return hostnameFromUrlString(brandUrlFromPayload(brandData));
+}
+
+/**
+ * The url the brand's initial market should TRACK — host plus path, from the same
+ * payload URL {@link brandDomainFromPayload} reduces to a host. Without it a brand
+ * created on `nba.com/kings` analyses `nba.com` until a data-service reconcile
+ * repairs it. Returns null when no usable URL is present.
+ */
+function brandPrimaryUrlFromPayload(brandData) {
+  return siteIdentityFromUrlString(brandUrlFromPayload(brandData));
 }
 
 /**
@@ -1636,6 +1658,7 @@ function BrandsController(ctx, log, env) {
       // The initial market's domain, resolved once during provisioning and reused
       // by the site-mirror hook below (avoids re-deriving from the payload).
       let provisionedBrandDomain = null;
+      let provisionedBrandPrimaryUrl = null;
       // The initial market's identity, captured for the mapping-row write below
       // (must happen AFTER the brand row exists — provisionBrandSubworkspace
       // runs before it does, see brand-provisioning.js's return doc).
@@ -1698,6 +1721,11 @@ function BrandsController(ctx, log, env) {
             return badRequest('A primary URL is required to provision a Semrush brand');
           }
           provisionedBrandDomain = brandDomain;
+          // The url the initial market's project should TRACK, from the same
+          // payload URL `brandDomain` reduces to a host. Null when the payload
+          // spells its primary URL in a form the identity rejects; the create
+          // handler then falls back to the host identity, as it did before.
+          provisionedBrandPrimaryUrl = brandPrimaryUrlFromPayload(brandData);
           // A prompt-generating project needs at least one AI model (LLM) to
           // track. The wizard collects them; reject a prompt-generating Semrush
           // create that omits them. With generatePrompts=false the project is
@@ -1739,6 +1767,7 @@ function BrandsController(ctx, log, env) {
             market,
             languageCode,
             brandDomain,
+            primaryUrl: provisionedBrandPrimaryUrl,
             modelIds,
             generateTopics: generatePrompts,
             brandAliases,
@@ -1820,8 +1849,12 @@ function BrandsController(ctx, log, env) {
       }
 
       // When a Semrush sub-workspace + initial market were provisioned, mirror that
-      // initial market as a SpaceCat Site (+ brand_sites link) keyed on the
-      // market's domain, so the Semrush project has a resolvable site entity.
+      // initial market as a SpaceCat Site (+ brand_sites link) keyed on the url the
+      // market TRACKS, so the Semrush project has a resolvable site entity naming
+      // the same url it analyses. Keyed on the host instead, a brand created on
+      // `nba.com/kings` would be recorded against the root `nba.com` Site — and
+      // that Site becomes `brands.site_id`, which sibling brands on one apex would
+      // then collide on.
       // INVARIANT: ensureMarketSite MUST NOT throw — it sits inside the try/catch
       // whose catch releases the just-provisioned workspace; a throw here would
       // tear down a live brand's workspace. ensureMarketSite is best-effort by
@@ -1834,8 +1867,10 @@ function BrandsController(ctx, log, env) {
         const linkedSiteId = await ensureMarketSite(context, {
           organizationId: spaceCatId,
           brandId: provisionedBrandId ?? undefined,
-          // The initial market's domain, resolved during provisioning above.
-          domain: provisionedBrandDomain ?? undefined,
+          // The initial market's tracked url, resolved during provisioning above;
+          // its host when the payload's spelling yielded no identity — the same
+          // value the create handler then tracked.
+          domain: provisionedBrandPrimaryUrl ?? provisionedBrandDomain ?? undefined,
           updatedBy,
           log,
         });

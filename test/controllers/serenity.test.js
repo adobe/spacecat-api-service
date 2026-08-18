@@ -1873,12 +1873,18 @@ describe('SerenityController', () => {
       const createBody = handlers.handleCreateMarketSubworkspace.firstCall.args[3];
       expect(createBody.market).to.equal('us');
       expect(createBody.languageCode).to.equal('en');
-      // brandDomain derived from the stashed primary URL (hostname only).
+      // brandDomain derived from the stashed primary URL (hostname only) — it is a
+      // bare FQDN by contract, and a path there is a hard 400 upstream.
       expect(createBody.brandDomain).to.equal('acme.com');
-      // The site mirror is fed the same resolved domain (not the raw stash URL),
-      // so the activate path and the create path agree on the base URL.
+      // The tracked url keeps the stash's path: this is the one place a subpath
+      // survives to activation, and reducing it for `brandDomain` used to be the
+      // end of it.
+      expect(createBody.primaryUrl).to.equal('acme.com/path');
+      // The site mirror is fed the url the project TRACKS, not the host it is
+      // filed under — the resolved Site becomes brands.site_id, so mirroring the
+      // host would record a brand analysing acme.com/path against the root site.
       expect(ensureMarketSiteStub).to.have.been.calledOnce;
-      expect(ensureMarketSiteStub.firstCall.args[1]).to.include({ domain: 'acme.com' });
+      expect(ensureMarketSiteStub.firstCall.args[1]).to.include({ domain: 'acme.com/path' });
       // The draft staging data is cleared on success, atomically with the flip —
       // now through updateBrand (pendingSemrushProvisioning: null), not the model.
       expect(updateBrandStub.firstCall.args[0].updates).to.include({

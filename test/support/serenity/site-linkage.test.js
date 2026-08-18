@@ -197,6 +197,34 @@ describe('serenity site-linkage: ensureMarketSite', () => {
     expect(Site.findByBaseURL).to.have.been.calledOnceWith('https://acme.com/markets/fr');
   });
 
+  it('skips (never throws) when the hostname resolves but the identity does not', async () => {
+    // WHATWG collapses the slash run in `https:///foo.example.com/bar` and reads
+    // the first path segment as the host, so a leading-slash input yields a public
+    // hostname while the identity — which rejects a leading '/' — yields null.
+    // Composing from null threw a TypeError out of a function documented as
+    // best-effort/never-throw. Live route: activate-retry, where brandDomain
+    // validation is presence-only.
+    const result = await ensureMarketSite(ctx, {
+      organizationId: ORG, brandId: BRAND, domain: '/foo.example.com/bar', log,
+    });
+    expect(result).to.equal(null);
+    expect(Site.findByBaseURL).to.not.have.been.called;
+    expect(Site.create).to.not.have.been.called;
+    expect(log.warn).to.have.been.calledOnce;
+  });
+
+  it('lowercases the host but PRESERVES the path case', async () => {
+    // Paths are case-sensitive on most origins, so folding `/OMES` onto `/omes`
+    // both misses an existing row spelled with capitals and hands downstream
+    // fetchers a URL the origin may 404. composeBaseURL lowercases whatever it is
+    // given, so it runs on the host alone.
+    Site.findByBaseURL.resolves(siteModel('site-9'));
+    await ensureMarketSite(ctx, {
+      organizationId: ORG, brandId: BRAND, domain: 'WWW.Acme.com/OMES/Sub', log,
+    });
+    expect(Site.findByBaseURL).to.have.been.calledOnceWith('https://acme.com/OMES/Sub');
+  });
+
   it('resolves sibling subpath sites on one host to DIFFERENT base URLs', async () => {
     // The defect this replaced: collapsing to the host resolved every sibling to
     // the root site. Prod holds 440 subpath sites, and nba.com coexists with

@@ -84,7 +84,14 @@ async function emptyWorkspaceBestEffort(transport, workspaceId, parentWorkspaceI
  * @param {string} params.brandName - brand display name (sub-workspace title + brand_name).
  * @param {string} params.market - ISO-2 country code for the initial market.
  * @param {string} params.languageCode - BCP-47 language code for the initial market.
- * @param {string} params.brandDomain - brand domain for the upstream project.
+ * @param {string} params.brandDomain - brand domain for the upstream project. A
+ *   bare FQDN: a path there is a hard 400 upstream, and the upstream folds it to
+ *   the registrable domain regardless.
+ * @param {string|null} [params.primaryUrl] - the url the project should TRACK (host
+ *   plus path), from the same input `brandDomain` reduces to a host. Set by a
+ *   PATCH after create, because create ignores it. Omitted/null falls back to the
+ *   host identity in the create handler, which is what a subpath brand created
+ *   this way used to get: a project analysing its apex until a reconcile ran.
  * @param {string[]} [params.modelIds] - AI models (LLMs) to attach to the
  *   project. This is always the brand's FIRST-EVER market (the sub-workspace
  *   is freshly created below), so an empty/omitted list resolves to the
@@ -133,7 +140,7 @@ async function emptyWorkspaceBestEffort(transport, workspaceId, parentWorkspaceI
  *   best-effort and never throw.
  */
 export async function provisionBrandSubworkspace(context, {
-  spaceCatId, brandId, brandName, market, languageCode, brandDomain,
+  spaceCatId, brandId, brandName, market, languageCode, brandDomain, primaryUrl = null,
   modelIds = [], brandAliases = [], brandUrlSources = null, competitors = [],
   generateTopics = true, writeDeadline = computeWriteDeadline(),
 }, log = console) {
@@ -242,6 +249,7 @@ export async function provisionBrandSubworkspace(context, {
         market: resolvedMarket,
         languageCode: resolvedLanguageCode,
         brandDomain,
+        primaryUrl,
         brandNames: [brandName],
         brandDisplayName: brandName,
         // `name` is deliberately omitted: the create handler defaults it to the

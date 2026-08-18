@@ -5152,7 +5152,7 @@ describe('Brands Controller', () => {
         );
       });
 
-      it('mirrors the provisioned brand domain as a Site (+ brand_sites link) after the row is written', async () => {
+      it('mirrors the url the market TRACKS as a Site (+ brand_sites link) after the row is written', async () => {
         const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
         const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
         const ensureSiteStub = sinon.stub().resolves('site-x');
@@ -5176,8 +5176,38 @@ describe('Brands Controller', () => {
         expect(ensureSiteStub.calledAfter(upsertStub)).to.equal(true);
         const opts = ensureSiteStub.firstCall.args[1];
         expect(opts.organizationId).to.equal(ORGANIZATION_ID);
-        expect(opts.domain).to.equal('acme.com');
+        // The tracked url, not the host the project is filed under: the resolved
+        // Site becomes brands.site_id, so mirroring the host would record a brand
+        // analysing acme.com/path against the root acme.com Site — and sibling
+        // brands on one apex would then collide on brands_base_site_unique.
+        expect(opts.domain).to.equal('acme.com/path');
         expect(opts.brandId).to.equal(provisionStub.firstCall.args[1].brandId);
+      });
+
+      it('forwards the payload URL\'s full identity as the project\'s tracked url', async () => {
+        // `brandDomain` must be a bare FQDN (a path there is a hard 400 upstream,
+        // and the upstream folds it to the registrable domain regardless), so
+        // without a separate primaryUrl a brand created on acme.com/path analysed
+        // acme.com until a data-service reconcile repaired it (serenity-docs#348).
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub,
+          upsertBrand: sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' }),
+          ensureMarketSite: sinon.stub().resolves('site-x'),
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(201);
+        const params = provisionStub.firstCall.args[1];
+        expect(params.brandDomain).to.equal('acme.com');
+        expect(params.primaryUrl).to.equal('acme.com/path');
       });
 
       it('links the mirrored site onto the mapping row after ensureMarketSite resolves', async () => {

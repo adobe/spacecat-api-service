@@ -1596,10 +1596,22 @@ function SerenityController(context, log, env) {
 
       // The brand_sites mirror is now a REQUIRED activation step (NOT
       // best-effort): run it only once every market is live. Every market in
-      // this batch was provisioned against the single resolved `brandDomain`
-      // (body/stash primary URL), so one idempotent ensure on that domain links
+      // this batch was provisioned against the single resolved `brandPrimaryUrl`
+      // (body/stash primary URL), so one idempotent ensure on that url links
       // them all. A null return (any failure: bad input, cross-org, write error)
       // keeps the brand pending below.
+      //
+      // Mirror the url the projects TRACK, not the host they are filed under.
+      // These markets were just provisioned on `brandPrimaryUrl`; anchoring their
+      // Site — which becomes `brands.site_id` via `baseSiteId` below, and the link
+      // `linkSiteToLiveRows` writes onto the mapping rows — to `brandDomain`
+      // instead would leave a brand analysing `nba.com/kings` recorded against the
+      // root `nba.com` Site. It also stops sibling brands on one apex from
+      // colliding on `brands_base_site_unique`. Identical for a body-supplied
+      // `brandDomain` (a bare FQDN by contract, whose identity is itself); only a
+      // stashed wizard URL carrying a subpath moves. A null value is the same
+      // malformed input the project provisioning above already rejected, and
+      // resolves to null here, keeping the brand pending.
       let siteLinked = false;
       let linkedSiteId = null;
       if (allMarketsLive) {
@@ -1607,14 +1619,14 @@ function SerenityController(context, log, env) {
           // Optional-chained so a missing/throwing accessor can't 500 the call.
           organizationId: brand.getOrganizationId?.(),
           brandId: auth.brandUuid,
-          domain: brandDomain,
+          domain: brandPrimaryUrl,
           updatedBy: 'serenity-activate',
           log,
         });
         siteLinked = !!linkedSiteId && hasText(linkedSiteId);
         // Best-effort, scope-guarded to unlinked live rows (mapping-rows.js) —
         // never overwrites an existing link. All markets in this batch share
-        // one resolved brandDomain and thus one mirror Site, so by-brand picks
+        // one resolved primary URL and thus one mirror Site, so by-brand picks
         // up every row this batch wrote (including 409/already-live ones).
         await linkSiteToLiveRows(ctx.dataAccess, auth.brandUuid, linkedSiteId, log);
       }
