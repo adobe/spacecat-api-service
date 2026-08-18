@@ -1,3 +1,11 @@
+## [1.755.1](https://github.com/adobe/spacecat-api-service/compare/v1.755.0...v1.755.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* allow x-view-full-experience header in CORS (SITES-49888) ([#3097](https://github.com/adobe/spacecat-api-service/issues/3097)) ([e171ece](https://github.com/adobe/spacecat-api-service/commit/e171eceac6f96419a00009295ac72f69349e6572)), closes [#3087](https://github.com/adobe/spacecat-api-service/issues/3087) [#3087](https://github.com/adobe/spacecat-api-service/issues/3087) [OneAdobe/experience-success-studio-ui#2199](https://github.com/OneAdobe/experience-success-studio-ui/issues/2199)
+* **serenity:** drop semrush_sub_workspace_id as an upsertBrand anchor (SITES-49449) ([#3095](https://github.com/adobe/spacecat-api-service/issues/3095)) ([2ae994e](https://github.com/adobe/spacecat-api-service/commit/2ae994e3912bdee5bdba0e2490d6700f1b429479)), closes [#2504](https://github.com/adobe/spacecat-api-service/issues/2504) [mysticat-data-service#936](https://github.com/mysticat-data-service/issues/936) [mysticat-data-service#936](https://github.com/mysticat-data-service/issues/936) [#936](https://github.com/adobe/spacecat-api-service/issues/936)
+
 # [1.755.0](https://github.com/adobe/spacecat-api-service/compare/v1.754.0...v1.755.0) (2026-08-18)
 
 
