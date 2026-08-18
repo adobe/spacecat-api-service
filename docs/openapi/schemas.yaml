@@ -10867,6 +10867,202 @@ AiVisibilityV1PromptPromptResponse:
         $ref: '#/AiVisibilitySemrushSource'
   additionalProperties: true
 
+AiVisibilityPromptResponseItem:
+  type: object
+  description: |
+    One hydrated prompt/response record. Shared by
+    `GET /llmo/ai-visibility/prompts/responses` and
+    `GET /llmo/ai-visibility/prompts/responses/all` so their item shape cannot drift.
+  properties:
+    prompt:
+      type: string
+    promptHash:
+      type: string
+    serpId:
+      type: string
+    topic:
+      type: string
+    topicId:
+      type: string
+    engine:
+      type: string
+    response:
+      type: string
+      description: |
+        Full LLM response, or the brief excerpt when the full relation was
+        unavailable. May be an empty string.
+    responseExcerpt:
+      type: string
+    responseSource:
+      type: string
+      enum: [full, excerpt, none]
+      description: Origin of the `response` value.
+    responseComplete:
+      type: boolean
+      description: True only when a full relation response was used.
+    relationStatus:
+      type: string
+      enum: [ok, error, skipped]
+      description: |
+        Per-item relation-call outcome (`error` = the call failed and `response`
+        fell back to the excerpt; `skipped` = the identity lacked the fields to
+        issue the call).
+    date:
+      type: [string, 'null']
+      description: Execution date normalized to ISO `YYYY-MM-DD`; null when absent.
+    citedPages:
+      type: array
+      items:
+        type: object
+        additionalProperties: true
+    mentionedBrands:
+      type: array
+      items:
+        type: string
+    mentionedBrandsCount:
+      type: integer
+    sourcesCount:
+      type: integer
+  additionalProperties: true
+
+AiVisibilityPromptsResponsesBatchIdentity:
+  type: object
+  description: |
+    One caller-supplied prompt identity to hydrate. All three of `promptHash`,
+    `serpId`, `topicId` must be non-empty; an item that is a well-formed object but
+    carries an empty identity field is not rejected — it is returned in-place with
+    `relationStatus: "skipped"` (no relation call is issued for it).
+  required: [promptHash, serpId, topicId]
+  properties:
+    promptHash:
+      type: string
+      minLength: 1
+    serpId:
+      type: string
+      minLength: 1
+    topicId:
+      type: string
+      minLength: 1
+    country:
+      type: string
+      description: Optional per-item market slice override.
+    engine:
+      type: string
+      description: Optional per-item engine slice override.
+  additionalProperties: true
+
+AiVisibilityPromptsResponsesBatchRequest:
+  type: object
+  description: |
+    Bulk-read request body. `domain` scopes access control and `items` carries the
+    caller-supplied identities to hydrate (1..500).
+  required: [domain, items]
+  properties:
+    domain:
+      type: string
+      description: Brand identifier / access-control scope. Required.
+    country:
+      type: string
+      description: Default market slice applied to items that omit `country`.
+    engine:
+      type: string
+      description: Default engine slice applied to items that omit `engine`.
+    items:
+      type: array
+      minItems: 1
+      maxItems: 500
+      items:
+        $ref: '#/AiVisibilityPromptsResponsesBatchIdentity'
+  additionalProperties: true
+
+AiVisibilityPromptsResponsesBatchItem:
+  type: object
+  description: |
+    One hydrated batch item. `promptHash`/`serpId`/`topicId` echo the caller-supplied
+    identity at the same index (order-stable, no-drop).
+  properties:
+    promptHash:
+      type: string
+    serpId:
+      type: string
+    topicId:
+      type: string
+    engine:
+      type: string
+    prompt:
+      type: string
+    response:
+      type: string
+    responseSource:
+      type: string
+      enum: [full, none]
+      description: |
+        Batch hydrates the relation call with no brief-excerpt fallback, so it only
+        ever emits `full` (a full response was returned) or `none`.
+    responseComplete:
+      type: boolean
+    relationStatus:
+      type: string
+      enum: [ok, error, skipped]
+    date:
+      type: [string, 'null']
+      description: Execution date normalized to ISO `YYYY-MM-DD`; null when absent.
+    citedPages:
+      type: array
+      items:
+        type: object
+        additionalProperties: true
+    mentionedBrands:
+      type: array
+      items:
+        type: string
+  additionalProperties: true
+
+AiVisibilityPromptsResponsesBatchResponse:
+  type: object
+  description: |
+    Order-stable, no-drop batch hydration result. `data[i]` corresponds to the
+    request's `items[i]`; `requested` equals the number of items sent.
+  required: [data, requested]
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityPromptsResponsesBatchItem'
+    requested:
+      type: integer
+  additionalProperties: true
+
+AiVisibilityPromptsResponsesAllResponse:
+  type: object
+  description: One page of a whole-brand prompt/response traversal.
+  required: [data, nextCursor]
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/AiVisibilityPromptResponseItem'
+    nextCursor:
+      type: [string, 'null']
+      description: Opaque base64url cursor for the next page; null on the last page.
+    snapshotId:
+      type: [string, 'null']
+      description: Best-effort snapshot identifier; may be null.
+    executionDate:
+      type: [string, 'null']
+      description: Capture date (ISO `YYYY-MM-DD`) for the page; null when absent.
+    truncated:
+      type: boolean
+      description: |
+        True when traversal stopped at the upstream offset ceiling before
+        exhausting the corpus.
+    truncationReason:
+      type: [string, 'null']
+      description: Reason for truncation (e.g. `backend_offset_ceiling`); null otherwise.
+    srFilters:
+      $ref: '#/AiVisibilitySrFilters'
+  additionalProperties: true
+
 AiVisibilityV1MetaCountry:
   type: object
   description: Country entry from Semrush `cr.v1 Meta/Meta` protobuf JSON.

@@ -15,7 +15,12 @@ import sinon from 'sinon';
 import {
   handlePromptsResponses,
   handlePromptsResponsesLatest,
+  handlePromptsResponsesAll,
+  handlePromptsResponsesBatch,
 } from '../../../../src/support/ai-visibility/handlers/prompts.js';
+
+const decodeTestCursor = (c) => JSON.parse(Buffer.from(c, 'base64url').toString('utf8'));
+const encodeTestCursor = (offset) => Buffer.from(JSON.stringify({ offset }), 'utf8').toString('base64url');
 
 describe('AI Visibility – prompts handlers', () => {
   let sandbox;
@@ -593,6 +598,298 @@ describe('AI Visibility – prompts handlers', () => {
       const sp = new URLSearchParams('promptHash=h1&serpId=s1&topicId=t1');
       const res = await handlePromptsResponsesLatest(sp, clients);
       expect(res.body.data.date).to.be.null;
+    });
+  });
+
+  /* ------------------------------------------------------------------ */
+  /*  handlePromptsResponsesAll (whole-brand cursor traversal)           */
+  /* ------------------------------------------------------------------ */
+  describe('handlePromptsResponsesAll', () => {
+    const makePrompts = (n) => Array.from({ length: n }, (_, i) => ({
+      prompt: `P${i}`,
+      promptHash: `h${i}`,
+      serpId: `s${i}`,
+      topicName: 'T',
+      topicId: `t${i}`,
+      llm: 1,
+      mentionedBrandsCount: 0,
+      sourcesCount: 0,
+    }));
+
+    it('returns 400 when domain is missing', async () => {
+      const sp = new URLSearchParams('');
+      const res = await handlePromptsResponsesAll(sp, clients);
+      expect(res.status).to.equal(400);
+      expect(res.body.error).to.equal('missing_domain');
+    });
+
+    it('returns 400 on a malformed cursor', async () => {
+      const sp = new URLSearchParams('domain=example.com&cursor=not-a-valid-cursor');
+      const res = await handlePromptsResponsesAll(sp, clients);
+      expect(res.status).to.equal(400);
+      expect(res.body.error).to.equal('invalid_cursor');
+      expect(clients.promptClient.prompts.called).to.be.false;
+    });
+
+    it('returns a page with the shared item shape and a null cursor when the corpus is exhausted', async () => {
+      clients.promptClient.prompts.resolves({ prompts: makePrompts(3) });
+      clients.prRelationsClient.prompt.resolves({
+        value: {
+          response: 'Full', sources: [{ url: 'https://x.com' }], mentionedBrands: [{ name: 'B' }], date: '2026-08-01',
+        },
+      });
+      const sp = new URLSearchParams('domain=example.com');
+      const res = await handlePromptsResponsesAll(sp, clients);
+      expect(res.status).to.equal(200);
+      expect(res.body.data).to.have.length(3);
+      expect(res.body.data[0].response).to.equal('Full');
+      expect(res.body.data[0].responseSource).to.equal('full');
+      expect(res.body.data[0].citedPages).to.have.length(1);
+      expect(res.body.nextCursor).to.be.null;
+      expect(res.body.truncated).to.equal(false);
+      expect(res.body.truncationReason).to.be.null;
+      expect(res.body.snapshotId).to.be.null;
+      expect(res.body.executionDate).to.equal('2026-08-01');
+    });
+
+    it('emits a decodable nextCursor for a full page below the ceiling', async () => {
+      clients.promptClient.prompts.resolves({ prompts: makePrompts(100) });
+      clients.prRelationsClient.prompt.resolves({ value: null });
+      const sp = new URLSearchParams('domain=example.com&limit=100');
+      const res = await handlePromptsResponsesAll(sp, clients);
+      expect(res.body.nextCursor).to.be.a('string');
+      expect(decodeTestCursor(res.body.nextCursor)).to.deep.equal({ offset: 100 });
+      expect(res.body.truncated).to.equal(false);
+    });
+
+    it('advances the backend offset when a cursor is supplied', async () => {
+      clients.promptClient.prompts.resolves({ prompts: makePrompts(2) });
+      clients.prRelationsClient.prompt.resolves({ value: null });
+      const sp = new URLSearchParams('domain=example.com');
+      sp.set('cursor', encodeTestCursor(40));
+      await handlePromptsResponsesAll(sp, clients);
+      expect(clients.promptClient.prompts.firstCall.args[0].range.offset).to.equal(40);
+    });
+
+    it('signals backend_offset_ceiling without a next cursor when the offset ceiling is reached', async () => {
+      clients.promptClient.prompts.resolves({ prompts: makePrompts(100) });
+      clients.prRelationsClient.prompt.resolves({ value: null });
+      const sp = new URLSearchParams('domain=example.com&limit=100');
+      sp.set('cursor', encodeTestCursor(950));
+      const res = await handlePromptsResponsesAll(sp, clients);
+      expect(res.body.nextCursor).to.be.null;
+      expect(res.body.truncated).to.equal(true);
+      expect(res.body.truncationReason).to.equal('backend_offset_ceiling');
+    });
+
+    it('clamps limit to the hard cap', async () => {
+      clients.promptClient.prompts.resolves({ prompts: [] });
+      const sp = new URLSearchParams('domain=example.com&limit=999');
+      await handlePromptsResponsesAll(sp, clients);
+      expect(clients.promptClient.prompts.firstCall.args[0].range.limit).to.equal(200);
+    });
+
+    it('falls back to the default limit for a fractional limit in (0,1) (guards the same-offset cursor loop)', async () => {
+      clients.promptClient.prompts.resolves({ prompts: [] });
+      const sp = new URLSearchParams('domain=example.com&limit=0.5');
+      await handlePromptsResponsesAll(sp, clients);
+      // Math.floor(0.5) === 0 would make the backend return 0 rows and re-emit the
+      // cursor at the same offset; the guard must fall back to the default (100).
+      expect(clients.promptClient.prompts.firstCall.args[0].range.limit).to.equal(100);
+    });
+
+    it('filters by promptQuery but advances the cursor by rows fetched', async () => {
+      clients.promptClient.prompts.resolves({
+        prompts: [
+          {
+            prompt: 'best seo tools for 2026', promptHash: 'h1', serpId: 's1', topicName: 'T', topicId: 't1', llm: 1, mentionedBrandsCount: 0, sourcesCount: 0,
+          },
+          {
+            prompt: 'weather forecast today', promptHash: 'h2', serpId: 's2', topicName: 'T', topicId: 't2', llm: 1, mentionedBrandsCount: 0, sourcesCount: 0,
+          },
+        ],
+      });
+      clients.prRelationsClient.prompt.resolves({ value: null });
+      const sp = new URLSearchParams('domain=example.com&promptQuery=best+seo+tools+for+2026');
+      const res = await handlePromptsResponsesAll(sp, clients);
+      expect(res.body.data).to.have.length(1);
+      expect(res.body.data[0].prompt).to.equal('best seo tools for 2026');
+      // 2 rows fetched (< limit) → natural end, no next cursor
+      expect(res.body.nextCursor).to.be.null;
+    });
+
+    it('derives executionDate from the pre-filter page even when promptQuery drops the dated row', async () => {
+      clients.promptClient.prompts.resolves({
+        prompts: [
+          {
+            prompt: 'keep this exact prompt', promptHash: 'h0', serpId: 's0', topicName: 'T', topicId: 't0', llm: 1, mentionedBrandsCount: 0, sourcesCount: 0,
+          },
+          {
+            prompt: 'drop different prompt entirely', promptHash: 'h1', serpId: 's1', topicName: 'T', topicId: 't1', llm: 1, mentionedBrandsCount: 0, sourcesCount: 0,
+          },
+        ],
+      });
+      // kept row has no date; the filtered-out row carries the page snapshot date.
+      clients.prRelationsClient.prompt
+        .onFirstCall().resolves({ value: null })
+        .onSecondCall().resolves({
+          value: {
+            response: 'R', sources: [], mentionedBrands: [], date: '2026-08-09',
+          },
+        });
+      const sp = new URLSearchParams('domain=example.com&promptQuery=keep+this+exact+prompt');
+      const res = await handlePromptsResponsesAll(sp, clients);
+      expect(res.body.data).to.have.length(1);
+      expect(res.body.data[0].prompt).to.equal('keep this exact prompt');
+      expect(res.body.data[0].date).to.be.null;
+      // executionDate comes from the pre-filter set, so the page still reports the snapshot
+      expect(res.body.executionDate).to.equal('2026-08-09');
+      // both fetched rows were hydrated (pre-filter), not just the kept one
+      expect(clients.prRelationsClient.prompt.callCount).to.equal(2);
+    });
+
+    it('carries per-item relation status through the shared builder', async () => {
+      clients.promptClient.prompts.resolves({
+        prompts: [{
+          prompt: 'Q', llm: 1, mentionedBrandsCount: 0, sourcesCount: 0,
+        }],
+      });
+      const sp = new URLSearchParams('domain=example.com');
+      const res = await handlePromptsResponsesAll(sp, clients);
+      expect(res.body.data[0].relationStatus).to.equal('skipped');
+      expect(clients.prRelationsClient.prompt.called).to.be.false;
+    });
+
+    it('handles raw.prompts being undefined', async () => {
+      clients.promptClient.prompts.resolves({});
+      const sp = new URLSearchParams('domain=example.com');
+      const res = await handlePromptsResponsesAll(sp, clients);
+      expect(res.body.data).to.deep.equal([]);
+      expect(res.body.nextCursor).to.be.null;
+      expect(res.body.executionDate).to.be.null;
+    });
+  });
+
+  /* ------------------------------------------------------------------ */
+  /*  handlePromptsResponsesBatch (bulk identity hydration)              */
+  /* ------------------------------------------------------------------ */
+  describe('handlePromptsResponsesBatch', () => {
+    it('returns 400 when domain is missing', async () => {
+      const res = await handlePromptsResponsesBatch({ items: [{ promptHash: 'h', serpId: 's', topicId: 't' }] }, clients);
+      expect(res.status).to.equal(400);
+      expect(res.body.error).to.equal('missing_domain');
+    });
+
+    it('returns 400 when body is not an object', async () => {
+      const res = await handlePromptsResponsesBatch(null, clients);
+      expect(res.status).to.equal(400);
+      expect(res.body.error).to.equal('missing_domain');
+    });
+
+    it('returns 400 when body is an array (Array.isArray guard)', async () => {
+      const res = await handlePromptsResponsesBatch(
+        [{ promptHash: 'h', serpId: 's', topicId: 't' }],
+        clients,
+      );
+      expect(res.status).to.equal(400);
+      expect(res.body.error).to.equal('missing_domain');
+      expect(clients.prRelationsClient.prompt.called).to.be.false;
+    });
+
+    it('returns 400 when items is missing or empty', async () => {
+      const res1 = await handlePromptsResponsesBatch({ domain: 'example.com' }, clients);
+      expect(res1.status).to.equal(400);
+      expect(res1.body.error).to.equal('missing_items');
+      const res2 = await handlePromptsResponsesBatch({ domain: 'example.com', items: [] }, clients);
+      expect(res2.status).to.equal(400);
+      expect(res2.body.error).to.equal('missing_items');
+    });
+
+    it('returns 400 when items exceeds the cap', async () => {
+      const items = Array.from({ length: 501 }, (_, i) => ({ promptHash: `h${i}`, serpId: `s${i}`, topicId: `t${i}` }));
+      const res = await handlePromptsResponsesBatch({ domain: 'example.com', items }, clients);
+      expect(res.status).to.equal(400);
+      expect(res.body.error).to.equal('too_many_items');
+      expect(clients.prRelationsClient.prompt.called).to.be.false;
+    });
+
+    it('returns 400 when an item is malformed (not an object)', async () => {
+      const res = await handlePromptsResponsesBatch({
+        domain: 'example.com',
+        items: [{ promptHash: 'h', serpId: 's', topicId: 't' }, 'not-an-object'],
+      }, clients);
+      expect(res.status).to.equal(400);
+      expect(res.body.error).to.equal('malformed_item');
+      expect(clients.prRelationsClient.prompt.called).to.be.false;
+    });
+
+    it('preserves order and never drops items across ok/skipped/error outcomes', async () => {
+      clients.prRelationsClient.prompt
+        .onFirstCall().resolves({
+          value: {
+            prompt: 'Q0', response: 'Full answer', sources: [{ url: 'https://x.com' }], mentionedBrands: [{ name: 'Acme' }], date: '2026-08-01',
+          },
+        })
+        .onSecondCall().rejects(new Error('upstream'));
+      const items = [
+        { promptHash: 'h0', serpId: 's0', topicId: 't0' }, // ok
+        { promptHash: 'h1', serpId: 's1', topicId: 't1' }, // error (rejects)
+        { promptHash: 'h2', serpId: '', topicId: 't2' }, // skipped (empty serpId)
+      ];
+      const res = await handlePromptsResponsesBatch({ domain: 'example.com', items }, clients);
+      expect(res.status).to.equal(200);
+      expect(res.body.requested).to.equal(3);
+      expect(res.body.data).to.have.length(3);
+
+      expect(res.body.data[0].relationStatus).to.equal('ok');
+      expect(res.body.data[0].promptHash).to.equal('h0');
+      expect(res.body.data[0].prompt).to.equal('Q0');
+      expect(res.body.data[0].response).to.equal('Full answer');
+      expect(res.body.data[0].responseSource).to.equal('full');
+      expect(res.body.data[0].responseComplete).to.equal(true);
+      expect(res.body.data[0].date).to.equal('2026-08-01');
+      expect(res.body.data[0].citedPages).to.have.length(1);
+      expect(res.body.data[0].mentionedBrands).to.deep.equal(['Acme']);
+
+      expect(res.body.data[1].relationStatus).to.equal('error');
+      expect(res.body.data[1].promptHash).to.equal('h1');
+      expect(res.body.data[1].responseSource).to.equal('none');
+
+      expect(res.body.data[2].relationStatus).to.equal('skipped');
+      expect(res.body.data[2].serpId).to.equal('');
+      expect(res.body.data[2].responseSource).to.equal('none');
+      // only the two items with a full identity issued a relation call
+      expect(clients.prRelationsClient.prompt.callCount).to.equal(2);
+    });
+
+    it('applies per-item country/engine over the top-level default', async () => {
+      clients.prRelationsClient.prompt.resolves({ value: null });
+      const items = [
+        {
+          promptHash: 'h0', serpId: 's0', topicId: 't0', engine: 'gemini',
+        },
+        { promptHash: 'h1', serpId: 's1', topicId: 't1' }, // inherits top-level
+      ];
+      const res = await handlePromptsResponsesBatch({
+        domain: 'example.com', country: 'US', engine: 'chatgpt', items,
+      }, clients);
+      expect(res.status).to.equal(200);
+      expect(res.body.data[0].engine).to.equal('gemini');
+      expect(res.body.data[1].engine).to.equal('chatgpt');
+    });
+
+    it('echoes the identity and returns responseSource=none for a null relation', async () => {
+      clients.prRelationsClient.prompt.resolves({ value: null });
+      const res = await handlePromptsResponsesBatch({
+        domain: 'example.com',
+        items: [{ promptHash: 'h', serpId: 's', topicId: 't' }],
+      }, clients);
+      expect(res.body.data[0].promptHash).to.equal('h');
+      expect(res.body.data[0].serpId).to.equal('s');
+      expect(res.body.data[0].topicId).to.equal('t');
+      expect(res.body.data[0].response).to.equal('');
+      expect(res.body.data[0].responseSource).to.equal('none');
+      expect(res.body.data[0].relationStatus).to.equal('ok');
     });
   });
 });

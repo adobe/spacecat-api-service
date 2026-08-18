@@ -834,6 +834,10 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-meta'
   /llmo/ai-visibility/prompts/responses/latest:
     $ref: './ai-visibility-api.yaml#/ai-visibility-prompts-responses-latest'
+  /llmo/ai-visibility/prompts/responses/batch:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-prompts-responses-batch'
+  /llmo/ai-visibility/prompts/responses/all:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-prompts-responses-all'
   /llmo/ai-visibility/prompts/responses:
     $ref: './ai-visibility-api.yaml#/ai-visibility-prompts-responses'
   /llmo/ai-visibility/topics/research/stats:

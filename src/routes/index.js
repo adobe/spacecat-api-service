@@ -840,6 +840,8 @@ export default function getRouteHandlers(
     'GET /llmo/ai-visibility/competitors/metrics': aiVisibilityController.getCompetitorsMetrics,
     'GET /llmo/ai-visibility/meta': aiVisibilityController.getMeta,
     'GET /llmo/ai-visibility/prompts/responses/latest': aiVisibilityController.getPromptsResponsesLatest,
+    'GET /llmo/ai-visibility/prompts/responses/all': aiVisibilityController.getPromptsResponsesAll,
+    'POST /llmo/ai-visibility/prompts/responses/batch': aiVisibilityController.postPromptsResponsesBatch,
     'GET /llmo/ai-visibility/prompts/responses': aiVisibilityController.getPromptsResponses,
     'GET /llmo/ai-visibility/topics/research/stats': aiVisibilityController.getTopicsResearchStats,
     'GET /llmo/ai-visibility/topics/research/prompts': aiVisibilityController.getTopicsResearchPrompts,

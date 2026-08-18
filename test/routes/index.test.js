@@ -530,6 +530,8 @@ describe('getRouteHandlers', () => {
     getCompetitorsMetrics: sinon.stub(),
     getMeta: sinon.stub(),
     getPromptsResponsesLatest: sinon.stub(),
+    getPromptsResponsesAll: sinon.stub(),
+    postPromptsResponsesBatch: sinon.stub(),
     getPromptsResponses: sinon.stub(),
     getTopicsResearchStats: sinon.stub(),
     getTopicsResearchPrompts: sinon.stub(),
@@ -795,6 +797,8 @@ describe('getRouteHandlers', () => {
       'GET /llmo/ai-visibility/competitors/metrics',
       'GET /llmo/ai-visibility/meta',
       'GET /llmo/ai-visibility/prompts/responses/latest',
+      'GET /llmo/ai-visibility/prompts/responses/all',
+      'POST /llmo/ai-visibility/prompts/responses/batch',
       'GET /llmo/ai-visibility/prompts/responses',
       'GET /llmo/ai-visibility/topics/research/stats',
       'GET /llmo/ai-visibility/topics/research/prompts',
@@ -895,6 +899,8 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /llmo/ai-visibility/competitors/metrics']).to.equal(mockAiVisibilityController.getCompetitorsMetrics);
     expect(staticRoutes['GET /llmo/ai-visibility/meta']).to.equal(mockAiVisibilityController.getMeta);
     expect(staticRoutes['GET /llmo/ai-visibility/prompts/responses/latest']).to.equal(mockAiVisibilityController.getPromptsResponsesLatest);
+    expect(staticRoutes['GET /llmo/ai-visibility/prompts/responses/all']).to.equal(mockAiVisibilityController.getPromptsResponsesAll);
+    expect(staticRoutes['POST /llmo/ai-visibility/prompts/responses/batch']).to.equal(mockAiVisibilityController.postPromptsResponsesBatch);
     expect(staticRoutes['GET /llmo/ai-visibility/prompts/responses']).to.equal(mockAiVisibilityController.getPromptsResponses);
     expect(staticRoutes['GET /llmo/ai-visibility/topics/research/stats']).to.equal(mockAiVisibilityController.getTopicsResearchStats);
     expect(staticRoutes['GET /llmo/ai-visibility/topics/research/prompts']).to.equal(mockAiVisibilityController.getTopicsResearchPrompts);
