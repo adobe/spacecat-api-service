@@ -12,8 +12,7 @@
 
 // @ts-check
 
-import { hasText } from '@adobe/spacecat-shared-utils';
-import { siteIdentityFromUrlString } from '../../url-utils.js';
+import { hasText, siteIdentityFromUrlString } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from '../../utils.js';
 import {
@@ -49,6 +48,7 @@ import { resolveProjects } from '../resolve-projects.js';
 import { buildReservedDomains, syncCompetitorBenchmarksForProject } from '../competitor-benchmarks.js';
 import { collectAliasNames } from '../brand-aliases.js';
 import { upsertMappingRow, tombstoneMappingRow } from '../mapping-rows.js';
+import { primaryUrlPatchBody } from '../project-provisioning.js';
 
 /** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
 /** @typedef {import('../rest-transport.js').ProjectCreateBody} ProjectCreateBody */
@@ -636,17 +636,22 @@ export async function handleCreateMarketSubworkspace(
     }
   }
 
-  // serenity-docs#348: record the URL the brand ACTUALLY tracks in
-  // `settings.ai.primary_url` (may carry a subdomain/subpath), distinct from the
-  // host-only `domain` create sends. Semrush IGNORES primary_url on create and
-  // only honors it via PATCH, so set it here — before the single publish below,
-  // so it's part of the published version. Prefer the caller-threaded full
-  // identity (`body.primaryUrl`, e.g. the wizard's draft URL or a subpath site's
-  // base URL); fall back to the host-only brandDomain (a no-op vs the apex).
-  // Best-effort by design, mirroring the brand-URL enrichment below: a failed
-  // PATCH must not abort a market that is otherwise valid upstream — the
-  // data-service drift/backfill pass (serenity-docs#348 WS3/WS4) reconciles any
-  // project left without its primary_url.
+  // The url the project TRACKS. Create IGNORES `primary_url` — whatever spelling
+  // goes in comes back as the apex — so it can only be set by a PATCH, and that
+  // PATCH has to land before the publish below or the value stays in draft.
+  // Applied on the adopt-a-leftover-draft branch too: such a draft was created by
+  // an earlier attempt that never got this far, so it does not have the value yet.
+  //
+  // Both the caller-threaded url and the brandDomain fallback go through the
+  // identity normalizer, so a caller that hands over a full URL, a trailing slash
+  // or a mixed-case host still writes the one spelling the upstream stores — and
+  // one the drift check compares equal to.
+  //
+  // Best-effort: this handler has no orphan-cleanup seam (unlike handleCreateMarket,
+  // which deletes and rethrows), and failing a whole market create because the
+  // tracked url could not be refined would be a worse outcome than a market that is
+  // live on the apex — the state every market is in today. A divergence is
+  // recoverable by the data-service reconcile, which repairs primary_url in place.
   const primaryUrl = siteIdentityFromUrlString(
     hasText(body?.primaryUrl) ? body.primaryUrl : body?.brandDomain,
   );
@@ -654,13 +659,14 @@ export async function handleCreateMarketSubworkspace(
   // siteIdentityFromUrlString only ever returns a real host string or null.
   if (primaryUrl) {
     try {
-      await transport.updateProject(workspaceId, projectId, {
-        type: 'ai',
-        primary_url: primaryUrl,
-      });
+      await transport.updateProject(
+        workspaceId,
+        projectId,
+        primaryUrlPatchBody(primaryUrl),
+      );
     } catch (e) {
-      log?.warn?.('handleCreateMarketSubworkspace: best-effort primary_url PATCH failed; project left without primary_url', {
-        workspaceId, projectId, primaryUrl, error: e.message,
+      log?.warn?.('handleCreateMarketSubworkspace: SERENITY_MARKET_PRIMARY_URL_DIVERGENCE — could not set primary_url (non-fatal); market tracks its apex domain', {
+        workspaceId, projectId, primaryUrl, error: e?.message,
       });
     }
   }

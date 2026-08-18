@@ -15,7 +15,9 @@
 import {
   createResponse, forbidden, internalServerError, noContent, notFound, accepted,
 } from '@adobe/spacecat-shared-http-utils';
-import { hasText, isNonEmptyObject, isValidUUID } from '@adobe/spacecat-shared-utils';
+import {
+  hasText, isNonEmptyObject, isValidUUID, siteIdentityFromUrlString,
+} from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
 import { createSerenityTransport } from '../support/serenity/rest-transport.js';
@@ -80,7 +82,11 @@ import {
   getBrandAliases, getBrandUrlSources, getBrandCompetitors, updateBrand, getBrandBaseSiteId,
 } from '../support/brands-storage.js';
 import { ErrorWithStatusCode, resolveSemrushImsToken as resolveImsTokenViaPromise } from '../support/utils.js';
-import { ensureMarketSite, resolveSiteIdentity, unlinkMarketSiteIfOrphaned } from '../support/serenity/site-linkage.js';
+import {
+  ensureMarketSite,
+  resolveSiteIdentity,
+  unlinkMarketSiteIfOrphaned,
+} from '../support/serenity/site-linkage.js';
 import { X_PROMISE_TOKEN_HEADER, PROMISE_TOKEN_REQUIRED_ERROR_CODE } from '../utils/constants.js';
 import { tombstoneAllForBrand, linkSiteToLiveRows } from '../support/serenity/mapping-rows.js';
 import { logUpstreamError } from '../support/serenity/upstream-log.js';
@@ -808,12 +814,20 @@ function SerenityController(context, log, env) {
         // The subworkspace create handler has no Site access (narrowed dataAccess),
         // so derive the Semrush project domain from the supplied siteId HERE when
         // brandDomain is absent. A supplied-but-unresolvable siteId is a hard 400.
-        let effectiveBody = requestBody;
+        // `primaryUrl` is always DERIVED here, never taken from the request. It is
+        // not part of the documented create-market contract, and passing a caller's
+        // value straight through would put an unvalidated string on the Semrush
+        // project. Set unconditionally so a client that sends one is ignored rather
+        // than trusted.
+        let effectiveBody = {
+          ...requestBody,
+          primaryUrl: siteIdentityFromUrlString(requestBody.brandDomain),
+        };
         if (suppliedSiteId && !hasText(requestBody.brandDomain)) {
-          // Resolve BOTH the host-only domain and the full primary_url identity
-          // (serenity-docs#348) from the site in one lookup; thread primaryUrl so
-          // the narrowed-dataAccess subworkspace handler can PATCH it (it cannot
-          // re-fetch the Site itself).
+          // Both values from one read, for the same reason the domain is derived
+          // here at all: the handler has no Site access. Only `primaryUrl` can
+          // carry a subpath — `brandDomain` is a bare FQDN because a path there is
+          // rejected upstream.
           const identity = await resolveSiteIdentity(ctx.dataAccess, suppliedSiteId, log);
           if (!identity?.domain || !hasText(identity.domain)) {
             return createResponse(
@@ -822,7 +836,7 @@ function SerenityController(context, log, env) {
             );
           }
           effectiveBody = {
-            ...requestBody,
+            ...effectiveBody,
             brandDomain: identity.domain,
             primaryUrl: identity.primaryUrl ?? undefined,
           };
@@ -1594,10 +1608,22 @@ function SerenityController(context, log, env) {
 
       // The brand_sites mirror is now a REQUIRED activation step (NOT
       // best-effort): run it only once every market is live. Every market in
-      // this batch was provisioned against the single resolved `brandDomain`
-      // (the body's primary URL), so one idempotent ensure on that domain links
+      // this batch was provisioned against the single resolved `brandPrimaryUrl`
+      // (the body's tracked URL), so one idempotent ensure on that url links
       // them all. A null return (any failure: bad input, cross-org, write error)
       // keeps the brand pending below.
+      //
+      // Mirror the url the projects TRACK, not the host they are filed under.
+      // These markets were just provisioned on `brandPrimaryUrl`; anchoring their
+      // Site — which becomes `brands.site_id` via `baseSiteId` below, and the link
+      // `linkSiteToLiveRows` writes onto the mapping rows — to `brandDomain`
+      // instead would leave a brand analysing `nba.com/kings` recorded against the
+      // root `nba.com` Site. It also stops sibling brands on one apex from
+      // colliding on `brands_base_site_unique`. Identical for a body-supplied
+      // `brandDomain` (a bare FQDN by contract, whose identity is itself); only a
+      // body-threaded `primaryUrl` carrying a subpath moves. A null value is the
+      // same malformed input the project provisioning above already rejected, and
+      // resolves to null here, keeping the brand pending.
       let siteLinked = false;
       let linkedSiteId = null;
       if (allMarketsLive) {
@@ -1605,14 +1631,14 @@ function SerenityController(context, log, env) {
           // Optional-chained so a missing/throwing accessor can't 500 the call.
           organizationId: brand.getOrganizationId?.(),
           brandId: auth.brandUuid,
-          domain: brandDomain,
+          domain: brandPrimaryUrl,
           updatedBy: 'serenity-activate',
           log,
         });
         siteLinked = !!linkedSiteId && hasText(linkedSiteId);
         // Best-effort, scope-guarded to unlinked live rows (mapping-rows.js) —
         // never overwrites an existing link. All markets in this batch share
-        // one resolved brandDomain and thus one mirror Site, so by-brand picks
+        // one resolved primary URL and thus one mirror Site, so by-brand picks
         // up every row this batch wrote (including 409/already-live ones).
         await linkSiteToLiveRows(ctx.dataAccess, auth.brandUuid, linkedSiteId, log);
       }

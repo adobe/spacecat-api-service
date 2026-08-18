@@ -12,7 +12,7 @@
 
 // @ts-check
 
-import { hasText } from '@adobe/spacecat-shared-utils';
+import { hasText, siteIdentityFromUrlString } from '@adobe/spacecat-shared-utils';
 
 import { isSemrushTransportError, isMeteredQuota, toQuotaExceededError } from './errors.js';
 import { benchmarkAliases } from './aliases.js';
@@ -84,6 +84,22 @@ export function normalizeBenchmarkDomain(value) {
   }
 }
 
+// Whether a brand website URL is nothing more than a market's primary domain.
+// The skip below exists to stop the SAME string being listed twice (the benchmark
+// already shows the domain), so it must compare the whole url, not just its host:
+// `https://nba.com/kings` and a benchmark reading `nba.com` are visibly different
+// entries, and the path is the part that says which brand this is. A url whose
+// host matched a primary but that the identity cannot parse counts as bare, which
+// is what it was treated as before this distinction existed.
+function isBarePrimaryDomainUrl(url, primaries) {
+  const host = normalizeBenchmarkDomain(url);
+  if (host === null || !primaries.has(host)) {
+    return false;
+  }
+  const identity = siteIdentityFromUrlString(url);
+  return identity === null || !identity.includes('/');
+}
+
 /**
  * The set of normalized hosts that are the primary domain of SOME market in the
  * brand's sub-workspace — every one of them is skipped as a `website` brand URL
@@ -119,7 +135,12 @@ export function primaryDomainSet(domains) {
  * primary and must not surface as a US-en brand URL. Because the skip set is the
  * same for every market, all markets end up with the same website entries. The
  * match is by normalized host, so both `https://x.com` and `https://www.x.com`
- * are skipped when a market's domain is `x.com`. Every OTHER website URL (a
+ * are skipped when a market's domain is `x.com`.
+ *
+ * A url that carries a PATH is never skipped, even on a primary host: a project's
+ * `domain` cannot hold one, so a subpath brand's own `https://nba.com/kings` is
+ * not the string the benchmark already shows — dropping it left the url the brand
+ * actually tracks out of `brand_urls` entirely. Every OTHER website URL (a
  * secondary site) is kept verbatim.
  *
  * Only HTTPS URLs survive (`brand_urls` rejects non-https with a 400, so a stored
@@ -134,8 +155,8 @@ export function primaryDomainSet(domains) {
  * @param {object} sources - { urls?, socialAccounts?, earnedContent? }.
  * @param {string} market - ISO-2 country code of the target project.
  * @param {Set<string>} [primaryDomains] - normalized hosts that are some market's
- *   primary domain ({@link primaryDomainSet}); a `website` URL whose host is in
- *   the set is skipped. Omit to keep all.
+ *   primary domain ({@link primaryDomainSet}); a path-free `website` URL whose
+ *   host is in the set is skipped. Omit to keep all.
  * @returns {{url: string, type: string}[]}
  */
 export function collectBrandUrlEntries(sources, market, primaryDomains) {
@@ -151,7 +172,7 @@ export function collectBrandUrlEntries(sources, market, primaryDomains) {
     ...urls
       .map((u) => toEntry(typeof u === 'string' ? u : u?.value, BRAND_URL_TYPE.WEBSITE))
       .filter(Boolean)
-      .filter((e) => !primaries.has(normalizeBenchmarkDomain(e.url))),
+      .filter((e) => !isBarePrimaryDomainUrl(e.url, primaries)),
     ...social
       .filter((s) => regionApplies(s?.regions, market))
       .map((s) => toEntry(s?.url, BRAND_URL_TYPE.SOCIAL))
