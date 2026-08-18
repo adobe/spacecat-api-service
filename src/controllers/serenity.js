@@ -80,7 +80,6 @@ import {
   getBrandAliases, getBrandUrlSources, getBrandCompetitors, updateBrand, getBrandBaseSiteId,
 } from '../support/brands-storage.js';
 import { ErrorWithStatusCode, resolveSemrushImsToken as resolveImsTokenViaPromise } from '../support/utils.js';
-import { hostnameFromUrlString } from '../support/url-utils.js';
 import { ensureMarketSite, resolveSiteIdentity, unlinkMarketSiteIfOrphaned } from '../support/serenity/site-linkage.js';
 import { X_PROMISE_TOKEN_HEADER, PROMISE_TOKEN_REQUIRED_ERROR_CODE } from '../utils/constants.js';
 import { tombstoneAllForBrand, linkSiteToLiveRows } from '../support/serenity/mapping-rows.js';
@@ -1255,51 +1254,38 @@ function SerenityController(context, log, env) {
       const body = ctx.data || {};
       const transport = buildTransport(ctx, imsToken);
       const brand = await loadBrand(ctx, brandUuid);
-      // Markets + primary URL come from the request body, but a pending (draft)
-      // brand activated from the wizard supplies none: fall back to what the
-      // wizard stashed at "Save as pending" (brands.pending_semrush_provisioning =
-      // { primaryUrl, markets }). A reactivation of an already-live brand
-      // re-supplies them in the body, so the body wins when present.
-      const pendingSemrushProvisioning = isNonEmptyObject(brand.getPendingSemrushProvisioning?.())
-        ? brand.getPendingSemrushProvisioning()
-        : null;
-      const hadPendingSemrushProvisioning = pendingSemrushProvisioning != null;
-      const storedMarkets = Array.isArray(pendingSemrushProvisioning?.markets)
-        ? pendingSemrushProvisioning.markets
-        : [];
-      // Whether to generate topics/prompts for the provisioned project(s). Body
-      // overrides the stash; default false preserves the historical activate
-      // behavior (projects published without generated prompts).
-      const generatePrompts = typeof body.generatePrompts === 'boolean'
-        ? body.generatePrompts
-        : pendingSemrushProvisioning?.generatePrompts === true;
+      // SITES-49448: brands.pending_semrush_provisioning (the wizard's "Save as
+      // pending" stash) is retired — markets, primary URL, and generatePrompts
+      // come from the request body only. A reactivation re-supplies them.
+      // Whether to generate topics/prompts for the provisioned project(s);
+      // default false preserves the historical activate behavior (projects
+      // published without generated prompts).
+      const generatePrompts = body.generatePrompts === true;
       const wasPending = brand.getStatus?.() === 'pending';
-      // The Semrush project domain: the request's brandDomain, else derived from
-      // the stashed draft primary URL (the wizard's "Save as pending" URL).
-      const suppliedUrlOrDomain = hasText(body.brandDomain)
-        || hasText(pendingSemrushProvisioning?.primaryUrl);
-      const brandDomain = hasText(body.brandDomain)
-        ? body.brandDomain
-        : hostnameFromUrlString(pendingSemrushProvisioning?.primaryUrl);
+      // The Semrush project domain: the request's brandDomain.
+      // SITES-49448 retired the pending_semrush_provisioning stash, so brandDomain
+      // now comes from the request body only (no stashed-URL fallback).
+      const { brandDomain } = body;
+      const suppliedUrlOrDomain = hasText(brandDomain);
       // serenity-docs#348: the FULL tracked URL (subdomain/subpath preserved),
       // threaded to the market handler so it PATCHes `settings.ai.primary_url`.
-      // Unlike `brandDomain` above (host-only) this keeps the stashed wizard URL
+      // Unlike `brandDomain` above (host-only) this keeps the raw tracked URL
       // intact; the handler normalizes it via `siteIdentityFromUrlString`.
       // Precedence mirrors markets.js (body.primaryUrl > body.brandDomain): a
-      // body-threaded full URL wins, else the stashed wizard URL (subpath kept),
-      // else the host-only body.brandDomain as a last resort.
+      // body-threaded full URL wins, else the host-only body.brandDomain as a
+      // last resort. (The stashed-wizard-URL tier is gone with SITES-49448.)
+      const brandDomainFallback = hasText(brandDomain) ? brandDomain : null;
       const brandPrimaryUrl = hasText(body.primaryUrl)
         ? body.primaryUrl
-        : (pendingSemrushProvisioning?.primaryUrl
-          ?? (hasText(body.brandDomain) ? body.brandDomain : null));
+        : brandDomainFallback;
 
       // ----- Pending-brand activation is ALWAYS sub-workspace-only (LLMO-6405) -----
       // Markets are Semrush projects added afterwards from the Markets tab, never
       // auto-created at activation — so a pending brand activates to just its
       // sub-workspace (the anchor, persisted by ensureSubworkspace) plus a status
-      // flip, IGNORING any stashed primary URL for project creation. The brand's
-      // primary site (brands.site_id) was set at create. Reactivation of an already
-      // ACTIVE brand (body-driven markets) is handled by the branches below.
+      // flip. The brand's primary site (brands.site_id) was set at create.
+      // Reactivation of an already ACTIVE brand (body-driven markets) is handled
+      // by the branches below.
       if (wasPending) {
         const pendingWorkspaceId = await ensureSubworkspace(
           transport,
@@ -1321,10 +1307,6 @@ function SerenityController(context, log, env) {
         let pendingActivateSucceeded = true;
         if (typeof brand.setStatus === 'function') {
           brand.setStatus('active');
-        }
-        if (hadPendingSemrushProvisioning
-          && typeof brand.setPendingSemrushProvisioning === 'function') {
-          brand.setPendingSemrushProvisioning(null);
         }
         try {
           await brand.save();
@@ -1417,12 +1399,10 @@ function SerenityController(context, log, env) {
       }
 
       // ----- Project activation (primary URL present) -----
-      // Markets come from the body (reactivation), else the stash. A draft with a
-      // URL but no stashed market provisions a single US/EN fallback project — the
-      // same default brand-provisioning.js applies on the direct-create path.
-      const requestedMarkets = Array.isArray(body.markets) && body.markets.length > 0
-        ? body.markets
-        : storedMarkets;
+      // Markets come from the body (reactivation). A URL with no market supplied
+      // provisions a single US/EN fallback project — the same default
+      // brand-provisioning.js applies on the direct-create path.
+      const requestedMarkets = Array.isArray(body.markets) ? body.markets : [];
       const markets = requestedMarkets.length > 0
         ? requestedMarkets
         : [{ market: 'US', languageCode: 'en' }];
@@ -1566,18 +1546,17 @@ function SerenityController(context, log, env) {
       //      persisted by ensureSubworkspace above), AND
       //   4. every provisioned market is mirrored as a Site + brand_sites row
       //      (type='serenity').
-      // If ANY step fails, a brand that was pending STAYS pending — its stash and
-      // workspace pointer are left intact so a retry converges idempotently (live
-      // markets return 409; the site-link + stash-clear re-run) — and the
-      // response is an error. (An already-active brand re-supplying markets is
-      // never downgraded.)
+      // If ANY step fails, a brand that was pending STAYS pending — its workspace
+      // pointer is left intact so a retry converges idempotently (live markets
+      // return 409; the site-link re-runs) — and the response is an error. (An
+      // already-active brand re-supplying markets is never downgraded.)
       const allMarketsLive = results.length > 0
         && results.every((r) => r.status === 201 || r.status === 409);
 
       // The brand_sites mirror is now a REQUIRED activation step (NOT
       // best-effort): run it only once every market is live. Every market in
       // this batch was provisioned against the single resolved `brandDomain`
-      // (body/stash primary URL), so one idempotent ensure on that domain links
+      // (the body's primary URL), so one idempotent ensure on that domain links
       // them all. A null return (any failure: bad input, cross-org, write error)
       // keeps the brand pending below.
       let siteLinked = false;
@@ -1603,7 +1582,7 @@ function SerenityController(context, log, env) {
 
       if (fullySucceeded) {
         try {
-          // Persist status + primary site + stash-clear in ONE atomic write via the
+          // Persist status + primary site in ONE atomic write via the
           // storage helper (the Brand model exposes no site_id setter, so a
           // model.save() can't set it — this is why Serenity historically never
           // populated brands.site_id). baseSiteId is the primary domain's mirror
@@ -1617,7 +1596,6 @@ function SerenityController(context, log, env) {
             updates: {
               status: 'active',
               baseSiteId: linkedSiteId,
-              pendingSemrushProvisioning: null,
             },
             postgrestClient: ctx.dataAccess.services.postgrestClient,
             updatedBy: 'serenity-activate',
