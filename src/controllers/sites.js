@@ -35,7 +35,6 @@ import {
   composeBaseURL,
   getBaseURLPathPrefix,
 } from '@adobe/spacecat-shared-utils';
-import { getDomain } from 'tldts';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
@@ -66,7 +65,7 @@ import {
 import { getBrandBySite, isSemrushMarketMirrorSite } from '../support/brands-storage.js';
 import { createSerenityTransport } from '../support/serenity/rest-transport.js';
 import { propagateSiteUrlToSemrush } from '../support/serenity/site-url-propagation.js';
-import { isSemrushTransportError, unwrapTransportCause, ERROR_CODES } from '../support/serenity/errors.js';
+import { isSemrushTransportError, unwrapTransportCause } from '../support/serenity/errors.js';
 import { listViewableResourceIds } from '../support/state-access-mapping-utils.js';
 import { requirePostgrestForFacsMappings } from '../support/postgrest-availability.js';
 import { isFacsRebacResource } from '../routes/facs-capabilities.js';
@@ -1200,12 +1199,18 @@ function SitesController(ctx, log, env) {
     }
 
     // A site's URL backing a Semrush-managed brand can be changed, but only for the
-    // brand's OWN primary site, and only to a URL on the same registrable domain — see
-    // serenity-docs#349. A market-mirror site (linked via brand_sites, type='serenity')
-    // stays immutable: whether/how a mirror should follow a rename is a separate, open
-    // decision (issue #349 workstream 4) this change does not make. The brand lookup
-    // runs only when a URL change is actually requested, so the common patch path (no
-    // baseURL) pays no extra query.
+    // brand's OWN primary site — see serenity-docs#349. A registrable-domain change is
+    // allowed too: live-verified against adobe-hackathon.semrush.com (2026-08-18) that
+    // Semrush's project PATCH accepts and persists a changed `domain` (not just
+    // `primary_url`), and that a subsequent publish settles cleanly with no project
+    // recreation — the "would this lose history?" concern that originally motivated
+    // refusing cross-domain edits does not hold. propagateSiteUrlToSemrush keeps the
+    // project's `domain` in step with the new registrable domain in this case (see that
+    // module). A market-mirror site (linked via brand_sites, type='serenity') stays
+    // immutable: whether/how a mirror should follow a rename is a separate, open decision
+    // (issue #349 workstream 4) this change does not make. The brand lookup runs only when
+    // a URL change is actually requested, so the common patch path (no baseURL) pays no
+    // extra query.
     if (hasText(requestBody.baseURL) && requestBody.baseURL !== site.getBaseURL()) {
       if (!isValidUrl(requestBody.baseURL)) {
         return badRequest('baseURL must be a valid URL');
@@ -1255,16 +1260,6 @@ function SitesController(ctx, log, env) {
         }
 
         if (hasText(attachedBrand?.semrushSubWorkspaceId)) {
-          const currentDomain = getDomain(new URL(site.getBaseURL()).hostname);
-          const nextDomain = getDomain(new URL(requestBody.baseURL).hostname);
-          if (currentDomain !== nextDomain) {
-            return createResponse({
-              message: 'Changing the registrable domain of a site attached to a Semrush-managed '
-                + 'brand is not supported; only same-domain URL edits (subdomain/subpath) are allowed',
-              code: ERROR_CODES.CROSS_DOMAIN_NOT_SUPPORTED,
-            }, 422);
-          }
-
           try {
             await propagateSiteUrlToSemrush({
               dataAccess: context.dataAccess,

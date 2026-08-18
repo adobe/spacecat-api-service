@@ -948,29 +948,24 @@ export default function siteTests(getHttpClient, resetData) {
         expect(after.body.baseURL).to.equal(newBaseUrl);
       });
 
-      it('returns unprocessable entity when a cross-registrable-domain baseURL change is attempted for a Semrush-managed brand\'s site', async () => {
+      it('propagates a cross-registrable-domain baseURL change for a Semrush-managed brand\'s site (serenity-docs#349)', async () => {
         // Same brand-attachment as above, but the new URL is on a DIFFERENT registrable
-        // domain (example.org vs example.com) — refused (422), not propagated: a
-        // project's `domain` is fixed at create and only a same-domain `primary_url`
-        // edit is supported today (serenity-docs#349 workstream 3).
-        //
-        // Reads the CURRENT baseURL first rather than assuming SITE_1_BASE_URL --
-        // this test runs after the same-domain-propagation test above, which already
-        // persisted a new (still same-domain) value onto SITE_1.
+        // domain (example.org vs example.com). Live-verified against
+        // adobe-hackathon.semrush.com (2026-08-18) that a project's `domain` PATCH is
+        // accepted, persists, and a subsequent publish settles cleanly with no project
+        // recreation -- so this is no longer refused, matching the same-domain case.
         const http = getHttpClient();
-        const before = await http.admin.get(`/sites/${SITE_1_ID}`);
-        expect(before.status).to.equal(200);
-        const currentBaseUrl = before.body.baseURL;
+        const newBaseUrl = 'https://cross-domain-rename.example.org';
 
         const res = await http.admin.patch(`/sites/${SITE_1_ID}`, {
-          baseURL: 'https://cross-domain-rename.example.org',
+          baseURL: newBaseUrl,
         });
-        expect(res.status).to.equal(422);
-        expect(res.body.code).to.equal('crossDomainNotSupported');
+        expect(res.status).to.equal(200);
+        expect(res.body.baseURL).to.equal(newBaseUrl);
 
         const after = await http.admin.get(`/sites/${SITE_1_ID}`);
         expect(after.status).to.equal(200);
-        expect(after.body.baseURL).to.equal(currentBaseUrl);
+        expect(after.body.baseURL).to.equal(newBaseUrl);
       });
 
       it('returns 403 when changing the baseURL of a Semrush market-mirror site (linked via brand_sites)', async () => {

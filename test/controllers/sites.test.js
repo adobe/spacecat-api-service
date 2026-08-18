@@ -960,7 +960,10 @@ describe('Sites Controller', () => {
     expect(updated).to.have.property('baseURL', 'https://site1.com/new-path');
   });
 
-  it('returns unprocessable entity when a Semrush-attached site\'s URL would change registrable domain', async () => {
+  it('propagates and persists a Semrush-attached site\'s URL change even across a different registrable domain', async () => {
+    // Live-verified against adobe-hackathon.semrush.com (2026-08-18): a project PATCH
+    // accepts and persists a changed `domain`, and a subsequent publish settles cleanly
+    // with no project recreation — so a cross-domain edit is no longer refused.
     const site = sites[0];
     site.save = sandbox.spy(site.save);
     getBrandBySiteStub.reset();
@@ -975,17 +978,15 @@ describe('Sites Controller', () => {
       dataAccess: { services: { postgrestClient } },
       ...defaultAuthAttributes,
     });
-    const error = await response.json();
 
-    expect(propagateSiteUrlToSemrushStub).to.have.not.been.called;
-    expect(site.save).to.have.not.been.called;
-    expect(response.status).to.equal(422);
-    expect(error).to.have.property(
-      'message',
-      'Changing the registrable domain of a site attached to a Semrush-managed brand is not '
-        + 'supported; only same-domain URL edits (subdomain/subpath) are allowed',
-    );
-    expect(error).to.have.property('code', 'crossDomainNotSupported');
+    expect(propagateSiteUrlToSemrushStub).to.have.been.calledOnce;
+    expect(propagateSiteUrlToSemrushStub.getCall(0).args[0]).to.include({
+      newBaseURL: 'https://changed.example.com',
+    });
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+    const updated = await response.json();
+    expect(updated).to.have.property('baseURL', 'https://changed.example.com');
   });
 
   it('returns conflict when the new baseURL collides with another existing site', async () => {

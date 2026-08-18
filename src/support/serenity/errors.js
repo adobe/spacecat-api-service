@@ -154,10 +154,6 @@ export const ERROR_CODES = Object.freeze({
   // Case-1 quota rejection (serenity-docs#72 §2): the disguised-405 signal classified by
   // isMeteredQuota, surfaced via toQuotaExceededError.
   QUOTA_EXCEEDED: 'quotaExceeded',
-  // serenity-docs#349: a site's baseURL PATCH would change the registrable domain of a
-  // site attached to a Semrush-managed brand — refused (a project's domain is fixed at
-  // create; only a same-domain primary_url edit is supported today).
-  CROSS_DOMAIN_NOT_SUPPORTED: 'crossDomainNotSupported',
 });
 
 /**

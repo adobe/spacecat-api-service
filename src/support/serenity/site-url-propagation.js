@@ -22,11 +22,15 @@ import { projectsForSite } from './mapping-rows.js';
 
 /**
  * Propagates a brand's own primary site's `baseURL` change onto Semrush: for every live
- * market project mapped to this site, re-points the project's tracked `primary_url`, the
- * own-brand benchmark's `domain` (full-body PUT — a field omitted from that PUT is
- * CLEARED upstream, not preserved, see `rest-transport.js`'s `updateBenchmark` JSDoc — so
- * this reads the benchmark first to carry its `brand_name`/`brand_aliases` forward
- * unchanged), and republishes.
+ * market project mapped to this site, re-points the project's tracked `primary_url` AND its
+ * `domain` (the registrable-domain grouping key — Semrush normalizes whatever is sent to the
+ * eTLD+1 via the Public Suffix List, so a same-domain edit is a no-op on this field and a
+ * cross-domain edit moves it too; live-verified against adobe-hackathon.semrush.com
+ * 2026-08-18 that a changed `domain` is accepted, persists, and a subsequent publish settles
+ * cleanly with no project recreation), the own-brand benchmark's `domain` (full-body PUT — a
+ * field omitted from that PUT is CLEARED upstream, not preserved, see `rest-transport.js`'s
+ * `updateBenchmark` JSDoc — so this reads the benchmark first to carry its
+ * `brand_name`/`brand_aliases` forward unchanged), and republishes.
  *
  * Scope: a brand's sub-workspace can hold multiple market projects, and a Site can be
  * shared by more than one of them (two locale variants of the same market both on one
@@ -80,7 +84,9 @@ export async function propagateSiteUrlToSemrush({
     const projectId = row.getSemrushProjectId();
 
     // eslint-disable-next-line no-await-in-loop
-    await transport.updateProject(workspaceId, projectId, { type: 'ai', primary_url: newIdentity });
+    await transport.updateProject(workspaceId, projectId, {
+      type: 'ai', primary_url: newIdentity, domain: newDomain,
+    });
 
     // eslint-disable-next-line no-await-in-loop
     const benchmarkId = await ensureOwnBrandBenchmark(

@@ -95,6 +95,7 @@ describe('propagateSiteUrlToSemrush', () => {
     expect(transport.updateProject).to.have.been.calledOnceWith(WS, 'proj-1', {
       type: 'ai',
       primary_url: 'site1.com/new-path',
+      domain: 'site1.com',
     });
     expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, 'proj-1', 'bench-1', {
       brand_name: 'Acme',
