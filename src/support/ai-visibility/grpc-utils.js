@@ -78,6 +78,77 @@ export function settledFulfilledMap(settled, mapFn, fallback) {
   return settled.status === 'fulfilled' ? mapFn(settled.value) : fallback;
 }
 
+/**
+ * Normalizes a relation `date` into an ISO `YYYY-MM-DD` string. The gRPC relation
+ * value carries `date` as a protobuf Date message (`{ year, month, day }`, plus a
+ * `$typeName` tag), not a scalar — emitting it verbatim leaks that struct to callers.
+ * Passes an already-formatted string through unchanged; returns `null` when the date
+ * is absent or incomplete.
+ *
+ * @param {object|string|null|undefined} d
+ * @returns {string|null}
+ */
+export function toIsoDate(d) {
+  if (!d) { return null; }
+  if (typeof d === 'string') { return d; }
+  const { year, month, day } = d;
+  if (!year || !month || !day) { return null; }
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${year}-${pad(month)}-${pad(day)}`;
+}
+
+/**
+ * Single identity predicate, reused by both the relation-call guard and
+ * `attempted[i]`, so the two cannot drift. `attempted[i]` records whether we
+ * actually issued the per-prompt relation call: without it a skipped prompt
+ * (missing identity → Promise.resolve(null)) is indistinguishable from a
+ * relation call that fulfilled with a null value, which hides why a row has no
+ * full response.
+ *
+ * @param {object} p prompt proto
+ * @returns {boolean}
+ */
+export function hasRelationIdentity(p) {
+  return Boolean(p.promptHash && String(p.serpId ?? '') && p.topicId);
+}
+
+/**
+ * Per-item relation status so callers (e.g. claims_extraction) can tell a real
+ * full response from a degraded one. `error` was previously swallowed silently.
+ *
+ * @param {{ attempted: boolean, settled: { status: 'fulfilled'|'rejected' } }} params
+ * @returns {'skipped'|'error'|'ok'}
+ */
+export function relationStatusFor({ attempted, settled }) {
+  if (!attempted) { return 'skipped'; }
+  if (settled.status === 'rejected') { return 'error'; }
+  return 'ok';
+}
+
+/**
+ * Response provenance. Preserves the exact legacy `response` value (nullish-coalesce
+ * chain) while exposing whether it came from the full relation response or the
+ * brief excerpt. LLMO-6585: claims must never be extracted from an excerpt that is
+ * mistaken for the full answer, so the excerpt fallback is now explicit, not silent.
+ *
+ * @param {object|null|undefined} rel relation value (`relations[i]`), may be null
+ * @param {string|null|undefined} briefResponse the prompt's brief excerpt
+ * @returns {{ response: string, responseSource: 'full'|'excerpt'|'none', responseComplete: boolean }}
+ */
+export function deriveResponse(rel, briefResponse) {
+  const relResponse = rel?.response;
+  const excerpt = briefResponse ?? '';
+  const usedFullResponse = relResponse != null; // relation supplied a `response` field
+  const response = usedFullResponse ? relResponse : excerpt;
+  let responseSource;
+  if (usedFullResponse) { responseSource = 'full'; } else if (excerpt !== '') { responseSource = 'excerpt'; } else { responseSource = 'none'; }
+  return {
+    response,
+    responseSource,
+    responseComplete: responseSource === 'full' && response.length > 0,
+  };
+}
+
 export const GAP_SOURCE_DOMAINS_MAX_RANGE_LIMIT = 100;
 /** Max topicIds query values combined into Semrush dimensionFilterQl (injection-safe numeric ids only). */
 export const MAX_TOPIC_IDS_DIMENSION_FILTER = 50;

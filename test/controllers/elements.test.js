@@ -518,6 +518,25 @@ describe('ElementsController', () => {
       expect(body.error).to.equal('internalServerError');
     });
 
+    // SITES-49993: the non-upstream fallback carries the tenant ids as JSON in
+    // the message and keeps the Error (with its stack) as the second argument.
+    it('logs the tenant ids on the non-upstream fallback path', async () => {
+      const boom = new Error('unexpected');
+      serviceStub.getUrlInspectorFilterDimensions.rejects(boom);
+      const log = fakeLog();
+      const ctx = fakeContext();
+      const ctrl = ElementsController(ctx, log, ENV);
+      await ctrl.listUrlInspectorFilterDimensions(ctx);
+      const call = log.error.getCalls().find(
+        (c) => typeof c.args[0] === 'string' && c.args[0].startsWith('Elements controller error {'),
+      );
+      expect(call).to.exist;
+      const payload = JSON.parse(call.args[0].slice('Elements controller error '.length));
+      expect(payload.spaceCatId).to.equal(ORG_ID);
+      expect(payload.brandId).to.equal(BRAND_ID);
+      expect(call.args[1]).to.equal(boom);
+    });
+
     it('logs ElementsTransportError via log.error', async () => {
       serviceStub.getUrlInspectorFilterDimensions
         .rejects(new MockElementsTransportError(500, 'upstream'));
@@ -526,6 +545,28 @@ describe('ElementsController', () => {
       const ctrl = ElementsController(ctx, log, ENV);
       await ctrl.listUrlInspectorFilterDimensions(ctx);
       expect(log.error).to.have.been.called;
+    });
+
+    // SITES-49993: the upstream-error log line is ONE structured JSON payload
+    // in the message — upstream status + (bounded) body + the tenant ids from
+    // the route — so Logs Insights can group Semrush failures by tenant and
+    // upstream reason.
+    it('logs one structured line with upstream status/body and tenant ids (SITES-49993)', async () => {
+      serviceStub.getUrlInspectorFilterDimensions
+        .rejects(new MockElementsTransportError(500, 'upstream', { code: 'boom' }));
+      const log = fakeLog();
+      const ctx = fakeContext();
+      const ctrl = ElementsController(ctx, log, ENV);
+      await ctrl.listUrlInspectorFilterDimensions(ctx);
+      const call = log.error.getCalls().find(
+        (c) => typeof c.args[0] === 'string' && c.args[0].startsWith('Elements upstream error {'),
+      );
+      expect(call).to.exist;
+      const payload = JSON.parse(call.args[0].slice('Elements upstream error '.length));
+      expect(payload.status).to.equal(500);
+      expect(payload.spaceCatId).to.equal(ORG_ID);
+      expect(payload.brandId).to.equal(BRAND_ID);
+      expect(payload.body).to.equal(JSON.stringify({ code: 'boom' }));
     });
 
     it('maps ErrorWithStatusCode with a code property to that code token', async () => {
@@ -1736,6 +1777,20 @@ describe('ElementsController', () => {
       expect(res.status).to.equal(200);
       const [, params] = serviceStub.getDomainUrls.firstCall.args;
       expect(params.hostname).to.be.undefined;
+    });
+
+    it('maps an upstream ElementsTransportError to 502 via mapError', async () => {
+      serviceStub.getDomainUrls
+        .rejects(new MockElementsTransportError(500, 'upstream failed'));
+      const ctx = fakeContext({
+        url: domainUrlsUrl('?startDate=2026-07-01&endDate=2026-07-14'),
+      });
+      const log = fakeLog();
+      const ctrl = ElementsController(ctx, log, ENV);
+      const res = await ctrl.listDomainUrls(ctx);
+
+      expect(res.status).to.equal(502);
+      expect(log.error).to.have.been.calledWithMatch('Elements upstream error');
     });
 
     it('keeps a single domain query param as a string', async () => {

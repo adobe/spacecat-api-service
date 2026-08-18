@@ -99,6 +99,36 @@ async function buildResolveData(org, site, context, asoEntitlement) {
 }
 
 /**
+ * Recursively deep-merges `patch` into `base`, returning a new object.
+ *
+ * Merge semantics (used for PATCH of nested config like hlxConfig/deliveryConfig):
+ * - Omitted keys keep their existing value in `base`.
+ * - A `null` value deletes the key.
+ * - Plain objects are merged recursively; arrays and non-object values replace.
+ * - Dangerous keys (`__proto__`/`constructor`/`prototype`) are ignored to
+ *   prevent prototype pollution from an untrusted request body.
+ *
+ * @param {object} base - Existing value.
+ * @param {object} patch - Incoming partial patch.
+ * @returns {object} Merged result.
+ */
+function deepMerge(base, patch) {
+  const result = { ...(isObject(base) ? base : {}) };
+  for (const [key, value] of Object.entries(patch)) {
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+      // Ignore prototype-pollution vectors from the request body.
+    } else if (value === null) {
+      delete result[key];
+    } else if (isObject(value) && isObject(result[key])) {
+      result[key] = deepMerge(result[key], value);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+/**
  * Resolves the org's per-product default site from config.defaults, validating it belongs
  * to the org and is enrolled. Returns the resolved data object or null to fall through
  * to getFirstEnrollment().
@@ -510,7 +540,8 @@ function SitesController(ctx, log, env) {
    * when more than one filter is present they compose with AND. `sort`
    * (`<field>:<asc|desc>`, field one of `baseURL`/`updatedAt`/`createdAt`/
    * `deliveryType`/`isLive`) sets the result order. `tier` (one of
-   * `CUSTOMER_VISIBLE_TIERS`) and `productCode` (one of `EntitlementModel.PRODUCT_CODES`)
+   * `EntitlementModel.TIERS`, incl. `PRE_ONBOARD` - not just `CUSTOMER_VISIBLE_TIERS`)
+   * and `productCode` (one of `EntitlementModel.PRODUCT_CODES`)
    * filter to sites enrolled at that entitlement tier/product; when either is present the
    * SAME where/orderBy/limit/cursor built for the branch is passed to
    * `Site.allByEnrollmentFiltered` instead of `Site.all`. Unlike every other filter here,
@@ -518,7 +549,10 @@ function SitesController(ctx, log, env) {
    * the same gate as the standalone `GET /sites/by-tier` endpoint
    * (`getAllByEnrollmentAndTier`) - so a read-only admin or an S2S `site:readAll`
    * caller gets 403 for either param, checked before their enum validation so the 403
-   * vs 400 outcome can't be used to probe valid values. `cursor` is not supported
+   * vs 400 outcome can't be used to probe valid values; the tier accepted-value set
+   * intentionally mirrors that sibling admin-only endpoint (both accept the full
+   * `EntitlementModel.TIERS`, since PRE_ONBOARD is a legitimate admin query here too).
+   * `cursor` is not supported
    * together with any filter/sort (use `offset` instead) - accepting both would silently
    * discard the cursor and mislead the client into thinking cursor pagination is active.
    * @returns {Promise<Response>} Paginated sites response
@@ -587,8 +621,9 @@ function SitesController(ctx, log, env) {
       }
       orderBy = { attribute: sortField, direction: sortDirection };
     }
-    if (hasText(tier) && !CUSTOMER_VISIBLE_TIERS.includes(tier)) {
-      return badRequest(`Invalid tier: ${tier}`);
+    const validTiers = Object.values(EntitlementModel.TIERS);
+    if (hasText(tier) && !validTiers.includes(tier)) {
+      return badRequest(`Tier must be one of: ${validTiers.join(', ')}`);
     }
     const validProductCodes = Object.values(EntitlementModel.PRODUCT_CODES);
     if (hasText(productCode) && !validProductCodes.includes(productCode)) {
@@ -1326,12 +1361,15 @@ function SitesController(ctx, log, env) {
       ? requestBody.authoringType
       : site.getAuthoringType();
 
+    // Deep-merge `deliveryConfig`/`hlxConfig` so a partial patch (e.g. hlxConfig with only
+    // rso+code) preserves omitted sub-keys like hlxConfig.content.source. An explicit `null`
+    // for a sub-key deletes it; omitting the field entirely keeps the existing value.
     const nextDeliveryConfig = isObject(requestBody.deliveryConfig)
-      ? requestBody.deliveryConfig
+      ? deepMerge(site.getDeliveryConfig(), requestBody.deliveryConfig)
       : site.getDeliveryConfig();
 
     const nextHlxConfig = isObject(requestBody.hlxConfig)
-      ? requestBody.hlxConfig
+      ? deepMerge(site.getHlxConfig(), requestBody.hlxConfig)
       : site.getHlxConfig();
 
     const authoringTypeChanged = nextAuthoringType !== site.getAuthoringType();

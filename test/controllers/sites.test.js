@@ -770,6 +770,123 @@ describe('Sites Controller', () => {
     });
   });
 
+  it('deep-merges hlxConfig, preserving existing content.source on partial patch', async () => {
+    const site = sites[0];
+    site.setHlxConfig({
+      content: { source: { type: 'markup', url: 'https://content.example/' } },
+      code: { source: { type: 'github', url: 'https://github.com/old/repo' } },
+    });
+    site.save = sandbox.spy(site.save);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        hlxConfig: {
+          rso: { owner: 'newOwner', site: 'newSite' },
+          code: { source: { type: 'github', url: 'https://github.com/new/repo' } },
+        },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+    const updatedSite = await response.json();
+    expect(updatedSite.hlxConfig).to.deep.equal({
+      content: { source: { type: 'markup', url: 'https://content.example/' } },
+      code: { source: { type: 'github', url: 'https://github.com/new/repo' } },
+      rso: { owner: 'newOwner', site: 'newSite' },
+    });
+  });
+
+  it('deletes an hlxConfig sub-key when patched with null', async () => {
+    const site = sites[0];
+    site.setHlxConfig({
+      content: { source: { type: 'markup', url: 'https://content.example/' } },
+      rso: { owner: 'owner', site: 'site' },
+    });
+    site.save = sandbox.spy(site.save);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { hlxConfig: { content: null } },
+      ...defaultAuthAttributes,
+    });
+
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+    const updatedSite = await response.json();
+    expect(updatedSite.hlxConfig).to.deep.equal({
+      rso: { owner: 'owner', site: 'site' },
+    });
+  });
+
+  it('leaves hlxConfig unchanged when the patch omits it', async () => {
+    const site = sites[0];
+    const existingHlxConfig = {
+      content: { source: { type: 'markup', url: 'https://content.example/' } },
+    };
+    site.setHlxConfig(existingHlxConfig);
+    site.save = sandbox.spy(site.save);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { deliveryType: 'other' },
+      ...defaultAuthAttributes,
+    });
+
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+    const updatedSite = await response.json();
+    expect(updatedSite.hlxConfig).to.deep.equal(existingHlxConfig);
+  });
+
+  it('deep-merges deliveryConfig, preserving omitted sub-keys on partial patch', async () => {
+    const site = sites[0];
+    site.setDeliveryConfig({
+      programId: '12652',
+      environmentId: '16854',
+      authorURL: 'https://author-p12652-e16854-cmstg.adobeaemcloud.com/',
+    });
+    site.save = sandbox.spy(site.save);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { deliveryConfig: { siteId: '1234' } },
+      ...defaultAuthAttributes,
+    });
+
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+    const updatedSite = await response.json();
+    expect(updatedSite.deliveryConfig).to.deep.equal({
+      programId: '12652',
+      environmentId: '16854',
+      authorURL: 'https://author-p12652-e16854-cmstg.adobeaemcloud.com/',
+      siteId: '1234',
+    });
+  });
+
+  it('ignores __proto__ keys in a config patch to prevent prototype pollution', async () => {
+    const site = sites[0];
+    site.setHlxConfig({ rso: { owner: 'o' } });
+    site.save = sandbox.spy(site.save);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        hlxConfig: JSON.parse('{"__proto__": {"polluted": true}, "rso": {"site": "s"}}'),
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(200);
+    // Object.prototype must not have been polluted.
+    expect({}.polluted).to.equal(undefined);
+    const updatedSite = await response.json();
+    expect(updatedSite.hlxConfig).to.deep.equal({ rso: { owner: 'o', site: 's' } });
+  });
+
   it('returns forbidden when trying to update organizationId', async () => {
     const site = sites[0];
     site.save = sandbox.spy(site.save);
@@ -1708,6 +1825,27 @@ describe('Sites Controller', () => {
       expect(opts.cursor).to.equal(Buffer.from(JSON.stringify({ offset: 0 })).toString('base64'));
     });
 
+    it('accepts tier=PRE_ONBOARD for a full admin (not just CUSTOMER_VISIBLE_TIERS) and calls Site.allByEnrollmentFiltered', async () => {
+      // This filter path is already full-admin-gated (see the 403 tests below), so it
+      // accepts the full Entitlement.TIERS set - same as the sibling admin-only
+      // GET /sites/by-tier endpoint (getAllByEnrollmentAndTier) - not just the
+      // customer-visible subset.
+      mockDataAccess.Site.allByEnrollmentFiltered.resolves(sites);
+
+      const result = await sitesController.getAll({
+        ...context,
+        data: { tier: 'PRE_ONBOARD' },
+      });
+      const body = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(body.pagination).to.include({ tier: 'PRE_ONBOARD' });
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+      expect(mockDataAccess.Site.allByEnrollmentFiltered).to.have.been.calledOnce;
+      const [filter] = mockDataAccess.Site.allByEnrollmentFiltered.firstCall.args;
+      expect(filter).to.deep.equal({ tier: 'PRE_ONBOARD', productCode: undefined });
+    });
+
     it('with no sort, the enrollment and non-enrollment branches receive an IDENTICAL default orderBy', async () => {
       // Regression: Site.all defaults (via its all-index) to baseURL asc, while
       // Site.allByEnrollmentFiltered defaults to updatedAt desc and ignores `order`.
@@ -1829,7 +1967,10 @@ describe('Sites Controller', () => {
         ...context,
         data: { tier: 'BOGUS_TIER' },
       });
+      const error = await result.json();
       expect(result.status).to.equal(400);
+      // Mirrors the sibling GET /sites/by-tier wording (getAllByEnrollmentAndTier).
+      expect(error.message).to.match(/^Tier must be one of:/);
       expect(mockDataAccess.Site.all).to.not.have.been.called;
       expect(mockDataAccess.Site.allByEnrollmentFiltered).to.not.have.been.called;
     });
@@ -1859,6 +2000,21 @@ describe('Sites Controller', () => {
       const result = await sitesController.getAll({
         ...context,
         data: { tier: 'PAID' },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Filtering sites by tier or productCode requires admin access');
+      expect(mockDataAccess.Site.all).to.not.have.been.called;
+      expect(mockDataAccess.Site.allByEnrollmentFiltered).to.not.have.been.called;
+    });
+
+    it('returns 403 (not 400 or 200) when a read-only admin requests tier=PRE_ONBOARD - the admin-access guard runs before tier enum validation', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false, is_read_only_admin: true });
+
+      const result = await sitesController.getAll({
+        ...context,
+        data: { tier: 'PRE_ONBOARD' },
       });
       const error = await result.json();
 

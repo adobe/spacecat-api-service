@@ -11,7 +11,9 @@
  */
 
 import { expect } from 'chai';
-import { hostnameFromUrlString, isPublicHostname } from '../../src/support/url-utils.js';
+import {
+  endpointOf, hostnameFromUrlString, isPublicHostname, siteIdentityFromUrlString,
+} from '../../src/support/url-utils.js';
 
 describe('url-utils: hostnameFromUrlString', () => {
   it('extracts the hostname from a full URL', () => {
@@ -31,6 +33,43 @@ describe('url-utils: hostnameFromUrlString', () => {
 
   it('returns null for an unparseable URL (new URL throws)', () => {
     expect(hostnameFromUrlString('https://[')).to.equal(null);
+  });
+});
+
+describe('url-utils: siteIdentityFromUrlString', () => {
+  it('keeps the host and preserves the path', () => {
+    expect(siteIdentityFromUrlString('https://www.nba.com/kings/')).to.equal('www.nba.com/kings');
+    expect(siteIdentityFromUrlString('nba.com/kings')).to.equal('nba.com/kings');
+    expect(siteIdentityFromUrlString('quickbooks.intuit.com/au')).to.equal('quickbooks.intuit.com/au');
+  });
+
+  it('returns host-only for path-free URLs (matches hostnameFromUrlString, no trailing slash)', () => {
+    expect(siteIdentityFromUrlString('https://example.com')).to.equal('example.com');
+    expect(siteIdentityFromUrlString('https://example.com/')).to.equal('example.com');
+    expect(siteIdentityFromUrlString('quickbooks.intuit.com')).to.equal('quickbooks.intuit.com');
+  });
+
+  it('strips a single trailing slash but preserves .html and case-sensitive path', () => {
+    expect(siteIdentityFromUrlString('experian.co.uk/business/')).to.equal('experian.co.uk/business');
+    expect(siteIdentityFromUrlString('oklahoma.gov/omes.html')).to.equal('oklahoma.gov/omes.html');
+    expect(siteIdentityFromUrlString('HTTPS://Shop.Example.COM/UK/En')).to.equal('shop.example.com/UK/En');
+  });
+
+  it('strips scheme, userinfo, port, query and fragment', () => {
+    expect(siteIdentityFromUrlString('https://user:pass@shop.example.com:8443/uk?a=1#f'))
+      .to.equal('shop.example.com/uk');
+  });
+
+  it('returns null for empty/whitespace/non-string input', () => {
+    expect(siteIdentityFromUrlString('')).to.equal(null);
+    expect(siteIdentityFromUrlString('   ')).to.equal(null);
+    expect(siteIdentityFromUrlString(undefined)).to.equal(null);
+    expect(siteIdentityFromUrlString(null)).to.equal(null);
+  });
+
+  it('returns null for unparseable input and empty-host URLs', () => {
+    expect(siteIdentityFromUrlString('https://[')).to.equal(null);
+    expect(siteIdentityFromUrlString('file:///etc/passwd')).to.equal(null);
   });
 });
 
@@ -104,5 +143,22 @@ describe('url-utils: isPublicHostname', () => {
 
   it('returns false for an unparseable input (fails closed)', () => {
     expect(isPublicHostname('https://[')).to.equal(false);
+  });
+});
+
+describe('url-utils: endpointOf', () => {
+  it('returns the pathname of a full URL', () => {
+    expect(endpointOf('https://gw.example.com/v1/workspaces/ws-1/resources?x=1'))
+      .to.equal('/v1/workspaces/ws-1/resources');
+  });
+
+  it('returns undefined for an unparseable URL', () => {
+    expect(endpointOf('not a url')).to.equal(undefined);
+  });
+
+  it('returns undefined for null/undefined/empty input', () => {
+    expect(endpointOf(null)).to.equal(undefined);
+    expect(endpointOf(undefined)).to.equal(undefined);
+    expect(endpointOf('')).to.equal(undefined);
   });
 });

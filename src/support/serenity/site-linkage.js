@@ -14,7 +14,7 @@
 
 import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
 import * as dataAccessModels from '@adobe/spacecat-shared-data-access';
-import { hostnameFromUrlString, isPublicHostname } from '../url-utils.js';
+import { hostnameFromUrlString, isPublicHostname, siteIdentityFromUrlString } from '../url-utils.js';
 
 // `Site` is a runtime value (the model class carrying the DELIVERY_TYPES static
 // map) but the data-access package's .d.ts re-exports its models as types only,
@@ -273,16 +273,55 @@ export async function ensureMarketSite(ctx, {
 }
 
 /**
- * Resolves a SpaceCat Site UUID to its bare hostname (the domain a Semrush
- * market/project tracks). Lets a market-create caller supply a `siteId` instead
- * of a `brandDomain`: the site's `base_url` is normalized to a hostname via
- * `hostnameFromUrlString` (the same normalizer every other brand → Semrush
- * domain derivation uses), so the derived domain is identical to what a
- * `brandDomain` caller would have sent.
+ * Resolves a SpaceCat Site UUID to BOTH URL-ish values a Semrush project tracks:
+ * the host-only `domain` (grouping key, `hostnameFromUrlString`) and the full
+ * `primaryUrl` "site identity" (`siteIdentityFromUrlString`, keeping any
+ * subdomain/subpath). The two are deliberately distinct — `domain` is
+ * eTLD+1-normalized upstream and rejects a path, while `primaryUrl` is the URL
+ * the brand actually owns (serenity-docs#348), written to
+ * `settings.ai.primary_url`. Sharing one Site fetch keeps them consistent.
  *
  * Best-effort: returns null (never throws) on missing input, unavailable
- * data-access, an unknown site, or a lookup failure. The caller decides whether
- * a null is a hard 400 (a supplied siteId that cannot resolve) or a silent skip.
+ * data-access, an unknown site, or a lookup failure — same contract as the
+ * former `resolveSiteDomain`, which now delegates here.
+ *
+ * @param {object} dataAccess - `ctx.dataAccess` (reads `dataAccess.Site`).
+ * @param {string|null|undefined} siteId - the SpaceCat Site UUID to resolve.
+ * @param {object} [log] - logger.
+ * @returns {Promise<{domain: string|null, primaryUrl: string|null}|null>} the
+ *   derived values, or null when the site cannot be resolved.
+ */
+export async function resolveSiteIdentity(dataAccess, siteId, log) {
+  if (!siteId || !hasText(siteId)) {
+    return null;
+  }
+  const Site = dataAccess?.Site;
+  if (!Site || typeof Site.findById !== 'function') {
+    log?.warn?.('resolveSiteIdentity: Site data-access unavailable; cannot resolve site', { siteId });
+    return null;
+  }
+  try {
+    const site = await Site.findById(siteId);
+    if (!site) {
+      log?.warn?.('resolveSiteIdentity: site not found', { siteId });
+      return null;
+    }
+    const baseURL = site.getBaseURL();
+    return {
+      domain: hostnameFromUrlString(baseURL),
+      primaryUrl: siteIdentityFromUrlString(baseURL),
+    };
+  } catch (e) {
+    log?.warn?.('resolveSiteIdentity: lookup failed (non-fatal)', { siteId, error: e.message });
+    return null;
+  }
+}
+
+/**
+ * Resolves a SpaceCat Site UUID to its bare hostname (the host-only `domain` a
+ * Semrush market/project tracks). Thin wrapper over {@link resolveSiteIdentity}
+ * kept for the callers that only need the domain. Best-effort: returns null
+ * (never throws) when the site cannot be resolved.
  *
  * @param {object} dataAccess - `ctx.dataAccess` (reads `dataAccess.Site`).
  * @param {string|null|undefined} siteId - the SpaceCat Site UUID to resolve.
@@ -290,25 +329,8 @@ export async function ensureMarketSite(ctx, {
  * @returns {Promise<string|null>} the site's hostname, or null when unresolvable.
  */
 export async function resolveSiteDomain(dataAccess, siteId, log) {
-  if (!siteId || !hasText(siteId)) {
-    return null;
-  }
-  const Site = dataAccess?.Site;
-  if (!Site || typeof Site.findById !== 'function') {
-    log?.warn?.('resolveSiteDomain: Site data-access unavailable; cannot resolve site domain', { siteId });
-    return null;
-  }
-  try {
-    const site = await Site.findById(siteId);
-    if (!site) {
-      log?.warn?.('resolveSiteDomain: site not found', { siteId });
-      return null;
-    }
-    return hostnameFromUrlString(site.getBaseURL());
-  } catch (e) {
-    log?.warn?.('resolveSiteDomain: lookup failed (non-fatal)', { siteId, error: e.message });
-    return null;
-  }
+  const identity = await resolveSiteIdentity(dataAccess, siteId, log);
+  return identity?.domain ?? null;
 }
 
 /**

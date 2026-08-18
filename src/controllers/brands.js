@@ -33,7 +33,7 @@ import {
 } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode, getImsUserToken, resolveSemrushImsToken } from '../support/utils.js';
-import { hostnameFromUrlString } from '../support/url-utils.js';
+import { hostnameFromUrlString, siteIdentityFromUrlString } from '../support/url-utils.js';
 import {
   STATUS_BAD_REQUEST,
 } from '../utils/constants.js';
@@ -72,6 +72,7 @@ import { ensureMarketSite } from '../support/serenity/site-linkage.js';
 import { upsertMappingRow, linkSiteToLiveRows } from '../support/serenity/mapping-rows.js';
 import { createSerenityTransport } from '../support/serenity/rest-transport.js';
 import { isSemrushTransportError, unwrapTransportCause } from '../support/serenity/errors.js';
+import { logUpstreamError } from '../support/serenity/upstream-log.js';
 import { syncBrandUrlsAcrossMarkets } from '../support/serenity/brand-urls.js';
 import { syncBrandAliasesAcrossMarkets } from '../support/serenity/brand-aliases.js';
 import { resolveProjects } from '../support/serenity/resolve-projects.js';
@@ -127,6 +128,36 @@ function brandDomainFromPayload(brandData) {
     .map((u) => (typeof u === 'string' ? u : u?.value))
     .find(hasText);
   return hostnameFromUrlString(first);
+}
+
+/**
+ * Derives the brand's full "site identity" (host + any subdomain/subpath) from a
+ * brand-create payload's URLs — the value written to Semrush's
+ * `settings.ai.primary_url` (serenity-docs#348), distinct from the host-only
+ * `domain` {@link brandDomainFromPayload} returns. Same first-URL selection.
+ * Returns null when no usable URL is present.
+ */
+function brandPrimaryUrlFromPayload(brandData) {
+  const urls = Array.isArray(brandData?.urls) ? brandData.urls : [];
+  const first = urls
+    .map((u) => (typeof u === 'string' ? u : u?.value))
+    .find(hasText);
+  return siteIdentityFromUrlString(first);
+}
+
+/**
+ * Tenant ids for the structured upstream-error log line (SITES-49993). The
+ * legacy routes name the org param `organizationId`, the v2 routes
+ * `spaceCatId` — normalised onto one queryable field name.
+ * @param {object} [context]
+ * @returns {Record<string, unknown>}
+ */
+function reqCtxOf(context) {
+  const params = context?.params ?? {};
+  return {
+    spaceCatId: params.spaceCatId ?? params.organizationId,
+    brandId: params.brandId,
+  };
 }
 
 /**
@@ -286,7 +317,12 @@ function BrandsController(ctx, log, env) {
     return params;
   }
 
-  function createErrorResponse(error) {
+  /**
+   * @param {unknown} error
+   * @param {Record<string, unknown>} [reqCtx] - tenant ids for the structured
+   *   upstream-error log line (SITES-49993); see {@link reqCtxOf}.
+   */
+  function createErrorResponse(error, reqCtx = {}) {
     // A Semrush upstream error's message embeds the gateway URL (internal host +
     // workspace/project UUIDs); never echo it to the client (body or x-error
     // header). Return a generic message and keep the detail to the log. Mirrors
@@ -299,6 +335,10 @@ function BrandsController(ctx, log, env) {
     // flattening to the generic 502. See unwrapTransportCause (errors.js).
     const err = unwrapTransportCause(error);
     if (isSemrushTransportError(err)) {
+      // One structured, queryable line with the upstream status/body and the
+      // tenant ids — the line Logs Insights groups on. The per-handler
+      // log.error above each call site adds its handler-specific context.
+      logUpstreamError(log, 'Brands upstream error', err, reqCtx);
       const status = (err.status === 401 || err.status === 403) ? err.status : 502;
       const message = status === 502 ? 'Upstream request failed' : 'Upstream authorization failed';
       return createResponse({ message }, status, { [HEADER_ERROR]: message });
@@ -369,7 +409,7 @@ function BrandsController(ctx, log, env) {
       return createResponse(brands, 200);
     } catch (error) {
       log.error(`Error getting brands for organization: ${organizationId}`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -477,7 +517,7 @@ function BrandsController(ctx, log, env) {
       return createResponse(brandGuidelines, 200);
     } catch (error) {
       log.error(`Error getting brand guidelines for site: ${siteId}`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -546,7 +586,7 @@ function BrandsController(ctx, log, env) {
       return createResponse(result, 200);
     } catch (error) {
       log.error(`Error listing prompts for brand ${brandId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -600,7 +640,7 @@ function BrandsController(ctx, log, env) {
       return ok(prompt);
     } catch (error) {
       log.error(`Error getting prompt ${promptId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -693,10 +733,10 @@ function BrandsController(ctx, log, env) {
     } catch (error) {
       if (error?.status === 409) {
         log.warn(`Prompt unique-constraint conflict for brand ${brandId} (org ${spaceCatId}): ${error.message}`);
-        return createErrorResponse(error);
+        return createErrorResponse(error, reqCtxOf(context));
       }
       log.error(`Error creating prompts for brand ${brandId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -755,7 +795,7 @@ function BrandsController(ctx, log, env) {
       return ok(prompt);
     } catch (error) {
       log.error(`Error updating prompt ${promptId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -811,7 +851,7 @@ function BrandsController(ctx, log, env) {
       return noContent();
     } catch (error) {
       log.error(`Error deleting prompt ${promptId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -870,7 +910,7 @@ function BrandsController(ctx, log, env) {
       return createResponse(result, 200);
     } catch (error) {
       log.error(`Error bulk deleting prompts for brand ${brandId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -926,7 +966,7 @@ function BrandsController(ctx, log, env) {
       return createResponse({ results }, 200);
     } catch (error) {
       log.error('Error checking prompts existence', { brandId, error });
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -973,7 +1013,7 @@ function BrandsController(ctx, log, env) {
       return createResponse(stats, 200);
     } catch (error) {
       log.error('Error fetching prompt stats', { brandId, error });
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1022,7 +1062,7 @@ function BrandsController(ctx, log, env) {
       return ok(withSerenityState(brand, serenityScopes));
     } catch (error) {
       log.error(`Error getting brand ${brandId} for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1094,7 +1134,7 @@ function BrandsController(ctx, log, env) {
         `Error resolving brand for org ${spaceCatId} site ${siteId}:`,
         error,
       );
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1159,7 +1199,7 @@ function BrandsController(ctx, log, env) {
       return createResponse({ brands }, 200);
     } catch (error) {
       log.error(`Error listing brands for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1194,7 +1234,7 @@ function BrandsController(ctx, log, env) {
       return createResponse({ categories }, 200);
     } catch (error) {
       log.error(`Error listing categories for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1266,7 +1306,7 @@ function BrandsController(ctx, log, env) {
       } else {
         log.error(`Error creating category for organization ${spaceCatId}:`, error);
       }
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1325,7 +1365,7 @@ function BrandsController(ctx, log, env) {
       } else {
         log.error(`Error updating category ${categoryId} for organization ${spaceCatId}:`, error);
       }
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1375,7 +1415,7 @@ function BrandsController(ctx, log, env) {
       return noContent();
     } catch (error) {
       log.error(`Error deleting category ${categoryId} for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1413,7 +1453,7 @@ function BrandsController(ctx, log, env) {
       return createResponse({ topics }, 200);
     } catch (error) {
       log.error(`Error listing topics for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1469,7 +1509,7 @@ function BrandsController(ctx, log, env) {
       } else {
         log.error(`Error creating topic for organization ${spaceCatId}:`, error);
       }
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1518,7 +1558,7 @@ function BrandsController(ctx, log, env) {
       return ok(updated);
     } catch (error) {
       log.error(`Error updating topic ${topicId} for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1565,7 +1605,7 @@ function BrandsController(ctx, log, env) {
       return noContent();
     } catch (error) {
       log.error(`Error deleting topic ${topicId} for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1682,46 +1722,16 @@ function BrandsController(ctx, log, env) {
           return badRequest('market and languageCode are required when generatePrompts is true');
         }
         if (isPendingBrand) {
-          // Defer provisioning: persist the chosen (market, languageCode) AND
-          // the primary URL (if the user entered one before saving as pending)
-          // on the brand, so activation can provision the real sub-workspace +
-          // project later (stored in brands.pending_semrush_provisioning). The primary
-          // URL otherwise lives only on the Semrush side, so a site-less draft
-          // would have nowhere to keep it. The row lands as 'pending' because it
-          // has no anchor (no site_id, no semrush_sub_workspace_id) — see
+          // A pending (draft) brand defers ALL Semrush provisioning — no
+          // sub-workspace, no project. Its markets are added later from the Markets
+          // tab, and pending→active activation is sub-workspace-only (LLMO-6405), so
+          // nothing needs to be stashed at create time. The row lands as 'pending'
+          // because it has no anchor (no site_id, no semrush_sub_workspace_id) — see
           // upsertBrand's anchor check.
-          const primaryUrl = (Array.isArray(brandData.urls) ? brandData.urls : [])
-            .map((u) => (typeof u === 'string' ? u : u?.value))
-            .find(hasText) || null;
-          // AI models (LLMs) the wizard collected. Unlike the direct-provision
-          // path they are NOT required here — a draft can be saved before the
-          // user picks any, and they can be edited per-market later from the
-          // Markets tab. Seed the initial market's modelIds with them when
-          // present so activation applies them; omit the key entirely when none
-          // were chosen (mirrors normalizePendingSemrushProvisioning).
-          const seedModelIds = Array.isArray(brandData.semrushModelIds)
-            ? brandData.semrushModelIds.filter(hasText)
-            : [];
-          // A no-prompt draft may carry NO market at all (location/language are
-          // optional then) — stash only the market actually picked. The activate
-          // flow already handles 0..N stashed markets: an empty list + a primary
-          // URL provisions a single US/EN fallback project, and an empty list +
-          // no URL provisions a sub-workspace-only brand.
-          // TODO: the wizard creates at most one market today; if multi-market
-          // draft creation is added, build this array from all selected markets.
-          const markets = [];
-          if (hasSemrushMarket) {
-            const initialMarket = { market, languageCode };
-            if (seedModelIds.length > 0) {
-              initialMarket.modelIds = seedModelIds;
-            }
-            markets.push(initialMarket);
-          }
-          brandData.pendingSemrushProvisioning = {
-            primaryUrl,
-            markets,
-            generatePrompts,
-          };
+          //
+          // SITES-49448: brands.pending_semrush_provisioning is being retired — this
+          // was its last create-time writer. The staging blob no longer serves any
+          // activation path, so the draft is saved without one.
         } else if (hasSemrushMarket) {
           const brandDomain = brandDomainFromPayload(brandData);
           if (!brandDomain || !hasText(brandDomain)) {
@@ -1769,6 +1779,7 @@ function BrandsController(ctx, log, env) {
             market,
             languageCode,
             brandDomain,
+            primaryUrl: brandPrimaryUrlFromPayload(brandData) ?? undefined,
             modelIds,
             generateTopics: generatePrompts,
             brandAliases,
@@ -1895,7 +1906,7 @@ function BrandsController(ctx, log, env) {
         });
         await emptyProvisionedWorkspace(context, provisionedWorkspaceId, spaceCatId, log);
       }
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1942,28 +1953,11 @@ function BrandsController(ctx, log, env) {
       // baseUrl is read-only (resolved from baseSiteId) — strip from updates.
       delete updates.baseUrl;
 
-      // pendingSemrushProvisioning is the deferred-provisioning staging blob for
-      // a *pending* (draft) brand. The draft UI mutates it via PATCH — the
-      // Markets tab appends a market / edits a market's LLMs before activation.
-      // Permit that ONLY while the brand is (and stays) pending: an active brand
-      // keeps its markets on the Semrush side, so a PATCH must never inject a
-      // primaryUrl/markets onto a live brand that activation would later trust.
-      // When the target isn't pending (or the same PATCH is flipping it to
-      // active — activation is the serenity endpoint's job, not PATCH's), strip
-      // it. Only pay for the status read when the field is actually present.
-      if (updates.pendingSemrushProvisioning !== undefined) {
-        const { data: currentBrand } = await postgrestClient
-          .from('brands')
-          .select('status')
-          .eq('organization_id', spaceCatId)
-          .eq('id', brandUuid)
-          .maybeSingle();
-        const isPending = currentBrand?.status === 'pending'
-          && (updates.status === undefined || updates.status === 'pending');
-        if (!isPending) {
-          delete updates.pendingSemrushProvisioning;
-        }
-      }
+      // pendingSemrushProvisioning was the deferred-provisioning staging blob for a
+      // *pending* (draft) brand, mutated by the draft Markets-tab UI via PATCH. That
+      // UI is gone and the blob is being retired (SITES-49448): never accept a
+      // client-supplied value, so no PATCH can (re)populate the column on any brand.
+      delete updates.pendingSemrushProvisioning;
 
       // Capture the competitor list BEFORE the update so the Semrush re-sync can
       // compute which competitors were removed (old − new) — the only ones it
@@ -2354,7 +2348,7 @@ function BrandsController(ctx, log, env) {
         emitBrandStaleWriteRejected(context, 'updateBrand');
       }
       log.error(`Error updating brand ${brandId} for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -2402,7 +2396,7 @@ function BrandsController(ctx, log, env) {
       return noContent();
     } catch (error) {
       log.error(`Error deleting brand ${brandId} for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -2508,6 +2502,13 @@ function BrandsController(ctx, log, env) {
       // usually baseUrl); a pending brand resolves from its stashed Semrush primary URL.
       // We deliberately do NOT fall back to urls[] — that's the brand's listed URLs,
       // not a declared activation anchor, so guessing one would be wrong.
+      //
+      // SITES-49448: pendingSemrushProvisioning is no longer written at create, so this
+      // stash-primaryUrl fallback now serves ONLY legacy pending rows during drain. A new
+      // pending brand anchors via baseSiteId (the caller's site selection) or activates
+      // through /serenity/activate (sub-workspace-anchored, needs no site) — neither path
+      // reaches this branch. The fallback is removed with the read-path cleanup once no
+      // live row carries a non-empty blob.
       let { baseSiteId, baseUrl } = brand;
       if (!hasText(baseSiteId)) {
         const primaryUrl = brand.pendingSemrushProvisioning?.primaryUrl;
@@ -2749,7 +2750,7 @@ function BrandsController(ctx, log, env) {
       } catch (alertError) {
         log.error(`Failed to post activation-failure alert for brand ${brandId}:`, alertError);
       }
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -2813,7 +2814,7 @@ function BrandsController(ctx, log, env) {
       return ok(withSerenityState(updated, serenityScopes));
     } catch (error) {
       log.error(`Error transitioning status for brand ${brandId} in organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 

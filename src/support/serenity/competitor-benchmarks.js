@@ -18,7 +18,7 @@ import {
   regionApplies,
   normalizeBenchmarkDomain,
   marketOf,
-  republishBestEffort,
+  republish,
 } from './brand-urls.js';
 import {
   dedupeAliases,
@@ -391,10 +391,10 @@ export async function syncCompetitorBenchmarksForProject(
 /**
  * Re-syncs a brand's competitors as benchmarks across every market/project in
  * its sub-workspace (the brand-edit path): per project, region-filter + create
- * additions + update alias drift + delete removals, then republish (best-effort)
- * when anything changed. Create/update/delete errors propagate; a quota 405 on
- * republish is tolerated. `rejected` aggregates the per-market competitor aliases
- * Semrush refused, tagged with their project/market, so the caller can surface them.
+ * additions + update alias drift + delete removals, then republish when anything
+ * changed. Create/update/delete/republish errors propagate. `rejected` aggregates
+ * the per-market competitor aliases Semrush refused, tagged with their project/market, so the
+ * caller can surface them.
  *
  * @param {SerenityTransport} transport
  * @param {Array<{name?: string, url?: string, regions?: string[], aliases?: string[]}>}
@@ -473,7 +473,7 @@ export async function syncCompetitorBenchmarksAcrossMarkets(
       rejected.push(...result.rejected.map((r) => ({ projectId, market, ...r })));
       if (result.changed) {
         // eslint-disable-next-line no-await-in-loop
-        await republishBestEffort(transport, workspaceId, projectId, log);
+        await republish(transport, workspaceId, projectId, log);
       }
     } catch (e) {
       // A mid-fan-out failure must name WHICH market split so the brand-edit

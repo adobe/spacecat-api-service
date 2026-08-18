@@ -418,6 +418,18 @@ export default function siteTests(getHttpClient, resetData) {
         expect(res.body.sites).to.be.an('array').that.is.empty;
       });
 
+      it('admin: tier=PRE_ONBOARD is accepted (internal-only, not customer-visible) since this filter is already admin-gated', async () => {
+        const http = getHttpClient();
+        // Mirrors the sibling GET /sites/by-tier/PRE_ONBOARD IT test: no PRE_ONBOARD
+        // entitlement is seeded above, so this only asserts the value is ACCEPTED
+        // (200, echoed in pagination) rather than rejected with 400, not that any
+        // specific site is returned.
+        const res = await http.admin.get('/sites?tier=PRE_ONBOARD');
+        expect(res.status).to.equal(200);
+        expect(res.body.pagination).to.include({ hasMore: false, tier: 'PRE_ONBOARD' });
+        expect(res.body.sites).to.be.an('array');
+      });
+
       it('admin: tier is rejected with 400 when not a recognized value', async () => {
         const http = getHttpClient();
         const res = await http.admin.get('/sites?tier=BOGUS_TIER');
@@ -929,6 +941,36 @@ export default function siteTests(getHttpClient, resetData) {
         const after = await http.admin.get(`/sites/${SITE_1_ID}`);
         expect(after.status).to.equal(200);
         expect(after.body.baseURL).to.equal(SITE_1_BASE_URL);
+      });
+
+      it('deep-merges hlxConfig on a partial patch, preserving content.source (SITES-49362)', async () => {
+        const http = getHttpClient();
+        // Seed a crosswalk-shaped hlxConfig (content.source.type=markup).
+        const seed = await http.user.patch(`/sites/${testSiteId}`, {
+          hlxConfig: {
+            content: { source: { type: 'markup', url: 'https://author.example/bin/franklin.delivery/o/s/main' } },
+            rso: {
+              owner: 'o', site: 's', ref: 'main', tld: 'aem.live',
+            },
+          },
+        });
+        expect(seed.status).to.equal(200);
+        expect(seed.body.hlxConfig.content.source.type).to.equal('markup');
+
+        // A partial patch touching only rso must NOT drop the sibling content.source.
+        const res = await http.user.patch(`/sites/${testSiteId}`, {
+          hlxConfig: {
+            rso: {
+              owner: 'o', site: 's2', ref: 'main', tld: 'aem.live',
+            },
+          },
+        });
+        expect(res.status).to.equal(200);
+        expect(res.body.hlxConfig.content.source).to.deep.equal({
+          type: 'markup',
+          url: 'https://author.example/bin/franklin.delivery/o/s/main',
+        });
+        expect(res.body.hlxConfig.rso.site).to.equal('s2');
       });
     });
 

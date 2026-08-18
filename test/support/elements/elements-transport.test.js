@@ -186,6 +186,39 @@ describe('createElementsTransport', () => {
       expect(err.status).to.equal(503);
     });
 
+    // SITES-49993: the error carries a structured request descriptor so the
+    // controller's upstream-error log line can emit queryable fields.
+    it('attaches method/endpoint/workspaceId/elementId to ElementsTransportError', async () => {
+      fetchStub.resolves(makeResponse(403, { error: 'denied' }));
+      const transport = createElementsTransport({ env: ENV, imsToken: IMS_TOKEN });
+      let err;
+      try {
+        await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {});
+      } catch (e) {
+        err = e;
+      }
+      expect(err.method).to.equal('POST');
+      expect(err.endpoint).to.equal(
+        `/enterprise/pages/api/v3/workspaces/${WORKSPACE_ID}/products/ai/elements/${ELEMENT_ID}/data`,
+      );
+      expect(err.workspaceId).to.equal(WORKSPACE_ID);
+      expect(err.elementId).to.equal(ELEMENT_ID);
+    });
+
+    it('attaches the request descriptor on timeout too (SITES-49993)', async () => {
+      fetchStub.rejects(Object.assign(new Error('The operation was aborted'), { name: 'AbortError' }));
+      const transport = createElementsTransport({ env: ENV, imsToken: IMS_TOKEN });
+      let err;
+      try {
+        await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {});
+      } catch (e) {
+        err = e;
+      }
+      expect(err.method).to.equal('POST');
+      expect(err.workspaceId).to.equal(WORKSPACE_ID);
+      expect(err.elementId).to.equal(ELEMENT_ID);
+    });
+
     it('includes parsed response body on ElementsTransportError', async () => {
       const errorBody = { error: 'upstream detail' };
       fetchStub.resolves(makeResponse(422, errorBody));

@@ -13,6 +13,7 @@
 // @ts-check
 
 import { hasText } from '@adobe/spacecat-shared-utils';
+import { siteIdentityFromUrlString } from '../../url-utils.js';
 
 import { ErrorWithStatusCode } from '../../utils.js';
 import {
@@ -515,10 +516,11 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  *   competitor list (region-filtered, domain-only). Read-merged with Semrush's
  *   existing/auto-generated list before publish. Best-effort: a failed sync is
  *   logged (non-fatal) and never aborts the create.
- * @param {'require'|'best-effort'|'skip'} [options.publishMode='require'] - how
- *   to publish: `require` throws on failure (the default markets endpoint);
- *   `best-effort` swallows a quota 405 (empty-units publish, workspace doc §5)
- *   and leaves the project a draft; `skip` does not publish at all.
+ * @param {'require'|'skip'} [options.publishMode='require'] - how to publish:
+ *   `require` throws on failure (the default markets endpoint, and — since
+ *   SITES-49206 — every create, including an empty-units project: Semrush no
+ *   longer enforces AI limits, so there is no quota 405 left to tolerate);
+ *   `skip` does not publish at all (LLMO-5492 defer-publish).
  * @param {any} [options.dataAccess] - when supplied, upserts the
  *   `brand_to_semrush_projects` mapping row for this project (best-effort,
  *   never fails the create). Omit for a `brand` that is not yet a persisted
@@ -628,6 +630,35 @@ export async function handleCreateMarketSubworkspace(
     projectId = String(createResp?.id || '');
     if (!hasText(projectId)) {
       return { status: 502, body: { error: 'createNoProjectId', message: 'Upstream createProject returned no id' } };
+    }
+  }
+
+  // serenity-docs#348: record the URL the brand ACTUALLY tracks in
+  // `settings.ai.primary_url` (may carry a subdomain/subpath), distinct from the
+  // host-only `domain` create sends. Semrush IGNORES primary_url on create and
+  // only honors it via PATCH, so set it here — before the single publish below,
+  // so it's part of the published version. Prefer the caller-threaded full
+  // identity (`body.primaryUrl`, e.g. the wizard's draft URL or a subpath site's
+  // base URL); fall back to the host-only brandDomain (a no-op vs the apex).
+  // Best-effort by design, mirroring the brand-URL enrichment below: a failed
+  // PATCH must not abort a market that is otherwise valid upstream — the
+  // data-service drift/backfill pass (serenity-docs#348 WS3/WS4) reconciles any
+  // project left without its primary_url.
+  const primaryUrl = siteIdentityFromUrlString(
+    hasText(body?.primaryUrl) ? body.primaryUrl : body?.brandDomain,
+  );
+  // Truthy check (not hasText) so tsc narrows `string | null` -> `string`;
+  // siteIdentityFromUrlString only ever returns a real host string or null.
+  if (primaryUrl) {
+    try {
+      await transport.updateProject(workspaceId, projectId, {
+        type: 'ai',
+        primary_url: primaryUrl,
+      });
+    } catch (e) {
+      log?.warn?.('handleCreateMarketSubworkspace: best-effort primary_url PATCH failed; project left without primary_url', {
+        workspaceId, projectId, primaryUrl, error: e.message,
+      });
     }
   }
 
@@ -754,9 +785,12 @@ export async function handleCreateMarketSubworkspace(
     });
   }
 
-  // Publish per mode. 'best-effort' swallows a quota 405 (publishing an
-  // empty-units child 405s as a disguised quota rejection, workspace doc §5) and
-  // leaves the project a draft so the brand still succeeds.
+  // Publish per mode. SITES-49206: Semrush no longer enforces AI project/prompt limits for
+  // proxy-routed LLMO workspaces (confirmed live, including a direct empty-units publish probe
+  // against a throwaway workspace, 2026-08-17), so there is no longer a 'best-effort' mode that
+  // tolerates a quota 405 by leaving an empty-units project a draft — every publish (including an
+  // empty one) now always runs this same 'require' path. A 405 here would mean Semrush is
+  // enforcing again, which is exactly what this classify-and-throw exists to catch.
   let published = false;
   if (publishMode === 'require') {
     try {
@@ -789,41 +823,6 @@ export async function handleCreateMarketSubworkspace(
         throw toQuotaExceededError();
       }
       throw e;
-    }
-  } else if (publishMode === 'best-effort') {
-    try {
-      await transport.publishProject(workspaceId, projectId);
-      published = true;
-    } catch (e) {
-      if (isMeteredQuota(e)) {
-        // Swallowed by design (best-effort provisioning must not fail the brand create), but this
-        // IS a quota rejection and the event that creates the dark draft market a customer later
-        // trips over — serenity-docs#72 §5 requires it to alert even though nothing failed here.
-        // The call below is side-effect-only (its returned error is intentionally discarded, never
-        // thrown — best-effort swallows it) purely to run `recordRejection('quotaExceeded')`
-        // inside it, so the CloudWatch metric this alarm will key on fires here too, keeping the
-        // classifier + alerting signal consistent between this swallowed path and the `require`
-        // path above (MysticatBot review, non-blocking nit).
-        toQuotaExceededError();
-        log?.warn?.('handleCreateMarketSubworkspace: publish skipped — quota exceeded, project left as draft', {
-          workspaceId, projectId,
-        });
-        // serenity-docs#72 §5 bullet 2: "the swallow is still a quota rejection... MUST emit the
-        // same (deduplicated) alert, marked as originating from the best-effort provisioning
-        // path" — the event that creates the dark draft market a customer later trips over.
-        // Awaited for the same Lambda-freeze reason as the require branch above.
-        await alertQuotaRejection({
-          orgId,
-          brandId: brand.getId(),
-          workspaceId,
-          market: `${body.market}/${languageCode}`,
-          caseType: 'brandCarveExhausted',
-          dimension: 'prompts',
-          swallowed: true,
-        }, env, log);
-      } else {
-        throw e;
-      }
     }
   }
 

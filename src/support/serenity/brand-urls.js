@@ -14,7 +14,7 @@
 
 import { hasText } from '@adobe/spacecat-shared-utils';
 
-import { isSemrushTransportError } from './errors.js';
+import { isSemrushTransportError, isMeteredQuota, toQuotaExceededError } from './errors.js';
 import { benchmarkAliases } from './aliases.js';
 import { resolveProjects } from './resolve-projects.js';
 
@@ -296,21 +296,27 @@ export async function attachBrandUrlsToProject(
   return { created: entries.length };
 }
 
-// Best-effort republish after an edit-time change so the live view reflects it.
-// Swallows a quota 405 (publishing an empty-units child 405s as a disguised
-// quota rejection — same convention as the market-create path); any other
-// failure propagates so the edit hard-fails. Shared by the brand-URL and
-// CI-competitor edit re-syncs.
+// Republish after an edit-time change so the live view reflects it. Shared by the brand-URL,
+// CI-competitor, and tag edit re-syncs.
+//
+// SITES-49206: this used to swallow a quota 405 (publishing an empty-units child 405s as a
+// disguised quota rejection) and leave the project a draft instead of failing the edit. Semrush
+// no longer enforces AI project/prompt limits for proxy-routed LLMO workspaces (confirmed live,
+// including a direct empty-units publish probe against a throwaway workspace, 2026-08-17) — a
+// quota 405 here would mean Semrush is enforcing again, which every OTHER publish call site in
+// this codebase already treats as a real, surfaced error (classify via `isMeteredQuota`, throw
+// `toQuotaExceededError()`) rather than something to tolerate silently. This function now matches
+// that convention instead of being the one place a live re-enforcement would go unnoticed.
 /** @param {SerenityTransport} transport */
-export async function republishBestEffort(transport, workspaceId, projectId, log) {
+export async function republish(transport, workspaceId, projectId, log) {
   try {
     await transport.publishProject(workspaceId, projectId);
   } catch (e) {
-    if (isSemrushTransportError(e) && e.status === 405) {
-      log?.warn?.('brand-urls: republish skipped — quota 405, project left as draft', {
+    if (isMeteredQuota(e)) {
+      log?.warn?.('republish: quota exceeded — Semrush is enforcing AI limits again (see ADR-009)', {
         workspaceId, projectId,
       });
-      return;
+      throw toQuotaExceededError();
     }
     throw e;
   }
@@ -329,9 +335,8 @@ export function marketOf(project) {
  * Re-syncs a brand's URL set onto every market/project in its sub-workspace
  * (the brand-edit path). For each project: builds the region-filtered desired
  * set, diffs it against the benchmark's live brand URLs, creates the additions,
- * deletes the removals, and republishes (best-effort) when anything changed.
- * Create/delete errors propagate so the edit hard-fails; a quota 405 on the
- * republish alone is tolerated.
+ * deletes the removals, and republishes when anything changed.
+ * Create/delete/republish errors propagate so the edit hard-fails.
  *
  * @param {SerenityTransport} transport
  * @param {object} sources - the brand's URL sources ({ urls?, socialAccounts?,
@@ -408,12 +413,11 @@ export async function syncBrandUrlsAcrossMarkets(
       }
       // Invariant: a read must target the same view the writes act on. Creates and
       // deletes act on the DRAFT (a publish then promotes it), so the draft — not
-      // the published view — is the state this sync converges on. Published lags
-      // the draft whenever the project has unpublished changes, which is exactly
-      // what a swallowed quota 405 on the republish below leaves behind. Reading
-      // published there would report an EMPTY existing set, so a URL the user
-      // removed would never be deleted (and every URL would be re-submitted on
-      // each sync).
+      // the published view — is the state this sync converges on. Creates/deletes
+      // land before this sync's own republish runs, so the published view can
+      // legitimately lag the draft at read time. Reading published there would
+      // report an EMPTY existing set, so a URL the user removed would never be
+      // deleted (and every URL would be re-submitted on each sync).
       // eslint-disable-next-line no-await-in-loop
       const existingResp = await transport.listBrandUrls(
         workspaceId,
@@ -448,7 +452,7 @@ export async function syncBrandUrlsAcrossMarkets(
       }
       if (toCreate.length > 0 || toDelete.length > 0) {
         // eslint-disable-next-line no-await-in-loop
-        await republishBestEffort(transport, workspaceId, projectId, log);
+        await republish(transport, workspaceId, projectId, log);
       }
     } catch (e) {
       // A mid-fan-out failure must name WHICH market split so the brand-edit

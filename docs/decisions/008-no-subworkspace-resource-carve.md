@@ -7,7 +7,9 @@
 > ("Delete the JIT allocator alongside the carve"), is recorded in
 > [ADR-009](009-remove-dormant-jit-allocator.md). Every reference below to the allocator being
 > retained behind a flag, to a flip procedure, or to a reclaim sweep is **historical** — see the
-> inline notes and ADR-009 for the current state.
+> inline notes and ADR-009 for the current state. The `scripts/serenity-metered-405-canary.mjs`
+> probe mentioned below as the interim re-check is also now retired — see
+> [ADR-010](010-durable-limits-recheck-retires-canary.md).
 
 ## Context
 

@@ -28,6 +28,7 @@ import { resolveBrandWorkspace } from '../support/serenity/workspace-resolver.js
 import { isSerenityActiveForBrand } from '../support/serenity/serenity-active.js';
 import { createSerenityTransport } from '../support/serenity/rest-transport.js';
 import { SerenityTransportError } from '../support/serenity/serenity-transport-error.js';
+import { logUpstreamError } from '../support/serenity/upstream-log.js';
 import { cachedOk } from '../support/cached-response.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { ErrorWithStatusCode, resolveSemrushImsToken } from '../support/utils.js';
@@ -111,14 +112,27 @@ function errorTokenForStatus(status) {
   }
 }
 
-function mapError(e, log) {
+/**
+ * Request-context ids for the structured upstream-error log line
+ * (SITES-49993). The workspace/element ids of the failed call ride on the
+ * transport error itself (attached in elements-transport.js); this adds the
+ * tenant ids only the route knows.
+ */
+function reqCtxOf(ctx) {
+  return {
+    spaceCatId: ctx?.params?.spaceCatId,
+    brandId: ctx?.params?.brandId,
+  };
+}
+
+function mapError(e, log, reqCtx = {}) {
   if (e instanceof ErrorWithStatusCode) {
     const status = Number.isInteger(e.status) ? e.status : 400;
     const errorToken = hasText(e.code) ? e.code : errorTokenForStatus(status);
     return createResponse({ error: errorToken, message: safeError(e.message) }, status);
   }
   if (e instanceof ElementsTransportError) {
-    log.error('Elements upstream error', e);
+    logUpstreamError(log, 'Elements upstream error', e, reqCtx);
     if (e.status === 401 || e.status === 403) {
       return createResponse(
         { error: errorTokenForStatus(e.status), message: 'Upstream authorization failed' },
@@ -131,10 +145,12 @@ function mapError(e, log) {
     // Only reachable from checkAccess: the User Manager resource-allowance probe. A 401/403 is
     // intercepted there and turned into `{ hasAccess: false }`, so anything reaching here is a
     // genuine upstream failure (5xx / 504 timeout) — surfaced as a 502, never as a false denial.
-    log.error('Serenity upstream error', e);
+    logUpstreamError(log, 'Serenity upstream error', e, reqCtx);
     return createResponse({ error: 'serenityUpstreamError', message: 'Upstream request failed' }, 502);
   }
-  log.error('Elements controller error', e);
+  // Not an upstream error: keep the Error as the second argument — the stack
+  // is the useful part here — and carry the tenant ids in the message.
+  log.error(`Elements controller error ${JSON.stringify(reqCtx)}`, e);
   return createResponse({ error: 'internalServerError', message: 'Internal server error' }, 500);
 }
 
@@ -624,7 +640,7 @@ export default function ElementsController(context, log, env) {
       );
       return ok(result);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
 
@@ -662,7 +678,7 @@ export default function ElementsController(context, log, env) {
       const result = await service.getWeeks(auth.workspaceId, query);
       return ok(result);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
 
@@ -713,7 +729,7 @@ export default function ElementsController(context, log, env) {
         throw e;
       }
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
 
@@ -749,7 +765,7 @@ export default function ElementsController(context, log, env) {
       });
       return ok(result);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
 
@@ -819,7 +835,7 @@ export default function ElementsController(context, log, env) {
       const result = await service.getCitedDomains(workspaceId, params);
       return ok(result);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
   /* c8 ignore stop */
@@ -887,7 +903,7 @@ export default function ElementsController(context, log, env) {
       const result = await service.getSentimentOverview(workspaceId, params);
       return cachedOk(result);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
   /* c8 ignore stop */
@@ -954,7 +970,7 @@ export default function ElementsController(context, log, env) {
 
       return cachedOk({ topics, totalCount: topics.length });
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
   /* c8 ignore stop */
@@ -1044,7 +1060,7 @@ export default function ElementsController(context, log, env) {
         topicId: topic, prompts, totalCount, page, pageSize,
       });
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
   /* c8 ignore stop */
@@ -1136,7 +1152,7 @@ export default function ElementsController(context, log, env) {
       // with no server-side pagination (the element returns the full list in one call).
       return cachedOk({ prompts });
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
   /* c8 ignore stop */
@@ -1250,7 +1266,7 @@ export default function ElementsController(context, log, env) {
 
       return cachedOk({ urls, totalCount });
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
   /* c8 ignore stop */
@@ -1336,7 +1352,7 @@ export default function ElementsController(context, log, env) {
 
       return cachedOk(result);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
 
@@ -1446,7 +1462,7 @@ export default function ElementsController(context, log, env) {
       });
       return cachedOk(result);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
   /* c8 ignore stop */
@@ -1545,7 +1561,7 @@ export default function ElementsController(context, log, env) {
 
       return cachedOk(result);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
 
@@ -1628,7 +1644,7 @@ export default function ElementsController(context, log, env) {
 
       return cachedOk(result);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
 
@@ -1681,7 +1697,7 @@ export default function ElementsController(context, log, env) {
 
       return cachedOk({ totalPrompts });
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
 
@@ -1771,7 +1787,7 @@ export default function ElementsController(context, log, env) {
       });
       return cachedOk(result);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
   /* c8 ignore stop */
@@ -1864,7 +1880,7 @@ export default function ElementsController(context, log, env) {
       });
       return cachedOk(result);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
   /* c8 ignore stop */
@@ -1954,7 +1970,7 @@ export default function ElementsController(context, log, env) {
       });
       return cachedOk(result);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
   /* c8 ignore stop */

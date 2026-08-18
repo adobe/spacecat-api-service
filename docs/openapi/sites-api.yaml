@@ -274,6 +274,11 @@ sites:
         required: false
         description: |
           Server-side filter: only return sites enrolled at this entitlement tier.
+          Accepts any entitlement tier, including `PRE_ONBOARD` (internal-only, not
+          customer-visible) — not just the customer-visible subset — because this
+          filter is already full-admin-gated below, the same as the standalone
+          `GET /sites/by-tier/{tier}` endpoint, for which `PRE_ONBOARD` is a
+          legitimate admin query (e.g. to find sites still awaiting onboarding).
           **Requires full admin access** — unlike every other `GET /sites` filter,
           this one is NOT available to S2S `site:readAll` callers or read-only admins
           (403 `Filtering sites by tier or productCode requires admin access`), the
@@ -294,6 +299,7 @@ sites:
             - FREE_TRIAL
             - PAID
             - PLG
+            - PRE_ONBOARD
           example: PAID
       - name: productCode
         in: query

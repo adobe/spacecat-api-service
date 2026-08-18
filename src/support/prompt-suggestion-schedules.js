@@ -155,6 +155,11 @@ export async function registerPromptSuggestionSchedule({
     description: `${providerId} prompt-suggestion schedule (onboarding)`,
     enableBrandPresence: false,
     triggerImmediately: true,
+    // Mirrors the trial-path submitJob call above: the runner reads snake_case
+    // `site_id` from job.parameters (no camel fallback) and fails
+    // "site_id missing from job parameters" without it (LLMO-7065) — DRS does
+    // NOT derive this server-side from the schedule's own siteId.
+    providerParameters: { [providerId]: { site_id: siteId } },
   });
 
   log.info(`Registered DRS ${providerId} schedule ${result?.scheduleId ?? 'unknown'} `
