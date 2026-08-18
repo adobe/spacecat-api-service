@@ -15,17 +15,26 @@
  * the auth header. `status` carries the upstream status; `body` is the parsed
  * JSON (or raw text when not valid JSON). Controllers must not leak `.body` to
  * clients — it is kept here only for server-side logging and classification.
+ *
+ * `requestInfo` carries the structured request descriptor (`method`, upstream
+ * URL path as `endpoint`) for the structured upstream-error log line
+ * (SITES-49993), attached at the throw sites in rest-transport.js.
  */
 export class SerenityTransportError extends Error {
   /**
    * @param {number} status - the upstream HTTP status.
    * @param {string} message
    * @param {any} [body] - parsed JSON, raw text, or null for an empty body.
+   * @param {object} [requestInfo]
+   * @param {string} [requestInfo.method] - HTTP method of the upstream call.
+   * @param {string} [requestInfo.endpoint] - upstream URL path (no host).
    */
-  constructor(status, message, body) {
+  constructor(status, message, body, requestInfo = {}) {
     super(message);
     this.name = 'SerenityTransportError';
     this.status = status;
     this.body = body;
+    this.method = requestInfo.method;
+    this.endpoint = requestInfo.endpoint;
   }
 }

@@ -84,6 +84,7 @@ import { hostnameFromUrlString } from '../support/url-utils.js';
 import { ensureMarketSite, resolveSiteDomain, unlinkMarketSiteIfOrphaned } from '../support/serenity/site-linkage.js';
 import { X_PROMISE_TOKEN_HEADER, PROMISE_TOKEN_REQUIRED_ERROR_CODE } from '../utils/constants.js';
 import { tombstoneAllForBrand, linkSiteToLiveRows } from '../support/serenity/mapping-rows.js';
+import { logUpstreamError } from '../support/serenity/upstream-log.js';
 
 const MAX_ERR_MSG_LEN = 500;
 const BEARER_PREFIX = 'Bearer ';
@@ -158,7 +159,27 @@ function errorTokenForStatus(status) {
   }
 }
 
-function mapError(e, log) {
+/**
+ * Request-context ids for the structured upstream-error log line
+ * (SITES-49993): the tenant ids from the route plus the resolved Semrush
+ * workspace from `authorize` — the latter is what attributes a
+ * ProjectEngineApiError (which carries no ids of its own) to a tenant.
+ * `auth` is the hoisted `authorize` result and may still be undefined (or its
+ * `{error}` variant) when the throw happened before/inside authorization.
+ * @param {object} [ctx]
+ * @param {{ brandUuid?: string, workspaceId?: string | null }} [auth]
+ * @returns {Record<string, unknown>}
+ */
+function reqCtxOf(ctx, auth) {
+  return {
+    spaceCatId: ctx?.params?.spaceCatId,
+    brandId: ctx?.params?.brandId,
+    brandUuid: auth?.brandUuid,
+    workspaceId: auth?.workspaceId,
+  };
+}
+
+function mapError(e, log, reqCtx = {}) {
   if (e instanceof ErrorWithStatusCode) {
     const status = Number.isInteger(e.status) ? e.status : 400;
     // Handlers can set `e.code` (e.g. 'marketNotFound') to pin a specific
@@ -178,7 +199,7 @@ function mapError(e, log) {
   // status would otherwise flatten all three to 502, silently regressing the auth response.
   const err = unwrapTransportCause(e);
   if (isSemrushTransportError(err)) {
-    log.error('Serenity upstream error', err);
+    logUpstreamError(log, 'Serenity upstream error', err, reqCtx);
     if (err.status === 401 || err.status === 403) {
       // Do NOT echo err.message here: the transport error message embeds the full
       // gateway URL (internal host + workspace/project UUIDs). Return a generic
@@ -204,7 +225,9 @@ function mapError(e, log) {
       message: 'Upstream request failed',
     }, 502);
   }
-  log.error('Serenity controller error', err);
+  // Not an upstream error: keep the Error as the second argument — the stack
+  // is the useful part here — and carry the tenant ids in the message.
+  log.error(`Serenity controller error ${JSON.stringify(reqCtx)}`, err);
   return createResponse(
     { error: 'internalServerError', message: 'Internal server error' },
     500,
@@ -501,9 +524,10 @@ function SerenityController(context, log, env) {
   }
 
   const listPrompts = async (ctx) => {
+    let auth;
     try {
       const imsToken = await resolveSemrushImsToken(ctx);
-      const auth = await authorize(ctx);
+      auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
       }
@@ -519,14 +543,15 @@ function SerenityController(context, log, env) {
         );
       return createResponse(result, 200);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx, auth));
     }
   };
 
   const createPrompts = async (ctx) => {
+    let auth;
     try {
       const imsToken = await resolveSemrushImsToken(ctx);
-      const auth = await authorize(ctx);
+      auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
       }
@@ -609,18 +634,19 @@ function SerenityController(context, log, env) {
         );
       return createResponse(result, 200);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx, auth));
     }
   };
 
   const updatePrompt = async (ctx) => {
+    let auth;
     try {
       const imsToken = await resolveSemrushImsToken(ctx);
       const { semrushPromptId } = ctx?.params || {};
       if (!hasText(semrushPromptId)) {
         throw new ErrorWithStatusCode('Missing semrushPromptId', 400);
       }
-      const auth = await authorize(ctx);
+      auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
       }
@@ -657,14 +683,15 @@ function SerenityController(context, log, env) {
         );
       return createResponse(result.body, result.status);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx, auth));
     }
   };
 
   const bulkDeletePrompts = async (ctx) => {
+    let auth;
     try {
       const imsToken = await resolveSemrushImsToken(ctx);
-      const auth = await authorize(ctx);
+      auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
       }
@@ -688,14 +715,15 @@ function SerenityController(context, log, env) {
         );
       return createResponse(result, 200);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx, auth));
     }
   };
 
   const listMarkets = async (ctx) => {
+    let auth;
     try {
       const imsToken = await resolveSemrushImsToken(ctx);
-      const auth = await authorize(ctx);
+      auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
       }
@@ -718,17 +746,18 @@ function SerenityController(context, log, env) {
         );
       return createResponse(result, 200);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx, auth));
     }
   };
 
   const getMarket = async (ctx) => {
+    let auth;
     try {
       // IMS bearer is required on the whole surface. Flat mode is a pure DB
       // read (no upstream), but subworkspace mode reads the live listing, so the token
       // is captured here and a transport built only when needed.
       const imsToken = await resolveSemrushImsToken(ctx);
-      const auth = await authorize(ctx);
+      auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
       }
@@ -751,18 +780,19 @@ function SerenityController(context, log, env) {
         : await handleGetMarket(ctx.dataAccess, auth.brandUuid, geoTargetId, languageCode);
       return createResponse(result, 200);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx, auth));
     }
   };
 
   const createMarket = async (ctx) => {
+    let auth;
     try {
       // Shared write-budget deadline, computed once at request entry so intent
       // classification during topic/prompt generation budgets against the true
       // request start (serenity-docs#32).
       const writeDeadline = computeWriteDeadline();
       const imsToken = await resolveSemrushImsToken(ctx);
-      const auth = await authorize(ctx);
+      auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
       }
@@ -896,14 +926,15 @@ function SerenityController(context, log, env) {
       }
       return createResponse(result.body, result.status);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx, auth));
     }
   };
 
   const deleteMarket = async (ctx) => {
+    let auth;
     try {
       const imsToken = await resolveSemrushImsToken(ctx);
-      const auth = await authorize(ctx);
+      auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
       }
@@ -974,14 +1005,15 @@ function SerenityController(context, log, env) {
       }
       return noContent();
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx, auth));
     }
   };
 
   const listTags = async (ctx) => {
+    let auth;
     try {
       const imsToken = await resolveSemrushImsToken(ctx);
-      const auth = await authorize(ctx);
+      auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
       }
@@ -998,7 +1030,7 @@ function SerenityController(context, log, env) {
         );
       return createResponse(result, 200);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx, auth));
     }
   };
 
@@ -1014,9 +1046,10 @@ function SerenityController(context, log, env) {
    * Dispatches by workspace mode, mirroring the tags/markets handlers.
    */
   const createTag = async (ctx) => {
+    let auth;
     try {
       const imsToken = await resolveSemrushImsToken(ctx);
-      const auth = await authorize(ctx);
+      auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
       }
@@ -1041,7 +1074,7 @@ function SerenityController(context, log, env) {
         );
       return createResponse(result.body, result.status);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx, auth));
     }
   };
 
@@ -1053,13 +1086,14 @@ function SerenityController(context, log, env) {
    * a 404. Dispatches by workspace mode, mirroring createTag / updatePrompt.
    */
   const updateTag = async (ctx) => {
+    let auth;
     try {
       const imsToken = await resolveSemrushImsToken(ctx);
       const { tagId } = ctx?.params || {};
       if (!hasText(tagId)) {
         throw new ErrorWithStatusCode('Missing tagId', 400);
       }
-      const auth = await authorize(ctx);
+      auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
       }
@@ -1083,14 +1117,15 @@ function SerenityController(context, log, env) {
         );
       return createResponse(result.body, result.status);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx, auth));
     }
   };
 
   const listModels = async (ctx) => {
+    let auth;
     try {
       const imsToken = await resolveSemrushImsToken(ctx);
-      const auth = await authorize(ctx);
+      auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
       }
@@ -1106,7 +1141,7 @@ function SerenityController(context, log, env) {
         );
       return createResponse(result, 200);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx, auth));
     }
   };
 
@@ -1143,7 +1178,8 @@ function SerenityController(context, log, env) {
       const result = await listGlobalModelCatalog(transport);
       return createResponse(result, 200);
     } catch (e) {
-      return mapError(e, log);
+      // Org-level route: no authorize()/workspace resolution here.
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
 
@@ -1179,14 +1215,16 @@ function SerenityController(context, log, env) {
       const result = await listLanguageCatalog(transport);
       return createResponse(result, 200);
     } catch (e) {
-      return mapError(e, log);
+      // Org-level route: no authorize()/workspace resolution here.
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
 
   const updateModels = async (ctx) => {
+    let auth;
     try {
       const imsToken = await resolveSemrushImsToken(ctx);
-      const auth = await authorize(ctx);
+      auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
       }
@@ -1214,7 +1252,7 @@ function SerenityController(context, log, env) {
         );
       return createResponse(result, 200);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx, auth));
     }
   };
 
@@ -1227,6 +1265,7 @@ function SerenityController(context, log, env) {
    * re-supplies them — there is no stored memory).
    */
   const activate = async (ctx) => {
+    let auth;
     try {
       // Shared write-budget deadline, computed once at request entry so intent
       // classification during per-market topic/prompt generation budgets against
@@ -1234,7 +1273,7 @@ function SerenityController(context, log, env) {
       // (serenity-docs#32).
       const writeDeadline = computeWriteDeadline();
       const imsToken = await resolveSemrushImsToken(ctx);
-      const auth = await authorize(ctx);
+      auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
       }
@@ -1675,7 +1714,7 @@ function SerenityController(context, log, env) {
         207,
       );
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx, auth));
     }
   };
 
@@ -1691,9 +1730,10 @@ function SerenityController(context, log, env) {
    * No-op decommission (still 200) for a brand with no sub-workspace.
    */
   const deactivate = async (ctx) => {
+    let auth;
     try {
       const imsToken = await resolveSemrushImsToken(ctx);
-      const auth = await authorize(ctx);
+      auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
       }
@@ -1756,7 +1796,7 @@ function SerenityController(context, log, env) {
       });
       return createResponse({ brandId: auth.brandUuid, status: 'pending' }, 200);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx, auth));
     }
   };
 

@@ -933,6 +933,31 @@ describe('SerenityController', () => {
       expect(JSON.stringify(body)).not.to.match(/Project Engine/);
     });
 
+    // SITES-49993: a Semrush upstream failure logs ONE structured line — the
+    // JSON payload embedded in the message carries the upstream status/method/
+    // body plus the tenant ids threaded from the route (ProjectEngineApiError
+    // itself carries no ids), so Logs Insights can group failures by tenant
+    // and upstream reason.
+    it('logs one structured line with upstream status/method/body and tenant ids (SITES-49993)', async () => {
+      handlers.handleListMarkets.rejects(
+        new ProjectEngineApiError(403, 'GET', { detail: 'workspace role missing' }),
+      );
+      const log = fakeLog();
+      const controller = SerenityController({ env: {} }, log, {});
+      await controller.listMarkets(fakeContext());
+      const call = log.error.getCalls().find(
+        (c) => typeof c.args[0] === 'string' && c.args[0].startsWith('Serenity upstream error {'),
+      );
+      expect(call).to.exist;
+      const payload = JSON.parse(call.args[0].slice('Serenity upstream error '.length));
+      expect(payload.status).to.equal(403);
+      expect(payload.method).to.equal('GET');
+      expect(payload.spaceCatId).to.equal(ORG);
+      expect(payload.brandId).to.equal(BRAND);
+      expect(payload.workspaceId).to.equal(WORKSPACE);
+      expect(payload.body).to.include('workspace role missing');
+    });
+
     it('upstream ProjectEngineApiError 401 propagates as 401 authenticationRequired (redacted)', async () => {
       handlers.handleListMarkets.rejects(new ProjectEngineApiError(401, 'GET', { secret: 'leak' }));
       const controller = SerenityController({ env: {} }, fakeLog(), {});
