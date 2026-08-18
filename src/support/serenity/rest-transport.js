@@ -70,14 +70,6 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 /** @typedef {MetadataBatchBody['items'][number]['metadata']} PromptMetadataPatch */
 
 /**
- * The `resources` allocation object shared by the v2 child-create and the v2 resources
- * transfer. It is REQUIRED on child-create: every field inside it is optional, so `{}` is
- * the contract's way to express "no allocation".
- *
- * @typedef {UmSchemas['handlers.createWorkspaceV2Resources']} WorkspaceResources
- */
-
-/**
  * The env keys this transport reads. All optional: each is resolved defensively and a
  * missing gateway origin raises a 503 `configurationError` rather than a runtime bug.
  *
@@ -1053,11 +1045,10 @@ export function createSerenityTransport({ env, imsToken }) {
      * OWN allocation, not the master pool (live-verified 2026-07-02).
      *
      * NOTE (SITES-49206): the just-in-time allocator that read this before a metered op was removed
-     * once Semrush stopped enforcing AI limits for proxy-routed LLMO workspaces, but this read has
-     * a live production caller — `elements.js` `checkAccess` (GET .../brand-presence/access,
-     * LLMO-6747) probes it with the user's IMS token and reads a 401/403 as `hasAccess: false`. It
-     * is therefore NOT canary-scoped and outlives the metered-405 canary; do not couple its
-     * lifetime to §10.6/§10.7. (The canary also happens to use it as its step-1 read.)
+     * once Semrush stopped enforcing AI limits for proxy-routed LLMO workspaces. This read has a
+     * live production caller — `elements.js` `checkAccess` (GET .../brand-presence/access,
+     * LLMO-6747) probes it with the user's IMS token and reads a 401/403 as `hasAccess: false` —
+     * and stays regardless of allocator/canary history (see ADR-010).
      *
      * @param {string} workspaceId
      */
@@ -1065,36 +1056,6 @@ export function createSerenityTransport({ env, imsToken }) {
       return unwrap('GET', await users.GET(
         '/v1/workspaces/{id}/resources',
         { params: { path: { id: workspaceId } } },
-      ));
-    },
-
-    /**
-     * POST /v2/workspaces/{ws}/resources/transfer — set a sub-workspace's AI resource totals
-     * (ABSOLUTE, not a delta), drawing the difference from / returning it to the parent pool.
-     * A public user-token endpoint (workspace doc §5/§7).
-     *
-     * NOTE (SITES-49206): the just-in-time allocator that used to call this — `transferOnce` /
-     * `transferAndSettle` in the removed `resource-manager.js` — is gone. The sole remaining caller
-     * is the retained metered-405 canary (`scripts/serenity-metered-405-canary.mjs`, step 2), which
-     * drains a throwaway sub-workspace to zero prompt headroom to provoke the disguised 405. Unlike
-     * `getWorkspaceResources` above (which has a live `elements.js` caller), this method is
-     * canary-scoped: it is retired WITH the canary under serenity-docs#72 §10.6/§10.7 ("delete
-     * last"). No production lifecycle path calls it: a child is created with no allocation and
-     * never carries one (see `workspace-lifecycle.js`).
-     *
-     * V2 wraps the resources under a `resources` key (WorkspaceResourcesTransferV2Form
-     * → createWorkspaceV2Resources); `payload` is the bare resources object
-     * (`{ ai: { projects, prompts } }`, the aiProductResources shape), so wrap it here. That `ai`
-     * shape is the SAME one proven live as the v2 child-create `resources` body
-     * (createSubworkspace).
-     *
-     * @param {string} workspaceId
-     * @param {WorkspaceResources} payload - bare resources object, wrapped here.
-     */
-    async transferWorkspaceResources(workspaceId, payload) {
-      return unwrap('POST', await users.POST(
-        '/v2/workspaces/{id}/resources/transfer',
-        { params: { path: { id: workspaceId } }, body: { resources: payload } },
       ));
     },
 

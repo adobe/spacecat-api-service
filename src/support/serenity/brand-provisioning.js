@@ -84,7 +84,10 @@ async function emptyWorkspaceBestEffort(transport, workspaceId, parentWorkspaceI
  * @param {string} params.brandName - brand display name (sub-workspace title + brand_name).
  * @param {string} params.market - ISO-2 country code for the initial market.
  * @param {string} params.languageCode - BCP-47 language code for the initial market.
- * @param {string} params.brandDomain - brand domain for the upstream project.
+ * @param {string} params.brandDomain - brand domain (host-only) for the upstream project.
+ * @param {string} [params.primaryUrl] - the full URL the brand tracks (may carry a
+ *   subdomain/subpath), written to `settings.ai.primary_url` (serenity-docs#348).
+ *   Falls back to `brandDomain` when absent.
  * @param {string[]} [params.modelIds] - AI models (LLMs) to attach to the
  *   project. This is always the brand's FIRST-EVER market (the sub-workspace
  *   is freshly created below), so an empty/omitted list resolves to the
@@ -133,7 +136,7 @@ async function emptyWorkspaceBestEffort(transport, workspaceId, parentWorkspaceI
  *   best-effort and never throw.
  */
 export async function provisionBrandSubworkspace(context, {
-  spaceCatId, brandId, brandName, market, languageCode, brandDomain,
+  spaceCatId, brandId, brandName, market, languageCode, brandDomain, primaryUrl,
   modelIds = [], brandAliases = [], brandUrlSources = null, competitors = [],
   generateTopics = true, writeDeadline = computeWriteDeadline(),
 }, log = console) {
@@ -215,21 +218,15 @@ export async function provisionBrandSubworkspace(context, {
 
   // LLMO-5492 publish-after-populate: defer-publish flag ON → leave the project a
   // DRAFT ('skip') for a later finalize step (prompts + models pushed, published
-  // once). OFF (default) preserves inline publish: a project with models OR
-  // generated prompts has real units and must publish ('require'); an empty
-  // project would publish "empty units" (a disguised quota 405), so leave it a
-  // draft ('best-effort') instead of failing the create. Checked against
-  // resolvedModelIds, not the raw caller-supplied modelIds: LLMO-6554 resolves an
-  // empty/omitted modelIds to the canonical net-new default, so resolvedModelIds
-  // is non-empty in the common case — checking the raw list would wrongly fall
-  // through to 'best-effort' (leaving a model-bearing project as an unpublished
-  // draft) whenever the caller omitted modelIds.
-  /** @type {'require' | 'best-effort' | 'skip'} */
-  let publishMode = 'best-effort';
+  // once). OFF (default) publishes inline regardless of whether the project has
+  // any models/prompts attached: SITES-49206 confirmed Semrush no longer enforces
+  // AI limits, so an empty-units publish no longer 405s and there is no more
+  // 'best-effort' mode to fall back to (a quota 405 now always propagates as a
+  // real "Quota exceeded" error — see `handleCreateMarketSubworkspace`).
+  /** @type {'require' | 'skip'} */
+  let publishMode = 'require';
   if (isSerenityDeferPublishEnabled(context.env)) {
     publishMode = 'skip';
-  } else if ((Array.isArray(resolvedModelIds) && resolvedModelIds.length > 0) || generateTopics) {
-    publishMode = 'require';
   }
 
   let result;
@@ -242,6 +239,9 @@ export async function provisionBrandSubworkspace(context, {
         market: resolvedMarket,
         languageCode: resolvedLanguageCode,
         brandDomain,
+        // #348: the full tracked URL for settings.ai.primary_url; the handler
+        // normalizes it and falls back to brandDomain when absent.
+        primaryUrl,
         brandNames: [brandName],
         brandDisplayName: brandName,
         // `name` is deliberately omitted: the create handler defaults it to the

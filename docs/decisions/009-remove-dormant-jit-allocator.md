@@ -5,6 +5,14 @@
 > recorded in [ADR-007](007-cross-container-resource-lock.md). Both ADRs' no-carve / lock findings
 > remain valid as history; the mechanism they retained is now deleted. Driver: serenity-docs#72
 > §10.1/§10.2, SITES-49206 (2026-08).
+>
+> **Update (2026-08, SITES-49206).** This ADR's open question — what the **durable** re-check of the
+> limits-unenforced premise is, beyond the interim manual canary — is resolved in
+> [ADR-010](010-durable-limits-recheck-retires-canary.md): real production traffic through the
+> retained classifier/alerting, not a scheduled synthetic probe. The canary
+> (`scripts/serenity-metered-405-canary.mjs`) and `transferWorkspaceResources` are now deleted; every
+> other mention below of them, or of §10.6 as fully deleting the classifier/alerting, is
+> **historical** — see ADR-010 for the current state.
 
 ## Context
 
