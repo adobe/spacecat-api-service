@@ -2159,14 +2159,15 @@ describe('SerenityController', () => {
       // Read once for the whole batch, not per market.
       expect(getBrandAliasesStub).to.have.been.calledOnceWith(BRAND);
       // Both market creates receive the same aliases in their options arg (index 7).
-      // No modelIds + no generatePrompts → empty units → best-effort publish. The
-      // loaded brand is already persisted, so dataAccess is threaded through for
-      // the mapping-row upsert (mapping-rows.js).
+      // SITES-49206: no modelIds + no generatePrompts used to mean "empty units" → best-effort
+      // publish; Semrush no longer enforces AI limits, so this now still requires publish like
+      // every other market create. The loaded brand is already persisted, so dataAccess is
+      // threaded through for the mapping-row upsert (mapping-rows.js).
       const expectedOpts = {
         modelIds: [],
         generateTopics: false,
         topicCap: 0,
-        publishMode: 'best-effort',
+        publishMode: 'require',
         brandAliases: ['Acme Inc'],
         brandUrlSources: { urls: [], socialAccounts: [], earnedContent: [] },
         competitors: [],

@@ -801,6 +801,13 @@ export declare type GapSourceDomainsRequest = Message<"semrush.services.ai_seo.v
    * @generated from field: optional string target_date = 11;
    */
   targetDate?: string;
+
+  /**
+   * search_type controls how target.domain is scoped. UNSPECIFIED defaults to DOMAIN.
+   *
+   * @generated from field: semrush.services.ai_seo.v2.source.SEARCH_TYPE.ENUM search_type = 12;
+   */
+  searchType: SEARCH_TYPE_ENUM;
 };
 
 /**
@@ -881,6 +888,13 @@ export declare type GapSourceDomainsRequestJson = {
    * @generated from field: optional string target_date = 11;
    */
   targetDate?: string;
+
+  /**
+   * search_type controls how target.domain is scoped. UNSPECIFIED defaults to DOMAIN.
+   *
+   * @generated from field: semrush.services.ai_seo.v2.source.SEARCH_TYPE.ENUM search_type = 12;
+   */
+  searchType?: SEARCH_TYPE_ENUMJson;
 };
 
 /**
@@ -1258,6 +1272,13 @@ export declare type GapSourceDomainsTotalsRequest = Message<"semrush.services.ai
    * @generated from field: optional string target_date = 8;
    */
   targetDate?: string;
+
+  /**
+   * search_type controls how target.domain is scoped. UNSPECIFIED defaults to DOMAIN.
+   *
+   * @generated from field: semrush.services.ai_seo.v2.source.SEARCH_TYPE.ENUM search_type = 9;
+   */
+  searchType: SEARCH_TYPE_ENUM;
 };
 
 /**
@@ -1319,6 +1340,13 @@ export declare type GapSourceDomainsTotalsRequestJson = {
    * @generated from field: optional string target_date = 8;
    */
   targetDate?: string;
+
+  /**
+   * search_type controls how target.domain is scoped. UNSPECIFIED defaults to DOMAIN.
+   *
+   * @generated from field: semrush.services.ai_seo.v2.source.SEARCH_TYPE.ENUM search_type = 9;
+   */
+  searchType?: SEARCH_TYPE_ENUMJson;
 };
 
 /**
