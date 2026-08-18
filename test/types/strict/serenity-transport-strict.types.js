@@ -42,10 +42,9 @@ export async function unknownMembersAreReported(transport) {
   // whole value went untyped.
   await transport.listLanguages();
 
-  // Compile-time gate for `getWorkspaceResources` (SITES-49206 / ADR-010): its only remaining
-  // caller is `elements.js` `checkAccess`, off any type-checked call path, so naming it here means
-  // a rename or removal in `rest-transport.js` is reported as TS2339 under the strict tier rather
-  // than only breaking that caller at runtime. `transferWorkspaceResources` was pinned alongside it
-  // for the same reason but is now deleted (its only caller, the metered-405 canary, is retired).
+  // Compile-time gate for `getWorkspaceResources`: its only caller (`elements.js` `checkAccess`)
+  // is off any type-checked call path, so naming it here means a rename or removal in
+  // `rest-transport.js` is reported as TS2339 under the strict tier rather than only breaking
+  // that caller at runtime.
   await transport.getWorkspaceResources('ws-1');
 }

@@ -52,7 +52,10 @@ export async function transportContractIsEnforced(transport, parentWorkspaceId) 
   // @ts-expect-error - Expected 2 arguments, but got 1.
   await transport.createSubworkspace(parentWorkspaceId);
 
-  // Body shape, derived from the generated Project Engine contract.
+  // Body shape, derived from the generated contract. Any method with a structured,
+  // generated-contract body works for this gate — it pins the TS mechanism, not
+  // createProject's own behavior. Was transferWorkspaceResources until SITES-49206/
+  // ADR-010 deleted it; createProject is just the next available body-shaped method.
   // @ts-expect-error - string is not assignable to the createProject body shape.
   await transport.createProject(parentWorkspaceId, 'not-a-body');
 

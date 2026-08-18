@@ -22,7 +22,8 @@ Two things resolved since ADR-009:
 
 - **The interim canary ran.** SITES-49206 §10.7: dev, stage, and prod, 2026-08-17, against a real
   throwaway Semrush sub-workspace. Publish succeeded at zero prompt headroom in all three — the
-  premise holds, recorded on PR #2995 and in a Jira SITES-49206 comment.
+  premise holds, recorded on PR #2995 and in a
+  [Jira SITES-49206 comment](https://jira.corp.adobe.com/browse/SITES-49206?focusedCommentId=57061238).
 - **§10.3 closed a gap that made the classifier load-bearing on every publish, not just the
   canary's synthetic one.** Before §10.3, several write paths (`republishBestEffort` and its
   competitor/alias/brand-URL/tag callers) *swallowed* a disguised quota 405 instead of classifying
