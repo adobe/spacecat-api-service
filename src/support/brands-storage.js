@@ -332,13 +332,6 @@ function mapDbBrandToV2(row) {
     name: row.name,
     baseSiteId: row.base_site?.id || row.site_id || null,
     baseUrl: row.base_site?.base_url || null,
-    // DEPRECATED (serenity-docs brand-semrush-mapping-maintenance.md §10
-    // rename, write-of-record cutover): read-only BC mirror of
-    // semrushSubWorkspaceId below, maintained by the mysticat-data-service
-    // brands_sync_semrush_workspace_id trigger. Kept for any consumer still
-    // reading this field directly; new/updated consumers should read
-    // semrushSubWorkspaceId instead.
-    semrushWorkspaceId: row.semrush_workspace_id || null,
     // Read-only: the brand's own Semrush sub-workspace (dual-mode) — the
     // write-of-record column. Null for brands still in flat mode (no
     // sub-workspace minted yet). Consumers use it to scope per-brand Semrush
