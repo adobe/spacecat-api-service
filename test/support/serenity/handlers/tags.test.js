@@ -19,6 +19,7 @@ import esmock from 'esmock';
 import { TAG_IDS, dimensionTreeLevels, makeListProjectTagsStub } from '../fixtures/tag-tree.js';
 import { INTENT_ROOT_NAME } from '../../../../src/support/serenity/prompt-tags.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
+import { ERROR_CODES } from '../../../../src/support/serenity/errors.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -129,22 +130,29 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       expect(transport.publishProject).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-1');
     });
 
-    it('still returns 201 when the post-create republish 405s on quota (left as draft)', async () => {
+    it('propagates a quotaExceeded 409 when the post-create republish 405s on quota (SITES-49206)', async () => {
+      // Pinned disguised-405 shape (LLMO-6190, live-verified): a bare string/HTML body, never
+      // JSON — isMeteredQuota keys on this SHAPE, not the bare status.
       const transport = makeTransport({
-        publishProject: sinon.stub().rejects(new SerenityTransportError(405, 'quota')),
+        publishProject: sinon.stub().rejects(
+          new SerenityTransportError(405, 'publish failed: 405', '<html>405 Not Allowed</html>'),
+        ),
       });
       const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
-      const res = await handler.handleCreateTag(
+      // SITES-49206: `republish` (brand-urls.js) no longer swallows a quota 405 — Semrush no
+      // longer enforces AI limits, so a 405 here means it's enforcing again and must surface as
+      // the stable quotaExceeded 409 token, matching every other publish call site.
+      const err = await handler.handleCreateTag(
         transport,
         dataAccess,
         BRAND,
         WORKSPACE,
         validBody,
         fakeLog(),
-      );
-      // The quota-405 disguise is swallowed by republishBestEffort — the create
-      // itself must not fail just because the follow-up publish was rejected.
-      expect(res.status).to.equal(201);
+      ).then(() => null, (e) => e);
+      expect(err).to.not.equal(null);
+      expect(err.status).to.equal(409);
+      expect(err.code).to.equal(ERROR_CODES.QUOTA_EXCEEDED);
       expect(transport.publishProject).to.have.been.calledOnce;
     });
 
