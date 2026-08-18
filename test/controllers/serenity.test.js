@@ -916,6 +916,29 @@ describe('SerenityController', () => {
       expect(log.error).to.have.been.calledWithMatch('Serenity controller error');
     });
 
+    // SITES-49993: when authorize() itself throws (before returning), the
+    // hoisted `auth` is still undefined — the fallback log line must still
+    // carry the route ids from params, with no brandUuid/workspaceId keys.
+    it('logs route ids on the fallback when authorize throws before resolving', async () => {
+      const boom = new Error('db down');
+      const log = fakeLog();
+      const controller = SerenityController({ env: {} }, log, {});
+      const ctx = fakeContext();
+      ctx.dataAccess.Organization.findById = sinon.stub().rejects(boom);
+      const response = await controller.listMarkets(ctx);
+      expect(response.status).to.equal(500);
+      const call = log.error.getCalls().find(
+        (c) => typeof c.args[0] === 'string' && c.args[0].startsWith('Serenity controller error {'),
+      );
+      expect(call).to.exist;
+      const payload = JSON.parse(call.args[0].slice('Serenity controller error '.length));
+      expect(payload.spaceCatId).to.equal(ORG);
+      expect(payload.brandId).to.equal(BRAND);
+      expect(payload).to.not.have.property('brandUuid');
+      expect(payload).to.not.have.property('workspaceId');
+      expect(call.args[1]).to.equal(boom);
+    });
+
     // LLMO-6386: a Project Engine call now throws ProjectEngineApiError directly (adaptPE gone).
     // mapError's widened branch must map it to the SAME HTTP envelope the old transport error
     // produced, redacting the body/message. ProjectEngineApiError does NOT extend

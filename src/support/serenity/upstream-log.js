@@ -55,6 +55,9 @@ export function upstreamLogPayload(err, reqCtx = {}) {
   const e = (err && typeof err === 'object') ? err : {};
   /** @type {Record<string, unknown>} */
   const payload = { ...reqCtx };
+  // `status` gets a strict undefined check because 0 is conceivable in
+  // principle; the string fields below use truthiness on purpose — an empty
+  // string carries no information and must not clobber a reqCtx value.
   if (e.status !== undefined) {
     payload.status = e.status;
   }

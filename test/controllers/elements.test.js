@@ -518,6 +518,25 @@ describe('ElementsController', () => {
       expect(body.error).to.equal('internalServerError');
     });
 
+    // SITES-49993: the non-upstream fallback carries the tenant ids as JSON in
+    // the message and keeps the Error (with its stack) as the second argument.
+    it('logs the tenant ids on the non-upstream fallback path', async () => {
+      const boom = new Error('unexpected');
+      serviceStub.getUrlInspectorFilterDimensions.rejects(boom);
+      const log = fakeLog();
+      const ctx = fakeContext();
+      const ctrl = ElementsController(ctx, log, ENV);
+      await ctrl.listUrlInspectorFilterDimensions(ctx);
+      const call = log.error.getCalls().find(
+        (c) => typeof c.args[0] === 'string' && c.args[0].startsWith('Elements controller error {'),
+      );
+      expect(call).to.exist;
+      const payload = JSON.parse(call.args[0].slice('Elements controller error '.length));
+      expect(payload.spaceCatId).to.equal(ORG_ID);
+      expect(payload.brandId).to.equal(BRAND_ID);
+      expect(call.args[1]).to.equal(boom);
+    });
+
     it('logs ElementsTransportError via log.error', async () => {
       serviceStub.getUrlInspectorFilterDimensions
         .rejects(new MockElementsTransportError(500, 'upstream'));
