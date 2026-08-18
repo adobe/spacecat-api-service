@@ -924,23 +924,70 @@ export default function siteTests(getHttpClient, resetData) {
         expect(res.status).to.equal(403);
       });
 
-      it('returns 403 when changing the baseURL of a site attached to a Semrush-managed brand', async () => {
+      it('propagates a same-domain baseURL change for a site attached to a Semrush-managed brand (serenity-docs#349)', async () => {
         // SITE_1 is the primary site of BRAND_1, which is Semrush-managed
-        // (semrush_workspace_id set in the seed). The brand's tracked domain
-        // lives on its Semrush projects, which have no domain-update path, so the
-        // SpaceCat site URL is immutable while that brand is attached. Admin is
-        // used so the only thing that can 403 is the URL-immutability guard
-        // itself (not access control). Other site fields stay editable.
+        // (semrush_workspace_id set in the seed; mirrored onto semrush_sub_workspace_id
+        // by the brands_sync_semrush_workspace_id DB trigger, so this brand resolves as
+        // a sub-workspace brand exactly like a serenity-first one). A same-registrable-
+        // domain baseURL change (site1.example.com -> semrush-managed-rename.example.com,
+        // both under example.com) is now accepted and propagated instead of refused —
+        // BRAND_1 has no `brand_to_semrush_projects` mapping row in this seed, so
+        // propagation resolves to zero mapped projects and no-ops (no Semrush mock call),
+        // then persists. Admin is used so the only thing gating the write is the
+        // Semrush-attachment/domain logic itself (not access control).
         const http = getHttpClient();
+        const newBaseUrl = 'https://semrush-managed-rename.example.com';
         const res = await http.admin.patch(`/sites/${SITE_1_ID}`, {
-          baseURL: 'https://semrush-managed-rename.example.com',
+          baseURL: newBaseUrl,
+        });
+        expect(res.status).to.equal(200);
+        expect(res.body.baseURL).to.equal(newBaseUrl);
+
+        const after = await http.admin.get(`/sites/${SITE_1_ID}`);
+        expect(after.status).to.equal(200);
+        expect(after.body.baseURL).to.equal(newBaseUrl);
+      });
+
+      it('returns unprocessable entity when a cross-registrable-domain baseURL change is attempted for a Semrush-managed brand\'s site', async () => {
+        // Same brand-attachment as above, but the new URL is on a DIFFERENT registrable
+        // domain (example.org vs example.com) — refused (422), not propagated: a
+        // project's `domain` is fixed at create and only a same-domain `primary_url`
+        // edit is supported today (serenity-docs#349 workstream 3).
+        //
+        // Reads the CURRENT baseURL first rather than assuming SITE_1_BASE_URL --
+        // this test runs after the same-domain-propagation test above, which already
+        // persisted a new (still same-domain) value onto SITE_1.
+        const http = getHttpClient();
+        const before = await http.admin.get(`/sites/${SITE_1_ID}`);
+        expect(before.status).to.equal(200);
+        const currentBaseUrl = before.body.baseURL;
+
+        const res = await http.admin.patch(`/sites/${SITE_1_ID}`, {
+          baseURL: 'https://cross-domain-rename.example.org',
+        });
+        expect(res.status).to.equal(422);
+        expect(res.body.code).to.equal('crossDomainNotSupported');
+
+        const after = await http.admin.get(`/sites/${SITE_1_ID}`);
+        expect(after.status).to.equal(200);
+        expect(after.body.baseURL).to.equal(currentBaseUrl);
+      });
+
+      it('returns 403 when changing the baseURL of a Semrush market-mirror site (linked via brand_sites)', async () => {
+        // MARKET_SITE_1 is linked to BRAND_1 via a brand_sites row (type='serenity'),
+        // not brands.site_id -- a market mirror, not the brand's own primary site.
+        // Market-mirror sites stay immutable regardless of domain (serenity-docs#349
+        // workstream 4 -- whether/how a mirror should follow a rename is still an open,
+        // unresolved decision, so this pass leaves them blocked).
+        const http = getHttpClient();
+        const res = await http.admin.patch(`/sites/${MARKET_SITE_1_ID}`, {
+          baseURL: 'https://semrush-market-renamed.example.fr',
         });
         expect(res.status).to.equal(403);
 
-        // The URL is unchanged (the guard blocked the write before persist).
-        const after = await http.admin.get(`/sites/${SITE_1_ID}`);
+        const after = await http.admin.get(`/sites/${MARKET_SITE_1_ID}`);
         expect(after.status).to.equal(200);
-        expect(after.body.baseURL).to.equal(SITE_1_BASE_URL);
+        expect(after.body.baseURL).to.equal(MARKET_SITE_1_BASE_URL);
       });
 
       it('deep-merges hlxConfig on a partial patch, preserving content.source (SITES-49362)', async () => {
