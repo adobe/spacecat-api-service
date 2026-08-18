@@ -43,6 +43,9 @@ describe('grpc-transport per-brand auth seam', () => {
   let mockCreateGrpcTransport;
   let mockResolve;
   let mockGetCachedToken;
+  // Every Http2SessionManager the transport builder constructs, in build order, so we
+  // can assert the evicted entry's connection is torn down (B2, LLMO-7029).
+  let sessionManagers;
 
   beforeEach(async () => {
     restoreGlobalFetchIfStubbed();
@@ -52,6 +55,13 @@ describe('grpc-transport per-brand auth seam', () => {
     mockCreateGrpcTransport = sandbox.stub().callsFake(() => ({}));
     mockResolve = sandbox.stub();
     mockGetCachedToken = sandbox.stub();
+    sessionManagers = [];
+    const MockHttp2SessionManager = class {
+      constructor() {
+        this.abort = sandbox.stub();
+        sessionManagers.push(this);
+      }
+    };
 
     const mod = await esmock(
       '../../../src/support/ai-visibility/grpc-transport.js',
@@ -59,6 +69,7 @@ describe('grpc-transport per-brand auth seam', () => {
         '@connectrpc/connect': { createClient: mockCreateClient },
         '@connectrpc/connect-node': {
           createGrpcTransport: mockCreateGrpcTransport,
+          Http2SessionManager: MockHttp2SessionManager,
         },
         '../../../third-party/ai-seo-ts/v2/brand/service_pb.js': {
           BrandService: {},
@@ -241,7 +252,7 @@ describe('grpc-transport per-brand auth seam', () => {
       expect(mockCreateGrpcTransport.calledTwice).to.be.true; // one per key
     });
 
-    it('resetGrpcClients clears the per-credential pool', () => {
+    it('resetGrpcClients clears the per-credential pool and tears down its transports', () => {
       mockResolve.returns({ key: 'org-42', getAuthToken: async () => 't' });
       const env = onEnv();
 
@@ -251,6 +262,8 @@ describe('grpc-transport per-brand auth seam', () => {
 
       expect(first).to.not.equal(second);
       expect(mockCreateGrpcTransport.calledTwice).to.be.true;
+      // The first entry's HTTP/2 session was aborted on reset (B2).
+      expect(sessionManagers[0].abort.calledOnce).to.be.true;
     });
 
     it('bounds the client pool and rebuilds an evicted key', () => {
@@ -272,6 +285,21 @@ describe('grpc-transport per-brand auth seam', () => {
       expect(a2).to.not.equal(a1);
       expect(getClientPoolSize()).to.equal(2);
       expect(mockCreateGrpcTransport.callCount).to.equal(4);
+    });
+
+    it('tears down the evicted transport HTTP/2 session on eviction (B2)', () => {
+      setClientPoolMaxSize(1);
+      mockResolve.withArgs('brand-a').returns({ key: 'org-a', getAuthToken: async () => 'a' });
+      mockResolve.withArgs('brand-b').returns({ key: 'org-b', getAuthToken: async () => 'b' });
+      const env = onEnv();
+
+      getGrpcClients(env, 'brand-a'); // sessionManagers[0] -> org-a
+      expect(sessionManagers[0].abort.notCalled).to.be.true;
+
+      getGrpcClients(env, 'brand-b'); // evicts org-a, builds sessionManagers[1]
+      // org-a's session is closed, org-b's stays open.
+      expect(sessionManagers[0].abort.calledOnce).to.be.true;
+      expect(sessionManagers[1].abort.notCalled).to.be.true;
     });
 
     it('enables the per-brand path for boolean true and string "1"', () => {

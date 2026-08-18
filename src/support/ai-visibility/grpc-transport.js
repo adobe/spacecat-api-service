@@ -11,7 +11,7 @@
  */
 
 import { createClient } from '@connectrpc/connect';
-import { createGrpcTransport } from '@connectrpc/connect-node';
+import { createGrpcTransport, Http2SessionManager } from '@connectrpc/connect-node';
 import { BrandService } from '@quazar/ai-seo-ts/v2/brand/service_pb.js';
 import { TopicService } from '@quazar/ai-seo-ts/v2/topic/service_pb.js';
 import { PromptService } from '@quazar/ai-seo-ts/v2/prompt/service_pb.js';
@@ -113,15 +113,23 @@ let maxClientsCacheSize = DEFAULT_MAX_CLIENTS_CACHE_SIZE;
  * Build the gRPC transport + all service clients around a single auth interceptor.
  * The transport options are identical across the shared and per-credential paths;
  * only the interceptor differs.
+ *
+ * Returns the client set together with the {@link Http2SessionManager} that owns the
+ * transport's HTTP/2 connection, so an evicted per-credential entry can close its
+ * connection instead of leaking it ({@link teardownClientPoolEntry}).
+ *
+ * @returns {{ clients: object, sessionManager: Http2SessionManager }}
  */
-function buildClients(interceptor) {
+function buildClientPoolEntry(interceptor) {
+  const sessionManager = new Http2SessionManager(GRPC_BASE_URL);
   const transport = createGrpcTransport({
     baseUrl: GRPC_BASE_URL,
     httpVersion: '2',
     interceptors: [interceptor],
+    sessionManager,
   });
 
-  return {
+  const clients = {
     brandClient: createClient(BrandService, transport),
     topicClient: createClient(TopicService, transport),
     promptClient: createClient(PromptService, transport),
@@ -132,6 +140,17 @@ function buildClients(interceptor) {
     voSourcesClient: createClient(VoSources, transport),
     prRelationsClient: createClient(Relations, transport),
   };
+
+  return { clients, sessionManager };
+}
+
+/**
+ * Tear down a pool entry's transport: abort its HTTP/2 session manager so the
+ * underlying connection is closed rather than leaked when the entry is evicted or the
+ * pool is reset. No-op when the entry has no session manager (e.g. under test mocks).
+ */
+function teardownClientPoolEntry(entry) {
+  entry?.sessionManager?.abort?.();
 }
 
 /**
@@ -150,10 +169,10 @@ function createCredentialInterceptor(env, credential) {
   };
 }
 
-let cachedClients = null;
+let cachedEntry = null;
 
-/** key -> clients, used only on the per-brand (flag-on) path. */
-const perCredentialClients = new Map();
+/** key -> pool entry ({ clients, sessionManager }), used only on the per-brand (flag-on) path. */
+const perCredentialEntries = new Map();
 
 /**
  * Lazy-init gRPC transport + all service clients.
@@ -172,11 +191,11 @@ const perCredentialClients = new Map();
  */
 export function getGrpcClients(env, brand) {
   if (!isPerBrandAuthEnabled(env)) {
-    if (cachedClients) {
-      return cachedClients;
+    if (cachedEntry) {
+      return cachedEntry.clients;
     }
-    cachedClients = buildClients(createAuthInterceptor(env));
-    return cachedClients;
+    cachedEntry = buildClientPoolEntry(createAuthInterceptor(env));
+    return cachedEntry.clients;
   }
 
   const credential = resolveSemrushCredential(brand, env);
@@ -184,26 +203,30 @@ export function getGrpcClients(env, brand) {
     ? credentialPoolKey(credential.key)
     : SHARED_CREDENTIAL_KEY;
 
-  const existing = perCredentialClients.get(key);
+  const existing = perCredentialEntries.get(key);
   if (existing) {
-    return existing;
+    return existing.clients;
   }
 
-  // Bound the pool: evict the oldest (FIFO by build time) transport when at capacity.
-  while (perCredentialClients.size >= maxClientsCacheSize) {
-    const oldestKey = perCredentialClients.keys().next().value;
-    perCredentialClients.delete(oldestKey);
+  // Bound the pool: evict the oldest (FIFO by build time) transport when at capacity,
+  // tearing down its HTTP/2 session so the connection is closed rather than leaked.
+  while (perCredentialEntries.size >= maxClientsCacheSize) {
+    const oldestKey = perCredentialEntries.keys().next().value;
+    teardownClientPoolEntry(perCredentialEntries.get(oldestKey));
+    perCredentialEntries.delete(oldestKey);
   }
 
-  const clients = buildClients(createCredentialInterceptor(env, credential));
-  perCredentialClients.set(key, clients);
-  return clients;
+  const entry = buildClientPoolEntry(createCredentialInterceptor(env, credential));
+  perCredentialEntries.set(key, entry);
+  return entry.clients;
 }
 
 /** @visibleForTesting */
 export function resetGrpcClients() {
-  cachedClients = null;
-  perCredentialClients.clear();
+  teardownClientPoolEntry(cachedEntry);
+  cachedEntry = null;
+  perCredentialEntries.forEach(teardownClientPoolEntry);
+  perCredentialEntries.clear();
   maxClientsCacheSize = DEFAULT_MAX_CLIENTS_CACHE_SIZE;
 }
 
@@ -214,7 +237,7 @@ export function setClientPoolMaxSize(n) {
 
 /** @visibleForTesting */
 export function getClientPoolSize() {
-  return perCredentialClients.size;
+  return perCredentialEntries.size;
 }
 
 export { getAccessToken, createAuthInterceptor };
