@@ -601,6 +601,27 @@ describe('brand-urls helpers', () => {
       expect(err.code).to.equal(ERROR_CODES.QUOTA_EXCEEDED);
     });
 
+    it('propagates a genuine JSON-bodied 405 through republish (not misclassified as quota)', async () => {
+      // isMeteredQuota keys on body SHAPE (string = disguised quota, JSON = a genuine app-level
+      // error), so a real "Method Not Allowed" (JSON body) must NOT be swallowed or misclassified
+      // as quotaExceeded — it must propagate as the ordinary 405 upstream error. This boundary was
+      // previously pinned in markets-subworkspace.test.js's now-deleted best-effort suite; this is
+      // the equivalent coverage for the shared `republish` function (SITES-49206).
+      const sources = { urls: ['https://acme.com'] };
+      const transport = {
+        listProjects: sandbox.stub().resolves({ items: [projectWith('p-us', 'us')] }),
+        listBenchmarks: sandbox.stub().resolves(benchOk()),
+        listBrandUrls: sandbox.stub().resolves({ brand_urls: [] }),
+        createBrandUrls: sandbox.stub().resolves({}),
+        deleteBrandUrls: sandbox.stub().resolves({}),
+        publishProject: sandbox.stub().rejects(
+          new SerenityTransportError(405, 'Method Not Allowed', { message: 'Method Not Allowed' }),
+        ),
+      };
+      await expect(syncBrandUrlsAcrossMarkets(transport, sources, WS, undefined))
+        .to.be.rejectedWith(/Method Not Allowed/);
+    });
+
     it('propagates a non-405 republish failure (hard-fail)', async () => {
       const sources = { urls: ['https://acme.com'] };
       const transport = {

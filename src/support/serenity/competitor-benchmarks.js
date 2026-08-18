@@ -393,8 +393,8 @@ export async function syncCompetitorBenchmarksForProject(
  * its sub-workspace (the brand-edit path): per project, region-filter + create
  * additions + update alias drift + delete removals, then republish when anything
  * changed. Create/update/delete/republish errors propagate. `rejected` aggregates
- * the per-market competitor aliases
- * Semrush refused, tagged with their project/market, so the caller can surface them.
+ * the per-market competitor aliases Semrush refused, tagged with their project/market, so the
+ * caller can surface them.
  *
  * @param {SerenityTransport} transport
  * @param {Array<{name?: string, url?: string, regions?: string[], aliases?: string[]}>}

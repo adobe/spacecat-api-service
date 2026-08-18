@@ -335,9 +335,8 @@ export function marketOf(project) {
  * Re-syncs a brand's URL set onto every market/project in its sub-workspace
  * (the brand-edit path). For each project: builds the region-filtered desired
  * set, diffs it against the benchmark's live brand URLs, creates the additions,
- * deletes the removals, and republishes (best-effort) when anything changed.
- * Create/delete errors propagate so the edit hard-fails; a quota 405 on the
- * republish alone is tolerated.
+ * deletes the removals, and republishes when anything changed.
+ * Create/delete/republish errors propagate so the edit hard-fails.
  *
  * @param {SerenityTransport} transport
  * @param {object} sources - the brand's URL sources ({ urls?, socialAccounts?,
@@ -414,12 +413,11 @@ export async function syncBrandUrlsAcrossMarkets(
       }
       // Invariant: a read must target the same view the writes act on. Creates and
       // deletes act on the DRAFT (a publish then promotes it), so the draft — not
-      // the published view — is the state this sync converges on. Published lags
-      // the draft whenever the project has unpublished changes, which is exactly
-      // what a swallowed quota 405 on the republish below leaves behind. Reading
-      // published there would report an EMPTY existing set, so a URL the user
-      // removed would never be deleted (and every URL would be re-submitted on
-      // each sync).
+      // the published view — is the state this sync converges on. Creates/deletes
+      // land before this sync's own republish runs, so the published view can
+      // legitimately lag the draft at read time. Reading published there would
+      // report an EMPTY existing set, so a URL the user removed would never be
+      // deleted (and every URL would be re-submitted on each sync).
       // eslint-disable-next-line no-await-in-loop
       const existingResp = await transport.listBrandUrls(
         workspaceId,
