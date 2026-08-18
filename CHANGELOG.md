@@ -1,3 +1,10 @@
+# [1.755.0](https://github.com/adobe/spacecat-api-service/compare/v1.754.0...v1.755.0) (2026-08-18)
+
+
+### Features
+
+* **brand-claims:** toggle brand-claims audit with enable/disable command ([#3078](https://github.com/adobe/spacecat-api-service/issues/3078)) ([650fd72](https://github.com/adobe/spacecat-api-service/commit/650fd72c59bf80476de03d2ba480dc80245b268e)), closes [#3058](https://github.com/adobe/spacecat-api-service/issues/3058)
+
 # [1.754.0](https://github.com/adobe/spacecat-api-service/compare/v1.753.0...v1.754.0) (2026-08-18)
 
 
