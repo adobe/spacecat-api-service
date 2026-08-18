@@ -1285,9 +1285,13 @@ function SerenityController(context, log, env) {
       // threaded to the market handler so it PATCHes `settings.ai.primary_url`.
       // Unlike `brandDomain` above (host-only) this keeps the stashed wizard URL
       // intact; the handler normalizes it via `siteIdentityFromUrlString`.
-      const brandPrimaryUrl = hasText(body.brandDomain)
-        ? body.brandDomain
-        : (pendingSemrushProvisioning?.primaryUrl ?? null);
+      // Precedence mirrors markets.js (body.primaryUrl > body.brandDomain): a
+      // body-threaded full URL wins, else the stashed wizard URL (subpath kept),
+      // else the host-only body.brandDomain as a last resort.
+      const brandPrimaryUrl = hasText(body.primaryUrl)
+        ? body.primaryUrl
+        : (pendingSemrushProvisioning?.primaryUrl
+          ?? (hasText(body.brandDomain) ? body.brandDomain : null));
 
       // ----- Pending-brand activation is ALWAYS sub-workspace-only (LLMO-6405) -----
       // Markets are Semrush projects added afterwards from the Markets tab, never
