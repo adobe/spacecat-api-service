@@ -1,3 +1,10 @@
+# [1.753.0](https://github.com/adobe/spacecat-api-service/compare/v1.752.1...v1.753.0) (2026-08-18)
+
+
+### Features
+
+* **serenity:** write settings.ai.primary_url at provisioning ([#348](https://github.com/adobe/spacecat-api-service/issues/348)) ([#3090](https://github.com/adobe/spacecat-api-service/issues/3090)) ([f15c9b8](https://github.com/adobe/spacecat-api-service/commit/f15c9b8a8e875966f067106213b00195cd6e3551)), closes [#3086](https://github.com/adobe/spacecat-api-service/issues/3086) [#3086](https://github.com/adobe/spacecat-api-service/issues/3086)
+
 ## [1.752.1](https://github.com/adobe/spacecat-api-service/compare/v1.752.0...v1.752.1) (2026-08-18)
 
 

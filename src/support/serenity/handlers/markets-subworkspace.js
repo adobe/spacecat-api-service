@@ -13,6 +13,7 @@
 // @ts-check
 
 import { hasText } from '@adobe/spacecat-shared-utils';
+import { siteIdentityFromUrlString } from '../../url-utils.js';
 
 import { ErrorWithStatusCode } from '../../utils.js';
 import {
@@ -629,6 +630,35 @@ export async function handleCreateMarketSubworkspace(
     projectId = String(createResp?.id || '');
     if (!hasText(projectId)) {
       return { status: 502, body: { error: 'createNoProjectId', message: 'Upstream createProject returned no id' } };
+    }
+  }
+
+  // serenity-docs#348: record the URL the brand ACTUALLY tracks in
+  // `settings.ai.primary_url` (may carry a subdomain/subpath), distinct from the
+  // host-only `domain` create sends. Semrush IGNORES primary_url on create and
+  // only honors it via PATCH, so set it here — before the single publish below,
+  // so it's part of the published version. Prefer the caller-threaded full
+  // identity (`body.primaryUrl`, e.g. the wizard's draft URL or a subpath site's
+  // base URL); fall back to the host-only brandDomain (a no-op vs the apex).
+  // Best-effort by design, mirroring the brand-URL enrichment below: a failed
+  // PATCH must not abort a market that is otherwise valid upstream — the
+  // data-service drift/backfill pass (serenity-docs#348 WS3/WS4) reconciles any
+  // project left without its primary_url.
+  const primaryUrl = siteIdentityFromUrlString(
+    hasText(body?.primaryUrl) ? body.primaryUrl : body?.brandDomain,
+  );
+  // Truthy check (not hasText) so tsc narrows `string | null` -> `string`;
+  // siteIdentityFromUrlString only ever returns a real host string or null.
+  if (primaryUrl) {
+    try {
+      await transport.updateProject(workspaceId, projectId, {
+        type: 'ai',
+        primary_url: primaryUrl,
+      });
+    } catch (e) {
+      log?.warn?.('handleCreateMarketSubworkspace: best-effort primary_url PATCH failed; project left without primary_url', {
+        workspaceId, projectId, primaryUrl, error: e.message,
+      });
     }
   }
 
