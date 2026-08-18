@@ -1,3 +1,16 @@
+# [1.752.0](https://github.com/adobe/spacecat-api-service/compare/v1.751.1...v1.752.0) (2026-08-18)
+
+
+### Bug Fixes
+
+* **schedules:** pass site_id through providerParameters on recurring prompt-suggestion schedules ([#3083](https://github.com/adobe/spacecat-api-service/issues/3083)) ([e161021](https://github.com/adobe/spacecat-api-service/commit/e161021aed2268218d7cf07956bee67d436a52a3)), closes [2986/#2991](https://github.com/adobe/spacecat-api-service/issues/2991)
+* **serenity:** retire the metered-405 canary and transferWorkspaceResources (§10.6, narrowed) ([#3084](https://github.com/adobe/spacecat-api-service/issues/3084)) ([d1746ab](https://github.com/adobe/spacecat-api-service/commit/d1746ab6a5ff7b83188a8aa745622b94fb98d9e0))
+
+
+### Features
+
+* **ai-seo:** sdk bump ([#3081](https://github.com/adobe/spacecat-api-service/issues/3081)) ([4de99ca](https://github.com/adobe/spacecat-api-service/commit/4de99ca0e4958794b7371ab7c889508b7bab6338))
+
 ## [1.751.1](https://github.com/adobe/spacecat-api-service/compare/v1.751.0...v1.751.1) (2026-08-18)
 
 
