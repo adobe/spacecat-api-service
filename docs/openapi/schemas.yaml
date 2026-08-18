@@ -12418,6 +12418,13 @@ SerenityCreateMarketRequest:
       minItems: 1
       items: { type: string }
       description: Brand-name variants the upstream should match in model answers.
+    primaryUrl:
+      type: [string, 'null']
+      description: |
+        Full tracked URL identity for the brand (may include subdomain/subpath,
+        e.g. www.nba.com/kings). Written to Semrush `settings.ai.primary_url` via
+        a best-effort PATCH before publish (serenity-docs#348). Optional — falls
+        back to `brandDomain` (host-only) when omitted.
 
 SerenityTag:
   type: object
