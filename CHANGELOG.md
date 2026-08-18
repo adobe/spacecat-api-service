@@ -1,3 +1,17 @@
+# [1.754.0](https://github.com/adobe/spacecat-api-service/compare/v1.753.0...v1.754.0) (2026-08-18)
+
+
+### Bug Fixes
+
+* **sites:** deep-merge hlxConfig/deliveryConfig on PATCH to preserve content.source (SITES-49362) ([#3077](https://github.com/adobe/spacecat-api-service/issues/3077)) ([96459af](https://github.com/adobe/spacecat-api-service/commit/96459af0e282c0fc291c2fa5263d9157fe5cb051)), closes [#3012](https://github.com/adobe/spacecat-api-service/issues/3012)
+* write \0 instead of a raw NUL byte in composite map keys ([#3070](https://github.com/adobe/spacecat-api-service/issues/3070)) ([9a447a1](https://github.com/adobe/spacecat-api-service/commit/9a447a16dea3b85b6fad5b229c454679949a3ea5)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+
+### Features
+
+* **logging:** log Semrush error body and request context on upstream failures ([#3091](https://github.com/adobe/spacecat-api-service/issues/3091)) ([d790ec6](https://github.com/adobe/spacecat-api-service/commit/d790ec69c53b132dec4091f3ffe51fdcbcf53f3b)), closes [Hi#level](https://github.com/Hi/issues/level)
+* **serenity:** resolve Sites by full identity and surface each market's tracked url ([#3073](https://github.com/adobe/spacecat-api-service/issues/3073)) ([14623fb](https://github.com/adobe/spacecat-api-service/commit/14623fb73367bb7fc9b7cfe4f97d2a490ca8209a)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 # [1.753.0](https://github.com/adobe/spacecat-api-service/compare/v1.752.1...v1.753.0) (2026-08-18)
 
 
