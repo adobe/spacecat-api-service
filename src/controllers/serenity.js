@@ -1353,7 +1353,7 @@ function SerenityController(context, log, env) {
           ctx.dataAccess.services.postgrestClient,
         );
         if (!existingSiteId) {
-          throw new ErrorWithStatusCode('Brand has no onboarded primary site', 400);
+          throw new ErrorWithStatusCode(`Brand has no onboarded primary site: ${brandUuid}`, 400);
         }
         const pendingWorkspaceId = await ensureSubworkspace(
           transport,
