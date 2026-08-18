@@ -196,7 +196,7 @@ v2-brand-for-org:
           Forbidden. One of:
           - the user does not have access to this organization;
           - the edit would re-sync a sub-workspace brand to Semrush (a URL,
-            competitor, or alias change on a brand carrying a `semrushWorkspaceId`)
+            competitor, or alias change on a brand carrying a `semrushSubWorkspaceId`)
             while the org-wide serenity feature flag (`LLMO/serenity`) is inactive —
             the edit is refused rather than left to drift (body message: "Serenity is
             not active for this organization");

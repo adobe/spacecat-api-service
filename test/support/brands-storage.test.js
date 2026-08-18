@@ -363,26 +363,6 @@ describe('brands-storage', () => {
       expect(acme.siteId).to.equal('shared-site');
     });
 
-    it('maps semrush_workspace_id to semrushWorkspaceId (deprecated BC mirror), null when absent', async () => {
-      const subWsRow = makeBrandRow({ semrush_workspace_id: 'ws-sub-123' });
-      const subWsQuery = createChainableQuery({ data: subWsRow, error: null });
-      const subWsResult = await getBrandById(
-        ORG_ID,
-        BRAND_ID,
-        { from: sinon.stub().returns(subWsQuery) },
-      );
-      expect(subWsResult.semrushWorkspaceId).to.equal('ws-sub-123');
-
-      // Flat-mode brand: no sub-workspace column → null.
-      const flatQuery = createChainableQuery({ data: makeBrandRow(), error: null });
-      const flatResult = await getBrandById(
-        ORG_ID,
-        BRAND_ID,
-        { from: sinon.stub().returns(flatQuery) },
-      );
-      expect(flatResult.semrushWorkspaceId).to.equal(null);
-    });
-
     it('maps semrush_sub_workspace_id to semrushSubWorkspaceId (write-of-record), null when absent', async () => {
       const mirroredRow = makeBrandRow({ semrush_sub_workspace_id: 'ws-sub-123' });
       const mirroredQuery = createChainableQuery({ data: mirroredRow, error: null });
