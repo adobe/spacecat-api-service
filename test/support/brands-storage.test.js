@@ -1075,6 +1075,7 @@ describe('brands-storage', () => {
           { data: null, error: null }, // existing lookup OK (no brand)
           { data: null, error: { code: '23505', message: 'brands_base_site_unique' } }, // upsert 409
         ],
+        sites: { data: { id: 'some-site-id' }, error: null }, // site belongs to org
       });
 
       const err = await upsertBrand({
@@ -1118,6 +1119,7 @@ describe('brands-storage', () => {
           { data: { id: BRAND_ID, name: 'Test' }, error: null },
           { data: fullBrandRow, error: null },
         ],
+        sites: { data: { id: 'site-uuid' }, error: null }, // site belongs to org
       });
 
       const result = await upsertBrand({
@@ -1136,6 +1138,7 @@ describe('brands-storage', () => {
           { data: { id: BRAND_ID, name: 'Test' }, error: null }, // upsert result
           { data: makeBrandRow({ name: 'Test', site_id: 'new-site' }), error: null },
         ],
+        sites: { data: { id: 'new-site' }, error: null }, // site belongs to org
       });
 
       await upsertBrand({
@@ -1221,6 +1224,7 @@ describe('brands-storage', () => {
           { data: { id: BRAND_ID, name: 'Test' }, error: null },
           { data: makeBrandRow({ name: 'Test' }), error: null },
         ],
+        sites: { data: { id: 'primary-site-id' }, error: null }, // site belongs to org
       });
 
       await upsertBrand({
@@ -1355,6 +1359,26 @@ describe('brands-storage', () => {
       expect(log.warn).to.have.been.calledWithMatch('immutable');
     });
 
+    it('rejects a fresh create whose baseSiteId belongs to a different org (serenity-docs#346)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null }, // no existing brand
+        ],
+        sites: { data: null, error: null }, // site not found under this org
+      });
+
+      const err = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', baseSiteId: 'other-orgs-site' },
+        postgrestClient: client,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(409);
+      expect(err.code).to.equal('brand_site_org_mismatch');
+      expect(err.message).to.contain('other-orgs-site');
+      expect(client.capturedCalls.upsert).to.have.lengthOf(0);
+    });
+
     it('does not warn when re-upserting with the same site_id', async () => {
       const log = { warn: sinon.stub(), info: sinon.stub(), error: sinon.stub() };
       const client = createCapturingClient({
@@ -1385,6 +1409,7 @@ describe('brands-storage', () => {
           { data: { id: BRAND_ID, name: 'Test' }, error: null }, // upsert result
           { data: makeBrandRow({ name: 'Test', site_id: 'new-site' }), error: null },
         ],
+        sites: { data: { id: 'new-site' }, error: null }, // site belongs to org
       });
 
       await upsertBrand({
@@ -2461,6 +2486,7 @@ describe('brands-storage', () => {
           // 2nd call: update fails with unique constraint
           { data: null, error: { code: '23505', message: 'brands_base_site_unique' } },
         ],
+        sites: { data: { id: 'some-site-id' }, error: null }, // site belongs to org
       });
 
       const err = await updateBrand({
@@ -2472,6 +2498,27 @@ describe('brands-storage', () => {
 
       expect(err.message).to.equal('This site is already the primary URL for another brand');
       expect(err.status).to.equal(409);
+    });
+
+    it('rejects setting baseSiteId to a site owned by a different org (serenity-docs#346)', async () => {
+      const postgrestClient = createCapturingClient({
+        brands: [
+          // 1st call: select current site_id (null → allow setting)
+          { data: { site_id: null }, error: null },
+        ],
+        sites: { data: null, error: null }, // site not found under this org
+      });
+
+      const err = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { baseSiteId: 'other-orgs-site' },
+        postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(409);
+      expect(err.code).to.equal('brand_site_org_mismatch');
+      expect(postgrestClient.capturedCalls.update).to.have.lengthOf(0);
     });
 
     it('sets baseSiteId when brand has no site_id yet', async () => {
@@ -2486,6 +2533,7 @@ describe('brands-storage', () => {
           // 3rd call: getBrandById re-fetch
           { data: fullBrandRow, error: null },
         ],
+        sites: { data: { id: 'new-site-id' }, error: null }, // site belongs to org
       });
 
       const result = await updateBrand({
@@ -2578,6 +2626,7 @@ describe('brands-storage', () => {
           // 3rd call: getBrandById re-fetch
           { data: makeBrandRow({ site_id: 'different-site-id', status: 'pending' }), error: null },
         ],
+        sites: { data: { id: 'different-site-id' }, error: null }, // site belongs to org
       });
 
       await updateBrand({
@@ -2599,6 +2648,7 @@ describe('brands-storage', () => {
           // 2nd call: update fails with unique constraint
           { data: null, error: { code: '23505', message: 'brands_base_site_unique' } },
         ],
+        sites: { data: { id: 'taken-site-id' }, error: null }, // site belongs to org
       });
 
       const err = await updateBrand({
@@ -3181,6 +3231,7 @@ describe('brands-storage', () => {
             },
           },
         ],
+        sites: { data: { id: 'site-1' }, error: null }, // site belongs to org
       });
 
       const err = await upsertBrand({
