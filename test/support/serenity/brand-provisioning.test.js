@@ -280,7 +280,7 @@ describe('provisionBrandSubworkspace', () => {
     });
   });
 
-  it('falls back to US/EN and publishes best-effort when generateTopics is false with no market or models', async () => {
+  it('falls back to US/EN and still requires publish when generateTopics is false with no market or models', async () => {
     const { provisionBrandSubworkspace } = await loadModule({
       resolveWorkspaceId, handleCreateMarketSubworkspace,
     });
@@ -297,10 +297,12 @@ describe('provisionBrandSubworkspace', () => {
     expect(body.market).to.equal('US');
     expect(body.languageCode).to.equal('en');
     expect(body.name).to.equal(undefined);
-    // No prompts + no models → empty units → best-effort publish (leaves a draft).
+    // SITES-49206: no prompts + no models used to mean "empty units" → best-effort publish
+    // (leaves a draft). Semrush no longer enforces AI limits, so this now still requires publish
+    // like every other create.
     expect(options.generateTopics).to.equal(false);
     expect(options.topicCap).to.equal(0);
-    expect(options.publishMode).to.equal('best-effort');
+    expect(options.publishMode).to.equal('require');
   });
 
   it('leaves the initial market a DRAFT (publishMode "skip") when SERENITY_DEFER_PUBLISH is on (LLMO-5492)', async () => {
