@@ -1,3 +1,10 @@
+# [1.757.0](https://github.com/adobe/spacecat-api-service/compare/v1.756.0...v1.757.0) (2026-08-19)
+
+
+### Features
+
+* Add a site-scoped edge-deployed-urls endpoint and collapse the Overview suggestions fan-out to one call | LLMO-7106 ([#3104](https://github.com/adobe/spacecat-api-service/issues/3104)) ([fad13fc](https://github.com/adobe/spacecat-api-service/commit/fad13fc5499448a09b37eb30bd2cbe6ddae9f73c))
+
 # [1.756.0](https://github.com/adobe/spacecat-api-service/compare/v1.755.2...v1.756.0) (2026-08-19)
 
 
