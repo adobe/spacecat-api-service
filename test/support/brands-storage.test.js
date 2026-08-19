@@ -1199,7 +1199,7 @@ describe('brands-storage', () => {
       expect(brandsUpsert.row).to.not.have.property('semrush_sub_workspace_id');
     });
 
-    it('keeps the brand active with a null site_id when only a semrush_sub_workspace_id anchors it (no baseSiteId)', async () => {
+    it('downgrades to pending with a null site_id when only a semrush_sub_workspace_id is supplied (SITES-49449, no baseSiteId)', async () => {
       const client = createCapturingClient({
         brands: [
           { data: null, error: null },
@@ -1216,10 +1216,10 @@ describe('brands-storage', () => {
       });
 
       const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
-      expect(brandsUpsert.row.status).to.equal('active');
+      // SITES-49449: semrush_sub_workspace_id is no longer a substitute anchor —
+      // site_id is required for 'active', so this downgrades to 'pending' instead.
+      expect(brandsUpsert.row.status).to.equal('pending');
       expect(brandsUpsert.row.semrush_sub_workspace_id).to.equal('ws-1');
-      // A fresh create always writes an explicit site_id — null when no baseSiteId
-      // is supplied. The sub-workspace is what keeps it active (LLMO-6405).
       expect(brandsUpsert.row.site_id).to.equal(null);
     });
 
