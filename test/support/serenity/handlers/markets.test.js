@@ -166,6 +166,19 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     expect(result.body.error).to.equal('invalidRequest');
   });
 
+  it('400s on a siteId that is not a UUID', async () => {
+    // Flat mode records the value straight onto a uuid column, so a malformed one
+    // has to be rejected here rather than at the write.
+    const transport = {};
+    const dataAccess = makeDataAccess([]);
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', brandDomain: 'adobe.com', siteId: 'not-a-uuid', brandNames: ['Adobe'],
+    }, fakeLog());
+    expect(result.status).to.equal(400);
+    expect(result.body.error).to.equal('invalidRequest');
+    expect(result.body.message).to.match(/siteId must be a valid UUID/);
+  });
+
   it('400s on unknown market', async () => {
     const transport = {};
     const dataAccess = makeDataAccess([]);
@@ -332,11 +345,11 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     };
 
     const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
-      market: 'US', languageCode: 'en', siteId: 'site-42', brandNames: ['Adobe'],
+      market: 'US', languageCode: 'en', siteId: '00000000-0000-4000-8000-000000000042', brandNames: ['Adobe'],
     }, fakeLog());
 
     expect(result.status).to.equal(201);
-    expect(dataAccess.Site.findById).to.have.been.calledOnceWith('site-42');
+    expect(dataAccess.Site.findById).to.have.been.calledOnceWith('00000000-0000-4000-8000-000000000042');
     // The Semrush project domain is the hostname resolved from the site base_url.
     expect(transport.createProject.firstCall.args[1].domain).to.equal('acme.com');
   });
@@ -354,7 +367,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     };
 
     await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
-      market: 'DE', languageCode: 'de', siteId: 'site-de', brandNames: ['Kisqali'],
+      market: 'DE', languageCode: 'de', siteId: '00000000-0000-4000-8000-0000000000de', brandNames: ['Kisqali'],
     }, fakeLog());
 
     // site_id is the PER-MARKET source of truth for the url a project tracks
@@ -366,7 +379,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
       semrushProjectId: 'proj-de',
       geoTargetId: 2276,
       languageCode: 'de',
-      siteId: 'site-de',
+      siteId: '00000000-0000-4000-8000-0000000000de',
     });
   });
 
@@ -404,7 +417,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     };
 
     const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
-      market: 'US', languageCode: 'en', siteId: 'site-42', brandNames: ['Kings'],
+      market: 'US', languageCode: 'en', siteId: '00000000-0000-4000-8000-000000000042', brandNames: ['Kings'],
     }, fakeLog());
 
     expect(result.status).to.equal(201);
@@ -455,7 +468,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const log = fakeLog();
 
     const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
-      market: 'US', languageCode: 'en', siteId: 'site-42', brandNames: ['Kings'],
+      market: 'US', languageCode: 'en', siteId: '00000000-0000-4000-8000-000000000042', brandNames: ['Kings'],
     }, log);
 
     // The subpath identity was derived from the Site and attempted...
@@ -485,7 +498,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     };
 
     const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
-      market: 'US', languageCode: 'en', brandDomain: 'adobe.com', siteId: 'site-42', brandNames: ['Adobe'],
+      market: 'US', languageCode: 'en', brandDomain: 'adobe.com', siteId: '00000000-0000-4000-8000-000000000042', brandNames: ['Adobe'],
     }, fakeLog());
 
     expect(result.status).to.equal(201);
@@ -502,7 +515,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     };
 
     const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
-      market: 'US', languageCode: 'en', siteId: 'site-missing', brandNames: ['Adobe'],
+      market: 'US', languageCode: 'en', siteId: '00000000-0000-4000-8000-00000000dead', brandNames: ['Adobe'],
     }, fakeLog());
 
     expect(result.status).to.equal(400);
