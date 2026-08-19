@@ -1,6 +1,6 @@
 # ── Serenity API ──
 # Public surface for AI-visibility prompts and markets. The upstream is
-# currently Semrush AIO (proxied via adobe-hackathon.semrush.com); upstream
+# currently Semrush AIO (proxied via www.semrush.com); upstream
 # routing details (`workspaceId`, internal project ids) are NOT exposed.
 #
 # The client sends its IMS user token; api-service forwards it; the upstream

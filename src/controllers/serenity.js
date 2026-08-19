@@ -705,13 +705,20 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
+      // Requester identity (LLMO-6289 pattern, SITES-50099 audit trail): resolve
+      // from the auth profile — NEVER the forwarded upstream bearer — and thread
+      // it through so the delete audit log line attributes the caller, not the
+      // Semrush service principal.
+      const callerId = resolveCallerId(ctx);
       const result = auth.mode === 'subworkspace'
         ? await handleBulkDeletePromptsSubworkspace(
           transport,
           /** @type {string} */ (auth.workspaceId),
           ctx.data || {},
           log,
-          { orgId: ctx?.params?.spaceCatId, brandId: auth.brandUuid, env: ctx.env || env },
+          {
+            orgId: ctx?.params?.spaceCatId, brandId: auth.brandUuid, env: ctx.env || env, callerId,
+          },
         )
         : await handleBulkDeletePrompts(
           transport,
@@ -720,7 +727,7 @@ function SerenityController(context, log, env) {
           /** @type {string} */ (auth.workspaceId),
           ctx.data || {},
           log,
-          { orgId: ctx?.params?.spaceCatId, env: ctx.env || env },
+          { orgId: ctx?.params?.spaceCatId, env: ctx.env || env, callerId },
         );
       return createResponse(result, 200);
     } catch (e) {

@@ -1233,6 +1233,19 @@ describe('SerenityController', () => {
       expect(handlers.handleBulkDeletePromptsSubworkspace).to.not.have.been.called;
     });
 
+    // SITES-50099: the delete audit log needs a requester identity threaded
+    // through, resolved via resolveCallerId — the same mechanism createPrompts/
+    // updatePrompt already use, never the forwarded upstream bearer.
+    it('bulkDeletePrompts threads the resolved callerId into the flat handler options', async () => {
+      handlers.handleBulkDeletePrompts.resolves({ deleted: 0, failed: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      await controller.bulkDeletePrompts(fakeContext({
+        data: { prompts: [{ semrushPromptId: 'q1', geoTargetId: 2840, languageCode: 'en' }] },
+      }));
+      const options = handlers.handleBulkDeletePrompts.firstCall.args[6];
+      expect(options.callerId).to.equal('unknown');
+    });
+
     it('createTag routes to the flat handler in flat mode and returns its status', async () => {
       handlers.handleCreateTag.resolves({
         status: 201,
@@ -1830,6 +1843,14 @@ describe('SerenityController', () => {
       expect(response.status).to.equal(200);
       expect(handlers.handleBulkDeletePromptsSubworkspace).to.have.been.calledOnce;
       expect(handlers.handleBulkDeletePrompts).to.not.have.been.called;
+    });
+
+    it('bulkDeletePrompts threads the resolved callerId into the subworkspace handler options', async () => {
+      handlers.handleBulkDeletePromptsSubworkspace.resolves({ deleted: 0, failed: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      await controller.bulkDeletePrompts(fakeContext({ data: { prompts: [] } }));
+      const options = handlers.handleBulkDeletePromptsSubworkspace.firstCall.args[4];
+      expect(options.callerId).to.equal('unknown');
     });
 
     it('listTags routes to the subworkspace handler in subworkspace mode', async () => {
