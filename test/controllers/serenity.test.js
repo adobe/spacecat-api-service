@@ -1968,6 +1968,42 @@ describe('SerenityController', () => {
       expect(opts).to.include({ organizationId: ORG, brandId: BRAND, domain: 'x.com' });
     });
 
+    it('activate resolves the organization from the route, not from the Brand entity', async () => {
+      // `brand.schema.js` deliberately does not map `organization_id`, so the real
+      // entity has no `getOrganizationId` at all — the fixture above fabricates one.
+      // A brand shaped like the real thing is what the deployed code actually sees:
+      // if the org is read off the entity, `ensureMarketSite` gets `undefined`,
+      // returns null through its one silent early return, and the activation
+      // answers 207 with the site link and `baseSiteId` never written — while
+      // every visible step reports success. (Only an already-active brand
+      // reaches this path: a pending brand activates sub-workspace-only and
+      // returns before it.)
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      const brand = makeBrandModel({ getStatus: () => 'active', getOrganizationId: undefined });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand,
+        data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }] },
+      }));
+      expect(response.status).to.equal(200);
+      expect(ensureMarketSiteStub.firstCall.args[1]).to.include({ organizationId: ORG });
+    });
+
+    it('activate writes the status flip against the route organization on a brand with no org accessor', async () => {
+      // The same defect one line further on, where it was NOT optional-chained: a
+      // real Brand entity would throw a TypeError here rather than degrade.
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      ensureMarketSiteStub.resolves('primary-site-uuid');
+      const brand = makeBrandModel({ getStatus: () => 'active', getOrganizationId: undefined });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand,
+        data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }] },
+      }));
+      expect(response.status).to.equal(200);
+      expect(updateBrandStub.firstCall.args[0]).to.include({ organizationId: ORG });
+    });
+
     it('activate passes a body-supplied market\'s modelIds into the options arg (LLMs applied at activation)', async () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
       const brand = makeBrandModel({ getStatus: () => 'active' });
