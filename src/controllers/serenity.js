@@ -1647,8 +1647,10 @@ function SerenityController(context, log, env) {
           // does not map `organization_id`, so no accessor is generated for it and
           // `brand.getOrganizationId?.()` is always `undefined`. `ensureMarketSite`
           // reads that as bad input and returns null through its one early return
-          // that logs nothing, which would keep an activating brand `pending` with
-          // every visible step reporting success.
+          // that logs nothing — every market goes live upstream while the site
+          // link never lands, so activation answers a permanent 207 with
+          // `baseSiteId` never written and nothing warning. The route org is
+          // exact here: authorize() resolved the brand scoped to it.
           organizationId: ctx?.params?.spaceCatId,
           brandId: auth.brandUuid,
           domain: brandPrimaryUrl,

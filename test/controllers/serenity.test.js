@@ -1884,8 +1884,11 @@ describe('SerenityController', () => {
       // entity has no `getOrganizationId` at all — the fixture above fabricates one.
       // A brand shaped like the real thing is what the deployed code actually sees:
       // if the org is read off the entity, `ensureMarketSite` gets `undefined`,
-      // returns null through its one silent early return, and the brand never
-      // activates while every visible step reports success.
+      // returns null through its one silent early return, and the activation
+      // answers 207 with the site link and `baseSiteId` never written — while
+      // every visible step reports success. (Only an already-active brand
+      // reaches this path: a pending brand activates sub-workspace-only and
+      // returns before it.)
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
       const brand = makeBrandModel({ getStatus: () => 'active', getOrganizationId: undefined });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
