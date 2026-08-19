@@ -337,6 +337,57 @@ async function replaceChildRows(table, brandId, rows, onConflict, postgrestClien
 }
 
 /**
+ * Verifies a candidate primary site (`baseSiteId`) belongs to the same org as the
+ * brand being anchored to it, before that site_id is ever persisted.
+ *
+ * serenity-docs#346: `brand.organization_id != site.organization_id` is exactly the
+ * org-ID mismatch pattern the investigation traced (Tata Capital, BMW, Toyota, ...) —
+ * a brand silently anchored to a *different* org's site. Both upsertBrand (fresh
+ * create / first anchor) and updateBrand (first set, or pending re-point) must call
+ * this before writing site_id; the immutable-once-set branches in each are
+ * unaffected, since they already refuse to change an existing active site_id.
+ *
+ * @param {object} postgrestClient - PostgREST client
+ * @param {string} siteId - Candidate `brands.site_id`
+ * @param {string} organizationId - SpaceCat organization UUID the brand belongs to
+ * @param {string} brandLabel - Whatever identifies the brand in the caller's context,
+ *   for the error message only — upsertBrand passes the brand name (not yet
+ *   persisted, so no id exists yet); updateBrand passes the fetched brand's
+ *   name when its existing-row read found one, else falls back to brandId.
+ * @throws {Error} status 409, code 'brand_site_org_mismatch', if the site does not
+ *   belong to organizationId (including if it doesn't exist at all)
+ */
+async function assertSiteBelongsToOrg(postgrestClient, siteId, organizationId, brandLabel) {
+  const { data: anchorSite, error: anchorSiteError } = await postgrestClient
+    .from('sites')
+    .select('id')
+    .eq('id', siteId)
+    .eq('organization_id', organizationId)
+    .maybeSingle();
+  if (anchorSiteError) {
+    throw new Error(
+      `Failed to verify primary site org for brand "${brandLabel}": ${anchorSiteError.message}`,
+    );
+  }
+  if (!anchorSite) {
+    // Plain ASCII (no em dash) to match this file's other thrown, client-facing
+    // messages: an em dash here previously crashed createErrorResponse's
+    // X-Error header (@adobe/fetch rejects non-Latin1 header content with a
+    // raw TypeError, surfacing as a 500 instead of this 409 — caught by the
+    // it-postgres IT suite, not the mocked unit tests). createErrorResponse
+    // now sanitizes the header regardless (serenity-docs#346), but this stays
+    // ASCII too rather than leaning on that alone.
+    const err = new Error(
+      `Cannot anchor brand "${brandLabel}" to site ${siteId}: that site `
+      + `does not exist, or does not belong to organization ${organizationId}.`,
+    );
+    err.status = 409;
+    err.code = 'brand_site_org_mismatch';
+    throw err;
+  }
+}
+
+/**
  * Fully replaces brand_sites for a brand. Groups submitted URLs by normalized base URL
  * (via composeBaseURL) so that multiple paths under the same site share one brand_sites row.
  */
@@ -1200,6 +1251,18 @@ export async function upsertBrand({
   // (which left Semrush brands' site_id NULL) is removed; a genuine collision with
   // another brand's primary site still surfaces as the brands_base_site_unique 409
   // handled below.
+  // serenity-docs#346: a brand's primary site must belong to the same org as the
+  // brand itself — anchoring to another org's site is exactly the org-ID mismatch
+  // pattern the investigation traced (Tata Capital, BMW, Toyota, ...). Verify on
+  // both paths that assign a *new* anchor (fresh create, or first anchor for a
+  // previously Semrush-only brand); the immutable-once-set branch below is
+  // unaffected since it already refuses to change an existing site_id.
+  const wantsNewAnchor = hasText(brand.baseSiteId)
+    && (existing === null || !hasText(existing.site_id));
+  if (wantsNewAnchor) {
+    await assertSiteBelongsToOrg(postgrestClient, brand.baseSiteId, organizationId, brand.name);
+  }
+
   if (existing === null) {
     row.site_id = hasText(brand.baseSiteId) ? brand.baseSiteId : null;
   } else if (hasText(brand.baseSiteId) && !hasText(existing.site_id)) {
@@ -1312,7 +1375,7 @@ export async function updateBrand({
   if (needsExistingFetch) {
     const { data: current, error: currentError } = await postgrestClient
       .from('brands')
-      .select('site_id, status, updated_at')
+      .select('name, site_id, status, updated_at')
       .eq('id', brandId)
       .maybeSingle();
     // Fail closed: a swallowed read error leaves `current` null, so the guard
@@ -1379,6 +1442,10 @@ export async function updateBrand({
       patch.site_id = null;
     }
   } else if (hasText(updates.baseSiteId) && (!existing?.site_id || isPending)) {
+    // serenity-docs#346: same org-ID mismatch guard as upsertBrand — verify the
+    // new/re-pointed site actually belongs to this brand's org before persisting.
+    const brandLabel = existing?.name || brandId;
+    await assertSiteBelongsToOrg(postgrestClient, updates.baseSiteId, organizationId, brandLabel);
     patch.site_id = updates.baseSiteId;
   }
 
