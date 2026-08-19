@@ -280,6 +280,9 @@ export async function linkSiteToLiveRows(dataAccess, brandId, siteId, log) {
  */
 export async function linkSiteToRow(dataAccess, semrushProjectId, siteId, log) {
   const BrandSemrushProject = dataAccess?.BrandSemrushProject;
+  // `!x || !hasText(x)` rather than `hasText` alone: hasText is typed `(string)`
+  // and these params are `string|null|undefined`, so the truthiness check is what
+  // narrows them for the type-check gate. Same shape as `linkSiteToLiveRows`.
   if (!BrandSemrushProject || !semrushProjectId || !hasText(semrushProjectId)
       || !siteId || !hasText(siteId)) {
     return;

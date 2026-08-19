@@ -1427,7 +1427,29 @@ describe('SerenityController', () => {
       expect(linkSiteToLiveRowsStub).to.not.have.been.called;
     });
 
-    it('createMarket mirrors the url the market TRACKS, not the host it is filed under', async () => {
+    it('createMarket warns and links nothing when a 201 names no project', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({
+        status: 201,
+        body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' },
+      });
+      ensureMarketSiteStub.resolves('site-uuid-1');
+      const log = fakeLog();
+      const controller = SerenityController({ env: {} }, log, {});
+      const ctx = fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'],
+        },
+      });
+      const response = await controller.createMarket(ctx);
+      expect(response.status).to.equal(201);
+      // The row is keyed by project id, so without one there is nothing to bind
+      // to — the market keeps no site. Unreachable while the handler holds its
+      // contract, which is why it must not fail silently if that ever changes.
+      expect(linkSiteToRowStub).to.have.been.calledOnceWith(ctx.dataAccess, null, 'site-uuid-1');
+      expect(log.warn).to.have.been.calledWithMatch(/201 without a projectId/);
+    });
+
+    it('createMarket mirrors the brand host when the market carries no url of its own', async () => {
       handlers.handleCreateMarketSubworkspace.resolves({
         status: 201,
         body: {
@@ -1439,10 +1461,11 @@ describe('SerenityController', () => {
         data: {
           market: 'us',
           languageCode: 'en',
-          // A subpath survives into primaryUrl; brandDomain is host-only because
-          // a path there is rejected upstream. The market's Site must mirror the
-          // tracked value — anchoring it to the host would record a brand
-          // analysing nba.com/kings against the root nba.com Site.
+          // The fallback arm: with no siteId, primaryUrl is derived from
+          // brandDomain and the two coincide. The arm where they diverge — a
+          // supplied siteId whose Site carries a subpath — is asserted by the
+          // `derives brandDomain from a supplied siteId` case below, which is
+          // the only way a market gets a url the brand host does not express.
           brandDomain: 'nba.com',
           brandNames: ['X'],
         },
