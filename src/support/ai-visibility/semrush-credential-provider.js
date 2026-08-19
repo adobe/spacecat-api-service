@@ -149,6 +149,9 @@ function assertWorkspaceSource(value) {
  * @param {(scope: object, env: object) => Promise<MintResult>} options.mintToken
  *   mints the TA token for the resolved credential scope (REQUIRED). Injected so this
  *   module never holds a live credential.
+ * @param {{debug?: (msg: string) => void}} [options.log] optional logger; when present,
+ *   the provider debug-logs a distinct reason on each fall-back path so the null/no-hint
+ *   outcomes are diagnosable once the seam goes live.
  * @returns {SemrushCredentialProvider}
  */
 export function createDualModeSemrushCredentialProvider(options = {}) {
@@ -158,6 +161,7 @@ export function createDualModeSemrushCredentialProvider(options = {}) {
     resolveRequestWorkspace = defaultResolveRequestWorkspace,
     lookupWorkspaceForOrg,
     mintToken,
+    log,
   } = options;
 
   if (typeof mintToken !== 'function') {
@@ -191,6 +195,10 @@ export function createDualModeSemrushCredentialProvider(options = {}) {
       // per-org: without an org claim we cannot scope a TA -> defer to the shared
       // fallback path (a null result, per spec §6.2).
       if (!imsOrgId) {
+        log?.debug?.(
+          '[semrush-credential-provider] no ims_org_id resolved; cannot scope a '
+          + 'per-org credential -- falling back to the shared credential path',
+        );
         return null;
       }
       key = perOrgScopeKey(imsOrgId);
@@ -204,9 +212,19 @@ export function createDualModeSemrushCredentialProvider(options = {}) {
     } else {
       // token-org-mapping: the org claim is the join key into the mapping.
       if (!imsOrgId) {
+        log?.debug?.(
+          '[semrush-credential-provider] no ims_org_id resolved; cannot map a '
+          + 'workspace -- falling back to the shared credential path',
+        );
         return null;
       }
       workspaceHint = lookupWorkspaceForOrg(imsOrgId, env) || undefined;
+      if (!workspaceHint) {
+        log?.debug?.(
+          `[semrush-credential-provider] ims_org_id "${imsOrgId}" has no mapped `
+          + 'workspace -- proceeding without a workspaceHint',
+        );
+      }
     }
 
     const scope = Object.freeze({

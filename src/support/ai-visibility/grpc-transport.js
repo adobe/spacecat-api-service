@@ -148,9 +148,17 @@ function buildClientPoolEntry(interceptor) {
  * Tear down a pool entry's transport: abort its HTTP/2 session manager so the
  * underlying connection is closed rather than leaked when the entry is evicted or the
  * pool is reset. No-op when the entry has no session manager (e.g. under test mocks).
+ *
+ * Best-effort: a failure to abort one entry must not stop teardown of the others (this
+ * runs in an eviction loop and a `forEach` over the whole pool), so the error is
+ * swallowed rather than propagated.
  */
 function teardownClientPoolEntry(entry) {
-  entry?.sessionManager?.abort?.();
+  try {
+    entry?.sessionManager?.abort?.();
+  } catch {
+    // Swallowed intentionally -- see the best-effort note above.
+  }
 }
 
 /**

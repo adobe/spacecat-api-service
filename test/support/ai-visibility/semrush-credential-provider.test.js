@@ -234,6 +234,55 @@ describe('semrush-credential-provider (dual-mode)', () => {
     expect(b.workspaceHint).to.equal('ws-body');
   });
 
+  describe('diagnostic logging on fall-back paths', () => {
+    it('logs distinct reasons for the missing-org and unmapped-workspace paths', () => {
+      const log = { debug: sandbox.stub() };
+      const provider = createDualModeSemrushCredentialProvider({
+        mintToken: sandbox.stub().resolves('t'),
+        lookupWorkspaceForOrg: sandbox.stub().returns(null),
+        log,
+      });
+
+      // per-org + no org -> null (cannot scope a per-org credential).
+      expect(provider('brand-string', {})).to.equal(null);
+      // org present but unmapped -> descriptor without workspaceHint (distinct reason).
+      const cred = provider({ imsOrgId: 'org-1' }, {});
+      expect(cred.workspaceHint).to.equal(undefined);
+
+      const messages = log.debug.getCalls().map((c) => c.args[0]);
+      expect(messages.some((m) => /cannot scope a per-org credential/.test(m))).to.be.true;
+      expect(messages.some((m) => /has no mapped workspace/.test(m))).to.be.true;
+    });
+
+    it('logs the workspace-mapping reason when mapping mode has no org (shared key)', () => {
+      const log = { debug: sandbox.stub() };
+      const provider = createDualModeSemrushCredentialProvider({
+        mintToken: sandbox.stub().resolves('t'),
+        lookupWorkspaceForOrg: sandbox.stub().returns('ws'),
+        log,
+        config: {
+          credentialGranularity: CredentialGranularity.SHARED,
+          workspaceSource: WorkspaceSource.TOKEN_ORG_MAPPING,
+        },
+      });
+
+      // Shared key needs no org, but mapping mode does -> null (cannot map a workspace).
+      expect(provider('brand-no-org', {})).to.equal(null);
+      const messages = log.debug.getCalls().map((c) => c.args[0]);
+      expect(messages.some((m) => /cannot map a workspace/.test(m))).to.be.true;
+    });
+
+    it('is silent when no logger is injected', () => {
+      const provider = createDualModeSemrushCredentialProvider({
+        mintToken: sandbox.stub().resolves('t'),
+        lookupWorkspaceForOrg: sandbox.stub().returns(null),
+      });
+      // No throw despite the fall-back paths firing without a logger.
+      expect(provider('brand-string', {})).to.equal(null);
+      expect(provider({ imsOrgId: 'org-1' }, {}).workspaceHint).to.equal(undefined);
+    });
+  });
+
   describe('installed into the resolver seam', () => {
     it('resolves per-brand and shares one mint per credential key via getCachedToken', async () => {
       const mintToken = sandbox.stub().resolves({ token: 'org-tok', expiresInMs: 60 * 1000 });

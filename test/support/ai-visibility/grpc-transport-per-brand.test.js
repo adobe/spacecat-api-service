@@ -172,6 +172,17 @@ describe('grpc-transport per-brand auth seam', () => {
       ]);
       expect(next.calledOnce).to.be.true;
     });
+
+    it('resetGrpcClients tears down the flag-off singleton transport (B2)', () => {
+      const env = { SEO_CLIENT_ID: 'id', SEO_CLIENT_SECRET: 'sec' };
+
+      getGrpcClients(env); // builds the singleton -> sessionManagers[0]
+      expect(sessionManagers[0].abort.notCalled).to.be.true;
+
+      resetGrpcClients();
+      // The default (flag-off) live path's session is closed on reset, not leaked.
+      expect(sessionManagers[0].abort.calledOnce).to.be.true;
+    });
   });
 
   describe('flag ON', () => {

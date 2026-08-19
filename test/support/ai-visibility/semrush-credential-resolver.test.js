@@ -279,5 +279,42 @@ describe('semrush-credential-resolver', () => {
       expect(beforeExpiry).to.equal('a');
       expect(atExpiry).to.equal('b');
     });
+
+    it('applies the skew on the absolute expiresAtMs path too (B3)', async () => {
+      const mint = sandbox.stub();
+      mint.onFirstCall().resolves({ token: 'a', expiresAtMs: 60 * 1000 });
+      mint.onSecondCall().resolves({ token: 'b', expiresAtMs: 60 * 1000 });
+
+      // Absolute expiry = 60000; skewed to 60000 - 5000 = 55000 (independent of `now`).
+      const first = await getCachedToken('k1', mint, 0);
+      const beforeSkew = await getCachedToken('k1', mint, 54999); // still valid
+      const atSkew = await getCachedToken('k1', mint, 55000); // re-mint 5s early
+
+      expect(first).to.equal('a');
+      expect(beforeSkew).to.equal('a');
+      expect(atSkew).to.equal('b');
+      expect(mint.calledTwice).to.be.true;
+    });
+
+    // MUST-FIX 1 -- expiry is measured from AFTER the mint resolves, not request start.
+    it('measures expiry from when the mint resolves, not from the initial call time', async () => {
+      // Clock advances 10s while the mint runs, so the post-mint read sees 10000.
+      let t = 0;
+      const clock = () => t;
+      const mint = sandbox.stub().callsFake(() => {
+        t = 10 * 1000; // the (slow) mint takes 10s
+        return Promise.resolve('tok');
+      });
+
+      await getCachedToken('k1', mint, clock);
+
+      // Default TTL is measured from 10000, so the entry is valid until 10000 + 300000,
+      // not 0 + 300000 -- the slow mint did not shorten the cached lifetime.
+      t = 300 * 1000; // exactly the old (buggy) expiry boundary
+      const stillValidNearOldExpiry = sandbox.stub().resolves('tok-2');
+      const reused = await getCachedToken('k1', stillValidNearOldExpiry, clock);
+      expect(reused).to.equal('tok');
+      expect(stillValidNearOldExpiry.notCalled).to.be.true;
+    });
   });
 });

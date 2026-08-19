@@ -54,6 +54,12 @@ const DEFAULT_TOKEN_TTL_MS = 5 * 60 * 1000;
  * expires, so a token handed to the transport is never within the skew window of
  * expiring mid-flight (which would 401). Not applied to the conservative default TTL,
  * which is already well short of any real credential lifetime.
+ *
+ * Sizing assumption: this margin only has to exceed the duration of a *single* gRPC
+ * call, since the token is re-checked (and re-minted if stale) on each request that
+ * builds/uses the transport. It is deliberately much smaller than the ~29s
+ * API-Gateway ceiling, which bounds a whole multi-RPC request rather than one call. If
+ * an individual gRPC call could ever run longer than this margin, raise it.
  */
 const TOKEN_TTL_SKEW_MS = 5 * 1000;
 
@@ -124,13 +130,18 @@ export function resolveSemrushCredential(brand, env) {
  * @param {string} key - stable cache key for the credential scope.
  * @param {() => Promise<MintResult>} mintFn - MUST resolve a non-empty token string
  *   or an object with a string `token`; anything else throws and caches nothing.
- * @param {number} [nowMs=Date.now()] - current time in ms (injectable for tests).
+ * @param {(() => number) | number} [now=Date.now] - clock used to measure expiry. A
+ *   function is read fresh at each point (the production default, so a slow mint's
+ *   expiry is measured from when the token actually exists); a fixed number pins the
+ *   clock deterministically for tests.
  * @returns {Promise<string>} the raw token string.
  * @throws {Error} when `mintFn` violates the contract above.
  */
-export async function getCachedToken(key, mintFn, nowMs = Date.now()) {
+export async function getCachedToken(key, mintFn, now = Date.now) {
+  const clock = typeof now === 'function' ? now : () => now;
+
   const existing = tokenCache.get(key);
-  if (existing && nowMs < existing.expiresAtMs) {
+  if (existing && clock() < existing.expiresAtMs) {
     return existing.token;
   }
 
@@ -142,23 +153,27 @@ export async function getCachedToken(key, mintFn, nowMs = Date.now()) {
 
   const mintPromise = (async () => {
     const minted = await mintFn();
+    // Capture the timestamp AFTER the mint resolves: a slow mint must not make the
+    // cached token expire early (its lifetime starts when the token exists, not when
+    // the request began).
+    const mintedAtMs = clock();
 
     let token;
     let expiresAtMs;
     let providerSuppliedExpiry = false;
     if (typeof minted === 'string') {
       token = minted;
-      expiresAtMs = nowMs + DEFAULT_TOKEN_TTL_MS;
+      expiresAtMs = mintedAtMs + DEFAULT_TOKEN_TTL_MS;
     } else if (minted && typeof minted.token === 'string') {
       token = minted.token;
       if (typeof minted.expiresAtMs === 'number') {
         expiresAtMs = minted.expiresAtMs;
         providerSuppliedExpiry = true;
       } else if (typeof minted.expiresInMs === 'number') {
-        expiresAtMs = nowMs + minted.expiresInMs;
+        expiresAtMs = mintedAtMs + minted.expiresInMs;
         providerSuppliedExpiry = true;
       } else {
-        expiresAtMs = nowMs + DEFAULT_TOKEN_TTL_MS;
+        expiresAtMs = mintedAtMs + DEFAULT_TOKEN_TTL_MS;
       }
     } else {
       // Enforce the mint contract: nothing is cached when it is violated, so the
@@ -169,11 +184,12 @@ export async function getCachedToken(key, mintFn, nowMs = Date.now()) {
     }
 
     // TTL skew: refresh a real token a few seconds before its true expiry. Guard against
-    // moving expiry to/before `nowMs` (would make the entry born-stale and re-mint every
-    // call) -- a token whose real lifetime is shorter than the skew keeps its own expiry.
+    // moving expiry to/before the mint time (would make the entry born-stale and re-mint
+    // every call) -- a token whose real lifetime is shorter than the skew keeps its own
+    // expiry.
     if (providerSuppliedExpiry) {
       const skewed = expiresAtMs - TOKEN_TTL_SKEW_MS;
-      if (skewed > nowMs) {
+      if (skewed > mintedAtMs) {
         expiresAtMs = skewed;
       }
     }
