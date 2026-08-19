@@ -1857,6 +1857,14 @@ const HLX_ADMIN_SITE = 'project-elmo-ui-data';
 const HLX_ADMIN_REF = 'main';
 const HLX_ADMIN_BASE_URL = 'https://admin.hlx.page';
 
+// '/'-separated relative path (e.g. 'brand-presence/2026-w28-chatgpt', or a
+// dataFolder like 'dev/test-com'). Each segment must start with a word character,
+// so '.' and '..' can never match as a whole segment -- this is what rules out
+// '..' traversal and a leading '/' anchor, entirely within the regex.
+const SAFE_RELATIVE_FILE_PATH_RE = /^[\w][\w.-]*(\/[\w][\w.-]*)*$/;
+export const isSafeRelativeFilePath = (value) => typeof value === 'string'
+  && SAFE_RELATIVE_FILE_PATH_RE.test(value);
+
 function buildHlxAdminUrl(action, filePath) {
   return `${HLX_ADMIN_BASE_URL}/${action}/${HLX_ADMIN_ORG}/${HLX_ADMIN_SITE}/${HLX_ADMIN_REF}/${filePath}`;
 }
@@ -1893,6 +1901,14 @@ async function readHlxErrorBody(response) {
  * @returns {Promise<void>}
  */
 export async function reindexQueryIndexPaths(dataFolder, fileNames, env, log) {
+  // Defense-in-depth: dataFolder is database-sourced and admin-controlled today
+  // (the only caller, updateQueryIndex, validates fileNames but trusts the site's
+  // stored dataFolder), but this guards the URL-building itself in case a future
+  // caller lets a less-privileged input reach this parameter.
+  if (!isSafeRelativeFilePath(dataFolder)) {
+    throw new Error(`Invalid dataFolder: ${dataFolder}`);
+  }
+
   const headers = getHlxAuthHeaders(env);
 
   log.info(`Reindexing ${fileNames.length} path(s) in ${dataFolder}`);
@@ -1928,6 +1944,11 @@ export async function reindexQueryIndexPaths(dataFolder, fileNames, env, log) {
 }
 
 export async function previewAndPublishQueryIndex(dataFolder, env, log) {
+  // Defense-in-depth -- see the matching check in reindexQueryIndexPaths.
+  if (!isSafeRelativeFilePath(dataFolder)) {
+    throw new Error(`Invalid dataFolder: ${dataFolder}`);
+  }
+
   const filePath = `${dataFolder}/query-index.json`;
   const headers = getHlxAuthHeaders(env);
   const fetchOptions = { method: 'POST', headers, timeout: 30000 };

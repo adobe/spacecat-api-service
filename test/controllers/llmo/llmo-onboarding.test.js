@@ -5515,6 +5515,28 @@ describe('LLMO Onboarding Functions', () => {
   });
 
   describe('reindexQueryIndexPaths', () => {
+    it('should reject an unsafe dataFolder before making any request', async () => {
+      const mockTracingFetch = sinon.stub().resolves({ ok: true, status: 200, statusText: 'OK' });
+
+      const { reindexQueryIndexPaths } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
+          },
+        },
+      );
+
+      try {
+        await reindexQueryIndexPaths('../other-folder', ['file1'], mockEnv, mockLog);
+        expect.fail('Should have thrown');
+      } catch (error) {
+        expect(error.message).to.equal('Invalid dataFolder: ../other-folder');
+      }
+
+      expect(mockTracingFetch).to.not.have.been.called;
+    });
+
     it('should POST to the Admin API index endpoint for each file', async () => {
       const mockTracingFetch = sinon.stub().resolves({ ok: true, status: 200, statusText: 'OK' });
 
@@ -5781,6 +5803,28 @@ describe('LLMO Onboarding Functions', () => {
   });
 
   describe('previewAndPublishQueryIndex', () => {
+    it('should reject an unsafe dataFolder before making any request', async () => {
+      const mockTracingFetch = sinon.stub().resolves({ ok: true, status: 200, statusText: 'OK' });
+
+      const { previewAndPublishQueryIndex } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
+          },
+        },
+      );
+
+      try {
+        await previewAndPublishQueryIndex('/etc/passwd', mockEnv, mockLog);
+        expect.fail('Should have thrown');
+      } catch (error) {
+        expect(error.message).to.equal('Invalid dataFolder: /etc/passwd');
+      }
+
+      expect(mockTracingFetch).to.not.have.been.called;
+    });
+
     it('should successfully preview and publish with .json path', async () => {
       const mockTracingFetch = sinon.stub();
       mockTracingFetch.onCall(0).resolves({ ok: true, status: 200, statusText: 'OK' });

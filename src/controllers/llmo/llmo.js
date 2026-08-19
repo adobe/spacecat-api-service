@@ -70,6 +70,7 @@ import {
   postLlmoAlert,
   reindexQueryIndexPaths,
   previewAndPublishQueryIndex,
+  isSafeRelativeFilePath,
 } from './llmo-onboarding.js';
 import { queryLlmoFiles } from './llmo-query-handler.js';
 import {
@@ -103,16 +104,6 @@ const VALID_CADENCES = ['daily', 'weekly-paid', 'weekly-free'];
 // Well above any real site's file count (heritage-sg, the largest observed, had 45)
 // -- just a backstop against pathological/abusive request sizes on this admin-only route.
 const MAX_REINDEX_FILES_PER_REQUEST = 200;
-
-// '/'-separated relative path for updateQueryIndex's fileNames (e.g.
-// 'brand-presence/2026-w28-chatgpt') -- allows subdirectories (unlike the
-// single-segment isSafePathSegment guard). Each segment must start with a word
-// character, so '.' and '..' can never match as a whole segment (a leading '.'
-// is rejected outright) -- this is what rules out '..' traversal and a leading
-// '/' anchor, entirely within the regex; no separate segment check is needed.
-const SAFE_RELATIVE_FILE_PATH_RE = /^[\w][\w.-]*(\/[\w][\w.-]*)*$/;
-const isSafeRelativeFilePath = (value) => typeof value === 'string'
-  && SAFE_RELATIVE_FILE_PATH_RE.test(value);
 
 /** Site IDs for which HLX `brandpresence` sheet data is blocked (PG migration). */
 const HLX_BRANDPRESENCE_PG_MIGRATION_SITE_IDS = new Set([
