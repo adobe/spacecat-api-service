@@ -12,7 +12,7 @@
 
 // @ts-check
 
-import { hasText, siteIdentityFromUrlString } from '@adobe/spacecat-shared-utils';
+import { hasText, isValidUUID, siteIdentityFromUrlString } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from '../../utils.js';
 import {
@@ -227,6 +227,13 @@ function validateCreateBody(body) {
   // domain and the tracked url from it (resolveSiteUrls). One of the two is required.
   if (!hasText(body?.brandDomain) && !hasText(body?.siteId)) {
     errors.push('brandDomain or siteId is required');
+  }
+  // Validated even though only the sub-workspace path resolves it: flat mode
+  // records it straight onto `brand_to_semrush_projects.site_id`, a uuid column,
+  // so a malformed value that gets this far surfaces as a write failure rather
+  // than as the bad request it is.
+  if (hasText(body?.siteId) && !isValidUUID(body.siteId)) {
+    errors.push('siteId must be a valid UUID');
   }
   if (!Array.isArray(body?.brandNames) || body.brandNames.length === 0
       || !body.brandNames.every(hasText)) {
@@ -457,6 +464,15 @@ export async function handleCreateMarket(
       semrushProjectId,
       geoTargetId: location.geoTargetId,
       languageCode,
+      // The market's own Site, when the caller named one — the per-market source
+      // of truth for the url this project tracks. It is the identity the project
+      // was just provisioned against (`resolveSiteIdentity` above derived both
+      // `brandDomain` and `primaryUrl` from it), so recording it here is what
+      // stops the market resolving to its brand's anchor by fallback later.
+      // A `brandDomain`-only create records none: flat mode resolves no Site from
+      // a raw domain, and inventing the brand's anchor would assert a per-market
+      // fact nobody stated.
+      ...(hasText(body.siteId) ? { siteId: body.siteId } : {}),
     });
   } catch (e) {
     log?.error?.(
