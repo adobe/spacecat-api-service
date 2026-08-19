@@ -104,6 +104,15 @@ const VALID_CADENCES = ['daily', 'weekly-paid', 'weekly-free'];
 // -- just a backstop against pathological/abusive request sizes on this admin-only route.
 const MAX_REINDEX_FILES_PER_REQUEST = 200;
 
+// '/'-separated relative path for updateQueryIndex's fileNames (e.g.
+// 'brand-presence/2026-w28-chatgpt') -- allows subdirectories (unlike the
+// single-segment isSafePathSegment guard) but rejects '..'/'.' segments and any
+// leading '/' so a caller can't escape the site's own dataFolder.
+const SAFE_RELATIVE_FILE_PATH_RE = /^[\w.-]+(\/[\w.-]+)*$/;
+const isSafeRelativeFilePath = (value) => typeof value === 'string'
+  && SAFE_RELATIVE_FILE_PATH_RE.test(value)
+  && !value.split('/').some((segment) => segment === '.' || segment === '..');
+
 /** Site IDs for which HLX `brandpresence` sheet data is blocked (PG migration). */
 const HLX_BRANDPRESENCE_PG_MIGRATION_SITE_IDS = new Set([
   '9ae8877a-bbf3-407d-9adb-d6a72ce3c5e3', // adobe.com Prod
@@ -2163,11 +2172,13 @@ function LlmoController(ctx) {
       }
 
       // Each fileName is interpolated into the Helix Admin API reindex URL
-      // (adobe/project-elmo-ui-data/main/<dataFolder>/<fileName>.json) — reject
-      // anything that isn't a plain path segment so a caller can't escape the
-      // site's own dataFolder (e.g. `../other-folder/secret`).
-      if (fileNames.some((f) => !isSafePathSegment(f.replace(/\.json$/, '')))) {
-        return badRequest('Each fileName must contain only alphanumerics, hyphens, or underscores');
+      // (adobe/project-elmo-ui-data/main/<dataFolder>/<fileName>.json). Real fileNames
+      // for this endpoint include a subdirectory (e.g. `brand-presence/2026-w28-chatgpt`,
+      // per the LLMO-6320 RCA), so this can't reuse the single-segment isSafePathSegment
+      // guard -- it must allow '/' between segments while still rejecting '..' and
+      // absolute-path anchors so a caller can't escape the site's own dataFolder.
+      if (fileNames.some((f) => !isSafeRelativeFilePath(f))) {
+        return badRequest('Each fileName must be a relative path of alphanumerics, hyphens, underscores, dots, or slashes, with no ".." segments');
       }
 
       const { dataAccess } = context;

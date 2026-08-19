@@ -7810,7 +7810,7 @@ describe('LlmoController', () => {
       expect(body.message).to.equal('Each fileName must be a non-empty string');
     });
 
-    it('should return bad request when a fileName contains path-traversal characters', async () => {
+    it('should return bad request when a fileName contains a ".." traversal segment', async () => {
       const ctx = {
         ...mockContext,
         data: { domain: 'example.com', fileNames: ['../other-folder/secret'] },
@@ -7820,8 +7820,34 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(400);
       const body = await result.json();
-      expect(body.message).to.equal('Each fileName must contain only alphanumerics, hyphens, or underscores');
+      expect(body.message).to.equal('Each fileName must be a relative path of alphanumerics, hyphens, underscores, dots, or slashes, with no ".." segments');
       expect(reindexStub).to.not.have.been.called;
+    });
+
+    it('should return bad request when a fileName has a leading slash (absolute path)', async () => {
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: ['/etc/passwd'] },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Each fileName must be a relative path of alphanumerics, hyphens, underscores, dots, or slashes, with no ".." segments');
+      expect(reindexStub).to.not.have.been.called;
+    });
+
+    it('should accept a fileName with a legitimate subdirectory segment', async () => {
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: ['brand-presence/2026-w28-chatgpt'] },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(200);
+      expect(reindexStub).to.have.been.calledWith(TEST_FOLDER, ['brand-presence/2026-w28-chatgpt'], sinon.match.any, sinon.match.any);
     });
 
     it('should return bad request when fileNames exceeds the per-request cap', async () => {
