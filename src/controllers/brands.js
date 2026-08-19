@@ -83,9 +83,9 @@ import {
   isSerenityUiActiveForOrg,
 } from '../support/serenity/serenity-active.js';
 import {
-  buildReservedDomains,
+  buildReservedIdentities,
   dropReservedCompetitors,
-  removedCompetitorDomains,
+  removedCompetitors,
   syncCompetitorBenchmarksAcrossMarkets,
 } from '../support/serenity/competitor-benchmarks.js';
 import {
@@ -1832,11 +1832,14 @@ function BrandsController(ctx, log, env) {
       // stored competitor list either. Social/earned domains are not reserved.
       if (Array.isArray(brandData.competitors) && brandData.competitors.length > 0) {
         const primaryDomain = brandDomainFromPayload(brandData);
-        const reservedDomains = buildReservedDomains(
+        const reservedIdentities = buildReservedIdentities(
           primaryDomain ? [primaryDomain] : [],
           brandData.urls,
         );
-        const { kept, dropped } = dropReservedCompetitors(brandData.competitors, reservedDomains);
+        const { kept, dropped } = dropReservedCompetitors(
+          brandData.competitors,
+          reservedIdentities,
+        );
         if (dropped.length > 0) {
           log.info('brands: dropped self-referential competitor(s) on create', {
             dropped: dropped.map((c) => c?.url).filter(Boolean),
@@ -2105,9 +2108,12 @@ function BrandsController(ctx, log, env) {
         const websiteUrls = updates.urls !== undefined ? updates.urls : (brandState?.urls || []);
         const brandOwnUrls = [brandState?.baseUrl, ...websiteUrls];
 
-        let reservedDomains;
+        let reservedIdentities;
         if (hasText(brandState?.semrushSubWorkspaceId)) {
           // Semrush brand: market/project domains come from the project listing.
+          // A project domain is a bare FQDN, so it reserves that apex exactly — a
+          // competitor on a sibling path of the same host is a different site and
+          // is kept.
           // List once and stash for the post-commit re-sync (see prefetchedProjects).
           // Best-effort for a migrating org: if the listing fails (e.g. user not
           // provisioned in Semrush), degrade to brand-URL-only reserved set and log —
@@ -2136,16 +2142,19 @@ function BrandsController(ctx, log, env) {
               throw guardError;
             }
           }
-          reservedDomains = buildReservedDomains(
+          reservedIdentities = buildReservedIdentities(
             (prefetchedProjects ?? []).map((p) => p?.domain),
             brandOwnUrls,
           );
         } else {
           // Flat-mode brand: no projects — reserve the primary + own website URLs.
-          reservedDomains = buildReservedDomains([], brandOwnUrls);
+          reservedIdentities = buildReservedIdentities([], brandOwnUrls);
         }
 
-        const { kept, dropped } = dropReservedCompetitors(updates.competitors, reservedDomains);
+        const { kept, dropped } = dropReservedCompetitors(
+          updates.competitors,
+          reservedIdentities,
+        );
         if (dropped.length > 0) {
           log.info('brands: dropped self-referential competitor(s) on update', {
             brandId,
@@ -2158,7 +2167,7 @@ function BrandsController(ctx, log, env) {
           // an empty list the caller didn't actually request.
           if (kept.length === 0) {
             return badRequest(
-              'All submitted competitors reference this brand\'s own domains and were '
+              'All submitted competitors reference this brand\'s own sites and were '
               + 'rejected; none were saved. Remove the self-referencing entries, or omit '
               + 'the competitors field to leave existing competitors unchanged.',
             );
@@ -2278,7 +2287,7 @@ function BrandsController(ctx, log, env) {
             );
           }
           if (competitorsTouched) {
-            const removed = removedCompetitorDomains(oldCompetitors, updated.competitors);
+            const removed = removedCompetitors(oldCompetitors, updated.competitors);
             const competitorResult = await syncCompetitorBenchmarksAcrossMarkets(
               transport,
               updated.competitors,

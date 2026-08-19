@@ -84,6 +84,30 @@ export function normalizeBenchmarkDomain(value) {
   }
 }
 
+/**
+ * Normalizes a URL or bare domain to the identity that distinguishes SITES on one
+ * host: lowercase host plus path, with `www.` folded away.
+ *
+ * This is {@link siteIdentityFromUrlString} with one adjustment. That primitive
+ * deliberately keeps `www.` and the apex apart, because for a tracked site they
+ * are distinct origins. For deciding whether a competitor IS one of the brand's
+ * own properties they are not: a brand listing `nba.com/kings` and a competitor
+ * spelled `www.nba.com/kings` name the same property, and the reservation must
+ * still catch it — which folding `www.` here preserves, since that is how the
+ * host-only comparison this replaces always behaved.
+ *
+ * The path is the part worth keeping: `nba.com/suns` and `nba.com/kings` are
+ * different sites, and reducing both to `nba.com` is what made a legitimate
+ * competitor look self-referential.
+ *
+ * @param {string|null|undefined} value - a full URL or a bare `host[/path]`.
+ * @returns {string|null} e.g. "nba.com/suns", or null when unparseable.
+ */
+export function siteIdentityFor(value) {
+  const identity = siteIdentityFromUrlString(typeof value === 'string' ? value.trim() : '');
+  return identity === null ? null : identity.replace(/^www\./, '');
+}
+
 // Whether a brand website URL is nothing more than a market's primary domain.
 // The skip below exists to stop the SAME string being listed twice (the benchmark
 // already shows the domain), so it must compare the whole url, not just its host:

@@ -198,7 +198,11 @@ describe('brand-aliases helpers', () => {
       // After the PUT, the re-read surfaces the rejected alias.
       transport.listBenchmarks.onSecondCall().resolves({
         aio_benchmarks: [{
-          id: 'own', main_brand: true, domain: 'brand.com', rejected_brand_aliases: ['bogus'],
+          id: 'own',
+          main_brand: true,
+          domain: 'brand.com',
+          brand_name: 'Brand',
+          rejected_brand_aliases: ['bogus'],
         }],
       });
       const aliases = [{ name: 'Acme', regions: [] }, { name: 'bogus', regions: [] }];
@@ -207,7 +211,7 @@ describe('brand-aliases helpers', () => {
 
       expect(result.rejected).to.deep.equal([
         {
-          projectId: 'p-us', market: 'us', domain: 'brand.com', aliases: ['bogus'],
+          projectId: 'p-us', market: 'us', name: 'Brand', domain: 'brand.com', aliases: ['bogus'],
         },
       ]);
     });

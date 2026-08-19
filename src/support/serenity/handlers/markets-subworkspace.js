@@ -45,7 +45,10 @@ import { classifyBrandedTag, needlesFromNames } from '../branded-classifier.js';
 import { classifyPromptIntents, AI_GEN_CLASSIFY_MAX, computeWriteDeadline } from '../intent-classification.js';
 import { collectBrandUrlEntries, attachBrandUrlsToProject, primaryDomainSet } from '../brand-urls.js';
 import { resolveProjects } from '../resolve-projects.js';
-import { buildReservedDomains, syncCompetitorBenchmarksForProject } from '../competitor-benchmarks.js';
+import {
+  buildReservedIdentities,
+  syncCompetitorBenchmarksForProject,
+} from '../competitor-benchmarks.js';
 import { collectAliasNames } from '../brand-aliases.js';
 import { upsertMappingRow, tombstoneMappingRow } from '../mapping-rows.js';
 import { primaryUrlPatchBody } from '../project-provisioning.js';
@@ -772,7 +775,7 @@ export async function handleCreateMarketSubworkspace(
   try {
     // Reserve the brand's own domains (this market's project domain + the brand's
     // own website URLs) so a competitor can't be one of the brand's own properties.
-    const reservedDomains = buildReservedDomains(
+    const reservedIdentities = buildReservedIdentities(
       [body.brandDomain],
       brandUrlSources?.urls,
     );
@@ -784,7 +787,7 @@ export async function handleCreateMarketSubworkspace(
       [],
       body.market,
       log,
-      reservedDomains,
+      reservedIdentities,
     );
   } catch (e) {
     // Same non-self-healing best-effort seam as the URL attach above — distinct

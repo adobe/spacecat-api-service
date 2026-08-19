@@ -7761,9 +7761,18 @@ V2SemrushRejectedAlias:
       type: string
       description: ISO-3166 country code of that market.
       example: 'us'
+    name:
+      type: [string, 'null']
+      description: >-
+        Name of the benchmark the aliases were attached to (null when absent).
+        This is what identifies the benchmark: a project can hold several
+        benchmarks on one domain, told apart by their name.
+      example: 'Phoenix Suns'
     domain:
       type: [string, 'null']
-      description: Benchmark domain the aliases were attached to (null when absent).
+      description: >-
+        Domain of that benchmark (null when absent). Not an identifier on its
+        own - use `name` to tell sibling benchmarks on one domain apart.
       example: 'www.example.com'
     aliases:
       type: array
