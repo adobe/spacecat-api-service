@@ -7300,6 +7300,29 @@ describe('Brands Controller', () => {
       );
     });
 
+    it('sanitizes only the X-Error header on the untyped-error (500) fallback too, keeping the body raw', async () => {
+      // Same split as the 409 case above, on the OTHER branch of
+      // createErrorResponse: a bare Error with no .status (e.g. the
+      // anchorSiteError DB-failure path) must not have its body message
+      // sanitized just because the header copy needs to be.
+      const err = new Error('DB read failed — connection reset');
+      const updateBrandStub = sinon.stub().rejects(err);
+
+      const controller = await buildUpdateController({ updateBrand: updateBrandStub });
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { baseSiteId: 'some-other-orgs-site' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(500);
+      const body = await response.json();
+      expect(body.message).to.equal(err.message); // body keeps the full, unsanitized message
+      expect(response.headers.get('x-error')).to.equal('DB read failed  connection reset');
+    });
+
     it('succeeds when expectedUpdatedAt matches the persisted row (LLMO-6591)', async () => {
       const response = await brandsController.updateBrandForOrg({
         ...context,

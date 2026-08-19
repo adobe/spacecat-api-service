@@ -24,7 +24,6 @@ import {
   noContent,
   createResponse,
   forbidden,
-  internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   composeBaseURL,
@@ -375,7 +374,18 @@ function BrandsController(ctx, log, env) {
         { [HEADER_ERROR]: cleanupHeaderValue(appErr.message || 'Error') },
       );
     }
-    return internalServerError(cleanupHeaderValue(appErr.message || 'Internal server error'));
+    // Same split as the typed-status branch above: internalServerError() would
+    // set the header AND the body from one value, so a non-ASCII character in
+    // a bare Error's message would strip from the body too — operators
+    // debugging a 500 lose it there for no reason (the raw error is still in
+    // the logs regardless). Build the response directly instead so only the
+    // header copy is sanitized.
+    const rawMessage = appErr.message || 'Internal server error';
+    return createResponse(
+      { message: rawMessage },
+      500,
+      { [HEADER_ERROR]: cleanupHeaderValue(rawMessage) },
+    );
   }
 
   function validateBrandGuidanceFields(brandData = {}) {
