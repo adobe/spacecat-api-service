@@ -1154,6 +1154,7 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status',
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
       'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
+      'GET /sites/:siteId/edge-deployed-urls',
       'GET /sites/:siteId/geo-experiments',
       'GET /sites/:siteId/geo-experiments/:geoExperimentId',
       'GET /sites/:siteId/geo-experiments/:geoExperimentId/results',
