@@ -45,7 +45,9 @@ export { SerenityTransportError } from './serenity-transport-error.js';
 // Cap upstream calls so a slow Semrush response doesn't pin the Lambda for its
 // full wall budget. Semrush returns well under 5s in practice; 15s is a safe
 // ceiling that still gives the user a clean error rather than a Lambda timeout.
-const DEFAULT_TIMEOUT_MS = 15_000;
+// Exported so other direct (non-typed-client) Semrush callers — e.g. the
+// onboarding workspace-provisioning call — use the same ceiling.
+export const DEFAULT_TIMEOUT_MS = 15_000;
 
 /**
  * The two generated Semrush contracts this transport speaks. Every request shape below is
@@ -195,7 +197,7 @@ function normalizeBaseUrl(raw, varName) {
  * @param {TransportEnv} env
  * @returns {string} canonical `protocol//host` origin
  */
-function baseUrl(env) {
+export function baseUrl(env) {
   return normalizeBaseUrl(env?.SEMRUSH_PROJECTS_BASE_URL, 'SEMRUSH_PROJECTS_BASE_URL');
 }
 
@@ -209,10 +211,14 @@ function baseUrl(env) {
  * (LLMO / api-service#2656). The error message names whichever var was the
  * effective source so a misconfiguration is unambiguous.
  *
+ * Exported for the onboarding workspace-provisioning call
+ * (`src/support/onboarding/workspace-provisioning.js`), which hits this User
+ * Manager path directly rather than going through the typed client built below.
+ *
  * @param {TransportEnv} env
  * @returns {string} canonical `protocol//host` origin
  */
-function usersBaseUrl(env) {
+export function usersBaseUrl(env) {
   // Bound first, then narrowed by `typeof`: `hasText` is not a TS type guard, so it
   // cannot take a `string | undefined` (see this dir's CLAUDE.md). Same idiom as
   // `normalizeBaseUrl` above. Behaviour is unchanged either way — `hasText` already
