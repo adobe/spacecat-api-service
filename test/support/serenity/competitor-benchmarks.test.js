@@ -812,6 +812,35 @@ describe('competitor-benchmarks helpers', () => {
       expect(resolved.has('newcomer')).to.equal(false);
     });
 
+    it('warns when the project carries two benchmarks under one name', () => {
+      // Upstream enforces name uniqueness case-insensitively, so this should be
+      // unreachable; if it happens, one of the two is unreachable by name and no
+      // sync of ours can resolve it, which is worth saying out loud.
+      const warn = sandbox.stub();
+      const resolved = resolveBenchmarksByCompetitor(
+        [
+          {
+            id: 'first', main_brand: false, domain: 'a.com', brand_name: 'Rival',
+          },
+          {
+            id: 'second', main_brand: false, domain: 'b.com', brand_name: 'RIVAL',
+          },
+        ],
+        [{ key: 'rival', name: 'Rival', domain: 'a.com' }],
+        new Set(),
+        { info: () => {}, warn },
+      );
+      expect(resolved.get('rival')?.id).to.equal('first');
+      expect(warn).to.have.been.calledWithMatch(
+        'competitor-benchmarks: duplicate benchmark name in project',
+        sinon.match({
+          key: 'rival',
+          matched: { id: 'first', name: 'Rival' },
+          ignored: { id: 'second', name: 'RIVAL' },
+        }),
+      );
+    });
+
     it('ignores benchmarks with no id, and tolerates non-array inputs', () => {
       expect(resolveBenchmarksByCompetitor(null, null).size).to.equal(0);
       const resolved = resolveBenchmarksByCompetitor(
@@ -970,6 +999,32 @@ describe('competitor-benchmarks helpers', () => {
         .flatMap((call) => call.args[3].brand_aliases)
         .filter((a) => a === 'shared');
       expect(sent).to.have.lengthOf(1);
+    });
+
+    it('deletes and recreates when a competitor is renamed AND moved at once', async () => {
+      // Neither the name nor the site identity survives, so this is not a rename at
+      // all — removedCompetitors reports it removed, its benchmark is deleted, and
+      // the new one is created clean. No alias can be carried forward, because the
+      // benchmark carrying it does not survive the edit.
+      const transport = makeTransport([{
+        id: 'foo',
+        main_brand: false,
+        domain: 'foo.com',
+        brand_name: 'Foo',
+        brand_aliases: ['foo', 'fooey'],
+      }]);
+      const oldC = [{ name: 'Foo', url: 'https://foo.com', aliases: ['fooey'] }];
+      const newC = [{
+        name: 'Foo Inc', url: 'https://bar.com', aliases: [], regions: ['us'],
+      }];
+      const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, newC, removedCompetitors(oldC, newC), 'us', undefined, new Set(), oldC);
+      expect(transport.deleteBenchmarks).to.have.been.calledOnceWith(WS, PID, ['foo']);
+      expect(transport.createBenchmarks).to.have.been.calledOnceWith(WS, PID, [
+        { brand_name: 'Foo Inc', domain: 'bar.com', brand_aliases: ['foo inc'] },
+      ]);
+      expect(result).to.deep.equal({
+        created: 1, updated: 0, deleted: 1, changed: true, rejected: [],
+      });
     });
 
     it('removes an alias the edit dropped even when the competitor was renamed', async () => {
@@ -1238,6 +1293,11 @@ describe('competitor-benchmarks helpers', () => {
       expect(removedCompetitors([{ url: 'https://a.com' }], [])).to.deep.equal([
         { name: 'a.com', key: 'a.com', domain: 'a.com' },
       ]);
+    });
+
+    it('skips a competitor with neither a name nor a usable url', () => {
+      // Nothing to key on, so it cannot be matched to a benchmark either way.
+      expect(removedCompetitors([{ url: 'not a url' }, { name: '  ' }], [])).to.deep.equal([]);
     });
   });
 

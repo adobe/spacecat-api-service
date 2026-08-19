@@ -308,8 +308,23 @@ export function resolveBenchmarksByCompetitor(
       domain: normalizeBenchmarkDomain(b?.domain),
     };
     const key = competitorKey(entry.name);
-    if (key !== '' && !byName.has(key)) {
-      byName.set(key, entry);
+    if (key !== '') {
+      if (byName.has(key)) {
+        // Upstream enforces name uniqueness within a project case-insensitively, so
+        // this should be unreachable. If it happens the project carries duplication
+        // no sync of ours can resolve — first-seen wins and the other benchmark is
+        // unreachable by name — so say so rather than picking one silently.
+        log?.warn?.('competitor-benchmarks: duplicate benchmark name in project', {
+          ...logContext,
+          key,
+          // Both spellings: the collision is case-folded, so the raw names can
+          // differ and either one alone makes the pair hard to find upstream.
+          matched: { id: byName.get(key).id, name: byName.get(key).name },
+          ignored: { id: entry.id, name: entry.name },
+        });
+      } else {
+        byName.set(key, entry);
+      }
     }
     if (entry.domain !== null && !isReserved(b?.domain, reservedIdentities)) {
       if (!byDomain.has(entry.domain)) {
@@ -335,6 +350,14 @@ export function resolveBenchmarksByCompetitor(
     }
   }
 
+  // Grouped by bare host because that is all a benchmark carries — its `domain` is
+  // an FQDN with no path, so `nba.com/suns` and `nba.com/lakers` are indistinguishable
+  // from the benchmark side. The host is therefore a hint, never a match, which is
+  // exactly why adoption requires a 1:1 pairing before it acts: on any host where the
+  // hint could point at more than one thing, it declines. This is one-time
+  // reconciliation, not steady-state behaviour — the first sync writes the desired
+  // name onto whatever it adopts, after which pass 1 matches it and this loop is a
+  // no-op forever.
   for (const [domain, unresolved] of pending) {
     const candidates = (byDomain.get(domain) || []).filter((e) => !claimed.has(e.id));
     if (candidates.length === 0) {
