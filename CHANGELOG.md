@@ -1,3 +1,10 @@
+## [1.755.2](https://github.com/adobe/spacecat-api-service/compare/v1.755.1...v1.755.2) (2026-08-19)
+
+
+### Bug Fixes
+
+* **serenity:** read and write the intent root under one name | LLMO-6986 ([#3054](https://github.com/adobe/spacecat-api-service/issues/3054)) ([4e256e8](https://github.com/adobe/spacecat-api-service/commit/4e256e8376c2d49269b793b78777527dd827c492)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 ## [1.755.1](https://github.com/adobe/spacecat-api-service/compare/v1.755.0...v1.755.1) (2026-08-18)
 
 
