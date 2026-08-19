@@ -27,6 +27,7 @@ import { GAP_PROMPTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/prompt/e
 import {
   parseLimitOffset,
   resolveCountry,
+  resolveSearchType,
   engineToLlm,
   brandTarget,
   parseCompetitorDomainsList,
@@ -38,6 +39,7 @@ import {
 /* c8 ignore start */
 export async function handleGapPrompts(sp, clients) {
   const domain = sp.get('domain');
+  const searchType = resolveSearchType(domain);
   const competitorDomains = parseCompetitorDomainsList(sp);
   const competitors = competitorDomains.length > 0
     ? competitorDomains.map(brandTarget)
@@ -70,6 +72,7 @@ export async function handleGapPrompts(sp, clients) {
       },
       range: { limit, offset },
       target_date: date,
+      search_type: searchType,
     };
     if (topicId) {
       listJson.topic_hash = topicId;
@@ -85,6 +88,7 @@ export async function handleGapPrompts(sp, clients) {
       target: { domain, name: domain },
       competitors,
       target_date: date,
+      search_type: searchType,
     };
     if (topicId) {
       totalsJson.topic_hash = topicId;

@@ -17,7 +17,6 @@ import {
   DIMENSION_PROVISION_ORDER,
   RESERVED_ROOT_NAMES,
   INTENT_ROOT_NAME,
-  LEGACY_INTENT_ROOT_NAME,
   rootNameOfDimension,
   dimensionOfRootName,
   ORIGIN_VALUE,
@@ -72,9 +71,12 @@ describe('serenity prompt-tags taxonomy', () => {
       expect(isDimensionRootName('Running Shoes')).to.equal(false);
     });
 
-    it('reserves BOTH intent spellings, so neither can be shadowed mid-rename', () => {
+    it('reserves BOTH intent spellings, so neither can be shadowed', () => {
+      // The bare name is reserved even though no root is named that: it folds to
+      // the intent dimension, so a customer category called `intent` at the root
+      // level would be READ as the dimension itself.
       expect(isDimensionRootName(INTENT_ROOT_NAME)).to.equal(true);
-      expect(isDimensionRootName(LEGACY_INTENT_ROOT_NAME)).to.equal(true);
+      expect(isDimensionRootName(DIMENSION.INTENT)).to.equal(true);
       expect([...RESERVED_ROOT_NAMES]).to.include(INTENT_ROOT_NAME);
     });
 
@@ -83,9 +85,8 @@ describe('serenity prompt-tags taxonomy', () => {
       // entry from the customer-facing Brand Presence tag filter.
       expect(rootNameOfDimension(DIMENSION.INTENT)).to.equal(INTENT_ROOT_NAME);
       expect(dimensionOfRootName(INTENT_ROOT_NAME)).to.equal(DIMENSION.INTENT);
-      // The pre-rename name IS the key, so the fold is identity for it and a
-      // mid-rename project answers the same dimension as a renamed one.
-      expect(dimensionOfRootName(LEGACY_INTENT_ROOT_NAME)).to.equal(DIMENSION.INTENT);
+      // The fold is identity for the dimension key itself.
+      expect(dimensionOfRootName(DIMENSION.INTENT)).to.equal(DIMENSION.INTENT);
       DIMENSION_PROVISION_ORDER
         .filter((d) => d !== DIMENSION.INTENT)
         .forEach((d) => {

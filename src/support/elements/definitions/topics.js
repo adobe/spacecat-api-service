@@ -12,8 +12,8 @@
 
 import { resolveElementModel, SEP } from '../constants.js';
 import {
+  HIDDEN_TAG_MARKER,
   INTENT_ROOT_NAME,
-  LEGACY_INTENT_ROOT_NAME,
   ORIGIN_ROOT_NAME,
   LEGACY_ORIGIN_ROOT_NAME,
 } from '../../serenity/prompt-tags.js';
@@ -133,35 +133,26 @@ export function transformCategoriesToFilterDimensions(raw) {
 }
 
 /**
- * The intent dimension's root names, and therefore its Elements tag prefixes —
- * the current `$abv_tags$intent` and the pre-rename `intent`. The Elements tag
- * encoding is the `__`-joined tag PATH, so a dimension's prefix is literally its
- * root's name and the rename (LLMO-6984) changes what these tags look like on
- * the wire. The rename runs project by project, so both shapes are read; a
- * project carries one or the other, never a mix, and the two prefixes cannot
- * match the same value (`intent__` does not prefix `$abv_tags$intent__…`).
- *
- * LLMO-6986 drops the legacy entry once no project carries it.
+ * The intent dimension's Elements tag prefix. The Elements tag encoding is the
+ * `__`-joined tag PATH, so a dimension's prefix is literally its root's name —
+ * `$abv_tags$intent__` for intent ({@link INTENT_ROOT_NAME}).
  */
-const INTENT_ROOT_NAMES = [INTENT_ROOT_NAME, LEGACY_INTENT_ROOT_NAME];
+const INTENT_MARKER = `${INTENT_ROOT_NAME}${SEP}`;
 
 /**
  * Extracts the intent-prefixed entries → `{ id: original tag, label }`, plus
  * `parent_id`/`parent_label` when the tag encodes a "Parent__Child" hierarchy.
  *
  * `id` stays the original tag value, which is what a caller passes back as a
- * `tags` filter, so it carries whichever prefix that project actually uses. The
- * `label` is the bare value either way — the rename touches only the root.
+ * `tags` filter. The `label` is the bare value — the marker prefixes only the
+ * root, never the five intent values.
  *
  * @param {object} raw - Raw response from the Elements API.
  * @returns {FilterDimensionItem[]}
  */
 export function transformIntentsToFilterDimensions(raw) {
-  return INTENT_ROOT_NAMES.flatMap((root) => {
-    const marker = `${root}${SEP}`;
-    return extractByPrefix(raw, root)
-      .map(({ original, stripped }) => ({ id: original, ...splitParent(stripped, marker) }));
-  });
+  return extractByPrefix(raw, INTENT_ROOT_NAME)
+    .map(({ original, stripped }) => ({ id: original, ...splitParent(stripped, INTENT_MARKER) }));
 }
 
 /**
@@ -204,22 +195,28 @@ export function transformOriginsToFilterDimensions(raw) {
 const KNOWN_TAG_PREFIXES = [
   'topic__',
   'category__',
-  ...INTENT_ROOT_NAMES.map((root) => `${root}${SEP}`),
+  INTENT_MARKER,
   ...ORIGIN_ROOT_NAMES.map((root) => `${root}${SEP}`),
 ];
 
 /**
  * Extracts every tag NOT already covered by {@link KNOWN_TAG_PREFIXES} —
- * `topic__`, `category__`, and both the intent and origin spellings
- * (`$abv_tags$intent__`/`intent__`, `origin__`/`source__`) — so
- * newly-introduced Semrush tag types (e.g. `type__branded`) surface in the
- * response without a code change per prefix.
+ * `topic__`, `category__`, `$abv_tags$intent__` and both origin spellings
+ * (`origin__`/`source__`) — so newly-introduced Semrush tag types
+ * (e.g. `type__branded`) surface in the response without a code change per prefix.
  *
- * Both intent and both origin spellings are covered, so a renamed project's tags
- * are claimed by `page_intents`/`origins` rather than resurfacing here as a
- * dynamic `$abv_tags$intent`/`origin` group — this catch-all is where an
- * unrecognised dimension would otherwise leak into the filter payload under its
- * raw upstream name.
+ * The intent prefix and both origin spellings are covered, so those tags are
+ * claimed by `page_intents`/`origins` rather than resurfacing here as a dynamic
+ * `$abv_tags$intent`/`origin` group — this catch-all is where an unrecognised
+ * dimension would otherwise leak into the filter payload under its raw upstream
+ * name.
+ *
+ * Anything carrying the `$abv_tags$` marker is dropped outright, whether or not it
+ * is a known prefix. The marker is what hides a root from the customer-facing Brand
+ * Presence tag filter upstream, so surfacing a marked family here would defeat it.
+ * Gating on the marker rather than on the known-prefix list keeps that control
+ * correct when Semrush adds a second marked root, instead of relying on someone
+ * remembering to extend the list.
  *
  * - `prefix__value` tags are grouped by their prefix into a dynamic key
  *   (e.g. `{ type: [{ id: 'type__branded', label: 'branded' }, ...] }`), unless
@@ -251,7 +248,9 @@ const KNOWN_TAG_PREFIXES = [
 export function transformOtherTagsForFilterDimensions(raw, reservedResultKeys = []) {
   const values = (raw?.blocks?.value ?? [])
     .map((item) => String(item.value ?? ''))
-    .filter((value) => value !== '' && !KNOWN_TAG_PREFIXES.some((p) => value.startsWith(p)));
+    .filter((value) => value !== ''
+      && !value.startsWith(HIDDEN_TAG_MARKER)
+      && !KNOWN_TAG_PREFIXES.some((p) => value.startsWith(p)));
 
   const groups = Object.create(null);
   const tags = [];

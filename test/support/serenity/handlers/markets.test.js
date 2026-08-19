@@ -166,6 +166,19 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     expect(result.body.error).to.equal('invalidRequest');
   });
 
+  it('400s on a siteId that is not a UUID', async () => {
+    // Flat mode records the value straight onto a uuid column, so a malformed one
+    // has to be rejected here rather than at the write.
+    const transport = {};
+    const dataAccess = makeDataAccess([]);
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', brandDomain: 'adobe.com', siteId: 'not-a-uuid', brandNames: ['Adobe'],
+    }, fakeLog());
+    expect(result.status).to.equal(400);
+    expect(result.body.error).to.equal('invalidRequest');
+    expect(result.body.message).to.match(/siteId must be a valid UUID/);
+  });
+
   it('400s on unknown market', async () => {
     const transport = {};
     const dataAccess = makeDataAccess([]);
@@ -332,13 +345,63 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     };
 
     const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
-      market: 'US', languageCode: 'en', siteId: 'site-42', brandNames: ['Adobe'],
+      market: 'US', languageCode: 'en', siteId: '00000000-0000-4000-8000-000000000042', brandNames: ['Adobe'],
     }, fakeLog());
 
     expect(result.status).to.equal(201);
-    expect(dataAccess.Site.findById).to.have.been.calledOnceWith('site-42');
+    expect(dataAccess.Site.findById).to.have.been.calledOnceWith('00000000-0000-4000-8000-000000000042');
     // The Semrush project domain is the hostname resolved from the site base_url.
     expect(transport.createProject.firstCall.args[1].domain).to.equal('acme.com');
+  });
+
+  it('records the market\'s own Site on the mapping row when the caller names one', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    dataAccess.Site.findById.resolves({ getBaseURL: () => 'https://kisqali.de' });
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-de', name: 'German' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-de' }),
+      updateProject: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'DE', languageCode: 'de', siteId: '00000000-0000-4000-8000-0000000000de', brandNames: ['Kisqali'],
+    }, fakeLog());
+
+    // site_id is the PER-MARKET source of truth for the url a project tracks
+    // (serenity-docs#356). It is the identity this project was just provisioned
+    // against, so recording it here is what stops the market resolving to its
+    // brand's anchor by fallback later.
+    expect(dataAccess.BrandSemrushProject.create).to.have.been.calledOnceWithExactly({
+      brandId: BRAND,
+      semrushProjectId: 'proj-de',
+      geoTargetId: 2276,
+      languageCode: 'de',
+      siteId: '00000000-0000-4000-8000-0000000000de',
+    });
+  });
+
+  it('records no Site when the market was created from a bare brandDomain', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      updateProject: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', brandDomain: 'adobe.com', brandNames: ['Adobe'],
+    }, fakeLog());
+
+    // Flat mode resolves no Site from a raw domain, and inventing the brand's
+    // anchor here would assert a per-market fact nobody stated.
+    const created = dataAccess.BrandSemrushProject.create.firstCall.args[0];
+    expect(created).to.not.have.property('siteId');
   });
 
   it('PATCHes the tracked url with the site path the domain cannot carry', async () => {
@@ -354,7 +417,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     };
 
     const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
-      market: 'US', languageCode: 'en', siteId: 'site-42', brandNames: ['Kings'],
+      market: 'US', languageCode: 'en', siteId: '00000000-0000-4000-8000-000000000042', brandNames: ['Kings'],
     }, fakeLog());
 
     expect(result.status).to.equal(201);
@@ -405,7 +468,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const log = fakeLog();
 
     const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
-      market: 'US', languageCode: 'en', siteId: 'site-42', brandNames: ['Kings'],
+      market: 'US', languageCode: 'en', siteId: '00000000-0000-4000-8000-000000000042', brandNames: ['Kings'],
     }, log);
 
     // The subpath identity was derived from the Site and attempted...
@@ -435,7 +498,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     };
 
     const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
-      market: 'US', languageCode: 'en', brandDomain: 'adobe.com', siteId: 'site-42', brandNames: ['Adobe'],
+      market: 'US', languageCode: 'en', brandDomain: 'adobe.com', siteId: '00000000-0000-4000-8000-000000000042', brandNames: ['Adobe'],
     }, fakeLog());
 
     expect(result.status).to.equal(201);
@@ -452,7 +515,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     };
 
     const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
-      market: 'US', languageCode: 'en', siteId: 'site-missing', brandNames: ['Adobe'],
+      market: 'US', languageCode: 'en', siteId: '00000000-0000-4000-8000-00000000dead', brandNames: ['Adobe'],
     }, fakeLog());
 
     expect(result.status).to.equal(400);
