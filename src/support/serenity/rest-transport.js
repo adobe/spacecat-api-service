@@ -1232,8 +1232,11 @@ export function createSerenityTransport({ env, imsToken }) {
 
     /**
      * POST /v2/workspaces/{ws}/projects/{pid}/ai_models/benchmarks — batch-create
-     * benchmarks. Body is an ARRAY of `{ brand_name, domain, brand_aliases?,
-     * color? }`. The API cannot set `main_brand` (system-managed); a created
+     * benchmarks. Body is an ARRAY of `{ brand_name, domain, primary_url?,
+     * brand_aliases?, color? }`. `primary_url` is honoured at create
+     * (live-verified 2026-08-19) and is what a subpath brand must carry, since
+     * `domain` alone scores it against its bare host. The API cannot set
+     * `main_brand` (system-managed); a created
      * benchmark is a regular tracked brand. Returns `{ ids: [...], existing_count }`.
      * We use it to create the project's own-brand benchmark when Semrush has not
      * auto-provisioned one (the `benchmark_id` brand URLs must attach to).
@@ -1285,7 +1288,14 @@ export function createSerenityTransport({ env, imsToken }) {
      * - A field left OUT of the body is cleared, not preserved: a PUT of
      *   `{brand_name, domain}` empties `brand_aliases`. Always send the full list.
      * - `domain` is required in practice (a body without it 400s on `primary_url`),
-     *   even though the generated request type marks nothing required.
+     *   even though the generated request type marks nothing required. It and
+     *   `primary_url` are ONE value: writing either sets both, `root_domain` keeps
+     *   the registrable form, and a body carrying a host-only `domain` therefore
+     *   RESETS a benchmark that tracks a subpath. Send `primary_url` on every write
+     *   — the value the benchmark should keep, not the plan's bare host
+     *   (live-verified 2026-08-19).
+     * - `main_brand` survives the PUT but cannot be set by it; the tracked url,
+     *   unlike the flag, does move in place.
      * - An alias is identified case-insensitively and keeps the spelling it was
      *   created with, so a PUT cannot re-case one, and two spellings of the same
      *   alias in one list are refused with a 409 that fails the whole write.
