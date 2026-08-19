@@ -63,6 +63,7 @@ import {
   resolveProductCode,
 } from '../support/tier-provisioning.js';
 import { getBrandBySite, isSemrushMarketMirrorSite } from '../support/brands-storage.js';
+import { normalizeHostCase } from '../support/url-utils.js';
 import { createSerenityTransport } from '../support/serenity/rest-transport.js';
 import { propagateSiteUrlToSemrush } from '../support/serenity/site-url-propagation.js';
 import { isSemrushTransportError, unwrapTransportCause } from '../support/serenity/errors.js';
@@ -1204,9 +1205,12 @@ function SitesController(ctx, log, env) {
     // `Site.findByBaseURL`. Deliberately NOT reusing `composeBaseURL`/`canonicalizeUrl`
     // here — both also strip `www.`, which this feature must NOT collapse (a Semrush
     // project's identity treats `www.x.com` and `x.com` as distinct sites; see
-    // `siteIdentityFromUrlString`'s own "do NOT collapse www vs apex" contract).
+    // `siteIdentityFromUrlString`'s own "do NOT collapse www vs apex" contract). The host's
+    // case is normalized here too — hosts are case-insensitive (RFC 3986 / WHATWG URL), so
+    // `Site1.com` and `site1.com` must compare, collide-check, propagate, and persist as the
+    // same value — but the path is left untouched, since paths ARE case-sensitive.
     const nextBaseURL = hasText(requestBody.baseURL)
-      ? requestBody.baseURL.replace(/\/$/, '')
+      ? normalizeHostCase(requestBody.baseURL.replace(/\/$/, ''))
       : requestBody.baseURL;
 
     // A site's URL backing a Semrush-managed brand can be changed, but only for the

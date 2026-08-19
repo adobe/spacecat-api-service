@@ -981,6 +981,28 @@ describe('Sites Controller', () => {
     expect(updated).to.have.property('baseURL', 'https://site1.com');
   });
 
+  it('normalizes host case before comparing/colliding/persisting a baseURL change', async () => {
+    // A case-only variant of the current baseURL's host must be treated as a no-op:
+    // no brand lookup, no Semrush call, no save -- matching the existing "unchanged URL"
+    // behavior, not a same-domain edit attempt. Hosts are case-insensitive
+    // (RFC 3986 / WHATWG URL); paths are not, so only the host is normalized.
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    getBrandBySiteStub.reset();
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { baseURL: 'https://Site1.COM', deliveryType: 'other' },
+      ...defaultAuthAttributes,
+    });
+
+    expect(getBrandBySiteStub).to.have.not.been.called;
+    expect(site.save).to.have.been.calledOnce; // deliveryType still changed
+    expect(response.status).to.equal(200);
+    const updated = await response.json();
+    expect(updated).to.have.property('baseURL', 'https://site1.com');
+  });
+
   it('collides on a trailing-slash variant of an existing site\'s baseURL', async () => {
     const site = sites[0];
     site.save = sandbox.spy(site.save);

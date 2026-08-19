@@ -154,6 +154,32 @@ describe('propagateSiteUrlToSemrush', () => {
     expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, 'proj-1', 'bench-new');
   });
 
+  it('skips the benchmark update (but still updates primary_url/domain and republishes) when no benchmark exists and none can be created', async () => {
+    // ensureOwnBrandBenchmark resolves null when create returns no id (existing_count,
+    // not an error) and a re-list still finds no match -- the default fixture already
+    // produces exactly this: empty benchmarks list, createBenchmarks resolving { ids: [] }.
+    const transport = makeTransport({ benchmarks: [] });
+    const rows = [fakeRow('proj-1')];
+
+    const result = await propagateSiteUrlToSemrush({
+      dataAccess: dataAccessWithRows(rows),
+      transport,
+      workspaceId: WS,
+      brandId: BRAND_ID,
+      siteId: SITE_ID,
+      brandIdentity: BRAND_IDENTITY,
+      newBaseURL: NEW_URL,
+    });
+
+    expect(result).to.deep.equal({ projectsUpdated: 1 });
+    expect(transport.createBenchmarks).to.have.been.calledOnce;
+    expect(transport.updateBenchmark).to.not.have.been.called;
+    expect(transport.updateProject).to.have.been.calledOnceWith(WS, 'proj-1', {
+      type: 'ai', primary_url: 'site1.com/new-path', domain: 'site1.com',
+    });
+    expect(transport.publishProject).to.have.been.calledOnceWith(WS, 'proj-1');
+  });
+
   it('propagates a quotaExceeded 409 when republish 405s on quota (SITES-49206), not swallowed', async () => {
     const transport = makeTransport({ benchmarks: [] });
     transport.publishProject.rejects(
