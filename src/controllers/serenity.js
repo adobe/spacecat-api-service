@@ -956,7 +956,9 @@ function SerenityController(context, log, env) {
           const projectId = result.body && 'projectId' in result.body
             ? result.body.projectId
             : null;
-          if (!projectId) {
+          if (projectId) {
+            await linkSiteToRow(ctx.dataAccess, projectId, linkedSiteId, log);
+          } else {
             // Unreachable while the handler keeps its 201 contract (a created
             // market always names its project). Worth a line if that ever
             // changes: the market silently keeps no site otherwise, which is
@@ -965,7 +967,6 @@ function SerenityController(context, log, env) {
               brandId: auth.brandUuid, siteId: linkedSiteId,
             });
           }
-          await linkSiteToRow(ctx.dataAccess, projectId, linkedSiteId, log);
         }
       } else {
         // Flat handler self-derives brandDomain from siteId (it has Site access).

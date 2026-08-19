@@ -1445,7 +1445,7 @@ describe('SerenityController', () => {
       // The row is keyed by project id, so without one there is nothing to bind
       // to — the market keeps no site. Unreachable while the handler holds its
       // contract, which is why it must not fail silently if that ever changes.
-      expect(linkSiteToRowStub).to.have.been.calledOnceWith(ctx.dataAccess, null, 'site-uuid-1');
+      expect(linkSiteToRowStub).to.not.have.been.called;
       expect(log.warn).to.have.been.calledWithMatch(/201 without a projectId/);
     });
 
