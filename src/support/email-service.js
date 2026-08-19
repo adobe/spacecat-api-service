@@ -33,6 +33,9 @@ export async function getEmailServiceToken(context) {
 
   try {
     const tokenPayload = await imsClient.getServiceAccessToken();
+    if (!tokenPayload?.access_token) {
+      throw new Error('IMS returned no access token');
+    }
     return tokenPayload.access_token;
   } catch (error) {
     context.log.error('[email-service] Failed to acquire IMS token', { error: error.message });
@@ -74,6 +77,11 @@ export async function sendEmail(context, {
       return result;
     }
 
+    if (!env.LLMO_EMAIL_IMS_CLIENT_ID) {
+      result.error = 'LLMO_EMAIL_IMS_CLIENT_ID is not configured';
+      return result;
+    }
+
     const accessToken = providedToken ?? await getEmailServiceToken(context);
     const postOfficeEndpoint = env.ADOBE_POSTOFFICE_ENDPOINT;
 
@@ -99,7 +107,8 @@ export async function sendEmail(context, {
       method: 'POST',
       headers: {
         Accept: 'application/json',
-        Authorization: `IMS ${accessToken}`,
+        Authorization: `Bearer ${accessToken}`,
+        'x-api-key': env.LLMO_EMAIL_IMS_CLIENT_ID,
         'Content-Type': 'application/json',
       },
       body,

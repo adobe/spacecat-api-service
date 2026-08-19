@@ -485,6 +485,34 @@ describe('Trial User Controller', () => {
       expect(body).to.have.property('emailId', 'newuser@example.com');
     });
 
+    it('should return internal server error when EMAIL_IMS_CLIENT_ID is not configured', async () => {
+      const context = {
+        params: { organizationId },
+        data: { emailId: 'newuser@example.com' },
+        dataAccess: mockDataAccess,
+        log: mockLogger,
+        env: {
+          EMAIL_IMS_CLIENT_SECRET: 'test-client-secret',
+          EMAIL_IMS_CLIENT_CODE: 'test-client-code',
+          EMAIL_IMS_SCOPE: 'test-scope',
+          ADOBE_POSTOFFICE_ENDPOINT: 'https://test-postoffice.adobe.com/po-server/message',
+          EMAIL_LLMO_TEMPLATE: 'expdev_xwalk_trial_confirm',
+        },
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ is_admin: true })
+            .withAuthenticated(true),
+        },
+      };
+
+      const result = await trialUserController.createTrialUserForEmailInvite(context);
+
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.equal('EMAIL_IMS_CLIENT_ID is not configured');
+    });
+
     it('should return bad request for invalid organization ID', async () => {
       const context = {
         params: { organizationId: 'invalid-uuid' },
@@ -759,7 +787,7 @@ describe('Trial User Controller', () => {
         data: { emailId: 'existing@example.com' },
         dataAccess: mockDataAccess,
         log: mockLogger,
-        env: {},
+        env: { EMAIL_IMS_CLIENT_ID: 'test-client-id' },
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
@@ -784,7 +812,7 @@ describe('Trial User Controller', () => {
         data: { emailId: 'newuser@example.com' },
         dataAccess: mockDataAccess,
         log: mockLogger,
-        env: {},
+        env: { EMAIL_IMS_CLIENT_ID: 'test-client-id' },
         attributes: {
           authInfo: new AuthInfo()
             .withType('jwt')
