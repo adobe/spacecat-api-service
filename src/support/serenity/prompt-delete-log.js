@@ -40,11 +40,13 @@ const LABEL = 'Serenity prompt delete';
  * @param {'deleted' | 'error'} event.outcome
  * @param {number} [event.status] - upstream HTTP status, error outcomes only.
  * @param {string} [event.message] - redacted upstream message, error outcomes only.
+ * @param {boolean} [event.alreadyGone] - true when the prompt was already gone upstream
+ *   (idempotent 404-treated-as-success), distinguishing it from a genuine delete.
  */
 export function logPromptDeleteEvent(log, event) {
   const {
     organizationId, brandId, semrushWorkspaceId, semrushPromptId, geoTargetId, languageCode,
-    callerId, outcome, status, message,
+    callerId, outcome, status, message, alreadyGone,
   } = event;
   const payload = {
     organizationId,
@@ -61,6 +63,9 @@ export function logPromptDeleteEvent(log, event) {
   }
   if (message) {
     payload.message = message;
+  }
+  if (alreadyGone) {
+    payload.alreadyGone = true;
   }
   const line = `${LABEL} ${JSON.stringify(payload)}`;
   // Optional chaining, matching the log?.info?.(...) defensiveness this call

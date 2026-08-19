@@ -496,7 +496,7 @@ export async function deleteProjectBatches(
       if (isUpstreamGone(e)) {
         deleted += bucket.ids.length;
         projectsToPublish.add(pid);
-        bucket.targets.forEach((t) => logEvent(t, 'deleted'));
+        bucket.targets.forEach((t) => logEvent(t, 'deleted', { alreadyGone: true }));
         return;
       }
       // Computed once per bucket, not per target — both values depend only on the

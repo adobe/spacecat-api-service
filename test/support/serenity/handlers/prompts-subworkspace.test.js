@@ -25,19 +25,13 @@ import { SerenityTransportError } from '../../../../src/support/serenity/rest-tr
 import { ErrorWithStatusCode } from '../../../../src/support/utils.js';
 import { ERROR_CODES } from '../../../../src/support/serenity/errors.js';
 import { TAG_IDS, makeListProjectTagsStub } from '../fixtures/tag-tree.js';
+import { parseAuditLine } from './audit-log-test-utils.js';
 
 use(chaiAsPromised);
 use(sinonChai);
 
 const WS = 'subworkspace-ws-1';
 const log = { info: () => {}, error: () => {}, warn: () => {} };
-
-// SITES-50099: strips the "Serenity prompt delete " label prefix off a logged
-// line and parses the embedded JSON payload.
-const AUDIT_LABEL = 'Serenity prompt delete ';
-function parseAuditLine(line) {
-  return JSON.parse(line.slice(AUDIT_LABEL.length));
-}
 
 // A subworkspace project for a (geo, lang) slice, in the v1 default shape:
 // nested settings.ai.location.id / settings.ai.language.name, no created_at.
@@ -722,7 +716,11 @@ describe('prompts-subworkspace handlers', () => {
       expect(parseAuditLine(line).callerId).to.equal('unknown');
     });
 
-    it('logs outcome=deleted for the idempotent upstream-404 case', async () => {
+    // Important (MysticatBot review, PR #3108): the audit log must be able to
+    // distinguish a genuine delete from finding the prompt already gone upstream
+    // (idempotent 404) — otherwise the trail cannot answer "did we delete it, or
+    // was it already gone" for reconciliation against the upstream's own records.
+    it('logs outcome=deleted with alreadyGone=true for the idempotent upstream-404 case', async () => {
       const transport = makeTransport({
         deletePromptsByIds: sinon.stub().rejects(new SerenityTransportError(404, 'gone')),
       });
@@ -734,12 +732,16 @@ describe('prompts-subworkspace handlers', () => {
 
       expect(spyLog.info).to.have.been.calledOnce;
       const [line] = spyLog.info.firstCall.args;
-      expect(parseAuditLine(line).outcome).to.equal('deleted');
+      const payload = parseAuditLine(line);
+      expect(payload.outcome).to.equal('deleted');
+      expect(payload.alreadyGone).to.equal(true);
     });
 
-    it('logs a structured error-outcome line for a failed delete', async () => {
+    it('logs a structured error-outcome line for a failed delete, without leaking the raw upstream error', async () => {
       const transport = makeTransport({
-        deletePromptsByIds: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
+        deletePromptsByIds: sinon.stub().rejects(
+          new SerenityTransportError(500, 'boom, includes secret internal detail'),
+        ),
       });
       const spyLog = { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() };
 
@@ -753,6 +755,26 @@ describe('prompts-subworkspace handlers', () => {
       expect(payload.outcome).to.equal('error');
       expect(payload.status).to.equal(500);
       expect(payload.callerId).to.equal('caller@example.com');
+      expect(payload.message).to.equal('Upstream request failed');
+    });
+
+    // Non-blocking (MysticatBot review, PR #3108): directly verifies per-prompt
+    // (not per-batch) log emission for the subworkspace path too.
+    it('logs one line per prompt for a multi-prompt batch in the same project', async () => {
+      const transport = makeTransport();
+      const spyLog = { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() };
+
+      await handleBulkDeletePromptsSubworkspace(transport, WS, {
+        prompts: [
+          { semrushPromptId: 'q1', geoTargetId: 2840, languageCode: 'en' },
+          { semrushPromptId: 'q2', geoTargetId: 2840, languageCode: 'en' },
+        ],
+      }, spyLog, { callerId: 'caller@example.com' });
+
+      expect(spyLog.info).to.have.callCount(2);
+      const loggedIds = spyLog.info.getCalls()
+        .map((c) => parseAuditLine(c.args[0]).semrushPromptId);
+      expect(loggedIds.sort()).to.deep.equal(['q1', 'q2']);
     });
 
     it('400s on an empty prompts array', async () => {

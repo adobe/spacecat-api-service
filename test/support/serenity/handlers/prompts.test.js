@@ -41,6 +41,7 @@ import {
   makeProvisioningTransportStubs,
 } from '../fixtures/tag-tree.js';
 import { INTENT_ROOT_NAME } from '../../../../src/support/serenity/prompt-tags.js';
+import { parseAuditLine } from './audit-log-test-utils.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -98,13 +99,6 @@ function fakeLog() {
     warn: sinon.stub(),
     error: sinon.stub(),
   };
-}
-
-// SITES-50099: strips the "Serenity prompt delete " label prefix off a logged
-// line and parses the embedded JSON payload.
-const AUDIT_LABEL = 'Serenity prompt delete ';
-function parseAuditLine(line) {
-  return JSON.parse(line.slice(AUDIT_LABEL.length));
 }
 
 describe('handlers/prompts.js — handleListPrompts', () => {
@@ -1848,7 +1842,11 @@ describe('handlers/prompts.js — handleBulkDeletePrompts', () => {
     expect(parseAuditLine(line).callerId).to.equal('unknown');
   });
 
-  it('logs outcome=deleted for the idempotent upstream-404 case', async () => {
+  // Important (MysticatBot review, PR #3108): the audit log must be able to
+  // distinguish a genuine delete from finding the prompt already gone upstream
+  // (idempotent 404) — otherwise the trail cannot answer "did we delete it, or
+  // was it already gone" for reconciliation against the upstream's own records.
+  it('logs outcome=deleted with alreadyGone=true for the idempotent upstream-404 case', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
@@ -1867,7 +1865,29 @@ describe('handlers/prompts.js — handleBulkDeletePrompts', () => {
 
     expect(log.info).to.have.been.calledOnce;
     const [line] = log.info.firstCall.args;
-    expect(parseAuditLine(line).outcome).to.equal('deleted');
+    const payload = parseAuditLine(line);
+    expect(payload.outcome).to.equal('deleted');
+    expect(payload.alreadyGone).to.equal(true);
+  });
+
+  it('logs outcome=deleted with no alreadyGone field for a genuine delete', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      deletePromptsByIds: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+    const log = fakeLog();
+
+    await handleBulkDeletePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{ semrushPromptId: 'sem-1', geoTargetId: 2840, languageCode: 'en' }],
+    }, log, { callerId: 'caller@example.com' });
+
+    const [line] = log.info.firstCall.args;
+    expect(parseAuditLine(line)).to.not.have.property('alreadyGone');
   });
 
   it('logs a structured error-outcome line for a failed delete, without leaking the raw upstream error', async () => {
@@ -1875,7 +1895,7 @@ describe('handlers/prompts.js — handleBulkDeletePrompts', () => {
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
     const dataAccess = makeDataAccess([project]);
-    const err = Object.assign(new Error('upstream boom'), { status: 503 });
+    const err = new SerenityTransportError(503, 'upstream boom, includes secret internal detail');
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
       deletePromptsByIds: sinon.stub().rejects(err),
@@ -1892,6 +1912,35 @@ describe('handlers/prompts.js — handleBulkDeletePrompts', () => {
     expect(payload.outcome).to.equal('error');
     expect(payload.status).to.equal(503);
     expect(payload.callerId).to.equal('caller@example.com');
+    expect(payload.message).to.equal('Upstream request failed');
+  });
+
+  // Non-blocking (MysticatBot review, PR #3108): directly verifies per-prompt (not
+  // per-batch) log emission — one line per target in the project's bucket, not one
+  // line for the whole upstream call.
+  it('logs one line per prompt for a multi-prompt batch in the same project', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      deletePromptsByIds: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+    const log = fakeLog();
+
+    await handleBulkDeletePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [
+        { semrushPromptId: 'sem-1', geoTargetId: 2840, languageCode: 'en' },
+        { semrushPromptId: 'sem-2', geoTargetId: 2840, languageCode: 'en' },
+        { semrushPromptId: 'sem-3', geoTargetId: 2840, languageCode: 'en' },
+      ],
+    }, log, { callerId: 'caller@example.com' });
+
+    expect(log.info).to.have.callCount(3);
+    const loggedIds = log.info.getCalls().map((c) => parseAuditLine(c.args[0]).semrushPromptId);
+    expect(loggedIds.sort()).to.deep.equal(['sem-1', 'sem-2', 'sem-3']);
   });
 
   it('reports an entry in failed for each missing field in a bulk-delete target', async () => {
