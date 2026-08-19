@@ -88,7 +88,11 @@ import {
   unlinkMarketSiteIfOrphaned,
 } from '../support/serenity/site-linkage.js';
 import { X_PROMISE_TOKEN_HEADER, PROMISE_TOKEN_REQUIRED_ERROR_CODE } from '../utils/constants.js';
-import { tombstoneAllForBrand, linkSiteToLiveRows } from '../support/serenity/mapping-rows.js';
+import {
+  tombstoneAllForBrand,
+  linkSiteToLiveRows,
+  linkSiteToRow,
+} from '../support/serenity/mapping-rows.js';
 import { logUpstreamError } from '../support/serenity/upstream-log.js';
 
 const MAX_ERR_MSG_LEN = 500;
@@ -808,6 +812,31 @@ function SerenityController(context, log, env) {
       // `siteId` instead of a raw `brandDomain`. Captured once for both the
       // domain derivation and the direct site link below. Absent → unchanged.
       const suppliedSiteId = hasText(requestBody.siteId) ? requestBody.siteId : null;
+      // A supplied Site is resolved and ownership-checked HERE, before either mode
+      // dispatches, because the id the caller names decides what the market's
+      // project analyses: it lands on `brand_to_semrush_projects.site_id`, the
+      // per-market source of truth for `settings.ai.primary_url`. Neither handler
+      // can make that check — the sub-workspace one has no Site access, and the
+      // flat one has no organization — so a Site from another organization would
+      // otherwise be recorded verbatim and point this project at someone else's
+      // site. Unresolvable and cross-org both answer the same 400: whether the id
+      // is unknown or simply not yours is not the caller's business.
+      let suppliedSiteIdentity = null;
+      if (suppliedSiteId) {
+        const orgId = ctx?.params?.spaceCatId;
+        suppliedSiteIdentity = await resolveSiteIdentity(
+          ctx.dataAccess,
+          suppliedSiteId,
+          log,
+          orgId,
+        );
+        if (!suppliedSiteIdentity?.domain || !hasText(suppliedSiteIdentity.domain)) {
+          return createResponse(
+            { error: 'invalidRequest', message: 'siteId did not resolve to a site domain' },
+            400,
+          );
+        }
+      }
       let result;
       if (auth.mode === 'subworkspace') {
         const brand = await loadBrand(ctx, auth.brandUuid);
@@ -823,22 +852,15 @@ function SerenityController(context, log, env) {
           ...requestBody,
           primaryUrl: siteIdentityFromUrlString(requestBody.brandDomain),
         };
-        if (suppliedSiteId && !hasText(requestBody.brandDomain)) {
-          // Both values from one read, for the same reason the domain is derived
-          // here at all: the handler has no Site access. Only `primaryUrl` can
-          // carry a subpath — `brandDomain` is a bare FQDN because a path there is
-          // rejected upstream.
-          const identity = await resolveSiteIdentity(ctx.dataAccess, suppliedSiteId, log);
-          if (!identity?.domain || !hasText(identity.domain)) {
-            return createResponse(
-              { error: 'invalidRequest', message: 'siteId did not resolve to a site domain' },
-              400,
-            );
-          }
+        if (suppliedSiteIdentity && !hasText(requestBody.brandDomain)) {
+          // Both values from the read above, for the same reason the domain is
+          // derived here at all: the handler has no Site access. Only `primaryUrl`
+          // can carry a subpath — `brandDomain` is a bare FQDN because a path there
+          // is rejected upstream.
           effectiveBody = {
             ...effectiveBody,
-            brandDomain: identity.domain,
-            primaryUrl: identity.primaryUrl ?? undefined,
+            brandDomain: suppliedSiteIdentity.domain,
+            primaryUrl: suppliedSiteIdentity.primaryUrl ?? undefined,
           };
         }
         // Brand aliases are brand-level but region-scoped: the create handler
@@ -913,11 +935,22 @@ function SerenityController(context, log, env) {
         // Semrush project is created. Best-effort: never fails a live market.
         if (result?.status === 201) {
           const linkedSiteId = await ensureMarketSite(ctx, {
-            // Optional-chained so a missing/throwing accessor can't 500 a market
-            // that is already live upstream — the mirror is best-effort.
-            organizationId: brand.getOrganizationId?.(),
+            // The org from the route, which is the same org the brand belongs to
+            // (resolveBrandUuid scopes the brand lookup to it). It cannot come
+            // from the Brand model: that schema deliberately does not map
+            // `organization_id` (brand.schema.js), so there is no accessor for it
+            // — and asking for one yields `undefined`, which `ensureMarketSite`
+            // treats as bad input and returns null for WITHOUT logging. That is
+            // the one silent path it has, which is why a market never carried a
+            // site despite every visible step succeeding.
+            organizationId: ctx?.params?.spaceCatId,
             brandId: auth.brandUuid,
-            domain: effectiveBody.brandDomain,
+            // The url this market TRACKS, which is what its Site must mirror —
+            // `brandDomain` is the host it is filed under and drops any subpath.
+            // The two coincide whenever both derive from one input; they part as
+            // soon as a market carries a url of its own, and the Site must follow
+            // the tracked value, never the host.
+            domain: effectiveBody.primaryUrl ?? effectiveBody.brandDomain,
             // When the caller supplied a siteId, link THAT site directly (skip the
             // domain→Site find-or-create); the client already holds the identity.
             siteId: suppliedSiteId ?? undefined,
@@ -929,10 +962,29 @@ function SerenityController(context, log, env) {
             requireLink: false,
             log,
           });
-          // Bind the market↔site on the live mapping rows — the DTO's source of
-          // truth (surfaced by the sub-workspace list/get enrichment). Scope-guarded
-          // to unlinked live rows (mapping-rows.js); never overwrites an existing link.
-          await linkSiteToLiveRows(ctx.dataAccess, auth.brandUuid, linkedSiteId, log);
+          // Bind the market↔site on THIS market's row — the per-market source of
+          // truth for the url its project tracks, and what the sub-workspace
+          // list/get enrichment surfaces. Scoped to the one row named by the new
+          // project id: a market created against its own url must not have that
+          // site spread across whichever sibling rows are unlinked (mapping-rows.js).
+          // `in` rather than a cast: the handler returns a success|error union
+          // that a `status === 201` test cannot narrow, and this both satisfies
+          // that and stays a real runtime guard — a future error shape reaching
+          // here feeds no id to the link instead of `undefined` silently.
+          const projectId = result.body && 'projectId' in result.body
+            ? result.body.projectId
+            : null;
+          if (projectId) {
+            await linkSiteToRow(ctx.dataAccess, projectId, linkedSiteId, log);
+          } else {
+            // Unreachable while the handler keeps its 201 contract (a created
+            // market always names its project). Worth a line if that ever
+            // changes: the market silently keeps no site otherwise, which is
+            // exactly the failure this whole path exists to have fixed.
+            log?.warn?.('serenity create-market: 201 without a projectId — market left unlinked', {
+              brandId: auth.brandUuid, siteId: linkedSiteId,
+            });
+          }
         }
       } else {
         // Flat handler self-derives brandDomain from siteId (it has Site access).
@@ -1336,10 +1388,25 @@ function SerenityController(context, log, env) {
       // Markets are Semrush projects added afterwards from the Markets tab, never
       // auto-created at activation — so a pending brand activates to just its
       // sub-workspace (the anchor, persisted by ensureSubworkspace) plus a status
-      // flip. The brand's primary site (brands.site_id) was set at create.
+      // flip. The brand's primary site (brands.site_id) was set at create for
+      // every brand created after LLMO-6405 — but SITES-49449 tightened
+      // chk_active_brand_has_site_id to require site_id unconditionally, so a
+      // legacy pre-LLMO-6405 pending brand with none would otherwise provision a
+      // live sub-workspace upstream and THEN fail the active-flip write with a
+      // raw DB constraint violation. Guard it upfront instead of wasting that
+      // provisioning call, mirroring the flat-brand activate handler's own guard
+      // (brands.js) for the same legacy-drain scenario.
       // Reactivation of an already ACTIVE brand (body-driven markets) is handled
       // by the branches below.
       if (wasPending) {
+        const existingSiteId = await getBrandBaseSiteId(
+          /** @type {string} */ (ctx?.params?.spaceCatId),
+          brandUuid,
+          ctx.dataAccess.services.postgrestClient,
+        );
+        if (!existingSiteId) {
+          throw new ErrorWithStatusCode(`Brand has no onboarded primary site: ${brandUuid}`, 400);
+        }
         const pendingWorkspaceId = await ensureSubworkspace(
           transport,
           brand,
@@ -1628,8 +1695,15 @@ function SerenityController(context, log, env) {
       let linkedSiteId = null;
       if (allMarketsLive) {
         linkedSiteId = await ensureMarketSite(ctx, {
-          // Optional-chained so a missing/throwing accessor can't 500 the call.
-          organizationId: brand.getOrganizationId?.(),
+          // From the route, not the Brand entity: `brand.schema.js` deliberately
+          // does not map `organization_id`, so no accessor is generated for it and
+          // `brand.getOrganizationId?.()` is always `undefined`. `ensureMarketSite`
+          // reads that as bad input and returns null through its one early return
+          // that logs nothing — every market goes live upstream while the site
+          // link never lands, so activation answers a permanent 207 with
+          // `baseSiteId` never written and nothing warning. The route org is
+          // exact here: authorize() resolved the brand scoped to it.
+          organizationId: ctx?.params?.spaceCatId,
           brandId: auth.brandUuid,
           domain: brandPrimaryUrl,
           updatedBy: 'serenity-activate',
@@ -1656,7 +1730,7 @@ function SerenityController(context, log, env) {
           // so this is where an active Serenity brand becomes site-anchored — same
           // authoritative brands.site_id contract as the brandalf activate path.
           await updateBrand({
-            organizationId: brand.getOrganizationId(),
+            organizationId: ctx?.params?.spaceCatId,
             brandId: brandUuid,
             updates: {
               status: 'active',

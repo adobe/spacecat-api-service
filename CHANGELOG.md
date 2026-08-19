@@ -1,3 +1,39 @@
+# [1.756.0](https://github.com/adobe/spacecat-api-service/compare/v1.755.2...v1.756.0) (2026-08-19)
+
+
+### Bug Fixes
+
+* **brands:** reject anchoring a brand to another org's site ([#3096](https://github.com/adobe/spacecat-api-service/issues/3096)) ([f241d81](https://github.com/adobe/spacecat-api-service/commit/f241d81ad222d59958adaa87b757f7c38e835d15)), closes [serenity-docs#346](https://github.com/serenity-docs/issues/346)
+* **serenity:** bind a created market to its own Site, not its brand's ([#3102](https://github.com/adobe/spacecat-api-service/issues/3102)) ([77b2155](https://github.com/adobe/spacecat-api-service/commit/77b2155246b49fae6c60a8823a7f08d906f85a86)), closes [Hi#level](https://github.com/Hi/issues/level)
+* **serenity:** resolve the activate path's organization from the route ([#3103](https://github.com/adobe/spacecat-api-service/issues/3103)) ([f8307ae](https://github.com/adobe/spacecat-api-service/commit/f8307aed1a9985c442f37dc1e8da513347268442)), closes [Hi#level](https://github.com/Hi/issues/level) [#39](https://github.com/adobe/spacecat-api-service/issues/39)
+
+
+### Features
+
+* **ai-visibility:** scope gap-prompts and gap-source-domains to subdomains ([#3093](https://github.com/adobe/spacecat-api-service/issues/3093)) ([e67f2f9](https://github.com/adobe/spacecat-api-service/commit/e67f2f9409c8d9d4d25fdd1aa9ad48f6a36716d6)), closes [adobe/spacecat-api-service#3081](https://github.com/adobe/spacecat-api-service/issues/3081) [Hi#level](https://github.com/Hi/issues/level)
+
+## [1.755.2](https://github.com/adobe/spacecat-api-service/compare/v1.755.1...v1.755.2) (2026-08-19)
+
+
+### Bug Fixes
+
+* **serenity:** read and write the intent root under one name | LLMO-6986 ([#3054](https://github.com/adobe/spacecat-api-service/issues/3054)) ([4e256e8](https://github.com/adobe/spacecat-api-service/commit/4e256e8376c2d49269b793b78777527dd827c492)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+## [1.755.1](https://github.com/adobe/spacecat-api-service/compare/v1.755.0...v1.755.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* allow x-view-full-experience header in CORS (SITES-49888) ([#3097](https://github.com/adobe/spacecat-api-service/issues/3097)) ([e171ece](https://github.com/adobe/spacecat-api-service/commit/e171eceac6f96419a00009295ac72f69349e6572)), closes [#3087](https://github.com/adobe/spacecat-api-service/issues/3087) [#3087](https://github.com/adobe/spacecat-api-service/issues/3087) [OneAdobe/experience-success-studio-ui#2199](https://github.com/OneAdobe/experience-success-studio-ui/issues/2199)
+* **serenity:** drop semrush_sub_workspace_id as an upsertBrand anchor (SITES-49449) ([#3095](https://github.com/adobe/spacecat-api-service/issues/3095)) ([2ae994e](https://github.com/adobe/spacecat-api-service/commit/2ae994e3912bdee5bdba0e2490d6700f1b429479)), closes [#2504](https://github.com/adobe/spacecat-api-service/issues/2504) [mysticat-data-service#936](https://github.com/mysticat-data-service/issues/936) [mysticat-data-service#936](https://github.com/mysticat-data-service/issues/936) [#936](https://github.com/adobe/spacecat-api-service/issues/936)
+
+# [1.755.0](https://github.com/adobe/spacecat-api-service/compare/v1.754.0...v1.755.0) (2026-08-18)
+
+
+### Features
+
+* **brand-claims:** toggle brand-claims audit with enable/disable command ([#3078](https://github.com/adobe/spacecat-api-service/issues/3078)) ([650fd72](https://github.com/adobe/spacecat-api-service/commit/650fd72c59bf80476de03d2ba480dc80245b268e)), closes [#3058](https://github.com/adobe/spacecat-api-service/issues/3058)
+
 # [1.754.0](https://github.com/adobe/spacecat-api-service/compare/v1.753.0...v1.754.0) (2026-08-18)
 
 
