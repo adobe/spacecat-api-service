@@ -15,6 +15,7 @@ import sinon from 'sinon';
 
 import {
   upsertMappingRow, tombstoneMappingRow, tombstoneAllForBrand, linkSiteToLiveRows,
+  linkSiteToRow,
 } from '../../../src/support/serenity/mapping-rows.js';
 
 const BRAND = 'brand-1';
@@ -296,6 +297,89 @@ describe('serenity mapping-rows', () => {
       expect(log.error).to.have.been.calledOnce;
       expect(log.error.firstCall.args[0]).to.include('SERENITY_MAPPING_ROW_WRITE_FAILED');
       expect(log.error.firstCall.args[1]).to.include({ failed: 1, total: 2 });
+    });
+  });
+
+  describe('linkSiteToRow', () => {
+    const PROJECT = 'proj-new';
+    const SITE = 'site-1';
+
+    it('no-ops when dataAccess has no BrandSemrushProject, projectId, or siteId is missing', async () => {
+      const findBySemrushProjectId = sinon.stub().resolves(fakeRow());
+      await linkSiteToRow({}, PROJECT, SITE, log);
+      await linkSiteToRow({ BrandSemrushProject: { findBySemrushProjectId } }, '', SITE, log);
+      await linkSiteToRow({ BrandSemrushProject: { findBySemrushProjectId } }, PROJECT, '', log);
+
+      expect(findBySemrushProjectId).to.not.have.been.called;
+      expect(log.error).to.not.have.been.called;
+    });
+
+    it('links the site onto the one row named by the project id', async () => {
+      const row = fakeRow();
+      const findBySemrushProjectId = sinon.stub().resolves(row);
+      await linkSiteToRow({ BrandSemrushProject: { findBySemrushProjectId } }, PROJECT, SITE, log);
+
+      expect(findBySemrushProjectId).to.have.been.calledOnceWith(PROJECT);
+      expect(row.setSiteId).to.have.been.calledOnceWith(SITE);
+      expect(row.save).to.have.been.calledOnce;
+    });
+
+    it('never overwrites an existing link', async () => {
+      // A row that already names a site has been spoken for — correcting a wrong
+      // link is a deliberate act, not a side effect of creating a market.
+      const row = fakeRow({ siteId: 'site-already-there' });
+      const findBySemrushProjectId = sinon.stub().resolves(row);
+      await linkSiteToRow({ BrandSemrushProject: { findBySemrushProjectId } }, PROJECT, SITE, log);
+
+      expect(row.setSiteId).to.not.have.been.called;
+      expect(row.save).to.not.have.been.called;
+    });
+
+    it('leaves a tombstoned row alone', async () => {
+      const row = fakeRow({ deletedAt: '2026-08-19T00:00:00.000Z' });
+      const findBySemrushProjectId = sinon.stub().resolves(row);
+      await linkSiteToRow({ BrandSemrushProject: { findBySemrushProjectId } }, PROJECT, SITE, log);
+
+      expect(row.setSiteId).to.not.have.been.called;
+      expect(row.save).to.not.have.been.called;
+    });
+
+    it('is a no-op (no throw) when no row matches the project id', async () => {
+      const findBySemrushProjectId = sinon.stub().resolves(null);
+      await linkSiteToRow({ BrandSemrushProject: { findBySemrushProjectId } }, PROJECT, SITE, log);
+      expect(log.error).to.not.have.been.called;
+    });
+
+    it('logs the alarmed token and swallows a save failure', async () => {
+      const row = fakeRow();
+      row.save.rejects(new Error('boom'));
+      const findBySemrushProjectId = sinon.stub().resolves(row);
+      await linkSiteToRow({ BrandSemrushProject: { findBySemrushProjectId } }, PROJECT, SITE, log);
+
+      expect(log.error).to.have.been.calledOnce;
+      expect(log.error.firstCall.args[0]).to.include('SERENITY_MAPPING_ROW_WRITE_FAILED');
+      expect(log.error.firstCall.args[1]).to.include({ op: 'link-site-row' });
+    });
+
+    it('does not touch a sibling market of the same brand', async () => {
+      // The race the by-brand sweep cannot close: two concurrent creates on one
+      // brand each leave an unlinked row behind before either links, so a
+      // siteId-IS-NULL scan would give the second caller's market the first
+      // caller's site.
+      const mine = fakeRow();
+      const sibling = fakeRow();
+      const findBySemrushProjectId = sinon.stub().resolves(mine);
+      const allByBrandId = sinon.stub().resolves([mine, sibling]);
+      await linkSiteToRow(
+        { BrandSemrushProject: { findBySemrushProjectId, allByBrandId } },
+        PROJECT,
+        SITE,
+        log,
+      );
+
+      expect(mine.setSiteId).to.have.been.calledOnceWith(SITE);
+      expect(sibling.setSiteId).to.not.have.been.called;
+      expect(allByBrandId).to.not.have.been.called;
     });
   });
 });

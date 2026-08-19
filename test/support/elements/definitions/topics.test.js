@@ -22,7 +22,6 @@ import {
 import { DEFAULT_ELEMENT_MODEL } from '../../../../src/support/elements/constants.js';
 import {
   INTENT_ROOT_NAME,
-  LEGACY_INTENT_ROOT_NAME,
   ORIGIN_ROOT_NAME,
   LEGACY_ORIGIN_ROOT_NAME,
 } from '../../../../src/support/serenity/prompt-tags.js';
@@ -45,9 +44,9 @@ const RAW_MIXED = {
       { value: 'category__Experience Cloud' },
       { value: 'category__Modular & Configurable Sofas__Compact Shippable Furniture' },
       { value: 'topic__Furniture__Compact Shippable Furniture' },
-      { value: 'intent' },
-      { value: 'intent__Informational' },
-      { value: 'intent__Transactional' },
+      { value: INTENT_ROOT_NAME },
+      { value: `${INTENT_ROOT_NAME}__Informational` },
+      { value: `${INTENT_ROOT_NAME}__Transactional` },
       { value: 'source' },
       { value: 'source__organic' },
       { value: 'source__paid' },
@@ -318,64 +317,49 @@ describe('topics definitions', () => {
       expect(transformIntentsToFilterDimensions(null)).to.deep.equal([]);
     });
 
-    it('ignores the bare "intent" prefix declaration and returns only intent__-prefixed entries', () => {
+    it('ignores the bare root declaration and returns only prefixed entries', () => {
       const result = transformIntentsToFilterDimensions(RAW_MIXED);
       expect(result).to.deep.equal([
-        { id: 'intent__Informational', label: 'Informational' },
-        { id: 'intent__Transactional', label: 'Transactional' },
-      ]);
-    });
-
-    it('sets id to the original tag value (including prefix) and preserves original casing in label', () => {
-      const raw = { blocks: { value: [{ value: 'intent__informational' }] } };
-      const [item] = transformIntentsToFilterDimensions(raw);
-      expect(item.id).to.equal('intent__informational');
-      expect(item.label).to.equal('informational');
-    });
-
-    it('excludes non-intent entries', () => {
-      const raw = { blocks: { value: [{ value: 'category__AI' }, { value: 'intent__Buy' }] } };
-      const result = transformIntentsToFilterDimensions(raw);
-      expect(result).to.have.length(1);
-      expect(result[0].label).to.equal('Buy');
-    });
-
-    // Both spellings read the same way; parent_id is rebuilt from whichever
-    // prefix matched. LLMO-6986 drops the legacy row from this table.
-    [LEGACY_INTENT_ROOT_NAME, INTENT_ROOT_NAME].forEach((root) => {
-      it(`adds parent_id/parent_label under the \`${root}\` root`, () => {
-        const raw = { blocks: { value: [{ value: `${root}__Commercial__Buy` }] } };
-        const [item] = transformIntentsToFilterDimensions(raw);
-        expect(item).to.deep.equal({
-          id: `${root}__Commercial__Buy`,
-          label: 'Buy',
-          parent_id: `${root}__Commercial`,
-          parent_label: 'Commercial',
-        });
-      });
-    });
-
-    // LLMO-6984: an Elements tag prefix is the `__`-joined tag PATH, so renaming
-    // the intent root renames the prefix. Both spellings are read while the rename
-    // sweeps projects one at a time.
-    it('reads the renamed root, keeping the prefix in id and stripping it from label', () => {
-      const raw = {
-        blocks: {
-          value: [
-            { value: `${INTENT_ROOT_NAME}__Informational` },
-            { value: `${INTENT_ROOT_NAME}__Transactional` },
-          ],
-        },
-      };
-      expect(transformIntentsToFilterDimensions(raw)).to.deep.equal([
         { id: `${INTENT_ROOT_NAME}__Informational`, label: 'Informational' },
         { id: `${INTENT_ROOT_NAME}__Transactional`, label: 'Transactional' },
       ]);
     });
 
-    it('does not double-count: the legacy prefix does not also match a renamed tag', () => {
-      const raw = { blocks: { value: [{ value: `${INTENT_ROOT_NAME}__Commercial` }] } };
-      expect(transformIntentsToFilterDimensions(raw)).to.have.length(1);
+    it('sets id to the original tag value (including prefix) and preserves original casing in label', () => {
+      const raw = { blocks: { value: [{ value: `${INTENT_ROOT_NAME}__informational` }] } };
+      const [item] = transformIntentsToFilterDimensions(raw);
+      expect(item.id).to.equal(`${INTENT_ROOT_NAME}__informational`);
+      expect(item.label).to.equal('informational');
+    });
+
+    it('excludes non-intent entries', () => {
+      const raw = {
+        blocks: {
+          value: [{ value: 'category__AI' }, { value: `${INTENT_ROOT_NAME}__Buy` }],
+        },
+      };
+      const result = transformIntentsToFilterDimensions(raw);
+      expect(result).to.have.length(1);
+      expect(result[0].label).to.equal('Buy');
+    });
+
+    it('adds parent_id/parent_label for a nested value', () => {
+      const raw = { blocks: { value: [{ value: `${INTENT_ROOT_NAME}__Commercial__Buy` }] } };
+      const [item] = transformIntentsToFilterDimensions(raw);
+      expect(item).to.deep.equal({
+        id: `${INTENT_ROOT_NAME}__Commercial__Buy`,
+        label: 'Buy',
+        parent_id: `${INTENT_ROOT_NAME}__Commercial`,
+        parent_label: 'Commercial',
+      });
+    });
+
+    // An Elements tag prefix is the `__`-joined tag PATH, so the intent root's
+    // name IS the prefix — a bare `intent__` tag belongs to no dimension this
+    // reader knows and must not be claimed as an intent.
+    it('does not read a bare `intent__` tag as an intent', () => {
+      const raw = { blocks: { value: [{ value: 'intent__Commercial' }] } };
+      expect(transformIntentsToFilterDimensions(raw)).to.deep.equal([]);
     });
   });
 
@@ -477,9 +461,24 @@ describe('topics definitions', () => {
       const result = transformOtherTagsForFilterDimensions(RAW_MIXED);
       expect(result).to.not.have.property('topic');
       expect(result).to.not.have.property('category');
-      expect(result).to.not.have.property('intent');
+      // RAW_MIXED spells intent the renamed way, so this is the assertion that
+      // carries weight here; the bare spelling is covered by its own test below.
+      expect(result).to.not.have.property(INTENT_ROOT_NAME);
       expect(result).to.not.have.property('origin');
       expect(result).to.not.have.property('source');
+      expect(result.tags).to.deep.equal([]);
+    });
+
+    it('drops anything carrying the hidden-tag marker, not just the known intent root', () => {
+      // The marker is the exposure control: Semrush hides a marked root from the
+      // customer-facing filter, so a marked family must never reach this payload.
+      // A second marked root Semrush adds later must be dropped without a code
+      // change here, which is why the filter keys on the marker and not on the
+      // known-prefix list.
+      const result = transformOtherTagsForFilterDimensions({
+        blocks: { value: [{ value: '$abv_tags$somethingnew__Value' }] },
+      });
+      expect(result).to.not.have.property('$abv_tags$somethingnew');
       expect(result.tags).to.deep.equal([]);
     });
 

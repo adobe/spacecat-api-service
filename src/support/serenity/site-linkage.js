@@ -340,15 +340,18 @@ export async function ensureMarketSite(ctx, {
  * detection does not report a difference that is not there.
  *
  * Best-effort: returns null (never throws) on missing input, unavailable
- * data-access, an unknown site, or a lookup failure.
+ * data-access, an unknown site, a cross-org site, or a lookup failure.
  *
  * @param {object} dataAccess - `ctx.dataAccess` (reads `dataAccess.Site`).
  * @param {string|null|undefined} siteId - the SpaceCat Site UUID to resolve.
  * @param {object} [log] - logger.
+ * @param {string} [organizationId] - when given, the Site must belong to this
+ *   organization or nothing resolves. Omit only where the caller genuinely has
+ *   no organization to check against.
  * @returns {Promise<{domain: string|null, primaryUrl: string|null}|null>} the
  *   derived values, or null when the site cannot be resolved.
  */
-export async function resolveSiteIdentity(dataAccess, siteId, log) {
+export async function resolveSiteIdentity(dataAccess, siteId, log, organizationId) {
   if (!siteId || !hasText(siteId)) {
     return null;
   }
@@ -361,6 +364,17 @@ export async function resolveSiteIdentity(dataAccess, siteId, log) {
     const site = await Site.findById(siteId);
     if (!site) {
       log?.warn?.('resolveSiteIdentity: site not found', { siteId });
+      return null;
+    }
+    // Same-org guard, when the caller can state the organization. A Site named by
+    // the request decides what the market's project analyses (its url reaches
+    // `settings.ai.primary_url` via brand_to_semrush_projects.site_id), so a Site
+    // belonging to another organization must not resolve — it would point one
+    // customer's project at another's site.
+    if (organizationId && hasText(organizationId) && site.getOrganizationId() !== organizationId) {
+      log?.warn?.('resolveSiteIdentity: site belongs to another organization; refusing to resolve', {
+        siteId, siteOrg: site.getOrganizationId(), brandOrg: organizationId,
+      });
       return null;
     }
     const baseURL = site.getBaseURL();
