@@ -14,6 +14,7 @@
 
 import { randomUUID } from 'crypto';
 
+import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import BrandClient, { BrandGovernanceClient } from '@adobe/spacecat-shared-brand-client';
 import DrsClient from '@adobe/spacecat-shared-drs-client';
 import {
@@ -23,7 +24,6 @@ import {
   noContent,
   createResponse,
   forbidden,
-  internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   composeBaseURL,
@@ -363,13 +363,29 @@ function BrandsController(ctx, log, env) {
       // client distinguish error cases without regex-matching the message text
       // (LLMO-6591; see the `uq_brand_name_per_org` TODO this same pattern
       // predates in elmo-ui's getBrandSaveErrorDescriptor).
+      // cleanupHeaderValue strips chars HTTP headers can't carry (CR/LF and
+      // non-ASCII that would otherwise throw ERR_INVALID_CHAR — caught via the
+      // it-postgres IT suite when this guard's own message used an em dash,
+      // serenity-docs#346). The JSON body keeps the raw message; only the
+      // header copy needs sanitizing.
       return createResponse(
         { message: appErr.message, ...(appErr.code ? { code: appErr.code } : {}) },
         appErr.status,
-        { [HEADER_ERROR]: appErr.message },
+        { [HEADER_ERROR]: cleanupHeaderValue(appErr.message || 'Error') },
       );
     }
-    return internalServerError(appErr.message);
+    // Same split as the typed-status branch above: internalServerError() would
+    // set the header AND the body from one value, so a non-ASCII character in
+    // a bare Error's message would strip from the body too — operators
+    // debugging a 500 lose it there for no reason (the raw error is still in
+    // the logs regardless). Build the response directly instead so only the
+    // header copy is sanitized.
+    const rawMessage = appErr.message || 'Internal server error';
+    return createResponse(
+      { message: rawMessage },
+      500,
+      { [HEADER_ERROR]: cleanupHeaderValue(rawMessage) },
+    );
   }
 
   function validateBrandGuidanceFields(brandData = {}) {
