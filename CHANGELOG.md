@@ -1,3 +1,17 @@
+# [1.758.0](https://github.com/adobe/spacecat-api-service/compare/v1.757.0...v1.758.0) (2026-08-19)
+
+
+### Bug Fixes
+
+* **llmo:** harden query-index registration + stop update-query-index workbook corruption (LLMO-6320) ([#3106](https://github.com/adobe/spacecat-api-service/issues/3106)) ([7e88a3e](https://github.com/adobe/spacecat-api-service/commit/7e88a3e4196e81d00f69afb50ec4fc25a160b58e)), closes [adobe/project-elmo-ui-data#365](https://github.com/adobe/project-elmo-ui-data/issues/365)
+* **serenity:** keep a benchmark on the url its market tracks ([#3107](https://github.com/adobe/spacecat-api-service/issues/3107)) ([8f10371](https://github.com/adobe/spacecat-api-service/commit/8f1037134777d9b914383416c151e918b49a4752)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+
+### Features
+
+* request access Semrush api integration ([#3039](https://github.com/adobe/spacecat-api-service/issues/3039)) ([286a308](https://github.com/adobe/spacecat-api-service/commit/286a3085b18270b3e48ca094e4d8455bce7c0844))
+* **serenity:** log AIO/Semrush prompt deletions with requester attribution ([#3108](https://github.com/adobe/spacecat-api-service/issues/3108)) ([1918895](https://github.com/adobe/spacecat-api-service/commit/1918895fc24c899dcd54304b7552f309d3a04842)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 # [1.757.0](https://github.com/adobe/spacecat-api-service/compare/v1.756.0...v1.757.0) (2026-08-19)
 
 
