@@ -360,8 +360,8 @@ export async function ensureOwnBrandBenchmark(transport, workspaceId, projectId,
  * @param {string} projectId - the market/project to attach the URLs to.
  * @param {Array<{url: string, type: string}>} entries - the brand-URL entries to
  *   push (a no-op when empty).
- * @param {object} brand - { name, domain, aliases? } of the project's own brand,
- *   used to find-or-create the benchmark the URLs attach to.
+ * @param {object} brand - { name, domain, primaryUrl?, aliases? } of the project's
+ *   own brand, used to find-or-create the benchmark the URLs attach to.
  * @param {object} [log] - optional logger ({ info?, warn? }).
  * @returns {Promise<{created: number, skipped?: boolean}>} count submitted
  *   (0 on no-op or when skipped for a missing benchmark).
