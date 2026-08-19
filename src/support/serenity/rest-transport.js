@@ -21,6 +21,7 @@ import {
 import { createSerenityUserManagerApiClient } from '@adobe/spacecat-shared-user-manager-client';
 import { ErrorWithStatusCode } from '../utils.js';
 import { SerenityTransportError } from './serenity-transport-error.js';
+import { endpointOf } from '../url-utils.js';
 
 // Compatibility re-export: internal callers now import SerenityTransportError directly from
 // the leaf module (`./serenity-transport-error.js`); this only exists for any external consumer
@@ -253,9 +254,16 @@ function createTimeoutFetch(timeoutMs) {
       return await fetch(input, { ...(init ?? {}), signal: controller.signal });
     } catch (e) {
       if (e?.name === 'AbortError') {
+        // Attach what identifies the aborted call (SITES-49993): openapi-fetch
+        // passes a Request as `input` (method + url); the hand-rolled paths
+        // pass a URL string with the method on `init`.
+        const method = init?.method ?? (input instanceof Request ? input.method : undefined);
+        const url = input instanceof Request ? input.url : String(input);
         throw new SerenityTransportError(
           504,
           `Semrush request timed out after ${timeoutMs}ms`,
+          undefined,
+          { method, endpoint: endpointOf(url) },
         );
       }
       throw e;
@@ -291,6 +299,7 @@ function unwrap(method, result) {
       response.status,
       `Semrush ${method} ${response.url} failed: ${response.status}`,
       body === '' ? null : body,
+      { method, endpoint: endpointOf(response.url) },
     );
   }
   return data ?? null;

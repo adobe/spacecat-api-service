@@ -2756,7 +2756,7 @@ describe('handlers/prompts.js — origin derivation (origin-dimension.md §3)', 
       listProjectTags: makeListProjectTagsStub({
         '': [
           { id: 'root-category', name: 'category', children_count: 0 },
-          { id: 'root-intent', name: 'intent', children_count: 5 },
+          { id: 'root-intent', name: INTENT_ROOT_NAME, children_count: 5 },
           { id: 'root-source', name: 'source', children_count: 2 },
           { id: 'root-type', name: 'type', children_count: 2 },
         ],

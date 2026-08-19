@@ -16,9 +16,9 @@ import { SEP } from './constants.js';
 import { mapWithConcurrency } from './concurrency.js';
 import { splitDateRangeIntoWeeksBackward } from './week-utils.js';
 import {
+  DIMENSION,
   INTENT_VALUE,
   INTENT_ROOT_NAME,
-  LEGACY_INTENT_ROOT_NAME,
 } from '../serenity/prompt-tags.js';
 import {
   buildBrandsPayload,
@@ -131,16 +131,6 @@ export function createElementsService(transport, log) {
         origins: transformOriginsToFilterDimensions(rawTopics),
         content_types: transformContentTypesToFilterDimensions(rawContentTypes),
       };
-      // The dual-prefix intent read is the one rename tolerance that would otherwise
-      // fire silently forever — the write-path alias and the `getPrompts` retry both
-      // log. Report it too, so LLMO-6986 can be gated on all three going quiet rather
-      // than on a judgement call about which projects the sweep reached.
-      if (result.page_intents.some((i) => i.id.startsWith(`${LEGACY_INTENT_ROOT_NAME}${SEP}`))) {
-        log?.info?.(
-          'serenity filter dimensions: workspace still carries pre-rename `intent__` tags',
-          { event: 'intent-rename-legacy-tags-present', workspaceId },
-        );
-      }
       // Merge any tag types not covered above (e.g. `type:branded`) under their own
       // prefix key, and plain prefix-less tags under `tags` — see
       // transformOtherTagsForFilterDimensions. The reserved-key list is derived
@@ -150,8 +140,17 @@ export function createElementsService(transport, log) {
       // below would repoint result's prototype instead of adding a property for
       // those (rather than dropping such tags, routing them as "reserved" sends
       // them into the generic `tags` array, same as any other collision).
+      //
+      // `intent` is reserved explicitly because it is NOT one of `result`'s keys —
+      // the intent dimension surfaces as `page_intents`. Without it, a project the
+      // intent rename has not reached would have its pre-rename `intent__` tags
+      // caught by the catch-all and published as a dynamic, customer-visible
+      // `intent` filter group — the exposure the `$abv_tags$` marker exists to
+      // prevent. Reserving it routes them to the generic `tags` array instead.
+      // This is a blast-radius bound on an un-swept project, not a tolerance: the
+      // tags are still not read as intents.
       const reservedResultKeys = [
-        ...Object.keys(result), 'tags', '__proto__', 'constructor', 'prototype',
+        ...Object.keys(result), DIMENSION.INTENT, 'tags', '__proto__', 'constructor', 'prototype',
       ];
       const { tags, ...otherGroups } = transformOtherTagsForFilterDimensions(
         rawTopics,
@@ -191,21 +190,14 @@ export function createElementsService(transport, log) {
      * derived with one `<intentRoot>__<value>`-filtered call per Semrush intent, run
      * in parallel and joined back to the base rows.
      *
-     * The intent root is being renamed to `$abv_tags$intent` project by project
-     * (LLMO-6984), and an Elements tag filter is the `__`-joined tag PATH — so the
-     * root's name IS the prefix, and a filter carrying the wrong one matches nothing
-     * and answers 200 with an empty `userIntent` on every row. The current spelling
-     * is therefore tried first and the pre-rename `intent` only as a RETRY, fired
-     * when all five calls came back empty: that is the signature of a project the
-     * rename has not reached. A renamed project stays at five calls, and the retry
-     * stops firing on its own as the sweep progresses, so removing the legacy
-     * spelling (LLMO-6986) is a no-op rather than a behaviour change.
+     * An Elements tag filter is the `__`-joined tag PATH, so the intent root's name
+     * IS the prefix every one of those five filters carries: `$abv_tags$intent__`
+     * ({@link INTENT_ROOT_NAME}). A filter carrying any other spelling matches
+     * nothing and answers 200 with an empty `userIntent` on every row, so the
+     * prefix is taken from the constant rather than written out here.
      *
      * Enrichment is non-fatal per intent value: each call catches its own failure
      * and contributes nothing, so one failing intent drops only that intent's rows.
-     * A failed call is NOT read as the empty-result signature, though — when any of
-     * the five failed, the legacy retry is skipped rather than doubling the call
-     * volume against a struggling upstream for an answer that would be a guess.
      * The base call still propagates on failure. Without the flag, response shape
      * and upstream call count are unchanged.
      *
@@ -234,13 +226,17 @@ export function createElementsService(transport, log) {
       }
 
       // `(prompt, prompt_topic)` join key — unique within the single requested slice.
-      const rowKey = (row) => `${row?.prompt ?? ''} ${row?.prompt_topic ?? ''}`;
+      // `\0` is the separator because prompt text is free-form and may contain any
+      // printable character, including whatever would otherwise read as a delimiter.
+      // Only a NUL cannot occur in either field, so only a NUL keeps the composite
+      // key collision-free. Keep it escaped — a literal byte makes whole-file
+      // scanners treat this file as binary and silently skip it.
+      const rowKey = (row) => `${row?.prompt ?? ''}\0${row?.prompt_topic ?? ''}`;
 
-      // One intent-filtered call per intent value under one root spelling, in
-      // parallel (~one extra round-trip). Each call degrades independently and
-      // reports whether it failed, so an empty round can be told apart from a
-      // broken one.
-      const fetchIntentRound = (intentRoot) => mapWithConcurrency(
+      // One intent-filtered call per intent value, in parallel (~one extra
+      // round-trip). Each call degrades independently. Started here rather than at
+      // the join below so it runs alongside the base call, not after it.
+      const intentRound = mapWithConcurrency(
         Object.values(INTENT_VALUE),
         INTENT_ENRICH_CONCURRENCY,
         async (value) => {
@@ -251,34 +247,25 @@ export function createElementsService(transport, log) {
               ELEMENT_IDS.PROMPTS,
               buildPromptsPayload({
                 ...promptParams,
-                tags: [...(promptParams.tags ?? []), `${intentRoot}${SEP}${value}`],
+                tags: [...(promptParams.tags ?? []), `${INTENT_ROOT_NAME}${SEP}${value}`],
               }),
             );
-            return { key, rows: transformPromptsResponse(raw).prompts, failed: false };
+            return { key, rows: transformPromptsResponse(raw).prompts };
           } catch (e) {
-            log?.warn?.(`serenity userIntent enrichment: intent-filtered PROMPTS call failed for '${value}' under '${intentRoot}'`, { workspaceId, error: e?.message });
-            return { key, rows: [], failed: true };
+            // A failed call contributes an empty round, so it reaches the caller as a
+            // blank `userIntent` — indistinguishable in the response from a prompt that
+            // genuinely carries no intent tag. This warn is the only thing that tells
+            // the two apart, so it carries an `event` key to stay queryable.
+            log?.warn?.(
+              `serenity userIntent enrichment: intent-filtered PROMPTS call failed for '${value}'`,
+              { workspaceId, error: e?.message, event: 'intent-enrichment-call-failed' },
+            );
+            return { key, rows: [] };
           }
         },
       );
 
-      // Current spelling first; the pre-rename one only when all five answered
-      // successfully AND empty (see the doc above).
-      const resolveIntentRows = async () => {
-        const current = await fetchIntentRound(INTENT_ROOT_NAME);
-        const unreached = current.every(({ rows, failed }) => rows.length === 0 && !failed);
-        if (!unreached) {
-          return current;
-        }
-        log?.info?.(
-          'serenity userIntent enrichment: no rows under the renamed intent root, retrying the pre-rename one',
-          { event: 'intent-rename-legacy-retry', workspaceId },
-        );
-        return fetchIntentRound(LEGACY_INTENT_ROOT_NAME);
-      };
-
-      // Base call runs alongside the intent rounds rather than after them.
-      const [base, intentResults] = await Promise.all([basePromise, resolveIntentRows()]);
+      const [base, intentResults] = await Promise.all([basePromise, intentRound]);
 
       // (prompt, prompt_topic) → own intent. A prompt carries exactly one intent
       // tag, so within a single slice it appears in at most one filtered result.

@@ -1190,7 +1190,7 @@ describe('brands-storage', () => {
       expect(brandsUpsert.row).to.not.have.property('semrush_sub_workspace_id');
     });
 
-    it('keeps the brand active with a null site_id when only a semrush_sub_workspace_id anchors it (no baseSiteId)', async () => {
+    it('downgrades to pending with a null site_id when only a semrush_sub_workspace_id is supplied (SITES-49449, no baseSiteId)', async () => {
       const client = createCapturingClient({
         brands: [
           { data: null, error: null },
@@ -1207,10 +1207,10 @@ describe('brands-storage', () => {
       });
 
       const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
-      expect(brandsUpsert.row.status).to.equal('active');
+      // SITES-49449: semrush_sub_workspace_id is no longer a substitute anchor —
+      // site_id is required for 'active', so this downgrades to 'pending' instead.
+      expect(brandsUpsert.row.status).to.equal('pending');
       expect(brandsUpsert.row.semrush_sub_workspace_id).to.equal('ws-1');
-      // A fresh create always writes an explicit site_id — null when no baseSiteId
-      // is supplied. The sub-workspace is what keeps it active (LLMO-6405).
       expect(brandsUpsert.row.site_id).to.equal(null);
     });
 
@@ -1257,234 +1257,6 @@ describe('brands-storage', () => {
 
       const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
       expect(brandsUpsert.row.status).to.equal('pending');
-    });
-
-    it('persists pending_semrush_provisioning (primaryUrl + markets) for a pending draft', async () => {
-      const client = createCapturingClient({
-        brands: [
-          { data: null, error: null },
-          { data: { id: BRAND_ID, name: 'Test' }, error: null },
-          { data: makeBrandRow({ name: 'Test' }), error: null },
-        ],
-      });
-
-      await upsertBrand({
-        organizationId: ORG_ID,
-        brand: {
-          name: 'Test',
-          status: 'pending',
-          pendingSemrushProvisioning: {
-            primaryUrl: 'https://acme.com',
-            markets: [{ market: 'US', languageCode: 'en' }],
-          },
-        },
-        postgrestClient: client,
-      });
-
-      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
-      expect(brandsUpsert.row.status).to.equal('pending');
-      expect(brandsUpsert.row.pending_semrush_provisioning).to.deep.equal({
-        primaryUrl: 'https://acme.com',
-        markets: [{ market: 'US', languageCode: 'en' }],
-      });
-    });
-
-    it('preserves per-market modelIds (trimmed, non-empty) and omits the key when empty', async () => {
-      const client = createCapturingClient({
-        brands: [
-          { data: null, error: null },
-          { data: { id: BRAND_ID, name: 'Test' }, error: null },
-          { data: makeBrandRow({ name: 'Test' }), error: null },
-        ],
-      });
-
-      await upsertBrand({
-        organizationId: ORG_ID,
-        brand: {
-          name: 'Test',
-          status: 'pending',
-          pendingSemrushProvisioning: {
-            primaryUrl: 'https://acme.com',
-            markets: [
-              { market: 'US', languageCode: 'en', modelIds: [' chatgpt ', '', 'perplexity'] },
-              { market: 'DE', languageCode: 'de', modelIds: ['  '] },
-              { market: 'FR', languageCode: 'fr' },
-            ],
-          },
-        },
-        postgrestClient: client,
-      });
-
-      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
-      expect(brandsUpsert.row.pending_semrush_provisioning).to.deep.equal({
-        primaryUrl: 'https://acme.com',
-        markets: [
-          { market: 'US', languageCode: 'en', modelIds: ['chatgpt', 'perplexity'] },
-          { market: 'DE', languageCode: 'de' },
-          { market: 'FR', languageCode: 'fr' },
-        ],
-      });
-    });
-
-    it('preserves an explicit generatePrompts flag, keeping a bare stash (no URL, no market) alive', async () => {
-      const client = createCapturingClient({
-        brands: [
-          { data: null, error: null },
-          { data: { id: BRAND_ID, name: 'Test' }, error: null },
-          { data: makeBrandRow({ name: 'Test' }), error: null },
-        ],
-      });
-
-      await upsertBrand({
-        organizationId: ORG_ID,
-        brand: {
-          name: 'Test',
-          status: 'pending',
-          // A bare no-prompt draft: no primary URL, no market — yet the explicit
-          // generatePrompts flag must keep the stash from collapsing to null so
-          // activation knows to provision a sub-workspace-only brand.
-          pendingSemrushProvisioning: { generatePrompts: false, markets: [] },
-        },
-        postgrestClient: client,
-      });
-
-      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
-      expect(brandsUpsert.row.pending_semrush_provisioning).to.deep.equal({
-        primaryUrl: null,
-        markets: [],
-        generatePrompts: false,
-      });
-    });
-
-    it('drops invalid markets and a blank primaryUrl from pending_semrush_provisioning, nulling it when empty', async () => {
-      const client = createCapturingClient({
-        brands: [
-          { data: null, error: null },
-          { data: { id: BRAND_ID, name: 'Test' }, error: null },
-          { data: makeBrandRow({ name: 'Test' }), error: null },
-        ],
-      });
-
-      await upsertBrand({
-        organizationId: ORG_ID,
-        brand: {
-          name: 'Test',
-          status: 'pending',
-          pendingSemrushProvisioning: {
-            primaryUrl: '   ',
-            markets: [{ market: '', languageCode: 'en' }, { market: 'US' }],
-          },
-        },
-        postgrestClient: client,
-      });
-
-      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
-      expect(brandsUpsert.row.pending_semrush_provisioning).to.equal(null);
-    });
-
-    it('treats a non-array markets value as an empty market list (keeps primaryUrl)', async () => {
-      // `value.markets` is a non-array (a string here): the normalizer must coerce
-      // it to [] rather than iterating it, and the surviving primaryUrl keeps the
-      // stash from collapsing to null.
-      const client = createCapturingClient({
-        brands: [
-          { data: null, error: null },
-          { data: { id: BRAND_ID, name: 'Test' }, error: null },
-          { data: makeBrandRow({ name: 'Test' }), error: null },
-        ],
-      });
-
-      await upsertBrand({
-        organizationId: ORG_ID,
-        brand: {
-          name: 'Test',
-          status: 'pending',
-          pendingSemrushProvisioning: {
-            primaryUrl: 'https://acme.com',
-            markets: 'not-an-array',
-          },
-        },
-        postgrestClient: client,
-      });
-
-      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
-      expect(brandsUpsert.row.pending_semrush_provisioning).to.deep.equal({
-        primaryUrl: 'https://acme.com',
-        markets: [],
-      });
-    });
-
-    it('coerces non-string market/languageCode and non-string modelIds to empty strings', async () => {
-      // Per-market `market`/`languageCode` that are not strings normalize to '' (then
-      // get dropped by the hasText filter), and non-string modelIds normalize to ''
-      // (dropped by the hasText filter), leaving only the valid entries.
-      const client = createCapturingClient({
-        brands: [
-          { data: null, error: null },
-          { data: { id: BRAND_ID, name: 'Test' }, error: null },
-          { data: makeBrandRow({ name: 'Test' }), error: null },
-        ],
-      });
-
-      await upsertBrand({
-        organizationId: ORG_ID,
-        brand: {
-          name: 'Test',
-          status: 'pending',
-          pendingSemrushProvisioning: {
-            primaryUrl: 'https://acme.com',
-            markets: [
-              // non-string market and languageCode -> '' -> dropped by hasText filter
-              { market: 123, languageCode: 456 },
-              // valid market with a mix of string and non-string modelIds
-              { market: 'US', languageCode: 'en', modelIds: ['chatgpt', 42, null] },
-            ],
-          },
-        },
-        postgrestClient: client,
-      });
-
-      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
-      expect(brandsUpsert.row.pending_semrush_provisioning).to.deep.equal({
-        primaryUrl: 'https://acme.com',
-        markets: [
-          { market: 'US', languageCode: 'en', modelIds: ['chatgpt'] },
-        ],
-      });
-    });
-
-    it('omits pending_semrush_provisioning from the row when not supplied', async () => {
-      const client = createCapturingClient({
-        brands: [
-          { data: null, error: null },
-          { data: { id: BRAND_ID, name: 'Test' }, error: null },
-          { data: makeBrandRow({ name: 'Test' }), error: null },
-        ],
-      });
-
-      await upsertBrand({
-        organizationId: ORG_ID,
-        brand: { name: 'Test', baseSiteId: 'site-1' },
-        postgrestClient: client,
-      });
-
-      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
-      expect(brandsUpsert.row).to.not.have.property('pending_semrush_provisioning');
-    });
-
-    it('throws 400 when pendingSemrushProvisioning is not an object', async () => {
-      const client = createCapturingClient({
-        brands: [{ data: null, error: null }],
-      });
-
-      const err = await upsertBrand({
-        organizationId: ORG_ID,
-        brand: { name: 'Test', pendingSemrushProvisioning: ['not', 'an', 'object'] },
-        postgrestClient: client,
-      }).catch((e) => e);
-
-      expect(err).to.be.an('error');
-      expect(err.status).to.equal(400);
     });
 
     it('normalizes brand guidance fields in upsert row', async () => {
@@ -2584,6 +2356,8 @@ describe('brands-storage', () => {
   });
 
   describe('setBrandClaimsEnabled', () => {
+    const SITE_ID = '55555555-5555-4555-8555-555555555555';
+
     it('throws when postgrestClient is missing', async () => {
       await expect(setBrandClaimsEnabled({
         brandId: BRAND_ID, enabled: true, postgrestClient: null,
@@ -2604,7 +2378,7 @@ describe('brands-storage', () => {
 
     it('writes brand_claims_enabled, excludes deleted brands, and returns the updated brand', async () => {
       const client = createCapturingClient({
-        brands: [{ data: { id: BRAND_ID, name: 'Acme' }, error: null }],
+        brands: [{ data: { id: BRAND_ID, name: 'Acme', site_id: SITE_ID }, error: null }],
       });
 
       const result = await setBrandClaimsEnabled({
@@ -2616,7 +2390,9 @@ describe('brands-storage', () => {
       expect(brandsUpdate.row.updated_by).to.equal('slack:U1');
       const neqFilter = client.capturedCalls.neq.find((c) => c.table === 'brands' && c.col === 'status');
       expect(neqFilter?.val).to.equal('deleted');
-      expect(result).to.deep.equal({ id: BRAND_ID, name: 'Acme' });
+      // site_id (the brand's primary site) is returned so callers can toggle the
+      // per-site brand-claims audit in lock-step with the flag.
+      expect(result).to.deep.equal({ id: BRAND_ID, name: 'Acme', site_id: SITE_ID });
     });
 
     it('returns null when no brand matches the id', async () => {
@@ -2892,25 +2668,6 @@ describe('brands-storage', () => {
       });
 
       expect(result).to.include({ name: 'NewName', status: 'pending' });
-    });
-
-    it('clears pending_semrush_provisioning when updates pass pendingSemrushProvisioning: null', async () => {
-      const client = createCapturingClient({
-        brands: [
-          { data: { id: BRAND_ID }, error: null },
-          { data: makeBrandRow({ status: 'active' }), error: null },
-        ],
-      });
-
-      await updateBrand({
-        organizationId: ORG_ID,
-        brandId: BRAND_ID,
-        updates: { pendingSemrushProvisioning: null },
-        postgrestClient: client,
-      });
-
-      const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
-      expect(brandsUpdate.row.pending_semrush_provisioning).to.equal(null);
     });
 
     it('normalizes brand guidance fields in update patch', async () => {

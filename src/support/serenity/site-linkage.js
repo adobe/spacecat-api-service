@@ -12,7 +12,7 @@
 
 // @ts-check
 
-import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
+import { composeBaseURL, hasText, siteIdentityFromUrlString } from '@adobe/spacecat-shared-utils';
 import * as dataAccessModels from '@adobe/spacecat-shared-data-access';
 import { hostnameFromUrlString, isPublicHostname } from '../url-utils.js';
 
@@ -71,7 +71,7 @@ export const SERENITY_BRAND_SITE_TYPE = 'serenity';
  * @param {object} [opts]
  * @param {string} [opts.organizationId] - the brand's organization UUID.
  * @param {string} [opts.brandId] - the brand UUID.
- * @param {string} [opts.domain] - the market/project domain or primary URL. Tolerates
+ * @param {string|null} [opts.domain] - the market/project domain or primary URL. Tolerates
  *   a bare hostname ("example.com") or a full URL ("https://example.com/x"); it is
  *   normalized to the hostname via hostnameFromUrlString (the single source of truth
  *   for brand -> Semrush project domain derivation) so all call sites resolve to the
@@ -209,16 +209,19 @@ export async function ensureMarketSite(ctx, {
     return null;
   }
 
-  // Normalize to a bare hostname first: callers pass either a bare domain or a
-  // full URL, and composeBaseURL does not strip a path/scheme — so a URL with a
-  // path would resolve to the wrong base_url, miss the existing Site, and hit the
-  // global base_url uniqueness constraint on every retry. hostnameFromUrlString
-  // keeps this in lockstep with brandDomainFromPayload (the brand-create path).
+  // Two derivations from one input, for two different jobs. The bare hostname is
+  // what the SSRF guard below must see (it classifies hosts, and a path would
+  // never match its patterns). The full identity — host plus path — is what the
+  // Site lookup must use, because `base_url` is unique over the WHOLE url: prod
+  // holds 440 subpath sites, and `nba.com` coexists with `nba.com/kings`,
+  // `/knicks`, `/lakers` and `/timberwolves` as five distinct rows. Collapsing to
+  // the host here silently resolved every one of them to the root site.
   const hostname = hostnameFromUrlString(domain);
   if (!hostname || !hasText(hostname)) {
     log?.warn?.('ensureMarketSite: domain did not resolve to a hostname; skipping', { brandId, domain });
     return null;
   }
+  const identity = siteIdentityFromUrlString(domain);
   // SSRF guard: a market domain becomes a Site base_url that downstream workers
   // fetch, and Site.create only validates the scheme — so refuse internal/private
   // hosts (localhost, loopback, link-local, RFC1918, *.internal, bare IPs) here,
@@ -229,12 +232,58 @@ export async function ensureMarketSite(ctx, {
     log?.warn?.('ensureMarketSite: domain is not a public hostname; refusing to mirror as a Site', { brandId, domain, hostname });
     return null;
   }
-  const baseURL = composeBaseURL(hostname);
+  // A resolved hostname does NOT imply a resolved identity. WHATWG collapses the
+  // slash run in `https:///foo.example.com/bar` and reads the first path segment
+  // as the host, so a leading-slash input yields a public hostname while the
+  // identity — which rejects a leading '/' — yields null. Composing from null
+  // throws, and this function's contract is best-effort/never-throw (brands.js:
+  // "a throw here would tear down a live brand's workspace"). The live route is
+  // activate-retry, where brandDomain validation is presence-only. Skip rather
+  // than fall back to the hostname: `/foo.example.com/bar` naming the site
+  // `foo.example.com` is the parser's artifact, not the caller's intent.
+  if (!identity || !hasText(identity)) {
+    log?.warn?.('ensureMarketSite: domain did not resolve to a site identity; skipping', { brandId, domain, hostname });
+    return null;
+  }
+  // Compose from the identity, not the raw input: composeBaseURL strips a trailing
+  // slash only at the domain root, so `nba.com/kings/` and `nba.com/kings` would
+  // otherwise compose to two different base URLs and resolve to two different
+  // Sites. The identity has already normalized that away.
+  //
+  // Host and path are composed separately because composeBaseURL is a hostname
+  // helper: it lowercases the WHOLE string, which would fold `acme.com/OMES` onto
+  // `/omes`. Paths are case-sensitive on most origins, so a lowercased base_url
+  // both misses an existing row spelled with capitals and gives downstream
+  // fetchers a URL the origin may 404. Running it on the host alone keeps every
+  // host-level normalization the rest of the system applies — port, trailing dot,
+  // `www.`, scheme — and leaves the path exactly as the identity produced it.
+  //
+  // No extra lookup for the previously-composed all-lowercase spelling: prod holds
+  // 3 sites whose path carries capitals and 6 on a `www.` host, and not one of
+  // them is a brand's primary site, a brand_sites link, or a market's site. So
+  // there is no row for such a lookup to find, only a round-trip on every create.
+  const [identityHost, ...identitySegments] = identity.split('/');
+  const identityPath = identitySegments.length > 0 ? `/${identitySegments.join('/')}` : '';
+  const baseURL = `${composeBaseURL(identityHost)}${identityPath}`;
 
   try {
-    // Global base_url uniqueness means at most one Site per domain; findByBaseURL
-    // makes this idempotent across markets that happen to share a domain.
+    // base_url is unique over the whole url including its path, so a host may back
+    // several Sites (nba.com alongside nba.com/kings). findByBaseURL on the full
+    // identity is therefore both the correct lookup and what makes this idempotent
+    // for markets that share one host.
     let site = await Site.findByBaseURL(baseURL);
+    // Only when the identity carries a path — a host-only base URL never has a
+    // meaningful trailing slash, composeBaseURL having already stripped it.
+    if (!site && identity && identity !== hostname) {
+      // Existing subpath Sites were stored with whatever trailing slash the
+      // onboarding URL happened to carry — 8 of 1,718 in dev end in one. The
+      // identity strips it, so a lookup by the stripped spelling alone would miss
+      // those rows and CREATE a near-duplicate Site differing only by that slash
+      // (the uniqueness constraint would not stop it). Try the stored spelling
+      // before creating anything; the create below still uses the normalized form
+      // so new rows converge on one spelling.
+      site = await Site.findByBaseURL(`${baseURL}/`);
+    }
     if (!site) {
       // OTHER delivery type: a Semrush-managed market site is not an AEM target.
       site = await Site.create({
@@ -273,40 +322,54 @@ export async function ensureMarketSite(ctx, {
 }
 
 /**
- * Resolves a SpaceCat Site UUID to its bare hostname (the domain a Semrush
- * market/project tracks). Lets a market-create caller supply a `siteId` instead
- * of a `brandDomain`: the site's `base_url` is normalized to a hostname via
- * `hostnameFromUrlString` (the same normalizer every other brand → Semrush
- * domain derivation uses), so the derived domain is identical to what a
- * `brandDomain` caller would have sent.
+ * Resolves a SpaceCat Site UUID to BOTH URL-ish values a Semrush project tracks:
+ * the host-only `domain` (grouping key, `hostnameFromUrlString`) and the full
+ * `primaryUrl` "site identity" (`siteIdentityFromUrlString`, keeping any
+ * subdomain/subpath). The two are deliberately distinct — `domain` is
+ * eTLD+1-normalized upstream and rejects a path, while `primaryUrl` is the URL
+ * the brand actually owns (serenity-docs#348), written to
+ * `settings.ai.primary_url`. Sharing one Site fetch keeps them consistent.
+ *
+ * Returned together because they describe one site, and resolving them from two
+ * reads invites two answers: a project domained to one url while tracking another
+ * is worse than one that tracks its apex, because it looks deliberate. It also
+ * halves the Site lookups on the market-create path.
+ *
+ * `primaryUrl` is scheme-less on purpose: that is the form the upstream stores, so
+ * a value written from here compares equal to the one read back and drift
+ * detection does not report a difference that is not there.
  *
  * Best-effort: returns null (never throws) on missing input, unavailable
- * data-access, an unknown site, or a lookup failure. The caller decides whether
- * a null is a hard 400 (a supplied siteId that cannot resolve) or a silent skip.
+ * data-access, an unknown site, or a lookup failure.
  *
  * @param {object} dataAccess - `ctx.dataAccess` (reads `dataAccess.Site`).
  * @param {string|null|undefined} siteId - the SpaceCat Site UUID to resolve.
  * @param {object} [log] - logger.
- * @returns {Promise<string|null>} the site's hostname, or null when unresolvable.
+ * @returns {Promise<{domain: string|null, primaryUrl: string|null}|null>} the
+ *   derived values, or null when the site cannot be resolved.
  */
-export async function resolveSiteDomain(dataAccess, siteId, log) {
+export async function resolveSiteIdentity(dataAccess, siteId, log) {
   if (!siteId || !hasText(siteId)) {
     return null;
   }
   const Site = dataAccess?.Site;
   if (!Site || typeof Site.findById !== 'function') {
-    log?.warn?.('resolveSiteDomain: Site data-access unavailable; cannot resolve site domain', { siteId });
+    log?.warn?.('resolveSiteIdentity: Site data-access unavailable; cannot resolve site', { siteId });
     return null;
   }
   try {
     const site = await Site.findById(siteId);
     if (!site) {
-      log?.warn?.('resolveSiteDomain: site not found', { siteId });
+      log?.warn?.('resolveSiteIdentity: site not found', { siteId });
       return null;
     }
-    return hostnameFromUrlString(site.getBaseURL());
+    const baseURL = site.getBaseURL();
+    return {
+      domain: hostnameFromUrlString(baseURL),
+      primaryUrl: siteIdentityFromUrlString(baseURL),
+    };
   } catch (e) {
-    log?.warn?.('resolveSiteDomain: lookup failed (non-fatal)', { siteId, error: e.message });
+    log?.warn?.('resolveSiteIdentity: lookup failed (non-fatal)', { siteId, error: e.message });
     return null;
   }
 }

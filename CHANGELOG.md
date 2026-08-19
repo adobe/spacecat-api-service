@@ -1,3 +1,46 @@
+## [1.755.2](https://github.com/adobe/spacecat-api-service/compare/v1.755.1...v1.755.2) (2026-08-19)
+
+
+### Bug Fixes
+
+* **serenity:** read and write the intent root under one name | LLMO-6986 ([#3054](https://github.com/adobe/spacecat-api-service/issues/3054)) ([4e256e8](https://github.com/adobe/spacecat-api-service/commit/4e256e8376c2d49269b793b78777527dd827c492)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+## [1.755.1](https://github.com/adobe/spacecat-api-service/compare/v1.755.0...v1.755.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* allow x-view-full-experience header in CORS (SITES-49888) ([#3097](https://github.com/adobe/spacecat-api-service/issues/3097)) ([e171ece](https://github.com/adobe/spacecat-api-service/commit/e171eceac6f96419a00009295ac72f69349e6572)), closes [#3087](https://github.com/adobe/spacecat-api-service/issues/3087) [#3087](https://github.com/adobe/spacecat-api-service/issues/3087) [OneAdobe/experience-success-studio-ui#2199](https://github.com/OneAdobe/experience-success-studio-ui/issues/2199)
+* **serenity:** drop semrush_sub_workspace_id as an upsertBrand anchor (SITES-49449) ([#3095](https://github.com/adobe/spacecat-api-service/issues/3095)) ([2ae994e](https://github.com/adobe/spacecat-api-service/commit/2ae994e3912bdee5bdba0e2490d6700f1b429479)), closes [#2504](https://github.com/adobe/spacecat-api-service/issues/2504) [mysticat-data-service#936](https://github.com/mysticat-data-service/issues/936) [mysticat-data-service#936](https://github.com/mysticat-data-service/issues/936) [#936](https://github.com/adobe/spacecat-api-service/issues/936)
+
+# [1.755.0](https://github.com/adobe/spacecat-api-service/compare/v1.754.0...v1.755.0) (2026-08-18)
+
+
+### Features
+
+* **brand-claims:** toggle brand-claims audit with enable/disable command ([#3078](https://github.com/adobe/spacecat-api-service/issues/3078)) ([650fd72](https://github.com/adobe/spacecat-api-service/commit/650fd72c59bf80476de03d2ba480dc80245b268e)), closes [#3058](https://github.com/adobe/spacecat-api-service/issues/3058)
+
+# [1.754.0](https://github.com/adobe/spacecat-api-service/compare/v1.753.0...v1.754.0) (2026-08-18)
+
+
+### Bug Fixes
+
+* **sites:** deep-merge hlxConfig/deliveryConfig on PATCH to preserve content.source (SITES-49362) ([#3077](https://github.com/adobe/spacecat-api-service/issues/3077)) ([96459af](https://github.com/adobe/spacecat-api-service/commit/96459af0e282c0fc291c2fa5263d9157fe5cb051)), closes [#3012](https://github.com/adobe/spacecat-api-service/issues/3012)
+* write \0 instead of a raw NUL byte in composite map keys ([#3070](https://github.com/adobe/spacecat-api-service/issues/3070)) ([9a447a1](https://github.com/adobe/spacecat-api-service/commit/9a447a16dea3b85b6fad5b229c454679949a3ea5)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+
+### Features
+
+* **logging:** log Semrush error body and request context on upstream failures ([#3091](https://github.com/adobe/spacecat-api-service/issues/3091)) ([d790ec6](https://github.com/adobe/spacecat-api-service/commit/d790ec69c53b132dec4091f3ffe51fdcbcf53f3b)), closes [Hi#level](https://github.com/Hi/issues/level)
+* **serenity:** resolve Sites by full identity and surface each market's tracked url ([#3073](https://github.com/adobe/spacecat-api-service/issues/3073)) ([14623fb](https://github.com/adobe/spacecat-api-service/commit/14623fb73367bb7fc9b7cfe4f97d2a490ca8209a)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+# [1.753.0](https://github.com/adobe/spacecat-api-service/compare/v1.752.1...v1.753.0) (2026-08-18)
+
+
+### Features
+
+* **serenity:** write settings.ai.primary_url at provisioning ([#348](https://github.com/adobe/spacecat-api-service/issues/348)) ([#3090](https://github.com/adobe/spacecat-api-service/issues/3090)) ([f15c9b8](https://github.com/adobe/spacecat-api-service/commit/f15c9b8a8e875966f067106213b00195cd6e3551)), closes [#3086](https://github.com/adobe/spacecat-api-service/issues/3086) [#3086](https://github.com/adobe/spacecat-api-service/issues/3086)
+
 ## [1.752.1](https://github.com/adobe/spacecat-api-service/compare/v1.752.0...v1.752.1) (2026-08-18)
 
 

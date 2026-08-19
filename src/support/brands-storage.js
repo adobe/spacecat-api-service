@@ -71,76 +71,6 @@ function normalizeNullableText(value, fieldName) {
 }
 
 /**
- * Normalizes the deferred Semrush provisioning data of a pending (draft) brand
- * into the shape persisted in `brands.pending_semrush_provisioning` (a JSONB object
- * `{ primaryUrl?, markets: [{ market, languageCode, modelIds? }], generatePrompts? }`).
- * These are the primary URL + initial markets (each with its chosen AI models/LLMs)
- * plus whether activation should generate topics/prompts — all collected by the
- * add-brand wizard before a sub-workspace/project exist; activation reads them
- * back to provision the real Semrush projects, then clears the column.
- * The canonical shape is the `PendingSemrushProvisioning` type exported by
- * `@adobe/spacecat-shared-data-access` (shared with project-elmo-ui).
- *
- * Returns `undefined` when the caller did not supply the field (leave the column
- * untouched), `null` when explicitly cleared or nothing useful remains, or the
- * cleaned object otherwise.
- *
- * @param {unknown} value - `{ primaryUrl?, markets }`, null, or undefined.
- * @returns {{primaryUrl: (string|null), markets: Array<{market: string,
- *   languageCode: string, modelIds?: string[]}>}|null|undefined}
- */
-function normalizePendingSemrushProvisioning(value) {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (value === null) {
-    return null;
-  }
-  if (typeof value !== 'object' || Array.isArray(value)) {
-    const error = new Error('pendingSemrushProvisioning must be an object or null');
-    error.status = 400;
-    throw error;
-  }
-  const markets = (Array.isArray(value.markets) ? value.markets : [])
-    .map((m) => {
-      const market = {
-        market: typeof m?.market === 'string' ? m.market.trim() : '',
-        languageCode: typeof m?.languageCode === 'string' ? m.languageCode.trim() : '',
-      };
-      // Per-market AI models (LLMs) chosen for this market; applied to the
-      // project at activation. Keep only non-empty strings; omit the key
-      // entirely when none remain so a cleared selection doesn't persist `[]`.
-      const modelIds = (Array.isArray(m?.modelIds) ? m.modelIds : [])
-        .map((id) => (typeof id === 'string' ? id.trim() : ''))
-        .filter(hasText);
-      if (modelIds.length > 0) {
-        market.modelIds = modelIds;
-      }
-      return market;
-    })
-    .filter((m) => hasText(m.market) && hasText(m.languageCode));
-  const primaryUrl = typeof value.primaryUrl === 'string' && hasText(value.primaryUrl)
-    ? value.primaryUrl.trim()
-    : null;
-  // Whether activation should generate topics/prompts for the provisioned
-  // project(s). Only meaningful as an explicit boolean; absent means "legacy
-  // stash, leave generation off" and is omitted so the column stays minimal.
-  const hasGeneratePrompts = typeof value.generatePrompts === 'boolean';
-  // Nothing worth persisting → treat as cleared. An explicit generatePrompts
-  // flag IS worth persisting on its own: a bare no-prompt draft (no URL, no
-  // market) still needs the stash so activation knows to provision a
-  // sub-workspace-only brand rather than treating it as a non-Semrush brand.
-  if (markets.length === 0 && !hasText(primaryUrl) && !hasGeneratePrompts) {
-    return null;
-  }
-  const result = { primaryUrl, markets };
-  if (hasGeneratePrompts) {
-    result.generatePrompts = value.generatePrompts;
-  }
-  return result;
-}
-
-/**
  * Splits a full URL string into its base URL and path.
  * e.g. "https://example.com/products" -> { base: "https://example.com", path: "/products" }
  * A root path "/" is treated as no path (empty string).
@@ -953,15 +883,16 @@ export async function getBrandBySite(organizationId, siteId, postgrestClient, lo
 /**
  * Sets the brand-scoped `brand_claims_enabled` scheduling gate (LLMO-5741),
  * keyed on the brand UUID (the PK), so operators can enable/disable Brand Claims
- * for a brand directly. Returns the updated `{ id, name }` or null when no brand
- * matches the id.
+ * for a brand directly. Returns the updated `{ id, name, site_id }` or null when
+ * no brand matches the id. `site_id` (the brand's primary site) lets callers keep
+ * the per-site `brand-claims` audit toggle in lock-step with this flag.
  *
  * @param {Object} params
  * @param {string} params.brandId - Brand UUID.
  * @param {boolean} params.enabled - Target flag value.
  * @param {Object} params.postgrestClient - PostgREST client.
  * @param {string} [params.updatedBy] - Audit actor.
- * @returns {Promise<{id: string, name: string}|null>}
+ * @returns {Promise<{id: string, name: string, site_id: string|null}|null>}
  */
 export async function setBrandClaimsEnabled({
   brandId,
@@ -986,7 +917,7 @@ export async function setBrandClaimsEnabled({
     // Do not flip the flag on a soft-deleted brand (matches the .neq guard used
     // across brands-storage); a deleted brand returns no row -> null.
     .neq('status', 'deleted')
-    .select('id, name')
+    .select('id, name, site_id')
     .maybeSingle();
 
   if (error) {
@@ -1192,14 +1123,12 @@ export async function upsertBrand({
     throw new Error(`Failed to look up existing brand "${brand.name}": ${existingError.message}`);
   }
 
-  // An active brand must be anchored by either a SpaceCat base site OR a Semrush
-  // sub-workspace (serenity dual-mode): a Semrush brand has no SpaceCat site, but
-  // its sub-workspace (semrush_sub_workspace_id, set on the serenity-first create
-  // path) is a valid anchor — mirrors the relaxed chk_active_brand_has_site_id
-  // DB constraint. Respect persisted site_id on the update path.
-  const hasAnchor = hasText(brand.baseSiteId)
-    || hasText(existing?.site_id)
-    || hasText(semrushSubWorkspaceId);
+  // An active brand must be anchored by a SpaceCat base site (chk_active_brand_has_site_id,
+  // SITES-49449). A Semrush sub-workspace brand is NOT exempt from this — the
+  // brand/market management model (LLMO-6405) makes site_id mandatory on every
+  // create path, subworkspace mode or not, so semrush_sub_workspace_id is no
+  // longer a substitute anchor. Respect persisted site_id on the update path.
+  const hasAnchor = hasText(brand.baseSiteId) || hasText(existing?.site_id);
   const status = (!hasAnchor && (brand.status || 'active') === 'active')
     ? 'pending'
     : (brand.status || 'active');
@@ -1253,17 +1182,6 @@ export async function upsertBrand({
   );
   if (mentionSentimentGuidance !== undefined) {
     row.mention_sentiment_guidance = mentionSentimentGuidance;
-  }
-
-  // Deferred Semrush provisioning data for a pending (draft) brand: the primary
-  // URL + desired (market, languageCode) the wizard collected before a
-  // sub-workspace / project exist. Persisted as JSONB so activation can
-  // provision it later, then cleared. Undefined leaves the column untouched.
-  const pendingSemrushProvisioning = normalizePendingSemrushProvisioning(
-    brand.pendingSemrushProvisioning,
-  );
-  if (pendingSemrushProvisioning !== undefined) {
-    row.pending_semrush_provisioning = pendingSemrushProvisioning;
   }
 
   // baseSiteId is immutable once persisted (mirrors updateBrand). Only set it
@@ -1498,15 +1416,6 @@ export async function updateBrand({
   if (updates.region !== undefined) {
     patch.regions = (updates.region || [])
       .map((r) => (typeof r === 'string' ? r : String(r))).filter(hasText);
-  }
-
-  // Deferred Semrush provisioning data (pending/draft brands). Activation passes
-  // `pendingSemrushProvisioning: null` to clear it once the real projects are
-  // provisioned.
-  if (updates.pendingSemrushProvisioning !== undefined) {
-    patch.pending_semrush_provisioning = normalizePendingSemrushProvisioning(
-      updates.pendingSemrushProvisioning,
-    );
   }
 
   // Clear legacy columns on any brand update so old data doesn't linger.
