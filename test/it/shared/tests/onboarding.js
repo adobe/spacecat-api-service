@@ -21,9 +21,11 @@ import {
  * Shared integration tests for POST /v2/orgs/:spaceCatId/semrush-onboarding.
  *
  * Scope is the auth gate that resolves against the real DB *before* the endpoint
- * calls the external Slack webhook: org existence and membership. The webhook
- * success path (200) depends on an external service and is covered by the unit
- * suites (test/controllers/onboarding.test.js, test/support/onboarding).
+ * resolves the caller's IMS token and calls the external Semrush
+ * workspace-provisioning API: org existence and membership. The
+ * IMS-token-resolution and provisioning paths (200/4xx/5xx) depend on external
+ * services and are covered by the unit suites (test/controllers/onboarding.test.js,
+ * test/support/onboarding).
  *
  * @param {() => object} getHttpClient - Getter returning the initialized HTTP client
  * @param {() => Promise<void>} resetData - Truncates all data and re-seeds baseline
