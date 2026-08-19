@@ -7265,6 +7265,41 @@ describe('Brands Controller', () => {
       }
     });
 
+    it('strips a header-unsafe character from the X-Error header without altering the JSON body (serenity-docs#346)', async () => {
+      // A brand name is customer-controlled, and any 409/500 whose message
+      // echoes it (this guard, brand_status_demotion_not_allowed, ...) would
+      // previously crash createErrorResponse's X-Error header with a raw
+      // TypeError [ERR_INVALID_CHAR] instead of returning the intended
+      // status, if that message contained a character outside the header-safe
+      // range (printable ASCII + Latin-1, 0x20-0x7E/0x80-0xFF — plain accented
+      // characters like "é" are actually fine; an em dash is not). This is
+      // exactly what the it-postgres IT suite caught for an em dash in this
+      // guard's own message.
+      const err = new Error(
+        'Cannot anchor brand "Global — Direct" to site abc: that site does not belong to organization xyz.',
+      );
+      err.status = 409;
+      err.code = 'brand_site_org_mismatch';
+      const updateBrandStub = sinon.stub().rejects(err);
+
+      const controller = await buildUpdateController({ updateBrand: updateBrandStub });
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { baseSiteId: 'some-other-orgs-site' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(409);
+      const body = await response.json();
+      expect(body.code).to.equal('brand_site_org_mismatch');
+      expect(body.message).to.equal(err.message); // body keeps the full, unsanitized message
+      expect(response.headers.get('x-error')).to.equal(
+        'Cannot anchor brand "Global  Direct" to site abc: that site does not belong to organization xyz.',
+      );
+    });
+
     it('succeeds when expectedUpdatedAt matches the persisted row (LLMO-6591)', async () => {
       const response = await brandsController.updateBrandForOrg({
         ...context,

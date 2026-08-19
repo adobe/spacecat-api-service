@@ -14,6 +14,7 @@
 
 import { randomUUID } from 'crypto';
 
+import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import BrandClient, { BrandGovernanceClient } from '@adobe/spacecat-shared-brand-client';
 import DrsClient from '@adobe/spacecat-shared-drs-client';
 import {
@@ -363,13 +364,18 @@ function BrandsController(ctx, log, env) {
       // client distinguish error cases without regex-matching the message text
       // (LLMO-6591; see the `uq_brand_name_per_org` TODO this same pattern
       // predates in elmo-ui's getBrandSaveErrorDescriptor).
+      // cleanupHeaderValue strips chars HTTP headers can't carry (CR/LF and
+      // non-ASCII that would otherwise throw ERR_INVALID_CHAR — caught via the
+      // it-postgres IT suite when this guard's own message used an em dash,
+      // serenity-docs#346). The JSON body keeps the raw message; only the
+      // header copy needs sanitizing.
       return createResponse(
         { message: appErr.message, ...(appErr.code ? { code: appErr.code } : {}) },
         appErr.status,
-        { [HEADER_ERROR]: appErr.message },
+        { [HEADER_ERROR]: cleanupHeaderValue(appErr.message || 'Error') },
       );
     }
-    return internalServerError(appErr.message);
+    return internalServerError(cleanupHeaderValue(appErr.message || 'Internal server error'));
   }
 
   function validateBrandGuidanceFields(brandData = {}) {

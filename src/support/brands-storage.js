@@ -370,8 +370,15 @@ async function assertSiteBelongsToOrg(postgrestClient, siteId, organizationId, b
     );
   }
   if (!anchorSite) {
+    // Plain ASCII (no em dash) to match this file's other thrown, client-facing
+    // messages: an em dash here previously crashed createErrorResponse's
+    // X-Error header (@adobe/fetch rejects non-Latin1 header content with a
+    // raw TypeError, surfacing as a 500 instead of this 409 — caught by the
+    // it-postgres IT suite, not the mocked unit tests). createErrorResponse
+    // now sanitizes the header regardless (serenity-docs#346), but this stays
+    // ASCII too rather than leaning on that alone.
     const err = new Error(
-      `Cannot anchor brand "${brandLabel}" to site ${siteId} — that site `
+      `Cannot anchor brand "${brandLabel}" to site ${siteId}: that site `
       + `does not exist, or does not belong to organization ${organizationId}.`,
     );
     err.status = 409;
