@@ -167,6 +167,7 @@ describe('Suggestions Controller', () => {
     'getAllForOpportunity',
     'getAllForOpportunityPaged',
     'deploySuggestionToEdge',
+    'getEdgeDeployedUrls',
     'listGeoExperiments',
     'getGeoExperiment',
     'getGeoExperimentResults',
@@ -556,6 +557,120 @@ describe('Suggestions Controller', () => {
 
   it('throws an error if data access cannot be destructured to Suggestion', () => {
     expect(() => SuggestionsController({ dataAccess: { Opportunity: {}, Suggestion: '' } })).to.throw('Data access required');
+  });
+
+  describe('getEdgeDeployedUrls', () => {
+    const makeOppty = (id, type, tags) => ({
+      getId: () => id,
+      getType: () => type,
+      getTags: () => tags,
+    });
+    const makeSugg = (opportunityId, data) => ({
+      getOpportunityId: () => opportunityId,
+      getData: () => data,
+    });
+
+    let edgeSite;
+    let edgeDataAccess;
+    let opptyAllBySiteId;
+    let suggestionAll;
+
+    const buildController = () => SuggestionsController({
+      dataAccess: edgeDataAccess,
+      pathInfo: { headers: { 'x-product': 'llmo' } },
+      ...authContext,
+    }, mockSqs, {});
+
+    beforeEach(() => {
+      edgeSite = { getId: () => SITE_ID };
+      opptyAllBySiteId = sandbox.stub().resolves([]);
+      suggestionAll = sandbox.stub().resolves([]);
+      edgeDataAccess = {
+        Opportunity: { allBySiteId: opptyAllBySiteId },
+        Suggestion: { all: suggestionAll },
+        SuggestionGrant: mockSuggestionGrant,
+        Site: { findById: sandbox.stub().resolves(edgeSite) },
+        Configuration: mockConfiguration,
+      };
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+    });
+
+    it('returns 400 for an invalid site id', async () => {
+      const response = await buildController().getEdgeDeployedUrls({ params: { siteId: 'not-a-uuid' } });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 404 when the site is not found', async () => {
+      edgeDataAccess.Site.findById.resolves(null);
+      const response = await buildController().getEdgeDeployedUrls({ params: { siteId: SITE_ID } });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 403 when the caller lacks access to the site', async () => {
+      AccessControlUtil.prototype.hasAccess.resolves(false);
+      const response = await buildController().getEdgeDeployedUrls({ params: { siteId: SITE_ID } });
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns an empty list and skips the suggestions query when the site has no Tokowaka opportunities', async () => {
+      opptyAllBySiteId.resolves([
+        makeOppty('opp-prerender', 'prerender', ['isElmo']),
+        makeOppty('opp-non-elmo', 'meta-tags', ['somethingElse']),
+        makeOppty('opp-untagged', 'alt-text', undefined),
+      ]);
+      const response = await buildController().getEdgeDeployedUrls({ params: { siteId: SITE_ID } });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.deep.equal([]);
+      expect(suggestionAll).to.have.callCount(0);
+    });
+
+    it('returns edge-deployed URLs for non-prerender ELMO opportunities, deduped with aggregated sources', async () => {
+      opptyAllBySiteId.resolves([
+        makeOppty('opp-meta', 'meta-tags', ['isElmo']),
+        makeOppty('opp-alt', 'alt-text', ['isElmo']),
+        makeOppty('opp-prerender', 'prerender', ['isElmo']), // excluded (prerender)
+        makeOppty('opp-nonelmo', 'content-freshness', []), // excluded (not isElmo)
+      ]);
+      suggestionAll.resolves([
+        makeSugg('opp-meta', { url: 'https://a.com/x', edgeDeployed: true }),
+        makeSugg('opp-alt', { url: 'https://a.com/x', edgeDeployed: true }), // same url, different source
+        makeSugg('opp-meta', { url: 'https://a.com/y', edgeDeployed: true }),
+        makeSugg('opp-meta', { url: 'https://a.com/z', edgeDeployed: false }), // excluded (not deployed)
+        makeSugg('opp-alt', { edgeDeployed: true }), // excluded (no url)
+      ]);
+
+      const response = await buildController().getEdgeDeployedUrls({ params: { siteId: SITE_ID } });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+
+      expect(body).to.have.length(2);
+      const byUrl = Object.fromEntries(body.map((e) => [e.url, e.sources]));
+      expect(byUrl['https://a.com/x']).to.have.members(['meta-tags', 'alt-text']);
+      expect(byUrl['https://a.com/x']).to.have.length(2);
+      expect(byUrl['https://a.com/y']).to.deep.equal(['meta-tags']);
+      expect(byUrl['https://a.com/z']).to.equal(undefined);
+    });
+
+    it('queries suggestions once with an opportunity_id IN filter (no per-opportunity fan-out)', async () => {
+      opptyAllBySiteId.resolves([
+        makeOppty('opp-meta', 'meta-tags', ['isElmo']),
+        makeOppty('opp-alt', 'alt-text', ['isElmo']),
+      ]);
+      suggestionAll.resolves([]);
+
+      await buildController().getEdgeDeployedUrls({ params: { siteId: SITE_ID } });
+
+      expect(suggestionAll).to.have.been.calledOnce;
+      // Resolve the where DSL to confirm it filters opportunity_id IN (the Tokowaka ids).
+      const [, options] = suggestionAll.firstCall.args;
+      const captured = {};
+      const attrs = new Proxy({}, { get: (_, p) => String(p) });
+      const op = { in: (field, value) => { captured.field = field; captured.value = value; } };
+      options.where(attrs, op);
+      expect(captured.field).to.equal('opportunityId');
+      expect(captured.value).to.have.members(['opp-meta', 'opp-alt']);
+    });
   });
 
   it('gets all suggestions for an opportunity and a site', async () => {
