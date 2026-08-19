@@ -180,6 +180,7 @@ describe('propagateSiteUrlToSemrush', () => {
     const transport = makeTransport({ benchmarks: [] });
     transport.updateProject.rejects(new SerenityTransportError(500, 'boom'));
     const rows = [fakeRow('proj-1')];
+    const log = { error: sinon.spy() };
 
     await expect(propagateSiteUrlToSemrush({
       dataAccess: dataAccessWithRows(rows),
@@ -189,7 +190,41 @@ describe('propagateSiteUrlToSemrush', () => {
       siteId: SITE_ID,
       brandIdentity: BRAND_IDENTITY,
       newBaseURL: NEW_URL,
+      log,
     })).to.be.rejectedWith('boom');
     expect(transport.publishProject).to.not.have.been.called;
+    expect(log.error).to.have.been.calledOnceWith(
+      'site-url-propagation: failed re-pointing a project mid fan-out',
+      sinon.match({
+        brandId: BRAND_ID, siteId: SITE_ID, projectId: 'proj-1', projectsUpdatedBeforeFailure: 0, totalProjects: 1,
+      }),
+    );
+  });
+
+  it('logs how many projects already succeeded before a mid-fan-out failure on the second project', async () => {
+    const transport = makeTransport({ benchmarks: [] });
+    transport.updateProject.onFirstCall().resolves({}).onSecondCall().rejects(
+      new SerenityTransportError(500, 'boom'),
+    );
+    const rows = [fakeRow('proj-1'), fakeRow('proj-2')];
+    const log = { error: sinon.spy() };
+
+    await expect(propagateSiteUrlToSemrush({
+      dataAccess: dataAccessWithRows(rows),
+      transport,
+      workspaceId: WS,
+      brandId: BRAND_ID,
+      siteId: SITE_ID,
+      brandIdentity: BRAND_IDENTITY,
+      newBaseURL: NEW_URL,
+      log,
+    })).to.be.rejectedWith('boom');
+    expect(transport.publishProject).to.have.been.calledOnceWith(WS, 'proj-1');
+    expect(log.error).to.have.been.calledOnceWith(
+      'site-url-propagation: failed re-pointing a project mid fan-out',
+      sinon.match({
+        projectId: 'proj-2', projectsUpdatedBeforeFailure: 1, totalProjects: 2,
+      }),
+    );
   });
 });

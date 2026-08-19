@@ -1198,6 +1198,17 @@ function SitesController(ctx, log, env) {
       return badRequest('Request body required');
     }
 
+    // Normalize a trailing slash ONCE, up front — so `https://x.com/` and `https://x.com`
+    // (or a subpath with/without one) compare, collide-check, propagate, and persist
+    // identically, matching how `createSite` normalizes its input before ever touching
+    // `Site.findByBaseURL`. Deliberately NOT reusing `composeBaseURL`/`canonicalizeUrl`
+    // here — both also strip `www.`, which this feature must NOT collapse (a Semrush
+    // project's identity treats `www.x.com` and `x.com` as distinct sites; see
+    // `siteIdentityFromUrlString`'s own "do NOT collapse www vs apex" contract).
+    const nextBaseURL = hasText(requestBody.baseURL)
+      ? requestBody.baseURL.replace(/\/$/, '')
+      : requestBody.baseURL;
+
     // A site's URL backing a Semrush-managed brand can be changed, but only for the
     // brand's OWN primary site — see serenity-docs#349. A registrable-domain change is
     // allowed too: live-verified against adobe-hackathon.semrush.com (2026-08-18) that
@@ -1211,12 +1222,12 @@ function SitesController(ctx, log, env) {
     // (issue #349 workstream 4) this change does not make. The brand lookup runs only when
     // a URL change is actually requested, so the common patch path (no baseURL) pays no
     // extra query.
-    if (hasText(requestBody.baseURL) && requestBody.baseURL !== site.getBaseURL()) {
-      if (!isValidUrl(requestBody.baseURL)) {
+    if (hasText(nextBaseURL) && nextBaseURL !== site.getBaseURL()) {
+      if (!isValidUrl(nextBaseURL)) {
         return badRequest('baseURL must be a valid URL');
       }
 
-      const collidingSite = await Site.findByBaseURL(requestBody.baseURL);
+      const collidingSite = await Site.findByBaseURL(nextBaseURL);
       if (collidingSite && collidingSite.getId() !== site.getId()) {
         return createResponse({
           message: 'A site with this baseURL already exists',
@@ -1271,7 +1282,7 @@ function SitesController(ctx, log, env) {
               brandId: attachedBrand.id,
               siteId: site.getId(),
               brandIdentity: { name: attachedBrand.name, aliases: attachedBrand.brandAliases },
-              newBaseURL: requestBody.baseURL,
+              newBaseURL: nextBaseURL,
               log,
             });
           } catch (propagationError) {
@@ -1302,8 +1313,8 @@ function SitesController(ctx, log, env) {
 
     let updates = false;
 
-    if (hasText(requestBody.baseURL) && requestBody.baseURL !== site.getBaseURL()) {
-      site.setBaseURL(requestBody.baseURL);
+    if (hasText(nextBaseURL) && nextBaseURL !== site.getBaseURL()) {
+      site.setBaseURL(nextBaseURL);
       updates = true;
     }
 

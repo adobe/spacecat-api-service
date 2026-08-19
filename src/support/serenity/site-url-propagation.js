@@ -83,39 +83,57 @@ export async function propagateSiteUrlToSemrush({
   for (const row of rows) {
     const projectId = row.getSemrushProjectId();
 
-    // eslint-disable-next-line no-await-in-loop
-    await transport.updateProject(workspaceId, projectId, {
-      type: 'ai', primary_url: newIdentity, domain: newDomain,
-    });
-
-    // eslint-disable-next-line no-await-in-loop
-    const benchmarkId = await ensureOwnBrandBenchmark(
-      transport,
-      workspaceId,
-      projectId,
-      { name: brandIdentity.name, domain: newDomain, aliases: brandIdentity.aliases },
-      log,
-    );
-    if (benchmarkId) {
-      // Read the DRAFT view — the PUT below acts on the draft (see updateBenchmark's
-      // JSDoc / syncBrandAliasesAcrossMarkets), so a diff against the published view
-      // would be stale on a project with pending changes.
+    try {
       // eslint-disable-next-line no-await-in-loop
-      const resp = await transport.listBenchmarks(workspaceId, projectId, { draft: true });
-      const benchmarks = Array.isArray(resp?.aio_benchmarks) ? resp.aio_benchmarks : [];
-      const own = benchmarks.find((b) => String(b?.id) === benchmarkId);
-      // eslint-disable-next-line no-await-in-loop
-      await transport.updateBenchmark(workspaceId, projectId, benchmarkId, {
-        brand_name: own?.brand_name || brandIdentity.name,
-        domain: newDomain,
-        brand_aliases: Array.isArray(own?.brand_aliases) ? own.brand_aliases : [],
+      await transport.updateProject(workspaceId, projectId, {
+        type: 'ai', primary_url: newIdentity, domain: newDomain,
       });
-    }
 
-    // NEW convention (SITES-49206): a real quota 405 now throws toQuotaExceededError()
-    // instead of silently leaving the project draft. Let it propagate.
-    // eslint-disable-next-line no-await-in-loop
-    await republish(transport, workspaceId, projectId, log);
+      // eslint-disable-next-line no-await-in-loop
+      const benchmarkId = await ensureOwnBrandBenchmark(
+        transport,
+        workspaceId,
+        projectId,
+        { name: brandIdentity.name, domain: newDomain, aliases: brandIdentity.aliases },
+        log,
+      );
+      if (benchmarkId) {
+        // Read the DRAFT view — the PUT below acts on the draft (see updateBenchmark's
+        // JSDoc / syncBrandAliasesAcrossMarkets), so a diff against the published view
+        // would be stale on a project with pending changes.
+        // eslint-disable-next-line no-await-in-loop
+        const resp = await transport.listBenchmarks(workspaceId, projectId, { draft: true });
+        const benchmarks = Array.isArray(resp?.aio_benchmarks) ? resp.aio_benchmarks : [];
+        const own = benchmarks.find((b) => String(b?.id) === benchmarkId);
+        // eslint-disable-next-line no-await-in-loop
+        await transport.updateBenchmark(workspaceId, projectId, benchmarkId, {
+          brand_name: own?.brand_name || brandIdentity.name,
+          domain: newDomain,
+          brand_aliases: Array.isArray(own?.brand_aliases) ? own.brand_aliases : [],
+        });
+      }
+
+      // NEW convention (SITES-49206): a real quota 405 now throws toQuotaExceededError()
+      // instead of silently leaving the project draft. Let it propagate.
+      // eslint-disable-next-line no-await-in-loop
+      await republish(transport, workspaceId, projectId, log);
+    } catch (e) {
+      // Name WHICH project failed and how many in THIS call already succeeded before it —
+      // mirrors brand-urls.js/brand-aliases.js's per-market fan-out logging — so an operator
+      // reading this line can tell "2 of 3 projects already re-pointed, the 3rd failed" rather
+      // than an opaque top-level error with no indication of partial progress. Log-then-rethrow:
+      // the caller (sites.js) still needs this to propagate so the SpaceCat-side URL isn't
+      // persisted on a failure (see the module JSDoc's "propagate before persist" ordering).
+      log?.error?.('site-url-propagation: failed re-pointing a project mid fan-out', {
+        brandId,
+        siteId,
+        projectId,
+        status: e?.status,
+        projectsUpdatedBeforeFailure: projectsUpdated,
+        totalProjects: rows.length,
+      });
+      throw e;
+    }
 
     projectsUpdated += 1;
   }

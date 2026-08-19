@@ -960,6 +960,47 @@ describe('Sites Controller', () => {
     expect(updated).to.have.property('baseURL', 'https://site1.com/new-path');
   });
 
+  it('normalizes a trailing slash before comparing/colliding/persisting a baseURL change', async () => {
+    // A trailing-slash-only variant of the current baseURL must be treated as a no-op:
+    // no brand lookup, no Semrush call, no save -- matching the existing "unchanged URL"
+    // behavior, not a same-domain edit attempt.
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    getBrandBySiteStub.reset();
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { baseURL: 'https://site1.com/', deliveryType: 'other' },
+      ...defaultAuthAttributes,
+    });
+
+    expect(getBrandBySiteStub).to.have.not.been.called;
+    expect(site.save).to.have.been.calledOnce; // deliveryType still changed
+    expect(response.status).to.equal(200);
+    const updated = await response.json();
+    expect(updated).to.have.property('baseURL', 'https://site1.com');
+  });
+
+  it('collides on a trailing-slash variant of an existing site\'s baseURL', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    // The "existing" colliding site is stored WITHOUT a trailing slash; the request
+    // carries one -- normalization must still catch this as the same URL.
+    mockDataAccess.Site.findByBaseURL.resolves(sites[1]);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { baseURL: 'https://site2.com/', deliveryType: 'other' },
+      ...defaultAuthAttributes,
+    });
+    const error = await response.json();
+
+    expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledOnceWith('https://site2.com');
+    expect(site.save).to.have.not.been.called;
+    expect(response.status).to.equal(409);
+    expect(error).to.have.property('code', 'siteUrlTaken');
+  });
+
   it('propagates and persists a Semrush-attached site\'s URL change even across a different registrable domain', async () => {
     // Live-verified against adobe-hackathon.semrush.com (2026-08-18): a project PATCH
     // accepts and persists a changed `domain`, and a subsequent publish settles cleanly
