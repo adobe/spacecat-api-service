@@ -607,9 +607,16 @@ export default function serenityTests(
         brandNames: ['Test Brand'],
         markets: [{ market: 'US', languageCode: 'en' }],
       });
-      // 207 Multi-Status: per-market results, each a published 201.
-      expect(activated.status).to.equal(207);
+      // 200, not 207: every market published AND the brand_sites mirror linked, which
+      // is what full activation means. 207 is the partial-failure code — the brand stays
+      // active but something in the chain did not land. This asserted 207 for as long as
+      // the organization was read from the Brand entity, which has no accessor for it:
+      // `ensureMarketSite` got `undefined`, returned null through its one silent early
+      // return, and the site link failed on every single activation.
+      expect(activated.status).to.equal(200);
       expect(activated.body.status).to.equal('active');
+      // Only the 200 body carries it, and only a real linked Site produces one.
+      expect(activated.body.baseSiteId).to.be.a('string').and.not.empty;
       expect(activated.body.markets).to.be.an('array').that.is.not.empty;
       expect(activated.body.markets[0].status).to.equal(201);
       expect(activated.body.markets[0].body.published).to.equal(true);
