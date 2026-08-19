@@ -7810,6 +7810,34 @@ describe('LlmoController', () => {
       expect(body.message).to.equal('Each fileName must be a non-empty string');
     });
 
+    it('should return bad request when a fileName contains path-traversal characters', async () => {
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: ['../other-folder/secret'] },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Each fileName must contain only alphanumerics, hyphens, or underscores');
+      expect(reindexStub).to.not.have.been.called;
+    });
+
+    it('should return bad request when fileNames exceeds the per-request cap', async () => {
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: Array.from({ length: 201 }, (_, i) => `file${i}`) },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('fileNames must not exceed 200 entries per request');
+      expect(reindexStub).to.not.have.been.called;
+    });
+
     it('should return not found when site does not exist', async () => {
       mockDataAccess.Site.findByBaseURL.resolves(null);
 

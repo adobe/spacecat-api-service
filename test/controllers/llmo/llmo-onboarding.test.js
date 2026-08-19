@@ -5669,6 +5669,33 @@ describe('LLMO Onboarding Functions', () => {
 
       expect(mockTracingFetch).to.have.been.calledTwice;
     });
+
+    it('should identify the failing file when fetch itself throws (network/timeout error)', async () => {
+      const mockTracingFetch = sinon.stub();
+      mockTracingFetch.onCall(0).resolves({ ok: true, status: 200, statusText: 'OK' });
+      mockTracingFetch.onCall(1).rejects(new Error('network timeout'));
+
+      const { reindexQueryIndexPaths } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
+          },
+        },
+      );
+
+      try {
+        await reindexQueryIndexPaths('dev/test-com', ['file1', 'file2', 'file3'], mockEnv, mockLog);
+        expect.fail('Should have thrown');
+      } catch (error) {
+        expect(error.message).to.equal('Reindex failed for dev/test-com/file2.json: network timeout');
+      }
+
+      expect(mockTracingFetch).to.have.been.calledTwice;
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(/Reindex failed for dev\/test-com\/file2\.json after reindexing 1\/3: network timeout/),
+      );
+    });
   });
 
   describe('updateIndexConfig', () => {

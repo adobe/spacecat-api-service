@@ -100,6 +100,9 @@ const { llmoConfig: llmoConfigSchema } = schemas;
 
 const IMS_ORG_ID_REGEX = /^[a-z0-9]{24}@AdobeOrg$/i;
 const VALID_CADENCES = ['daily', 'weekly-paid', 'weekly-free'];
+// Well above any real site's file count (heritage-sg, the largest observed, had 45)
+// -- just a backstop against pathological/abusive request sizes on this admin-only route.
+const MAX_REINDEX_FILES_PER_REQUEST = 200;
 
 /** Site IDs for which HLX `brandpresence` sheet data is blocked (PG migration). */
 const HLX_BRANDPRESENCE_PG_MIGRATION_SITE_IDS = new Set([
@@ -2151,8 +2154,20 @@ function LlmoController(ctx) {
         return badRequest('fileNames must be a non-empty array of strings');
       }
 
+      if (fileNames.length > MAX_REINDEX_FILES_PER_REQUEST) {
+        return badRequest(`fileNames must not exceed ${MAX_REINDEX_FILES_PER_REQUEST} entries per request`);
+      }
+
       if (fileNames.some((f) => typeof f !== 'string' || !f.trim())) {
         return badRequest('Each fileName must be a non-empty string');
+      }
+
+      // Each fileName is interpolated into the Helix Admin API reindex URL
+      // (adobe/project-elmo-ui-data/main/<dataFolder>/<fileName>.json) — reject
+      // anything that isn't a plain path segment so a caller can't escape the
+      // site's own dataFolder (e.g. `../other-folder/secret`).
+      if (fileNames.some((f) => !isSafePathSegment(f.replace(/\.json$/, '')))) {
+        return badRequest('Each fileName must contain only alphanumerics, hyphens, or underscores');
       }
 
       const { dataAccess } = context;

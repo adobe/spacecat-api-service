@@ -1899,21 +1899,29 @@ export async function reindexQueryIndexPaths(dataFolder, fileNames, env, log) {
 
   // Sequential by design: this is an admin-only, low-QPS path (LLMO administrators
   // only), and one request at a time avoids bursting the Admin API.
+  let reindexedCount = 0;
   for (const fileName of fileNames) {
     const name = fileName.endsWith('.json') ? fileName : `${fileName}.json`;
     const filePath = `${dataFolder}/${name}`;
     const reindexUrl = buildHlxAdminUrl('index', filePath);
 
-    // eslint-disable-next-line no-await-in-loop
-    const response = await fetch(reindexUrl, { method: 'POST', headers, timeout: 30000 });
+    let response;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      response = await fetch(reindexUrl, { method: 'POST', headers, timeout: 30000 });
+    } catch (error) {
+      log.error(`Reindex failed for ${filePath} after reindexing ${reindexedCount}/${fileNames.length}: ${error.message}`);
+      throw new Error(`Reindex failed for ${filePath}: ${error.message}`);
+    }
     if (!response.ok) {
       const errorCode = response.headers?.get('x-error-code') || '';
       const errorMsg = response.headers?.get('x-error') || '';
       // eslint-disable-next-line no-await-in-loop
       const bodyText = await readHlxErrorBody(response);
-      log.error(`Reindex failed for ${filePath}: ${response.status} ${response.statusText} | x-error-code: ${errorCode} | x-error: ${errorMsg} | body: ${bodyText}`);
+      log.error(`Reindex failed for ${filePath} after reindexing ${reindexedCount}/${fileNames.length}: ${response.status} ${response.statusText} | x-error-code: ${errorCode} | x-error: ${errorMsg} | body: ${bodyText}`);
       throw new Error(`Reindex failed for ${filePath}: ${response.status} ${response.statusText}`);
     }
+    reindexedCount += 1;
   }
 
   log.info(`Successfully reindexed ${fileNames.length} path(s) in ${dataFolder}`);
