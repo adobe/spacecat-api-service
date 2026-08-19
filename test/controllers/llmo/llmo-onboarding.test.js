@@ -37,9 +37,11 @@ describe('LLMO Onboarding Functions', () => {
       Site: {
         findByBaseURL: sinon.stub(),
         create: sinon.stub(),
-        // Default: no pre-cutoff sites → mode resolution returns v2 (the default).
-        // Tests that need v1 mode should set LLMO_ONBOARDING_DEFAULT_VERSION='v1'
-        // in context.env to use the global kill switch.
+        // Mode resolution defaults to v2. Tests that need v1 mode set
+        // LLMO_ONBOARDING_DEFAULT_VERSION='v1' in context.env (global kill switch).
+        // allByOrganizationId is no longer read by resolveLlmoOnboardingMode
+        // (the legacy-site cutoff was removed in LLMO-7108) — kept as a harmless
+        // default for other code paths.
         allByOrganizationId: sinon.stub().resolves([]),
       },
       Organization: {
@@ -1396,9 +1398,7 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
       expect(mockSite.getOrganizationId).to.have.been.called;
       expect(mockSite.setOrganizationId).to.have.been.calledWith('new-org-456');
-      // LLMO-4176: re-parent must be persisted before resolveLlmoOnboardingMode
-      // queries Site.allByOrganizationId, otherwise a legacy site moved into a
-      // brand-new org would be misclassified as v2.
+      // createOrFindSite persists a re-parent immediately via save().
       expect(mockSite.save).to.have.been.calledOnce;
     }).timeout(5000);
 
@@ -1996,13 +1996,6 @@ describe('LLMO Onboarding Functions', () => {
         baseURL: 'https://example.com',
         organizationId: 'org123',
       });
-
-      // LLMO-4176 regression guard: resolveLlmoOnboardingMode reads
-      // Site.allByOrganizationId, and that read MUST happen after the site
-      // has been created/re-parented — otherwise a legacy site moved into a
-      // brand-new org gets misclassified as v2.
-      expect(mockDataAccess.Site.allByOrganizationId)
-        .to.have.been.calledAfter(mockDataAccess.Site.findByBaseURL);
 
       // Verify site config was updated
       expect(mockSite.getConfig().updateLlmoBrand).to.have.been.calledWith('Test Brand');

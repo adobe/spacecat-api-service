@@ -16,31 +16,17 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 
 import {
-  LLMO_BRANDALF_GA_CUTOFF_MS_DEFAULT,
-  hasPreBrandalfSites,
   readBrandalfFlagOverride,
   readBrandalfMigrationFlagOverride,
-  resolveBrandalfCutoffMs,
   resolveLlmoOnboardingMode,
 } from '../../src/support/llmo-onboarding-mode.js';
 
 use(sinonChai);
 use(chaiAsPromised);
 
-// 2026-04-01T00:00:00Z in ms — matches the default constant
-const CUTOFF = LLMO_BRANDALF_GA_CUTOFF_MS_DEFAULT;
-const BEFORE_CUTOFF = new Date(CUTOFF - 1).toISOString(); // 2026-03-31T23:59:59.999Z
-const AT_CUTOFF = new Date(CUTOFF).toISOString(); // 2026-04-01T00:00:00.000Z
-const AFTER_CUTOFF = new Date(CUTOFF + 86400000).toISOString(); // 2026-04-02T00:00:00.000Z
-
-function makeSite(createdAt, id = 'site-id') {
-  return { getCreatedAt: () => createdAt, getId: () => id };
-}
-
 /**
  * Builds a postgrestClient stub whose feature_flags read returns the given value.
  * Pass `null` to simulate a missing row, `'throw'` to simulate a DB error.
- * Also supports the write chain used by `upsertFeatureFlag`.
  */
 function makePostgrestClient(brandalfValue) {
   if (brandalfValue === undefined) {
@@ -61,42 +47,19 @@ function makePostgrestClient(brandalfValue) {
     }),
   });
 
-  // Write branches: from().update().eq().select().single() when the org already
-  // has a row, from().insert().select().single() when it does not.
-  const writeSingle = sinon.stub().resolves({ data: { flag_value: false }, error: null });
-  const writeSelect = sinon.stub().returns({ single: writeSingle });
-  const update = sinon.stub().returns({ eq: sinon.stub().returns({ select: writeSelect }) });
-  const insert = sinon.stub().returns({ select: writeSelect });
-
-  const client = {
-    from: sinon.stub().returns({
-      select: readSelect,
-      update,
-      insert,
-    }),
+  return {
+    from: sinon.stub().returns({ select: readSelect }),
   };
-  // The remediation path only ever runs on an org whose brandalf row exists, so
-  // the flag write is always the update branch.
-  client.getUpsertStub = () => update;
-  client.failWrite = () => writeSingle.resolves({
-    data: null,
-    error: { message: 'upsert failed' },
-  });
-  return client;
 }
 
-function makeContext({
-  sites = [], env = {}, throwOnLookup = false, brandalfValue,
-} = {}) {
+function makeContext({ env = {}, brandalfValue } = {}) {
   const ctx = {
-    env: { LLMO_BRANDALF_GA_CUTOFF_MS: String(CUTOFF), ...env },
+    env: { ...env },
     log: { warn: sinon.stub(), error: sinon.stub(), info: sinon.stub() },
     dataAccess: {
-      Site: {
-        allByOrganizationId: throwOnLookup
-          ? sinon.stub().rejects(new Error('DB error'))
-          : sinon.stub().resolves(sites),
-      },
+      // The resolver no longer reads sites — kept as a spy so tests can assert
+      // the legacy-site lookup is never performed (LLMO-7108).
+      Site: { allByOrganizationId: sinon.stub().resolves([]) },
     },
   };
   const postgrestClient = makePostgrestClient(brandalfValue);
@@ -201,191 +164,28 @@ describe('llmo-onboarding-mode', () => {
     });
   });
 
-  // ── resolveBrandalfCutoffMs ───────────────────────────────────────────────
-
-  describe('resolveBrandalfCutoffMs', () => {
-    it('pins LLMO_BRANDALF_GA_CUTOFF_MS_DEFAULT to 2026-04-01T00:00:00Z', () => {
-      // Guards against an off-by-one-year regression on the hard-coded fallback.
-      expect(LLMO_BRANDALF_GA_CUTOFF_MS_DEFAULT).to.equal(Date.UTC(2026, 3, 1));
-    });
-
-    it('returns the default when env var is not set', () => {
-      expect(resolveBrandalfCutoffMs({ env: {} })).to.equal(LLMO_BRANDALF_GA_CUTOFF_MS_DEFAULT);
-    });
-
-    it('returns the default when context is missing', () => {
-      expect(resolveBrandalfCutoffMs()).to.equal(LLMO_BRANDALF_GA_CUTOFF_MS_DEFAULT);
-    });
-
-    it('returns the parsed value from a valid env var string', () => {
-      expect(resolveBrandalfCutoffMs({ env: { LLMO_BRANDALF_GA_CUTOFF_MS: '1000000000000' } }))
-        .to.equal(1000000000000);
-    });
-
-    it('returns the default and warns for non-numeric env var', () => {
-      const log = { warn: sinon.stub() };
-      const result = resolveBrandalfCutoffMs({ env: { LLMO_BRANDALF_GA_CUTOFF_MS: 'abc' }, log });
-      expect(result).to.equal(LLMO_BRANDALF_GA_CUTOFF_MS_DEFAULT);
-      expect(log.warn).to.have.been.called;
-    });
-
-    it('returns the default and warns for zero', () => {
-      const log = { warn: sinon.stub() };
-      const result = resolveBrandalfCutoffMs({ env: { LLMO_BRANDALF_GA_CUTOFF_MS: '0' }, log });
-      expect(result).to.equal(LLMO_BRANDALF_GA_CUTOFF_MS_DEFAULT);
-      expect(log.warn).to.have.been.called;
-    });
-
-    it('returns the default and warns for a negative value', () => {
-      const log = { warn: sinon.stub() };
-      const result = resolveBrandalfCutoffMs({ env: { LLMO_BRANDALF_GA_CUTOFF_MS: '-1' }, log });
-      expect(result).to.equal(LLMO_BRANDALF_GA_CUTOFF_MS_DEFAULT);
-      expect(log.warn).to.have.been.called;
-    });
-  });
-
-  // ── hasPreBrandalfSites ───────────────────────────────────────────────────
-
-  describe('hasPreBrandalfSites', () => {
-    it('returns false when the org has no sites', async () => {
-      const ctx = makeContext({ sites: [] });
-      expect(await hasPreBrandalfSites('org-1', ctx)).to.equal(false);
-    });
-
-    it('returns true when at least one site predates the cutoff', async () => {
-      const ctx = makeContext({ sites: [makeSite(BEFORE_CUTOFF)] });
-      expect(await hasPreBrandalfSites('org-1', ctx)).to.equal(true);
-    });
-
-    it('returns false when the only site is exactly at the cutoff (exclusive comparison)', async () => {
-      const ctx = makeContext({ sites: [makeSite(AT_CUTOFF)] });
-      expect(await hasPreBrandalfSites('org-1', ctx)).to.equal(false);
-    });
-
-    it('returns false when all sites are after the cutoff', async () => {
-      const ctx = makeContext({ sites: [makeSite(AFTER_CUTOFF)] });
-      expect(await hasPreBrandalfSites('org-1', ctx)).to.equal(false);
-    });
-
-    it('returns true when multiple sites exist and one predates the cutoff', async () => {
-      const ctx = makeContext({
-        sites: [makeSite(AFTER_CUTOFF), makeSite(BEFORE_CUTOFF)],
-      });
-      expect(await hasPreBrandalfSites('org-1', ctx)).to.equal(true);
-    });
-
-    it('returns false for sites with null createdAt and warns', async () => {
-      const ctx = makeContext({ sites: [makeSite(null)] });
-      expect(await hasPreBrandalfSites('org-1', ctx)).to.equal(false);
-      expect(ctx.log.warn).to.have.been.calledWithMatch(/has no createdAt/);
-    });
-
-    it('returns false for sites with undefined createdAt and warns', async () => {
-      const ctx = makeContext({ sites: [makeSite(undefined)] });
-      expect(await hasPreBrandalfSites('org-1', ctx)).to.equal(false);
-      expect(ctx.log.warn).to.have.been.calledWithMatch(/has no createdAt/);
-    });
-
-    it('returns false for sites with invalid createdAt string and warns', async () => {
-      const ctx = makeContext({ sites: [makeSite('not-a-date')] });
-      expect(await hasPreBrandalfSites('org-1', ctx)).to.equal(false);
-      expect(ctx.log.warn).to.have.been.calledWithMatch(/unparseable createdAt/);
-    });
-
-    it('falls back to <unknown> in the warn when site has no getId (null createdAt)', async () => {
-      // Mirrors a partially-hydrated site model that exposes createdAt but not getId.
-      const ctx = makeContext({ sites: [{ getCreatedAt: () => null }] });
-      expect(await hasPreBrandalfSites('org-1', ctx)).to.equal(false);
-      expect(ctx.log.warn).to.have.been.calledWithMatch(/Site <unknown>.*has no createdAt/);
-    });
-
-    it('falls back to <unknown> in the warn when site has no getId (invalid createdAt)', async () => {
-      const ctx = makeContext({ sites: [{ getCreatedAt: () => 'not-a-date' }] });
-      expect(await hasPreBrandalfSites('org-1', ctx)).to.equal(false);
-      expect(ctx.log.warn).to.have.been.calledWithMatch(/Site <unknown>.*unparseable createdAt/);
-    });
-
-    it('accepts a Date object for createdAt', async () => {
-      const ctx = makeContext({ sites: [makeSite(new Date(CUTOFF - 1))] });
-      expect(await hasPreBrandalfSites('org-1', ctx)).to.equal(true);
-    });
-
-    it('honours a custom LLMO_BRANDALF_GA_CUTOFF_MS from context.env', async () => {
-      const customCutoff = new Date('2026-06-01T00:00:00Z').getTime();
-      const ctx = makeContext({
-        sites: [makeSite(AFTER_CUTOFF)], // after default cutoff but before custom cutoff
-        env: { LLMO_BRANDALF_GA_CUTOFF_MS: String(customCutoff) },
-      });
-      expect(await hasPreBrandalfSites('org-1', ctx)).to.equal(true);
-    });
-  });
-
   // ── resolveLlmoOnboardingMode ─────────────────────────────────────────────
-  // Tests are structured around the 8-row decision matrix
-  // (see v1-v2-onboarding-consistency-safeguard.md).
+  // The legacy-site cutoff was removed in LLMO-7108. The resolver now decides:
+  //   1. brandalf=true            → v2
+  //   2. brandalf_migration=true  → v2
+  //   3. LLMO_ONBOARDING_DEFAULT_VERSION==='v1' (kill switch) → v1
+  //   4. otherwise                → v2
 
   describe('resolveLlmoOnboardingMode', () => {
-    // ── Brandalf flag override (rows 1, 3, 5, 7) ──────────────────────────
+    // ── Brandalf flag → v2 ─────────────────────────────────────────────────
 
     describe('brandalf flag override', () => {
-      it('row 1: kill switch + pre-cutoff + brandalf=true → v1, reverts flag to false', async () => {
-        const ctx = makeContext({
-          sites: [makeSite(BEFORE_CUTOFF)],
-          env: { LLMO_ONBOARDING_DEFAULT_VERSION: 'v1' },
-          brandalfValue: true,
-        });
-        const mode = await resolveLlmoOnboardingMode('org-1', ctx);
-        expect(mode).to.equal('v1');
-        // Flag was reverted
-        expect(ctx.dataAccess.services.postgrestClient.getUpsertStub()).to.have.been.called;
-        // Warning logged about migration
-        expect(ctx.log.warn).to.have.been.calledWithMatch(/pre-cutoff sites.*kill switch.*Reverted brandalf/);
-      });
-
-      it('row 1: still returns v1 even if upsertFeatureFlag fails', async () => {
-        const ctx = makeContext({
-          sites: [makeSite(BEFORE_CUTOFF)],
-          env: { LLMO_ONBOARDING_DEFAULT_VERSION: 'v1' },
-          brandalfValue: true,
-        });
-        // Make the flag write fail
-        ctx.dataAccess.services.postgrestClient.failWrite();
-        const mode = await resolveLlmoOnboardingMode('org-1', ctx);
-        expect(mode).to.equal('v1');
-        expect(ctx.log.error).to.have.been.calledWithMatch(/Failed to revert brandalf flag.*Flag may still be true/);
-      });
-
-      it('row 1 in readOnly mode: returns v1 WITHOUT mutating the brandalf flag', async () => {
-        // LLMO-4716: read-only callers (resolver endpoint hit by BP refresh +
-        // DRS scheduler) must compute the same downgrade decision but never
-        // write to feature_flags from a GET request.
-        const ctx = makeContext({
-          sites: [makeSite(BEFORE_CUTOFF)],
-          env: { LLMO_ONBOARDING_DEFAULT_VERSION: 'v1' },
-          brandalfValue: true,
-        });
-        const mode = await resolveLlmoOnboardingMode('org-1', ctx, { readOnly: true });
-        expect(mode).to.equal('v1');
-        // No upsert side effect.
-        expect(ctx.dataAccess.services.postgrestClient.getUpsertStub()).to.not.have.been.called;
-        // Info log explains the read-only downgrade for triage.
-        expect(ctx.log.info).to.have.been.calledWithMatch(/read-only.*pre-cutoff.*v1/);
-      });
-
-      it('row 3: kill switch + no pre-cutoff + brandalf=true → v2', async () => {
-        const ctx = makeContext({
-          sites: [makeSite(AFTER_CUTOFF)],
-          env: { LLMO_ONBOARDING_DEFAULT_VERSION: 'v1' },
-          brandalfValue: true,
-        });
+      it('returns v2 when brandalf=true', async () => {
+        const ctx = makeContext({ brandalfValue: true });
         const mode = await resolveLlmoOnboardingMode('org-1', ctx);
         expect(mode).to.equal('v2');
         expect(ctx.log.info).to.have.been.calledWithMatch(/brandalf=true.*using v2/);
       });
 
-      it('row 3: kill switch + no sites + brandalf=true → v2', async () => {
+      it('returns v2 when brandalf=true even with the kill switch active', async () => {
+        // LLMO-7108: without the legacy-site cutoff there is no row-1
+        // remediation — an explicitly migrated org is always honored as v2.
         const ctx = makeContext({
-          sites: [],
           env: { LLMO_ONBOARDING_DEFAULT_VERSION: 'v1' },
           brandalfValue: true,
         });
@@ -393,140 +193,61 @@ describe('llmo-onboarding-mode', () => {
         expect(mode).to.equal('v2');
       });
 
-      it('row 5: default v2 + pre-cutoff + brandalf=true → v2', async () => {
-        const ctx = makeContext({
-          sites: [makeSite(BEFORE_CUTOFF)],
-          brandalfValue: true,
-        });
-        const mode = await resolveLlmoOnboardingMode('org-1', ctx);
-        expect(mode).to.equal('v2');
-        expect(ctx.log.info).to.have.been.calledWithMatch(/brandalf=true.*using v2/);
-      });
-
-      it('row 5: does not check pre-cutoff sites when kill switch is off', async () => {
-        const ctx = makeContext({
-          sites: [makeSite(BEFORE_CUTOFF)],
-          brandalfValue: true,
-        });
+      it('never reads the org sites (legacy-site cutoff removed)', async () => {
+        const ctx = makeContext({ brandalfValue: true });
         await resolveLlmoOnboardingMode('org-1', ctx);
-        // Site lookup not called — brandalf=true + no kill switch = v2 immediately
-        expect(ctx.dataAccess.Site.allByOrganizationId).not.to.have.been.called;
+        expect(ctx.dataAccess.Site.allByOrganizationId).to.not.have.been.called;
       });
 
-      it('row 7: default v2 + no pre-cutoff + brandalf=true → v2', async () => {
-        const ctx = makeContext({
-          sites: [makeSite(AFTER_CUTOFF)],
-          brandalfValue: true,
-        });
-        const mode = await resolveLlmoOnboardingMode('org-1', ctx);
-        expect(mode).to.equal('v2');
-      });
-
-      it('falls through to default resolution when brandalf flag read fails', async () => {
-        const ctx = makeContext({
-          sites: [],
-          brandalfValue: 'throw',
-        });
+      it('falls through to default resolution when the brandalf flag read fails', async () => {
+        const ctx = makeContext({ brandalfValue: 'throw' });
         const mode = await resolveLlmoOnboardingMode('org-1', ctx);
         expect(mode).to.equal('v2');
         expect(ctx.log.warn).to.have.been.calledWithMatch(/Failed to read brandalf flag/);
       });
-
-      it('row 1: falls through to v2 when hasPreBrandalfSites throws (brandalf=true preserved)', async () => {
-        const ctx = makeContext({
-          env: { LLMO_ONBOARDING_DEFAULT_VERSION: 'v1' },
-          throwOnLookup: true,
-          brandalfValue: true,
-        });
-        const mode = await resolveLlmoOnboardingMode('org-1', ctx);
-        // Cannot confirm pre-cutoff sites → honor brandalf=true → v2
-        expect(mode).to.equal('v2');
-        expect(ctx.log.warn).to.have.been.calledWithMatch(/Failed to check pre-Brandalf sites/);
-      });
     });
 
-    // ── Kill switch — no brandalf flag (rows 2, 4) ─────────────────────────
+    // ── Kill switch — no brandalf flag ─────────────────────────────────────
 
-    describe('kill switch — no brandalf flag (rows 2, 4)', () => {
-      it('row 2: kill switch + pre-cutoff + no brandalf → v1', async () => {
+    describe('kill switch — no brandalf flag', () => {
+      it('returns v1 when the kill switch is active and the flag row is missing', async () => {
         const ctx = makeContext({
-          sites: [makeSite(BEFORE_CUTOFF)],
           env: { LLMO_ONBOARDING_DEFAULT_VERSION: 'v1' },
           brandalfValue: null,
         });
-        const mode = await resolveLlmoOnboardingMode('org-1', ctx);
-        expect(mode).to.equal('v1');
+        expect(await resolveLlmoOnboardingMode('org-1', ctx)).to.equal('v1');
       });
 
-      it('row 4: kill switch + no pre-cutoff + no brandalf → v1', async () => {
+      it('returns v1 when the kill switch is active and brandalf=false', async () => {
         const ctx = makeContext({
-          sites: [],
-          env: { LLMO_ONBOARDING_DEFAULT_VERSION: 'v1' },
-          brandalfValue: null,
-        });
-        const mode = await resolveLlmoOnboardingMode('org-1', ctx);
-        expect(mode).to.equal('v1');
-      });
-
-      it('kill switch skips site lookup when brandalf is false', async () => {
-        const ctx = makeContext({
-          sites: [makeSite(AFTER_CUTOFF)],
           env: { LLMO_ONBOARDING_DEFAULT_VERSION: 'v1' },
           brandalfValue: false,
         });
-        const mode = await resolveLlmoOnboardingMode('org-1', ctx);
-        expect(mode).to.equal('v1');
-        // brandalf=false → falls to kill switch → v1 without site check
-        expect(ctx.dataAccess.Site.allByOrganizationId).not.to.have.been.called;
+        expect(await resolveLlmoOnboardingMode('org-1', ctx)).to.equal('v1');
+        // brandalf=false → kill switch → v1 without any site lookup.
+        expect(ctx.dataAccess.Site.allByOrganizationId).to.not.have.been.called;
       });
     });
 
-    // ── Default v2 — no brandalf flag (rows 6, 8) ──────────────────────────
+    // ── Default v2 — no brandalf flag ──────────────────────────────────────
 
-    describe('default v2 — no brandalf flag (rows 6, 8)', () => {
-      it('row 6: default v2 + pre-cutoff + no brandalf → v1', async () => {
-        const ctx = makeContext({
-          sites: [makeSite(BEFORE_CUTOFF)],
-          brandalfValue: null,
-        });
-        expect(await resolveLlmoOnboardingMode('org-1', ctx)).to.equal('v1');
-      });
-
-      it('row 8: default v2 + no pre-cutoff + no brandalf → v2', async () => {
-        const ctx = makeContext({ sites: [], brandalfValue: null });
+    describe('default v2 — no brandalf flag', () => {
+      it('returns v2 when brandalf is unset and no kill switch is configured', async () => {
+        const ctx = makeContext({ brandalfValue: null });
         expect(await resolveLlmoOnboardingMode('org-1', ctx)).to.equal('v2');
       });
 
-      it('returns v2 when all sites are at or after the cutoff', async () => {
-        const ctx = makeContext({
-          sites: [makeSite(AT_CUTOFF), makeSite(AFTER_CUTOFF)],
-          brandalfValue: null,
-        });
+      it('returns v2 when brandalf=false and no kill switch is configured', async () => {
+        const ctx = makeContext({ brandalfValue: false });
         expect(await resolveLlmoOnboardingMode('org-1', ctx)).to.equal('v2');
       });
 
-      it('returns v1 when org has multiple sites and at least one predates cutoff', async () => {
+      it('returns v2 when LLMO_ONBOARDING_DEFAULT_VERSION is explicitly v2', async () => {
         const ctx = makeContext({
-          sites: [makeSite(AFTER_CUTOFF), makeSite(BEFORE_CUTOFF)],
-          brandalfValue: null,
-        });
-        expect(await resolveLlmoOnboardingMode('org-1', ctx)).to.equal('v1');
-      });
-
-      it('returns v1 for a legacy org even when LLMO_ONBOARDING_DEFAULT_VERSION = v2', async () => {
-        const ctx = makeContext({
-          sites: [makeSite(BEFORE_CUTOFF)],
           env: { LLMO_ONBOARDING_DEFAULT_VERSION: 'v2' },
           brandalfValue: null,
         });
-        expect(await resolveLlmoOnboardingMode('org-1', ctx)).to.equal('v1');
-      });
-
-      it('returns v2 and falls through when site lookup throws', async () => {
-        const ctx = makeContext({ throwOnLookup: true, brandalfValue: null });
-        const mode = await resolveLlmoOnboardingMode('org-1', ctx);
-        expect(mode).to.equal('v2');
-        expect(ctx.log.warn).to.have.been.calledWithMatch(/Failed to check pre-Brandalf sites/);
+        expect(await resolveLlmoOnboardingMode('org-1', ctx)).to.equal('v2');
       });
     });
 
@@ -540,7 +261,6 @@ describe('llmo-onboarding-mode', () => {
 
       it('warns and falls back to v2 for invalid LLMO_ONBOARDING_DEFAULT_VERSION', async () => {
         const ctx = makeContext({
-          sites: [],
           env: { LLMO_ONBOARDING_DEFAULT_VERSION: 'banana' },
           brandalfValue: null,
         });
@@ -549,16 +269,6 @@ describe('llmo-onboarding-mode', () => {
         expect(ctx.log.warn).to.have.been.calledWith(
           'Invalid LLMO_ONBOARDING_DEFAULT_VERSION "banana", falling back to v2',
         );
-      });
-
-      it('custom cutoff: treats a post-default-cutoff site as legacy', async () => {
-        const futureCutoff = new Date('2026-06-01T00:00:00Z').getTime();
-        const ctx = makeContext({
-          sites: [makeSite(AFTER_CUTOFF)],
-          env: { LLMO_BRANDALF_GA_CUTOFF_MS: String(futureCutoff) },
-          brandalfValue: null,
-        });
-        expect(await resolveLlmoOnboardingMode('org-1', ctx)).to.equal('v1');
       });
     });
 
@@ -570,7 +280,7 @@ describe('llmo-onboarding-mode', () => {
      * test the brandalf_migration short-circuit, which requires reading
      * brandalf and brandalf_migration independently.
      */
-    function makeMultiFlagContext(flags, sites = []) {
+    function makeMultiFlagContext(flags) {
       const flagNameEq = sinon.stub().callsFake((field, flagName) => {
         const value = field === 'flag_name' ? flags[flagName] : undefined;
         return Promise.resolve({
@@ -585,10 +295,10 @@ describe('llmo-onboarding-mode', () => {
         from: sinon.stub().returns({ select }),
       };
       return {
-        env: { LLMO_BRANDALF_GA_CUTOFF_MS: String(CUTOFF) },
+        env: {},
         log: { warn: sinon.stub(), error: sinon.stub(), info: sinon.stub() },
         dataAccess: {
-          Site: { allByOrganizationId: sinon.stub().resolves(sites) },
+          Site: { allByOrganizationId: sinon.stub().resolves([]) },
           services: { postgrestClient },
         },
       };
@@ -603,8 +313,7 @@ describe('llmo-onboarding-mode', () => {
         const mode = await resolveLlmoOnboardingMode('org-1', ctx);
         expect(mode).to.equal('v2');
         expect(ctx.log.info).to.have.been.calledWithMatch(/brandalf_migration=true.*using v2/);
-        // Short-circuit: site lookup must not happen — neither for legacy
-        // protection nor for kill-switch downgrade.
+        // Short-circuit: site lookup must not happen.
         expect(ctx.dataAccess.Site.allByOrganizationId).to.not.have.been.called;
       });
 
@@ -630,13 +339,10 @@ describe('llmo-onboarding-mode', () => {
         expect(mode).to.equal('v2');
       });
 
-      it('returns v1 when brandalf_migration=false and org has pre-cutoff sites', async () => {
-        const ctx = makeMultiFlagContext(
-          { brandalf: null, brandalf_migration: false },
-          [makeSite(BEFORE_CUTOFF)],
-        );
+      it('returns v2 when brandalf_migration=false and no kill switch is configured', async () => {
+        const ctx = makeMultiFlagContext({ brandalf: null, brandalf_migration: false });
         const mode = await resolveLlmoOnboardingMode('org-1', ctx);
-        expect(mode).to.equal('v1');
+        expect(mode).to.equal('v2');
       });
 
       it('warns and falls through when brandalf_migration read throws', async () => {
@@ -649,7 +355,7 @@ describe('llmo-onboarding-mode', () => {
         const orgEq = sinon.stub().returns({ eq: productEq });
         const select = sinon.stub().returns({ eq: orgEq });
         const ctx = {
-          env: { LLMO_BRANDALF_GA_CUTOFF_MS: String(CUTOFF) },
+          env: {},
           log: { warn: sinon.stub(), error: sinon.stub(), info: sinon.stub() },
           dataAccess: {
             Site: { allByOrganizationId: sinon.stub().resolves([]) },
@@ -657,7 +363,7 @@ describe('llmo-onboarding-mode', () => {
           },
         };
         const mode = await resolveLlmoOnboardingMode('org-1', ctx);
-        // Defaults to v2 via the legacy-customer fallthrough (no pre-cutoff sites).
+        // Defaults to v2 via the no-kill-switch fallthrough.
         expect(mode).to.equal('v2');
         expect(ctx.log.warn).to.have.been.calledWithMatch(/Failed to read brandalf_migration flag/);
       });
