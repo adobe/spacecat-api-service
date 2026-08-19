@@ -88,7 +88,11 @@ import {
   unlinkMarketSiteIfOrphaned,
 } from '../support/serenity/site-linkage.js';
 import { X_PROMISE_TOKEN_HEADER, PROMISE_TOKEN_REQUIRED_ERROR_CODE } from '../utils/constants.js';
-import { tombstoneAllForBrand, linkSiteToLiveRows } from '../support/serenity/mapping-rows.js';
+import {
+  tombstoneAllForBrand,
+  linkSiteToLiveRows,
+  linkSiteToRow,
+} from '../support/serenity/mapping-rows.js';
 import { logUpstreamError } from '../support/serenity/upstream-log.js';
 
 const MAX_ERR_MSG_LEN = 500;
@@ -913,11 +917,22 @@ function SerenityController(context, log, env) {
         // Semrush project is created. Best-effort: never fails a live market.
         if (result?.status === 201) {
           const linkedSiteId = await ensureMarketSite(ctx, {
-            // Optional-chained so a missing/throwing accessor can't 500 a market
-            // that is already live upstream — the mirror is best-effort.
-            organizationId: brand.getOrganizationId?.(),
+            // The org from the route, which is the same org the brand belongs to
+            // (resolveBrandUuid scopes the brand lookup to it). It cannot come
+            // from the Brand model: that schema deliberately does not map
+            // `organization_id` (brand.schema.js), so there is no accessor for it
+            // — and asking for one yields `undefined`, which `ensureMarketSite`
+            // treats as bad input and returns null for WITHOUT logging. That is
+            // the one silent path it has, which is why a market never carried a
+            // site despite every visible step succeeding.
+            organizationId: ctx?.params?.spaceCatId,
             brandId: auth.brandUuid,
-            domain: effectiveBody.brandDomain,
+            // The url this market TRACKS, which is what its Site must mirror —
+            // `brandDomain` is the host it is filed under and drops any subpath.
+            // The two coincide whenever both derive from one input; they part as
+            // soon as a market carries a url of its own, and the Site must follow
+            // the tracked value, never the host.
+            domain: effectiveBody.primaryUrl ?? effectiveBody.brandDomain,
             // When the caller supplied a siteId, link THAT site directly (skip the
             // domain→Site find-or-create); the client already holds the identity.
             siteId: suppliedSiteId ?? undefined,
@@ -929,10 +944,19 @@ function SerenityController(context, log, env) {
             requireLink: false,
             log,
           });
-          // Bind the market↔site on the live mapping rows — the DTO's source of
-          // truth (surfaced by the sub-workspace list/get enrichment). Scope-guarded
-          // to unlinked live rows (mapping-rows.js); never overwrites an existing link.
-          await linkSiteToLiveRows(ctx.dataAccess, auth.brandUuid, linkedSiteId, log);
+          // Bind the market↔site on THIS market's row — the per-market source of
+          // truth for the url its project tracks, and what the sub-workspace
+          // list/get enrichment surfaces. Scoped to the one row named by the new
+          // project id: a market created against its own url must not have that
+          // site spread across whichever sibling rows are unlinked (mapping-rows.js).
+          // `in` rather than a cast: the handler returns a success|error union
+          // that a `status === 201` test cannot narrow, and this both satisfies
+          // that and stays a real runtime guard — a future error shape reaching
+          // here feeds no id to the link instead of `undefined` silently.
+          const projectId = result.body && 'projectId' in result.body
+            ? result.body.projectId
+            : null;
+          await linkSiteToRow(ctx.dataAccess, projectId, linkedSiteId, log);
         }
       } else {
         // Flat handler self-derives brandDomain from siteId (it has Site access).

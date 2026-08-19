@@ -183,6 +183,7 @@ describe('SerenityController', () => {
   let getBrandBaseSiteIdStub;
   let exchangePromiseTokenStub;
   let linkSiteToLiveRowsStub;
+  let linkSiteToRowStub;
   let tombstoneAllForBrandStub;
   let createAndEnqueueJobStub;
   let MockTransportError;
@@ -220,6 +221,7 @@ describe('SerenityController', () => {
     getBrandBaseSiteIdStub = sinon.stub().resolves(null);
     exchangePromiseTokenStub = sinon.stub().resolves('exchanged-ims-token');
     linkSiteToLiveRowsStub = sinon.stub().resolves();
+    linkSiteToRowStub = sinon.stub().resolves();
     tombstoneAllForBrandStub = sinon.stub().resolves();
     createAndEnqueueJobStub = sinon.stub().resolves({
       getId: () => 'job-abc', getStatus: () => 'IN_PROGRESS',
@@ -313,6 +315,7 @@ describe('SerenityController', () => {
       },
       '../../src/support/serenity/mapping-rows.js': {
         linkSiteToLiveRows: linkSiteToLiveRowsStub,
+        linkSiteToRow: linkSiteToRowStub,
         tombstoneAllForBrand: tombstoneAllForBrandStub,
       },
       '../../src/support/serenity/async-job-runner.js': {
@@ -1400,8 +1403,13 @@ describe('SerenityController', () => {
       expect(opts).to.include({ organizationId: ORG, brandId: BRAND, domain: 'x.com' });
     });
 
-    it('createMarket links the mirrored site onto the mapping row on 201', async () => {
-      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' } });
+    it('createMarket links the mirrored site onto THIS market\'s mapping row on 201', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({
+        status: 201,
+        body: {
+          brandId: BRAND, geoTargetId: 2840, languageCode: 'en', projectId: 'P-NEW',
+        },
+      });
       ensureMarketSiteStub.resolves('site-uuid-1');
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const ctx = fakeContext({
@@ -1411,7 +1419,37 @@ describe('SerenityController', () => {
       });
       const response = await controller.createMarket(ctx);
       expect(response.status).to.equal(201);
-      expect(linkSiteToLiveRowsStub).to.have.been.calledOnceWith(ctx.dataAccess, BRAND, 'site-uuid-1');
+      // Scoped to the row named by the new project id. A market created against
+      // its own url must not have that site spread across whichever sibling rows
+      // happen to be unlinked — site_id is the PER-MARKET source of truth for the
+      // url a project tracks (serenity-docs#356).
+      expect(linkSiteToRowStub).to.have.been.calledOnceWith(ctx.dataAccess, 'P-NEW', 'site-uuid-1');
+      expect(linkSiteToLiveRowsStub).to.not.have.been.called;
+    });
+
+    it('createMarket mirrors the url the market TRACKS, not the host it is filed under', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({
+        status: 201,
+        body: {
+          brandId: BRAND, geoTargetId: 2840, languageCode: 'en', projectId: 'P-NEW',
+        },
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createMarket(fakeContext({
+        data: {
+          market: 'us',
+          languageCode: 'en',
+          // A subpath survives into primaryUrl; brandDomain is host-only because
+          // a path there is rejected upstream. The market's Site must mirror the
+          // tracked value — anchoring it to the host would record a brand
+          // analysing nba.com/kings against the root nba.com Site.
+          brandDomain: 'nba.com',
+          brandNames: ['X'],
+        },
+      }));
+      expect(response.status).to.equal(201);
+      const opts = ensureMarketSiteStub.firstCall.args[1];
+      expect(opts.domain).to.equal('nba.com');
     });
 
     it('createMarket does NOT mirror a Site when the upstream create did not return 201', async () => {
@@ -1445,9 +1483,14 @@ describe('SerenityController', () => {
       // the controller does not pass this the subpath is lost for good and the
       // project silently tracks the parent domain.
       expect(handlerBody.primaryUrl).to.equal('acme.com/markets');
-      // ensureMarketSite links THAT site directly (siteId + derived domain).
+      // ensureMarketSite links THAT site directly. `domain` carries the tracked
+      // url rather than the host — the Site must mirror what the market analyses,
+      // subpath included. It is moot on this path (a supplied siteId takes the
+      // fast path and skips domain resolution entirely) and load-bearing on the
+      // brandDomain-only path, so it is asserted here to pin the value the
+      // controller actually hands over.
       const opts = ensureMarketSiteStub.firstCall.args[1];
-      expect(opts).to.include({ siteId: 'site-onboarded', domain: 'acme.com' });
+      expect(opts).to.include({ siteId: 'site-onboarded', domain: 'acme.com/markets' });
     });
 
     it('createMarket 400s when a supplied siteId does not resolve to a domain', async () => {

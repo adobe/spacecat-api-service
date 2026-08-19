@@ -457,6 +457,15 @@ export async function handleCreateMarket(
       semrushProjectId,
       geoTargetId: location.geoTargetId,
       languageCode,
+      // The market's own Site, when the caller named one — the per-market source
+      // of truth for the url this project tracks. It is the identity the project
+      // was just provisioned against (`resolveSiteIdentity` above derived both
+      // `brandDomain` and `primaryUrl` from it), so recording it here is what
+      // stops the market resolving to its brand's anchor by fallback later.
+      // A `brandDomain`-only create records none: flat mode resolves no Site from
+      // a raw domain, and inventing the brand's anchor would assert a per-market
+      // fact nobody stated.
+      ...(hasText(body.siteId) ? { siteId: body.siteId } : {}),
     });
   } catch (e) {
     log?.error?.(

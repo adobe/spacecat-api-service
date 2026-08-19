@@ -341,6 +341,56 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     expect(transport.createProject.firstCall.args[1].domain).to.equal('acme.com');
   });
 
+  it('records the market\'s own Site on the mapping row when the caller names one', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    dataAccess.Site.findById.resolves({ getBaseURL: () => 'https://kisqali.de' });
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-de', name: 'German' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-de' }),
+      updateProject: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'DE', languageCode: 'de', siteId: 'site-de', brandNames: ['Kisqali'],
+    }, fakeLog());
+
+    // site_id is the PER-MARKET source of truth for the url a project tracks
+    // (serenity-docs#356). It is the identity this project was just provisioned
+    // against, so recording it here is what stops the market resolving to its
+    // brand's anchor by fallback later.
+    expect(dataAccess.BrandSemrushProject.create).to.have.been.calledOnceWithExactly({
+      brandId: BRAND,
+      semrushProjectId: 'proj-de',
+      geoTargetId: 2276,
+      languageCode: 'de',
+      siteId: 'site-de',
+    });
+  });
+
+  it('records no Site when the market was created from a bare brandDomain', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      updateProject: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', brandDomain: 'adobe.com', brandNames: ['Adobe'],
+    }, fakeLog());
+
+    // Flat mode resolves no Site from a raw domain, and inventing the brand's
+    // anchor here would assert a per-market fact nobody stated.
+    const created = dataAccess.BrandSemrushProject.create.firstCall.args[0];
+    expect(created).to.not.have.property('siteId');
+  });
+
   it('PATCHes the tracked url with the site path the domain cannot carry', async () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
