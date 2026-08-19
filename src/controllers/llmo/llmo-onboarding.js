@@ -884,9 +884,16 @@ export async function updateIndexConfig(dataFolder, context, say = () => {}) {
   });
   const content = Buffer.from(file.content, 'base64').toString('utf-8');
 
-  if (content.includes(dataFolder)) {
-    log.warn(`Helix query yaml already contains string ${dataFolder}. Skipping update.`);
-    await say(`Helix query yaml already contains string ${dataFolder}. Skipping GitHub update.`);
+  // Match dataFolder as an actual YAML key, not a substring of one (LLMO-6320) —
+  // see the "substring of an existing key" test below for the failure this prevents.
+  // ^\s*<folder>: (with the m flag) matches any line, so it would also match a nested
+  // key under a different section -- helix-query.yaml is a flat list of top-level
+  // definitions today, so that case can't occur; revisit if that ever changes.
+  const escapedDataFolder = dataFolder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const indexKeyPattern = new RegExp(`^\\s*${escapedDataFolder}:`, 'm');
+  if (indexKeyPattern.test(content)) {
+    log.warn(`Helix query yaml already has an index definition for ${dataFolder}. Skipping update.`);
+    await say(`Helix query yaml already has an index definition for ${dataFolder}. Skipping GitHub update.`);
     return;
   }
 
@@ -1844,71 +1851,130 @@ export async function performLlmoOffboarding(site, config, context) {
   };
 }
 
-export async function appendRowsToQueryIndex(dataFolder, fileNames, env, log) {
-  const sharepointClient = await createSharePointClient(env);
-  const redirects = sharepointClient.getRedirects();
+// Shared by every project-elmo-ui-data Admin API caller below. Other admin.hlx.page
+// callers in this file (startBulkStatusJob, pollJobStatus, bulkUnpublishPaths) build
+// their own headers (they also need Content-Type) and aren't touched here to keep this
+// change scoped to LLMO-6320; consolidating all of them is a reasonable follow-up.
+const HLX_ADMIN_ORG = 'adobe';
+const HLX_ADMIN_SITE = 'project-elmo-ui-data';
+const HLX_ADMIN_REF = 'main';
+const HLX_ADMIN_BASE_URL = 'https://admin.hlx.page';
 
-  const now = Math.floor(Date.now() / 1000);
-  const rows = fileNames.map((fileName) => {
-    const name = fileName.endsWith('.json') ? fileName : `${fileName}.json`;
-    return [
-      `/${dataFolder}/${name}`,
-      now,
-      now,
-    ];
-  });
+// '/'-separated relative path (e.g. 'brand-presence/2026-w28-chatgpt', or a
+// dataFolder like 'dev/test-com'). Each segment must start with a word character,
+// so '.' and '..' can never match as a whole segment -- this is what rules out
+// '..' traversal and a leading '/' anchor, entirely within the regex.
+const SAFE_RELATIVE_FILE_PATH_RE = /^[\w][\w.-]*(\/[\w][\w.-]*)*$/;
+export const isSafeRelativeFilePath = (value) => typeof value === 'string'
+  && SAFE_RELATIVE_FILE_PATH_RE.test(value);
 
-  log.info(`Appending ${rows.length} rows to query-index.xlsx in ${dataFolder}`);
-  await redirects.appendRowsToSheet(`/${dataFolder}/query-index.xlsx`, rows);
-  log.info(`Successfully appended rows to query-index.xlsx in ${dataFolder}`);
+function buildHlxAdminUrl(action, filePath) {
+  return `${HLX_ADMIN_BASE_URL}/${action}/${HLX_ADMIN_ORG}/${HLX_ADMIN_SITE}/${HLX_ADMIN_REF}/${filePath}`;
 }
 
-export async function previewAndPublishQueryIndex(dataFolder, env, log) {
-  const org = 'adobe';
-  const site = 'project-elmo-ui-data';
-  const ref = 'main';
-  const baseUrl = 'https://admin.hlx.page';
-  const filePath = `${dataFolder}/query-index.json`;
-
+function getHlxAuthHeaders(env) {
   if (!env.HLX_ONBOARDING_TOKEN) {
     throw new Error('HLX_ONBOARDING_TOKEN is not set');
   }
+  return { Cookie: `auth_token=${env.HLX_ONBOARDING_TOKEN}` };
+}
 
-  const headers = {
-    Cookie: `auth_token=${env.HLX_ONBOARDING_TOKEN}`,
-  };
+async function readHlxErrorBody(response) {
+  try {
+    return await response.text();
+  } catch {
+    return '';
+  }
+}
 
+/**
+ * Reindexes a set of already-published files via the Helix Admin API.
+ *
+ * This replaces the previous approach of appending rows directly to
+ * query-index.xlsx via helix-content-sdk's appendRowsToSheet: on a warm Lambda
+ * that client caches the resolved sheet (worksheets[0]) across invocations, so it
+ * can append rows into the wrong sheet of a different workbook (the served
+ * `helix-default` sheet instead of `raw_index`), corrupting the workbook's array
+ * formula (observed twice on heritage-sg, LLMO-6320). The Admin API reindex
+ * endpoint reads the already-published file directly and has no such state.
+ * @param {string} dataFolder - The data folder name
+ * @param {Array<string>} fileNames - File names (with or without .json) to reindex
+ * @param {object} env - Environment variables
+ * @param {object} log - Logger instance
+ * @returns {Promise<void>}
+ */
+export async function reindexQueryIndexPaths(dataFolder, fileNames, env, log) {
+  // Defense-in-depth: dataFolder is database-sourced and admin-controlled today
+  // (the only caller, updateQueryIndex, validates fileNames but trusts the site's
+  // stored dataFolder), but this guards the URL-building itself in case a future
+  // caller lets a less-privileged input reach this parameter.
+  if (!isSafeRelativeFilePath(dataFolder)) {
+    throw new Error(`Invalid dataFolder: ${dataFolder}`);
+  }
+
+  const headers = getHlxAuthHeaders(env);
+
+  log.info(`Reindexing ${fileNames.length} path(s) in ${dataFolder}`);
+
+  // Sequential by design: this is an admin-only, low-QPS path (LLMO administrators
+  // only), and one request at a time avoids bursting the Admin API.
+  let reindexedCount = 0;
+  for (const fileName of fileNames) {
+    const name = fileName.endsWith('.json') ? fileName : `${fileName}.json`;
+    const filePath = `${dataFolder}/${name}`;
+    const reindexUrl = buildHlxAdminUrl('index', filePath);
+
+    let response;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      response = await fetch(reindexUrl, { method: 'POST', headers, timeout: 30000 });
+    } catch (error) {
+      log.error(`Reindex failed for ${filePath} after reindexing ${reindexedCount}/${fileNames.length}: ${error.message}`);
+      throw new Error(`Reindex failed for ${filePath}: ${error.message}`);
+    }
+    if (!response.ok) {
+      const errorCode = response.headers?.get('x-error-code') || '';
+      const errorMsg = response.headers?.get('x-error') || '';
+      // eslint-disable-next-line no-await-in-loop
+      const bodyText = await readHlxErrorBody(response);
+      log.error(`Reindex failed for ${filePath} after reindexing ${reindexedCount}/${fileNames.length}: ${response.status} ${response.statusText} | x-error-code: ${errorCode} | x-error: ${errorMsg} | body: ${bodyText}`);
+      throw new Error(`Reindex failed for ${filePath}: ${response.status} ${response.statusText}`);
+    }
+    reindexedCount += 1;
+  }
+
+  log.info(`Successfully reindexed ${fileNames.length} path(s) in ${dataFolder}`);
+}
+
+export async function previewAndPublishQueryIndex(dataFolder, env, log) {
+  // Defense-in-depth -- see the matching check in reindexQueryIndexPaths.
+  if (!isSafeRelativeFilePath(dataFolder)) {
+    throw new Error(`Invalid dataFolder: ${dataFolder}`);
+  }
+
+  const filePath = `${dataFolder}/query-index.json`;
+  const headers = getHlxAuthHeaders(env);
   const fetchOptions = { method: 'POST', headers, timeout: 30000 };
 
-  const previewUrl = `${baseUrl}/preview/${org}/${site}/${ref}/${filePath}`;
+  const previewUrl = buildHlxAdminUrl('preview', filePath);
   log.info(`Previewing query-index at ${previewUrl}`);
   const previewResponse = await fetch(previewUrl, fetchOptions);
   if (!previewResponse.ok) {
     const errorCode = previewResponse.headers?.get('x-error-code') || '';
     const errorMsg = previewResponse.headers?.get('x-error') || '';
-    let bodyText = '';
-    try {
-      bodyText = await previewResponse.text();
-    } catch {
-      /* noop */
-    }
+    const bodyText = await readHlxErrorBody(previewResponse);
     log.error(`Preview failed: ${previewResponse.status} ${previewResponse.statusText} | x-error-code: ${errorCode} | x-error: ${errorMsg} | body: ${bodyText}`);
     throw new Error(`Preview failed: ${previewResponse.status} ${previewResponse.statusText}`);
   }
   log.info('Preview of query-index succeeded');
 
-  const publishUrl = `${baseUrl}/live/${org}/${site}/${ref}/${filePath}`;
+  const publishUrl = buildHlxAdminUrl('live', filePath);
   log.info(`Publishing query-index at ${publishUrl}`);
   const publishResponse = await fetch(publishUrl, fetchOptions);
   if (!publishResponse.ok) {
     const errorCode = publishResponse.headers?.get('x-error-code') || '';
     const errorMsg = publishResponse.headers?.get('x-error') || '';
-    let bodyText = '';
-    try {
-      bodyText = await publishResponse.text();
-    } catch {
-      /* noop */
-    }
+    const bodyText = await readHlxErrorBody(publishResponse);
     log.error(`Publish failed: ${publishResponse.status} ${publishResponse.statusText} | x-error-code: ${errorCode} | x-error: ${errorMsg} | body: ${bodyText}`);
     throw new Error(`Publish failed: ${publishResponse.status} ${publishResponse.statusText}`);
   }

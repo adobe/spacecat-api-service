@@ -71,76 +71,6 @@ function normalizeNullableText(value, fieldName) {
 }
 
 /**
- * Normalizes the deferred Semrush provisioning data of a pending (draft) brand
- * into the shape persisted in `brands.pending_semrush_provisioning` (a JSONB object
- * `{ primaryUrl?, markets: [{ market, languageCode, modelIds? }], generatePrompts? }`).
- * These are the primary URL + initial markets (each with its chosen AI models/LLMs)
- * plus whether activation should generate topics/prompts — all collected by the
- * add-brand wizard before a sub-workspace/project exist; activation reads them
- * back to provision the real Semrush projects, then clears the column.
- * The canonical shape is the `PendingSemrushProvisioning` type exported by
- * `@adobe/spacecat-shared-data-access` (shared with project-elmo-ui).
- *
- * Returns `undefined` when the caller did not supply the field (leave the column
- * untouched), `null` when explicitly cleared or nothing useful remains, or the
- * cleaned object otherwise.
- *
- * @param {unknown} value - `{ primaryUrl?, markets }`, null, or undefined.
- * @returns {{primaryUrl: (string|null), markets: Array<{market: string,
- *   languageCode: string, modelIds?: string[]}>}|null|undefined}
- */
-function normalizePendingSemrushProvisioning(value) {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (value === null) {
-    return null;
-  }
-  if (typeof value !== 'object' || Array.isArray(value)) {
-    const error = new Error('pendingSemrushProvisioning must be an object or null');
-    error.status = 400;
-    throw error;
-  }
-  const markets = (Array.isArray(value.markets) ? value.markets : [])
-    .map((m) => {
-      const market = {
-        market: typeof m?.market === 'string' ? m.market.trim() : '',
-        languageCode: typeof m?.languageCode === 'string' ? m.languageCode.trim() : '',
-      };
-      // Per-market AI models (LLMs) chosen for this market; applied to the
-      // project at activation. Keep only non-empty strings; omit the key
-      // entirely when none remain so a cleared selection doesn't persist `[]`.
-      const modelIds = (Array.isArray(m?.modelIds) ? m.modelIds : [])
-        .map((id) => (typeof id === 'string' ? id.trim() : ''))
-        .filter(hasText);
-      if (modelIds.length > 0) {
-        market.modelIds = modelIds;
-      }
-      return market;
-    })
-    .filter((m) => hasText(m.market) && hasText(m.languageCode));
-  const primaryUrl = typeof value.primaryUrl === 'string' && hasText(value.primaryUrl)
-    ? value.primaryUrl.trim()
-    : null;
-  // Whether activation should generate topics/prompts for the provisioned
-  // project(s). Only meaningful as an explicit boolean; absent means "legacy
-  // stash, leave generation off" and is omitted so the column stays minimal.
-  const hasGeneratePrompts = typeof value.generatePrompts === 'boolean';
-  // Nothing worth persisting → treat as cleared. An explicit generatePrompts
-  // flag IS worth persisting on its own: a bare no-prompt draft (no URL, no
-  // market) still needs the stash so activation knows to provision a
-  // sub-workspace-only brand rather than treating it as a non-Semrush brand.
-  if (markets.length === 0 && !hasText(primaryUrl) && !hasGeneratePrompts) {
-    return null;
-  }
-  const result = { primaryUrl, markets };
-  if (hasGeneratePrompts) {
-    result.generatePrompts = value.generatePrompts;
-  }
-  return result;
-}
-
-/**
  * Splits a full URL string into its base URL and path.
  * e.g. "https://example.com/products" -> { base: "https://example.com", path: "/products" }
  * A root path "/" is treated as no path (empty string).
@@ -332,13 +262,6 @@ function mapDbBrandToV2(row) {
     name: row.name,
     baseSiteId: row.base_site?.id || row.site_id || null,
     baseUrl: row.base_site?.base_url || null,
-    // DEPRECATED (serenity-docs brand-semrush-mapping-maintenance.md §10
-    // rename, write-of-record cutover): read-only BC mirror of
-    // semrushSubWorkspaceId below, maintained by the mysticat-data-service
-    // brands_sync_semrush_workspace_id trigger. Kept for any consumer still
-    // reading this field directly; new/updated consumers should read
-    // semrushSubWorkspaceId instead.
-    semrushWorkspaceId: row.semrush_workspace_id || null,
     // Read-only: the brand's own Semrush sub-workspace (dual-mode) — the
     // write-of-record column. Null for brands still in flat mode (no
     // sub-workspace minted yet). Consumers use it to scope per-brand Semrush
@@ -410,6 +333,57 @@ async function replaceChildRows(table, brandId, rows, onConflict, postgrestClien
     .upsert(rows, { onConflict });
   if (insertError) {
     throw new Error(`Failed to sync ${table}: ${insertError.message}`);
+  }
+}
+
+/**
+ * Verifies a candidate primary site (`baseSiteId`) belongs to the same org as the
+ * brand being anchored to it, before that site_id is ever persisted.
+ *
+ * serenity-docs#346: `brand.organization_id != site.organization_id` is exactly the
+ * org-ID mismatch pattern the investigation traced (Tata Capital, BMW, Toyota, ...) —
+ * a brand silently anchored to a *different* org's site. Both upsertBrand (fresh
+ * create / first anchor) and updateBrand (first set, or pending re-point) must call
+ * this before writing site_id; the immutable-once-set branches in each are
+ * unaffected, since they already refuse to change an existing active site_id.
+ *
+ * @param {object} postgrestClient - PostgREST client
+ * @param {string} siteId - Candidate `brands.site_id`
+ * @param {string} organizationId - SpaceCat organization UUID the brand belongs to
+ * @param {string} brandLabel - Whatever identifies the brand in the caller's context,
+ *   for the error message only — upsertBrand passes the brand name (not yet
+ *   persisted, so no id exists yet); updateBrand passes the fetched brand's
+ *   name when its existing-row read found one, else falls back to brandId.
+ * @throws {Error} status 409, code 'brand_site_org_mismatch', if the site does not
+ *   belong to organizationId (including if it doesn't exist at all)
+ */
+async function assertSiteBelongsToOrg(postgrestClient, siteId, organizationId, brandLabel) {
+  const { data: anchorSite, error: anchorSiteError } = await postgrestClient
+    .from('sites')
+    .select('id')
+    .eq('id', siteId)
+    .eq('organization_id', organizationId)
+    .maybeSingle();
+  if (anchorSiteError) {
+    throw new Error(
+      `Failed to verify primary site org for brand "${brandLabel}": ${anchorSiteError.message}`,
+    );
+  }
+  if (!anchorSite) {
+    // Plain ASCII (no em dash) to match this file's other thrown, client-facing
+    // messages: an em dash here previously crashed createErrorResponse's
+    // X-Error header (@adobe/fetch rejects non-Latin1 header content with a
+    // raw TypeError, surfacing as a 500 instead of this 409 — caught by the
+    // it-postgres IT suite, not the mocked unit tests). createErrorResponse
+    // now sanitizes the header regardless (serenity-docs#346), but this stays
+    // ASCII too rather than leaning on that alone.
+    const err = new Error(
+      `Cannot anchor brand "${brandLabel}" to site ${siteId}: that site `
+      + `does not exist, or does not belong to organization ${organizationId}.`,
+    );
+    err.status = 409;
+    err.code = 'brand_site_org_mismatch';
+    throw err;
   }
 }
 
@@ -960,15 +934,16 @@ export async function getBrandBySite(organizationId, siteId, postgrestClient, lo
 /**
  * Sets the brand-scoped `brand_claims_enabled` scheduling gate (LLMO-5741),
  * keyed on the brand UUID (the PK), so operators can enable/disable Brand Claims
- * for a brand directly. Returns the updated `{ id, name }` or null when no brand
- * matches the id.
+ * for a brand directly. Returns the updated `{ id, name, site_id }` or null when
+ * no brand matches the id. `site_id` (the brand's primary site) lets callers keep
+ * the per-site `brand-claims` audit toggle in lock-step with this flag.
  *
  * @param {Object} params
  * @param {string} params.brandId - Brand UUID.
  * @param {boolean} params.enabled - Target flag value.
  * @param {Object} params.postgrestClient - PostgREST client.
  * @param {string} [params.updatedBy] - Audit actor.
- * @returns {Promise<{id: string, name: string}|null>}
+ * @returns {Promise<{id: string, name: string, site_id: string|null}|null>}
  */
 export async function setBrandClaimsEnabled({
   brandId,
@@ -993,7 +968,7 @@ export async function setBrandClaimsEnabled({
     // Do not flip the flag on a soft-deleted brand (matches the .neq guard used
     // across brands-storage); a deleted brand returns no row -> null.
     .neq('status', 'deleted')
-    .select('id, name')
+    .select('id, name, site_id')
     .maybeSingle();
 
   if (error) {
@@ -1199,14 +1174,12 @@ export async function upsertBrand({
     throw new Error(`Failed to look up existing brand "${brand.name}": ${existingError.message}`);
   }
 
-  // An active brand must be anchored by either a SpaceCat base site OR a Semrush
-  // sub-workspace (serenity dual-mode): a Semrush brand has no SpaceCat site, but
-  // its sub-workspace (semrush_sub_workspace_id, set on the serenity-first create
-  // path) is a valid anchor — mirrors the relaxed chk_active_brand_has_site_id
-  // DB constraint. Respect persisted site_id on the update path.
-  const hasAnchor = hasText(brand.baseSiteId)
-    || hasText(existing?.site_id)
-    || hasText(semrushSubWorkspaceId);
+  // An active brand must be anchored by a SpaceCat base site (chk_active_brand_has_site_id,
+  // SITES-49449). A Semrush sub-workspace brand is NOT exempt from this — the
+  // brand/market management model (LLMO-6405) makes site_id mandatory on every
+  // create path, subworkspace mode or not, so semrush_sub_workspace_id is no
+  // longer a substitute anchor. Respect persisted site_id on the update path.
+  const hasAnchor = hasText(brand.baseSiteId) || hasText(existing?.site_id);
   const status = (!hasAnchor && (brand.status || 'active') === 'active')
     ? 'pending'
     : (brand.status || 'active');
@@ -1262,17 +1235,6 @@ export async function upsertBrand({
     row.mention_sentiment_guidance = mentionSentimentGuidance;
   }
 
-  // Deferred Semrush provisioning data for a pending (draft) brand: the primary
-  // URL + desired (market, languageCode) the wizard collected before a
-  // sub-workspace / project exist. Persisted as JSONB so activation can
-  // provision it later, then cleared. Undefined leaves the column untouched.
-  const pendingSemrushProvisioning = normalizePendingSemrushProvisioning(
-    brand.pendingSemrushProvisioning,
-  );
-  if (pendingSemrushProvisioning !== undefined) {
-    row.pending_semrush_provisioning = pendingSemrushProvisioning;
-  }
-
   // baseSiteId is immutable once persisted (mirrors updateBrand). Only set it
   // when the brand has no site_id yet — re-onboarding/re-upserting an existing
   // brand by name must NOT re-point its primary site (LLMO-5556: this silently
@@ -1289,6 +1251,18 @@ export async function upsertBrand({
   // (which left Semrush brands' site_id NULL) is removed; a genuine collision with
   // another brand's primary site still surfaces as the brands_base_site_unique 409
   // handled below.
+  // serenity-docs#346: a brand's primary site must belong to the same org as the
+  // brand itself — anchoring to another org's site is exactly the org-ID mismatch
+  // pattern the investigation traced (Tata Capital, BMW, Toyota, ...). Verify on
+  // both paths that assign a *new* anchor (fresh create, or first anchor for a
+  // previously Semrush-only brand); the immutable-once-set branch below is
+  // unaffected since it already refuses to change an existing site_id.
+  const wantsNewAnchor = hasText(brand.baseSiteId)
+    && (existing === null || !hasText(existing.site_id));
+  if (wantsNewAnchor) {
+    await assertSiteBelongsToOrg(postgrestClient, brand.baseSiteId, organizationId, brand.name);
+  }
+
   if (existing === null) {
     row.site_id = hasText(brand.baseSiteId) ? brand.baseSiteId : null;
   } else if (hasText(brand.baseSiteId) && !hasText(existing.site_id)) {
@@ -1401,7 +1375,7 @@ export async function updateBrand({
   if (needsExistingFetch) {
     const { data: current, error: currentError } = await postgrestClient
       .from('brands')
-      .select('site_id, status, updated_at')
+      .select('name, site_id, status, updated_at')
       .eq('id', brandId)
       .maybeSingle();
     // Fail closed: a swallowed read error leaves `current` null, so the guard
@@ -1468,6 +1442,10 @@ export async function updateBrand({
       patch.site_id = null;
     }
   } else if (hasText(updates.baseSiteId) && (!existing?.site_id || isPending)) {
+    // serenity-docs#346: same org-ID mismatch guard as upsertBrand — verify the
+    // new/re-pointed site actually belongs to this brand's org before persisting.
+    const brandLabel = existing?.name || brandId;
+    await assertSiteBelongsToOrg(postgrestClient, updates.baseSiteId, organizationId, brandLabel);
     patch.site_id = updates.baseSiteId;
   }
 
@@ -1505,15 +1483,6 @@ export async function updateBrand({
   if (updates.region !== undefined) {
     patch.regions = (updates.region || [])
       .map((r) => (typeof r === 'string' ? r : String(r))).filter(hasText);
-  }
-
-  // Deferred Semrush provisioning data (pending/draft brands). Activation passes
-  // `pendingSemrushProvisioning: null` to clear it once the real projects are
-  // provisioned.
-  if (updates.pendingSemrushProvisioning !== undefined) {
-    patch.pending_semrush_provisioning = normalizePendingSemrushProvisioning(
-      updates.pendingSemrushProvisioning,
-    );
   }
 
   // Clear legacy columns on any brand update so old data doesn't linger.

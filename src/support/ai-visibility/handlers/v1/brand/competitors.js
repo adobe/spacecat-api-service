@@ -19,6 +19,7 @@ import {
   PROTO_FROM_JSON,
   PROTO_TO_JSON,
   responseFromGrpcError,
+  resolveSearchType,
 } from '../../../grpc-utils.js';
 
 /* c8 ignore start */
@@ -30,6 +31,7 @@ export async function handleCompetitors(sp, clients) {
       body: { error: 'invalid_request', message: 'domain is required' },
     };
   }
+  const searchType = resolveSearchType(domain);
   const count = sp.get('count');
 
   let request;
@@ -38,6 +40,7 @@ export async function handleCompetitors(sp, clients) {
       BrandCompetitorsRequestSchema,
       {
         target: { domain, name: domain },
+        search_type: searchType,
         ...(count ? { count } : {}),
       },
       PROTO_FROM_JSON,

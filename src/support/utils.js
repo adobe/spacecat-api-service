@@ -673,19 +673,45 @@ export function isViewAsTrialRequest(requestContext) {
 }
 
 /**
+ * Returns true when the request originates from the sites-optimizer-ui client
+ * and carries the x-view-full-experience header, i.e. an internal user has asked
+ * to view the full (non-PLG-limited) experience. This only inspects the headers;
+ * the admin gate that actually authorises the bypass is applied by the caller
+ * (see getIsSummitPlgEnabled), so a customer sending the header alone changes nothing.
+ * @param {Object} requestContext - Per-request context with pathInfo.headers
+ * @returns {boolean}
+ */
+export function isViewFullExperienceRequest(requestContext) {
+  const headers = requestContext?.pathInfo?.headers;
+  return headers?.['x-client-type'] === 'sites-optimizer-ui'
+    && headers?.['x-view-full-experience'] === 'true';
+}
+
+/**
  * Returns whether the summit-plg audit handler is enabled for the site in configuration.
  * No entitlement check; use when the site was already resolved via TierClient (e.g. sites-resolve).
  * @param {Object} site - Site entity
  * @param {Object} context - Request context with dataAccess, log
  * @param {Object} [requestContext] - Optional per-request context; when provided, the check
  *   is gated on the x-client-type header being 'sites-optimizer-ui'.
+ * @param {Object} [accessControlUtil] - Optional AccessControlUtil for the caller. Required
+ *   to honour the internal "view full experience" override; when the request carries
+ *   x-view-full-experience and the caller has admin access, PLG limiting is bypassed.
  * @returns {Promise<boolean>}
  */
-export async function getIsSummitPlgEnabled(site, context, requestContext) {
+export async function getIsSummitPlgEnabled(site, context, requestContext, accessControlUtil) {
   try {
     if (requestContext) {
       const clientType = requestContext.pathInfo?.headers?.['x-client-type'];
       if (clientType !== 'sites-optimizer-ui') {
+        return false;
+      }
+      // Internal "View full experience" override: an admin caller (e.g. running a
+      // custom demo) can bypass PLG limiting to see the full paid experience without
+      // changing the site's tier. Gated on hasAdminAccess() so a customer cannot
+      // self-unlock entitlement-gated data merely by sending the header.
+      if (isViewFullExperienceRequest(requestContext)
+        && accessControlUtil?.hasAdminAccess?.()) {
         return false;
       }
       if (isViewAsTrialRequest(requestContext)) {

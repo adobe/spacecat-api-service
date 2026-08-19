@@ -12,6 +12,7 @@
 
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { ErrorWithStatusCode } from '../utils.js';
+import { endpointOf } from '../url-utils.js';
 import { ElementsTransportError } from './errors.js';
 
 const ELEMENTS_API_PATH = '/enterprise/pages/api/v3/workspaces';
@@ -165,16 +166,26 @@ function nextRetryDelayMs(completedAttempt, baseDelayMs, response) {
  * @param {number} [opts.timeoutMs] per-attempt timeout
  * @param {number} [opts.maxRetries] number of retries after the first attempt; <=0 ⇒ single attempt
  * @param {number} [opts.retryBaseDelayMs] base delay for the jittered exponential backoff
+ * @param {string} [opts.workspaceId] id of the workspace being called, carried onto the thrown
+ *   error's request descriptor for the structured upstream-error log line (SITES-49993)
+ * @param {string} [opts.elementId] id of the element being called, ditto
  * @returns {Promise<*>} parsed response body on success
  */
 async function request(url, imsToken, body, {
   timeoutMs = DEFAULT_TIMEOUT_MS,
   maxRetries = DEFAULT_MAX_RETRIES,
   retryBaseDelayMs = DEFAULT_RETRY_BASE_DELAY_MS,
+  workspaceId = undefined,
+  elementId = undefined,
 } = {}) {
   const jsonBody = JSON.stringify(body);
   // Floor at 0: a negative/zero maxRetries degrades to a single attempt (no retry).
   const retries = Math.max(0, maxRetries);
+  // Structured request descriptor for the upstream-error log line (SITES-49993).
+  // Built only when a throw actually happens — never on the happy path.
+  const requestInfo = () => ({
+    method: 'POST', endpoint: endpointOf(url), workspaceId, elementId,
+  });
 
   for (let attempt = 0; ; attempt += 1) {
     const controller = new AbortController();
@@ -190,7 +201,7 @@ async function request(url, imsToken, body, {
       });
     } catch (e) {
       if (e?.name === 'AbortError') {
-        throw new ElementsTransportError(504, `Elements API POST ${url} timed out after ${timeoutMs}ms`);
+        throw new ElementsTransportError(504, `Elements API POST ${url} timed out after ${timeoutMs}ms`, undefined, requestInfo());
       }
       throw e;
     } finally {
@@ -213,6 +224,7 @@ async function request(url, imsToken, body, {
         response.status,
         `Elements API POST ${url} failed: ${response.status}`,
         parsed,
+        requestInfo(),
       );
     }
   }
@@ -271,6 +283,8 @@ export function createElementsTransport({
         maxRetries: callOpts.maxRetries ?? maxRetries,
         retryBaseDelayMs,
         timeoutMs: callOpts.timeoutMs,
+        workspaceId,
+        elementId,
       });
     },
   };

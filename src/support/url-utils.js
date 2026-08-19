@@ -41,6 +41,26 @@ export function hostnameFromUrlString(value) {
 }
 
 /**
+ * Extracts the path of a URL — e.g. for logging a failed upstream call's
+ * `endpoint`, where the host adds nothing (it is fixed per environment) and
+ * the path is what identifies the operation. Returns undefined for a missing
+ * or unparseable URL.
+ *
+ * @param {string | undefined | null} url
+ * @returns {string | undefined}
+ */
+export function endpointOf(url) {
+  if (!url) {
+    return undefined;
+  }
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * True when `hostname` is a routable PUBLIC domain name — i.e. NOT a loopback,
  * link-local, private, single-label, IP-literal, or reserved-TLD host.
  *

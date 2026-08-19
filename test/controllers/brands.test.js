@@ -5152,7 +5152,7 @@ describe('Brands Controller', () => {
         );
       });
 
-      it('mirrors the provisioned brand domain as a Site (+ brand_sites link) after the row is written', async () => {
+      it('mirrors the url the market TRACKS as a Site (+ brand_sites link) after the row is written', async () => {
         const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
         const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
         const ensureSiteStub = sinon.stub().resolves('site-x');
@@ -5176,8 +5176,38 @@ describe('Brands Controller', () => {
         expect(ensureSiteStub.calledAfter(upsertStub)).to.equal(true);
         const opts = ensureSiteStub.firstCall.args[1];
         expect(opts.organizationId).to.equal(ORGANIZATION_ID);
-        expect(opts.domain).to.equal('acme.com');
+        // The tracked url, not the host the project is filed under: the resolved
+        // Site becomes brands.site_id, so mirroring the host would record a brand
+        // analysing acme.com/path against the root acme.com Site — and sibling
+        // brands on one apex would then collide on brands_base_site_unique.
+        expect(opts.domain).to.equal('acme.com/path');
         expect(opts.brandId).to.equal(provisionStub.firstCall.args[1].brandId);
+      });
+
+      it('forwards the payload URL\'s full identity as the project\'s tracked url', async () => {
+        // `brandDomain` must be a bare FQDN (a path there is a hard 400 upstream,
+        // and the upstream folds it to the registrable domain regardless), so
+        // without a separate primaryUrl a brand created on acme.com/path analysed
+        // acme.com until a data-service reconcile repaired it (serenity-docs#348).
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub,
+          upsertBrand: sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' }),
+          ensureMarketSite: sinon.stub().resolves('site-x'),
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(201);
+        const params = provisionStub.firstCall.args[1];
+        expect(params.brandDomain).to.equal('acme.com');
+        expect(params.primaryUrl).to.equal('acme.com/path');
       });
 
       it('links the mirrored site onto the mapping row after ensureMarketSite resolves', async () => {
@@ -5328,6 +5358,43 @@ describe('Brands Controller', () => {
         expect(JSON.stringify(body)).to.not.contain('gw.internal');
         expect(response.headers.get('x-error') || '').to.not.contain('gw.internal');
         expect(upsertStub.called).to.equal(false);
+      });
+
+      // SITES-49993: while the client sees only the generic message,
+      // createErrorResponse logs ONE structured line — JSON in the message —
+      // with the upstream status/method/endpoint/body and the tenant ids, so
+      // Logs Insights can group Semrush failures by tenant and upstream reason.
+      it('logs one structured line with upstream status/body and tenant ids (SITES-49993)', async () => {
+        loggerStub.error.resetHistory();
+        const leakUrl = 'https://gw.internal/enterprise/workspaces/ws-9/projects/proj-abc/aio';
+        const provisionStub = sinon.stub().rejects(
+          new SerenityTransportError(502, `Semrush POST ${leakUrl} failed: 502`, { detail: 'pool exhausted' }, {
+            method: 'POST', endpoint: '/enterprise/workspaces/ws-9/projects/proj-abc/aio',
+          }),
+        );
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub,
+          upsertBrand: sinon.stub().resolves({ id: 'x' }),
+        });
+
+        await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        const call = loggerStub.error.getCalls().find(
+          (c) => typeof c.args[0] === 'string' && c.args[0].startsWith('Brands upstream error {'),
+        );
+        expect(call).to.exist;
+        const payload = JSON.parse(call.args[0].slice('Brands upstream error '.length));
+        expect(payload.status).to.equal(502);
+        expect(payload.method).to.equal('POST');
+        expect(payload.endpoint).to.equal('/enterprise/workspaces/ws-9/projects/proj-abc/aio');
+        expect(payload.spaceCatId).to.equal(ORGANIZATION_ID);
+        expect(payload.body).to.include('pool exhausted');
       });
 
       it('maps a 401 Semrush upstream error on provisioning to HTTP 401 + generic auth message', async () => {
@@ -7196,6 +7263,64 @@ describe('Brands Controller', () => {
       } finally {
         logSpy.restore();
       }
+    });
+
+    it('strips a header-unsafe character from the X-Error header without altering the JSON body (serenity-docs#346)', async () => {
+      // A brand name is customer-controlled, and any 409/500 whose message
+      // echoes it (this guard, brand_status_demotion_not_allowed, ...) would
+      // previously crash createErrorResponse's X-Error header with a raw
+      // TypeError [ERR_INVALID_CHAR] instead of returning the intended
+      // status, if that message contained a character outside the header-safe
+      // range (printable ASCII + Latin-1, 0x20-0x7E/0x80-0xFF — plain accented
+      // characters like "é" are actually fine; an em dash is not). This is
+      // exactly what the it-postgres IT suite caught for an em dash in this
+      // guard's own message.
+      const err = new Error(
+        'Cannot anchor brand "Global — Direct" to site abc: that site does not belong to organization xyz.',
+      );
+      err.status = 409;
+      err.code = 'brand_site_org_mismatch';
+      const updateBrandStub = sinon.stub().rejects(err);
+
+      const controller = await buildUpdateController({ updateBrand: updateBrandStub });
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { baseSiteId: 'some-other-orgs-site' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(409);
+      const body = await response.json();
+      expect(body.code).to.equal('brand_site_org_mismatch');
+      expect(body.message).to.equal(err.message); // body keeps the full, unsanitized message
+      expect(response.headers.get('x-error')).to.equal(
+        'Cannot anchor brand "Global  Direct" to site abc: that site does not belong to organization xyz.',
+      );
+    });
+
+    it('sanitizes only the X-Error header on the untyped-error (500) fallback too, keeping the body raw', async () => {
+      // Same split as the 409 case above, on the OTHER branch of
+      // createErrorResponse: a bare Error with no .status (e.g. the
+      // anchorSiteError DB-failure path) must not have its body message
+      // sanitized just because the header copy needs to be.
+      const err = new Error('DB read failed — connection reset');
+      const updateBrandStub = sinon.stub().rejects(err);
+
+      const controller = await buildUpdateController({ updateBrand: updateBrandStub });
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { baseSiteId: 'some-other-orgs-site' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(500);
+      const body = await response.json();
+      expect(body.message).to.equal(err.message); // body keeps the full, unsanitized message
+      expect(response.headers.get('x-error')).to.equal('DB read failed  connection reset');
     });
 
     it('succeeds when expectedUpdatedAt matches the persisted row (LLMO-6591)', async () => {

@@ -69,7 +69,7 @@ function OpportunitiesController(ctx) {
    * @returns {Promise<Array>} Filtered (or unfiltered) opportunities
    */
   async function filterForSummitPlg(site, opportunities, requestContext) {
-    if (await getIsSummitPlgEnabled(site, ctx, requestContext)) {
+    if (await getIsSummitPlgEnabled(site, ctx, requestContext, accessControlUtil)) {
       return opportunities.filter(
         (oppty) => SUMMIT_PLG_ALLOWED_TYPES.includes(oppty.getType()),
       );
@@ -205,7 +205,7 @@ function OpportunitiesController(ctx) {
     if (!oppty || oppty.getSiteId() !== siteId) {
       return notFound('Opportunity not found');
     }
-    if (await getIsSummitPlgEnabled(site, ctx, context)) {
+    if (await getIsSummitPlgEnabled(site, ctx, context, accessControlUtil)) {
       try {
         await grantSuggestionsForOpportunity(dataAccess, site, oppty);
       /* c8 ignore next 3 */

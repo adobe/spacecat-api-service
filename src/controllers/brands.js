@@ -14,6 +14,7 @@
 
 import { randomUUID } from 'crypto';
 
+import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import BrandClient, { BrandGovernanceClient } from '@adobe/spacecat-shared-brand-client';
 import DrsClient from '@adobe/spacecat-shared-drs-client';
 import {
@@ -23,13 +24,13 @@ import {
   noContent,
   createResponse,
   forbidden,
-  internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   composeBaseURL,
   hasText,
   isNonEmptyObject,
   isValidUUID,
+  siteIdentityFromUrlString,
 } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode, getImsUserToken, resolveSemrushImsToken } from '../support/utils.js';
@@ -72,6 +73,7 @@ import { ensureMarketSite } from '../support/serenity/site-linkage.js';
 import { upsertMappingRow, linkSiteToLiveRows } from '../support/serenity/mapping-rows.js';
 import { createSerenityTransport } from '../support/serenity/rest-transport.js';
 import { isSemrushTransportError, unwrapTransportCause } from '../support/serenity/errors.js';
+import { logUpstreamError } from '../support/serenity/upstream-log.js';
 import { syncBrandUrlsAcrossMarkets } from '../support/serenity/brand-urls.js';
 import { syncBrandAliasesAcrossMarkets } from '../support/serenity/brand-aliases.js';
 import { resolveProjects } from '../support/serenity/resolve-projects.js';
@@ -116,17 +118,53 @@ const BRAND_GUIDANCE_MAX_LENGTH = 4000;
 const BRAND_GUIDANCE_FIELDS = ['brandContext', 'mentionSentimentGuidance'];
 
 /**
+ * The brand's primary URL as the create payload spells it: the first non-empty
+ * entry in `urls`, tolerating bare hostnames, missing schemes, and both payload
+ * shapes (a plain string or `{ value }`). One input for both derivations below,
+ * so the project's `domain` and the url it tracks can never describe two
+ * different urls. Null when no usable URL is present.
+ */
+function brandUrlFromPayload(brandData) {
+  const urls = Array.isArray(brandData?.urls) ? brandData.urls : [];
+  return urls
+    .map((u) => (typeof u === 'string' ? u : u?.value))
+    .find(hasText) ?? null;
+}
+
+/**
  * Derives the brand domain (hostname) from a brand-create payload's URLs, used as
- * the Semrush project `domain` when provisioning a Semrush-mode brand. Takes the
- * first non-empty URL (the primary), tolerating bare hostnames and missing
- * schemes. Returns null when no usable URL is present.
+ * the Semrush project `domain` when provisioning a Semrush-mode brand. Host-only
+ * on purpose: `domain` must be a bare FQDN — a path there is a hard 400 upstream,
+ * and the upstream folds it to the registrable domain regardless. Returns null
+ * when no usable URL is present.
  */
 function brandDomainFromPayload(brandData) {
-  const urls = Array.isArray(brandData?.urls) ? brandData.urls : [];
-  const first = urls
-    .map((u) => (typeof u === 'string' ? u : u?.value))
-    .find(hasText);
-  return hostnameFromUrlString(first);
+  return hostnameFromUrlString(brandUrlFromPayload(brandData));
+}
+
+/**
+ * The url the brand's initial market should TRACK — host plus path, from the same
+ * payload URL {@link brandDomainFromPayload} reduces to a host. Without it a brand
+ * created on `nba.com/kings` analyses `nba.com` until a data-service reconcile
+ * repairs it. Returns null when no usable URL is present.
+ */
+function brandPrimaryUrlFromPayload(brandData) {
+  return siteIdentityFromUrlString(brandUrlFromPayload(brandData));
+}
+
+/**
+ * Tenant ids for the structured upstream-error log line (SITES-49993). The
+ * legacy routes name the org param `organizationId`, the v2 routes
+ * `spaceCatId` — normalised onto one queryable field name.
+ * @param {object} [context]
+ * @returns {Record<string, unknown>}
+ */
+function reqCtxOf(context) {
+  const params = context?.params ?? {};
+  return {
+    spaceCatId: params.spaceCatId ?? params.organizationId,
+    brandId: params.brandId,
+  };
 }
 
 /**
@@ -286,7 +324,12 @@ function BrandsController(ctx, log, env) {
     return params;
   }
 
-  function createErrorResponse(error) {
+  /**
+   * @param {unknown} error
+   * @param {Record<string, unknown>} [reqCtx] - tenant ids for the structured
+   *   upstream-error log line (SITES-49993); see {@link reqCtxOf}.
+   */
+  function createErrorResponse(error, reqCtx = {}) {
     // A Semrush upstream error's message embeds the gateway URL (internal host +
     // workspace/project UUIDs); never echo it to the client (body or x-error
     // header). Return a generic message and keep the detail to the log. Mirrors
@@ -299,6 +342,10 @@ function BrandsController(ctx, log, env) {
     // flattening to the generic 502. See unwrapTransportCause (errors.js).
     const err = unwrapTransportCause(error);
     if (isSemrushTransportError(err)) {
+      // One structured, queryable line with the upstream status/body and the
+      // tenant ids — the line Logs Insights groups on. The per-handler
+      // log.error above each call site adds its handler-specific context.
+      logUpstreamError(log, 'Brands upstream error', err, reqCtx);
       const status = (err.status === 401 || err.status === 403) ? err.status : 502;
       const message = status === 502 ? 'Upstream request failed' : 'Upstream authorization failed';
       return createResponse({ message }, status, { [HEADER_ERROR]: message });
@@ -316,13 +363,29 @@ function BrandsController(ctx, log, env) {
       // client distinguish error cases without regex-matching the message text
       // (LLMO-6591; see the `uq_brand_name_per_org` TODO this same pattern
       // predates in elmo-ui's getBrandSaveErrorDescriptor).
+      // cleanupHeaderValue strips chars HTTP headers can't carry (CR/LF and
+      // non-ASCII that would otherwise throw ERR_INVALID_CHAR — caught via the
+      // it-postgres IT suite when this guard's own message used an em dash,
+      // serenity-docs#346). The JSON body keeps the raw message; only the
+      // header copy needs sanitizing.
       return createResponse(
         { message: appErr.message, ...(appErr.code ? { code: appErr.code } : {}) },
         appErr.status,
-        { [HEADER_ERROR]: appErr.message },
+        { [HEADER_ERROR]: cleanupHeaderValue(appErr.message || 'Error') },
       );
     }
-    return internalServerError(appErr.message);
+    // Same split as the typed-status branch above: internalServerError() would
+    // set the header AND the body from one value, so a non-ASCII character in
+    // a bare Error's message would strip from the body too — operators
+    // debugging a 500 lose it there for no reason (the raw error is still in
+    // the logs regardless). Build the response directly instead so only the
+    // header copy is sanitized.
+    const rawMessage = appErr.message || 'Internal server error';
+    return createResponse(
+      { message: rawMessage },
+      500,
+      { [HEADER_ERROR]: cleanupHeaderValue(rawMessage) },
+    );
   }
 
   function validateBrandGuidanceFields(brandData = {}) {
@@ -369,7 +432,7 @@ function BrandsController(ctx, log, env) {
       return createResponse(brands, 200);
     } catch (error) {
       log.error(`Error getting brands for organization: ${organizationId}`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -477,7 +540,7 @@ function BrandsController(ctx, log, env) {
       return createResponse(brandGuidelines, 200);
     } catch (error) {
       log.error(`Error getting brand guidelines for site: ${siteId}`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -546,7 +609,7 @@ function BrandsController(ctx, log, env) {
       return createResponse(result, 200);
     } catch (error) {
       log.error(`Error listing prompts for brand ${brandId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -600,7 +663,7 @@ function BrandsController(ctx, log, env) {
       return ok(prompt);
     } catch (error) {
       log.error(`Error getting prompt ${promptId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -693,10 +756,10 @@ function BrandsController(ctx, log, env) {
     } catch (error) {
       if (error?.status === 409) {
         log.warn(`Prompt unique-constraint conflict for brand ${brandId} (org ${spaceCatId}): ${error.message}`);
-        return createErrorResponse(error);
+        return createErrorResponse(error, reqCtxOf(context));
       }
       log.error(`Error creating prompts for brand ${brandId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -755,7 +818,7 @@ function BrandsController(ctx, log, env) {
       return ok(prompt);
     } catch (error) {
       log.error(`Error updating prompt ${promptId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -811,7 +874,7 @@ function BrandsController(ctx, log, env) {
       return noContent();
     } catch (error) {
       log.error(`Error deleting prompt ${promptId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -870,7 +933,7 @@ function BrandsController(ctx, log, env) {
       return createResponse(result, 200);
     } catch (error) {
       log.error(`Error bulk deleting prompts for brand ${brandId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -926,7 +989,7 @@ function BrandsController(ctx, log, env) {
       return createResponse({ results }, 200);
     } catch (error) {
       log.error('Error checking prompts existence', { brandId, error });
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -973,7 +1036,7 @@ function BrandsController(ctx, log, env) {
       return createResponse(stats, 200);
     } catch (error) {
       log.error('Error fetching prompt stats', { brandId, error });
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1022,7 +1085,7 @@ function BrandsController(ctx, log, env) {
       return ok(withSerenityState(brand, serenityScopes));
     } catch (error) {
       log.error(`Error getting brand ${brandId} for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1094,7 +1157,7 @@ function BrandsController(ctx, log, env) {
         `Error resolving brand for org ${spaceCatId} site ${siteId}:`,
         error,
       );
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1159,7 +1222,7 @@ function BrandsController(ctx, log, env) {
       return createResponse({ brands }, 200);
     } catch (error) {
       log.error(`Error listing brands for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1194,7 +1257,7 @@ function BrandsController(ctx, log, env) {
       return createResponse({ categories }, 200);
     } catch (error) {
       log.error(`Error listing categories for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1266,7 +1329,7 @@ function BrandsController(ctx, log, env) {
       } else {
         log.error(`Error creating category for organization ${spaceCatId}:`, error);
       }
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1325,7 +1388,7 @@ function BrandsController(ctx, log, env) {
       } else {
         log.error(`Error updating category ${categoryId} for organization ${spaceCatId}:`, error);
       }
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1375,7 +1438,7 @@ function BrandsController(ctx, log, env) {
       return noContent();
     } catch (error) {
       log.error(`Error deleting category ${categoryId} for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1413,7 +1476,7 @@ function BrandsController(ctx, log, env) {
       return createResponse({ topics }, 200);
     } catch (error) {
       log.error(`Error listing topics for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1469,7 +1532,7 @@ function BrandsController(ctx, log, env) {
       } else {
         log.error(`Error creating topic for organization ${spaceCatId}:`, error);
       }
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1518,7 +1581,7 @@ function BrandsController(ctx, log, env) {
       return ok(updated);
     } catch (error) {
       log.error(`Error updating topic ${topicId} for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1565,7 +1628,7 @@ function BrandsController(ctx, log, env) {
       return noContent();
     } catch (error) {
       log.error(`Error deleting topic ${topicId} for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1636,6 +1699,7 @@ function BrandsController(ctx, log, env) {
       // The initial market's domain, resolved once during provisioning and reused
       // by the site-mirror hook below (avoids re-deriving from the payload).
       let provisionedBrandDomain = null;
+      let provisionedBrandPrimaryUrl = null;
       // The initial market's identity, captured for the mapping-row write below
       // (must happen AFTER the brand row exists — provisionBrandSubworkspace
       // runs before it does, see brand-provisioning.js's return doc).
@@ -1698,6 +1762,11 @@ function BrandsController(ctx, log, env) {
             return badRequest('A primary URL is required to provision a Semrush brand');
           }
           provisionedBrandDomain = brandDomain;
+          // The url the initial market's project should TRACK, from the same
+          // payload URL `brandDomain` reduces to a host. Null when the payload
+          // spells its primary URL in a form the identity rejects; the create
+          // handler then falls back to the host identity, as it did before.
+          provisionedBrandPrimaryUrl = brandPrimaryUrlFromPayload(brandData);
           // A prompt-generating project needs at least one AI model (LLM) to
           // track. The wizard collects them; reject a prompt-generating Semrush
           // create that omits them. With generatePrompts=false the project is
@@ -1739,6 +1808,7 @@ function BrandsController(ctx, log, env) {
             market,
             languageCode,
             brandDomain,
+            primaryUrl: provisionedBrandPrimaryUrl,
             modelIds,
             generateTopics: generatePrompts,
             brandAliases,
@@ -1820,8 +1890,12 @@ function BrandsController(ctx, log, env) {
       }
 
       // When a Semrush sub-workspace + initial market were provisioned, mirror that
-      // initial market as a SpaceCat Site (+ brand_sites link) keyed on the
-      // market's domain, so the Semrush project has a resolvable site entity.
+      // initial market as a SpaceCat Site (+ brand_sites link) keyed on the url the
+      // market TRACKS, so the Semrush project has a resolvable site entity naming
+      // the same url it analyses. Keyed on the host instead, a brand created on
+      // `nba.com/kings` would be recorded against the root `nba.com` Site — and
+      // that Site becomes `brands.site_id`, which sibling brands on one apex would
+      // then collide on.
       // INVARIANT: ensureMarketSite MUST NOT throw — it sits inside the try/catch
       // whose catch releases the just-provisioned workspace; a throw here would
       // tear down a live brand's workspace. ensureMarketSite is best-effort by
@@ -1834,8 +1908,10 @@ function BrandsController(ctx, log, env) {
         const linkedSiteId = await ensureMarketSite(context, {
           organizationId: spaceCatId,
           brandId: provisionedBrandId ?? undefined,
-          // The initial market's domain, resolved during provisioning above.
-          domain: provisionedBrandDomain ?? undefined,
+          // The initial market's tracked url, resolved during provisioning above;
+          // its host when the payload's spelling yielded no identity — the same
+          // value the create handler then tracked.
+          domain: provisionedBrandPrimaryUrl ?? provisionedBrandDomain ?? undefined,
           updatedBy,
           log,
         });
@@ -1865,7 +1941,7 @@ function BrandsController(ctx, log, env) {
         });
         await emptyProvisionedWorkspace(context, provisionedWorkspaceId, spaceCatId, log);
       }
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -2307,7 +2383,7 @@ function BrandsController(ctx, log, env) {
         emitBrandStaleWriteRejected(context, 'updateBrand');
       }
       log.error(`Error updating brand ${brandId} for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -2355,7 +2431,7 @@ function BrandsController(ctx, log, env) {
       return noContent();
     } catch (error) {
       log.error(`Error deleting brand ${brandId} for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -2709,7 +2785,7 @@ function BrandsController(ctx, log, env) {
       } catch (alertError) {
         log.error(`Failed to post activation-failure alert for brand ${brandId}:`, alertError);
       }
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -2773,7 +2849,7 @@ function BrandsController(ctx, log, env) {
       return ok(withSerenityState(updated, serenityScopes));
     } catch (error) {
       log.error(`Error transitioning status for brand ${brandId} in organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
