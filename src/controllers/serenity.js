@@ -1643,8 +1643,13 @@ function SerenityController(context, log, env) {
       let linkedSiteId = null;
       if (allMarketsLive) {
         linkedSiteId = await ensureMarketSite(ctx, {
-          // Optional-chained so a missing/throwing accessor can't 500 the call.
-          organizationId: brand.getOrganizationId?.(),
+          // From the route, not the Brand entity: `brand.schema.js` deliberately
+          // does not map `organization_id`, so no accessor is generated for it and
+          // `brand.getOrganizationId?.()` is always `undefined`. `ensureMarketSite`
+          // reads that as bad input and returns null through its one early return
+          // that logs nothing, which would keep an activating brand `pending` with
+          // every visible step reporting success.
+          organizationId: ctx?.params?.spaceCatId,
           brandId: auth.brandUuid,
           domain: brandPrimaryUrl,
           updatedBy: 'serenity-activate',
@@ -1671,7 +1676,7 @@ function SerenityController(context, log, env) {
           // so this is where an active Serenity brand becomes site-anchored — same
           // authoritative brands.site_id contract as the brandalf activate path.
           await updateBrand({
-            organizationId: brand.getOrganizationId(),
+            organizationId: ctx?.params?.spaceCatId,
             brandId: brandUuid,
             updates: {
               status: 'active',
