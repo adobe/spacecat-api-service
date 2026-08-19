@@ -110,6 +110,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} elementsController - Elements API controller (Semrush Elements wrappers).
  * @param {Object} proxyController - URL proxy controller for client-side previews.
  * @param {Object} brand24Controller - Brand24 API proxy controller (POC — Offsite Visibility).
+ * @param {Object} marketDiscoveryController - Market Discovery controller (POC).
  * @param {Object} taskManagementController - Task-management (Jira ticket creation) controller.
  * @param {Object} onboardingController - Semrush onboarding notification controller.
  * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
@@ -182,6 +183,7 @@ export default function getRouteHandlers(
   elementsController,
   proxyController,
   brand24Controller,
+  marketDiscoveryController,
   taskManagementController,
   onboardingController,
   redirectsController,
@@ -499,6 +501,9 @@ export default function getRouteHandlers(
     'GET /tools/api-keys': apiKeyController.getApiKeys,
     'GET /tools/proxy': proxyController.getPreview,
     'GET /tools/brand24': brand24Controller.getData,
+    'POST /tools/market-discovery': marketDiscoveryController.getCategories,
+    'POST /tools/market-discovery/topic-sources': marketDiscoveryController.getTopicSources,
+    'POST /tools/market-discovery/share-of-voice': marketDiscoveryController.getShareOfVoice,
     'GET /monitoring/drs-bp-pg-audit': drsBpPgAuditController.getProjectionAudit,
 
     // Hybrid permission model — state-layer management + capability
