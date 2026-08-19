@@ -1251,33 +1251,57 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       expect(transport.updateProjectTag).to.not.have.been.called;
     });
 
-    // LLMO-6984 regression. The guard reads the target's DIMENSION, so it must keep
-    // holding whichever name the project's intent root carries. Were the raw upstream
-    // name to reach it, `$abv_tags$intent` would not be in SERVER_OWNED_DIMENSIONS and
-    // the guard would fail OPEN on exactly the projects the rename has reached — the
-    // client could then rename `Informational`, and the next server write would mint a
-    // second one beside it.
-    [
-      { label: 'renamed', levels: dimensionTreeLevels() },
-      { label: 'pre-rename', levels: dimensionTreeLevels({}, { legacyIntentRoot: true }) },
-    ].forEach(({ label, levels }) => {
-      it(`400s a rename of an intent value on a ${label} project`, async () => {
-        const transport = makeTransport({ listProjectTags: makeListProjectTagsStub(levels) });
-        const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
-        const err = await handler.handleUpdateTag(
-          transport,
-          dataAccess,
-          BRAND,
-          WORKSPACE,
-          TAG_IDS.intentCommercial,
-          { name: 'Shopping', geoTargetId: 2840, languageCode: 'en' },
-          fakeLog(),
-        ).then(() => null, (e) => e);
-
-        expect(err.status).to.equal(400);
-        expect(err.message).to.match(/server-owned "intent" dimension cannot be renamed or re-parented/);
-        expect(transport.updateProjectTag).to.not.have.been.called;
+    // The guard reads the target's DIMENSION, not the raw upstream root name. Were
+    // the raw name to reach it, `$abv_tags$intent` would not be in
+    // SERVER_OWNED_DIMENSIONS and the guard would fail OPEN — the client could then
+    // rename `Informational`, and the next server write would mint a second one
+    // beside it.
+    it('400s a rename of an intent value', async () => {
+      const transport = makeTransport({
+        listProjectTags: makeListProjectTagsStub(dimensionTreeLevels()),
       });
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const err = await handler.handleUpdateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        TAG_IDS.intentCommercial,
+        { name: 'Shopping', geoTargetId: 2840, languageCode: 'en' },
+        fakeLog(),
+      ).then(() => null, (e) => e);
+
+      expect(err.status).to.equal(400);
+      expect(err.message).to.match(/server-owned "intent" dimension cannot be renamed or re-parented/);
+      expect(transport.updateProjectTag).to.not.have.been.called;
+    });
+
+    // The same guard on a project the intent rename never reached, whose root is
+    // still named `intent`. `dimensionOfRootName` is identity for that name, so the
+    // fold still yields the intent dimension and the guard still holds. This is why
+    // the bare spelling stays in RESERVED_ROOT_NAMES, and it is what keeps an
+    // un-swept project safe rather than merely degraded — so it is asserted, not
+    // assumed, for as long as such a project can exist.
+    it('400s a rename of a value under a pre-rename `intent` root', async () => {
+      const levels = dimensionTreeLevels();
+      levels[''] = levels[''].map(
+        (t) => (t.name === INTENT_ROOT_NAME ? { ...t, name: 'intent' } : t),
+      );
+      const transport = makeTransport({ listProjectTags: makeListProjectTagsStub(levels) });
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const err = await handler.handleUpdateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        TAG_IDS.intentCommercial,
+        { name: 'Shopping', geoTargetId: 2840, languageCode: 'en' },
+        fakeLog(),
+      ).then(() => null, (e) => e);
+
+      expect(err.status).to.equal(400);
+      expect(err.message).to.match(/server-owned "intent" dimension cannot be renamed or re-parented/);
+      expect(transport.updateProjectTag).to.not.have.been.called;
     });
 
     // LLMO-6665 regression. `source` is server-owned but OPEN, so it is

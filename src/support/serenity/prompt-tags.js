@@ -69,34 +69,42 @@ export const DIMENSION_PROVISION_ORDER = Object.freeze([
 ]);
 
 /**
- * The upstream ROOT NAME of the `intent` dimension.
+ * The agreed marker that hides a tag tree entry from the customer-facing Brand
+ * Presence tag filter: Semrush suppresses any entry whose name starts with it.
  *
- * Semrush hides a tag tree entry whose name starts with the agreed `$abv_tags$`
- * marker from the customer-facing Brand Presence tag filter, so the intent root
- * is named `$abv_tags$intent` upstream. `intent` remains the DIMENSION KEY
- * everywhere else — the `type` a client names on the tag endpoints, the key of
- * the closed vocabularies, the value elmo reads — and only the root's upstream
- * name carries the marker. The five intent VALUES stay bare-named
- * (`Informational`, `Commercial`, …); the rename does not touch them.
+ * This is a data-exposure control, not a naming convention, so anything deciding
+ * what reaches a customer-visible payload keys on THIS rather than on a list of
+ * known marked names.
  */
-export const INTENT_ROOT_NAME = '$abv_tags$intent';
+export const HIDDEN_TAG_MARKER = '$abv_tags$';
 
 /**
- * The pre-rename intent root name, identical to the dimension key.
+ * The upstream ROOT NAME of the `intent` dimension.
  *
- * TEMPORARY — the rename runs project by project from the data-service migration
- * CLI (LLMO-6985), so a project can carry either spelling until that sweep
- * completes. Both the tag-tree resolver and the Elements read path tolerate this
- * one; LLMO-6986 removes the tolerance once no live project carries it.
- *
- * Each of the three tolerances logs when it fires, under its own `event` key, so
- * "has the sweep finished?" is a query rather than a judgement call:
- * `intent-rename-legacy-root-adopted` (tag-tree resolved the pre-rename root),
- * `intent-rename-legacy-retry` (the Elements enrichment fell back), and
- * `intent-rename-legacy-tags-present` (filter dimensions still saw `intent__`
- * tags). LLMO-6986 is safe once all three have gone quiet.
+ * The intent root carries {@link HIDDEN_TAG_MARKER}, so it is named
+ * `$abv_tags$intent` upstream. `intent` remains the DIMENSION KEY everywhere else
+ * — the `type` a client names on the tag endpoints, the key of the closed
+ * vocabularies, the value elmo reads — and only the root's upstream name carries
+ * the marker. The five intent VALUES stay bare-named (`Informational`,
+ * `Commercial`, …); the rename does not touch them.
  */
-export const LEGACY_INTENT_ROOT_NAME = DIMENSION.INTENT;
+export const INTENT_ROOT_NAME = `${HIDDEN_TAG_MARKER}intent`;
+
+/**
+ * The upstream root NAME a dimension's root is provisioned and resolved by — the
+ * dimension key itself for four of the five, {@link INTENT_ROOT_NAME} for
+ * `intent`. Anything outside the taxonomy maps to itself, so a caller gets the
+ * name it asked for rather than `undefined` flowing into a create.
+ *
+ * {@link RESERVED_ROOT_NAMES} is derived through this function, so a change to the
+ * mapping widens or narrows what a customer tag may not shadow.
+ *
+ * @param {string} dimension - a dimension key.
+ * @returns {string} the upstream root name.
+ */
+export function rootNameOfDimension(dimension) {
+  return dimension === DIMENSION.INTENT ? INTENT_ROOT_NAME : dimension;
+}
 
 /**
  * The origin (authorship) dimension root name — who authored the prompt. Named
@@ -119,23 +127,39 @@ export const ORIGIN_ROOT_NAME = DIMENSION.ORIGIN;
  * an un-reshaped project, or a producing-system value on a reshaped one — and the
  * two cannot be told apart at this prefix. The origins read tolerates `source__`
  * for the un-reshaped case and accepts that producing-system values ride along on
- * reshaped projects until a dedicated source dimension claims them. Unlike
- * LLMO-6986's intent tolerance, this one is not cleanly observable from the read
- * surface (producing-system `source__` masks it), so there is no transition log.
+ * reshaped projects until a dedicated source dimension claims them. That
+ * ambiguity is also why this tolerance carries no transition log: a `source__`
+ * tag on the read surface does not tell you whether any project is still
+ * un-reshaped, so the sweep has to be proved from the tag trees themselves.
  */
 export const LEGACY_ORIGIN_ROOT_NAME = 'source';
 
 /**
- * Every name reserved at the root level: the four roots named after their
- * dimension, plus BOTH intent spellings — the upstream `$abv_tags$intent` and
- * the pre-rename `intent`, which stays reserved while any project still carries
- * it. A customer value may shadow neither, or the tree would hold two tags a
+ * Every name reserved at the root level: each dimension's key AND its upstream
+ * root name. Those coincide for four of the five; for `intent` they differ, so
+ * both `intent` and `$abv_tags$intent` are reserved.
+ *
+ * The bare `intent` is reserved even though no root is named that, because
+ * {@link dimensionOfRootName} maps it to the intent dimension: a name shadowing
+ * it would be READ as the dimension itself, leaving the tree with two entries a
  * reader cannot tell apart at the level that decides a tag's dimension.
+ *
+ * Its most reachable effect today is on {@link canonicalizeSource}, which reuses
+ * this list to refuse a free-text `prompts.source` that folds onto a dimension
+ * name. The root-level create paths are already closed by other means — a create
+ * without a parent is placed under its dimension's own root, one with a parent
+ * must prove in-dimension ancestry, and a patch cannot promote a tag to root — so
+ * treat this as defence in depth there rather than the only guard.
+ *
+ * Both halves are derived from `DIMENSION_PROVISION_ORDER` rather than listed, so
+ * a future tidy-up that maps the spread through {@link rootNameOfDimension} —
+ * which is what the other consumer of that list does — cannot silently drop the
+ * bare spelling and with it the shadowing guard.
  */
-export const RESERVED_ROOT_NAMES = Object.freeze([
+export const RESERVED_ROOT_NAMES = Object.freeze([...new Set([
   ...DIMENSION_PROVISION_ORDER,
-  INTENT_ROOT_NAME,
-]);
+  ...DIMENSION_PROVISION_ORDER.map(rootNameOfDimension),
+])]);
 
 /** `origin` values — who authored the prompt. */
 export const ORIGIN_VALUE = Object.freeze({
@@ -334,24 +358,17 @@ export function isDimensionRootName(name) {
 }
 
 /**
- * The upstream root NAME a dimension's root is provisioned and resolved by — the
- * dimension key itself for four of the five, {@link INTENT_ROOT_NAME} for
- * `intent`. Anything outside the taxonomy maps to itself, so a caller gets the
- * name it asked for rather than `undefined` flowing into a create.
- *
- * @param {string} dimension - a dimension key.
- * @returns {string} the upstream root name.
- */
-export function rootNameOfDimension(dimension) {
-  return dimension === DIMENSION.INTENT ? INTENT_ROOT_NAME : dimension;
-}
-
-/**
  * The DIMENSION KEY a root name denotes — the inverse of
  * {@link rootNameOfDimension}, and the fold that keeps `$abv_tags$intent` from
  * leaking out of the tag-tree walk into everything that reasons about dimensions
- * by key. Identity for every other name, the pre-rename `intent` included (it IS
- * the key), so a mid-rename project and a renamed one answer the same thing.
+ * by key.
+ *
+ * Identity for every other name. That is by construction and cannot single out
+ * the bare `intent`, which is why it stays in {@link RESERVED_ROOT_NAMES}: a root
+ * named that would be read as the intent dimension. Note the write and read paths
+ * deliberately disagree about such a root — this fold makes the write path treat
+ * its children as server-owned, while the Elements read path does not claim them
+ * as intents. That asymmetry is intended; do not "fix" one side to match the other.
  *
  * @param {string} rootName - a tag's root-ancestor name, as upstream spells it.
  * @returns {string} the dimension key.
