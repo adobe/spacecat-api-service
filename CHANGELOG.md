@@ -1,3 +1,10 @@
+## [1.758.1](https://github.com/adobe/spacecat-api-service/compare/v1.758.0...v1.758.1) (2026-08-19)
+
+
+### Bug Fixes
+
+* **onboard:** preserve PLG/Pre-onboard tier during onboard command ([#3074](https://github.com/adobe/spacecat-api-service/issues/3074)) ([41e9496](https://github.com/adobe/spacecat-api-service/commit/41e9496f36baabca2012cf27ff3d9f18c7cd12c8))
+
 # [1.758.0](https://github.com/adobe/spacecat-api-service/compare/v1.757.0...v1.758.0) (2026-08-19)
 
 
