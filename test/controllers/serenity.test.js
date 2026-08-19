@@ -1487,6 +1487,29 @@ describe('SerenityController', () => {
       expect(ensureMarketSiteStub).to.not.have.been.called;
     });
 
+    it('createMarket 400s on a siteId the caller does not own, even alongside a brandDomain', async () => {
+      // The unguarded shape: with brandDomain present nothing used to read the
+      // Site, so a foreign UUID was recorded verbatim as the market's own — and
+      // that value decides what the project analyses. The org check runs on every
+      // supplied siteId now, before either mode dispatches.
+      resolveSiteIdentityStub.resolves(null);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        data: {
+          market: 'us',
+          languageCode: 'en',
+          brandDomain: 'x.com',
+          siteId: '00000000-0000-4000-8000-00000000f0f0',
+          brandNames: ['X'],
+        },
+      });
+      const response = await controller.createMarket(ctx);
+      expect(response.status).to.equal(400);
+      // The organization is what makes the check possible, so it must be passed.
+      expect(resolveSiteIdentityStub).to.have.been.calledWith(ctx.dataAccess, '00000000-0000-4000-8000-00000000f0f0', sinon.match.any, ORG);
+      expect(handlers.handleCreateMarketSubworkspace).to.not.have.been.called;
+    });
+
     it('createMarket derives brandDomain from a supplied siteId and links THAT site (LLMO-6405)', async () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' } });
       resolveSiteIdentityStub.resolves({ domain: 'acme.com', primaryUrl: 'acme.com/markets' });

@@ -812,6 +812,31 @@ function SerenityController(context, log, env) {
       // `siteId` instead of a raw `brandDomain`. Captured once for both the
       // domain derivation and the direct site link below. Absent → unchanged.
       const suppliedSiteId = hasText(requestBody.siteId) ? requestBody.siteId : null;
+      // A supplied Site is resolved and ownership-checked HERE, before either mode
+      // dispatches, because the id the caller names decides what the market's
+      // project analyses: it lands on `brand_to_semrush_projects.site_id`, the
+      // per-market source of truth for `settings.ai.primary_url`. Neither handler
+      // can make that check — the sub-workspace one has no Site access, and the
+      // flat one has no organization — so a Site from another organization would
+      // otherwise be recorded verbatim and point this project at someone else's
+      // site. Unresolvable and cross-org both answer the same 400: whether the id
+      // is unknown or simply not yours is not the caller's business.
+      let suppliedSiteIdentity = null;
+      if (suppliedSiteId) {
+        const orgId = ctx?.params?.spaceCatId;
+        suppliedSiteIdentity = await resolveSiteIdentity(
+          ctx.dataAccess,
+          suppliedSiteId,
+          log,
+          orgId,
+        );
+        if (!suppliedSiteIdentity?.domain || !hasText(suppliedSiteIdentity.domain)) {
+          return createResponse(
+            { error: 'invalidRequest', message: 'siteId did not resolve to a site domain' },
+            400,
+          );
+        }
+      }
       let result;
       if (auth.mode === 'subworkspace') {
         const brand = await loadBrand(ctx, auth.brandUuid);
@@ -827,22 +852,15 @@ function SerenityController(context, log, env) {
           ...requestBody,
           primaryUrl: siteIdentityFromUrlString(requestBody.brandDomain),
         };
-        if (suppliedSiteId && !hasText(requestBody.brandDomain)) {
-          // Both values from one read, for the same reason the domain is derived
-          // here at all: the handler has no Site access. Only `primaryUrl` can
-          // carry a subpath — `brandDomain` is a bare FQDN because a path there is
-          // rejected upstream.
-          const identity = await resolveSiteIdentity(ctx.dataAccess, suppliedSiteId, log);
-          if (!identity?.domain || !hasText(identity.domain)) {
-            return createResponse(
-              { error: 'invalidRequest', message: 'siteId did not resolve to a site domain' },
-              400,
-            );
-          }
+        if (suppliedSiteIdentity && !hasText(requestBody.brandDomain)) {
+          // Both values from the read above, for the same reason the domain is
+          // derived here at all: the handler has no Site access. Only `primaryUrl`
+          // can carry a subpath — `brandDomain` is a bare FQDN because a path there
+          // is rejected upstream.
           effectiveBody = {
             ...effectiveBody,
-            brandDomain: identity.domain,
-            primaryUrl: identity.primaryUrl ?? undefined,
+            brandDomain: suppliedSiteIdentity.domain,
+            primaryUrl: suppliedSiteIdentity.primaryUrl ?? undefined,
           };
         }
         // Brand aliases are brand-level but region-scoped: the create handler
