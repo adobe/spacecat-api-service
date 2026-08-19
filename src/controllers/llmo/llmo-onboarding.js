@@ -886,6 +886,9 @@ export async function updateIndexConfig(dataFolder, context, say = () => {}) {
 
   // Match dataFolder as an actual YAML key, not a substring of one (LLMO-6320) —
   // see the "substring of an existing key" test below for the failure this prevents.
+  // ^\s*<folder>: (with the m flag) matches any line, so it would also match a nested
+  // key under a different section -- helix-query.yaml is a flat list of top-level
+  // definitions today, so that case can't occur; revisit if that ever changes.
   const escapedDataFolder = dataFolder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const indexKeyPattern = new RegExp(`^\\s*${escapedDataFolder}:`, 'm');
   if (indexKeyPattern.test(content)) {
