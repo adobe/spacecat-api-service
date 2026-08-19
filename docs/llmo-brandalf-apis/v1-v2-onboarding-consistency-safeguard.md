@@ -40,9 +40,26 @@ defaults to v2. Concretely:
 4. otherwise → **v2**
 
 The `LLMO_ONBOARDING_DEFAULT_VERSION` kill switch is **retained** as a global
-"hold not-yet-migrated orgs on v1" switch. Existing v1 customers are **not
-migrated**: this resolver only runs at onboarding time, and already-onboarded
-orgs keep their `brandalf=false` flag and continue running v1 downstream.
+"hold not-yet-migrated orgs on v1" switch.
+
+**Where the resolver runs.** `resolveLlmoOnboardingMode` is consumed on two
+paths, not just onboarding:
+
+- `performLlmoOnboarding` (write) — on a v2 result it upserts `brandalf=true`
+  **org-wide**, so a single onboarding touch flips *every* existing site of that
+  org to v2 downstream (including sites that have no v2 brand or an empty prompt
+  set). Ops note: the remaining v1 population is dominated by one internal org
+  holding ~159 sites — onboarding any one of its sites flips all 159 at once.
+- `getBrandForOrgSite` in `brands.js` — a read-only GET, hit by BP refresh and
+  the DRS scheduler.
+
+Removing the cutoff flips a flagless pre-cutoff org to v2 on **both** paths: the
+brand resolver now returns the v2 brand where it previously 404'd. The resolver
+does **not** by itself flip an already-onboarded org's `brandalf` flag (only an
+onboarding does that), and DRS gates on the `brandalf` / `brandalf_migration`
+flags independently, so a still-flagless org keeps running v1 downstream until it
+is onboarded/flagged. (A small tracked set of orgs already resolve v1 in DRS while
+owning v2 brand rows — for those, this endpoint now serves the v2 brand.)
 
 The sections below describe the original cutoff-based design (rows referencing
 `LLMO_BRANDALF_GA_CUTOFF_MS` / "pre-cutoff sites") and are retained for

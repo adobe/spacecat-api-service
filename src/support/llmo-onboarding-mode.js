@@ -69,11 +69,17 @@ export async function readBrandalfMigrationFlagOverride(organizationId, postgres
  *  4. Otherwise → return v2 (default for everyone else).
  *
  * The legacy-site cutoff that previously forced pre-GA customers onto v1
- * (createdAt before LLMO_BRANDALF_GA_CUTOFF_MS) was removed in LLMO-7108 so that
- * every new onboarding defaults to v2 unless the kill switch explicitly holds
- * the org back. This resolver only runs at onboarding time: already-onboarded v1
- * customers keep their brandalf=false flag and continue running v1 downstream —
- * it does not migrate existing orgs.
+ * (createdAt before LLMO_BRANDALF_GA_CUTOFF_MS) was removed in LLMO-7108 so every
+ * new onboarding defaults to v2 unless the kill switch holds the org back.
+ *
+ * This is consumed on two paths, not just onboarding: performLlmoOnboarding
+ * (which upserts brandalf=true org-wide on a v2 result) and the read-only
+ * (org, site) -> brand resolver in brands.js (hit by BP refresh and the DRS
+ * scheduler). Removing the cutoff flips a flagless pre-cutoff org to v2 on both
+ * — the brand resolver now returns the v2 brand where it used to 404. It does
+ * not by itself flip an already-onboarded org's brandalf flag (only an
+ * onboarding does that, org-wide), and DRS gates on the flag independently, so a
+ * still-flagless org keeps running v1 downstream until it is onboarded/flagged.
  *
  * TEMPORARY — the LLMO_ONBOARDING_DEFAULT_VERSION kill switch and the v1 branch
  * should be removed once all v1 customers have been migrated to v2, at which
