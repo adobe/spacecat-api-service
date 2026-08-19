@@ -1370,7 +1370,7 @@ export async function updateBrand({
   if (needsExistingFetch) {
     const { data: current, error: currentError } = await postgrestClient
       .from('brands')
-      .select('site_id, status, updated_at')
+      .select('name, site_id, status, updated_at')
       .eq('id', brandId)
       .maybeSingle();
     // Fail closed: a swallowed read error leaves `current` null, so the guard
@@ -1439,7 +1439,8 @@ export async function updateBrand({
   } else if (hasText(updates.baseSiteId) && (!existing?.site_id || isPending)) {
     // serenity-docs#346: same org-ID mismatch guard as upsertBrand — verify the
     // new/re-pointed site actually belongs to this brand's org before persisting.
-    await assertSiteBelongsToOrg(postgrestClient, updates.baseSiteId, organizationId, brandId);
+    const brandLabel = existing?.name || brandId;
+    await assertSiteBelongsToOrg(postgrestClient, updates.baseSiteId, organizationId, brandLabel);
     patch.site_id = updates.baseSiteId;
   }
 

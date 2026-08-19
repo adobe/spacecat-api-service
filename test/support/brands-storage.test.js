@@ -2546,6 +2546,31 @@ describe('brands-storage', () => {
       expect(sitesEq).to.deep.include({ table: 'sites', col: 'organization_id', val: ORG_ID });
     });
 
+    it('rejects re-pointing a pending brand to a cross-org site (serenity-docs#346)', async () => {
+      // Distinct code path from the "first set" test above: this brand already
+      // HAS a site_id, so the guard only fires via the isPending re-point
+      // sub-condition, not the !existing?.site_id one.
+      const client = createCapturingClient({
+        brands: [
+          { data: { name: 'Pending Re-pointer', site_id: 'old-site', status: 'pending' }, error: null },
+        ],
+        sites: { data: null, error: null }, // site not found under this org
+      });
+
+      const err = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { baseSiteId: 'other-orgs-site' },
+        postgrestClient: client,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(409);
+      expect(err.code).to.equal('brand_site_org_mismatch');
+      // Uses the fetched brand's name, not the raw brandId, in the message.
+      expect(err.message).to.contain('Pending Re-pointer');
+      expect(client.capturedCalls.update).to.have.lengthOf(0);
+    });
+
     it('sets baseSiteId when brand has no site_id yet', async () => {
       const fullBrandRow = makeBrandRow({ site_id: 'new-site-id' });
 
