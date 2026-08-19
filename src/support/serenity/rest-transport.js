@@ -770,7 +770,7 @@ export function createSerenityTransport({ env, imsToken }) {
      *
      * NESTING (1-level category tree): pass `parentId` to create the names as
      * CHILDREN of that upstream tag id — a single call, no separate re-parent
-     * needed (verified live 2026-07-01 against adobe-hackathon.semrush.com: the
+     * needed (verified live 2026-07-01 against www.semrush.com: the
      * child comes back with `parent_id` set and lists under the parent). The one
      * `parent_id` applies to every name in the batch. Omit for a flat/root tag.
      *
@@ -896,7 +896,7 @@ export function createSerenityTransport({ env, imsToken }) {
     /**
      * DELETE /v1/workspaces/{ws}/projects/{pid} — removes an upstream
      * project. Upstream support verified 2026-05-28 against
-     * adobe-hackathon.semrush.com:
+     * www.semrush.com:
      *
      *   OPTIONS /v1/workspaces/{ws}/projects/{pid} → 405, allow: DELETE, GET, PATCH
      *   DELETE  /v1/workspaces/{ws}/projects/<bogus> → 404 {"message":"not found"}
