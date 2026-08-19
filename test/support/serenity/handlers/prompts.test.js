@@ -100,6 +100,13 @@ function fakeLog() {
   };
 }
 
+// SITES-50099: strips the "Serenity prompt delete " label prefix off a logged
+// line and parses the embedded JSON payload.
+const AUDIT_LABEL = 'Serenity prompt delete ';
+function parseAuditLine(line) {
+  return JSON.parse(line.slice(AUDIT_LABEL.length));
+}
+
 describe('handlers/prompts.js — handleListPrompts', () => {
   it('400s when geoTargetId is missing', async () => {
     const transport = {};
@@ -1786,6 +1793,105 @@ describe('handlers/prompts.js — handleBulkDeletePrompts', () => {
     expect(result.failed).to.have.lengthOf(0);
     // Single project = single publish, even though two prompts were deleted.
     expect(transport.publishProject).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en');
+  });
+
+  // SITES-50099: every deleted prompt gets one structured, requester-attributed
+  // audit log line — the only durable trail for "who deleted which prompt".
+  it('logs one structured "Serenity prompt delete" line per successfully deleted prompt', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      deletePromptsByIds: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+    const log = fakeLog();
+
+    await handleBulkDeletePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{ semrushPromptId: 'sem-1', geoTargetId: 2840, languageCode: 'en' }],
+    }, log, { orgId: 'org-1', callerId: 'caller@example.com' });
+
+    expect(log.info).to.have.been.calledOnce;
+    const [line] = log.info.firstCall.args;
+    expect(line).to.match(/^Serenity prompt delete /);
+    expect(parseAuditLine(line)).to.deep.equal({
+      organizationId: 'org-1',
+      brandId: BRAND,
+      semrushWorkspaceId: WORKSPACE,
+      semrushPromptId: 'sem-1',
+      geoTargetId: 2840,
+      languageCode: 'en',
+      callerId: 'caller@example.com',
+      outcome: 'deleted',
+    });
+  });
+
+  it('defaults callerId to "unknown" when the caller is not threaded through', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      deletePromptsByIds: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+    const log = fakeLog();
+
+    await handleBulkDeletePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{ semrushPromptId: 'sem-1', geoTargetId: 2840, languageCode: 'en' }],
+    }, log);
+
+    const [line] = log.info.firstCall.args;
+    expect(parseAuditLine(line).callerId).to.equal('unknown');
+  });
+
+  it('logs outcome=deleted for the idempotent upstream-404 case', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    const err = new SerenityTransportError(404, 'not found');
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      deletePromptsByIds: sinon.stub().rejects(err),
+      publishProject: sinon.stub().resolves(),
+    };
+    const log = fakeLog();
+
+    await handleBulkDeletePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{ semrushPromptId: 'sem-1', geoTargetId: 2840, languageCode: 'en' }],
+    }, log, { callerId: 'caller@example.com' });
+
+    expect(log.info).to.have.been.calledOnce;
+    const [line] = log.info.firstCall.args;
+    expect(parseAuditLine(line).outcome).to.equal('deleted');
+  });
+
+  it('logs a structured error-outcome line for a failed delete, without leaking the raw upstream error', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    const err = Object.assign(new Error('upstream boom'), { status: 503 });
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      deletePromptsByIds: sinon.stub().rejects(err),
+    };
+    const log = fakeLog();
+
+    await handleBulkDeletePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{ semrushPromptId: 'sem-1', geoTargetId: 2840, languageCode: 'en' }],
+    }, log, { callerId: 'caller@example.com' });
+
+    expect(log.error).to.have.been.calledOnce;
+    const [line] = log.error.firstCall.args;
+    const payload = parseAuditLine(line);
+    expect(payload.outcome).to.equal('error');
+    expect(payload.status).to.equal(503);
+    expect(payload.callerId).to.equal('caller@example.com');
   });
 
   it('reports an entry in failed for each missing field in a bulk-delete target', async () => {

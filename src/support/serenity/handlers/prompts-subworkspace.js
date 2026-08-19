@@ -36,6 +36,7 @@ import {
   MAX_TAG_IDS,
   BULK_CREATE_CONCURRENCY,
   BULK_PROMPTS_MAX_ITEMS,
+  deleteProjectBatches,
 } from './prompts.js';
 import { ORIGIN_VALUE, PROXY_CREATE_SOURCE_VALUE } from '../prompt-tags.js';
 import { resolveProject, buildSliceProjectMap, sliceKey } from '../subworkspace-projects.js';
@@ -483,16 +484,20 @@ export async function handleUpdatePromptSubworkspace(
  * @param {any} body
  * @param {any} log
  * @param {object} [options]
- * @param {string | null} [options.orgId] - serenity-docs#72 §5 alert payload only.
- * @param {string | null} [options.brandId] - serenity-docs#72 §5 alert payload only.
+ * @param {string | null} [options.orgId] - also the audit log's organizationId.
+ * @param {string | null} [options.brandId] - also stamped on the audit log line.
  * @param {object | null} [options.env] - serenity-docs#72 §5 alert kill-switch/config only.
+ * @param {string} [options.callerId] - resolved requester id (see resolveCallerId),
+ *   stamped on every audit log line this call emits (SITES-50099).
  */
 export async function handleBulkDeletePromptsSubworkspace(
   transport,
   workspaceId,
   body,
   log,
-  { orgId = null, brandId = null, env = null } = {},
+  {
+    orgId = null, brandId = null, env = null, callerId = 'unknown',
+  } = {},
 ) {
   const targets = Array.isArray(body?.prompts) ? body.prompts : [];
   if (targets.length === 0) {
@@ -541,31 +546,12 @@ export async function handleBulkDeletePromptsSubworkspace(
     bucket.targets.push({ semrushPromptId: sid, geoTargetId, languageCode });
   });
 
-  let deleted = 0;
-  const projectsToPublish = new Set();
-  await Promise.all(Array.from(byProject.entries()).map(async ([pid, bucket]) => {
-    try {
-      await transport.deletePromptsByIds(workspaceId, pid, bucket.ids);
-      deleted += bucket.ids.length;
-      projectsToPublish.add(pid);
-    } catch (e) {
-      if (isUpstreamGone(e)) {
-        deleted += bucket.ids.length;
-        projectsToPublish.add(pid);
-        log?.info?.('bulk-delete (subworkspace): upstream already-deleted (404 treated as success)', { ids: bucket.ids });
-        return;
-      }
-      bucket.targets.forEach((t) => {
-        failed.push({
-          semrushPromptId: t.semrushPromptId,
-          geoTargetId: t.geoTargetId,
-          languageCode: t.languageCode,
-          status: e.status || 500,
-          message: redactUpstreamMessage(e),
-        });
-      });
-    }
-  }));
+  const {
+    deleted, failed: deleteFailures, projectsToPublish,
+  } = await deleteProjectBatches(transport, workspaceId, byProject, log, {
+    orgId, brandId, callerId,
+  });
+  failed.push(...deleteFailures);
 
   for (const pid of projectsToPublish) {
     invalidateTagCacheForProject(workspaceId, pid);

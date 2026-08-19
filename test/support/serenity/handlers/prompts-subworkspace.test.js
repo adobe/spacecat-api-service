@@ -32,6 +32,13 @@ use(sinonChai);
 const WS = 'subworkspace-ws-1';
 const log = { info: () => {}, error: () => {}, warn: () => {} };
 
+// SITES-50099: strips the "Serenity prompt delete " label prefix off a logged
+// line and parses the embedded JSON payload.
+const AUDIT_LABEL = 'Serenity prompt delete ';
+function parseAuditLine(line) {
+  return JSON.parse(line.slice(AUDIT_LABEL.length));
+}
+
 // A subworkspace project for a (geo, lang) slice, in the v1 default shape:
 // nested settings.ai.location.id / settings.ai.language.name, no created_at.
 function proj({ id = 'p-us-en', geo = 2840, lang = 'en' } = {}) {
@@ -676,6 +683,76 @@ describe('prompts-subworkspace handlers', () => {
       }, log);
       expect(result.deleted).to.equal(1);
       expect(result.failed).to.have.length(0);
+    });
+
+    // SITES-50099: every deleted prompt gets one structured, requester-attributed
+    // audit log line — the only durable trail for "who deleted which prompt".
+    it('logs one structured "Serenity prompt delete" line per successfully deleted prompt', async () => {
+      const transport = makeTransport();
+      const spyLog = { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() };
+
+      await handleBulkDeletePromptsSubworkspace(transport, WS, {
+        prompts: [{ semrushPromptId: 'q1', geoTargetId: 2840, languageCode: 'en' }],
+      }, spyLog, { orgId: 'org-1', brandId: 'brand-1', callerId: 'caller@example.com' });
+
+      expect(spyLog.info).to.have.been.calledOnce;
+      const [line] = spyLog.info.firstCall.args;
+      expect(line).to.match(/^Serenity prompt delete /);
+      expect(parseAuditLine(line)).to.deep.equal({
+        organizationId: 'org-1',
+        brandId: 'brand-1',
+        semrushWorkspaceId: WS,
+        semrushPromptId: 'q1',
+        geoTargetId: 2840,
+        languageCode: 'en',
+        callerId: 'caller@example.com',
+        outcome: 'deleted',
+      });
+    });
+
+    it('defaults callerId to "unknown" when the caller is not threaded through', async () => {
+      const transport = makeTransport();
+      const spyLog = { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() };
+
+      await handleBulkDeletePromptsSubworkspace(transport, WS, {
+        prompts: [{ semrushPromptId: 'q1', geoTargetId: 2840, languageCode: 'en' }],
+      }, spyLog);
+
+      const [line] = spyLog.info.firstCall.args;
+      expect(parseAuditLine(line).callerId).to.equal('unknown');
+    });
+
+    it('logs outcome=deleted for the idempotent upstream-404 case', async () => {
+      const transport = makeTransport({
+        deletePromptsByIds: sinon.stub().rejects(new SerenityTransportError(404, 'gone')),
+      });
+      const spyLog = { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() };
+
+      await handleBulkDeletePromptsSubworkspace(transport, WS, {
+        prompts: [{ semrushPromptId: 'q1', geoTargetId: 2840, languageCode: 'en' }],
+      }, spyLog, { callerId: 'caller@example.com' });
+
+      expect(spyLog.info).to.have.been.calledOnce;
+      const [line] = spyLog.info.firstCall.args;
+      expect(parseAuditLine(line).outcome).to.equal('deleted');
+    });
+
+    it('logs a structured error-outcome line for a failed delete', async () => {
+      const transport = makeTransport({
+        deletePromptsByIds: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
+      });
+      const spyLog = { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() };
+
+      await handleBulkDeletePromptsSubworkspace(transport, WS, {
+        prompts: [{ semrushPromptId: 'q1', geoTargetId: 2840, languageCode: 'en' }],
+      }, spyLog, { callerId: 'caller@example.com' });
+
+      expect(spyLog.error).to.have.been.calledOnce;
+      const [line] = spyLog.error.firstCall.args;
+      const payload = parseAuditLine(line);
+      expect(payload.outcome).to.equal('error');
+      expect(payload.status).to.equal(500);
+      expect(payload.callerId).to.equal('caller@example.com');
     });
 
     it('400s on an empty prompts array', async () => {
