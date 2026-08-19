@@ -16,7 +16,7 @@ import {
   BRAND_1_ID,
   SITE_2_ID,
   SITE_2_BASE_URL,
-  SITE_3_ID,
+  SITE_3_ID, // belongs to ORG_2, not ORG_1 (seed-data/sites.js) — used for cross-org tests
   MARKET_SITE_1_ID,
   MARKET_SITE_1_BASE_URL,
 } from '../seed-ids.js';

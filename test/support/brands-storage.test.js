@@ -1393,6 +1393,32 @@ describe('brands-storage', () => {
       expect(sitesEq).to.deep.include({ table: 'sites', col: 'organization_id', val: ORG_ID });
     });
 
+    it('fails closed with an untyped error when the sites org-membership lookup errors (serenity-docs#346)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null }, // no existing brand
+        ],
+        sites: { data: null, error: { message: 'connection reset' } }, // PostgREST failure
+      });
+
+      const err = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', baseSiteId: 'some-site' },
+        postgrestClient: client,
+      }).catch((e) => e);
+
+      expect(err.message).to.equal(
+        'Failed to verify primary site org for brand "Test": connection reset',
+      );
+      // Deliberately untyped: a DB-read failure is not the same class of
+      // problem as a genuine org mismatch, so it must NOT carry the 409
+      // brand_site_org_mismatch status/code — it surfaces as a plain 500
+      // via the controller's generic error path instead.
+      expect(err.status).to.be.undefined;
+      expect(err.code).to.be.undefined;
+      expect(client.capturedCalls.upsert).to.have.lengthOf(0);
+    });
+
     it('does not warn when re-upserting with the same site_id', async () => {
       const log = { warn: sinon.stub(), info: sinon.stub(), error: sinon.stub() };
       const client = createCapturingClient({

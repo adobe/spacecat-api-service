@@ -352,8 +352,8 @@ async function replaceChildRows(table, brandId, rows, onConflict, postgrestClien
  * @param {string} organizationId - SpaceCat organization UUID the brand belongs to
  * @param {string} brandLabel - Whatever identifies the brand in the caller's context,
  *   for the error message only — upsertBrand passes the brand name (not yet
- *   persisted, so no id exists yet), updateBrand passes the brand id (no
- *   guaranteed name on hand there without an extra fetch).
+ *   persisted, so no id exists yet); updateBrand passes the fetched brand's
+ *   name when its existing-row read found one, else falls back to brandId.
  * @throws {Error} status 409, code 'brand_site_org_mismatch', if the site does not
  *   belong to organizationId (including if it doesn't exist at all)
  */
@@ -372,7 +372,7 @@ async function assertSiteBelongsToOrg(postgrestClient, siteId, organizationId, b
   if (!anchorSite) {
     const err = new Error(
       `Cannot anchor brand "${brandLabel}" to site ${siteId} — that site `
-      + `does not belong to organization ${organizationId}.`,
+      + `does not exist, or does not belong to organization ${organizationId}.`,
     );
     err.status = 409;
     err.code = 'brand_site_org_mismatch';
