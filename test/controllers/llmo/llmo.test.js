@@ -7726,7 +7726,7 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body.message).to.include('reindexed, previewed, and published');
-      expect(body.entriesAdded).to.equal(2);
+      expect(body.entriesReindexed).to.equal(2);
       expect(reindexStub).to.have.been.calledOnce;
       expect(previewAndPublishStub).to.have.been.calledOnce;
     });

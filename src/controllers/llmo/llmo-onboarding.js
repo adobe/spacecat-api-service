@@ -884,11 +884,8 @@ export async function updateIndexConfig(dataFolder, context, say = () => {}) {
   });
   const content = Buffer.from(file.content, 'base64').toString('utf-8');
 
-  // Match the dataFolder as an actual YAML mapping key, not merely as a substring:
-  // a raw `content.includes(dataFolder)` check false-positives whenever dataFolder is a
-  // substring of an already-registered key (e.g. registering `lego-com` is silently
-  // skipped because `lego-com-uk:` already exists), which lets real folders go
-  // unregistered while the onboarding flow believes it registered them (LLMO-6320).
+  // Match dataFolder as an actual YAML key, not a substring of one (LLMO-6320) —
+  // see the "substring of an existing key" test below for the failure this prevents.
   const escapedDataFolder = dataFolder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const indexKeyPattern = new RegExp(`^\\s*${escapedDataFolder}:`, 'm');
   if (indexKeyPattern.test(content)) {
@@ -1851,6 +1848,34 @@ export async function performLlmoOffboarding(site, config, context) {
   };
 }
 
+// Shared by every project-elmo-ui-data Admin API caller below. Other admin.hlx.page
+// callers in this file (startBulkStatusJob, pollJobStatus, bulkUnpublishPaths) build
+// their own headers (they also need Content-Type) and aren't touched here to keep this
+// change scoped to LLMO-6320; consolidating all of them is a reasonable follow-up.
+const HLX_ADMIN_ORG = 'adobe';
+const HLX_ADMIN_SITE = 'project-elmo-ui-data';
+const HLX_ADMIN_REF = 'main';
+const HLX_ADMIN_BASE_URL = 'https://admin.hlx.page';
+
+function buildHlxAdminUrl(action, filePath) {
+  return `${HLX_ADMIN_BASE_URL}/${action}/${HLX_ADMIN_ORG}/${HLX_ADMIN_SITE}/${HLX_ADMIN_REF}/${filePath}`;
+}
+
+function getHlxAuthHeaders(env) {
+  if (!env.HLX_ONBOARDING_TOKEN) {
+    throw new Error('HLX_ONBOARDING_TOKEN is not set');
+  }
+  return { Cookie: `auth_token=${env.HLX_ONBOARDING_TOKEN}` };
+}
+
+async function readHlxErrorBody(response) {
+  try {
+    return await response.text();
+  } catch {
+    return '';
+  }
+}
+
 /**
  * Reindexes a set of already-published files via the Helix Admin API.
  *
@@ -1868,30 +1893,25 @@ export async function performLlmoOffboarding(site, config, context) {
  * @returns {Promise<void>}
  */
 export async function reindexQueryIndexPaths(dataFolder, fileNames, env, log) {
-  const org = 'adobe';
-  const site = 'project-elmo-ui-data';
-  const ref = 'main';
-  const baseUrl = 'https://admin.hlx.page';
-
-  if (!env.HLX_ONBOARDING_TOKEN) {
-    throw new Error('HLX_ONBOARDING_TOKEN is not set');
-  }
-
-  const headers = { Cookie: `auth_token=${env.HLX_ONBOARDING_TOKEN}` };
+  const headers = getHlxAuthHeaders(env);
 
   log.info(`Reindexing ${fileNames.length} path(s) in ${dataFolder}`);
 
+  // Sequential by design: this is an admin-only, low-QPS path (LLMO administrators
+  // only), and one request at a time avoids bursting the Admin API.
   for (const fileName of fileNames) {
     const name = fileName.endsWith('.json') ? fileName : `${fileName}.json`;
     const filePath = `${dataFolder}/${name}`;
-    const reindexUrl = `${baseUrl}/index/${org}/${site}/${ref}/${filePath}`;
+    const reindexUrl = buildHlxAdminUrl('index', filePath);
 
     // eslint-disable-next-line no-await-in-loop
     const response = await fetch(reindexUrl, { method: 'POST', headers, timeout: 30000 });
     if (!response.ok) {
       const errorCode = response.headers?.get('x-error-code') || '';
       const errorMsg = response.headers?.get('x-error') || '';
-      log.error(`Reindex failed for ${filePath}: ${response.status} ${response.statusText} | x-error-code: ${errorCode} | x-error: ${errorMsg}`);
+      // eslint-disable-next-line no-await-in-loop
+      const bodyText = await readHlxErrorBody(response);
+      log.error(`Reindex failed for ${filePath}: ${response.status} ${response.statusText} | x-error-code: ${errorCode} | x-error: ${errorMsg} | body: ${bodyText}`);
       throw new Error(`Reindex failed for ${filePath}: ${response.status} ${response.statusText}`);
     }
   }
@@ -1900,51 +1920,29 @@ export async function reindexQueryIndexPaths(dataFolder, fileNames, env, log) {
 }
 
 export async function previewAndPublishQueryIndex(dataFolder, env, log) {
-  const org = 'adobe';
-  const site = 'project-elmo-ui-data';
-  const ref = 'main';
-  const baseUrl = 'https://admin.hlx.page';
   const filePath = `${dataFolder}/query-index.json`;
-
-  if (!env.HLX_ONBOARDING_TOKEN) {
-    throw new Error('HLX_ONBOARDING_TOKEN is not set');
-  }
-
-  const headers = {
-    Cookie: `auth_token=${env.HLX_ONBOARDING_TOKEN}`,
-  };
-
+  const headers = getHlxAuthHeaders(env);
   const fetchOptions = { method: 'POST', headers, timeout: 30000 };
 
-  const previewUrl = `${baseUrl}/preview/${org}/${site}/${ref}/${filePath}`;
+  const previewUrl = buildHlxAdminUrl('preview', filePath);
   log.info(`Previewing query-index at ${previewUrl}`);
   const previewResponse = await fetch(previewUrl, fetchOptions);
   if (!previewResponse.ok) {
     const errorCode = previewResponse.headers?.get('x-error-code') || '';
     const errorMsg = previewResponse.headers?.get('x-error') || '';
-    let bodyText = '';
-    try {
-      bodyText = await previewResponse.text();
-    } catch {
-      /* noop */
-    }
+    const bodyText = await readHlxErrorBody(previewResponse);
     log.error(`Preview failed: ${previewResponse.status} ${previewResponse.statusText} | x-error-code: ${errorCode} | x-error: ${errorMsg} | body: ${bodyText}`);
     throw new Error(`Preview failed: ${previewResponse.status} ${previewResponse.statusText}`);
   }
   log.info('Preview of query-index succeeded');
 
-  const publishUrl = `${baseUrl}/live/${org}/${site}/${ref}/${filePath}`;
+  const publishUrl = buildHlxAdminUrl('live', filePath);
   log.info(`Publishing query-index at ${publishUrl}`);
   const publishResponse = await fetch(publishUrl, fetchOptions);
   if (!publishResponse.ok) {
     const errorCode = publishResponse.headers?.get('x-error-code') || '';
     const errorMsg = publishResponse.headers?.get('x-error') || '';
-    let bodyText = '';
-    try {
-      bodyText = await publishResponse.text();
-    } catch {
-      /* noop */
-    }
+    const bodyText = await readHlxErrorBody(publishResponse);
     log.error(`Publish failed: ${publishResponse.status} ${publishResponse.statusText} | x-error-code: ${errorCode} | x-error: ${errorMsg} | body: ${bodyText}`);
     throw new Error(`Publish failed: ${publishResponse.status} ${publishResponse.statusText}`);
   }

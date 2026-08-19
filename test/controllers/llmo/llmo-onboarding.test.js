@@ -5576,7 +5576,7 @@ describe('LLMO Onboarding Functions', () => {
       }
     });
 
-    it('should throw and log details when a reindex call fails', async () => {
+    it('should throw and log details (including body) when a reindex call fails', async () => {
       const mockHeaders = { get: sinon.stub() };
       mockHeaders.get.withArgs('x-error-code').returns('CONTENT_NOT_FOUND');
       mockHeaders.get.withArgs('x-error').returns('resource not found');
@@ -5586,6 +5586,7 @@ describe('LLMO Onboarding Functions', () => {
         status: 404,
         statusText: 'Not Found',
         headers: mockHeaders,
+        text: sinon.stub().resolves('detailed error body'),
       });
 
       const { reindexQueryIndexPaths } = await esmock(
@@ -5605,7 +5606,37 @@ describe('LLMO Onboarding Functions', () => {
       }
 
       expect(mockLog.error).to.have.been.calledWith(
-        sinon.match(/Reindex failed.*404.*x-error-code: CONTENT_NOT_FOUND.*x-error: resource not found/),
+        sinon.match(/Reindex failed.*404.*x-error-code: CONTENT_NOT_FOUND.*x-error: resource not found.*body: detailed error body/),
+      );
+    });
+
+    it('should handle text() throwing when reading a reindex error body', async () => {
+      const mockTracingFetch = sinon.stub().resolves({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        headers: { get: sinon.stub().returns('') },
+        text: sinon.stub().rejects(new Error('stream error')),
+      });
+
+      const { reindexQueryIndexPaths } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
+          },
+        },
+      );
+
+      try {
+        await reindexQueryIndexPaths('dev/test-com', ['file1'], mockEnv, mockLog);
+        expect.fail('Should have thrown');
+      } catch (error) {
+        expect(error.message).to.equal('Reindex failed for dev/test-com/file1.json: 500 Internal Server Error');
+      }
+
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(/Reindex failed.*500.*body: $/),
       );
     });
 
@@ -5617,6 +5648,7 @@ describe('LLMO Onboarding Functions', () => {
         status: 500,
         statusText: 'Internal Server Error',
         headers: { get: sinon.stub().returns('') },
+        text: sinon.stub().resolves(''),
       });
 
       const { reindexQueryIndexPaths } = await esmock(
@@ -5696,6 +5728,28 @@ describe('LLMO Onboarding Functions', () => {
       const { content } = octokitInstance.repos.createOrUpdateFileContents.firstCall.args[0];
       const written = Buffer.from(content, 'base64').toString('utf-8');
       expect(written).to.match(/^\s*lego-com:/m);
+    });
+
+    // Regression: dataFolder is interpolated into a RegExp without escaping metacharacters
+    // would treat e.g. the '.' in 'frescopa.coffee' as "match any character", so an
+    // unrelated key like 'frescopaXcoffee:' would incorrectly be treated as an existing
+    // registration and the real folder would never get registered.
+    it('escapes regex metacharacters in the folder name before matching', async () => {
+      const existingContent = 'default: &default\n  target: /default/query-index.xlsx\n\nfrescopaXcoffee:\n  <<: *default\n  include:\n    - \'/frescopaXcoffee/**\'\n  target: /frescopaXcoffee/query-index.xlsx\n';
+      const mockOctokit = createMockOctokit(sinon, { content: existingContent, sha: 'sha-1' });
+
+      const { updateIndexConfig } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        { '@octokit/rest': { Octokit: mockOctokit } },
+      );
+
+      await updateIndexConfig('frescopa.coffee', { log: mockLog, env: mockEnv });
+
+      const octokitInstance = mockOctokit.firstCall.returnValue;
+      expect(octokitInstance.repos.createOrUpdateFileContents).to.have.been.calledOnce;
+      const { content } = octokitInstance.repos.createOrUpdateFileContents.firstCall.args[0];
+      const written = Buffer.from(content, 'base64').toString('utf-8');
+      expect(written).to.match(/^\s*frescopa\.coffee:/m);
     });
   });
 

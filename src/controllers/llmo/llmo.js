@@ -2182,7 +2182,7 @@ function LlmoController(ctx) {
         message: 'query-index.json reindexed, previewed, and published successfully',
         domain,
         dataFolder,
-        entriesAdded: fileNames.length,
+        entriesReindexed: fileNames.length,
       });
     } catch (error) {
       log.error(`Failed to update query-index for domain ${data?.domain}: ${error.message}`);
