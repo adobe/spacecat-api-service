@@ -884,9 +884,16 @@ export async function updateIndexConfig(dataFolder, context, say = () => {}) {
   });
   const content = Buffer.from(file.content, 'base64').toString('utf-8');
 
-  if (content.includes(dataFolder)) {
-    log.warn(`Helix query yaml already contains string ${dataFolder}. Skipping update.`);
-    await say(`Helix query yaml already contains string ${dataFolder}. Skipping GitHub update.`);
+  // Match the dataFolder as an actual YAML mapping key, not merely as a substring:
+  // a raw `content.includes(dataFolder)` check false-positives whenever dataFolder is a
+  // substring of an already-registered key (e.g. registering `lego-com` is silently
+  // skipped because `lego-com-uk:` already exists), which lets real folders go
+  // unregistered while the onboarding flow believes it registered them (LLMO-6320).
+  const escapedDataFolder = dataFolder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const indexKeyPattern = new RegExp(`^\\s*${escapedDataFolder}:`, 'm');
+  if (indexKeyPattern.test(content)) {
+    log.warn(`Helix query yaml already has an index definition for ${dataFolder}. Skipping update.`);
+    await say(`Helix query yaml already has an index definition for ${dataFolder}. Skipping GitHub update.`);
     return;
   }
 
@@ -1844,23 +1851,52 @@ export async function performLlmoOffboarding(site, config, context) {
   };
 }
 
-export async function appendRowsToQueryIndex(dataFolder, fileNames, env, log) {
-  const sharepointClient = await createSharePointClient(env);
-  const redirects = sharepointClient.getRedirects();
+/**
+ * Reindexes a set of already-published files via the Helix Admin API.
+ *
+ * This replaces the previous approach of appending rows directly to
+ * query-index.xlsx via helix-content-sdk's appendRowsToSheet: on a warm Lambda
+ * that client caches the resolved sheet (worksheets[0]) across invocations, so it
+ * can append rows into the wrong sheet of a different workbook (the served
+ * `helix-default` sheet instead of `raw_index`), corrupting the workbook's array
+ * formula (observed twice on heritage-sg, LLMO-6320). The Admin API reindex
+ * endpoint reads the already-published file directly and has no such state.
+ * @param {string} dataFolder - The data folder name
+ * @param {Array<string>} fileNames - File names (with or without .json) to reindex
+ * @param {object} env - Environment variables
+ * @param {object} log - Logger instance
+ * @returns {Promise<void>}
+ */
+export async function reindexQueryIndexPaths(dataFolder, fileNames, env, log) {
+  const org = 'adobe';
+  const site = 'project-elmo-ui-data';
+  const ref = 'main';
+  const baseUrl = 'https://admin.hlx.page';
 
-  const now = Math.floor(Date.now() / 1000);
-  const rows = fileNames.map((fileName) => {
+  if (!env.HLX_ONBOARDING_TOKEN) {
+    throw new Error('HLX_ONBOARDING_TOKEN is not set');
+  }
+
+  const headers = { Cookie: `auth_token=${env.HLX_ONBOARDING_TOKEN}` };
+
+  log.info(`Reindexing ${fileNames.length} path(s) in ${dataFolder}`);
+
+  for (const fileName of fileNames) {
     const name = fileName.endsWith('.json') ? fileName : `${fileName}.json`;
-    return [
-      `/${dataFolder}/${name}`,
-      now,
-      now,
-    ];
-  });
+    const filePath = `${dataFolder}/${name}`;
+    const reindexUrl = `${baseUrl}/index/${org}/${site}/${ref}/${filePath}`;
 
-  log.info(`Appending ${rows.length} rows to query-index.xlsx in ${dataFolder}`);
-  await redirects.appendRowsToSheet(`/${dataFolder}/query-index.xlsx`, rows);
-  log.info(`Successfully appended rows to query-index.xlsx in ${dataFolder}`);
+    // eslint-disable-next-line no-await-in-loop
+    const response = await fetch(reindexUrl, { method: 'POST', headers, timeout: 30000 });
+    if (!response.ok) {
+      const errorCode = response.headers?.get('x-error-code') || '';
+      const errorMsg = response.headers?.get('x-error') || '';
+      log.error(`Reindex failed for ${filePath}: ${response.status} ${response.statusText} | x-error-code: ${errorCode} | x-error: ${errorMsg}`);
+      throw new Error(`Reindex failed for ${filePath}: ${response.status} ${response.statusText}`);
+    }
+  }
+
+  log.info(`Successfully reindexed ${fileNames.length} path(s) in ${dataFolder}`);
 }
 
 export async function previewAndPublishQueryIndex(dataFolder, env, log) {

@@ -68,7 +68,7 @@ import {
   performLlmoOnboarding,
   performLlmoOffboarding,
   postLlmoAlert,
-  appendRowsToQueryIndex,
+  reindexQueryIndexPaths,
   previewAndPublishQueryIndex,
 } from './llmo-onboarding.js';
 import { queryLlmoFiles } from './llmo-query-handler.js';
@@ -2173,13 +2173,13 @@ function LlmoController(ctx) {
 
       const { dataFolder } = llmoConfig;
 
-      await appendRowsToQueryIndex(dataFolder, fileNames, env, log);
+      await reindexQueryIndexPaths(dataFolder, fileNames, env, log);
       await previewAndPublishQueryIndex(dataFolder, env, log);
 
-      log.info(`Successfully updated query-index.xlsx for domain ${domain} with ${fileNames.length} entries`);
+      log.info(`Successfully reindexed query-index.json for domain ${domain} with ${fileNames.length} entries`);
 
       return ok({
-        message: 'query-index.xlsx updated, previewed, and published successfully',
+        message: 'query-index.json reindexed, previewed, and published successfully',
         domain,
         dataFolder,
         entriesAdded: fileNames.length,
