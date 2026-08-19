@@ -17,7 +17,7 @@ import esmock from 'esmock';
 
 use(chaiAsPromised);
 
-const ENV = { SEMRUSH_PROJECTS_BASE_URL: 'https://adobe-hackathon.semrush.com' };
+const ENV = { SEMRUSH_USERS_BASE_URL: 'https://adobe-hackathon.semrush.com' };
 const IMS_TOKEN = 'ims-access-token-abc';
 
 describe('provisionWorkspaceMember', () => {
@@ -141,7 +141,7 @@ describe('provisionWorkspaceMember', () => {
       .and.eventually.have.property('status', 502);
   });
 
-  it('propagates a 503 configuration error when SEMRUSH_PROJECTS_BASE_URL is unset', async () => {
+  it('propagates a 503 configuration error when neither SEMRUSH_USERS_BASE_URL nor SEMRUSH_PROJECTS_BASE_URL is set', async () => {
     let thrown;
     try {
       await provisionWorkspaceMember({}, IMS_TOKEN);
@@ -151,6 +151,39 @@ describe('provisionWorkspaceMember', () => {
 
     expect(thrown.status).to.equal(503);
     expect(fetchStub.called).to.equal(false);
+  });
+
+  it('falls back to SEMRUSH_PROJECTS_BASE_URL when SEMRUSH_USERS_BASE_URL is unset', async () => {
+    fetchStub.resolves({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        email: 'jane@example.com', organization_id: 'org-abc', workspace_id: 'ws-123', role: 'admin',
+      }),
+    });
+
+    await provisionWorkspaceMember({ SEMRUSH_PROJECTS_BASE_URL: 'https://fallback.semrush.com' }, IMS_TOKEN);
+
+    const [url] = fetchStub.firstCall.args;
+    expect(url).to.equal('https://fallback.semrush.com/enterprise/users/api/v1/adobe-ims/workspace-members');
+  });
+
+  it('prefers SEMRUSH_USERS_BASE_URL over SEMRUSH_PROJECTS_BASE_URL when both are set', async () => {
+    fetchStub.resolves({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        email: 'jane@example.com', organization_id: 'org-abc', workspace_id: 'ws-123', role: 'admin',
+      }),
+    });
+
+    await provisionWorkspaceMember({
+      SEMRUSH_USERS_BASE_URL: 'https://users.semrush.com',
+      SEMRUSH_PROJECTS_BASE_URL: 'https://projects.semrush.com',
+    }, IMS_TOKEN);
+
+    const [url] = fetchStub.firstCall.args;
+    expect(url).to.equal('https://users.semrush.com/enterprise/users/api/v1/adobe-ims/workspace-members');
   });
 
   it('passes an AbortSignal with the shared 15s Semrush timeout on the fetch call', async () => {

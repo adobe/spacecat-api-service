@@ -13,7 +13,7 @@
 // @ts-check
 
 import { hasText, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
-import { baseUrl, DEFAULT_TIMEOUT_MS } from '../serenity/rest-transport.js';
+import { DEFAULT_TIMEOUT_MS, usersBaseUrl } from '../serenity/rest-transport.js';
 import { SerenityTransportError } from '../serenity/serenity-transport-error.js';
 
 const WORKSPACE_MEMBERS_PATH = '/enterprise/users/api/v1/adobe-ims/workspace-members';
@@ -32,7 +32,9 @@ const WORKSPACE_MEMBERS_PATH = '/enterprise/users/api/v1/adobe-ims/workspace-mem
  * API's documented contract.
  *
  * @param {Record<string, string|undefined>} env - Runtime env (context.env);
- *   resolves the gateway origin via `SEMRUSH_PROJECTS_BASE_URL`.
+ *   resolves the User Manager gateway origin via `usersBaseUrl` (`SEMRUSH_USERS_BASE_URL`,
+ *   falling back to `SEMRUSH_PROJECTS_BASE_URL` when unset) — this is a User Manager
+ *   path, not a Project Engine one.
  * @param {string} imsToken - The caller's Adobe IMS access token.
  * @returns {Promise<{ email: string, organizationId: string, workspaceId: string, role: string }>}
  * @throws {SerenityTransportError} the upstream status (400/401/403/409/422/500)
@@ -41,7 +43,7 @@ const WORKSPACE_MEMBERS_PATH = '/enterprise/users/api/v1/adobe-ims/workspace-mem
  *   `role`.
  */
 export async function provisionWorkspaceMember(env, imsToken) {
-  const url = `${baseUrl(env)}${WORKSPACE_MEMBERS_PATH}`;
+  const url = `${usersBaseUrl(env)}${WORKSPACE_MEMBERS_PATH}`;
 
   let response;
   try {

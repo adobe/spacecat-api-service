@@ -194,11 +194,6 @@ function normalizeBaseUrl(raw, varName) {
  * No source default: the upstream host is operational config that must be
  * settable per-environment without a code change.
  *
- * Exported for the onboarding workspace-provisioning call
- * (`src/support/onboarding/workspace-provisioning.js`), which hits a Semrush
- * host directly rather than going through the typed Project Engine / User
- * Manager clients built below.
- *
  * @param {TransportEnv} env
  * @returns {string} canonical `protocol//host` origin
  */
@@ -216,10 +211,14 @@ export function baseUrl(env) {
  * (LLMO / api-service#2656). The error message names whichever var was the
  * effective source so a misconfiguration is unambiguous.
  *
+ * Exported for the onboarding workspace-provisioning call
+ * (`src/support/onboarding/workspace-provisioning.js`), which hits this User
+ * Manager path directly rather than going through the typed client built below.
+ *
  * @param {TransportEnv} env
  * @returns {string} canonical `protocol//host` origin
  */
-function usersBaseUrl(env) {
+export function usersBaseUrl(env) {
   // Bound first, then narrowed by `typeof`: `hasText` is not a TS type guard, so it
   // cannot take a `string | undefined` (see this dir's CLAUDE.md). Same idiom as
   // `normalizeBaseUrl` above. Behaviour is unchanged either way — `hasText` already
