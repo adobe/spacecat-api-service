@@ -3203,9 +3203,10 @@ describe('Brands Controller', () => {
       expect(resolveLlmoOnboardingModeStub).to.have.been.calledOnce;
       const [orgArg, , optsArg] = resolveLlmoOnboardingModeStub.firstCall.args;
       expect(orgArg).to.equal(ORGANIZATION_ID);
-      // readOnly: true is load-bearing — without it the resolver could write
-      // to feature_flags from a GET (row-1 brandalf-revert side effect).
-      expect(optsArg).to.deep.equal({ readOnly: true });
+      // The resolver is side-effect free since LLMO-7108 removed the legacy-site
+      // cutoff (and with it the row-1 brandalf-revert write), so this GET no
+      // longer passes a readOnly option.
+      expect(optsArg).to.equal(undefined);
       expect(getBrandBySiteStub).to.have.been.calledOnce;
       expect(getBrandBySiteStub.firstCall.args[0]).to.equal(ORGANIZATION_ID);
       expect(getBrandBySiteStub.firstCall.args[1]).to.equal(SITE_ID);

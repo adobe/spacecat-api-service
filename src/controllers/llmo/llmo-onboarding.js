@@ -1618,12 +1618,11 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     // Create or find organization
     const organization = await createOrFindOrganization(imsOrgId, context, say);
 
-    // Create site BEFORE resolving the onboarding mode. createOrFindSite may
-    // re-parent an existing site into the destination org; resolveLlmoOnboardingMode
-    // reads Site.allByOrganizationId, so the re-parent has to be persisted first
-    // (createOrFindSite saves the site in that branch). Otherwise a legacy
-    // pre-cutoff site moved into a brand-new org would be misclassified as v2
-    // and instantly create the mixed state LLMO-4176 was filed to prevent.
+    // Create the site before resolving the onboarding mode so downstream steps
+    // (entitlement, config, audits) have it. createOrFindSite may re-parent an
+    // existing site into the destination org and persists that immediately.
+    // (This ordering historically also fed resolveLlmoOnboardingMode's
+    // legacy-site cutoff check, which was removed in LLMO-7108.)
     site = await createOrFindSite(baseURL, organization.getId(), context, deliveryType);
 
     const onboardingMode = await resolveLlmoOnboardingMode(organization.getId(), context);
