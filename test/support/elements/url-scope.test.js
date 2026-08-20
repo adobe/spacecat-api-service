@@ -103,6 +103,7 @@ describe('url-scope', () => {
 
   describe('isWithinPathPrefix', () => {
     it('matches everything under an empty prefix', () => {
+      expect(isWithinPathPrefix('', '')).to.be.true;
       expect(isWithinPathPrefix('/', '')).to.be.true;
       expect(isWithinPathPrefix('/anything', '')).to.be.true;
     });

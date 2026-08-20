@@ -258,6 +258,50 @@ describe('createElementsService', () => {
     });
   });
 
+  describe('getDomainUrls', () => {
+    const statsFor = (source, citations) => ({
+      blocks: {
+        data: [{
+          source, citations, prompts_with_citation: 1, domain_type: 'Other',
+        }],
+      },
+    });
+
+    it('fans out one Stats-per-URL call per project and threads the scope params', async () => {
+      transport.fetchElement.onFirstCall().resolves(statsFor('https://quickbooks.intuit.com/a', 5));
+      transport.fetchElement.onSecondCall().resolves(statsFor('https://turbotax.intuit.com/b', 3));
+
+      const result = await service.getDomainUrls('ws-1', {
+        projects: [{ region: 'US', projectId: 'p1' }, { region: 'AU', projectId: 'p2' }],
+        hostname: 'intuit.com',
+        siteBaseUrl: 'https://quickbooks.intuit.com',
+        startDate: '2026-07-01',
+        endDate: '2026-07-28',
+      });
+
+      expect(transport.fetchElement).to.have.been.calledTwice;
+      expect(transport.fetchElement.firstCall.args[1]).to.equal(ELEMENT_IDS.STATS_PER_URL);
+      expect(transport.fetchElement.firstCall.args[2].project_id).to.equal('p1');
+      expect(transport.fetchElement.secondCall.args[2].project_id).to.equal('p2');
+      // The site's own subtree is excluded from the ancestor fold; regions ride along.
+      expect(result.totalCount).to.equal(1);
+      expect(result.urls[0]).to.include({ url: 'https://turbotax.intuit.com/b', regions: 'AU' });
+    });
+
+    it('falls back to a single unscoped call when no projects are given', async () => {
+      transport.fetchElement.resolves(statsFor('https://reddit.com/x', 2));
+
+      const result = await service.getDomainUrls('ws-1', {
+        startDate: '2026-07-01',
+        endDate: '2026-07-28',
+      });
+
+      expect(transport.fetchElement).to.have.been.calledOnce;
+      expect(transport.fetchElement.firstCall.args[2].project_id).to.be.undefined;
+      expect(result.urls.map((u) => u.url)).to.deep.equal(['https://reddit.com/x']);
+    });
+  });
+
   describe('getPrompts', () => {
     const RAW_PROMPTS = {
       type: 'table',

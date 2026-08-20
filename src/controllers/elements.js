@@ -1282,7 +1282,7 @@ export default function ElementsController(context, log, env) {
    * domain (`hostname`, which also accepts a `host/path` scope) client-side
    * instead of `domain_type='Owned'`. The brand's own site anchor is passed
    * along so a subdomain/subpath site's subtree stays separable from its
-   * parent domain's fold (see `matchesRequestedScope` in url-scope.js).
+   * parent domain's fold (see `createScopeMatcher` in url-scope.js).
    */
   const listDomainUrls = async (ctx) => {
     try {

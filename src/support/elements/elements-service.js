@@ -563,7 +563,6 @@ export function createElementsService(transport, log) {
      * @param {string|number} [params.page] / [params.pageSize] - Client-side slice.
      * @returns {Promise<{ urls: object[], totalCount: number }>} Legacy contract.
      */
-    /* c8 ignore start -- LLMO-6160 POC endpoint; unit tests intentionally deferred */
     async getDomainUrls(workspaceId, {
       projects = [], hostname, siteBaseUrl, channel, model, platform, startDate, endDate,
       category, page, pageSize,
@@ -590,7 +589,6 @@ export function createElementsService(transport, log) {
         hostname, siteBaseUrl, channel, page, pageSize,
       });
     },
-    /* c8 ignore stop */
 
     /**
      * Fetches weekly per-competitor mentions + citations for the Competitor
