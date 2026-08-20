@@ -973,6 +973,7 @@ describe('getRouteHandlers', () => {
       'GET /organizations/:organizationId',
       'GET /organizations/by-ims-org-id/:imsOrgId',
       'GET /organizations/by-ims-org-id/:imsOrgId/slack-config',
+      'GET /organizations/by-product-code/:productCode',
       'PATCH /organizations/:organizationId',
       'DELETE /organizations/:organizationId',
       'GET /organizations/:organizationId/sites',

@@ -1133,13 +1133,9 @@ function BrandsController(ctx, log, env) {
         return unavailable;
       }
 
-      // readOnly: true keeps this GET endpoint idempotent — the resolver's
-      // kill-switch remediation (which writes to feature_flags) only fires
-      // from explicit onboarding/admin write paths, never from a high-traffic
-      // resolver hit by BP refresh and the DRS scheduler.
-      const mode = await resolveLlmoOnboardingMode(spaceCatId, context, {
-        readOnly: true,
-      });
+      // resolveLlmoOnboardingMode is side-effect free — safe to call from this
+      // GET endpoint hit by BP refresh and the DRS scheduler.
+      const mode = await resolveLlmoOnboardingMode(spaceCatId, context);
       if (mode !== LLMO_ONBOARDING_MODE_V2) {
         return notFound('No v2 brand configured for this organization');
       }

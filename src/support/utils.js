@@ -1921,6 +1921,54 @@ export const onboardSingleSite = async (
       return reportLine;
     }
 
+    // Only one domain is supported under a PLG ASO entitlement — that's an org-level
+    // record, not per-site. The RESTRICTED_TIERS check above only blocks *requesting*
+    // tier=PLG here; it does nothing to stop this command from onboarding a brand-new
+    // domain (tier FREE_TRIAL/PAID) into an org that already holds a PLG entitlement
+    // bound to a different site. SITES-49886 (#3074) stopped that from silently
+    // downgrading/retiering the shared entitlement, but still lets the new domain's
+    // Site row get created and its audits/opportunities run once. Block it outright
+    // here instead — mirroring the "one onboarded domain per IMS org" invariant the
+    // dedicated PLG flow enforces (see handleExistingOnboardedDomain) — unless the
+    // caller already owns that entitlement's enrollment (re-onboarding the same site)
+    // or explicitly overrides via forceTierUpdate (same escape hatch as SITES-49886).
+    // PRE_ONBOARD is deliberately not covered here — it's an internal staging tier
+    // without the "single customer-facing domain" constraint PLG has.
+    // Fail-open on lookup errors — getAsoEntitlement already swallows its own and
+    // returns null.
+    try {
+      const { Organization: OrgLookup } = dataAccess;
+      const organization = await OrgLookup.findByImsOrgId(imsOrgID);
+      const asoEntitlement = organization
+        ? await getAsoEntitlement(organization.getId(), context)
+        : null;
+      const existingTier = asoEntitlement?.getTier() ?? null;
+
+      if (existingTier === EntitlementModel.TIERS.PLG) {
+        const existingEnrollments = prefetchedSite
+          ? await prefetchedSite.getSiteEnrollments()
+          : [];
+        const isSameEnrolledSite = existingEnrollments?.some(
+          (se) => se.getEntitlementId() === asoEntitlement.getId(),
+        );
+
+        if (!isSameEnrolledSite) {
+          if (additionalParams.forceTierUpdate) {
+            log.warn(`Force-onboarding ${baseURL} into IMS org ${imsOrgID} despite an existing ${existingTier} entitlement bound to a different site; that site's enrollment will NOT be revoked automatically.`);
+            await say(`:warning: IMS org \`${imsOrgID}\` already has a *${existingTier}* ASO entitlement bound to a different site. Proceeding anyway (Force Tier Update) — that site's enrollment will *not* be revoked automatically.`);
+          } else {
+            reportLine.errors = `Blocked: IMS org ${imsOrgID} already has a ${existingTier}-tier ASO entitlement bound to a different site — only one domain is supported per org on this tier`;
+            reportLine.status = 'Failed';
+            log.error(`Refusing to onboard ${baseURL} into IMS org ${imsOrgID}: existing ${existingTier} entitlement is bound to a different site`);
+            await say(`:x: IMS org \`${imsOrgID}\` already has a *${existingTier}* ASO entitlement bound to a different site. Only one domain is supported per org on this tier — use the PLG onboarding flow to displace it, or select *Force Tier Update* to override.`);
+            return reportLine;
+          }
+        }
+      }
+    } catch (singleDomainGuardError) {
+      log.warn(`Single-domain tier guard check failed for IMS org ${imsOrgID}, skipping guard:`, singleDomainGuardError);
+    }
+
     await say(`:gear: Starting environment setup for site ${baseURL} with imsOrgID: ${imsOrgID} and tier: ${tier} using the ${profileName} profile`);
     await say(':key: Please make sure you have access to the AEM Shared Production Demo environment. Request access here: https://demo.adobe.com/demos/internal/AemSharedProdEnv.html');
 
