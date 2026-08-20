@@ -3765,7 +3765,7 @@ describe('LLMO Onboarding Functions', () => {
       );
     });
 
-    it('should skip helix-query.yaml update when tempOnboarding is true', async () => {
+    it('should always update helix-query.yaml, even if a stray tempOnboarding param is passed (LLMO-7141: flag removed)', async () => {
       const mockOrganization = {
         getId: sinon.stub().returns('org123'),
         getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
@@ -3832,13 +3832,12 @@ describe('LLMO Onboarding Functions', () => {
         domain: 'example.com',
         brandName: 'Test Brand',
         imsOrgId: 'ABC123@AdobeOrg',
+        // Stray/unsupported param — must have zero effect now that the temp-onboarding
+        // skip path has been removed. Registration always runs.
         tempOnboarding: true,
       }, context);
 
-      expect(createOrUpdateFileContents).to.not.have.been.called;
-      expect(mockLog.info).to.have.been.calledWith(
-        sinon.match(/Skipping helix-query.yaml update \(temp-onboarding\)/),
-      );
+      expect(createOrUpdateFileContents).to.have.been.called;
     });
 
     it('should call cleanup functions when site.save() throws an error', async () => {
