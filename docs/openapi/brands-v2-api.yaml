@@ -92,11 +92,18 @@ v2-brands-for-org:
         $ref: './responses.yaml#/404-organization-not-found-with-id'
       '409':
         description: |
-          Conflict. A by-name upsert matched an existing **active** brand and the
-          supplied `status` would demote it to `pending`. Silent demotion is
-          rejected (`code: brand_status_demotion_not_allowed`). Use
-          `PATCH /v2/orgs/{spaceCatId}/brands/{brandId}/status` for intentional
-          status transitions.
+          Conflict. One of (disambiguated by the `code` field in the response body,
+          where present):
+          - A by-name upsert matched an existing **active** brand and the supplied
+            `status` would demote it to `pending`. Silent demotion is rejected
+            (`code: brand_status_demotion_not_allowed`). Use
+            `PATCH /v2/orgs/{spaceCatId}/brands/{brandId}/status` for intentional
+            status transitions.
+          - The supplied `baseSiteId` is a fresh anchor (the brand has no
+            persisted primary site yet) but that site belongs to a different
+            organization (`code: brand_site_org_mismatch`).
+          - The brand's primary URL is already the primary URL (base site) of
+            another brand in this organization.
         headers:
           X-Error:
             $ref: './headers.yaml#/xError'
@@ -215,6 +222,10 @@ v2-brand-for-org:
             persisted `updatedAt` — another write landed after this client last
             loaded the brand (`code: brand_stale_write`). Reload the brand and
             reapply the edit rather than retrying with the same body.
+          - The supplied `baseSiteId` is a fresh anchor (the brand has no
+            persisted primary site, or is `pending` and re-pointing) but that
+            site belongs to a different organization
+            (`code: brand_site_org_mismatch`).
           - The brand's primary URL is already the primary URL (base site) of
             another brand in this organization.
         headers:

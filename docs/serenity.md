@@ -4,7 +4,7 @@ This document is the runtime reference for the `/v2/orgs/:spaceCatId/brands/:bra
 
 ## Architecture in one paragraph
 
-api-service exposes nine endpoints that front the Adobe-hosted Semrush AIO API at `https://adobe-hackathon.semrush.com`. Authentication is IMS-bearer-only: the client sends an `Authorization: Bearer <ims_user_token>`, api-service forwards that header verbatim to Semrush, and the Adobe gateway exchanges the IMS token for Semrush's internal credential server-side. There are no Semrush cookies, API keys, or service accounts in api-service — every outbound request carries the caller's IMS user token. The brand-to-project mapping lives in the `brand_to_semrush_projects` table in mysticat-data-service; the Semrush workspace per org is read from `organizations.semrush_workspace_id` (already in place since PR #2403).
+api-service exposes nine endpoints that front the Adobe-hosted Semrush AIO API at `https://www.semrush.com`. Authentication is IMS-bearer-only: the client sends an `Authorization: Bearer <ims_user_token>`, api-service forwards that header verbatim to Semrush, and the Adobe gateway exchanges the IMS token for Semrush's internal credential server-side. There are no Semrush cookies, API keys, or service accounts in api-service — every outbound request carries the caller's IMS user token. The brand-to-project mapping lives in the `brand_to_semrush_projects` table in mysticat-data-service; the Semrush workspace per org is read from `organizations.semrush_workspace_id` (already in place since PR #2403).
 
 ## Environment configuration
 
@@ -23,11 +23,11 @@ vault login -method=oidc   # opens browser
 
 # value used for all three today; production target host may differ later
 vault kv patch dx_mysticat/dev/api-service \
-  SEMRUSH_PROJECTS_BASE_URL=https://adobe-hackathon.semrush.com
+  SEMRUSH_PROJECTS_BASE_URL=https://www.semrush.com
 vault kv patch dx_mysticat/stage/api-service \
-  SEMRUSH_PROJECTS_BASE_URL=https://adobe-hackathon.semrush.com
+  SEMRUSH_PROJECTS_BASE_URL=https://www.semrush.com
 vault kv patch dx_mysticat/prod/api-service \
-  SEMRUSH_PROJECTS_BASE_URL=https://adobe-hackathon.semrush.com
+  SEMRUSH_PROJECTS_BASE_URL=https://www.semrush.com
 
 # verify (must export VAULT_ADDR — the CLI default is 127.0.0.1:8200)
 export VAULT_ADDR=https://vault-amer.adobe.net
@@ -320,7 +320,7 @@ If step 5, 6 or 7 fails, no row is written and the caller may safely retry with 
 
 ## Delete-market semantics
 
-`DELETE /serenity/markets/:geoTargetId/:languageCode` removes a slice from the brand. Upstream support was verified 2026-05-28 against `adobe-hackathon.semrush.com`:
+`DELETE /serenity/markets/:geoTargetId/:languageCode` removes a slice from the brand. Upstream support was verified 2026-05-28 against `www.semrush.com`:
 
 ```
 OPTIONS /v1/workspaces/{ws}/projects/{pid} → 405, allow: DELETE, GET, PATCH
@@ -441,7 +441,7 @@ What that means operationally: a market carrying this token is **live and usable
 Greppable failure tokens worth alerting on: `SERENITY_MARKET_LINK_REJECTED` (the `brand_sites.type='serenity'` migration is not deployed in the env — every market create/activate then produces a Semrush project + Site with no link), `SERENITY_ACTIVATE_LINK_INCOMPLETE` (markets live upstream but the brand stayed pending because the site mirror failed), and `SERENITY_ACTIVATE_SAVE_DIVERGENCE` / `SERENITY_DEACTIVATE_SAVE_DIVERGENCE` (upstream succeeded but the status/pointer persist failed).
 
 Expected fields in the structured log payload:
-- outbound host: `adobe-hackathon.semrush.com`
+- outbound host: `www.semrush.com`
 - outbound auth: `Authorization: Bearer ...` (the token itself is redacted by the platform)
 - the IMS sub of the caller in the `actor` field
 
@@ -547,10 +547,10 @@ Negative-path checks worth covering: non-UUID `:brandId` → 400 `invalidRequest
 After the walkthrough, verify Splunk has the outbound traces:
 
 ```spl
-index=dx_aem_engineering sourcetype=dx_aem_sites_spacecat_backend_<env> service=api-service "adobe-hackathon.semrush.com" | head 30
+index=dx_aem_engineering sourcetype=dx_aem_sites_spacecat_backend_<env> service=api-service "www.semrush.com" | head 30
 ```
 
-Expected: outbound host `adobe-hackathon.semrush.com`, IMS sub of the caller in `actor`, no `SerenityTransportError` entries beyond the deliberate 404/409 cases above.
+Expected: outbound host `www.semrush.com`, IMS sub of the caller in `actor`, no `SerenityTransportError` entries beyond the deliberate 404/409 cases above.
 
 ## Troubleshooting
 

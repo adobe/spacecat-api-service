@@ -446,6 +446,28 @@ describe('serenity site-linkage: resolveSiteIdentity', () => {
     expect(Site.findById).to.have.been.calledOnceWith('site-1');
   });
 
+  it('refuses a Site owned by another organization', async () => {
+    // The resolved url reaches `settings.ai.primary_url` through the mapping row,
+    // so resolving a foreign Site would point one customer's project at another's.
+    Site.findById.resolves({
+      getBaseURL: () => 'https://acme.com',
+      getOrganizationId: () => 'org-other',
+    });
+    expect(await resolveSiteIdentity(dataAccess, 'site-1', log, 'org-mine')).to.equal(null);
+    expect(log.warn).to.have.been.calledWithMatch(/another organization/);
+  });
+
+  it('resolves a Site of the stated organization', async () => {
+    Site.findById.resolves({
+      getBaseURL: () => 'https://acme.com',
+      getOrganizationId: () => 'org-mine',
+    });
+    expect(await resolveSiteIdentity(dataAccess, 'site-1', log, 'org-mine')).to.deep.equal({
+      domain: 'acme.com',
+      primaryUrl: 'acme.com',
+    });
+  });
+
   it('primaryUrl is scheme-less so it matches the stored upstream value', async () => {
     Site.findById.resolves({ getBaseURL: () => 'https://quickbooks.intuit.com/au/' });
     const { primaryUrl } = await resolveSiteIdentity(dataAccess, 'site-1', log);

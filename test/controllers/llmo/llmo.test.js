@@ -7669,18 +7669,18 @@ describe('LlmoController', () => {
 
   describe('updateQueryIndex', () => {
     let updateQueryIndexController;
-    let appendRowsStub;
+    let reindexStub;
     let previewAndPublishStub;
 
     before(async () => {
-      appendRowsStub = sinon.stub().resolves();
+      reindexStub = sinon.stub().resolves();
       previewAndPublishStub = sinon.stub().resolves();
 
       const LlmoControllerForQueryIndex = await esmock(
         '../../../src/controllers/llmo/llmo.js',
         {
           '../../../src/controllers/llmo/llmo-onboarding.js': {
-            appendRowsToQueryIndex: (...args) => appendRowsStub(...args),
+            reindexQueryIndexPaths: (...args) => reindexStub(...args),
             previewAndPublishQueryIndex: (...args) => previewAndPublishStub(...args),
           },
           '@adobe/spacecat-shared-http-utils': mockHttpUtils,
@@ -7708,8 +7708,8 @@ describe('LlmoController', () => {
     });
 
     beforeEach(() => {
-      appendRowsStub.reset();
-      appendRowsStub.resolves();
+      reindexStub.reset();
+      reindexStub.resolves();
       previewAndPublishStub.reset();
       previewAndPublishStub.resolves();
       mockDataAccess.Site.findByBaseURL = sinon.stub().resolves(mockSite);
@@ -7725,9 +7725,9 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(200);
       const body = await result.json();
-      expect(body.message).to.include('updated, previewed, and published');
-      expect(body.entriesAdded).to.equal(2);
-      expect(appendRowsStub).to.have.been.calledOnce;
+      expect(body.message).to.include('reindexed, previewed, and published');
+      expect(body.entriesReindexed).to.equal(2);
+      expect(reindexStub).to.have.been.calledOnce;
       expect(previewAndPublishStub).to.have.been.calledOnce;
     });
 
@@ -7736,7 +7736,7 @@ describe('LlmoController', () => {
         '../../../src/controllers/llmo/llmo.js',
         {
           '../../../src/controllers/llmo/llmo-onboarding.js': {
-            appendRowsToQueryIndex: sinon.stub(),
+            reindexQueryIndexPaths: sinon.stub(),
             previewAndPublishQueryIndex: sinon.stub(),
           },
           '@adobe/spacecat-shared-http-utils': mockHttpUtils,
@@ -7810,6 +7810,60 @@ describe('LlmoController', () => {
       expect(body.message).to.equal('Each fileName must be a non-empty string');
     });
 
+    it('should return bad request when a fileName contains a ".." traversal segment', async () => {
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: ['../other-folder/secret'] },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Each fileName must be a relative path of alphanumerics, hyphens, underscores, dots, or slashes, with no ".." segments');
+      expect(reindexStub).to.not.have.been.called;
+    });
+
+    it('should return bad request when a fileName has a leading slash (absolute path)', async () => {
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: ['/etc/passwd'] },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Each fileName must be a relative path of alphanumerics, hyphens, underscores, dots, or slashes, with no ".." segments');
+      expect(reindexStub).to.not.have.been.called;
+    });
+
+    it('should accept a fileName with a legitimate subdirectory segment', async () => {
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: ['brand-presence/2026-w28-chatgpt'] },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(200);
+      expect(reindexStub).to.have.been.calledWith(TEST_FOLDER, ['brand-presence/2026-w28-chatgpt'], sinon.match.any, sinon.match.any);
+    });
+
+    it('should return bad request when fileNames exceeds the per-request cap', async () => {
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: Array.from({ length: 201 }, (_, i) => `file${i}`) },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('fileNames must not exceed 200 entries per request');
+      expect(reindexStub).to.not.have.been.called;
+    });
+
     it('should return not found when site does not exist', async () => {
       mockDataAccess.Site.findByBaseURL.resolves(null);
 
@@ -7838,8 +7892,8 @@ describe('LlmoController', () => {
       expect(body.message).to.include('dataFolder is missing');
     });
 
-    it('should return internal server error when appendRows throws', async () => {
-      appendRowsStub.rejects(new Error('SharePoint connection failed'));
+    it('should return internal server error when reindex throws', async () => {
+      reindexStub.rejects(new Error('Reindex failed: 500 Internal Server Error'));
       mockConfig.getLlmoConfig.returns({ dataFolder: TEST_FOLDER });
 
       const ctx = {
@@ -7851,7 +7905,7 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(500);
       const body = await result.json();
-      expect(body.message).to.include('SharePoint connection failed');
+      expect(body.message).to.include('Reindex failed: 500 Internal Server Error');
     });
 
     it('should return internal server error when previewAndPublish throws', async () => {

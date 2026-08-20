@@ -12,7 +12,7 @@
 
 import { expect } from 'chai';
 import {
-  ORG_1_ID, BRAND_1_ID, SITE_1_ID,
+  ORG_1_ID, BRAND_1_ID, SITE_1_ID, SITE_2_ID,
 } from '../seed-ids.js';
 import { INTENT_ROOT_NAME } from '../../../../src/support/serenity/prompt-tags.js';
 
@@ -607,9 +607,16 @@ export default function serenityTests(
         brandNames: ['Test Brand'],
         markets: [{ market: 'US', languageCode: 'en' }],
       });
-      // 207 Multi-Status: per-market results, each a published 201.
-      expect(activated.status).to.equal(207);
+      // 200, not 207: every market published AND the brand_sites mirror linked, which
+      // is what full activation means. 207 is the partial-failure code — the brand stays
+      // active but something in the chain did not land. This asserted 207 for as long as
+      // the organization was read from the Brand entity, which has no accessor for it:
+      // `ensureMarketSite` got `undefined`, returned null through its one silent early
+      // return, and the site link failed on every single activation.
+      expect(activated.status).to.equal(200);
       expect(activated.body.status).to.equal('active');
+      // Only the 200 body carries it, and only a real linked Site produces one.
+      expect(activated.body.baseSiteId).to.be.a('string').and.not.empty;
       expect(activated.body.markets).to.be.an('array').that.is.not.empty;
       expect(activated.body.markets[0].status).to.equal(201);
       expect(activated.body.markets[0].body.published).to.equal(true);
@@ -660,12 +667,39 @@ export default function serenityTests(
       // absent key).
       expect(slice.promptsCount).to.equal(0);
       expect(slice.modelsCount).to.equal(0);
-      // NOTE (LLMO-6405): the sub-workspace market DTO also carries `siteId`
-      // (enriched from the brand_to_semrush_projects mapping row). The round-trip
-      // siteId assertions were removed pending live verification of the mapping-row
-      // enrichment in the IT stack — the field is additive and the UI degrades to
-      // domain-keying when it is null, so this does not block the feature. Unit
-      // coverage for the create-time binding lives in site-linkage.test.js.
+    });
+
+    it('binds each market to its OWN site, so two markets of one brand differ', async () => {
+      // The point of serenity-docs#356. `brand_to_semrush_projects.site_id` is
+      // the per-market source of truth for the url a project tracks, but every
+      // derivation used to resolve ONE url per brand and apply it to every market
+      // in that brand's sub-workspace — so a brand whose GB market genuinely
+      // tracks a different site than its US market could not be expressed at all.
+      //
+      // Same language, two countries: the two markets differ only in the Site
+      // they were created from, which is exactly the axis under test.
+      const GB_GEO = 2826; // GB: 2000 + ISO numeric 826.
+      const us = await getHttpClient().admin.post(`${base}/markets`, {
+        market: 'US', languageCode: 'en', siteId: SITE_1_ID, brandNames: ['Test Brand'],
+      });
+      expect(us.status).to.equal(201);
+      const gb = await getHttpClient().admin.post(`${base}/markets`, {
+        market: 'GB', languageCode: 'en', siteId: SITE_2_ID, brandNames: ['Test Brand'],
+      });
+      expect(gb.status).to.equal(201);
+
+      const res = await getHttpClient().admin.get(`${base}/markets`);
+      expect(res.status).to.equal(200);
+      const bySlice = (geo) => res.body.items.find(
+        (m) => m.geoTargetId === geo && m.languageCode === 'en',
+      );
+      expect(bySlice(US_GEO), 'the US market should round-trip').to.exist;
+      expect(bySlice(GB_GEO), 'the GB market should round-trip').to.exist;
+      // Each row carries the Site it was created from. Binding by brand instead
+      // would give both markets whichever site was resolved first.
+      expect(bySlice(US_GEO).siteId).to.equal(SITE_1_ID);
+      expect(bySlice(GB_GEO).siteId).to.equal(SITE_2_ID);
+      expect(bySlice(US_GEO).siteId).to.not.equal(bySlice(GB_GEO).siteId);
     });
 
     it('GET /serenity/markets/:geo/:lang resolves a created+published market', async () => {
