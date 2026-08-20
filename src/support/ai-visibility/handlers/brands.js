@@ -24,6 +24,7 @@ import {
 import {
   num,
   brandTarget,
+  resolveSearchType,
   parseLimitOffset,
   resolveCountry,
   resolveCountryForCitedSources,
@@ -331,9 +332,12 @@ export async function handleBrandStats(sp, clients) {
   const endM = endMonth ? endMonth.month : now.getUTCMonth() + 1;
   const windowMonths = Math.min(Math.max(Number(sp.get('windowMonths')) || 4, 1), 6);
   const dateRange = statsByLLMDateRange(endYear, endM, windowMonths);
+  const searchType = resolveSearchType(domain);
   const statsSettled = await Promise.allSettled([
-    clients.brandClient.statsByLLM({ country, target, dateRange }),
-    clients.brandClient.statsByCountry({ target, llm: LLM_ENUM.ALL }),
+    clients.brandClient.statsByLLM({
+      country, target, searchType, dateRange,
+    }),
+    clients.brandClient.statsByCountry({ target, searchType, llm: LLM_ENUM.ALL }),
   ]);
   if (statsSettled[0].status !== 'fulfilled') {
     throw statsSettled[0].reason;
@@ -357,11 +361,16 @@ export async function handleBrandTopics(sp, clients) {
   const country = resolveCountry(sp);
   const { limit, offset } = parseLimitOffset(sp);
   const llm = engineToLlm(sp.get('engine')?.trim() || '');
+  const searchType = resolveSearchType(domain);
   const body = {
-    country, target: brandTarget(domain), order: { by: BRAND_TOPICS_ORDER_BY_ENUM.VISIBILITY }, range: { limit, offset },
+    country,
+    target: brandTarget(domain),
+    searchType,
+    order: { by: BRAND_TOPICS_ORDER_BY_ENUM.VISIBILITY },
+    range: { limit, offset },
   };
   if (llm) { body.llm = llm; }
-  const totalsBody = { country, target: brandTarget(domain) };
+  const totalsBody = { country, target: brandTarget(domain), searchType };
   if (llm) { totalsBody.llm = llm; }
   const topicsSettled = await Promise.allSettled([
     clients.topicClient.brandTopics(body),
@@ -809,7 +818,7 @@ export async function handleBrandSourceOpportunities(sp, clients) {
 export async function handleBrandCompetitors(sp, clients) {
   const domain = sp.get('domain')?.trim();
   if (!domain) { return { status: 400, body: { error: 'missing_domain', message: 'domain is required' } }; }
-  const body = { target: brandTarget(domain) };
+  const body = { target: brandTarget(domain), searchType: resolveSearchType(domain) };
   const countRaw = sp.get('count');
   if (countRaw != null && String(countRaw).trim() !== '') {
     const c = Math.min(20, Math.max(1, num(countRaw)));
