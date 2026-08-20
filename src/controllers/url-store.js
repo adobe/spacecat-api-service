@@ -51,9 +51,10 @@ const MAX_LIMIT = 500;
 function youTubeWatchShortForm(urlObj) {
   const isYouTubeHost = urlObj.hostname === 'youtube.com'
     || urlObj.hostname.endsWith('.youtube.com');
-  if (isYouTubeHost && urlObj.pathname.startsWith('/watch')) {
+  const isWatchPath = urlObj.pathname === '/watch' || urlObj.pathname === '/watch/';
+  if (isYouTubeHost && isWatchPath) {
     const videoId = urlObj.searchParams.get('v');
-    if (videoId) {
+    if (videoId && /^[A-Za-z0-9_-]+$/.test(videoId)) {
       return `https://youtu.be/${videoId}`;
     }
   }

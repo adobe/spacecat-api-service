@@ -671,6 +671,14 @@ describe('UrlStore Controller', () => {
         .to.equal('https://youtu.be/zEb4ucxTI2Y');
     });
 
+    it('shortens youtube.com/watch/ URLs with valid video ids', async () => {
+      context.data = [{ url: 'https://www.youtube.com/watch/?v=abc_123-XYZ', audits: [] }];
+      mockDataAccess.AuditUrl.create.resolves(mockAuditUrls[0]);
+      await urlStoreController.addUrls(context);
+      expect(mockDataAccess.AuditUrl.create.firstCall.args[0].url)
+        .to.equal('https://youtu.be/abc_123-XYZ');
+    });
+
     it('shortens youtube watch URLs on m. and bare hosts and over http', async () => {
       context.data = [{ url: 'http://m.youtube.com/watch?v=abc123', audits: [] }];
       mockDataAccess.AuditUrl.create.resolves(mockAuditUrls[0]);
@@ -709,6 +717,25 @@ describe('UrlStore Controller', () => {
       await urlStoreController.addUrls(context);
       expect(mockDataAccess.AuditUrl.create.firstCall.args[0].url)
         .to.equal('https://www.youtube.com/results');
+    });
+
+    it('does not shorten youtube paths that only start with watch', async () => {
+      context.data = [{ url: 'https://www.youtube.com/watchlater?v=abc123', audits: [] }];
+      mockDataAccess.AuditUrl.create.resolves(mockAuditUrls[0]);
+      await urlStoreController.addUrls(context);
+      expect(mockDataAccess.AuditUrl.create.firstCall.args[0].url)
+        .to.equal('https://www.youtube.com/watchlater');
+    });
+
+    it('does not interpolate malformed youtube video ids into the short URL', async () => {
+      context.data = [{
+        url: 'https://www.youtube.com/watch?v=abc%2F..%2Fadmin',
+        audits: [],
+      }];
+      mockDataAccess.AuditUrl.create.resolves(mockAuditUrls[0]);
+      await urlStoreController.addUrls(context);
+      expect(mockDataAccess.AuditUrl.create.firstCall.args[0].url)
+        .to.equal('https://www.youtube.com/watch');
     });
 
     it('still strips query params for non-youtube URLs', async () => {
