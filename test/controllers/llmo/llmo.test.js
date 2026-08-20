@@ -3007,7 +3007,7 @@ describe('LlmoController', () => {
       expect(triggerBrandProfileAgentStub).to.have.been.calledOnce;
     });
 
-    it('should pass tempOnboarding when temp-onboarding is true', async () => {
+    it('should ignore a temp-onboarding body field (LLMO-7141: flag removed, registration always runs)', async () => {
       const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/controllers/llmo/llmo-onboarding.js': {
           validateSiteNotOnboarded: validateSiteNotOnboardedStub,
@@ -3050,7 +3050,9 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(200);
       expect(performLlmoOnboardingStub).to.have.been.calledOnce;
-      expect(performLlmoOnboardingStub.firstCall.args[0].tempOnboarding).to.equal(true);
+      // The temp-onboarding flag no longer exists — a caller still sending it must not
+      // be forwarded as tempOnboarding into performLlmoOnboarding.
+      expect(performLlmoOnboardingStub.firstCall.args[0]).to.not.have.property('tempOnboarding');
     });
 
     ['data', 'domain', 'brandName', 'authInfo', 'profile', 'tenants', 'tenant ID'].forEach((field) => {
