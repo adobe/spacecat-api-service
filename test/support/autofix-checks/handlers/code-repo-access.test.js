@@ -42,15 +42,14 @@ describe('code-repo-access handler', () => {
     expect(result.details).to.equal('https://github.com/cm/repo');
   });
 
-  it('returns FAILED for CM BYOG GitHub (type="github" with numeric owner+repo)', () => {
+  it('returns PASSED for CM BYOG GitHub (type="github" with numeric owner+repo) — SITES-50145', () => {
     const result = codeRepoAccessHandler(makesite({
       type: 'github',
       owner: '99552',
       repo: '12345',
     }));
 
-    expect(result.status).to.equal('FAILED');
-    expect(result.message).to.include('coming soon');
+    expect(result.status).to.equal('PASSED');
   });
 
   it('returns PASSED for AEMY GitHub (type="github" with string owner+repo)', () => {
