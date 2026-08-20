@@ -1,3 +1,15 @@
+# [1.759.0](https://github.com/adobe/spacecat-api-service/compare/v1.758.2...v1.759.0) (2026-08-20)
+
+
+### Bug Fixes
+
+* **serenity:** key competitor benchmarks on brand_name, not domain ([#3101](https://github.com/adobe/spacecat-api-service/issues/3101)) ([3f3cdb6](https://github.com/adobe/spacecat-api-service/commit/3f3cdb6bf1dcce657e180408535ab012f197b0d6)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+
+### Features
+
+* **serenity:** re-enable changing a Semrush-attached site's URL ([#3098](https://github.com/adobe/spacecat-api-service/issues/3098)) ([858209c](https://github.com/adobe/spacecat-api-service/commit/858209cba60d5624321733c8eefb29547d39608e)), closes [adobe/serenity-docs#349](https://github.com/adobe/serenity-docs/issues/349) [#348](https://github.com/adobe/spacecat-api-service/issues/348) [#3073](https://github.com/adobe/spacecat-api-service/issues/3073)
+
 ## [1.758.2](https://github.com/adobe/spacecat-api-service/compare/v1.758.1...v1.758.2) (2026-08-20)
 
 
