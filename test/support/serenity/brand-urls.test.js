@@ -20,6 +20,8 @@ import {
   regionApplies,
   collectBrandUrlEntries,
   primaryDomainSet,
+  primaryIdentitySet,
+  benchmarkTrackedUrl,
   normalizeBenchmarkDomain,
   ensureOwnBrandBenchmark,
   attachBrandUrlsToProject,
@@ -146,6 +148,51 @@ describe('brand-urls helpers', () => {
       ]);
     });
 
+    it('KEEPS a subpath url on a primary host', () => {
+      // A project's `domain` cannot carry a path — the upstream folds it to the
+      // registrable domain — so `nba.com/kings` is not the string the benchmark
+      // already shows, and it is the part that says which brand this is. Matching
+      // on the host alone dropped a subpath brand's own url from brand_urls
+      // entirely (serenity-docs#348).
+      const sources = { urls: ['https://nba.com', 'https://nba.com/kings', 'https://www.nba.com/knicks'] };
+      const primaries = primaryDomainSet(['nba.com']);
+      expect(collectBrandUrlEntries(sources, 'us', primaries)).to.deep.equal([
+        { url: 'https://nba.com/kings', type: BRAND_URL_TYPE.WEBSITE },
+        { url: 'https://www.nba.com/knicks', type: BRAND_URL_TYPE.WEBSITE },
+      ]);
+    });
+
+    it('still skips a primary-host url whose only path is a bare slash', () => {
+      // `https://acme.com/` IS the string the benchmark shows; the identity
+      // normalizes the trailing slash away, so it stays skipped.
+      const sources = { urls: ['https://acme.com/'] };
+      expect(collectBrandUrlEntries(sources, 'us', primaryDomainSet(['acme.com']))).to.deep.equal([]);
+    });
+
+    it('skips a subpath url that IS a market tracked url', () => {
+      // Once the Lakers' main benchmark reads `nba.com/lakers`, a brand url of the
+      // same string is that entry listed twice (serenity-docs#25). The sibling
+      // page is a different string and stays.
+      const sources = {
+        urls: ['https://nba.com/lakers', 'https://nba.com/lakers/tickets'],
+      };
+      const entries = collectBrandUrlEntries(sources, 'us', primaryDomainSet(['nba.com']), primaryIdentitySet(['nba.com/lakers']));
+      expect(entries).to.deep.equal([
+        { url: 'https://nba.com/lakers/tickets', type: BRAND_URL_TYPE.WEBSITE },
+      ]);
+    });
+
+    it('skips ANOTHER market tracked url too (market-mirror brand)', () => {
+      const sources = { urls: ['https://chevrolet.ca/trucks'] };
+      const entries = collectBrandUrlEntries(
+        sources,
+        'us',
+        primaryDomainSet(['chevrolet.com']),
+        primaryIdentitySet(['chevrolet.ca/trucks']),
+      );
+      expect(entries).to.deep.equal([]);
+    });
+
     it('keeps all website urls when no primary domains are given', () => {
       const sources = { urls: ['https://acme.com', 'https://www.acme.com'] };
       // Empty skip set → nothing skipped (both kept; www vs apex are two rows).
@@ -172,6 +219,45 @@ describe('brand-urls helpers', () => {
 
     it('returns an empty set for a non-array', () => {
       expect(primaryDomainSet(null).size).to.equal(0);
+    });
+  });
+
+  describe('primaryIdentitySet', () => {
+    it('keeps the path and drops the unusable values', () => {
+      const set = primaryIdentitySet([
+        'nba.com/lakers',
+        'https://www.acme.ca/en',
+        null,
+        '',
+        '   ',
+        42,
+      ]);
+      expect([...set].sort()).to.deep.equal(['nba.com/lakers', 'www.acme.ca/en']);
+    });
+
+    it('returns an empty set for a non-array', () => {
+      expect(primaryIdentitySet(null).size).to.equal(0);
+    });
+  });
+
+  describe('benchmarkTrackedUrl', () => {
+    it('prefers primary_url, then domain, then root_domain', () => {
+      expect(benchmarkTrackedUrl({
+        primary_url: 'nba.com/lakers', domain: 'nba.com', root_domain: 'nba.com',
+      })).to.equal('nba.com/lakers');
+      expect(benchmarkTrackedUrl({ domain: 'us.kisqali.com', root_domain: 'kisqali.com' }))
+        .to.equal('us.kisqali.com');
+      expect(benchmarkTrackedUrl({ root_domain: 'kisqali.com' })).to.equal('kisqali.com');
+    });
+
+    it('returns null for a benchmark carrying no url', () => {
+      expect(benchmarkTrackedUrl({ id: 'b-1' })).to.equal(null);
+      expect(benchmarkTrackedUrl(null)).to.equal(null);
+    });
+
+    it('skips a value it cannot parse and falls through to the next', () => {
+      expect(benchmarkTrackedUrl({ domain: '   ', root_domain: 'kisqali.com' }))
+        .to.equal('kisqali.com');
     });
   });
 
@@ -246,7 +332,33 @@ describe('brand-urls helpers', () => {
       expect(await ensureOwnBrandBenchmark(transport, WS, PID, BRAND, undefined)).to.equal('new-1');
       // The create carries the lowercase forms Semrush's own resolution would add.
       expect(transport.createBenchmarks).to.have.been.calledOnceWith(WS, PID, [
-        { brand_name: 'Acme', domain: 'https://acme.com', brand_aliases: ['acme inc', 'acme'] },
+        {
+          brand_name: 'Acme',
+          domain: 'https://acme.com',
+          primary_url: 'acme.com',
+          brand_aliases: ['acme inc', 'acme'],
+        },
+      ]);
+    });
+
+    it('creates the benchmark on the market TRACKED url, not its bare host', async () => {
+      // External parties read the benchmark's primary_url, and upstream domain and
+      // primary_url are one value — so a create sending only the host scores a
+      // subpath brand against its parent site from the moment it is provisioned.
+      const transport = {
+        listBenchmarks: sandbox.stub().resolves({ aio_benchmarks: [] }),
+        createBenchmarks: sandbox.stub().resolves({ ids: ['new-1'], existing_count: 0 }),
+      };
+      const brand = { name: 'Lakers', domain: 'nba.com', primaryUrl: 'https://nba.com/lakers' };
+
+      expect(await ensureOwnBrandBenchmark(transport, WS, PID, brand, undefined)).to.equal('new-1');
+      expect(transport.createBenchmarks).to.have.been.calledOnceWith(WS, PID, [
+        {
+          brand_name: 'Lakers',
+          domain: 'nba.com',
+          primary_url: 'nba.com/lakers',
+          brand_aliases: ['lakers'],
+        },
       ]);
     });
 

@@ -16,6 +16,7 @@ import {
   BRAND_1_ID,
   SITE_2_ID,
   SITE_2_BASE_URL,
+  SITE_3_ID, // belongs to ORG_2, not ORG_1 (seed-data/sites.js) — used for cross-org tests
   MARKET_SITE_1_ID,
   MARKET_SITE_1_BASE_URL,
 } from '../seed-ids.js';
@@ -234,6 +235,50 @@ export default function brandsTests(getHttpClient, resetData) {
       });
       expect(reuse.status).to.equal(200);
       expect(reuse.body.baseSiteId).to.equal(SITE_2_ID);
+    });
+  });
+
+  describe('Brands v2 rejects a cross-org baseSiteId (serenity-docs#346)', () => {
+    before(() => resetData());
+
+    it('rejects a fresh create anchored to another org\'s site', async () => {
+      const http = getHttpClient();
+
+      // SITE_3_ID belongs to ORG_2 (seed-data/sites.js) — anchoring an ORG_1
+      // brand to it is exactly the org-ID mismatch signature the investigation
+      // traced (a brand silently pointing at a different org's site).
+      //
+      // status: 'pending' defers ALL Semrush provisioning (see createBrandForOrg),
+      // so this stays a plain flat-mode create regardless of ORG_1's serenity
+      // rollout flag — the guard fires on the baseSiteId anchor check itself,
+      // independent of that unrelated machinery.
+      const res = await http.admin.post(`/v2/orgs/${ORG_1_ID}/brands`, {
+        name: 'Cross-Org Anchor Attempt', region: ['US'], status: 'pending', baseSiteId: SITE_3_ID,
+      });
+
+      expect(res.status).to.equal(409);
+      expect(res.body.code).to.equal('brand_site_org_mismatch');
+    });
+
+    it('rejects setting an existing pending brand\'s baseSiteId to another org\'s site', async () => {
+      const http = getHttpClient();
+
+      const create = await http.admin.post(`/v2/orgs/${ORG_1_ID}/brands`, {
+        name: 'Pending Brand For Cross-Org Attempt', region: ['US'], status: 'pending',
+      });
+      expect(create.status).to.equal(201);
+      const { id: brandId } = create.body;
+
+      const res = await http.admin.patch(`/v2/orgs/${ORG_1_ID}/brands/${brandId}`, {
+        baseSiteId: SITE_3_ID,
+      });
+
+      expect(res.status).to.equal(409);
+      expect(res.body.code).to.equal('brand_site_org_mismatch');
+
+      // The brand must be untouched — no partial write.
+      const getRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/brands/${brandId}`);
+      expect(getRes.body.baseSiteId == null).to.equal(true);
     });
   });
 

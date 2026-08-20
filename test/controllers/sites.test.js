@@ -153,12 +153,18 @@ describe('Sites Controller', () => {
   let updateRumConfigStub;
   let getBrandBySiteStub;
   let isSemrushMarketMirrorSiteStub;
+  let resolveSemrushImsTokenStub;
+  let createSerenityTransportStub;
+  let propagateSiteUrlToSemrushStub;
   let SitesControllerMocked;
 
   before(async () => {
     updateRumConfigStub = sandbox.stub().resolves(true);
     getBrandBySiteStub = sandbox.stub().resolves(null);
     isSemrushMarketMirrorSiteStub = sandbox.stub().resolves(false);
+    resolveSemrushImsTokenStub = sandbox.stub().resolves('ims-token-abc');
+    createSerenityTransportStub = sandbox.stub().returns({ name: 'fake-transport' });
+    propagateSiteUrlToSemrushStub = sandbox.stub().resolves({ projectsUpdated: 0 });
     SitesControllerMocked = (await esmock('../../src/controllers/sites.js', {
       '../../src/support/rum-config-service.js': {
         updateRumConfig: updateRumConfigStub,
@@ -166,6 +172,15 @@ describe('Sites Controller', () => {
       '../../src/support/brands-storage.js': {
         getBrandBySite: getBrandBySiteStub,
         isSemrushMarketMirrorSite: isSemrushMarketMirrorSiteStub,
+      },
+      '../../src/support/utils.js': {
+        resolveSemrushImsToken: resolveSemrushImsTokenStub,
+      },
+      '../../src/support/serenity/rest-transport.js': {
+        createSerenityTransport: createSerenityTransportStub,
+      },
+      '../../src/support/serenity/site-url-propagation.js': {
+        propagateSiteUrlToSemrush: propagateSiteUrlToSemrushStub,
       },
     })).default;
   });
@@ -180,6 +195,12 @@ describe('Sites Controller', () => {
     getBrandBySiteStub.resolves(null);
     isSemrushMarketMirrorSiteStub.reset();
     isSemrushMarketMirrorSiteStub.resolves(false);
+    resolveSemrushImsTokenStub.reset();
+    resolveSemrushImsTokenStub.resolves('ims-token-abc');
+    createSerenityTransportStub.reset();
+    createSerenityTransportStub.returns({ name: 'fake-transport' });
+    propagateSiteUrlToSemrushStub.reset();
+    propagateSiteUrlToSemrushStub.resolves({ projectsUpdated: 0 });
 
     mockDataAccess = {
       Audit: {
@@ -770,6 +791,123 @@ describe('Sites Controller', () => {
     });
   });
 
+  it('deep-merges hlxConfig, preserving existing content.source on partial patch', async () => {
+    const site = sites[0];
+    site.setHlxConfig({
+      content: { source: { type: 'markup', url: 'https://content.example/' } },
+      code: { source: { type: 'github', url: 'https://github.com/old/repo' } },
+    });
+    site.save = sandbox.spy(site.save);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        hlxConfig: {
+          rso: { owner: 'newOwner', site: 'newSite' },
+          code: { source: { type: 'github', url: 'https://github.com/new/repo' } },
+        },
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+    const updatedSite = await response.json();
+    expect(updatedSite.hlxConfig).to.deep.equal({
+      content: { source: { type: 'markup', url: 'https://content.example/' } },
+      code: { source: { type: 'github', url: 'https://github.com/new/repo' } },
+      rso: { owner: 'newOwner', site: 'newSite' },
+    });
+  });
+
+  it('deletes an hlxConfig sub-key when patched with null', async () => {
+    const site = sites[0];
+    site.setHlxConfig({
+      content: { source: { type: 'markup', url: 'https://content.example/' } },
+      rso: { owner: 'owner', site: 'site' },
+    });
+    site.save = sandbox.spy(site.save);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { hlxConfig: { content: null } },
+      ...defaultAuthAttributes,
+    });
+
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+    const updatedSite = await response.json();
+    expect(updatedSite.hlxConfig).to.deep.equal({
+      rso: { owner: 'owner', site: 'site' },
+    });
+  });
+
+  it('leaves hlxConfig unchanged when the patch omits it', async () => {
+    const site = sites[0];
+    const existingHlxConfig = {
+      content: { source: { type: 'markup', url: 'https://content.example/' } },
+    };
+    site.setHlxConfig(existingHlxConfig);
+    site.save = sandbox.spy(site.save);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { deliveryType: 'other' },
+      ...defaultAuthAttributes,
+    });
+
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+    const updatedSite = await response.json();
+    expect(updatedSite.hlxConfig).to.deep.equal(existingHlxConfig);
+  });
+
+  it('deep-merges deliveryConfig, preserving omitted sub-keys on partial patch', async () => {
+    const site = sites[0];
+    site.setDeliveryConfig({
+      programId: '12652',
+      environmentId: '16854',
+      authorURL: 'https://author-p12652-e16854-cmstg.adobeaemcloud.com/',
+    });
+    site.save = sandbox.spy(site.save);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { deliveryConfig: { siteId: '1234' } },
+      ...defaultAuthAttributes,
+    });
+
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+    const updatedSite = await response.json();
+    expect(updatedSite.deliveryConfig).to.deep.equal({
+      programId: '12652',
+      environmentId: '16854',
+      authorURL: 'https://author-p12652-e16854-cmstg.adobeaemcloud.com/',
+      siteId: '1234',
+    });
+  });
+
+  it('ignores __proto__ keys in a config patch to prevent prototype pollution', async () => {
+    const site = sites[0];
+    site.setHlxConfig({ rso: { owner: 'o' } });
+    site.save = sandbox.spy(site.save);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        hlxConfig: JSON.parse('{"__proto__": {"polluted": true}, "rso": {"site": "s"}}'),
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(response.status).to.equal(200);
+    // Object.prototype must not have been polluted.
+    expect({}.polluted).to.equal(undefined);
+    const updatedSite = await response.json();
+    expect(updatedSite.hlxConfig).to.deep.equal({ rso: { owner: 'o', site: 's' } });
+  });
+
   it('returns forbidden when trying to update organizationId', async () => {
     const site = sites[0];
     site.save = sandbox.spy(site.save);
@@ -788,11 +926,113 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Updating organization ID is not allowed');
   });
 
-  it('returns forbidden when changing the URL of a site attached to a Semrush-managed brand', async () => {
+  it('propagates the URL change to Semrush and persists it for the brand\'s own primary site', async () => {
     const site = sites[0];
     site.save = sandbox.spy(site.save);
     getBrandBySiteStub.reset();
-    getBrandBySiteStub.resolves({ semrushSubWorkspaceId: 'sub-ws-123' });
+    getBrandBySiteStub.resolves({
+      id: 'brand-1', name: 'Acme', semrushSubWorkspaceId: 'sub-ws-123', brandAliases: [],
+    });
+    const postgrestClient = { from: () => {} };
+
+    // Same registrable domain as the site's current https://site1.com — a subpath edit.
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { baseURL: 'https://site1.com/new-path', deliveryType: 'other' },
+      dataAccess: { services: { postgrestClient } },
+      ...defaultAuthAttributes,
+    });
+
+    expect(getBrandBySiteStub).to.have.been.calledOnce;
+    expect(resolveSemrushImsTokenStub).to.have.been.calledOnce;
+    expect(createSerenityTransportStub).to.have.been.calledOnce;
+    expect(propagateSiteUrlToSemrushStub).to.have.been.calledOnce;
+    const call = propagateSiteUrlToSemrushStub.getCall(0).args[0];
+    expect(call).to.include({
+      workspaceId: 'sub-ws-123',
+      brandId: 'brand-1',
+      siteId: SITE_IDS[0],
+      newBaseURL: 'https://site1.com/new-path',
+    });
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+    const updated = await response.json();
+    expect(updated).to.have.property('baseURL', 'https://site1.com/new-path');
+  });
+
+  it('normalizes a trailing slash before comparing/colliding/persisting a baseURL change', async () => {
+    // A trailing-slash-only variant of the current baseURL must be treated as a no-op:
+    // no brand lookup, no Semrush call, no save -- matching the existing "unchanged URL"
+    // behavior, not a same-domain edit attempt.
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    getBrandBySiteStub.reset();
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { baseURL: 'https://site1.com/', deliveryType: 'other' },
+      ...defaultAuthAttributes,
+    });
+
+    expect(getBrandBySiteStub).to.have.not.been.called;
+    expect(site.save).to.have.been.calledOnce; // deliveryType still changed
+    expect(response.status).to.equal(200);
+    const updated = await response.json();
+    expect(updated).to.have.property('baseURL', 'https://site1.com');
+  });
+
+  it('normalizes host case before comparing/colliding/persisting a baseURL change', async () => {
+    // A case-only variant of the current baseURL's host must be treated as a no-op:
+    // no brand lookup, no Semrush call, no save -- matching the existing "unchanged URL"
+    // behavior, not a same-domain edit attempt. Hosts are case-insensitive
+    // (RFC 3986 / WHATWG URL); paths are not, so only the host is normalized.
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    getBrandBySiteStub.reset();
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { baseURL: 'https://Site1.COM', deliveryType: 'other' },
+      ...defaultAuthAttributes,
+    });
+
+    expect(getBrandBySiteStub).to.have.not.been.called;
+    expect(site.save).to.have.been.calledOnce; // deliveryType still changed
+    expect(response.status).to.equal(200);
+    const updated = await response.json();
+    expect(updated).to.have.property('baseURL', 'https://site1.com');
+  });
+
+  it('collides on a trailing-slash variant of an existing site\'s baseURL', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    // The "existing" colliding site is stored WITHOUT a trailing slash; the request
+    // carries one -- normalization must still catch this as the same URL.
+    mockDataAccess.Site.findByBaseURL.resolves(sites[1]);
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { baseURL: 'https://site2.com/', deliveryType: 'other' },
+      ...defaultAuthAttributes,
+    });
+    const error = await response.json();
+
+    expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledOnceWith('https://site2.com');
+    expect(site.save).to.have.not.been.called;
+    expect(response.status).to.equal(409);
+    expect(error).to.have.property('code', 'siteUrlTaken');
+  });
+
+  it('propagates and persists a Semrush-attached site\'s URL change even across a different registrable domain', async () => {
+    // Live-verified against adobe-hackathon.semrush.com (2026-08-18): a project PATCH
+    // accepts and persists a changed `domain`, and a subsequent publish settles cleanly
+    // with no project recreation — so a cross-domain edit is no longer refused.
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    getBrandBySiteStub.reset();
+    getBrandBySiteStub.resolves({
+      id: 'brand-1', name: 'Acme', semrushSubWorkspaceId: 'sub-ws-123', brandAliases: [],
+    });
     const postgrestClient = { from: () => {} };
 
     const response = await sitesController.updateSite({
@@ -801,15 +1041,60 @@ describe('Sites Controller', () => {
       dataAccess: { services: { postgrestClient } },
       ...defaultAuthAttributes,
     });
+
+    expect(propagateSiteUrlToSemrushStub).to.have.been.calledOnce;
+    expect(propagateSiteUrlToSemrushStub.getCall(0).args[0]).to.include({
+      newBaseURL: 'https://changed.example.com',
+    });
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+    const updated = await response.json();
+    expect(updated).to.have.property('baseURL', 'https://changed.example.com');
+  });
+
+  it('returns conflict when the new baseURL collides with another existing site', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    mockDataAccess.Site.findByBaseURL.resolves(sites[1]); // a DIFFERENT site than the one edited
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { baseURL: 'https://site2.com', deliveryType: 'other' },
+      ...defaultAuthAttributes,
+    });
     const error = await response.json();
 
-    expect(getBrandBySiteStub).to.have.been.calledOnce;
+    expect(getBrandBySiteStub).to.have.not.been.called;
     expect(site.save).to.have.not.been.called;
-    expect(response.status).to.equal(403);
-    expect(error).to.have.property(
-      'message',
-      'Updating the URL of a site attached to a Semrush-managed brand is not allowed',
-    );
+    expect(response.status).to.equal(409);
+    expect(error).to.have.property('message', 'A site with this baseURL already exists');
+    expect(error).to.have.property('code', 'siteUrlTaken');
+  });
+
+  it('surfaces a Semrush quota-exceeded propagation failure as 409 and does not persist the URL', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    getBrandBySiteStub.reset();
+    getBrandBySiteStub.resolves({
+      id: 'brand-1', name: 'Acme', semrushSubWorkspaceId: 'sub-ws-123', brandAliases: [],
+    });
+    const quotaError = new Error('AI resource allocation quota exceeded');
+    quotaError.status = 409;
+    quotaError.code = 'quotaExceeded';
+    propagateSiteUrlToSemrushStub.rejects(quotaError);
+    const postgrestClient = { from: () => {} };
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: { baseURL: 'https://site1.com/new-path', deliveryType: 'other' },
+      dataAccess: { services: { postgrestClient } },
+      ...defaultAuthAttributes,
+    });
+    const error = await response.json();
+
+    expect(site.save).to.have.not.been.called;
+    expect(response.status).to.equal(409);
+    expect(error).to.have.property('code', 'quotaExceeded');
   });
 
   it('allows changing the URL of a site not attached to a Semrush-managed brand', async () => {

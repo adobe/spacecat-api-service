@@ -112,7 +112,7 @@ describe('LlmoController — onboardSiteOnly (LLMO-5606)', () => {
         performLlmoOnboarding: (...a) => performLlmoOnboardingStub(...a),
         performLlmoOffboarding: sinon.stub(),
         postLlmoAlert: (...a) => postLlmoAlertStub(...a),
-        appendRowsToQueryIndex: sinon.stub(),
+        reindexQueryIndexPaths: sinon.stub(),
         previewAndPublishQueryIndex: sinon.stub(),
       },
       '../../../src/support/brand-profile-trigger.js': {

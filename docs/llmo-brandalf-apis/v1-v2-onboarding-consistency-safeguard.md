@@ -2,16 +2,68 @@
 
 **Jira:** [LLMO-4176](https://jira.corp.adobe.com/browse/LLMO-4176)
 **Epic:** [LLMO-4054 — Brandalf GA (Brandalf v1 fast follows)](https://jira.corp.adobe.com/browse/LLMO-4054)
-**Status:** Implemented and tested on dev
+**Status:** Superseded in part by [LLMO-7108](https://jira.corp.adobe.com/browse/LLMO-7108)
+— the legacy-site cutoff has been removed (see the update note below). The
+`LLMO_ONBOARDING_DEFAULT_VERSION` kill switch is retained; the
+`LLMO_BRANDALF_GA_CUTOFF_MS` cutoff and its helpers are gone.
 **PRs:**
 - api-service: [adobe/spacecat-api-service#2171](https://github.com/adobe/spacecat-api-service/pull/2171)
 - audit-worker: [adobe/spacecat-audit-worker#2380](https://github.com/adobe/spacecat-audit-worker/pull/2380) *(companion fix — required for v1 onboarding to complete successfully)*
 **Lifetime:** **Temporary.** This rule is a stop-gap to keep new and legacy
 customers from drifting into a mixed v1/v2 state. It should be **removed once
 all v1 customers have been migrated to v2**, at which point
-`resolveLlmoOnboardingMode` collapses to "always v2" and both
-`LLMO_ONBOARDING_DEFAULT_VERSION` and `LLMO_BRANDALF_GA_CUTOFF_MS` can be
-deleted.
+`resolveLlmoOnboardingMode` collapses to "always v2" and
+`LLMO_ONBOARDING_DEFAULT_VERSION` can be deleted.
+
+## Update — LLMO-7108: legacy-site cutoff removed
+
+As of [LLMO-7108](https://jira.corp.adobe.com/browse/LLMO-7108) ("stop onboarding
+on v1"), the **legacy-site cutoff has been removed** so that every new onboarding
+defaults to v2. Concretely:
+
+- Deleted from `src/support/llmo-onboarding-mode.js`: `hasPreBrandalfSites`,
+  `resolveBrandalfCutoffMs`, and the `LLMO_BRANDALF_GA_CUTOFF_MS_DEFAULT`
+  constant. The `LLMO_BRANDALF_GA_CUTOFF_MS` env var is no longer read.
+- The **row-1 remediation** (which reverted `brandalf=true` → `false` for an org
+  with pre-cutoff sites under an active kill switch) is gone with it — it
+  depended on detecting pre-cutoff sites. A `brandalf=true` org is now **always
+  v2**, even under an active kill switch.
+- The resolver's `readOnly` option was removed: with the row-1 write gone the
+  function has no side effects, so callers (e.g. the `(org, site) → brand`
+  resolver GET in `brands.js`) no longer pass it.
+
+**Current decision order** in `resolveLlmoOnboardingMode`:
+
+1. `brandalf=true` → **v2**
+2. `brandalf_migration=true` → **v2**
+3. `LLMO_ONBOARDING_DEFAULT_VERSION === 'v1'` (global kill switch) → **v1**
+4. otherwise → **v2**
+
+The `LLMO_ONBOARDING_DEFAULT_VERSION` kill switch is **retained** as a global
+"hold not-yet-migrated orgs on v1" switch.
+
+**Where the resolver runs.** `resolveLlmoOnboardingMode` is consumed on two
+paths, not just onboarding:
+
+- `performLlmoOnboarding` (write) — on a v2 result it upserts `brandalf=true`
+  **org-wide**, so a single onboarding touch flips *every* existing site of that
+  org to v2 downstream (including sites that have no v2 brand or an empty prompt
+  set). Ops note: the remaining v1 population is dominated by one internal org
+  holding ~159 sites — onboarding any one of its sites flips all 159 at once.
+- `getBrandForOrgSite` in `brands.js` — a read-only GET, hit by BP refresh and
+  the DRS scheduler.
+
+Removing the cutoff flips a flagless pre-cutoff org to v2 on **both** paths: the
+brand resolver now returns the v2 brand where it previously 404'd. The resolver
+does **not** by itself flip an already-onboarded org's `brandalf` flag (only an
+onboarding does that), and DRS gates on the `brandalf` / `brandalf_migration`
+flags independently, so a still-flagless org keeps running v1 downstream until it
+is onboarded/flagged. (A small tracked set of orgs already resolve v1 in DRS while
+owning v2 brand rows — for those, this endpoint now serves the v2 brand.)
+
+The sections below describe the original cutoff-based design (rows referencing
+`LLMO_BRANDALF_GA_CUTOFF_MS` / "pre-cutoff sites") and are retained for
+historical context only — they no longer reflect the shipped code.
 
 ## Problem
 

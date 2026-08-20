@@ -110,6 +110,68 @@ export default function organizationTests(getHttpClient, resetData) {
       });
     });
 
+    describe('GET /organizations/by-product-code/:productCode', () => {
+      it('admin: returns only orgs with a site onboarded for LLMO', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/organizations/by-product-code/LLMO');
+        expect(res.status).to.equal(200);
+        // Onboarded (owns a site with an LLMO SiteEnrollment): ORG_1 (SITE_1) + ORG_3 (SITE_4).
+        // Excluded: ORG_2 (no LLMO site) and the LLMO mode-resolution fixture orgs
+        // (no entitlement/enrollment), even though they all appear in GET /organizations.
+        expect(res.body).to.be.an('array').with.lengthOf(2);
+        const sorted = sortById(res.body);
+        sorted.forEach((org) => expectOrgDto(org));
+        const ids = sorted.map((org) => org.id);
+        expect(ids).to.include(ORG_1_ID);
+        expect(ids).to.include(ORG_3_ID);
+        expect(ids).to.not.include(ORG_2_ID);
+      });
+
+      it('admin: excludes orgs that are entitled but have no onboarded site (ASO)', async () => {
+        // ORG_1 holds an ASO entitlement (ENT_2) but no site is enrolled under ASO, so the
+        // onboarded (not merely entitled) filter returns an empty list.
+        const http = getHttpClient();
+        const res = await http.admin.get('/organizations/by-product-code/ASO');
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').that.is.empty;
+      });
+
+      it('admin: returns 400 for an unknown product code', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/organizations/by-product-code/BOGUS');
+        expect(res.status).to.equal(400);
+      });
+
+      it('normalizes a lower-case product code', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/organizations/by-product-code/llmo');
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(2);
+      });
+
+      it('user: returns 403', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get('/organizations/by-product-code/LLMO');
+        expect(res.status).to.equal(403);
+      });
+
+      it('s2sConsumerReadAll: returns the onboarded orgs (organization:readAll)', async () => {
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadAll.get('/organizations/by-product-code/LLMO');
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(2);
+        const ids = res.body.map((org) => org.id);
+        expect(ids).to.include(ORG_1_ID);
+        expect(ids).to.include(ORG_3_ID);
+      });
+
+      it('s2sConsumerReadOnly: returns 403 (no organization:readAll)', async () => {
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadOnly.get('/organizations/by-product-code/LLMO');
+        expect(res.status).to.equal(403);
+      });
+    });
+
     describe('GET /organizations/:organizationId', () => {
       it('admin: returns accessible org by ID', async () => {
         const http = getHttpClient();

@@ -999,6 +999,12 @@ SiteUpdate:
     name:
       description: The name of the site
       type: string
+    baseURL:
+      description: >-
+        The base URL of the site. Changing the URL of a site attached to a
+        Semrush-managed brand's own primary site propagates the change to
+        Semrush; a market-mirror site stays immutable — see PATCH /sites/{siteId}.
+      $ref: '#/URL'
     deliveryType:
       description: The type of the delivery this site is using
       $ref: '#/DeliveryType'
@@ -7761,9 +7767,18 @@ V2SemrushRejectedAlias:
       type: string
       description: ISO-3166 country code of that market.
       example: 'us'
+    name:
+      type: [string, 'null']
+      description: >-
+        Name of the benchmark the aliases were attached to (null when absent).
+        This is what identifies the benchmark: a project can hold several
+        benchmarks on one domain, told apart by their name.
+      example: 'Phoenix Suns'
     domain:
       type: [string, 'null']
-      description: Benchmark domain the aliases were attached to (null when absent).
+      description: >-
+        Domain of that benchmark (null when absent). Not an identifier on its
+        own - use `name` to tell sibling benchmarks on one domain apart.
       example: 'www.example.com'
     aliases:
       type: array
@@ -11880,9 +11895,8 @@ SerenityPrompt:
         different dimensions (a sub-category `human` and the `source` value
         `human`). Read a tag's dimension from `path[0].name`, never from its
         own name — bearing in mind that `path[0].name` is the root's UPSTREAM
-        name, which for the intent dimension is `$abv_tags$intent`, or the
-        pre-rename `intent` on a project the rename has not reached. Match both
-        spellings when keying on that dimension.
+        name, which for the intent dimension is `$abv_tags$intent` and for the
+        other four is the dimension key itself.
     tagIds:
       type: array
       items: { type: string }
@@ -11932,8 +11946,7 @@ SerenityPromptTag:
     normalizes that absence to `null`, so a tag whose `path` is `null` is a
     dimension root and its own `name` names its dimension upstream. Names are
     passed through exactly as upstream holds them, so the intent root reads
-    `$abv_tags$intent` — or the pre-rename `intent` on a project the rename has
-    not reached. The dimension is `intent` either way.
+    `$abv_tags$intent`. The dimension is `intent`.
   required: [id, name]
   properties:
     id:
@@ -12156,10 +12169,22 @@ SerenityMarket:
       description: Upstream Semrush AIO project id for this slice (sub-workspace mode only).
     domain:
       description: |
-        The market's own domain (its primary URL host, e.g. "example.com").
-        Each market has its own primary URL/domain — the brand itself has none.
-        Additive, sub-workspace mode only. Surfaced so the market overview can
-        display it. Null when the upstream project carries no domain.
+        The registrable domain the market's upstream project is filed under
+        (e.g. "example.com"). Each market has its own domain — the brand itself
+        has none. It cannot carry a path, so for a market whose site is a
+        subdomain or a subpath it names the parent rather than the tracked site;
+        read `primaryUrl` for that. Additive, sub-workspace mode only. Null when
+        the upstream project carries no domain.
+      oneOf:
+        - type: string
+        - type: 'null'
+    primaryUrl:
+      description: |
+        The url the market's upstream project actually analyses (Semrush
+        `settings.ai.primary_url`) — host plus path, scheme-less, e.g.
+        "nba.com/lakers". This is the value the market overview displays, since
+        it is the only one that distinguishes markets sharing a domain. Additive,
+        sub-workspace mode only. Null when the upstream project carries none.
       oneOf:
         - type: string
         - type: 'null'
@@ -12415,6 +12440,13 @@ SerenityCreateMarketRequest:
       minItems: 1
       items: { type: string }
       description: Brand-name variants the upstream should match in model answers.
+    primaryUrl:
+      type: [string, 'null']
+      description: |
+        Full tracked URL identity for the brand (may include subdomain/subpath,
+        e.g. www.nba.com/kings). Written to Semrush `settings.ai.primary_url` via
+        a best-effort PATCH before publish (serenity-docs#348). Optional — falls
+        back to `brandDomain` (host-only) when omitted.
 
 SerenityTag:
   type: object
@@ -12822,10 +12854,8 @@ SerenityUrlInspectorFilterDimensions:
     page_intents:
       type: array
       description: >-
-        Distinct intent-prefixed tags. The prefix is the intent root's name on that
-        project — `$abv_tags$intent__`, or `intent__` on a project the rename has not
-        reached yet — and `id` is the original tag value, carrying whichever prefix
-        that project uses.
+        Distinct `$abv_tags$intent__`-prefixed tags. The prefix is the intent root's
+        upstream name, and `id` is the original tag value carrying that prefix.
       items: { $ref: '#/SerenityFilterDimensionItem' }
     origins:
       type: array
@@ -14047,22 +14077,28 @@ TicketCreateRequest:
       items:
         $ref: '#/TicketAttachment'
       maxItems: 10
-OnboardingNotificationResponse:
+OnboardingProvisioningResponse:
   type: object
   required:
-    - notified
+    - provisioned
     - workspaceId
+    - role
   properties:
-    notified:
+    provisioned:
       type: boolean
       example: true
     workspaceId:
-      type: [string, 'null']
-      description: The org-level Semrush workspace ID, or null if the org has none.
-      example: "ws-123"
-    reason:
       type: string
+      description: The Semrush workspace ID the caller was granted admin access to.
+      example: "ws-123"
+    role:
+      type: string
+      description: The role granted to the caller in the Semrush workspace.
+      example: "admin"
+    alreadyMember:
+      type: boolean
       description: >-
-        Present only when notified is false. Explains why no notification was
-        sent (e.g. a duplicate request arrived within the per-org cooldown window).
-      example: "recently notified"
+        Present and true when the caller was already a member of the
+        workspace (or its parent) before this call — Semrush's 409 response,
+        which is treated as success rather than an error.
+      example: true

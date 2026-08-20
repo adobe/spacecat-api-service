@@ -54,7 +54,7 @@ ever size a child.
 
 ### Evidence
 
-Live probe against the LLMO-Dev-2 parent on `adobe-hackathon.semrush.com`, 2026-07-28. A child
+Live probe against the LLMO-Dev-2 parent on `www.semrush.com`, 2026-07-28. A child
 created with no `resources` body:
 
 - settled to `created` and reported `projects 0/0  prompts 0/0`;

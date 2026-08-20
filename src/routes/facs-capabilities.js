@@ -176,6 +176,7 @@ const routeFacsCapabilities = {
 
     // Admin-only reads
     'GET /organizations', // admin OR S2S readAll
+    'GET /organizations/by-product-code/:productCode', // admin OR S2S readAll
     'GET /sites', // admin OR S2S readAll
     'GET /sites.csv', // hasAdminReadAccess
     'GET /sites.xlsx', // hasAdminReadAccess
@@ -761,6 +762,7 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit/:cursor': 'llmo/can_view',
       'GET /sites/:siteId/opportunities/by-status/:status': 'llmo/can_view',
       'GET /sites/:siteId/opportunities/top-paid': 'llmo/can_view',
+      'GET /sites/:siteId/edge-deployed-urls': 'llmo/can_view',
       'GET /sites/:siteId/page-citability/counts': 'llmo/can_view',
       'GET /sites/:siteId/reports': 'llmo/can_view',
       'GET /sites/:siteId/reports/:reportId': 'llmo/can_view',
@@ -988,6 +990,7 @@ const routeFacsCapabilities = {
       // cdn / ims-org-access / contact-sales / consent-banner /
       // import-tools / scrape-tools)
       // ------------------------------------------------------------------
+      'PATCH /organizations/:organizationId': 'aso/can_configure',
       'PATCH /sites/:siteId': 'aso/can_configure',
       'PATCH /sites/:siteId/config/cdn-logs': 'aso/can_configure',
       'PATCH /sites/:siteId/config/scraper': 'aso/can_configure',
@@ -1072,6 +1075,7 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit/:cursor': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': 'aso/can_view',
+      'GET /sites/:siteId/edge-deployed-urls': 'aso/can_view',
       'GET /sites/:siteId/fixes': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': 'aso/can_view',
@@ -1316,7 +1320,7 @@ const routeFacsCapabilities = {
     'base64PageUrl', 'base64Url', 'baseURL', 'channel', 'cursor',
     'dataSource', 'deliveryType', 'endDate', 'eventType',
     'exportId', 'flagName', 'geo', 'handlerType', 'hookSecret', 'limit',
-    'metric', 'processingType', 'product', 'projectName',
+    'metric', 'processingType', 'product', 'productCode', 'projectName',
     'sheetType', 'source', 'startDate', 'status', 'tier', 'tokenType', 'type',
     'url', 'version', 'week',
     // Single-row id used by the state-layer management endpoints

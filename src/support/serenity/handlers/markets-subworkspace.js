@@ -12,7 +12,7 @@
 
 // @ts-check
 
-import { hasText } from '@adobe/spacecat-shared-utils';
+import { hasText, siteIdentityFromUrlString } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from '../../utils.js';
 import {
@@ -34,7 +34,7 @@ import {
   validateParentIdQuery,
 } from './markets.js';
 import {
-  listMarkets, resolveProject, mapPublishStatus, projectToSlice,
+  listMarkets, resolveProject, mapPublishStatus, projectToSlice, primaryUrlOf,
 } from '../subworkspace-projects.js';
 import { ensureSubworkspace } from '../workspace-lifecycle.js';
 import {
@@ -43,11 +43,17 @@ import {
 import { provisionDimensionTree, ensureServerOwnedValue } from '../tag-tree.js';
 import { classifyBrandedTag, needlesFromNames } from '../branded-classifier.js';
 import { classifyPromptIntents, AI_GEN_CLASSIFY_MAX, computeWriteDeadline } from '../intent-classification.js';
-import { collectBrandUrlEntries, attachBrandUrlsToProject, primaryDomainSet } from '../brand-urls.js';
+import {
+  collectBrandUrlEntries, attachBrandUrlsToProject, primaryDomainSet, primaryIdentitySet,
+} from '../brand-urls.js';
 import { resolveProjects } from '../resolve-projects.js';
-import { buildReservedDomains, syncCompetitorBenchmarksForProject } from '../competitor-benchmarks.js';
+import {
+  buildReservedIdentities,
+  syncCompetitorBenchmarksForProject,
+} from '../competitor-benchmarks.js';
 import { collectAliasNames } from '../brand-aliases.js';
 import { upsertMappingRow, tombstoneMappingRow } from '../mapping-rows.js';
+import { primaryUrlPatchBody } from '../project-provisioning.js';
 
 /** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
 /** @typedef {import('../rest-transport.js').ProjectCreateBody} ProjectCreateBody */
@@ -428,7 +434,10 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
   for (const text of allTexts) {
     const typeValue = classifyBrandedTag(text, needles);
     const intentValue = intentByText.get(text) ?? INTENT_VALUE.INFORMATIONAL;
-    const key = `${typeValue} ${intentValue}`;
+    // `\0` cannot occur in either vocabulary value, so the composite key is
+    // collision-free. Keep it escaped — a literal byte makes whole-file scanners
+    // treat this file as binary and silently skip it.
+    const key = `${typeValue}\0${intentValue}`;
     const bucket = byTagSet.get(key);
     if (bucket) {
       bucket.items.push(text);
@@ -632,6 +641,41 @@ export async function handleCreateMarketSubworkspace(
     }
   }
 
+  // The url the project TRACKS. Create IGNORES `primary_url` — whatever spelling
+  // goes in comes back as the apex — so it can only be set by a PATCH, and that
+  // PATCH has to land before the publish below or the value stays in draft.
+  // Applied on the adopt-a-leftover-draft branch too: such a draft was created by
+  // an earlier attempt that never got this far, so it does not have the value yet.
+  //
+  // Both the caller-threaded url and the brandDomain fallback go through the
+  // identity normalizer, so a caller that hands over a full URL, a trailing slash
+  // or a mixed-case host still writes the one spelling the upstream stores — and
+  // one the drift check compares equal to.
+  //
+  // Best-effort: this handler has no orphan-cleanup seam (unlike handleCreateMarket,
+  // which deletes and rethrows), and failing a whole market create because the
+  // tracked url could not be refined would be a worse outcome than a market that is
+  // live on the apex — the state every market is in today. A divergence is
+  // recoverable by the data-service reconcile, which repairs primary_url in place.
+  const primaryUrl = siteIdentityFromUrlString(
+    hasText(body?.primaryUrl) ? body.primaryUrl : body?.brandDomain,
+  );
+  // Truthy check (not hasText) so tsc narrows `string | null` -> `string`;
+  // siteIdentityFromUrlString only ever returns a real host string or null.
+  if (primaryUrl) {
+    try {
+      await transport.updateProject(
+        workspaceId,
+        projectId,
+        primaryUrlPatchBody(primaryUrl),
+      );
+    } catch (e) {
+      log?.warn?.('handleCreateMarketSubworkspace: SERENITY_MARKET_PRIMARY_URL_DIVERGENCE — could not set primary_url (non-fatal); market tracks its apex domain', {
+        workspaceId, projectId, primaryUrl, error: e?.message,
+      });
+    }
+  }
+
   // Provision the dimension-root taxonomy on the project (independent of prompts),
   // so classification can later apply intent/origin/type values per prompt and the
   // Categories surface has a `category` root to hang customer categories under.
@@ -701,17 +745,30 @@ export async function handleCreateMarketSubworkspace(
       body.brandDomain,
       ...siblings.map((p) => p?.domain),
     ]);
+    // The same skip keyed on what each market TRACKS. This market's own tracked
+    // url is the one PATCHed above; a sibling's comes from its project, which the
+    // listing already carries.
+    const primaryIdentities = primaryIdentitySet([
+      primaryUrl,
+      ...siblings.map((p) => primaryUrlOf(p)),
+    ]);
     const brandUrlEntries = collectBrandUrlEntries(
       brandUrlSources,
       body.market,
       primaryDomains,
+      primaryIdentities,
     );
     await attachBrandUrlsToProject(
       transport,
       workspaceId,
       projectId,
       brandUrlEntries,
-      { name: body.brandDisplayName, domain: body.brandDomain, aliases: aliasNames },
+      {
+        name: body.brandDisplayName,
+        domain: body.brandDomain,
+        primaryUrl,
+        aliases: aliasNames,
+      },
       log,
     );
   } catch (e) {
@@ -733,7 +790,7 @@ export async function handleCreateMarketSubworkspace(
   try {
     // Reserve the brand's own domains (this market's project domain + the brand's
     // own website URLs) so a competitor can't be one of the brand's own properties.
-    const reservedDomains = buildReservedDomains(
+    const reservedIdentities = buildReservedIdentities(
       [body.brandDomain],
       brandUrlSources?.urls,
     );
@@ -745,7 +802,7 @@ export async function handleCreateMarketSubworkspace(
       [],
       body.market,
       log,
-      reservedDomains,
+      reservedIdentities,
     );
   } catch (e) {
     // Same non-self-healing best-effort seam as the URL attach above — distinct
