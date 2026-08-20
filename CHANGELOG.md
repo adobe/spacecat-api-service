@@ -1,3 +1,10 @@
+## [1.760.1](https://github.com/adobe/spacecat-api-service/compare/v1.760.0...v1.760.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **llmo:** drop temp-onboarding/skip-helix-query flags, always register dataFolder | LLMO-7141 ([#3116](https://github.com/adobe/spacecat-api-service/issues/3116)) ([80b7722](https://github.com/adobe/spacecat-api-service/commit/80b7722ce51566a70048dc3462ddaf42ac34b67c)), closes [#2098](https://github.com/adobe/spacecat-api-service/issues/2098)
+
 # [1.760.0](https://github.com/adobe/spacecat-api-service/compare/v1.759.0...v1.760.0) (2026-08-20)
 
 
