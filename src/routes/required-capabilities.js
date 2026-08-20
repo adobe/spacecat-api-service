@@ -272,6 +272,7 @@ const routeRequiredCapabilities = {
 
   // Organizations
   'GET /organizations': CAP_ORG_READ_ALL,
+  'GET /organizations/by-product-code/:productCode': CAP_ORG_READ_ALL,
   'POST /organizations': 'organization:write',
   'GET /organizations/:organizationId': 'organization:read',
   'GET /organizations/by-ims-org-id/:imsOrgId': 'organization:read',
