@@ -1,3 +1,23 @@
+## [1.760.1](https://github.com/adobe/spacecat-api-service/compare/v1.760.0...v1.760.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **llmo:** drop temp-onboarding/skip-helix-query flags, always register dataFolder | LLMO-7141 ([#3116](https://github.com/adobe/spacecat-api-service/issues/3116)) ([80b7722](https://github.com/adobe/spacecat-api-service/commit/80b7722ce51566a70048dc3462ddaf42ac34b67c)), closes [#2098](https://github.com/adobe/spacecat-api-service/issues/2098)
+
+# [1.760.0](https://github.com/adobe/spacecat-api-service/compare/v1.759.0...v1.760.0) (2026-08-20)
+
+
+### Bug Fixes
+
+* **onboard:** support only one domain per org on PLG tier ([#3115](https://github.com/adobe/spacecat-api-service/issues/3115)) ([72cdba8](https://github.com/adobe/spacecat-api-service/commit/72cdba80132bcd6f5139e04bb396aa85ca0ab708)), closes [#3074](https://github.com/adobe/spacecat-api-service/issues/3074)
+
+
+### Features
+
+* add GET /organizations/by-product-code endpoint for onboarded orgs ([#3112](https://github.com/adobe/spacecat-api-service/issues/3112)) ([b813d6a](https://github.com/adobe/spacecat-api-service/commit/b813d6a713ca8fee0180abe9c817d8889a138f63))
+* default LLMO onboarding to v2 flow ([#3105](https://github.com/adobe/spacecat-api-service/issues/3105)) ([ebd686f](https://github.com/adobe/spacecat-api-service/commit/ebd686f7612af6314a232c91cf6c3abba037c381))
+
 # [1.759.0](https://github.com/adobe/spacecat-api-service/compare/v1.758.2...v1.759.0) (2026-08-20)
 
 

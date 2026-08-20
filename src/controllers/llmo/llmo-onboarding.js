@@ -1587,8 +1587,6 @@ export async function activateBrandAndGeneratePrompts({
  * @param {string} params.brandName - The brand name
  * @param {string} params.imsOrgId - The IMS Organization ID
  * @param {string} [params.deliveryType] - The delivery type for site creation
- * @param {boolean} [params.tempOnboarding] - When true, skips updating helix-query.yaml in GitHub.
- *   HTTP clients set this via the `temp-onboarding` body field.
  * @param {string} [params.region] - Optional ISO 3166-1 alpha-2 region code forwarded to V1 DRS
  *   prompt generation. Omitted → DRS client default ('US') applies.
  * @param {boolean} [params.siteOnly=false] - Site-only onboarding (LLMO-5606). When true, stands
@@ -1602,7 +1600,7 @@ export async function activateBrandAndGeneratePrompts({
 export async function performLlmoOnboarding(params, context, say = () => {}) {
   const {
     domain, baseURL: providedBaseURL, brandName, imsOrgId, deliveryType,
-    tempOnboarding, region, siteOnly = false,
+    region, siteOnly = false,
   } = params;
   const { env, log } = context;
 
@@ -1641,13 +1639,11 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       log.warn(`Failed to enqueue ${LLMO_ONBOARDING_PUBLISH_TRIGGER} for site ${site.getId()}: ${error.message}`);
     }
 
-    // Update helix-query.yaml in project-elmo-ui-data (skip for temporary onboarding)
-    if (tempOnboarding) {
-      log.info(`Skipping helix-query.yaml update (temp-onboarding) for data folder ${dataFolder}`);
-      await say(`:information_source: Skipping helix-query.yaml update (temp-onboarding) for ${dataFolder}`);
-    } else {
-      await updateIndexConfig(dataFolder, context, say);
-    }
+    // Update helix-query.yaml in project-elmo-ui-data. This registration must always run
+    // during onboarding (LLMO-7141): the former temp-onboarding skip was a workaround for a
+    // since-fixed (same-day) Helix bulk-indexing capacity issue, and skipping registration was
+    // the root cause of the LLMO-6320 bug class (sites silently going dark in dashboards).
+    await updateIndexConfig(dataFolder, context, say);
 
     // Site-only onboarding (LLMO-5606) omits llmo-customer-analysis entirely — it
     // belongs to the prompt-gen/brand path (Piece 2) which site-only skips, and it
