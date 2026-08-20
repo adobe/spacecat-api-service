@@ -6327,7 +6327,7 @@ site-llmo-akamai-versions:
       '502':
         $ref: './responses.yaml#/502'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 
 site-llmo-akamai-plan:
   parameters:
