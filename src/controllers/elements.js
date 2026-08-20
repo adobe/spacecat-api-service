@@ -23,6 +23,7 @@ import { ElementsTransportError } from '../support/elements/errors.js';
 import { createElementsService } from '../support/elements/elements-service.js';
 import { fetchOwnedUrlsTraffic, mergeOwnedUrlsTraffic } from '../support/elements/owned-urls-traffic.js';
 import { mapWithConcurrency } from '../support/elements/concurrency.js';
+import { splitScope } from '../support/elements/url-scope.js';
 import { addDaysToDate } from '../support/elements/week-utils.js';
 import { resolveBrandWorkspace } from '../support/serenity/workspace-resolver.js';
 import { isSerenityActiveForBrand } from '../support/serenity/serenity-active.js';
@@ -371,7 +372,8 @@ async function authorizeOrgAccess(ctx) {
  * `:brandId`. `workspaceId` is the brand's Semrush sub-workspace ID, falling
  * back to the org's parent workspace when the brand hasn't been provisioned
  * one yet (per `resolveBrandWorkspace`'s dual-mode resolution). `brand` is
- * looked up via {@link getBrandIdentity} (a lightweight `id, name` select) —
+ * looked up via {@link getBrandIdentity} (a lightweight `id, name, baseUrl`
+ * select) —
  * a missing PostgREST client is reported as 503, not masked as a brand 404.
  *
  * Returns `{ workspaceId, brand }` on success or `{ error: Response }` on failure.
@@ -1277,7 +1279,10 @@ export default function ElementsController(context, log, env) {
    * Phase 2 of the Cited Third-Party tree: expand a cited domain → its URLs.
    * Same Semrush element as owned-urls (Stats-per-URL 9af5ed83) minus the trend
    * element and the Postgres traffic hybrid, optionally filtered to a single
-   * domain (`hostname`) client-side instead of `domain_type='Owned'`.
+   * domain (`hostname`, which also accepts a `host/path` scope) client-side
+   * instead of `domain_type='Owned'`. The brand's own site anchor is passed
+   * along so a subdomain/subpath site's subtree stays separable from its
+   * parent domain's fold (see `createScopeMatcher` in url-scope.js).
    */
   const listDomainUrls = async (ctx) => {
     try {
@@ -1334,6 +1339,12 @@ export default function ElementsController(context, log, env) {
       // Normalize whitespace-only hostname to "no filter" explicitly at the API
       // boundary, rather than relying on the transform's downstream `.trim()`.
       const hostname = (query.hostname || query.domain || '').trim() || undefined;
+      // Reject a hostname that parses to no host (e.g. a bare path) here at the
+      // boundary, mirroring the date validation above; the transform's own
+      // empty-result guard stays as defense-in-depth.
+      if (hostname && !splitScope(hostname)) {
+        return badRequest('hostname must be a domain or host/path scope');
+      }
 
       // The transform optionally host-filters, sorts by citations desc, and slices
       // client-side (Semrush has no server-side pagination); totalCount is the full
@@ -1341,6 +1352,9 @@ export default function ElementsController(context, log, env) {
       const result = await service.getDomainUrls(workspaceId, {
         projects,
         hostname,
+        // The brand's own site anchor (subdomain/subpath aware): scopes the
+        // site's row to its own subtree and keeps it out of ancestor folds.
+        siteBaseUrl: brand.baseUrl,
         channel: query.channel || query.selectedChannel,
         model: query.model || query.platform,
         startDate,

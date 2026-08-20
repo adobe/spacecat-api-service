@@ -697,18 +697,23 @@ export async function getBrandById(organizationId, brandId, postgrestClient) {
 }
 
 /**
- * Lightweight brand/org-membership + display-name lookup. Selects only `id, name`
- * — unlike {@link getBrandById}, which pays for a wide 8-table join
+ * Lightweight brand/org-membership + display-name lookup. Selects `id, name`
+ * plus the primary site's `base_url` (one indexed `sites!site_id` FK join) —
+ * unlike {@link getBrandById}, which pays for a wide 8-table join
  * (`BRAND_SELECT`: aliases, social accounts, earned sources, competitors, sites,
  * urls) to build the full brand DTO. Callers that only need to confirm a brand
  * belongs to an org and want its display name (e.g. auth guards enriching a
- * filter-dimensions response) should use this instead.
+ * filter-dimensions response) should use this instead. `baseUrl` carries the
+ * brand's own site scope (may include a subdomain or a subpath, e.g.
+ * `https://nba.com/kings`); it is null for a serenity shell without a
+ * `site_id`.
  *
  * @param {string} organizationId - SpaceCat organization UUID.
  * @param {string} brandId - Brand UUID.
  * @param {object} postgrestClient - PostgREST client.
- * @returns {Promise<{id: string, name: string} | null>} the brand's id + name,
- *   or null if it doesn't exist / doesn't belong to the org.
+ * @returns {Promise<{id: string, name: string, baseUrl: string|null} | null>}
+ *   the brand's id, name, and primary-site base URL, or null if it doesn't
+ *   exist / doesn't belong to the org.
  */
 export async function getBrandIdentity(organizationId, brandId, postgrestClient) {
   if (!postgrestClient?.from || !hasText(brandId)) {
@@ -717,7 +722,7 @@ export async function getBrandIdentity(organizationId, brandId, postgrestClient)
 
   const { data, error } = await postgrestClient
     .from('brands')
-    .select('id, name')
+    .select('id, name, base_site:sites!site_id(base_url)')
     .eq('organization_id', organizationId)
     .eq('id', brandId)
     .maybeSingle();
@@ -725,7 +730,11 @@ export async function getBrandIdentity(organizationId, brandId, postgrestClient)
   if (error) {
     throw new Error(`Failed to get brand identity: ${error.message}`);
   }
-  return data ?? null;
+  if (!data) {
+    return null;
+  }
+  // Same derivation as mapDbBrandToV2's `baseUrl` (BRAND_SELECT's base_site join).
+  return { id: data.id, name: data.name, baseUrl: data.base_site?.base_url || null };
 }
 
 /**

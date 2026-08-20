@@ -1816,6 +1816,45 @@ describe('ElementsController', () => {
       const [, params] = serviceStub.getDomainUrls.firstCall.args;
       expect(params.hostname).to.be.undefined;
     });
+
+    it('rejects a hostname without a parseable host with 400', async () => {
+      const ctx = fakeContext({
+        url: domainUrlsUrl('?startDate=2026-07-01&endDate=2026-07-14&hostname=%2Fjust%2Fa%2Fpath'),
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listDomainUrls(ctx);
+
+      expect(res.status).to.equal(400);
+      expect(serviceStub.getDomainUrls).to.not.have.been.called;
+    });
+
+    it('passes the brand primary-site base URL to the service as siteBaseUrl', async () => {
+      getBrandIdentityStub.resolves({
+        id: BRAND_ID, name: 'Adobe Brand', baseUrl: 'https://nba.com/kings',
+      });
+      const ctx = fakeContext({
+        url: domainUrlsUrl('?startDate=2026-07-01&endDate=2026-07-14&hostname=nba.com'),
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listDomainUrls(ctx);
+
+      expect(res.status).to.equal(200);
+      const [, params] = serviceStub.getDomainUrls.firstCall.args;
+      expect(params.siteBaseUrl).to.equal('https://nba.com/kings');
+    });
+
+    it('passes no siteBaseUrl for a brand without a primary site', async () => {
+      getBrandIdentityStub.resolves({ id: BRAND_ID, name: 'Adobe Brand', baseUrl: null });
+      const ctx = fakeContext({
+        url: domainUrlsUrl('?startDate=2026-07-01&endDate=2026-07-14'),
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listDomainUrls(ctx);
+
+      expect(res.status).to.equal(200);
+      const [, params] = serviceStub.getDomainUrls.firstCall.args;
+      expect(params.siteBaseUrl).to.be.null;
+    });
   });
 
   // The 4th URL Inspector KPI card, split out of getUrlInspectorStats — shares

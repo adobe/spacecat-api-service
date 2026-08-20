@@ -60,6 +60,20 @@ describe('domain-urls definitions', () => {
 
       expect(modelFilter(payload)).to.be.undefined;
     });
+
+    it('adds the category tag filter and the top-level project_id when provided', () => {
+      const payload = buildDomainUrlsPayload({
+        startDate: '2026-01-01',
+        endDate: '2026-01-31',
+        category: 'category__foo',
+        projectId: 'proj-1',
+      });
+
+      expect(payload.project_id).to.equal('proj-1');
+      expect(payload.filters.advanced.filters).to.deep.include(
+        { op: 'eq', val: 'category__foo', col: 'CBF_tags' },
+      );
+    });
   });
 
   describe('transformDomainUrlsResponse', () => {
@@ -178,6 +192,156 @@ describe('domain-urls definitions', () => {
       expect(result.urls.map((url) => url.url)).to.deep.equal([
         'https://adobe.com/b',
       ]);
+    });
+
+    it('skips statless projects, null rows, sourceless rows, and unparseable sources', () => {
+      const result = transformDomainUrlsResponse([
+        { region: 'DE', stats: undefined },
+        {
+          stats: {
+            blocks: {
+              data: [
+                null,
+                { citations: 3, prompts_with_citation: 1, domain_type: 'Other' },
+                {
+                  source: 'not a url', citations: 3, prompts_with_citation: 1, domain_type: 'Other',
+                },
+                { source: 'https://adobe.com/a', citations: 5 },
+              ],
+            },
+          },
+        },
+      ], {});
+
+      expect(result.totalCount).to.equal(1);
+      // Missing domain_type / prompts_with_citation default to '' / 0; no region
+      // on the project → the row's regions string stays empty.
+      expect(result.urls[0]).to.include({
+        url: 'https://adobe.com/a', contentType: '', promptsCited: 0, regions: '',
+      });
+    });
+
+    it('merges the same URL across projects, summing counts and joining regions', () => {
+      const row = {
+        source: 'https://adobe.com/a', citations: 5, prompts_with_citation: 3, domain_type: 'Owned',
+      };
+      const result = transformDomainUrlsResponse([
+        { region: 'US', stats: { blocks: { data: [row] } } },
+        { region: 'DE', stats: { blocks: { data: [{ ...row, citations: 'oops' }] } } },
+      ], { page: 0, pageSize: 10 });
+
+      expect(result.totalCount).to.equal(1);
+      expect(result.urls[0]).to.include({
+        url: 'https://adobe.com/a', citations: 5, promptsCited: 6, regions: 'DE,US',
+      });
+    });
+  });
+
+  describe('transformDomainUrlsResponse site scoping', () => {
+    const project = (rows) => [{ region: 'US', stats: { blocks: { data: rows } } }];
+    const row = (source, citations = 1) => ({
+      source, citations, prompts_with_citation: 1, domain_type: 'Other',
+    });
+    const urlsOf = (result) => result.urls.map((u) => u.url);
+
+    const intuitRows = project([
+      row('https://quickbooks.intuit.com/pricing', 9),
+      row('https://help.quickbooks.intuit.com/faq', 8),
+      row('https://turbotax.intuit.com/deals', 7),
+      row('https://www.intuit.com/company', 6),
+    ]);
+    const nbaRows = project([
+      row('https://www.nba.com/kings', 9),
+      row('https://nba.com/kings/roster', 8),
+      row('https://nba.com/kingsx', 7),
+      row('https://nba.com/celtics', 6),
+      row('https://cdn.espn.com/kings', 5),
+    ]);
+
+    it('returns only the site subtree when the site host is requested (subdomain site)', () => {
+      const result = transformDomainUrlsResponse(intuitRows, {
+        hostname: 'quickbooks.intuit.com',
+        siteBaseUrl: 'https://quickbooks.intuit.com',
+      });
+
+      expect(urlsOf(result)).to.deep.equal([
+        'https://quickbooks.intuit.com/pricing',
+        'https://help.quickbooks.intuit.com/faq',
+      ]);
+    });
+
+    it('excludes the site subtree from the parent-domain fold (subdomain site)', () => {
+      const result = transformDomainUrlsResponse(intuitRows, {
+        hostname: 'intuit.com',
+        siteBaseUrl: 'https://quickbooks.intuit.com',
+      });
+
+      expect(urlsOf(result)).to.deep.equal([
+        'https://turbotax.intuit.com/deals',
+        'https://www.intuit.com/company',
+      ]);
+    });
+
+    it('returns only the path subtree when the site scope is requested (subpath site)', () => {
+      const result = transformDomainUrlsResponse(nbaRows, {
+        hostname: 'nba.com/kings',
+        siteBaseUrl: 'https://www.nba.com/kings',
+      });
+
+      expect(urlsOf(result)).to.deep.equal([
+        'https://www.nba.com/kings',
+        'https://nba.com/kings/roster',
+      ]);
+    });
+
+    it('excludes the path subtree from the host fold (subpath site)', () => {
+      const result = transformDomainUrlsResponse(nbaRows, {
+        hostname: 'nba.com',
+        siteBaseUrl: 'https://www.nba.com/kings',
+      });
+
+      expect(urlsOf(result)).to.deep.equal([
+        'https://nba.com/kingsx',
+        'https://nba.com/celtics',
+      ]);
+    });
+
+    it('keeps the plain fold for third-party domains regardless of the site scope', () => {
+      const result = transformDomainUrlsResponse(nbaRows, {
+        hostname: 'espn.com',
+        siteBaseUrl: 'https://www.nba.com/kings',
+      });
+
+      expect(urlsOf(result)).to.deep.equal(['https://cdn.espn.com/kings']);
+    });
+
+    it('keeps the whole fold when no site scope is supplied (legacy behavior)', () => {
+      const result = transformDomainUrlsResponse(intuitRows, { hostname: 'intuit.com' });
+
+      expect(result.totalCount).to.equal(4);
+    });
+
+    it('narrows a path-bearing third-party scope by its path prefix', () => {
+      const result = transformDomainUrlsResponse(nbaRows, {
+        hostname: 'nba.com/celtics',
+        siteBaseUrl: 'https://www.nba.com/kings',
+      });
+
+      expect(urlsOf(result)).to.deep.equal(['https://nba.com/celtics']);
+    });
+
+    it('matches nothing for a non-empty hostname without a parseable host', () => {
+      const result = transformDomainUrlsResponse(nbaRows, { hostname: '/just/a/path' });
+
+      expect(result).to.deep.equal({ urls: [], totalCount: 0 });
+    });
+
+    it('keeps all rows when hostname is omitted, even with a site scope present', () => {
+      const result = transformDomainUrlsResponse(nbaRows, {
+        siteBaseUrl: 'https://www.nba.com/kings',
+      });
+
+      expect(result.totalCount).to.equal(5);
     });
   });
 });
