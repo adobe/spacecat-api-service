@@ -46,6 +46,9 @@ Offboarding and other paths reuse **`validateSiteNotOnboarded`** / **`performLlm
 
 ## History: removal of `temp-onboarding` (LLMO-7141)
 
+Removed as a durable follow-up to LLMO-6320, which has the full incident writeup (root cause,
+affected customer sites, and the bug class this flag caused).
+
 LLMO-4024 (PR #2098, 2026-04-01) introduced a **`temp-onboarding`** flag (HTTP body field, and
 **`--skip-helix-query`** / **`--temp-onboarding`** Slack flags) that let onboarding skip the
 **`updateIndexConfig`** step entirely, leaving a site's dataFolder unregistered in
