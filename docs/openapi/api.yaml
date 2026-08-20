@@ -126,6 +126,8 @@ paths:
     $ref: './webhooks-api.yaml#/github-webhook'
   /organizations:
     $ref: './organizations-api.yaml#/organizations'
+  /organizations/by-product-code/{productCode}:
+    $ref: './organizations-api.yaml#/organizations-by-product-code'
   /organizations/{organizationId}:
     $ref: './organization-api.yaml#/organization'
   /organizations/{organizationId}/brands:

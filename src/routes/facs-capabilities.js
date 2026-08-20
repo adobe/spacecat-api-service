@@ -176,6 +176,7 @@ const routeFacsCapabilities = {
 
     // Admin-only reads
     'GET /organizations', // admin OR S2S readAll
+    'GET /organizations/by-product-code/:productCode', // admin OR S2S readAll
     'GET /sites', // admin OR S2S readAll
     'GET /sites.csv', // hasAdminReadAccess
     'GET /sites.xlsx', // hasAdminReadAccess
@@ -1318,7 +1319,7 @@ const routeFacsCapabilities = {
     'base64PageUrl', 'base64Url', 'baseURL', 'channel', 'cursor',
     'dataSource', 'deliveryType', 'endDate', 'eventType',
     'exportId', 'flagName', 'geo', 'handlerType', 'hookSecret', 'limit',
-    'metric', 'processingType', 'product', 'projectName',
+    'metric', 'processingType', 'product', 'productCode', 'projectName',
     'sheetType', 'source', 'startDate', 'status', 'tier', 'tokenType', 'type',
     'url', 'version', 'week',
     // Single-row id used by the state-layer management endpoints
