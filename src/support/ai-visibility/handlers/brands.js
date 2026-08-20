@@ -233,7 +233,9 @@ function mapSourceDomainRowToCitedSource(d) {
 
 export async function citedPagesOwnedCountFromStatsByLlmForMonth(country, target, monthYm, llmEnum, clients) {
   const dateRange = statsByLLMDateRange(monthYm.year, monthYm.month, 1);
-  const raw = await clients.brandClient.statsByLLM({ country, target, dateRange });
+  const raw = await clients.brandClient.statsByLLM({
+    country, target, searchType: resolveSearchType(target.domain), dateRange,
+  });
   const mapped = mapStatsByLLM(raw, dateRange);
   const cp = mapped.citedPages;
   if (!cp || typeof cp !== 'object') { return null; }
@@ -289,13 +291,14 @@ function dedupeRawBrandPromptsForOpportunities(prompts) {
 
 async function fetchBrandPromptsPagesForOpportunities(country, domain, llm, maxPages, orderBy, clients) {
   const target = brandTarget(domain);
+  const searchType = resolveSearchType(domain);
   const order = { by: orderBy };
   async function pullPage(page, acc) {
     if (page >= maxPages) {
       return acc;
     }
     const raw = await clients.promptClient.prompts({
-      country, llm, target, order, range: { limit: 100, offset: page * 100 },
+      country, llm, target, searchType, order, range: { limit: 100, offset: page * 100 },
     }).catch(() => ({ prompts: [] }));
     const chunk = raw.prompts || [];
     const next = [...acc, ...chunk];
@@ -412,14 +415,17 @@ export async function handleBrandPrompts(sp, clients) {
   }
   const { dimensionFilterQl } = topicFilter;
   const target = brandTarget(domain);
+  const searchType = resolveSearchType(domain);
   const order = { by: PROMPTS_REQUEST_ORDER_BY_ENUM.TOPIC_VOLUME };
 
   if (llmSingle) {
     const body = {
-      country, llm: llmSingle, target, range: { limit, offset }, order,
+      country, llm: llmSingle, target, searchType, range: { limit, offset }, order,
     };
     if (dimensionFilterQl) { body.dimensionFilterQl = dimensionFilterQl; }
-    const totalsReq = { country, llm: llmSingle, target };
+    const totalsReq = {
+      country, llm: llmSingle, target, searchType,
+    };
     if (dimensionFilterQl) { totalsReq.dimensionFilterQl = dimensionFilterQl; }
     const promptsPair = await Promise.allSettled([
       clients.promptClient.promptsTotals(totalsReq),
@@ -445,10 +451,10 @@ export async function handleBrandPrompts(sp, clients) {
 
   const perLlmFetch = Math.min(100, offset + limit);
   const baseList = {
-    country, target, order, range: { limit: perLlmFetch, offset: 0 },
+    country, target, searchType, order, range: { limit: perLlmFetch, offset: 0 },
   };
   if (dimensionFilterQl) { baseList.dimensionFilterQl = dimensionFilterQl; }
-  const baseTotals = { country, target };
+  const baseTotals = { country, target, searchType };
   if (dimensionFilterQl) { baseTotals.dimensionFilterQl = dimensionFilterQl; }
 
   const [totalsResults, listResults] = await Promise.all([
@@ -491,13 +497,17 @@ export async function handleBrandCitedPages(sp, clients) {
   const { limit, offset } = parseLimitOffset(sp);
   const llmEnum = optionalLlmFromQuery(sp) ?? LLM_ENUM.ALL;
   const target = brandTarget(domain);
+  const searchType = resolveSearchType(domain);
   const order = resolveGrpcSortOrder(sp, SOURCES_REQUEST_ORDER_BY_ENUM, SOURCES_REQUEST_ORDER_BY_ENUM.PROMPTS_COUNT, CITED_PAGES_SORT_KEYS);
   const monthYm = parseMonthYM(sp);
   const monthRaw = sp.get('month')?.trim();
   const listReq = {
-    country, llm: llmEnum, target, category: SOURCE_CATEGORY_ENUM.OWNED_BY_TARGET, order, range: { limit, offset },
+    country, llm: llmEnum, target, searchType, category: SOURCE_CATEGORY_ENUM.OWNED_BY_TARGET, order, range: { limit, offset },
   };
   if (monthYm && monthRaw) { listReq.targetDate = monthRaw; }
+  // Note: sourcesTotals (SourcesTotalsRequest) does not carry search_type in the
+  // SDK, so the totals fallback stays domain-scoped; the primary total path is
+  // citedPagesOwnedCountFromStatsByLlmForMonth, which is subdomain-scoped above.
   const totalsReq = { country, llm: llmEnum, target };
 
   async function fetchSourcesListBody() {
@@ -749,10 +759,12 @@ export async function handleBrandSourceOpportunities(sp, clients) {
   }
 
   const rangeLimit = Math.min(Math.max(1, limit), GAP_SOURCE_DOMAINS_MAX_RANGE_LIMIT);
+  const searchType = resolveSearchType(domain);
   const listBody = {
     country,
     llm,
     target: brandTarget(domain),
+    searchType,
     competitors,
     kind: kinds,
     order: resolveGrpcSortOrder(sp, DOMAINS_REQUEST_ORDER_BY_ENUM, DOMAINS_REQUEST_ORDER_BY_ENUM.ORGANIC_TRAFFIC, DOMAINS_SORT_KEYS),
@@ -760,7 +772,7 @@ export async function handleBrandSourceOpportunities(sp, clients) {
   };
   if (snapshotDate) { listBody.date = snapshotDate; }
   const totalsBody = {
-    country, llm, target: brandTarget(domain), competitors,
+    country, llm, target: brandTarget(domain), searchType, competitors,
   };
   if (snapshotDate) { totalsBody.date = snapshotDate; }
 
