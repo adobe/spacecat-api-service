@@ -6159,7 +6159,7 @@ describe('Brands Controller', () => {
         '../../src/support/prompts-storage.js': { resolveBrandUuid: sinon.stub().resolves(BRAND_UUID) },
         '../../src/support/serenity/rest-transport.js': { createSerenityTransport },
         '../../src/support/serenity/brand-urls.js': { syncBrandUrlsAcrossMarkets },
-        // removedCompetitorDomains is left REAL so the diff logic is exercised.
+        // removedCompetitors is left REAL so the diff logic is exercised.
         '../../src/support/serenity/competitor-benchmarks.js': { syncCompetitorBenchmarksAcrossMarkets },
         '../../src/support/serenity/brand-aliases.js': { syncBrandAliasesAcrossMarkets },
         '../../src/support/serenity/serenity-active.js': {
@@ -6798,11 +6798,13 @@ describe('Brands Controller', () => {
       // old competitors read BEFORE the update to compute removals.
       expect(getBrandCompetitorsStub).to.have.been.calledOnceWith(BRAND_UUID);
       expect(getBrandCompetitorsStub).to.have.been.calledBefore(updateBrandStub);
-      // sync gets the NEW competitor list, the removed domain, and the workspace.
+      // sync gets the NEW competitor list, the removed competitor, and the workspace.
+      // rival.com is NOT reported removed: the stored entry carried no name, so it
+      // keys on its domain, but its site is still tracked — that is a rename.
       expect(ciSyncStub).to.have.been.calledOnceWith(
         transport,
         updated.competitors,
-        ['gone.com'],
+        [{ name: 'gone.com', key: 'gone.com', domain: 'gone.com' }],
         'ws-9',
       );
     });
