@@ -233,14 +233,17 @@ export function sameAliasSetExact(a, b) {
 /**
  * From a benchmark listing, extract the aliases Semrush rejected
  * (`rejected_brand_aliases`) for the benchmarks selected by `select`. Returns
- * `[{ domain, aliases }]` only for benchmarks that have at least one rejected
- * alias. Pure — the caller fetches the listing (a re-read after the alias write,
- * since neither the create nor the update response carries the rejected set).
+ * `[{ name, domain, aliases }]` only for benchmarks that have at least one
+ * rejected alias. Pure — the caller fetches the listing (a re-read after the alias
+ * write, since neither the create nor the update response carries the rejected set).
+ *
+ * `name` is reported alongside `domain` because a domain does not identify a
+ * benchmark: a project holds several on one domain, discriminated by `brand_name`.
  *
  * @param {Array<object>} benchmarks - `aio_benchmarks` from `listBenchmarks`.
  * @param {(b: object) => boolean} select - keep predicate (e.g. `main_brand`, or
- *   domain ∈ a desired set).
- * @returns {{domain: string|null, aliases: string[]}[]}
+ *   name ∈ a written set).
+ * @returns {{name: string|null, domain: string|null, aliases: string[]}[]}
  */
 export function rejectedAliasesFrom(benchmarks, select) {
   const out = [];
@@ -253,7 +256,7 @@ export function rejectedAliasesFrom(benchmarks, select) {
       ? b.rejected_brand_aliases.filter((a) => hasText(a))
       : [];
     if (rejected.length > 0) {
-      out.push({ domain: b?.domain ?? null, aliases: rejected });
+      out.push({ name: b?.brand_name ?? null, domain: b?.domain ?? null, aliases: rejected });
     }
   }
   return out;

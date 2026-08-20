@@ -158,26 +158,53 @@ describe('serenity alias helpers', () => {
 
   describe('rejectedAliasesFrom', () => {
     const benchmarks = [
-      { domain: 'own.com', main_brand: true, rejected_brand_aliases: ['bad-own'] },
-      { domain: 'rival.com', main_brand: false, rejected_brand_aliases: ['bad-rival', ''] },
-      { domain: 'clean.com', main_brand: false, rejected_brand_aliases: [] },
-      { domain: 'none.com', main_brand: false },
+      {
+        domain: 'own.com', brand_name: 'Own', main_brand: true, rejected_brand_aliases: ['bad-own'],
+      },
+      {
+        domain: 'rival.com',
+        brand_name: 'Rival',
+        main_brand: false,
+        rejected_brand_aliases: ['bad-rival', ''],
+      },
+      {
+        domain: 'clean.com', brand_name: 'Clean', main_brand: false, rejected_brand_aliases: [],
+      },
+      { domain: 'none.com', brand_name: 'None', main_brand: false },
     ];
 
     it('selects via the predicate and keeps only non-empty rejected sets', () => {
       expect(rejectedAliasesFrom(benchmarks, (b) => b.main_brand !== true))
-        .to.deep.equal([{ domain: 'rival.com', aliases: ['bad-rival'] }]);
+        .to.deep.equal([{ name: 'Rival', domain: 'rival.com', aliases: ['bad-rival'] }]);
     });
 
-    it('falls back to a null domain when the benchmark has none', () => {
-      const noDomain = [{ main_brand: false, rejected_brand_aliases: ['x'] }];
-      expect(rejectedAliasesFrom(noDomain, () => true))
-        .to.deep.equal([{ domain: null, aliases: ['x'] }]);
+    it('reports the name alongside the domain, which does not identify a benchmark', () => {
+      // A project holds several benchmarks on one domain, discriminated by name —
+      // so a report carrying only the domain cannot say which one was affected.
+      const siblings = [
+        {
+          domain: 'nba.com', brand_name: 'Suns', main_brand: false, rejected_brand_aliases: ['a'],
+        },
+        {
+          domain: 'nba.com',
+          brand_name: 'Warriors',
+          main_brand: false,
+          rejected_brand_aliases: ['b'],
+        },
+      ];
+      expect(rejectedAliasesFrom(siblings, () => true).map((r) => r.name))
+        .to.deep.equal(['Suns', 'Warriors']);
+    });
+
+    it('falls back to a null name/domain when the benchmark has neither', () => {
+      const bare = [{ main_brand: false, rejected_brand_aliases: ['x'] }];
+      expect(rejectedAliasesFrom(bare, () => true))
+        .to.deep.equal([{ name: null, domain: null, aliases: ['x'] }]);
     });
 
     it('can target the main brand benchmark', () => {
       expect(rejectedAliasesFrom(benchmarks, (b) => b.main_brand === true))
-        .to.deep.equal([{ domain: 'own.com', aliases: ['bad-own'] }]);
+        .to.deep.equal([{ name: 'Own', domain: 'own.com', aliases: ['bad-own'] }]);
     });
 
     it('returns [] for non-array input', () => {

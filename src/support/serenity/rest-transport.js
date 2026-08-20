@@ -45,7 +45,9 @@ export { SerenityTransportError } from './serenity-transport-error.js';
 // Cap upstream calls so a slow Semrush response doesn't pin the Lambda for its
 // full wall budget. Semrush returns well under 5s in practice; 15s is a safe
 // ceiling that still gives the user a clean error rather than a Lambda timeout.
-const DEFAULT_TIMEOUT_MS = 15_000;
+// Exported so other direct (non-typed-client) Semrush callers — e.g. the
+// onboarding workspace-provisioning call — use the same ceiling.
+export const DEFAULT_TIMEOUT_MS = 15_000;
 
 /**
  * The two generated Semrush contracts this transport speaks. Every request shape below is
@@ -195,7 +197,7 @@ function normalizeBaseUrl(raw, varName) {
  * @param {TransportEnv} env
  * @returns {string} canonical `protocol//host` origin
  */
-function baseUrl(env) {
+export function baseUrl(env) {
   return normalizeBaseUrl(env?.SEMRUSH_PROJECTS_BASE_URL, 'SEMRUSH_PROJECTS_BASE_URL');
 }
 
@@ -209,10 +211,14 @@ function baseUrl(env) {
  * (LLMO / api-service#2656). The error message names whichever var was the
  * effective source so a misconfiguration is unambiguous.
  *
+ * Exported for the onboarding workspace-provisioning call
+ * (`src/support/onboarding/workspace-provisioning.js`), which hits this User
+ * Manager path directly rather than going through the typed client built below.
+ *
  * @param {TransportEnv} env
  * @returns {string} canonical `protocol//host` origin
  */
-function usersBaseUrl(env) {
+export function usersBaseUrl(env) {
   // Bound first, then narrowed by `typeof`: `hasText` is not a TS type guard, so it
   // cannot take a `string | undefined` (see this dir's CLAUDE.md). Same idiom as
   // `normalizeBaseUrl` above. Behaviour is unchanged either way — `hasText` already
@@ -770,7 +776,7 @@ export function createSerenityTransport({ env, imsToken }) {
      *
      * NESTING (1-level category tree): pass `parentId` to create the names as
      * CHILDREN of that upstream tag id — a single call, no separate re-parent
-     * needed (verified live 2026-07-01 against adobe-hackathon.semrush.com: the
+     * needed (verified live 2026-07-01 against www.semrush.com: the
      * child comes back with `parent_id` set and lists under the parent). The one
      * `parent_id` applies to every name in the batch. Omit for a flat/root tag.
      *
@@ -896,7 +902,7 @@ export function createSerenityTransport({ env, imsToken }) {
     /**
      * DELETE /v1/workspaces/{ws}/projects/{pid} — removes an upstream
      * project. Upstream support verified 2026-05-28 against
-     * adobe-hackathon.semrush.com:
+     * www.semrush.com:
      *
      *   OPTIONS /v1/workspaces/{ws}/projects/{pid} → 405, allow: DELETE, GET, PATCH
      *   DELETE  /v1/workspaces/{ws}/projects/<bogus> → 404 {"message":"not found"}
@@ -1232,8 +1238,11 @@ export function createSerenityTransport({ env, imsToken }) {
 
     /**
      * POST /v2/workspaces/{ws}/projects/{pid}/ai_models/benchmarks — batch-create
-     * benchmarks. Body is an ARRAY of `{ brand_name, domain, brand_aliases?,
-     * color? }`. The API cannot set `main_brand` (system-managed); a created
+     * benchmarks. Body is an ARRAY of `{ brand_name, domain, primary_url?,
+     * brand_aliases?, color? }`. `primary_url` is honoured at create
+     * (live-verified 2026-08-19) and is what a subpath brand must carry, since
+     * `domain` alone scores it against its bare host. The API cannot set
+     * `main_brand` (system-managed); a created
      * benchmark is a regular tracked brand. Returns `{ ids: [...], existing_count }`.
      * We use it to create the project's own-brand benchmark when Semrush has not
      * auto-provisioned one (the `benchmark_id` brand URLs must attach to).
@@ -1285,7 +1294,14 @@ export function createSerenityTransport({ env, imsToken }) {
      * - A field left OUT of the body is cleared, not preserved: a PUT of
      *   `{brand_name, domain}` empties `brand_aliases`. Always send the full list.
      * - `domain` is required in practice (a body without it 400s on `primary_url`),
-     *   even though the generated request type marks nothing required.
+     *   even though the generated request type marks nothing required. It and
+     *   `primary_url` are ONE value: writing either sets both, `root_domain` keeps
+     *   the registrable form, and a body carrying a host-only `domain` therefore
+     *   RESETS a benchmark that tracks a subpath. Send `primary_url` on every write
+     *   — the value the benchmark should keep, not the plan's bare host
+     *   (live-verified 2026-08-19).
+     * - `main_brand` survives the PUT but cannot be set by it; the tracked url,
+     *   unlike the flag, does move in place.
      * - An alias is identified case-insensitively and keeps the spelling it was
      *   created with, so a PUT cannot re-case one, and two spellings of the same
      *   alias in one list are refused with a 409 that fails the whole write.

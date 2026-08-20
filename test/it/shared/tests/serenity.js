@@ -1521,5 +1521,40 @@ export default function serenityTests(
 
       expect(aliasesOf((await benchmarkNamed('Rival Uno')).row)).to.include('rival incorporated');
     });
+
+    it('accepts an edit whose competitors all sit on the brand\'s own host', async () => {
+      // The Sacramento Kings shape (serenity-docs#358): a brand tracked on a subpath
+      // of a shared host, with sibling competitors on other subpaths of it. Folded to
+      // hosts, all four read as the project's own domain, so every one was rejected as
+      // self-referential, `kept` came back empty, and the whole edit was refused with a
+      // 400 that blamed the customer's data. They are distinct sites, and a Semrush
+      // project holds several benchmarks on one domain discriminated by brand_name.
+      await createUsMarketWithBenchmark();
+
+      const competitors = [
+        { name: 'Phoenix Suns', url: 'https://www.example.com/suns', regions: ['WW'] },
+        { name: 'Golden State Warriors', url: 'https://www.example.com/warriors', regions: ['WW'] },
+        { name: 'Los Angeles Lakers', url: 'https://www.example.com/lakers', regions: ['WW'] },
+        { name: 'Los Angeles Clippers', url: 'https://www.example.com/clippers', regions: ['WW'] },
+      ];
+      const res = await getHttpClient().admin.patch(brandPath, { competitors });
+      expect(res.status).to.equal(200);
+
+      // Stored in full: the drop happened at write time, so a rejected competitor was
+      // erased from the brand row as well as skipped in the sync.
+      expect((res.body.competitors || []).map((c) => c.name).sort())
+        .to.deep.equal(competitors.map((c) => c.name).sort());
+
+      // The benchmarks themselves are NOT asserted here. The PE mock's batch-create
+      // treats `domain` as a conflict token alongside brand name and alias, so four
+      // benchmarks on one domain are a 409 and the sync's writes are absorbed by the
+      // brand-edit's accept-drift seam. Live does not behave that way: probed against
+      // Project Engine 2026-08-19, a create on a domain another benchmark already
+      // holds is ACCEPTED, and a batch of two benchmarks sharing one domain is
+      // ACCEPTED, while a duplicate brand_name is refused with the 409 — which is the
+      // asymmetry this whole change rests on. The mock is over-strict (its own 409
+      // reads 'duplicate brand name or alias' and never mentions domain); until it is
+      // corrected, the sibling-benchmark write is covered by the unit suite.
+    });
   });
 }

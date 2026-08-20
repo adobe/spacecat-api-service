@@ -461,6 +461,32 @@ export function startOnboarding(lambdaContext) {
             },
             {
               type: 'input',
+              block_id: 'force_tier_update_input',
+              optional: true,
+              element: {
+                type: 'checkboxes',
+                action_id: 'force_tier_update',
+                options: [
+                  {
+                    text: {
+                      type: 'plain_text',
+                      text: 'Force tier update',
+                    },
+                    description: {
+                      type: 'plain_text',
+                      text: 'Allow onboard to change a PLG/Pre-onboard tier (normally preserved).',
+                    },
+                    value: 'override',
+                  },
+                ],
+              },
+              label: {
+                type: 'plain_text',
+                text: 'Force Tier Update',
+              },
+            },
+            {
+              type: 'input',
               block_id: 'language_input',
               element: {
                 type: 'plain_text_input',
@@ -633,6 +659,8 @@ export function onboardSiteModal(lambdaContext) {
       const forceOnboard = values.force_onboard_input?.force_onboard?.selected_options?.some(
         (opt) => opt.value === 'force',
       ) ?? false;
+      const forceTierUpdate = values.force_tier_update_input?.force_tier_update
+        ?.selected_options?.some((opt) => opt.value === 'override') ?? false;
       const projectId = values.project_id_input.project_id.value;
       const language = values.language_input.language.value;
       const region = values.region_input.region.value;
@@ -716,6 +744,9 @@ export function onboardSiteModal(lambdaContext) {
       }
       if (forceOnboard) {
         additionalParams.force = true;
+      }
+      if (forceTierUpdate) {
+        additionalParams.forceTierUpdate = true;
       }
       if (projectId) {
         additionalParams.projectId = projectId;
