@@ -33,6 +33,14 @@ use(sinonChai);
  *
  * PRE_ONBOARD is deliberately out of scope — it's an internal staging tier without
  * PLG's "single customer-facing domain" constraint.
+ *
+ * Org resolution: when the site already exists, the guard reads the org straight off
+ * `prefetchedSite.getOrganizationId()` instead of resolving `Organization.findByImsOrgId
+ * (imsOrgID)` — mirroring createSiteAndOrganization, which does the same and ignores
+ * imsOrgID entirely for an existing site. imsOrgID can legitimately point elsewhere (it
+ * defaults to env.DEMO_IMS_ORG when the caller omits it on a re-onboard); resolving by
+ * imsOrgID in that case would check the wrong org's entitlement and silently let a
+ * re-onboard that should be blocked run its full pipeline for nothing.
  */
 describe('onboardSingleSite — PLG-tier org guard', () => {
   const SITE_URL = 'https://example.com';
@@ -43,7 +51,9 @@ describe('onboardSingleSite — PLG-tier org guard', () => {
   let onboardSingleSite;
   let sayStub;
 
-  before(async () => {
+  before(async function beforeHook() {
+    // esmock's cold load of utils.js can exceed the 2s default hook timeout.
+    this.timeout(15000);
     ({ onboardSingleSite } = await esmock('../../src/support/utils.js', {
       '@aws-sdk/client-sfn': {
         // eslint-disable-next-line func-style
@@ -112,12 +122,14 @@ describe('onboardSingleSite — PLG-tier org guard', () => {
   // Site not yet enrolled under the entitlement — a genuinely different domain.
   const makeUnrelatedSite = () => ({
     getConfig: nonPaidConfig,
+    getOrganizationId: () => 'org-plg-1',
     getSiteEnrollments: sandbox.stub().resolves([]),
   });
 
   // Site already enrolled under the same entitlement — safe to re-onboard.
   const makeSameEnrolledSite = (entitlementId) => ({
     getConfig: nonPaidConfig,
+    getOrganizationId: () => 'org-plg-1',
     getSiteEnrollments: sandbox.stub().resolves([
       { getEntitlementId: () => entitlementId },
     ]),
@@ -208,6 +220,47 @@ describe('onboardSingleSite — PLG-tier org guard', () => {
       expect(result.status).to.equal('Failed');
       expect(result.errors).to.match(/Blocked.*PLG-tier ASO entitlement/);
       expect(sayStub).to.have.been.calledWith(sinon.match(GUARD_WARNING_PATTERN));
+    });
+
+    it('resolves the org from the existing site itself, ignoring a mismatched imsOrgID (regression: DEMO_IMS_ORG default)', async () => {
+      const REAL_ORG_ID = 'org-real-plg';
+      const IMS_LOOKUP_ORG_ID = 'org-demo-unrelated';
+
+      const guardSite = {
+        getConfig: nonPaidConfig,
+        getOrganizationId: () => REAL_ORG_ID,
+        // Unrelated to the entitlement bound to the site's real org — no matching enrollment.
+        getSiteEnrollments: sandbox.stub().resolves([]),
+      };
+
+      const ctx = makeContext({
+        org: { getId: () => IMS_LOOKUP_ORG_ID },
+        guardSite,
+      });
+      // The site's real org holds the PLG entitlement; the org imsOrgID/DEMO_IMS_ORG
+      // resolves to has none — proving the guard must not use the latter.
+      ctx.dataAccess.Entitlement.findByOrganizationIdAndProductCode = sandbox.stub();
+      ctx.dataAccess.Entitlement.findByOrganizationIdAndProductCode
+        .withArgs(REAL_ORG_ID, sinon.match.any).resolves(makeEntitlement('PLG'));
+      ctx.dataAccess.Entitlement.findByOrganizationIdAndProductCode
+        .withArgs(IMS_LOOKUP_ORG_ID, sinon.match.any).resolves(null);
+
+      const result = await onboardSingleSite(
+        SITE_URL,
+        IMS_ORG_ID,
+        {},
+        demoProfile,
+        300,
+        slackContext(),
+        ctx,
+        {},
+        { profileName: 'demo' },
+      );
+
+      expect(result.status).to.equal('Failed');
+      expect(result.errors).to.match(/Blocked.*PLG-tier ASO entitlement/);
+      // Site already exists — imsOrgID must never even be resolved to an org.
+      expect(ctx.dataAccess.Organization.findByImsOrgId).to.not.have.been.called;
     });
   });
 

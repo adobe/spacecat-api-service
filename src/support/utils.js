@@ -1936,12 +1936,21 @@ export const onboardSingleSite = async (
     // without the "single customer-facing domain" constraint PLG has.
     // Fail-open on lookup errors — getAsoEntitlement already swallows its own and
     // returns null.
+    //
+    // Resolve the org from the site itself when it already exists, not from imsOrgID.
+    // createSiteAndOrganization ignores imsOrgID entirely for an existing site and always
+    // keys off site.getOrganizationId() — imsOrgID can legitimately point elsewhere (it
+    // defaults to env.DEMO_IMS_ORG when the caller omits it on a re-onboard). Checking
+    // imsOrgID's org here would look at the wrong org's entitlement, let a re-onboard that
+    // should be blocked run its full pipeline (audits, CDN detection, brand-profile) for
+    // nothing, and only have the later protected-tier check (which does use the site's real
+    // org) skip the entitlement write after all that work already happened. Only fall back
+    // to resolving by imsOrgID for a genuinely new site, where there's no existing org to read.
     try {
-      const { Organization: OrgLookup } = dataAccess;
-      const organization = await OrgLookup.findByImsOrgId(imsOrgID);
-      const asoEntitlement = organization
-        ? await getAsoEntitlement(organization.getId(), context)
-        : null;
+      const orgId = prefetchedSite
+        ? prefetchedSite.getOrganizationId()
+        : (await dataAccess.Organization.findByImsOrgId(imsOrgID))?.getId();
+      const asoEntitlement = orgId ? await getAsoEntitlement(orgId, context) : null;
       const existingTier = asoEntitlement?.getTier() ?? null;
 
       if (existingTier === EntitlementModel.TIERS.PLG) {
