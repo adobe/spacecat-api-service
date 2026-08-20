@@ -30,6 +30,7 @@ import {
 } from './prompts.js';
 import { ORIGIN_VALUE } from '../prompt-tags.js';
 import { resolveIntentValueInjection } from '../tag-tree.js';
+import { buildSliceProjectMap, sliceKey } from '../subworkspace-projects.js';
 
 /** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
 
@@ -139,7 +140,7 @@ async function requeuePending(context, job, semrushWorkspaceId, items) {
  * @param {SerenityTransport} transport - Serenity transport built from the exchanged
  *   access token.
  * @param {object} metadata - the job's metadata (`brandId`, `semrushWorkspaceId`,
- *   `prompts`).
+ *   `subworkspace`, `prompts`).
  * @returns {Promise<object>} the job result.
  */
 async function createAndClassify(context, job, transport, metadata) {
@@ -149,13 +150,25 @@ async function createAndClassify(context, job, transport, metadata) {
   // Authorship (LLMO-6289): the caller id captured at enqueue time in the create
   // controller, carried through the async job so classified-on-create prompts are
   // stamped with the human/service that submitted them, not the job runner.
-  const { brandId, semrushWorkspaceId, callerId = 'unknown' } = metadata;
+  const {
+    brandId, semrushWorkspaceId, subworkspace = false, callerId = 'unknown',
+  } = metadata;
   const inputs = Array.isArray(metadata.prompts) ? metadata.prompts : [];
 
-  const projects = await dataAccess.BrandSemrushProject.allByBrandId(brandId);
+  // Twin of the sync handlers' slice→project resolution (prompts.js vs
+  // prompts-subworkspace.js): subworkspace mode has no BrandSemrushProject DB
+  // mapping to read, so it resolves every slice from one live upstream listing.
   const projectsBySlice = new Map();
-  for (const p of projects || []) {
-    projectsBySlice.set(`${p.getGeoTargetId()}:${p.getLanguageCode()}`, p);
+  if (subworkspace) {
+    for (const [key, p] of await buildSliceProjectMap(transport, semrushWorkspaceId, log)) {
+      projectsBySlice.set(key, p.id);
+    }
+  } else {
+    const projects = await dataAccess.BrandSemrushProject.allByBrandId(brandId);
+    for (const p of projects || []) {
+      const key = sliceKey(p.getGeoTargetId(), p.getLanguageCode());
+      projectsBySlice.set(key, p.getSemrushProjectId());
+    }
   }
 
   const classifyPromptType = await buildPromptTypeClassifier(dataAccess, brandId);
@@ -180,8 +193,8 @@ async function createAndClassify(context, job, transport, metadata) {
     if (!input) {
       return { skipped: { text: String(raw?.text || ''), reason: /** @type {string} */ (reason) } };
     }
-    const project = projectsBySlice.get(`${input.geoTargetId}:${input.languageCode}`);
-    if (!project) {
+    const projectId = projectsBySlice.get(sliceKey(input.geoTargetId, input.languageCode));
+    if (!projectId) {
       return {
         skipped: {
           text: input.text,
@@ -189,7 +202,6 @@ async function createAndClassify(context, job, transport, metadata) {
         },
       };
     }
-    const projectId = project.getSemrushProjectId();
     try {
       let typed = await injectComputedTags(projectId, input);
       typed = await injectComputedIntent(projectId, typed);

@@ -62,6 +62,7 @@ describe('handlers/classify-prompts-job.js (serenity-docs#33)', () => {
       createPromptsWithMetadata: sinon.stub().resolves({ items: [{ id: 'created-prompt' }] }),
       publishProject: sinon.stub().resolves(),
       updatePromptTagsByIds: sinon.stub().resolves(),
+      listProjects: sinon.stub().resolves({ items: [] }),
     };
   });
 
@@ -173,6 +174,39 @@ describe('handlers/classify-prompts-job.js (serenity-docs#33)', () => {
       expect(result.pendingClassificationCount).to.equal(1);
       expect(result.requeuedJobId).to.equal(null);
       expect(createAndEnqueueJobStub).to.not.have.been.called;
+    });
+
+    it('subworkspace mode: resolves the slice from a live project listing, not the DB mapping', async () => {
+      const intentByTextMap = new Map([['great product', 'Task']]);
+      const createAndEnqueueJobStub = sinon.stub();
+      transport.listProjects = sinon.stub().resolves({
+        items: [{
+          id: 'proj-live-1',
+          settings: { ai: { location: { id: 2840 }, language: { name: 'en' } } },
+        }],
+      });
+      const { classifyPromptsHandler } = await load({
+        intentByTextMap, createAndEnqueueJobStub, transport,
+      });
+
+      const dataAccess = dataAccessFor([]);
+      const context = { env: {}, log: fakeLog(), dataAccess };
+      const job = makeJob({
+        brandId: 'brand-1',
+        semrushWorkspaceId: WORKSPACE,
+        subworkspace: true,
+        prompts: [{
+          text: 'great product', geoTargetId: 2840, languageCode: 'en', tagIds: [TAG_IDS.categoryRunningShoes],
+        }],
+      });
+
+      const result = await classifyPromptsHandler(context, job, 'token');
+
+      expect(result.created).to.have.lengthOf(1);
+      expect(result.created[0].tagIds).to.include(TAG_IDS.intentTask);
+      // The DB mapping is never consulted in subworkspace mode.
+      expect(dataAccess.BrandSemrushProject.allByBrandId).to.not.have.been.called;
+      expect(transport.listProjects).to.have.been.calledOnceWith(WORKSPACE);
     });
 
     it('skips a prompt whose slice has no matching project', async () => {
