@@ -1,3 +1,10 @@
+## [1.758.2](https://github.com/adobe/spacecat-api-service/compare/v1.758.1...v1.758.2) (2026-08-20)
+
+
+### Bug Fixes
+
+* **facs:** add aso/can_configure to PATCH /organizations/:organizationId ([#3110](https://github.com/adobe/spacecat-api-service/issues/3110)) ([b67374c](https://github.com/adobe/spacecat-api-service/commit/b67374c811d8a530ccf3dd9aa86e59b15abc9ffd))
+
 ## [1.758.1](https://github.com/adobe/spacecat-api-service/compare/v1.758.0...v1.758.1) (2026-08-19)
 
 
