@@ -1,3 +1,10 @@
+# [1.761.0](https://github.com/adobe/spacecat-api-service/compare/v1.760.2...v1.761.0) (2026-08-20)
+
+
+### Features
+
+* **ai-visibility:** scope brands/* AI-visibility handlers to subdomains ([#3111](https://github.com/adobe/spacecat-api-service/issues/3111)) ([40d3f24](https://github.com/adobe/spacecat-api-service/commit/40d3f2432c8afcb76c30b07a14b186bb49dbc43b))
+
 ## [1.760.2](https://github.com/adobe/spacecat-api-service/compare/v1.760.1...v1.760.2) (2026-08-20)
 
 
