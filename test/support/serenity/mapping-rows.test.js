@@ -15,7 +15,7 @@ import sinon from 'sinon';
 
 import {
   upsertMappingRow, tombstoneMappingRow, tombstoneAllForBrand, linkSiteToLiveRows,
-  linkSiteToRow,
+  linkSiteToRow, projectsForSite,
 } from '../../../src/support/serenity/mapping-rows.js';
 
 const BRAND = 'brand-1';
@@ -297,6 +297,43 @@ describe('serenity mapping-rows', () => {
       expect(log.error).to.have.been.calledOnce;
       expect(log.error.firstCall.args[0]).to.include('SERENITY_MAPPING_ROW_WRITE_FAILED');
       expect(log.error.firstCall.args[1]).to.include({ failed: 1, total: 2 });
+    });
+  });
+
+  describe('projectsForSite', () => {
+    const SITE = 'site-1';
+
+    it('returns [] when dataAccess has no BrandSemrushProject, brandId, or siteId is missing', async () => {
+      expect(await projectsForSite({}, BRAND, SITE)).to.deep.equal([]);
+      expect(await projectsForSite({ BrandSemrushProject: {} }, '', SITE)).to.deep.equal([]);
+      expect(await projectsForSite({ BrandSemrushProject: {} }, BRAND, null)).to.deep.equal([]);
+    });
+
+    it('returns only live rows whose siteId matches, excluding tombstoned and other-site rows', async () => {
+      const matching = fakeRow({ siteId: SITE });
+      const otherSite = fakeRow({ siteId: 'site-other' });
+      const tombstonedMatching = fakeRow({ siteId: SITE, deletedAt: '2026-06-01T00:00:00.000Z' });
+      const allByBrandId = sinon.stub().resolves([matching, otherSite, tombstonedMatching]);
+
+      const rows = await projectsForSite({ BrandSemrushProject: { allByBrandId } }, BRAND, SITE);
+
+      expect(rows).to.deep.equal([matching]);
+    });
+
+    it('returns every live row sharing the site (locale variants of one market)', async () => {
+      const first = fakeRow({ siteId: SITE });
+      const second = fakeRow({ siteId: SITE });
+      const allByBrandId = sinon.stub().resolves([first, second]);
+
+      const rows = await projectsForSite({ BrandSemrushProject: { allByBrandId } }, BRAND, SITE);
+
+      expect(rows).to.deep.equal([first, second]);
+    });
+
+    it('tolerates a non-array result from allByBrandId (defensive fallback)', async () => {
+      const allByBrandId = sinon.stub().resolves(null);
+      expect(await projectsForSite({ BrandSemrushProject: { allByBrandId } }, BRAND, SITE))
+        .to.deep.equal([]);
     });
   });
 

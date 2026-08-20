@@ -34,7 +34,7 @@ import {
   validateParentIdQuery,
 } from './markets.js';
 import {
-  listMarkets, resolveProject, mapPublishStatus, projectToSlice,
+  listMarkets, resolveProject, mapPublishStatus, projectToSlice, primaryUrlOf,
 } from '../subworkspace-projects.js';
 import { ensureSubworkspace } from '../workspace-lifecycle.js';
 import {
@@ -43,9 +43,14 @@ import {
 import { provisionDimensionTree, ensureServerOwnedValue } from '../tag-tree.js';
 import { classifyBrandedTag, needlesFromNames } from '../branded-classifier.js';
 import { classifyPromptIntents, AI_GEN_CLASSIFY_MAX, computeWriteDeadline } from '../intent-classification.js';
-import { collectBrandUrlEntries, attachBrandUrlsToProject, primaryDomainSet } from '../brand-urls.js';
+import {
+  collectBrandUrlEntries, attachBrandUrlsToProject, primaryDomainSet, primaryIdentitySet,
+} from '../brand-urls.js';
 import { resolveProjects } from '../resolve-projects.js';
-import { buildReservedDomains, syncCompetitorBenchmarksForProject } from '../competitor-benchmarks.js';
+import {
+  buildReservedIdentities,
+  syncCompetitorBenchmarksForProject,
+} from '../competitor-benchmarks.js';
 import { collectAliasNames } from '../brand-aliases.js';
 import { upsertMappingRow, tombstoneMappingRow } from '../mapping-rows.js';
 import { primaryUrlPatchBody } from '../project-provisioning.js';
@@ -740,17 +745,30 @@ export async function handleCreateMarketSubworkspace(
       body.brandDomain,
       ...siblings.map((p) => p?.domain),
     ]);
+    // The same skip keyed on what each market TRACKS. This market's own tracked
+    // url is the one PATCHed above; a sibling's comes from its project, which the
+    // listing already carries.
+    const primaryIdentities = primaryIdentitySet([
+      primaryUrl,
+      ...siblings.map((p) => primaryUrlOf(p)),
+    ]);
     const brandUrlEntries = collectBrandUrlEntries(
       brandUrlSources,
       body.market,
       primaryDomains,
+      primaryIdentities,
     );
     await attachBrandUrlsToProject(
       transport,
       workspaceId,
       projectId,
       brandUrlEntries,
-      { name: body.brandDisplayName, domain: body.brandDomain, aliases: aliasNames },
+      {
+        name: body.brandDisplayName,
+        domain: body.brandDomain,
+        primaryUrl,
+        aliases: aliasNames,
+      },
       log,
     );
   } catch (e) {
@@ -772,7 +790,7 @@ export async function handleCreateMarketSubworkspace(
   try {
     // Reserve the brand's own domains (this market's project domain + the brand's
     // own website URLs) so a competitor can't be one of the brand's own properties.
-    const reservedDomains = buildReservedDomains(
+    const reservedIdentities = buildReservedIdentities(
       [body.brandDomain],
       brandUrlSources?.urls,
     );
@@ -784,7 +802,7 @@ export async function handleCreateMarketSubworkspace(
       [],
       body.market,
       log,
-      reservedDomains,
+      reservedIdentities,
     );
   } catch (e) {
     // Same non-self-healing best-effort seam as the URL attach above — distinct

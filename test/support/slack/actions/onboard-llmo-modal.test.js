@@ -1176,10 +1176,10 @@ example-com:
       await onboardSite(input, lambdaCtx, slackCtx);
 
       // Verify that warning messages were sent for existing data folder in YAML
-      expect(slackCtx.say).to.have.been.calledWith('Helix query yaml already contains string example-com. Skipping GitHub update.');
+      expect(slackCtx.say).to.have.been.calledWith('Helix query yaml already has an index definition for example-com. Skipping GitHub update.');
 
       // Verify that warning was logged
-      expect(lambdaCtx.log.warn).to.have.been.calledWith('Helix query yaml already contains string example-com. Skipping update.');
+      expect(lambdaCtx.log.warn).to.have.been.calledWith('Helix query yaml already has an index definition for example-com. Skipping update.');
 
       // Verify that createOrUpdateFileContents was not called since the data folder already exists
       const octokitInstance = testOctokitMock.getCall(0).returnValue;

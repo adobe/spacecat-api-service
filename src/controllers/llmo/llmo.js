@@ -68,8 +68,9 @@ import {
   performLlmoOnboarding,
   performLlmoOffboarding,
   postLlmoAlert,
-  appendRowsToQueryIndex,
+  reindexQueryIndexPaths,
   previewAndPublishQueryIndex,
+  isSafeRelativeFilePath,
 } from './llmo-onboarding.js';
 import { queryLlmoFiles } from './llmo-query-handler.js';
 import {
@@ -100,6 +101,9 @@ const { llmoConfig: llmoConfigSchema } = schemas;
 
 const IMS_ORG_ID_REGEX = /^[a-z0-9]{24}@AdobeOrg$/i;
 const VALID_CADENCES = ['daily', 'weekly-paid', 'weekly-free'];
+// Well above any real site's file count (heritage-sg, the largest observed, had 45)
+// -- just a backstop against pathological/abusive request sizes on this admin-only route.
+const MAX_REINDEX_FILES_PER_REQUEST = 200;
 
 /** Site IDs for which HLX `brandpresence` sheet data is blocked (PG migration). */
 const HLX_BRANDPRESENCE_PG_MIGRATION_SITE_IDS = new Set([
@@ -2151,8 +2155,22 @@ function LlmoController(ctx) {
         return badRequest('fileNames must be a non-empty array of strings');
       }
 
+      if (fileNames.length > MAX_REINDEX_FILES_PER_REQUEST) {
+        return badRequest(`fileNames must not exceed ${MAX_REINDEX_FILES_PER_REQUEST} entries per request`);
+      }
+
       if (fileNames.some((f) => typeof f !== 'string' || !f.trim())) {
         return badRequest('Each fileName must be a non-empty string');
+      }
+
+      // Each fileName is interpolated into the Helix Admin API reindex URL
+      // (adobe/project-elmo-ui-data/main/<dataFolder>/<fileName>.json). Real fileNames
+      // for this endpoint include a subdirectory (e.g. `brand-presence/2026-w28-chatgpt`,
+      // per the LLMO-6320 RCA), so this can't reuse the single-segment isSafePathSegment
+      // guard -- it must allow '/' between segments while still rejecting '..' and
+      // absolute-path anchors so a caller can't escape the site's own dataFolder.
+      if (fileNames.some((f) => !isSafeRelativeFilePath(f))) {
+        return badRequest('Each fileName must be a relative path of alphanumerics, hyphens, underscores, dots, or slashes, with no ".." segments');
       }
 
       const { dataAccess } = context;
@@ -2173,16 +2191,16 @@ function LlmoController(ctx) {
 
       const { dataFolder } = llmoConfig;
 
-      await appendRowsToQueryIndex(dataFolder, fileNames, env, log);
+      await reindexQueryIndexPaths(dataFolder, fileNames, env, log);
       await previewAndPublishQueryIndex(dataFolder, env, log);
 
-      log.info(`Successfully updated query-index.xlsx for domain ${domain} with ${fileNames.length} entries`);
+      log.info(`Successfully reindexed query-index.json for domain ${domain} with ${fileNames.length} entries`);
 
       return ok({
-        message: 'query-index.xlsx updated, previewed, and published successfully',
+        message: 'query-index.json reindexed, previewed, and published successfully',
         domain,
         dataFolder,
-        entriesAdded: fileNames.length,
+        entriesReindexed: fileNames.length,
       });
     } catch (error) {
       log.error(`Failed to update query-index for domain ${data?.domain}: ${error.message}`);

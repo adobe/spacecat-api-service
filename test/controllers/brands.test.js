@@ -3203,9 +3203,10 @@ describe('Brands Controller', () => {
       expect(resolveLlmoOnboardingModeStub).to.have.been.calledOnce;
       const [orgArg, , optsArg] = resolveLlmoOnboardingModeStub.firstCall.args;
       expect(orgArg).to.equal(ORGANIZATION_ID);
-      // readOnly: true is load-bearing — without it the resolver could write
-      // to feature_flags from a GET (row-1 brandalf-revert side effect).
-      expect(optsArg).to.deep.equal({ readOnly: true });
+      // The resolver is side-effect free since LLMO-7108 removed the legacy-site
+      // cutoff (and with it the row-1 brandalf-revert write), so this GET no
+      // longer passes a readOnly option.
+      expect(optsArg).to.equal(undefined);
       expect(getBrandBySiteStub).to.have.been.calledOnce;
       expect(getBrandBySiteStub.firstCall.args[0]).to.equal(ORGANIZATION_ID);
       expect(getBrandBySiteStub.firstCall.args[1]).to.equal(SITE_ID);
@@ -6159,7 +6160,7 @@ describe('Brands Controller', () => {
         '../../src/support/prompts-storage.js': { resolveBrandUuid: sinon.stub().resolves(BRAND_UUID) },
         '../../src/support/serenity/rest-transport.js': { createSerenityTransport },
         '../../src/support/serenity/brand-urls.js': { syncBrandUrlsAcrossMarkets },
-        // removedCompetitorDomains is left REAL so the diff logic is exercised.
+        // removedCompetitors is left REAL so the diff logic is exercised.
         '../../src/support/serenity/competitor-benchmarks.js': { syncCompetitorBenchmarksAcrossMarkets },
         '../../src/support/serenity/brand-aliases.js': { syncBrandAliasesAcrossMarkets },
         '../../src/support/serenity/serenity-active.js': {
@@ -6798,11 +6799,13 @@ describe('Brands Controller', () => {
       // old competitors read BEFORE the update to compute removals.
       expect(getBrandCompetitorsStub).to.have.been.calledOnceWith(BRAND_UUID);
       expect(getBrandCompetitorsStub).to.have.been.calledBefore(updateBrandStub);
-      // sync gets the NEW competitor list, the removed domain, and the workspace.
+      // sync gets the NEW competitor list, the removed competitor, and the workspace.
+      // rival.com is NOT reported removed: the stored entry carried no name, so it
+      // keys on its domain, but its site is still tracked — that is a rename.
       expect(ciSyncStub).to.have.been.calledOnceWith(
         transport,
         updated.competitors,
-        ['gone.com'],
+        [{ name: 'gone.com', key: 'gone.com', domain: 'gone.com' }],
         'ws-9',
       );
     });

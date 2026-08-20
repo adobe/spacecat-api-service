@@ -254,6 +254,28 @@ export async function linkSiteToLiveRows(dataAccess, brandId, siteId, log) {
 }
 
 /**
+ * Live `BrandSemrushProject` rows for a brand whose `siteId` matches. A brand's markets
+ * don't all share one Site — each distinct domain gets its own mirror Site (see
+ * `ensureMarketSite`/`linkSiteToLiveRows` above) — so this is the reference-counting
+ * query (same shape as the tombstone/link helpers' `allByBrandId`-then-filter) that
+ * scopes a site URL-change edit to only the project(s) actually tracking this site.
+ *
+ * @param {any} dataAccess
+ * @param {string|null|undefined} brandId
+ * @param {string|null|undefined} siteId
+ * @returns {Promise<Array<any>>} live rows linked to `siteId` (empty on missing input).
+ */
+export async function projectsForSite(dataAccess, brandId, siteId) {
+  const BrandSemrushProject = dataAccess?.BrandSemrushProject;
+  if (!BrandSemrushProject || !brandId || !hasText(brandId) || !siteId || !hasText(siteId)) {
+    return [];
+  }
+  const rows = await BrandSemrushProject.allByBrandId(brandId);
+  return (Array.isArray(rows) ? rows : [])
+    .filter((row) => !row.getDeletedAt() && row.getSiteId() === siteId);
+}
+
+/**
  * Links `siteId` onto the ONE live mapping row named by `semrushProjectId`.
  *
  * The per-market counterpart to `linkSiteToLiveRows`. A market's `site_id` is

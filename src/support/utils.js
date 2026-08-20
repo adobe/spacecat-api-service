@@ -1793,6 +1793,10 @@ export async function queueDeliveryConfigWriter(
  * @param {Object} context - Lambda context containing dataAccess, log, etc.
  * @param {Object} additionalParams - Additional parameters
  * @param {string} additionalParams.tier - Entitlement tier
+ * @param {boolean} [additionalParams.forceTierUpdate] - When true, allows the onboard
+ *   command to change a PLG/PRE_ONBOARD org's tier/entitlement and audit config. By
+ *   default these tiers are preserved (SITES-49886). Separate from `force`, which only
+ *   overrides the paid-profile downgrade guard.
  * @param {Object} options - Additional options
  * @param {Function} options.urlProcessor - Function to process the URL
  *                                          (e.g., extractURLFromSlackInput)
@@ -1917,6 +1921,54 @@ export const onboardSingleSite = async (
       return reportLine;
     }
 
+    // Only one domain is supported under a PLG ASO entitlement — that's an org-level
+    // record, not per-site. The RESTRICTED_TIERS check above only blocks *requesting*
+    // tier=PLG here; it does nothing to stop this command from onboarding a brand-new
+    // domain (tier FREE_TRIAL/PAID) into an org that already holds a PLG entitlement
+    // bound to a different site. SITES-49886 (#3074) stopped that from silently
+    // downgrading/retiering the shared entitlement, but still lets the new domain's
+    // Site row get created and its audits/opportunities run once. Block it outright
+    // here instead — mirroring the "one onboarded domain per IMS org" invariant the
+    // dedicated PLG flow enforces (see handleExistingOnboardedDomain) — unless the
+    // caller already owns that entitlement's enrollment (re-onboarding the same site)
+    // or explicitly overrides via forceTierUpdate (same escape hatch as SITES-49886).
+    // PRE_ONBOARD is deliberately not covered here — it's an internal staging tier
+    // without the "single customer-facing domain" constraint PLG has.
+    // Fail-open on lookup errors — getAsoEntitlement already swallows its own and
+    // returns null.
+    try {
+      const { Organization: OrgLookup } = dataAccess;
+      const organization = await OrgLookup.findByImsOrgId(imsOrgID);
+      const asoEntitlement = organization
+        ? await getAsoEntitlement(organization.getId(), context)
+        : null;
+      const existingTier = asoEntitlement?.getTier() ?? null;
+
+      if (existingTier === EntitlementModel.TIERS.PLG) {
+        const existingEnrollments = prefetchedSite
+          ? await prefetchedSite.getSiteEnrollments()
+          : [];
+        const isSameEnrolledSite = existingEnrollments?.some(
+          (se) => se.getEntitlementId() === asoEntitlement.getId(),
+        );
+
+        if (!isSameEnrolledSite) {
+          if (additionalParams.forceTierUpdate) {
+            log.warn(`Force-onboarding ${baseURL} into IMS org ${imsOrgID} despite an existing ${existingTier} entitlement bound to a different site; that site's enrollment will NOT be revoked automatically.`);
+            await say(`:warning: IMS org \`${imsOrgID}\` already has a *${existingTier}* ASO entitlement bound to a different site. Proceeding anyway (Force Tier Update) — that site's enrollment will *not* be revoked automatically.`);
+          } else {
+            reportLine.errors = `Blocked: IMS org ${imsOrgID} already has a ${existingTier}-tier ASO entitlement bound to a different site — only one domain is supported per org on this tier`;
+            reportLine.status = 'Failed';
+            log.error(`Refusing to onboard ${baseURL} into IMS org ${imsOrgID}: existing ${existingTier} entitlement is bound to a different site`);
+            await say(`:x: IMS org \`${imsOrgID}\` already has a *${existingTier}* ASO entitlement bound to a different site. Only one domain is supported per org on this tier — use the PLG onboarding flow to displace it, or select *Force Tier Update* to override.`);
+            return reportLine;
+          }
+        }
+      }
+    } catch (singleDomainGuardError) {
+      log.warn(`Single-domain tier guard check failed for IMS org ${imsOrgID}, skipping guard:`, singleDomainGuardError);
+    }
+
     await say(`:gear: Starting environment setup for site ${baseURL} with imsOrgID: ${imsOrgID} and tier: ${tier} using the ${profileName} profile`);
     await say(':key: Please make sure you have access to the AEM Shared Production Demo environment. Request access here: https://demo.adobe.com/demos/internal/AemSharedProdEnv.html');
 
@@ -1961,15 +2013,38 @@ export const onboardSingleSite = async (
       prefetchedSite,
     );
 
+    // Protected-tier guard (SITES-49886): ASO entitlements are org-level. If the org
+    // already holds a PLG or PRE_ONBOARD ASO entitlement, the onboard command must NOT
+    // touch the tier/entitlement/enrollment — TierClient.createEntitlement(FREE_TRIAL)
+    // would otherwise overwrite (downgrade) the existing tier, exposing all opportunities
+    // instead of the limited PLG set. Onboarding is unsupported for these tiers; we only
+    // run audits/opportunities once (below) and leave the earlier config untouched.
+    // An explicit additionalParams.forceTierUpdate is the sole escape hatch (kept separate
+    // from `force`, which only overrides the paid-profile downgrade guard).
+    const existingAso = await getAsoEntitlement(organizationId, context);
+    const existingTier = existingAso?.getTier() ?? null;
+    const PROTECTED_EXISTING_TIERS = [
+      EntitlementModel.TIERS.PLG,
+      EntitlementModel.TIERS.PRE_ONBOARD,
+    ];
+    const isProtectedOrg = existingTier != null && PROTECTED_EXISTING_TIERS.includes(existingTier);
+    const preserveProtectedTier = isProtectedOrg && !additionalParams.forceTierUpdate;
+
     // Create entitlement and enrollment
-    await createEntitlementAndEnrollment(
-      site,
-      context,
-      slackContext,
-      reportLine,
-      EntitlementModel.PRODUCT_CODES.ASO,
-      tier,
-    );
+    if (preserveProtectedTier) {
+      reportLine.tier = existingTier; // report the true, unchanged tier
+      log.info(`Preserving ${existingTier} tier for org ${organizationId} - skipping entitlement/enrollment write during onboard of ${baseURL}`);
+      await say(`:lock: Org for \`${baseURL}\` is on the *${existingTier}* tier — onboarding will NOT change the tier, entitlement, or enrollment. Running audits and opportunities only. (Use *Force Tier Update* to override.)`);
+    } else {
+      await createEntitlementAndEnrollment(
+        site,
+        context,
+        slackContext,
+        reportLine,
+        EntitlementModel.PRODUCT_CODES.ASO,
+        tier,
+      );
+    }
 
     // Create new project or assign existing project
     const project = await createProject(
@@ -2142,48 +2217,60 @@ export const onboardSingleSite = async (
     //     enabled, so a prior scheduled/paid enablement can't leak this run's audit
     //     set into the scheduler. The direct triggerAuditForSite calls below still
     //     fire once — enable status only gates scheduling, not triggering.
-    const latestConfiguration = await Configuration.findLatest();
     const wantEnabled = scheduledRun || profile.protected;
-    const auditsChanged = [];
-    for (const auditType of auditTypes) {
-      /* eslint-disable no-await-in-loop */
-      const isEnabled = latestConfiguration.isHandlerEnabledForSite(auditType, site);
-      if (wantEnabled && !isEnabled) {
-        latestConfiguration.enableHandlerForSite(auditType, site);
-        auditsChanged.push(auditType);
-      } else if (!wantEnabled && isEnabled) {
-        latestConfiguration.disableHandlerForSite(auditType, site);
-        auditsChanged.push(auditType);
-      }
-    }
-
-    if (auditsChanged.length > 0) {
-      try {
-        await latestConfiguration.save();
-        if (wantEnabled) {
-          log.debug(`Enabled the following audits for site ${siteID}: ${auditsChanged.join(', ')}`);
-          if (scheduledRun) {
-            await say(
-              `:calendar: *Scheduled onboarding:* These audits were enabled in site configuration for recurring runs: ${auditsChanged.join(', ')}`,
-            );
-          }
-        } else {
-          log.debug(`Disabled the following previously-enabled audits for site ${siteID}: ${auditsChanged.join(', ')}`);
-        }
-      } catch (error) {
-        log.error(`Failed to save configuration for site ${siteID}:`, error);
-        throw error;
-      }
+    // Protected-tier orgs (SITES-49886): leave the existing audit scheduling config exactly
+    // as-is. Enabling/disabling handlers here would alter a PLG/PRE_ONBOARD customer's
+    // recurring-audit setup; we only run audits once (below). Skipped unless forceTierUpdate.
+    if (preserveProtectedTier) {
+      log.debug(`Preserving existing audit configuration for ${existingTier}-tier site ${siteID}`);
     } else {
-      log.debug(`Audit configuration already matches the desired state (${wantEnabled ? 'enabled' : 'disabled'}) for site ${siteID}`);
+      const latestConfiguration = await Configuration.findLatest();
+      const auditsChanged = [];
+      for (const auditType of auditTypes) {
+        /* eslint-disable no-await-in-loop */
+        const isEnabled = latestConfiguration.isHandlerEnabledForSite(auditType, site);
+        if (wantEnabled && !isEnabled) {
+          latestConfiguration.enableHandlerForSite(auditType, site);
+          auditsChanged.push(auditType);
+        } else if (!wantEnabled && isEnabled) {
+          latestConfiguration.disableHandlerForSite(auditType, site);
+          auditsChanged.push(auditType);
+        }
+      }
+
+      if (auditsChanged.length > 0) {
+        try {
+          await latestConfiguration.save();
+          if (wantEnabled) {
+            log.debug(`Enabled the following audits for site ${siteID}: ${auditsChanged.join(', ')}`);
+            if (scheduledRun) {
+              await say(
+                `:calendar: *Scheduled onboarding:* These audits were enabled in site configuration for recurring runs: ${auditsChanged.join(', ')}`,
+              );
+            }
+          } else {
+            log.debug(`Disabled the following previously-enabled audits for site ${siteID}: ${auditsChanged.join(', ')}`);
+          }
+        } catch (error) {
+          log.error(`Failed to save configuration for site ${siteID}:`, error);
+          throw error;
+        }
+      } else {
+        log.debug(`Audit configuration already matches the desired state (${wantEnabled ? 'enabled' : 'disabled'}) for site ${siteID}`);
+      }
     }
 
     reportLine.audits = auditTypes.join(', ');
     const auditsMessage = reportLine.audits || 'None';
     const importsMessage = reportLine.imports || 'None';
-    const statusMessage = scheduledRun
-      ? `:white_check_mark: *For site ${baseURL}*: Adding imports: ${importsMessage} and audits: ${auditsMessage} to scheduled run`
-      : `:white_check_mark: *For site ${baseURL}*: Enabled imports: ${importsMessage}; triggered (not scheduled) audits: ${auditsMessage}`;
+    let statusMessage;
+    if (preserveProtectedTier) {
+      statusMessage = `:white_check_mark: *For site ${baseURL}*: Audit scheduling config preserved (${existingTier} tier); triggered audits once: ${auditsMessage}`;
+    } else if (scheduledRun) {
+      statusMessage = `:white_check_mark: *For site ${baseURL}*: Adding imports: ${importsMessage} and audits: ${auditsMessage} to scheduled run`;
+    } else {
+      statusMessage = `:white_check_mark: *For site ${baseURL}*: Enabled imports: ${importsMessage}; triggered (not scheduled) audits: ${auditsMessage}`;
+    }
     await say(statusMessage);
 
     // trigger audit runs

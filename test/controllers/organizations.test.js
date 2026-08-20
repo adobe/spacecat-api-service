@@ -191,6 +191,7 @@ describe('Organizations Controller', () => {
   const organizationFunctions = [
     'createOrganization',
     'getAll',
+    'getByProductCode',
     'getByID',
     'getSitesForOrganization',
     'getProjectsByOrganizationId',
@@ -214,12 +215,14 @@ describe('Organizations Controller', () => {
         create: sinon.stub(),
         findById: sinon.stub(),
         findByImsOrgId: sinon.stub(),
+        batchGetByKeys: sinon.stub(),
       },
       Site: {
         allByOrganizationId: sinon.stub(),
         allByOrganizationIdAndProjectId: sinon.stub(),
         allByOrganizationIdAndProjectName: sinon.stub(),
         findById: sinon.stub(),
+        allByEnrollmentFiltered: sinon.stub(),
       },
       Project: {
         allByOrganizationId: sinon.stub(),
@@ -878,6 +881,151 @@ describe('Organizations Controller', () => {
 
     expect(response.status).to.equal(200);
     expect(body).to.be.an('array').with.lengthOf(4);
+  });
+
+  describe('getByProductCode', () => {
+    beforeEach(() => {
+      context.params = { productCode: 'LLMO' };
+    });
+
+    it('returns the organizations that have a site onboarded for the product', async () => {
+      // sites[0] -> org '9033...', sites[2] -> org '7033...'
+      mockDataAccess.Site.allByEnrollmentFiltered
+        .resolves({ data: [sites[0], sites[2]], cursor: null });
+      mockDataAccess.Organization.batchGetByKeys
+        .resolves({ data: [organizations[0], organizations[3]] });
+
+      const response = await organizationsController.getByProductCode(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      const filterCall = mockDataAccess.Site.allByEnrollmentFiltered.firstCall;
+      expect(filterCall.args[0]).to.deep.equal({ productCode: 'LLMO' });
+      expect(filterCall.args[1]).to.include({ limit: 1000, returnCursor: true });
+      expect(mockDataAccess.Organization.batchGetByKeys).to.have.been.calledOnce;
+      expect(mockDataAccess.Organization.batchGetByKeys.firstCall.args[0]).to.have.deep.members([
+        { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' },
+        { organizationId: '7033554c-de8a-44ac-a356-09b51af8cc28' },
+      ]);
+      expect(body).to.be.an('array').with.lengthOf(2);
+      expect(body.map((o) => o.id)).to.have.members([
+        '9033554c-de8a-44ac-a356-09b51af8cc28',
+        '7033554c-de8a-44ac-a356-09b51af8cc28',
+      ]);
+    });
+
+    it('de-duplicates organizations when several sites belong to the same org', async () => {
+      mockDataAccess.Site.allByEnrollmentFiltered
+        .resolves({ data: [sites[0], sites[0]], cursor: null });
+      mockDataAccess.Organization.batchGetByKeys.resolves({ data: [organizations[0]] });
+
+      const response = await organizationsController.getByProductCode(context);
+
+      expect(response.status).to.equal(200);
+      expect(mockDataAccess.Organization.batchGetByKeys.firstCall.args[0]).to.deep.equal([
+        { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' },
+      ]);
+    });
+
+    it('pages through all enrolled sites via the returned cursor', async () => {
+      mockDataAccess.Site.allByEnrollmentFiltered
+        .onFirstCall().resolves({ data: [sites[0]], cursor: 'cursor-2' })
+        .onSecondCall().resolves({ data: [sites[2]], cursor: null });
+      mockDataAccess.Organization.batchGetByKeys
+        .resolves({ data: [organizations[0], organizations[3]] });
+
+      const response = await organizationsController.getByProductCode(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(mockDataAccess.Site.allByEnrollmentFiltered).to.have.been.calledTwice;
+      expect(mockDataAccess.Site.allByEnrollmentFiltered.secondCall.args[1]).to.include({ cursor: 'cursor-2' });
+      expect(body).to.be.an('array').with.lengthOf(2);
+    });
+
+    it('returns an empty array when no site is onboarded for the product', async () => {
+      mockDataAccess.Site.allByEnrollmentFiltered.resolves({ data: [], cursor: null });
+
+      const response = await organizationsController.getByProductCode(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body).to.be.an('array').that.is.empty;
+      expect(mockDataAccess.Organization.batchGetByKeys).to.not.have.been.called;
+    });
+
+    it('normalizes a lower-case product code to upper-case', async () => {
+      context.params = { productCode: 'llmo' };
+      mockDataAccess.Site.allByEnrollmentFiltered.resolves({ data: [], cursor: null });
+
+      await organizationsController.getByProductCode(context);
+
+      expect(mockDataAccess.Site.allByEnrollmentFiltered.firstCall.args[0]).to.deep.equal({ productCode: 'LLMO' });
+    });
+
+    it('returns 400 for an unknown product code', async () => {
+      context.params = { productCode: 'BOGUS' };
+
+      const response = await organizationsController.getByProductCode(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(400);
+      expect(body.message).to.match(/Invalid product code/);
+      expect(mockDataAccess.Site.allByEnrollmentFiltered).to.not.have.been.called;
+    });
+
+    it('returns 400 when the product code is missing', async () => {
+      context.params = {};
+
+      const response = await organizationsController.getByProductCode(context);
+
+      expect(response.status).to.equal(400);
+      expect(mockDataAccess.Site.allByEnrollmentFiltered).to.not.have.been.called;
+    });
+
+    it('returns 403 for a non-admin caller without organization:readAll', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false });
+
+      const response = await organizationsController.getByProductCode(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(403);
+      expect(body).to.have.property('message', 'Forbidden: admin access or organization:readAll capability required');
+      expect(mockDataAccess.Site.allByEnrollmentFiltered).to.not.have.been.called;
+    });
+
+    it('allows a read-only admin caller', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false, is_read_only_admin: true });
+      mockDataAccess.Site.allByEnrollmentFiltered.resolves({ data: [sites[0]], cursor: null });
+      mockDataAccess.Organization.batchGetByKeys.resolves({ data: [organizations[0]] });
+
+      const response = await organizationsController.getByProductCode(context);
+
+      expect(response.status).to.equal(200);
+    });
+
+    it('grants access to an S2S consumer holding organization:readAll', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false });
+      context.s2sConsumer = { getClientId: () => 'svc-1', getImsOrgId: () => 'AAA111111111111111111111@AdobeOrg' };
+      context.invocation = { id: 'req-bpc-1' };
+      mockDataAccess.Consumer = {
+        findByClientIdAndImsOrgId: sinon.stub().resolves({
+          getId: () => 'consumer-id-1',
+          getCapabilities: () => ['organization:readAll'],
+          getStatus: () => 'ACTIVE',
+          isRevoked: () => false,
+        }),
+      };
+      mockDataAccess.Site.allByEnrollmentFiltered.resolves({ data: [sites[0]], cursor: null });
+      mockDataAccess.Organization.batchGetByKeys.resolves({ data: [organizations[0]] });
+
+      const response = await organizationsController.getByProductCode(context);
+
+      expect(response.status).to.equal(200);
+      expect(context.log.info).to.have.been.calledWithMatch(
+        /\[s2s-readall\] GET \/organizations\/by-product-code\/LLMO granted clientId=svc-1 consumerId=consumer-id-1 capability=organization:readAll count=1 requestId=req-bpc-1/,
+      );
+    });
   });
 
   describe('GET /organizations - S2S readAll capability', () => {
