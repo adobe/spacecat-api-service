@@ -363,26 +363,6 @@ describe('brands-storage', () => {
       expect(acme.siteId).to.equal('shared-site');
     });
 
-    it('maps semrush_workspace_id to semrushWorkspaceId (deprecated BC mirror), null when absent', async () => {
-      const subWsRow = makeBrandRow({ semrush_workspace_id: 'ws-sub-123' });
-      const subWsQuery = createChainableQuery({ data: subWsRow, error: null });
-      const subWsResult = await getBrandById(
-        ORG_ID,
-        BRAND_ID,
-        { from: sinon.stub().returns(subWsQuery) },
-      );
-      expect(subWsResult.semrushWorkspaceId).to.equal('ws-sub-123');
-
-      // Flat-mode brand: no sub-workspace column → null.
-      const flatQuery = createChainableQuery({ data: makeBrandRow(), error: null });
-      const flatResult = await getBrandById(
-        ORG_ID,
-        BRAND_ID,
-        { from: sinon.stub().returns(flatQuery) },
-      );
-      expect(flatResult.semrushWorkspaceId).to.equal(null);
-    });
-
     it('maps semrush_sub_workspace_id to semrushSubWorkspaceId (write-of-record), null when absent', async () => {
       const mirroredRow = makeBrandRow({ semrush_sub_workspace_id: 'ws-sub-123' });
       const mirroredQuery = createChainableQuery({ data: mirroredRow, error: null });
@@ -998,7 +978,7 @@ describe('brands-storage', () => {
   // so tests can verify which filters were applied to queries.
   function createCapturingClient(tableMap) {
     const calls = {
-      upsert: [], update: [], delete: [], or: [], neq: [],
+      upsert: [], update: [], delete: [], or: [], neq: [], eq: [],
     };
     const callCounts = {};
     const makeQuery = (table) => {
@@ -1040,6 +1020,12 @@ describe('brands-storage', () => {
           if (prop === 'neq') {
             return (col, val) => {
               calls.neq.push({ table, col, val });
+              return new Proxy({}, handler);
+            };
+          }
+          if (prop === 'eq') {
+            return (col, val) => {
+              calls.eq.push({ table, col, val });
               return new Proxy({}, handler);
             };
           }
@@ -1095,6 +1081,7 @@ describe('brands-storage', () => {
           { data: null, error: null }, // existing lookup OK (no brand)
           { data: null, error: { code: '23505', message: 'brands_base_site_unique' } }, // upsert 409
         ],
+        sites: { data: { id: 'some-site-id' }, error: null }, // site belongs to org
       });
 
       const err = await upsertBrand({
@@ -1138,6 +1125,7 @@ describe('brands-storage', () => {
           { data: { id: BRAND_ID, name: 'Test' }, error: null },
           { data: fullBrandRow, error: null },
         ],
+        sites: { data: { id: 'site-uuid' }, error: null }, // site belongs to org
       });
 
       const result = await upsertBrand({
@@ -1156,6 +1144,7 @@ describe('brands-storage', () => {
           { data: { id: BRAND_ID, name: 'Test' }, error: null }, // upsert result
           { data: makeBrandRow({ name: 'Test', site_id: 'new-site' }), error: null },
         ],
+        sites: { data: { id: 'new-site' }, error: null }, // site belongs to org
       });
 
       await upsertBrand({
@@ -1210,7 +1199,7 @@ describe('brands-storage', () => {
       expect(brandsUpsert.row).to.not.have.property('semrush_sub_workspace_id');
     });
 
-    it('keeps the brand active with a null site_id when only a semrush_sub_workspace_id anchors it (no baseSiteId)', async () => {
+    it('downgrades to pending with a null site_id when only a semrush_sub_workspace_id is supplied (SITES-49449, no baseSiteId)', async () => {
       const client = createCapturingClient({
         brands: [
           { data: null, error: null },
@@ -1227,10 +1216,10 @@ describe('brands-storage', () => {
       });
 
       const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
-      expect(brandsUpsert.row.status).to.equal('active');
+      // SITES-49449: semrush_sub_workspace_id is no longer a substitute anchor —
+      // site_id is required for 'active', so this downgrades to 'pending' instead.
+      expect(brandsUpsert.row.status).to.equal('pending');
       expect(brandsUpsert.row.semrush_sub_workspace_id).to.equal('ws-1');
-      // A fresh create always writes an explicit site_id — null when no baseSiteId
-      // is supplied. The sub-workspace is what keeps it active (LLMO-6405).
       expect(brandsUpsert.row.site_id).to.equal(null);
     });
 
@@ -1241,6 +1230,7 @@ describe('brands-storage', () => {
           { data: { id: BRAND_ID, name: 'Test' }, error: null },
           { data: makeBrandRow({ name: 'Test' }), error: null },
         ],
+        sites: { data: { id: 'primary-site-id' }, error: null }, // site belongs to org
       });
 
       await upsertBrand({
@@ -1277,234 +1267,6 @@ describe('brands-storage', () => {
 
       const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
       expect(brandsUpsert.row.status).to.equal('pending');
-    });
-
-    it('persists pending_semrush_provisioning (primaryUrl + markets) for a pending draft', async () => {
-      const client = createCapturingClient({
-        brands: [
-          { data: null, error: null },
-          { data: { id: BRAND_ID, name: 'Test' }, error: null },
-          { data: makeBrandRow({ name: 'Test' }), error: null },
-        ],
-      });
-
-      await upsertBrand({
-        organizationId: ORG_ID,
-        brand: {
-          name: 'Test',
-          status: 'pending',
-          pendingSemrushProvisioning: {
-            primaryUrl: 'https://acme.com',
-            markets: [{ market: 'US', languageCode: 'en' }],
-          },
-        },
-        postgrestClient: client,
-      });
-
-      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
-      expect(brandsUpsert.row.status).to.equal('pending');
-      expect(brandsUpsert.row.pending_semrush_provisioning).to.deep.equal({
-        primaryUrl: 'https://acme.com',
-        markets: [{ market: 'US', languageCode: 'en' }],
-      });
-    });
-
-    it('preserves per-market modelIds (trimmed, non-empty) and omits the key when empty', async () => {
-      const client = createCapturingClient({
-        brands: [
-          { data: null, error: null },
-          { data: { id: BRAND_ID, name: 'Test' }, error: null },
-          { data: makeBrandRow({ name: 'Test' }), error: null },
-        ],
-      });
-
-      await upsertBrand({
-        organizationId: ORG_ID,
-        brand: {
-          name: 'Test',
-          status: 'pending',
-          pendingSemrushProvisioning: {
-            primaryUrl: 'https://acme.com',
-            markets: [
-              { market: 'US', languageCode: 'en', modelIds: [' chatgpt ', '', 'perplexity'] },
-              { market: 'DE', languageCode: 'de', modelIds: ['  '] },
-              { market: 'FR', languageCode: 'fr' },
-            ],
-          },
-        },
-        postgrestClient: client,
-      });
-
-      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
-      expect(brandsUpsert.row.pending_semrush_provisioning).to.deep.equal({
-        primaryUrl: 'https://acme.com',
-        markets: [
-          { market: 'US', languageCode: 'en', modelIds: ['chatgpt', 'perplexity'] },
-          { market: 'DE', languageCode: 'de' },
-          { market: 'FR', languageCode: 'fr' },
-        ],
-      });
-    });
-
-    it('preserves an explicit generatePrompts flag, keeping a bare stash (no URL, no market) alive', async () => {
-      const client = createCapturingClient({
-        brands: [
-          { data: null, error: null },
-          { data: { id: BRAND_ID, name: 'Test' }, error: null },
-          { data: makeBrandRow({ name: 'Test' }), error: null },
-        ],
-      });
-
-      await upsertBrand({
-        organizationId: ORG_ID,
-        brand: {
-          name: 'Test',
-          status: 'pending',
-          // A bare no-prompt draft: no primary URL, no market — yet the explicit
-          // generatePrompts flag must keep the stash from collapsing to null so
-          // activation knows to provision a sub-workspace-only brand.
-          pendingSemrushProvisioning: { generatePrompts: false, markets: [] },
-        },
-        postgrestClient: client,
-      });
-
-      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
-      expect(brandsUpsert.row.pending_semrush_provisioning).to.deep.equal({
-        primaryUrl: null,
-        markets: [],
-        generatePrompts: false,
-      });
-    });
-
-    it('drops invalid markets and a blank primaryUrl from pending_semrush_provisioning, nulling it when empty', async () => {
-      const client = createCapturingClient({
-        brands: [
-          { data: null, error: null },
-          { data: { id: BRAND_ID, name: 'Test' }, error: null },
-          { data: makeBrandRow({ name: 'Test' }), error: null },
-        ],
-      });
-
-      await upsertBrand({
-        organizationId: ORG_ID,
-        brand: {
-          name: 'Test',
-          status: 'pending',
-          pendingSemrushProvisioning: {
-            primaryUrl: '   ',
-            markets: [{ market: '', languageCode: 'en' }, { market: 'US' }],
-          },
-        },
-        postgrestClient: client,
-      });
-
-      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
-      expect(brandsUpsert.row.pending_semrush_provisioning).to.equal(null);
-    });
-
-    it('treats a non-array markets value as an empty market list (keeps primaryUrl)', async () => {
-      // `value.markets` is a non-array (a string here): the normalizer must coerce
-      // it to [] rather than iterating it, and the surviving primaryUrl keeps the
-      // stash from collapsing to null.
-      const client = createCapturingClient({
-        brands: [
-          { data: null, error: null },
-          { data: { id: BRAND_ID, name: 'Test' }, error: null },
-          { data: makeBrandRow({ name: 'Test' }), error: null },
-        ],
-      });
-
-      await upsertBrand({
-        organizationId: ORG_ID,
-        brand: {
-          name: 'Test',
-          status: 'pending',
-          pendingSemrushProvisioning: {
-            primaryUrl: 'https://acme.com',
-            markets: 'not-an-array',
-          },
-        },
-        postgrestClient: client,
-      });
-
-      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
-      expect(brandsUpsert.row.pending_semrush_provisioning).to.deep.equal({
-        primaryUrl: 'https://acme.com',
-        markets: [],
-      });
-    });
-
-    it('coerces non-string market/languageCode and non-string modelIds to empty strings', async () => {
-      // Per-market `market`/`languageCode` that are not strings normalize to '' (then
-      // get dropped by the hasText filter), and non-string modelIds normalize to ''
-      // (dropped by the hasText filter), leaving only the valid entries.
-      const client = createCapturingClient({
-        brands: [
-          { data: null, error: null },
-          { data: { id: BRAND_ID, name: 'Test' }, error: null },
-          { data: makeBrandRow({ name: 'Test' }), error: null },
-        ],
-      });
-
-      await upsertBrand({
-        organizationId: ORG_ID,
-        brand: {
-          name: 'Test',
-          status: 'pending',
-          pendingSemrushProvisioning: {
-            primaryUrl: 'https://acme.com',
-            markets: [
-              // non-string market and languageCode -> '' -> dropped by hasText filter
-              { market: 123, languageCode: 456 },
-              // valid market with a mix of string and non-string modelIds
-              { market: 'US', languageCode: 'en', modelIds: ['chatgpt', 42, null] },
-            ],
-          },
-        },
-        postgrestClient: client,
-      });
-
-      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
-      expect(brandsUpsert.row.pending_semrush_provisioning).to.deep.equal({
-        primaryUrl: 'https://acme.com',
-        markets: [
-          { market: 'US', languageCode: 'en', modelIds: ['chatgpt'] },
-        ],
-      });
-    });
-
-    it('omits pending_semrush_provisioning from the row when not supplied', async () => {
-      const client = createCapturingClient({
-        brands: [
-          { data: null, error: null },
-          { data: { id: BRAND_ID, name: 'Test' }, error: null },
-          { data: makeBrandRow({ name: 'Test' }), error: null },
-        ],
-      });
-
-      await upsertBrand({
-        organizationId: ORG_ID,
-        brand: { name: 'Test', baseSiteId: 'site-1' },
-        postgrestClient: client,
-      });
-
-      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
-      expect(brandsUpsert.row).to.not.have.property('pending_semrush_provisioning');
-    });
-
-    it('throws 400 when pendingSemrushProvisioning is not an object', async () => {
-      const client = createCapturingClient({
-        brands: [{ data: null, error: null }],
-      });
-
-      const err = await upsertBrand({
-        organizationId: ORG_ID,
-        brand: { name: 'Test', pendingSemrushProvisioning: ['not', 'an', 'object'] },
-        postgrestClient: client,
-      }).catch((e) => e);
-
-      expect(err).to.be.an('error');
-      expect(err.status).to.equal(400);
     });
 
     it('normalizes brand guidance fields in upsert row', async () => {
@@ -1603,6 +1365,60 @@ describe('brands-storage', () => {
       expect(log.warn).to.have.been.calledWithMatch('immutable');
     });
 
+    it('rejects a fresh create whose baseSiteId belongs to a different org (serenity-docs#346)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null }, // no existing brand
+        ],
+        sites: { data: null, error: null }, // site not found under this org
+      });
+
+      const err = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', baseSiteId: 'other-orgs-site' },
+        postgrestClient: client,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(409);
+      expect(err.code).to.equal('brand_site_org_mismatch');
+      expect(err.message).to.contain('other-orgs-site');
+      expect(client.capturedCalls.upsert).to.have.lengthOf(0);
+
+      // Verify the guard queried with the RIGHT siteId/organizationId pair,
+      // not just that a `sites` lookup happened at all — a swapped or
+      // mismatched pair here would still 409 in this test's fake, but would
+      // be a real cross-tenant hole against a real database.
+      const sitesEq = client.capturedCalls.eq.filter((c) => c.table === 'sites');
+      expect(sitesEq).to.deep.include({ table: 'sites', col: 'id', val: 'other-orgs-site' });
+      expect(sitesEq).to.deep.include({ table: 'sites', col: 'organization_id', val: ORG_ID });
+    });
+
+    it('fails closed with an untyped error when the sites org-membership lookup errors (serenity-docs#346)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null }, // no existing brand
+        ],
+        sites: { data: null, error: { message: 'connection reset' } }, // PostgREST failure
+      });
+
+      const err = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', baseSiteId: 'some-site' },
+        postgrestClient: client,
+      }).catch((e) => e);
+
+      expect(err.message).to.equal(
+        'Failed to verify primary site org for brand "Test": connection reset',
+      );
+      // Deliberately untyped: a DB-read failure is not the same class of
+      // problem as a genuine org mismatch, so it must NOT carry the 409
+      // brand_site_org_mismatch status/code — it surfaces as a plain 500
+      // via the controller's generic error path instead.
+      expect(err.status).to.be.undefined;
+      expect(err.code).to.be.undefined;
+      expect(client.capturedCalls.upsert).to.have.lengthOf(0);
+    });
+
     it('does not warn when re-upserting with the same site_id', async () => {
       const log = { warn: sinon.stub(), info: sinon.stub(), error: sinon.stub() };
       const client = createCapturingClient({
@@ -1633,6 +1449,7 @@ describe('brands-storage', () => {
           { data: { id: BRAND_ID, name: 'Test' }, error: null }, // upsert result
           { data: makeBrandRow({ name: 'Test', site_id: 'new-site' }), error: null },
         ],
+        sites: { data: { id: 'new-site' }, error: null }, // site belongs to org
       });
 
       await upsertBrand({
@@ -2604,6 +2421,8 @@ describe('brands-storage', () => {
   });
 
   describe('setBrandClaimsEnabled', () => {
+    const SITE_ID = '55555555-5555-4555-8555-555555555555';
+
     it('throws when postgrestClient is missing', async () => {
       await expect(setBrandClaimsEnabled({
         brandId: BRAND_ID, enabled: true, postgrestClient: null,
@@ -2624,7 +2443,7 @@ describe('brands-storage', () => {
 
     it('writes brand_claims_enabled, excludes deleted brands, and returns the updated brand', async () => {
       const client = createCapturingClient({
-        brands: [{ data: { id: BRAND_ID, name: 'Acme' }, error: null }],
+        brands: [{ data: { id: BRAND_ID, name: 'Acme', site_id: SITE_ID }, error: null }],
       });
 
       const result = await setBrandClaimsEnabled({
@@ -2636,7 +2455,9 @@ describe('brands-storage', () => {
       expect(brandsUpdate.row.updated_by).to.equal('slack:U1');
       const neqFilter = client.capturedCalls.neq.find((c) => c.table === 'brands' && c.col === 'status');
       expect(neqFilter?.val).to.equal('deleted');
-      expect(result).to.deep.equal({ id: BRAND_ID, name: 'Acme' });
+      // site_id (the brand's primary site) is returned so callers can toggle the
+      // per-site brand-claims audit in lock-step with the flag.
+      expect(result).to.deep.equal({ id: BRAND_ID, name: 'Acme', site_id: SITE_ID });
     });
 
     it('returns null when no brand matches the id', async () => {
@@ -2709,6 +2530,7 @@ describe('brands-storage', () => {
           // 2nd call: update fails with unique constraint
           { data: null, error: { code: '23505', message: 'brands_base_site_unique' } },
         ],
+        sites: { data: { id: 'some-site-id' }, error: null }, // site belongs to org
       });
 
       const err = await updateBrand({
@@ -2720,6 +2542,59 @@ describe('brands-storage', () => {
 
       expect(err.message).to.equal('This site is already the primary URL for another brand');
       expect(err.status).to.equal(409);
+    });
+
+    it('rejects setting baseSiteId to a site owned by a different org (serenity-docs#346)', async () => {
+      const postgrestClient = createCapturingClient({
+        brands: [
+          // 1st call: select current site_id (null → allow setting)
+          { data: { site_id: null }, error: null },
+        ],
+        sites: { data: null, error: null }, // site not found under this org
+      });
+
+      const err = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { baseSiteId: 'other-orgs-site' },
+        postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(409);
+      expect(err.code).to.equal('brand_site_org_mismatch');
+      expect(postgrestClient.capturedCalls.update).to.have.lengthOf(0);
+
+      // Same query-argument check as upsertBrand's guard test — proves the
+      // guard used THIS brand's org and THIS candidate site, not just that
+      // some sites lookup happened.
+      const sitesEq = postgrestClient.capturedCalls.eq.filter((c) => c.table === 'sites');
+      expect(sitesEq).to.deep.include({ table: 'sites', col: 'id', val: 'other-orgs-site' });
+      expect(sitesEq).to.deep.include({ table: 'sites', col: 'organization_id', val: ORG_ID });
+    });
+
+    it('rejects re-pointing a pending brand to a cross-org site (serenity-docs#346)', async () => {
+      // Distinct code path from the "first set" test above: this brand already
+      // HAS a site_id, so the guard only fires via the isPending re-point
+      // sub-condition, not the !existing?.site_id one.
+      const client = createCapturingClient({
+        brands: [
+          { data: { name: 'Pending Re-pointer', site_id: 'old-site', status: 'pending' }, error: null },
+        ],
+        sites: { data: null, error: null }, // site not found under this org
+      });
+
+      const err = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { baseSiteId: 'other-orgs-site' },
+        postgrestClient: client,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(409);
+      expect(err.code).to.equal('brand_site_org_mismatch');
+      // Uses the fetched brand's name, not the raw brandId, in the message.
+      expect(err.message).to.contain('Pending Re-pointer');
+      expect(client.capturedCalls.update).to.have.lengthOf(0);
     });
 
     it('sets baseSiteId when brand has no site_id yet', async () => {
@@ -2734,6 +2609,7 @@ describe('brands-storage', () => {
           // 3rd call: getBrandById re-fetch
           { data: fullBrandRow, error: null },
         ],
+        sites: { data: { id: 'new-site-id' }, error: null }, // site belongs to org
       });
 
       const result = await updateBrand({
@@ -2826,6 +2702,7 @@ describe('brands-storage', () => {
           // 3rd call: getBrandById re-fetch
           { data: makeBrandRow({ site_id: 'different-site-id', status: 'pending' }), error: null },
         ],
+        sites: { data: { id: 'different-site-id' }, error: null }, // site belongs to org
       });
 
       await updateBrand({
@@ -2847,6 +2724,7 @@ describe('brands-storage', () => {
           // 2nd call: update fails with unique constraint
           { data: null, error: { code: '23505', message: 'brands_base_site_unique' } },
         ],
+        sites: { data: { id: 'taken-site-id' }, error: null }, // site belongs to org
       });
 
       const err = await updateBrand({
@@ -2912,25 +2790,6 @@ describe('brands-storage', () => {
       });
 
       expect(result).to.include({ name: 'NewName', status: 'pending' });
-    });
-
-    it('clears pending_semrush_provisioning when updates pass pendingSemrushProvisioning: null', async () => {
-      const client = createCapturingClient({
-        brands: [
-          { data: { id: BRAND_ID }, error: null },
-          { data: makeBrandRow({ status: 'active' }), error: null },
-        ],
-      });
-
-      await updateBrand({
-        organizationId: ORG_ID,
-        brandId: BRAND_ID,
-        updates: { pendingSemrushProvisioning: null },
-        postgrestClient: client,
-      });
-
-      const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
-      expect(brandsUpdate.row.pending_semrush_provisioning).to.equal(null);
     });
 
     it('normalizes brand guidance fields in update patch', async () => {
@@ -3448,6 +3307,7 @@ describe('brands-storage', () => {
             },
           },
         ],
+        sites: { data: { id: 'site-1' }, error: null }, // site belongs to org
       });
 
       const err = await upsertBrand({

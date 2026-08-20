@@ -26,6 +26,7 @@ import {
   canonicalizeSource, SOURCE_VALUES,
 } from '../prompt-tags.js';
 import { classifyPromptIntents } from '../intent-classification.js';
+import { logPromptDeleteEvent } from '../prompt-delete-log.js';
 
 /** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
 
@@ -211,11 +212,10 @@ export function validateDeferPublish(body) {
  *
  * Names are passed through as upstream holds them, root breadcrumb included, so
  * a root's name is not always the bare dimension key: the intent root is named
- * `$abv_tags$intent` on a project the rename (LLMO-6984) has reached, and
- * `intent` on one it has not. Folding either spelling to the dimension key here
- * would put a name in `path[]` beside an id that upstream does not hold under
- * it, so this stays a faithful mirror and a consumer that keys on the intent
- * dimension matches both spellings.
+ * `$abv_tags$intent`. Folding it to the dimension key here would put a name in
+ * `path[]` beside an id that upstream does not hold under it, so this stays a
+ * faithful mirror. A consumer keying on the intent dimension matches
+ * `$abv_tags$intent`; use `dimensionOfRootName` rather than comparing by hand.
  *
  * String-form tags (a defensive upstream fallback) carry a name but no id, and
  * are surfaced with an empty id rather than dropped.
@@ -441,6 +441,82 @@ export async function publishAffected(
     }
   }));
   return errors;
+}
+
+/**
+ * Deletes each project's prompt batch via `transport.deletePromptsByIds`, treating an
+ * upstream 404 as idempotent success, and emits one structured, requester-attributed
+ * `logPromptDeleteEvent` line per prompt (SITES-50099) — success or failure alike.
+ * Shared by flat and subworkspace callers: the loop is identical in both once `byProject`
+ * is built, so it lives here rather than being hand-duplicated across the two twins (same
+ * reasoning as {@link publishAffected} and {@link invalidateTagCacheForProject}).
+ * @param {SerenityTransport} transport
+ * @param {string} workspaceId
+ * @param {Map<string, { ids: string[], targets: Array<{ semrushPromptId: string,
+ *   geoTargetId: number, languageCode: string }> }>} byProject
+ * @param {any} log
+ * @param {object} auditCtx
+ * @param {string | null} auditCtx.orgId
+ * @param {string | null | undefined} auditCtx.brandId
+ * @param {string} auditCtx.callerId
+ * @returns {Promise<{ deleted: number, failed: Array<{ semrushPromptId: string,
+ *   geoTargetId: number, languageCode: string, status: number, message: string }>,
+ *   projectsToPublish: Set<string> }>}
+ */
+export async function deleteProjectBatches(
+  transport,
+  workspaceId,
+  byProject,
+  log,
+  { orgId, brandId, callerId },
+) {
+  let deleted = 0;
+  const failed = [];
+  const projectsToPublish = new Set();
+
+  const logEvent = (t, outcome, extra = {}) => logPromptDeleteEvent(log, {
+    organizationId: orgId,
+    brandId,
+    semrushWorkspaceId: workspaceId,
+    semrushPromptId: t.semrushPromptId,
+    geoTargetId: t.geoTargetId,
+    languageCode: t.languageCode,
+    callerId,
+    outcome,
+    ...extra,
+  });
+
+  await Promise.all(Array.from(byProject.entries()).map(async ([pid, bucket]) => {
+    try {
+      await transport.deletePromptsByIds(workspaceId, pid, bucket.ids);
+      deleted += bucket.ids.length;
+      projectsToPublish.add(pid);
+      bucket.targets.forEach((t) => logEvent(t, 'deleted'));
+    } catch (e) {
+      if (isUpstreamGone(e)) {
+        deleted += bucket.ids.length;
+        projectsToPublish.add(pid);
+        bucket.targets.forEach((t) => logEvent(t, 'deleted', { alreadyGone: true }));
+        return;
+      }
+      // Computed once per bucket, not per target — both values depend only on the
+      // one caught error `e`, shared by every target in this project's batch.
+      const message = redactUpstreamMessage(e);
+      const status = e.status || 500;
+      bucket.targets.forEach((t) => {
+        failed.push({
+          semrushPromptId: t.semrushPromptId,
+          geoTargetId: t.geoTargetId,
+          languageCode: t.languageCode,
+          status,
+          message,
+        });
+        logEvent(t, 'error', { status, message });
+      });
+    }
+  }));
+
+  return { deleted, failed, projectsToPublish };
 }
 
 /**
@@ -1434,8 +1510,10 @@ export async function handleUpdatePrompt(
  * @param {any} body
  * @param {any} log
  * @param {object} [options]
- * @param {string | null} [options.orgId] - serenity-docs#72 §5 alert payload only.
+ * @param {string | null} [options.orgId] - also the audit log's organizationId.
  * @param {object | null} [options.env] - serenity-docs#72 §5 alert kill-switch/config only.
+ * @param {string} [options.callerId] - resolved requester id (see resolveCallerId),
+ *   stamped on every audit log line this call emits (SITES-50099).
  */
 export async function handleBulkDeletePrompts(
   transport,
@@ -1444,7 +1522,9 @@ export async function handleBulkDeletePrompts(
   semrushWorkspaceId,
   body,
   log,
-  { orgId = null, env = null } = {},
+  {
+    orgId = null, env = null, callerId = 'unknown',
+  } = {},
 ) {
   const targets = Array.isArray(body?.prompts) ? body.prompts : [];
   if (targets.length === 0) {
@@ -1499,31 +1579,12 @@ export async function handleBulkDeletePrompts(
     bucket.targets.push({ semrushPromptId: sid, geoTargetId, languageCode });
   });
 
-  let deleted = 0;
-  const projectsToPublish = new Set();
-  await Promise.all(Array.from(byProject.entries()).map(async ([pid, bucket]) => {
-    try {
-      await transport.deletePromptsByIds(semrushWorkspaceId, pid, bucket.ids);
-      deleted += bucket.ids.length;
-      projectsToPublish.add(pid);
-    } catch (e) {
-      if (isUpstreamGone(e)) {
-        deleted += bucket.ids.length;
-        projectsToPublish.add(pid);
-        log?.info?.('bulk-delete: upstream already-deleted (404 treated as success)', { ids: bucket.ids });
-        return;
-      }
-      bucket.targets.forEach((t) => {
-        failed.push({
-          semrushPromptId: t.semrushPromptId,
-          geoTargetId: t.geoTargetId,
-          languageCode: t.languageCode,
-          status: e.status || 500,
-          message: redactUpstreamMessage(e),
-        });
-      });
-    }
-  }));
+  const {
+    deleted, failed: deleteFailures, projectsToPublish,
+  } = await deleteProjectBatches(transport, semrushWorkspaceId, byProject, log, {
+    orgId, brandId, callerId,
+  });
+  failed.push(...deleteFailures);
 
   // Deleting prompts can remove the last carrier of a tag in the project,
   // so any project that lost prompts must drop its cached tag set on this

@@ -17,9 +17,11 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import {
   regionApplies,
   normalizeBenchmarkDomain,
+  benchmarkTrackedUrl,
   marketOf,
-  republishBestEffort,
+  republish,
 } from './brand-urls.js';
+import { primaryUrlOf } from './subworkspace-projects.js';
 import {
   dedupeAliases,
   sameAliasSet,
@@ -72,8 +74,8 @@ export function collectAliasNames(aliases, market) {
  * Re-syncs a brand's aliases onto every market/project in its sub-workspace (the
  * brand-edit path). For each project: region-filter the aliases for that market,
  * then — when drifted — PATCH the project's `brand_names` (display name + aliases)
- * and PUT its own-brand benchmark's `brand_aliases`, republishing (best-effort)
- * when anything changed. PATCH/PUT errors propagate so the edit hard-fails (an
+ * and PUT its own-brand benchmark's `brand_aliases`, republishing when anything
+ * changed. PATCH/PUT/republish errors propagate so the edit hard-fails (an
  * already-live brand must not silently diverge). `rejected` aggregates the aliases
  * Semrush refused per market, so the caller can surface them.
  *
@@ -197,10 +199,22 @@ export async function syncBrandAliasesAcrossMarkets(
         // Compared with casing significant, so a re-cased alias counts as a change.
         // The merge keeps every live spelling, so this is quiet in the steady state.
         if (!sameAliasSetExact(currentAliases, nextAliases)) {
+          // This write is about aliases, so the url it carries is the one the
+          // benchmark should KEEP. Upstream `domain` and `primary_url` are ONE
+          // value: a body sending a host-only `domain` and no `primary_url` resets
+          // a benchmark that tracks a subpath, silently re-scoping the brand to its
+          // parent site as a side effect of renaming an alias. The project's own
+          // tracked url is the first fallback for a benchmark that records none,
+          // and the project's domain the last — so the body always names the value
+          // it is keeping rather than leaving `domain` to imply it.
+          const keepUrl = benchmarkTrackedUrl(own)
+            || primaryUrlOf(project)
+            || normalizeBenchmarkDomain(project?.domain);
           // eslint-disable-next-line no-await-in-loop
           await transport.updateBenchmark(workspaceId, projectId, String(own.id), {
             brand_name: benchmarkName,
             domain: own.domain ?? project?.domain,
+            ...(keepUrl ? { primary_url: keepUrl } : {}),
             brand_aliases: nextAliases,
           });
           benchmarksUpdated += 1;
@@ -234,7 +248,7 @@ export async function syncBrandAliasesAcrossMarkets(
 
       if (changed) {
         // eslint-disable-next-line no-await-in-loop
-        await republishBestEffort(transport, workspaceId, projectId, log);
+        await republish(transport, workspaceId, projectId, log);
       }
     } catch (e) {
       // Name WHICH market split so the brand-edit hard-fail (brands.js) is

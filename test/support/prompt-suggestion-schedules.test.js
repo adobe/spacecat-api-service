@@ -72,6 +72,15 @@ describe('prompt-suggestion-schedules support module', () => {
       expect(drsClient.createSchedule).to.have.been.calledThrice;
       expect(drsClient.submitJob).to.not.have.been.called;
       expect(results.map((r) => r.status)).to.deep.equal(['created', 'created', 'created']);
+      // LLMO-7065: providerParameters MUST carry snake_case site_id per
+      // provider — the Fargate runner reads job.parameters.site_id only (no
+      // camel fallback, no server-side derivation from the schedule's siteId)
+      // and raises "site_id missing from job parameters" without it.
+      drsClient.createSchedule.getCalls().forEach((call) => {
+        const [{ providerIds, providerParameters }] = call.args;
+        const [providerId] = providerIds;
+        expect(providerParameters).to.deep.equal({ [providerId]: { site_id: SITE_ID } });
+      });
     });
 
     it('reports already-existed as success (idempotent)', async () => {

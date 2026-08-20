@@ -252,3 +252,74 @@ export async function linkSiteToLiveRows(dataAccess, brandId, siteId, log) {
     });
   }
 }
+
+/**
+ * Live `BrandSemrushProject` rows for a brand whose `siteId` matches. A brand's markets
+ * don't all share one Site — each distinct domain gets its own mirror Site (see
+ * `ensureMarketSite`/`linkSiteToLiveRows` above) — so this is the reference-counting
+ * query (same shape as the tombstone/link helpers' `allByBrandId`-then-filter) that
+ * scopes a site URL-change edit to only the project(s) actually tracking this site.
+ *
+ * @param {any} dataAccess
+ * @param {string|null|undefined} brandId
+ * @param {string|null|undefined} siteId
+ * @returns {Promise<Array<any>>} live rows linked to `siteId` (empty on missing input).
+ */
+export async function projectsForSite(dataAccess, brandId, siteId) {
+  const BrandSemrushProject = dataAccess?.BrandSemrushProject;
+  if (!BrandSemrushProject || !brandId || !hasText(brandId) || !siteId || !hasText(siteId)) {
+    return [];
+  }
+  const rows = await BrandSemrushProject.allByBrandId(brandId);
+  return (Array.isArray(rows) ? rows : [])
+    .filter((row) => !row.getDeletedAt() && row.getSiteId() === siteId);
+}
+
+/**
+ * Links `siteId` onto the ONE live mapping row named by `semrushProjectId`.
+ *
+ * The per-market counterpart to `linkSiteToLiveRows`. A market's `site_id` is
+ * the per-market source of truth for the url its project tracks, so a market
+ * created against its own url must record ITS site — not have the brand's
+ * anchor stand in for it, and not have its site spread to whichever siblings
+ * happen to be unlinked. `linkSiteToLiveRows` remains correct where it is used:
+ * activation provisions every market in one batch against a single resolved
+ * brand url, so one Site genuinely answers for all of them.
+ *
+ * Targeting the row by its own unique key also closes a race the by-brand sweep
+ * cannot: two concurrent creates on one brand each leave an unlinked row behind
+ * before either links, so the first caller's `siteId IS NULL` scan would sweep up
+ * the second caller's market and give it the wrong site.
+ *
+ * Never overwrites an existing link — same invariant as `linkSiteToLiveRows`.
+ * A row that already names a site has been spoken for; correcting a wrong link
+ * is a deliberate act, not a side effect of a create.
+ *
+ * @param {any} dataAccess
+ * @param {string|null|undefined} semrushProjectId - the row's unique key.
+ * @param {string|null|undefined} siteId - the market's own Site.
+ * @param {any} [log]
+ */
+export async function linkSiteToRow(dataAccess, semrushProjectId, siteId, log) {
+  const BrandSemrushProject = dataAccess?.BrandSemrushProject;
+  // `!x || !hasText(x)` rather than `hasText` alone: hasText is typed `(string)`
+  // and these params are `string|null|undefined`, so the truthiness check is what
+  // narrows them for the type-check gate. Same shape as `linkSiteToLiveRows`.
+  if (!BrandSemrushProject || !semrushProjectId || !hasText(semrushProjectId)
+      || !siteId || !hasText(siteId)) {
+    return;
+  }
+  try {
+    const row = await BrandSemrushProject.findBySemrushProjectId(semrushProjectId);
+    // Gone, tombstoned, or already linked — nothing to do in any of the three.
+    if (!row || row.getDeletedAt?.() || row.getSiteId?.()) {
+      return;
+    }
+    row.setSiteId(siteId);
+    await row.save();
+  } catch (e) {
+    log?.error?.(`serenity mapping row: ${WRITE_FAILED_TOKEN} — site link failed`, {
+      semrushProjectId, siteId, op: 'link-site-row', error: e?.message,
+    });
+  }
+}

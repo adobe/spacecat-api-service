@@ -461,6 +461,6 @@ Upstream error bodies are **never forwarded to clients** — they are logged ser
 
 | Variable | Source | Used by |
 |---|---|---|
-| `SEMRUSH_PROJECTS_BASE_URL` | Vault `dx_mysticat/<env>/api-service` | `elements-transport.js` `baseUrl()` — the Elements API base host (e.g. `https://adobe-hackathon.semrush.com`) |
+| `SEMRUSH_PROJECTS_BASE_URL` | Vault `dx_mysticat/<env>/api-service` | `elements-transport.js` `baseUrl()` — the Elements API base host (e.g. `https://www.semrush.com`) |
 
 No additional secrets are required. The Elements transport reuses the same `SEMRUSH_PROJECTS_BASE_URL` already configured for the Serenity (prompts/markets) transport.

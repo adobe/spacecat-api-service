@@ -37,9 +37,11 @@ describe('LLMO Onboarding Functions', () => {
       Site: {
         findByBaseURL: sinon.stub(),
         create: sinon.stub(),
-        // Default: no pre-cutoff sites → mode resolution returns v2 (the default).
-        // Tests that need v1 mode should set LLMO_ONBOARDING_DEFAULT_VERSION='v1'
-        // in context.env to use the global kill switch.
+        // Mode resolution defaults to v2. Tests that need v1 mode set
+        // LLMO_ONBOARDING_DEFAULT_VERSION='v1' in context.env (global kill switch).
+        // allByOrganizationId is no longer read by resolveLlmoOnboardingMode
+        // (the legacy-site cutoff was removed in LLMO-7108) — kept as a harmless
+        // default for other code paths.
         allByOrganizationId: sinon.stub().resolves([]),
       },
       Organization: {
@@ -1396,9 +1398,7 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
       expect(mockSite.getOrganizationId).to.have.been.called;
       expect(mockSite.setOrganizationId).to.have.been.calledWith('new-org-456');
-      // LLMO-4176: re-parent must be persisted before resolveLlmoOnboardingMode
-      // queries Site.allByOrganizationId, otherwise a legacy site moved into a
-      // brand-new org would be misclassified as v2.
+      // createOrFindSite persists a re-parent immediately via save().
       expect(mockSite.save).to.have.been.calledOnce;
     }).timeout(5000);
 
@@ -1996,13 +1996,6 @@ describe('LLMO Onboarding Functions', () => {
         baseURL: 'https://example.com',
         organizationId: 'org123',
       });
-
-      // LLMO-4176 regression guard: resolveLlmoOnboardingMode reads
-      // Site.allByOrganizationId, and that read MUST happen after the site
-      // has been created/re-parented — otherwise a legacy site moved into a
-      // brand-new org gets misclassified as v2.
-      expect(mockDataAccess.Site.allByOrganizationId)
-        .to.have.been.calledAfter(mockDataAccess.Site.findByBaseURL);
 
       // Verify site config was updated
       expect(mockSite.getConfig().updateLlmoBrand).to.have.been.calledWith('Test Brand');
@@ -5514,57 +5507,317 @@ describe('LLMO Onboarding Functions', () => {
     });
   });
 
-  describe('appendRowsToQueryIndex', () => {
-    it('should append rows with correct format and timestamps', async () => {
-      const mockAppendRowsToSheet = sinon.stub().resolves();
-      const mockRedirects = { appendRowsToSheet: mockAppendRowsToSheet };
-      const mockSPClient = { getRedirects: sinon.stub().returns(mockRedirects) };
+  describe('reindexQueryIndexPaths', () => {
+    it('should reject an unsafe dataFolder before making any request', async () => {
+      const mockTracingFetch = sinon.stub().resolves({ ok: true, status: 200, statusText: 'OK' });
 
-      const { appendRowsToQueryIndex } = await esmock(
+      const { reindexQueryIndexPaths } = await esmock(
         '../../../src/controllers/llmo/llmo-onboarding.js',
         {
-          '@adobe/spacecat-helix-content-sdk': {
-            createFrom: sinon.stub().resolves(mockSPClient),
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
           },
         },
       );
 
-      await appendRowsToQueryIndex('dev/test-com', ['file1', 'file2.json'], mockEnv, mockLog);
+      try {
+        await reindexQueryIndexPaths('../other-folder', ['file1'], mockEnv, mockLog);
+        expect.fail('Should have thrown');
+      } catch (error) {
+        expect(error.message).to.equal('Invalid dataFolder: ../other-folder');
+      }
 
-      expect(mockAppendRowsToSheet).to.have.been.calledOnce;
-      const [sheetPath, rows] = mockAppendRowsToSheet.firstCall.args;
-      expect(sheetPath).to.equal('/dev/test-com/query-index.xlsx');
-      expect(rows).to.have.length(2);
-      expect(rows[0][0]).to.equal('/dev/test-com/file1.json');
-      expect(rows[1][0]).to.equal('/dev/test-com/file2.json');
-      expect(rows[0][1]).to.be.a('number');
-      expect(rows[0][2]).to.be.a('number');
-      expect(mockLog.info).to.have.been.calledWith(sinon.match(/Appending 2 rows/));
-      expect(mockLog.info).to.have.been.calledWith(sinon.match(/Successfully appended rows/));
+      expect(mockTracingFetch).to.not.have.been.called;
+    });
+
+    it('should POST to the Admin API index endpoint for each file', async () => {
+      const mockTracingFetch = sinon.stub().resolves({ ok: true, status: 200, statusText: 'OK' });
+
+      const { reindexQueryIndexPaths } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
+          },
+        },
+      );
+
+      await reindexQueryIndexPaths('dev/test-com', ['file1', 'file2.json'], mockEnv, mockLog);
+
+      expect(mockTracingFetch).to.have.been.calledTwice;
+      expect(mockTracingFetch.firstCall.args[0]).to.equal(
+        'https://admin.hlx.page/index/adobe/project-elmo-ui-data/main/dev/test-com/file1.json',
+      );
+      expect(mockTracingFetch.firstCall.args[1]).to.deep.include({ method: 'POST', timeout: 30000 });
+      expect(mockTracingFetch.secondCall.args[0]).to.equal(
+        'https://admin.hlx.page/index/adobe/project-elmo-ui-data/main/dev/test-com/file2.json',
+      );
+      expect(mockLog.info).to.have.been.calledWith(sinon.match(/Reindexing 2 path\(s\)/));
+      expect(mockLog.info).to.have.been.calledWith(sinon.match(/Successfully reindexed 2 path\(s\)/));
     });
 
     it('should not double-append .json extension for files already ending in .json', async () => {
-      const mockAppendRowsToSheet = sinon.stub().resolves();
-      const mockRedirects = { appendRowsToSheet: mockAppendRowsToSheet };
-      const mockSPClient = { getRedirects: sinon.stub().returns(mockRedirects) };
+      const mockTracingFetch = sinon.stub().resolves({ ok: true, status: 200, statusText: 'OK' });
 
-      const { appendRowsToQueryIndex } = await esmock(
+      const { reindexQueryIndexPaths } = await esmock(
         '../../../src/controllers/llmo/llmo-onboarding.js',
         {
-          '@adobe/spacecat-helix-content-sdk': {
-            createFrom: sinon.stub().resolves(mockSPClient),
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
           },
         },
       );
 
-      await appendRowsToQueryIndex('dev/test-com', ['already.json'], mockEnv, mockLog);
+      await reindexQueryIndexPaths('dev/test-com', ['already.json'], mockEnv, mockLog);
 
-      const [, rows] = mockAppendRowsToSheet.firstCall.args;
-      expect(rows[0][0]).to.equal('/dev/test-com/already.json');
+      expect(mockTracingFetch.firstCall.args[0]).to.equal(
+        'https://admin.hlx.page/index/adobe/project-elmo-ui-data/main/dev/test-com/already.json',
+      );
+    });
+
+    it('should throw when HLX_ONBOARDING_TOKEN is not set', async () => {
+      const { reindexQueryIndexPaths } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {},
+      );
+
+      const envWithoutToken = { ...mockEnv, HLX_ONBOARDING_TOKEN: '' };
+
+      try {
+        await reindexQueryIndexPaths('dev/test-com', ['file1'], envWithoutToken, mockLog);
+        expect.fail('Should have thrown');
+      } catch (error) {
+        expect(error.message).to.equal('HLX_ONBOARDING_TOKEN is not set');
+      }
+    });
+
+    it('should throw and log details (including body) when a reindex call fails', async () => {
+      const mockHeaders = { get: sinon.stub() };
+      mockHeaders.get.withArgs('x-error-code').returns('CONTENT_NOT_FOUND');
+      mockHeaders.get.withArgs('x-error').returns('resource not found');
+
+      const mockTracingFetch = sinon.stub().resolves({
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+        headers: mockHeaders,
+        text: sinon.stub().resolves('detailed error body'),
+      });
+
+      const { reindexQueryIndexPaths } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
+          },
+        },
+      );
+
+      try {
+        await reindexQueryIndexPaths('dev/test-com', ['file1'], mockEnv, mockLog);
+        expect.fail('Should have thrown');
+      } catch (error) {
+        expect(error.message).to.equal('Reindex failed for dev/test-com/file1.json: 404 Not Found');
+      }
+
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(/Reindex failed.*404.*x-error-code: CONTENT_NOT_FOUND.*x-error: resource not found.*body: detailed error body/),
+      );
+    });
+
+    it('should handle text() throwing when reading a reindex error body', async () => {
+      const mockTracingFetch = sinon.stub().resolves({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        headers: { get: sinon.stub().returns('') },
+        text: sinon.stub().rejects(new Error('stream error')),
+      });
+
+      const { reindexQueryIndexPaths } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
+          },
+        },
+      );
+
+      try {
+        await reindexQueryIndexPaths('dev/test-com', ['file1'], mockEnv, mockLog);
+        expect.fail('Should have thrown');
+      } catch (error) {
+        expect(error.message).to.equal('Reindex failed for dev/test-com/file1.json: 500 Internal Server Error');
+      }
+
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(/Reindex failed.*500.*body: $/),
+      );
+    });
+
+    it('should stop at the first failing path without reindexing the rest', async () => {
+      const mockTracingFetch = sinon.stub();
+      mockTracingFetch.onCall(0).resolves({ ok: true, status: 200, statusText: 'OK' });
+      mockTracingFetch.onCall(1).resolves({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        headers: { get: sinon.stub().returns('') },
+        text: sinon.stub().resolves(''),
+      });
+
+      const { reindexQueryIndexPaths } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
+          },
+        },
+      );
+
+      try {
+        await reindexQueryIndexPaths('dev/test-com', ['file1', 'file2', 'file3'], mockEnv, mockLog);
+        expect.fail('Should have thrown');
+      } catch (error) {
+        expect(error.message).to.equal('Reindex failed for dev/test-com/file2.json: 500 Internal Server Error');
+      }
+
+      expect(mockTracingFetch).to.have.been.calledTwice;
+    });
+
+    it('should identify the failing file when fetch itself throws (network/timeout error)', async () => {
+      const mockTracingFetch = sinon.stub();
+      mockTracingFetch.onCall(0).resolves({ ok: true, status: 200, statusText: 'OK' });
+      mockTracingFetch.onCall(1).rejects(new Error('network timeout'));
+
+      const { reindexQueryIndexPaths } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
+          },
+        },
+      );
+
+      try {
+        await reindexQueryIndexPaths('dev/test-com', ['file1', 'file2', 'file3'], mockEnv, mockLog);
+        expect.fail('Should have thrown');
+      } catch (error) {
+        expect(error.message).to.equal('Reindex failed for dev/test-com/file2.json: network timeout');
+      }
+
+      expect(mockTracingFetch).to.have.been.calledTwice;
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(/Reindex failed for dev\/test-com\/file2\.json after reindexing 1\/3: network timeout/),
+      );
+    });
+  });
+
+  describe('updateIndexConfig', () => {
+    it('registers a new folder when it has no existing entry', async () => {
+      const existingContent = 'default: &default\n  target: /default/query-index.xlsx\n\nlego-com-uk:\n  <<: *default\n  include:\n    - \'/lego-com-uk/**\'\n  target: /lego-com-uk/query-index.xlsx\n';
+      const mockOctokit = createMockOctokit(sinon, { content: existingContent, sha: 'sha-1' });
+
+      const { updateIndexConfig } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        { '@octokit/rest': { Octokit: mockOctokit } },
+      );
+
+      const mockSay = sinon.stub();
+      await updateIndexConfig('lego-com', { log: mockLog, env: mockEnv }, mockSay);
+
+      const octokitInstance = mockOctokit.firstCall.returnValue;
+      expect(octokitInstance.repos.createOrUpdateFileContents).to.have.been.calledOnce;
+      const { content } = octokitInstance.repos.createOrUpdateFileContents.firstCall.args[0];
+      const written = Buffer.from(content, 'base64').toString('utf-8');
+      expect(written).to.match(/^\s*lego-com:/m);
+      expect(mockSay).to.not.have.been.called;
+    });
+
+    it('skips the update when an exact index definition already exists', async () => {
+      const existingContent = 'default: &default\n  target: /default/query-index.xlsx\n\nlego-com:\n  <<: *default\n  include:\n    - \'/lego-com/**\'\n  target: /lego-com/query-index.xlsx\n';
+      const mockOctokit = createMockOctokit(sinon, { content: existingContent, sha: 'sha-1' });
+
+      const { updateIndexConfig } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        { '@octokit/rest': { Octokit: mockOctokit } },
+      );
+
+      const mockSay = sinon.stub();
+      await updateIndexConfig('lego-com', { log: mockLog, env: mockEnv }, mockSay);
+
+      const octokitInstance = mockOctokit.firstCall.returnValue;
+      expect(octokitInstance.repos.createOrUpdateFileContents).to.not.have.been.called;
+      expect(mockSay).to.have.been.calledWith(sinon.match(/already has an index definition/));
+    });
+
+    // Regression for LLMO-6320: a raw substring check (content.includes(dataFolder))
+    // false-positives here because 'lego-com' is a substring of the already-registered
+    // 'lego-com-uk' key, so the folder would be silently left unregistered.
+    it('does not skip a folder whose name is only a substring of an existing key', async () => {
+      const existingContent = 'default: &default\n  target: /default/query-index.xlsx\n\nlego-com-uk:\n  <<: *default\n  include:\n    - \'/lego-com-uk/**\'\n  target: /lego-com-uk/query-index.xlsx\n';
+      const mockOctokit = createMockOctokit(sinon, { content: existingContent, sha: 'sha-1' });
+
+      const { updateIndexConfig } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        { '@octokit/rest': { Octokit: mockOctokit } },
+      );
+
+      await updateIndexConfig('lego-com', { log: mockLog, env: mockEnv });
+
+      const octokitInstance = mockOctokit.firstCall.returnValue;
+      expect(octokitInstance.repos.createOrUpdateFileContents).to.have.been.calledOnce;
+      const { content } = octokitInstance.repos.createOrUpdateFileContents.firstCall.args[0];
+      const written = Buffer.from(content, 'base64').toString('utf-8');
+      expect(written).to.match(/^\s*lego-com:/m);
+    });
+
+    // Regression: dataFolder is interpolated into a RegExp without escaping metacharacters
+    // would treat e.g. the '.' in 'frescopa.coffee' as "match any character", so an
+    // unrelated key like 'frescopaXcoffee:' would incorrectly be treated as an existing
+    // registration and the real folder would never get registered.
+    it('escapes regex metacharacters in the folder name before matching', async () => {
+      const existingContent = 'default: &default\n  target: /default/query-index.xlsx\n\nfrescopaXcoffee:\n  <<: *default\n  include:\n    - \'/frescopaXcoffee/**\'\n  target: /frescopaXcoffee/query-index.xlsx\n';
+      const mockOctokit = createMockOctokit(sinon, { content: existingContent, sha: 'sha-1' });
+
+      const { updateIndexConfig } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        { '@octokit/rest': { Octokit: mockOctokit } },
+      );
+
+      await updateIndexConfig('frescopa.coffee', { log: mockLog, env: mockEnv });
+
+      const octokitInstance = mockOctokit.firstCall.returnValue;
+      expect(octokitInstance.repos.createOrUpdateFileContents).to.have.been.calledOnce;
+      const { content } = octokitInstance.repos.createOrUpdateFileContents.firstCall.args[0];
+      const written = Buffer.from(content, 'base64').toString('utf-8');
+      expect(written).to.match(/^\s*frescopa\.coffee:/m);
     });
   });
 
   describe('previewAndPublishQueryIndex', () => {
+    it('should reject an unsafe dataFolder before making any request', async () => {
+      const mockTracingFetch = sinon.stub().resolves({ ok: true, status: 200, statusText: 'OK' });
+
+      const { previewAndPublishQueryIndex } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
+          },
+        },
+      );
+
+      try {
+        await previewAndPublishQueryIndex('/etc/passwd', mockEnv, mockLog);
+        expect.fail('Should have thrown');
+      } catch (error) {
+        expect(error.message).to.equal('Invalid dataFolder: /etc/passwd');
+      }
+
+      expect(mockTracingFetch).to.not.have.been.called;
+    });
+
     it('should successfully preview and publish with .json path', async () => {
       const mockTracingFetch = sinon.stub();
       mockTracingFetch.onCall(0).resolves({ ok: true, status: 200, statusText: 'OK' });

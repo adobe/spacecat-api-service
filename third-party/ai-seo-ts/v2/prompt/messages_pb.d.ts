@@ -1399,6 +1399,15 @@ export declare type GapPromptsRequest = Message<"semrush.services.ai_seo.v2.prom
    * @generated from field: optional string target_date = 15;
    */
   targetDate?: string;
+
+  /**
+   * search_type defines how target.domain is interpreted when scoping target mentions
+   * (root domain / subdomain / subfolder / exact URL).
+   * Unset / UNSPECIFIED is treated as DOMAIN for backward compatibility.
+   *
+   * @generated from field: semrush.services.ai_seo.v2.source.SEARCH_TYPE.ENUM search_type = 16;
+   */
+  searchType: SEARCH_TYPE_ENUM;
 };
 
 /**
@@ -1498,6 +1507,15 @@ export declare type GapPromptsRequestJson = {
    * @generated from field: optional string target_date = 15;
    */
   targetDate?: string;
+
+  /**
+   * search_type defines how target.domain is interpreted when scoping target mentions
+   * (root domain / subdomain / subfolder / exact URL).
+   * Unset / UNSPECIFIED is treated as DOMAIN for backward compatibility.
+   *
+   * @generated from field: semrush.services.ai_seo.v2.source.SEARCH_TYPE.ENUM search_type = 16;
+   */
+  searchType?: SEARCH_TYPE_ENUMJson;
 };
 
 /**
@@ -2551,6 +2569,15 @@ export declare type GapPromptsTotalsRequest = Message<"semrush.services.ai_seo.v
    * @generated from field: optional string target_date = 11;
    */
   targetDate?: string;
+
+  /**
+   * search_type defines how target.domain is interpreted when scoping target mentions
+   * (root domain / subdomain / subfolder / exact URL).
+   * Unset / UNSPECIFIED is treated as DOMAIN for backward compatibility.
+   *
+   * @generated from field: semrush.services.ai_seo.v2.source.SEARCH_TYPE.ENUM search_type = 12;
+   */
+  searchType: SEARCH_TYPE_ENUM;
 };
 
 /**
@@ -2634,6 +2661,15 @@ export declare type GapPromptsTotalsRequestJson = {
    * @generated from field: optional string target_date = 11;
    */
   targetDate?: string;
+
+  /**
+   * search_type defines how target.domain is interpreted when scoping target mentions
+   * (root domain / subdomain / subfolder / exact URL).
+   * Unset / UNSPECIFIED is treated as DOMAIN for backward compatibility.
+   *
+   * @generated from field: semrush.services.ai_seo.v2.source.SEARCH_TYPE.ENUM search_type = 12;
+   */
+  searchType?: SEARCH_TYPE_ENUMJson;
 };
 
 /**

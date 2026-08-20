@@ -4,7 +4,7 @@ This document is the runtime reference for the `/v2/orgs/:spaceCatId/brands/:bra
 
 ## Architecture in one paragraph
 
-api-service exposes nine endpoints that front the Adobe-hosted Semrush AIO API at `https://adobe-hackathon.semrush.com`. Authentication is IMS-bearer-only: the client sends an `Authorization: Bearer <ims_user_token>`, api-service forwards that header verbatim to Semrush, and the Adobe gateway exchanges the IMS token for Semrush's internal credential server-side. There are no Semrush cookies, API keys, or service accounts in api-service — every outbound request carries the caller's IMS user token. The brand-to-project mapping lives in the `brand_to_semrush_projects` table in mysticat-data-service; the Semrush workspace per org is read from `organizations.semrush_workspace_id` (already in place since PR #2403).
+api-service exposes nine endpoints that front the Adobe-hosted Semrush AIO API at `https://www.semrush.com`. Authentication is IMS-bearer-only: the client sends an `Authorization: Bearer <ims_user_token>`, api-service forwards that header verbatim to Semrush, and the Adobe gateway exchanges the IMS token for Semrush's internal credential server-side. There are no Semrush cookies, API keys, or service accounts in api-service — every outbound request carries the caller's IMS user token. The brand-to-project mapping lives in the `brand_to_semrush_projects` table in mysticat-data-service; the Semrush workspace per org is read from `organizations.semrush_workspace_id` (already in place since PR #2403).
 
 ## Environment configuration
 
@@ -23,11 +23,11 @@ vault login -method=oidc   # opens browser
 
 # value used for all three today; production target host may differ later
 vault kv patch dx_mysticat/dev/api-service \
-  SEMRUSH_PROJECTS_BASE_URL=https://adobe-hackathon.semrush.com
+  SEMRUSH_PROJECTS_BASE_URL=https://www.semrush.com
 vault kv patch dx_mysticat/stage/api-service \
-  SEMRUSH_PROJECTS_BASE_URL=https://adobe-hackathon.semrush.com
+  SEMRUSH_PROJECTS_BASE_URL=https://www.semrush.com
 vault kv patch dx_mysticat/prod/api-service \
-  SEMRUSH_PROJECTS_BASE_URL=https://adobe-hackathon.semrush.com
+  SEMRUSH_PROJECTS_BASE_URL=https://www.semrush.com
 
 # verify (must export VAULT_ADDR — the CLI default is 127.0.0.1:8200)
 export VAULT_ADDR=https://vault-amer.adobe.net
@@ -289,7 +289,7 @@ Two **org-level** catalogue routes are brand-independent (prefixed with `/v2/org
 
 ## The onboarding flow
 
-`POST /serenity/markets` writes a row to `brand_to_semrush_projects` **only after both upstream calls succeed**. The order is strict and the `findBySlice` 409 gate runs before any upstream call so safe retries are free:
+`POST /serenity/markets` writes a row to `brand_to_semrush_projects` **only after all three upstream calls succeed**. The order is strict and the `findBySlice` 409 gate runs before any upstream call so safe retries are free:
 
 ```
 1. validate body                                  -> 400 on missing/invalid fields
@@ -298,17 +298,29 @@ Two **org-level** catalogue routes are brand-independent (prefixed with `/v2/org
 4. resolveLanguageId(languageCode) via cached     -> 400 if language not in catalog
    `/v1/languages`
 5. POST /v1/workspaces/{ws}/projects              -> 502 envelope on upstream error
-6. POST .../publish                               -> 502 envelope, no row written
-7. BrandSemrushProject.create({...})              -> 201 with the new market
+6. PATCH .../projects/{pid} {type, primary_url}   -> 502 envelope, no row written
+7. POST .../publish                               -> 502 envelope, no row written
+8. BrandSemrushProject.create({...})              -> 201 with the new market
 ```
 
-If step 5 or 6 fails, no row is written and the caller may safely retry with the same body. The 409 gate catches the case where a previous attempt succeeded both upstream calls but failed the DB write — extremely unlikely in practice; covered by the integration tests in `test/it/`.
+Step 6 is not optional and cannot be folded into step 5. A project carries two URL-ish
+fields: `domain`, which must be a bare FQDN (a path is a hard 400, and the upstream folds
+whatever is sent to the registrable domain), and `settings.ai.primary_url`, which is the
+URL the project actually **tracks** and accepts a subdomain, a subpath, or both. Create
+**ignores** `primary_url` — sent in the create body it comes back as the apex, whatever
+spelling went in — so it can only be set by a PATCH, and that PATCH must land before the
+publish or the value stays in draft. `primary_url` is sent flat (`{type: 'ai',
+primary_url}`, the shape `model.ProjectUpdateRequest` declares) and read back nested at
+`settings.ai.primary_url`. Without it, a brand whose site is `nba.com/kings` is recorded
+against the whole of `nba.com`.
 
-**`brandDomain` OR `siteId` (LLMO-6405 Phase 2).** A market created from an already-onboarded URL can send `siteId` (the SpaceCat Site UUID) instead of a raw `brandDomain`. The server derives the Semrush project domain from that Site's `base_url` (`resolveSiteDomain`, same hostname normalization as every other brand→domain derivation; an unresolvable `siteId` is a 400). At least one of the two is required. In sub-workspace mode a supplied `siteId` also makes the post-201 mirror link **that** Site directly (skipping the domain→Site find-or-create — see below); the linked `siteId` then surfaces on the market DTO (`GET /serenity/markets[/:slice]`, both modes). The flat handler self-derives (it holds `dataAccess.Site`); the sub-workspace handler relies on the controller (its `dataAccess` is narrowed). When `siteId` is absent, behavior is byte-for-byte unchanged.
+If step 5, 6 or 7 fails, no row is written and the caller may safely retry with the same body. The 409 gate catches the case where a previous attempt succeeded all three upstream calls but failed the DB write — extremely unlikely in practice; covered by the integration tests in `test/it/`.
+
+**`brandDomain` OR `siteId` (LLMO-6405 Phase 2).** A market created from an already-onboarded URL can send `siteId` (the SpaceCat Site UUID) instead of a raw `brandDomain`. The server derives **both** Semrush URL values from that Site's `base_url` in one read (`resolveSiteUrls`): the project `domain` (bare host, the same normalization as every other brand→domain derivation) and the project's tracked `primary_url` (host + path, scheme-less to match the stored upstream form). They come from one read so the two can never describe different URLs; an unresolvable `siteId` is a 400. `primary_url` is always derived server-side and never read from the request body. At least one of the two is required. In sub-workspace mode a supplied `siteId` also makes the post-201 mirror link **that** Site directly (skipping the domain→Site find-or-create — see below); the linked `siteId` then surfaces on the market DTO (`GET /serenity/markets[/:slice]`, both modes). The flat handler self-derives (it holds `dataAccess.Site`); the sub-workspace handler relies on the controller (its `dataAccess` is narrowed). When `siteId` is absent, behavior is byte-for-byte unchanged.
 
 ## Delete-market semantics
 
-`DELETE /serenity/markets/:geoTargetId/:languageCode` removes a slice from the brand. Upstream support was verified 2026-05-28 against `adobe-hackathon.semrush.com`:
+`DELETE /serenity/markets/:geoTargetId/:languageCode` removes a slice from the brand. Upstream support was verified 2026-05-28 against `www.semrush.com`:
 
 ```
 OPTIONS /v1/workspaces/{ws}/projects/{pid} → 405, allow: DELETE, GET, PATCH
@@ -334,7 +346,7 @@ The DELETE is **not soft**. The UI must confirm with the user before invoking �
 
 For backwards compatibility and integrations, every Semrush market (project) is mirrored as a SpaceCat **Site** on our side. The domain model is the key thing to hold onto:
 
-- A **brand is a shell** with **no domain of its own** — like its Semrush sub-workspace. **Each market has its own primary URL/domain**, and that domain maps to a single Site (global `sites.base_url` uniqueness ⇒ at most one Site per domain). A brand whose markets span distinct domains therefore owns several market Sites.
+- A **brand is a shell** with **no domain of its own** — like its Semrush sub-workspace. **Each market has its own primary URL/domain**, and that URL maps to a single Site. `sites.base_url` is globally unique over the **whole URL including its path**, so one host can back several Sites: in prod 440 of 12,926 sites carry a subpath, and `nba.com` coexists with `nba.com/kings`, `/knicks`, `/lakers` and `/timberwolves` as five distinct rows. A brand whose markets span distinct URLs therefore owns several market Sites. Site lookup is by the full identity (host + path) for exactly this reason — resolving by host alone silently returns the root site for every subpath sibling.
 - The Site is linked to the owning brand via a **`brand_sites` row tagged `type='serenity'`** (`src/support/serenity/site-linkage.js` → `ensureMarketSite`; the marker names the owning feature, not the provider). The marker is load-bearing:
   - **`syncBrandSites` preserves it.** That function rebuilds `brand_sites` from `brand.urls` on every brand edit (delete-all-then-reinsert). A market's domain is generally **not** in `brand.urls`, so an unmarked row would be silently deleted on the next edit. The marker excludes these rows from the delete and keeps their type from being downgraded on re-upsert.
   - **`mapDbBrandToV2` excludes it.** A market's domain is not a brand URL, so `type='serenity'` rows never surface in the brand V2 response (`urls[]` / `siteIds`). Integrations resolve them via the `sites` / `brand_sites` tables directly.
@@ -380,7 +392,7 @@ produced by this path today; if that changes, the site-link step must require a
 linked Site per distinct market domain.)
 
 - Body: `{ brandDomain?, brandNames?, brandDisplayName?, markets?: [{ market, languageCode, name? }] }`. **All body fields are optional.** A pending brand's approve sends an empty body (→ sub-workspace-only). For an active brand, `markets` is **capped at 50** (400 above that); an empty `markets` with a resolved `brandDomain` provisions one `US`/`en` fallback project; a body that resolves no markets and no `brandDomain` is a no-op re-ensure.
-- **No stash-driven provisioning (LLMO-6405).** A pending brand activates sub-workspace-only regardless of `brands.pending_semrush_provisioning`; the stash is no longer read to drive market provisioning (it is only *cleared* on that path). The column is slated for removal once existing drafts drain (serenity-docs post-GA cleanup).
+- **No stash-driven provisioning (LLMO-6405, SITES-49448).** A pending brand activates sub-workspace-only regardless of `brands.pending_semrush_provisioning`; activation no longer reads OR clears the stash — the column is a deprecated, unwritten remnant, slated for removal once existing legacy drafts drain (serenity-docs post-GA cleanup).
 - Response: **200** — a pending brand's sub-workspace-only activation (flips to `active`), or a fully-succeeded active reactivation. **502 `serenityActivationIncomplete`** — a pending brand whose sub-workspace ensured upstream but whose `active` flip did not persist (stays `pending`, idempotent retry). **207 Multi-Status** — an *already-active* brand re-supplying markets where ≥1 fails; never downgraded, stays `active`.
 - Idempotent: a market already live upstream returns 409 `sliceExists` and still counts as live, so a full re-activate of an already-live active brand is a 200.
 
@@ -422,10 +434,14 @@ Outbound calls to Semrush, plus the controller's 502/500 paths, ship to Splunk (
 index=dx_aem_engineering sourcetype=dx_aem_sites_spacecat_backend_<env> service=api-service "semrush" | head 50
 ```
 
+`SERENITY_MARKET_PRIMARY_URL_DIVERGENCE` fires only in **sub-workspace** mode, and it is expected to be rare rather than impossible. The two provisioning paths treat a failed `primary_url` PATCH differently on purpose. The **flat** handler treats it exactly like a failed publish: the project is deleted best-effort, the error is rethrown, and no mapping row is written — so the market simply does not exist and a retry is safe. The **sub-workspace** handler cannot do that; it adopts leftover drafts, provisions a taxonomy between create and publish, and publishes quota-tolerantly, so it has no orphan-cleanup seam, and failing a whole market create because the tracked url could not be refined is worse than a market live on its apex — the state every market is in today. It therefore logs this token and continues.
+
+What that means operationally: a market carrying this token is **live and usable**, but tracking its apex rather than its subpath. Nothing further is needed here — the `mysticat-data-service` reconcile repairs `primary_url` in place (PATCH + publish, non-destructive) on its next run, because it compares against live state. A token that keeps recurring for the same market across reconciles is the signal worth chasing.
+
 Greppable failure tokens worth alerting on: `SERENITY_MARKET_LINK_REJECTED` (the `brand_sites.type='serenity'` migration is not deployed in the env — every market create/activate then produces a Semrush project + Site with no link), `SERENITY_ACTIVATE_LINK_INCOMPLETE` (markets live upstream but the brand stayed pending because the site mirror failed), and `SERENITY_ACTIVATE_SAVE_DIVERGENCE` / `SERENITY_DEACTIVATE_SAVE_DIVERGENCE` (upstream succeeded but the status/pointer persist failed).
 
 Expected fields in the structured log payload:
-- outbound host: `adobe-hackathon.semrush.com`
+- outbound host: `www.semrush.com`
 - outbound auth: `Authorization: Bearer ...` (the token itself is redacted by the platform)
 - the IMS sub of the caller in the `actor` field
 
@@ -454,17 +470,15 @@ that: a brand's first market-add demanded the child's project total be raised to
 pool that could not cover it, and the whole request died as a generic 502 before it ever reached
 project creation.
 
-The parent-pool premise is re-checked, not assumed: `scripts/serenity-metered-405-canary.mjs`
-drives the real transport against a throwaway sub-workspace and publishes into zero headroom. Read
-the outcome by what the publish does, not by an exit code (it exits 0 either way): a publish that
-**succeeds** at zero headroom confirms the premise holds, whereas the disguised **405** the script
-was built to capture now means Semrush is enforcing again — the signal to re-introduce the allocator
-from history. (The script's on-screen `expected`/`UNEXPECTED` labels are LLMO-6190 fixture-capture
-language and read the opposite way round — see its header.) It is a **manual** per-environment run
-(live IMS token + a real sub-workspace id; nothing schedules it), and serenity-docs#72 §10.7 retires
-it together with the §10.6 quota classifier — so it is the interim re-check, not the durable one. The
-durable re-check beyond §10.6 is an open question that §10.6 must settle (see
-[ADR-009](decisions/009-remove-dormant-jit-allocator.md)).
+The parent-pool premise was re-checked, not assumed: a manual metered-405 canary drove the real
+transport against a throwaway sub-workspace and published into zero headroom, per environment
+(dev/stage/prod, SITES-49206, 2026-08-17) — publish succeeded at zero headroom in all three,
+confirming the premise. That interim, manual, one-time check is now retired; the **durable**
+re-check is the retained disguised-405 classifier (`isMeteredQuota` / `toQuotaExceededError`,
+`errors.js`) observing every real production publish continuously, backed by
+`quota-alerts.js`/`allocation-metrics.js` alerting — see [ADR-010](decisions/010-durable-limits-recheck-retires-canary.md)
+for why this resolves the "durable re-check" question ADR-009 left open, and
+[ADR-009](decisions/009-remove-dormant-jit-allocator.md) for the original removal.
 
 > **Removed (SITES-49206):** the just-in-time (JIT) top-up allocator
 > (`SERENITY_DYNAMIC_ALLOCATION`, `resource-manager.js`, `dynamic-allocation-active.js`,
@@ -533,10 +547,10 @@ Negative-path checks worth covering: non-UUID `:brandId` → 400 `invalidRequest
 After the walkthrough, verify Splunk has the outbound traces:
 
 ```spl
-index=dx_aem_engineering sourcetype=dx_aem_sites_spacecat_backend_<env> service=api-service "adobe-hackathon.semrush.com" | head 30
+index=dx_aem_engineering sourcetype=dx_aem_sites_spacecat_backend_<env> service=api-service "www.semrush.com" | head 30
 ```
 
-Expected: outbound host `adobe-hackathon.semrush.com`, IMS sub of the caller in `actor`, no `SerenityTransportError` entries beyond the deliberate 404/409 cases above.
+Expected: outbound host `www.semrush.com`, IMS sub of the caller in `actor`, no `SerenityTransportError` entries beyond the deliberate 404/409 cases above.
 
 ## Troubleshooting
 
