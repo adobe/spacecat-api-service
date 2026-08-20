@@ -1,3 +1,10 @@
+## [1.760.2](https://github.com/adobe/spacecat-api-service/compare/v1.760.1...v1.760.2) (2026-08-20)
+
+
+### Bug Fixes
+
+* **onboard:** resolve PLG org guard from the site's own org, not imsO… ([#3117](https://github.com/adobe/spacecat-api-service/issues/3117)) ([925a00b](https://github.com/adobe/spacecat-api-service/commit/925a00b66891ab1bcaec3c57f93b544871f66082))
+
 ## [1.760.1](https://github.com/adobe/spacecat-api-service/compare/v1.760.0...v1.760.1) (2026-08-20)
 
 
