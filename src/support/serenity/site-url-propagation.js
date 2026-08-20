@@ -27,10 +27,12 @@ import { projectsForSite } from './mapping-rows.js';
  * eTLD+1 via the Public Suffix List, so a same-domain edit is a no-op on this field and a
  * cross-domain edit moves it too; live-verified against adobe-hackathon.semrush.com
  * 2026-08-18 that a changed `domain` is accepted, persists, and a subsequent publish settles
- * cleanly with no project recreation), the own-brand benchmark's `domain` (full-body PUT — a
- * field omitted from that PUT is CLEARED upstream, not preserved, see `rest-transport.js`'s
- * `updateBenchmark` JSDoc — so this reads the benchmark first to carry its
- * `brand_name`/`brand_aliases` forward unchanged), and republishes.
+ * cleanly with no project recreation), the own-brand benchmark's `domain`/`primary_url` (one
+ * value upstream — see `brand-urls.js`'s `benchmarkTrackedUrl` JSDoc — sent as a full-body PUT
+ * since a field omitted from that PUT is CLEARED upstream, not preserved, see
+ * `rest-transport.js`'s `updateBenchmark` JSDoc — so this reads the benchmark first to carry
+ * its `brand_name`/`brand_aliases` forward unchanged while always moving `primary_url` to the
+ * new identity), and republishes.
  *
  * Scope: a brand's sub-workspace can hold multiple market projects, and a Site can be
  * shared by more than one of them (two locale variants of the same market both on one
@@ -94,7 +96,12 @@ export async function propagateSiteUrlToSemrush({
         transport,
         workspaceId,
         projectId,
-        { name: brandIdentity.name, domain: newDomain, aliases: brandIdentity.aliases },
+        {
+          name: brandIdentity.name,
+          domain: newDomain,
+          primaryUrl: newIdentity,
+          aliases: brandIdentity.aliases,
+        },
         log,
       );
       if (benchmarkId) {
@@ -109,6 +116,13 @@ export async function propagateSiteUrlToSemrush({
         await transport.updateBenchmark(workspaceId, projectId, benchmarkId, {
           brand_name: own?.brand_name || brandIdentity.name,
           domain: newDomain,
+          // `domain` and `primary_url` are ONE value upstream (see brand-urls.js's
+          // `benchmarkTrackedUrl` JSDoc / brand-aliases.js's `keepUrl` comment) — a body
+          // that sends `domain` without `primary_url` resets the benchmark to the bare
+          // domain, undoing the very re-point this call exists to make. Unlike the
+          // alias re-sync (which KEEPS whatever url the benchmark already tracked),
+          // this one deliberately MOVES it: always send the new identity, never the old.
+          primary_url: newIdentity,
           brand_aliases: Array.isArray(own?.brand_aliases) ? own.brand_aliases : [],
         });
       }

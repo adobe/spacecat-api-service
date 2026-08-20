@@ -74,7 +74,7 @@ describe('propagateSiteUrlToSemrush', () => {
     expect(log.warn).to.have.been.calledOnce;
   });
 
-  it('re-points primary_url and the own-brand benchmark domain (full body), then republishes', async () => {
+  it('re-points primary_url and the own-brand benchmark domain/primary_url (full body), then republishes', async () => {
     const own = {
       id: 'bench-1', main_brand: true, brand_name: 'Acme', domain: 'site1.com', brand_aliases: ['acme inc'],
     };
@@ -100,6 +100,9 @@ describe('propagateSiteUrlToSemrush', () => {
     expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, 'proj-1', 'bench-1', {
       brand_name: 'Acme',
       domain: 'site1.com',
+      // domain/primary_url are one value upstream (brand-urls.js's benchmarkTrackedUrl
+      // JSDoc) -- this write deliberately MOVES the benchmark to the new identity.
+      primary_url: 'site1.com/new-path',
       // The FULL alias list is carried forward — a field omitted from this PUT is
       // cleared upstream, not preserved (rest-transport.js updateBenchmark JSDoc).
       brand_aliases: ['acme inc'],
@@ -150,7 +153,14 @@ describe('propagateSiteUrlToSemrush', () => {
     });
 
     expect(result).to.deep.equal({ projectsUpdated: 1 });
-    expect(transport.createBenchmarks).to.have.been.calledOnce;
+    // createBenchmarks must carry `primary_url` too (not just `domain`) -- otherwise the
+    // newly created benchmark tracks the bare domain instead of the site's new path, the
+    // exact trap PR #3107 fixed for the alias-write path (see ensureOwnBrandBenchmark's
+    // JSDoc: create derives `primary_url` from the passed-in `primaryUrl`, falling back
+    // to `domain` when absent).
+    expect(transport.createBenchmarks).to.have.been.calledOnceWith(WS, 'proj-1', [
+      sinon.match({ domain: 'site1.com', primary_url: 'site1.com/new-path' }),
+    ]);
     expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, 'proj-1', 'bench-new');
   });
 

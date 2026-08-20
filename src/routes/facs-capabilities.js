@@ -989,6 +989,7 @@ const routeFacsCapabilities = {
       // cdn / ims-org-access / contact-sales / consent-banner /
       // import-tools / scrape-tools)
       // ------------------------------------------------------------------
+      'PATCH /organizations/:organizationId': 'aso/can_configure',
       'PATCH /sites/:siteId': 'aso/can_configure',
       'PATCH /sites/:siteId/config/cdn-logs': 'aso/can_configure',
       'PATCH /sites/:siteId/config/scraper': 'aso/can_configure',
