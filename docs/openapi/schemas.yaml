@@ -999,6 +999,12 @@ SiteUpdate:
     name:
       description: The name of the site
       type: string
+    baseURL:
+      description: >-
+        The base URL of the site. Changing the URL of a site attached to a
+        Semrush-managed brand's own primary site propagates the change to
+        Semrush; a market-mirror site stays immutable — see PATCH /sites/{siteId}.
+      $ref: '#/URL'
     deliveryType:
       description: The type of the delivery this site is using
       $ref: '#/DeliveryType'
