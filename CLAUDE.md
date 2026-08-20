@@ -50,6 +50,8 @@ npm run docs:lint         # Validate OpenAPI specs
 npm run docs:serve        # Preview docs locally
 ```
 
+**`docs/index.html` non-determinism:** `docs:build` regenerates this file's styled-components CSS as inline hashed class names, and the hash assignment order is not stable across Redocly CLI/Node versions — an environment other than the canonical CI toolchain can produce a diff of tens of thousands of lines that is pure hash/markup churn, not a content change (verify by diffing for the actual OpenAPI content you touched, e.g. `grep` for the field/path name in old vs new). Don't commit a hash-noise diff from a non-canonical environment: either regenerate on the canonical CI toolchain, or note the exception in the PR description (spec files are the source of truth and are what reviewers should verify) and leave `docs/index.html` as committed on `main`.
+
 ### Deployment
 ```bash
 npm run build             # Build production bundle with Helix Deploy
