@@ -551,7 +551,11 @@ export function createElementsService(transport, log) {
      * @param {object} params
      * @param {Array<{region?: string, projectId?: string}>} [params.projects] -
      *   Projects to query. Empty → one unscoped (workspace-wide) fetch.
-     * @param {string} params.hostname - Registered domain to drill into (required).
+     * @param {string} params.hostname - Domain (or `host/path` scope) to drill
+     *   into (required).
+     * @param {string} [params.siteBaseUrl] - The brand's own site anchor
+     *   (`sites.base_url`); lets the transform separate the site's subtree from
+     *   an ancestor-domain fold.
      * @param {string} [params.channel] - Content-type filter, applied client-side.
      * @param {string} [params.model] / [params.platform] - AI model filter.
      * @param {string} params.startDate / params.endDate - Required YYYY-MM-DD.
@@ -561,8 +565,8 @@ export function createElementsService(transport, log) {
      */
     /* c8 ignore start -- LLMO-6160 POC endpoint; unit tests intentionally deferred */
     async getDomainUrls(workspaceId, {
-      projects = [], hostname, channel, model, platform, startDate, endDate, category,
-      page, pageSize,
+      projects = [], hostname, siteBaseUrl, channel, model, platform, startDate, endDate,
+      category, page, pageSize,
     }) {
       const scopes = projects.length > 0 ? projects : [{}];
       // Bound the per-project fan-out (mirrors owned-urls) so a brand with many
@@ -583,7 +587,7 @@ export function createElementsService(transport, log) {
         },
       );
       return transformDomainUrlsResponse(projectResults, {
-        hostname, channel, page, pageSize,
+        hostname, siteBaseUrl, channel, page, pageSize,
       });
     },
     /* c8 ignore stop */
