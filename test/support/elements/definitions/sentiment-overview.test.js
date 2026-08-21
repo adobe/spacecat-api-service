@@ -16,7 +16,6 @@ import {
   transformSentimentOverviewResponse,
   SENTIMENT_COLORS,
 } from '../../../../src/support/elements/definitions/sentiment-overview.js';
-import { DEFAULT_ELEMENT_MODEL } from '../../../../src/support/elements/constants.js';
 
 // Locates the CBF_project value inside the advanced filter tree (it sits in its own
 // `or` block, like the CBF_model block), or returns undefined if absent.
@@ -60,15 +59,29 @@ describe('sentiment-overview definitions', () => {
       expect(buildSentimentOverviewPayload().filters.advanced.op).to.equal('and');
     });
 
-    it('defaults the model to DEFAULT_ELEMENT_MODEL in a CBF_model or-block', () => {
-      const modelBlock = buildSentimentOverviewPayload().filters.advanced.filters[0];
-      expect(modelBlock.op).to.equal('or');
-      expect(modelBlock.filters[0].col).to.equal('CBF_model');
-      expect(modelBlock.filters[0].val).to.equal(DEFAULT_ELEMENT_MODEL);
+    it('omits the CBF_model filter when the model is absent (All Platforms aggregate)', () => {
+      const payload = buildSentimentOverviewPayload();
+      const hasModel = payload.filters.advanced.filters.some(
+        (f) => f.filters?.some((sub) => sub.col === 'CBF_model'),
+      );
+      expect(hasModel).to.equal(false);
+      // no model, no project, no category → the advanced filter list is empty
+      expect(payload.filters.advanced.filters).to.deep.equal([]);
     });
 
-    it('translates a UI platform code to the Semrush model', () => {
+    it("omits the CBF_model filter for the explicit 'all' sentinel, keeping project scoping", () => {
+      const payload = buildSentimentOverviewPayload({ platform: 'all', projectId: 'proj-1' });
+      const hasModel = payload.filters.advanced.filters.some(
+        (f) => f.filters?.some((sub) => sub.col === 'CBF_model'),
+      );
+      expect(hasModel).to.equal(false);
+      expect(findProjectFilterVal(payload)).to.equal('proj-1');
+    });
+
+    it('translates a UI platform code to the Semrush model in a CBF_model or-block', () => {
       const modelBlock = buildSentimentOverviewPayload({ model: 'openai' }).filters.advanced.filters[0];
+      expect(modelBlock.op).to.equal('or');
+      expect(modelBlock.filters[0].col).to.equal('CBF_model');
       expect(modelBlock.filters[0].val).to.equal('chatgpt-paid');
     });
 

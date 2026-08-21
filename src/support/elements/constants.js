@@ -47,6 +47,30 @@ export function isAllPlatforms(value) {
   return typeof value === 'string' && value.trim().toLowerCase() === ALL_PLATFORMS;
 }
 
+/**
+ * True when a brand-presence model/platform filter should aggregate across ALL of the
+ * brand's models rather than scope to a single one — i.e. the value is ABSENT (empty /
+ * non-string) OR the explicit {@link ALL_PLATFORMS} sentinel. When true, the affected
+ * brand-presence element payloads OMIT the `CBF_model` filter, so Semrush returns the
+ * deduped cross-model aggregate across whatever models produced data (the brand's enabled
+ * models) — LLMO-7093.
+ *
+ * Distinct from {@link isAllPlatforms}, which matches ONLY the literal `'all'` string: this
+ * ALSO treats the absent value as "all models". The Serenity "All Platforms" UI omits the
+ * `platform` query param entirely (project-elmo-ui#2888), so for these endpoints "no
+ * platform" means "all platforms" — NOT the {@link DEFAULT_ELEMENT_MODEL} single-model
+ * default that {@link resolveElementModel} would otherwise apply. (The `url-prompts`
+ * endpoint deliberately keeps the `absent → default model` behaviour and uses the plain
+ * {@link isAllPlatforms} check instead; only the brand-presence family opts into
+ * `absent → aggregate`.)
+ *
+ * @param {string} [value] - Raw value from the `model` or `platform` query param.
+ * @returns {boolean}
+ */
+export function isAllModelsFilter(value) {
+  return typeof value !== 'string' || value.trim().length === 0 || isAllPlatforms(value);
+}
+
 export const ELEMENT_MODELS = Object.freeze([
   'google-ai-mode',
   'grok-3',
@@ -96,3 +120,25 @@ export function resolveElementModel(value) {
   return ELEMENT_MODELS.includes(mapped) ? mapped : DEFAULT_ELEMENT_MODEL;
 }
 /* c8 ignore stop */
+
+/**
+ * Builds the single-model `CBF_model` advanced filter for a brand-presence element, or
+ * returns `null` when the request is an all-models aggregate ({@link isAllModelsFilter} —
+ * param absent or the `'all'` sentinel), so the caller simply omits the filter and Semrush
+ * aggregates across every model the brand has data for (LLMO-7093). Centralises the
+ * `absent/'all' → omit, else resolve-and-scope` branch shared by the brand-presence family
+ * (stats, kpi-headlines, market-tracking-trends, sentiment-overview).
+ *
+ * @param {string} [requestedModel] - Raw model/platform value (callers pass `model || platform`).
+ * @param {object} [opts]
+ * @param {boolean} [opts.wrap=true] - Wrap the `eq` in a one-member `or` block (the shape most
+ *   elements use); pass `false` for the bare-`eq` elements (stats mentions/citations).
+ * @returns {object|null} The `CBF_model` filter node, or `null` for the aggregate case.
+ */
+export function buildModelFilter(requestedModel, { wrap = true } = {}) {
+  if (isAllModelsFilter(requestedModel)) {
+    return null;
+  }
+  const eq = { op: 'eq', val: resolveElementModel(requestedModel), col: 'CBF_model' };
+  return wrap ? { op: 'or', filters: [eq] } : eq;
+}

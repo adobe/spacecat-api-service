@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { resolveElementModel } from '../constants.js';
+import { buildModelFilter } from '../constants.js';
 import { dateToIsoWeek } from '../week-utils.js';
 
 // Legacy default window is a rolling 28 days (see defaultDateRange in
@@ -67,7 +67,9 @@ function defaultDateRange() {
  *
  * @param {object} [params]
  * @param {string} [params.model] - AI model filter value (Semrush engine name or UI
- *   platform code). Translated + validated via {@link resolveElementModel}.
+ *   platform code). Translated + validated via {@link resolveElementModel}. Absent or
+ *   `'all'` ({@link isAllModelsFilter}) → the `CBF_model` filter is OMITTED so Semrush
+ *   aggregates across all of the brand's models ("All Platforms", LLMO-7093).
  * @param {string} [params.platform] - Legacy alias for `model`; `model` takes precedence.
  * @param {string} [params.startDate] - ISO date (YYYY-MM-DD). Defaults to 28 days ago.
  * @param {string} [params.endDate] - ISO date (YYYY-MM-DD). Defaults to today.
@@ -80,14 +82,17 @@ function defaultDateRange() {
 export function buildSentimentOverviewPayload({
   model, platform, startDate, endDate, category, projectId, projectIds,
 } = {}) {
-  const resolvedModel = resolveElementModel(model || platform);
+  // "All platforms" (param absent or 'all') → omit CBF_model so Semrush aggregates across
+  // every model that produced data; otherwise scope to the single resolved model (LLMO-7093).
+  const modelFilter = buildModelFilter(model || platform);
   const defaults = defaultDateRange();
   const start = startDate || defaults.startDate;
   const end = endDate || defaults.endDate;
 
-  const advancedFilters = [
-    { op: 'or', filters: [{ op: 'eq', val: resolvedModel, col: 'CBF_model' }] },
-  ];
+  const advancedFilters = [];
+  if (modelFilter) {
+    advancedFilters.push(modelFilter);
+  }
   // Project scoping: this element scopes by CBF_project (one or more Semrush project ids),
   // NOT a top-level project_id. Supplied by the caller via the `projectId` query param.
   const ids = Array.isArray(projectIds) && projectIds.length > 0
