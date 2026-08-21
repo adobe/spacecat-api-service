@@ -524,7 +524,7 @@ function SuggestionsController(ctx, sqs, env) {
         () => createSuggestionTranslator(context),
         grantedEntities,
         locale,
-        { timeoutMs: resolveBatchTimeoutMs(context.env) },
+        { timeoutMs: resolveBatchTimeoutMs(context.env), log: context.log },
       );
     }
     const suggestions = grantedEntities.map(

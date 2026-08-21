@@ -275,6 +275,7 @@ export function createIntentClassifier(context = {}, categorySpec = DRS_CATEGORY
           { role: 'user', content: trimmed.slice(0, MAX_PROMPT_CHARS) },
         ]),
         invokeTimeoutMs,
+        'intent classification',
       );
       // content may be a string OR an array of content parts; coerce either way.
       const content = contentToString(response?.content);

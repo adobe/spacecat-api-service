@@ -44,6 +44,12 @@ const LOCALE_LANGUAGE_NAMES = {
 };
 
 const DEFAULT_INVOKE_TIMEOUT_MS = 10000;
+// Intentionally shorter than DEFAULT_INVOKE_TIMEOUT_MS: the batch cap bounds how long the
+// suggestions read path waits overall, not how long any individual call is allowed to run. A
+// call already in flight when the batch cap fires may still resolve up to
+// DEFAULT_INVOKE_TIMEOUT_MS later — the `stopped` flag in ensureAiRationaleTranslations ensures
+// such a late result is discarded rather than persisted after this function (and the HTTP
+// response it gates) has already returned.
 const DEFAULT_BATCH_TIMEOUT_MS = 8000;
 const DEFAULT_MAX_CONCURRENCY = 5;
 // aiRationale is a one-to-few-sentence rationale; a few hundred tokens comfortably covers a
@@ -127,7 +133,14 @@ export function createSuggestionTranslator(context = {}) {
     if (trimmed.length === 0) {
       return null;
     }
-    const languageName = LOCALE_LANGUAGE_NAMES[targetLocale] || targetLocale;
+    // Reject rather than fall through to the raw locale code: an unmapped code (including
+    // `en_us`, which the `xx_yy` format validator accepts) would otherwise be sent straight into
+    // the prompt, wasting a call and risking garbled/untranslated text overwriting the original.
+    // Also closes off a prompt-injection surface if the upstream locale regex is ever relaxed.
+    const languageName = LOCALE_LANGUAGE_NAMES[targetLocale];
+    if (!languageName) {
+      return null;
+    }
     try {
       const response = await withTimeout(
         model.invoke([
@@ -138,6 +151,7 @@ export function createSuggestionTranslator(context = {}) {
           { role: 'user', content: trimmed },
         ]),
         invokeTimeoutMs,
+        'suggestion translation',
       );
       const translated = contentToString(response?.content).trim();
       return hasText(translated) ? translated : null;
@@ -173,13 +187,18 @@ export function createSuggestionTranslator(context = {}) {
  * @param {object} [options]
  * @param {number} [options.maxConcurrency] - Max in-flight LLM calls.
  * @param {number} [options.timeoutMs] - Total wall-clock cap for the batch.
+ * @param {object} [options.log] - Logger; used to surface persistence failures to operators.
  * @returns {Promise<void>}
  */
 export async function ensureAiRationaleTranslations(
   createTranslator,
   suggestions,
   locale,
-  { maxConcurrency = DEFAULT_MAX_CONCURRENCY, timeoutMs = DEFAULT_BATCH_TIMEOUT_MS } = {},
+  {
+    maxConcurrency = DEFAULT_MAX_CONCURRENCY,
+    timeoutMs = DEFAULT_BATCH_TIMEOUT_MS,
+    log = console,
+  } = {},
 ) {
   if (typeof createTranslator !== 'function' || !hasText(locale)) {
     return;
@@ -216,11 +235,16 @@ export async function ensureAiRationaleTranslations(
       // eslint-disable-next-line no-await-in-loop
       const translated = await translate(data.aiRationale, locale).catch(() => null);
       if (!stopped && hasText(translated)) {
+        // Re-read rather than reuse the pre-await `data` snapshot: it narrows (doesn't
+        // eliminate) the window in which a concurrent request translating this same
+        // suggestion into a different locale could have its own setData/save overwritten by
+        // this one replaying a stale i18n map from before the LLM call.
+        const freshData = suggestion.getData();
         suggestion.setData({
-          ...data,
+          ...freshData,
           i18n: {
-            ...data.i18n,
-            [locale]: { ...data.i18n?.[locale], aiRationale: translated },
+            ...freshData.i18n,
+            [locale]: { ...freshData.i18n?.[locale], aiRationale: translated },
           },
         });
         try {
@@ -228,8 +252,10 @@ export async function ensureAiRationaleTranslations(
           // response (setData already mutated the in-memory entity above).
           // eslint-disable-next-line no-await-in-loop
           await suggestion.save();
-        } catch {
-          // best-effort; see comment above
+        } catch (e) {
+          // Best-effort persist — but a silent failure here is invisible cost amplification:
+          // every future request would re-translate via LLM with no signal to operators.
+          log.warn(`Failed to persist translated aiRationale for suggestion ${suggestion.getId?.() ?? 'unknown'} (locale ${locale}): ${e.message}`);
         }
       }
     }

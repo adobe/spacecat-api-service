@@ -24,13 +24,15 @@
  *
  * @param {Promise<*>} promise - Work to bound
  * @param {number} timeoutMs - Timeout in milliseconds
+ * @param {string} [label] - Included in the timeout error message so callers' logs stay
+ *   specific (e.g. 'intent classification', 'suggestion translation') instead of generic.
  * @returns {Promise<*>} resolves/rejects with `promise`, or rejects on timeout
  */
-export function withTimeout(promise, timeoutMs) {
+export function withTimeout(promise, timeoutMs, label = 'operation') {
   let timer;
   const timeout = new Promise((_, reject) => {
     timer = setTimeout(() => {
-      reject(new Error(`operation timed out after ${timeoutMs}ms`));
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
     }, timeoutMs);
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
