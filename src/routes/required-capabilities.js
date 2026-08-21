@@ -114,6 +114,7 @@ export const INTERNAL_ROUTES = [
   // via hasLlmoCapabilityForSite (isLLMOAdministrator fallback for non-FACS orgs).
   'GET /sites/:siteId/llmo/cdn-onboard/akamai/config',
   'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties',
+  'GET /sites/:siteId/llmo/cdn-onboard/akamai/versions',
   'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan',
   'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy',
   'GET /sites/:siteId/llmo/cdn-onboard/akamai/deploy-status',
