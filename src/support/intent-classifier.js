@@ -13,6 +13,7 @@ import { AzureChatOpenAI } from '@langchain/openai';
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { normalizeIntent } from './intent.js';
+import { withTimeout, contentToString } from './llm-utils.js';
 
 /**
  * LLM-backed classifier that buckets a human-added prompt's text into one of the
@@ -128,61 +129,9 @@ export function resolveBatchTimeoutMs(env = {}) {
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_BATCH_TIMEOUT_MS;
 }
 
-/**
- * Races a promise against a timer. Rejects with a timeout error if `promise`
- * does not settle within `timeoutMs`. The timer is always cleared so the event
- * loop is not held open by a pending timeout once the race resolves.
- *
- * @param {Promise<*>} promise - Work to bound
- * @param {number} timeoutMs - Timeout in milliseconds
- * @returns {Promise<*>} resolves/rejects with `promise`, or rejects on timeout
- */
-function withTimeout(promise, timeoutMs) {
-  let timer;
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => {
-      reject(new Error(`intent classification timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-  });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-}
-
-/**
- * Coerces an LLM message `content` into a plain string. `AzureChatOpenAI`
- * `.invoke()` may return `content` as a string OR as an array of content parts
- * (`[{ type: 'text', text: '...' }, ...]`). Array content is concatenated from
- * its text parts so the downstream JSON parse sees the full model output rather
- * than silently failing on a non-string.
- *
- * @param {*} content - `response.content` from the model
- * @returns {string}
- */
-export function contentToString(content) {
-  if (typeof content === 'string') {
-    return content;
-  }
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => {
-        if (typeof part === 'string') {
-          return part;
-        }
-        // LangChain text parts: { type: 'text', text: '...' }. Some providers
-        // use `content` instead of `text`; accept either, ignore non-text parts.
-        if (part && typeof part === 'object') {
-          if (typeof part.text === 'string') {
-            return part.text;
-          }
-          if (typeof part.content === 'string') {
-            return part.content;
-          }
-        }
-        return '';
-      })
-      .join('');
-  }
-  return String(content ?? '');
-}
+// withTimeout/contentToString moved to llm-utils.js (shared with suggestion-translator.js);
+// re-exported here so existing external imports of contentToString keep working.
+export { contentToString } from './llm-utils.js';
 
 /**
  * Extracts a JSON object from a model response that may include code fences or
@@ -326,6 +275,7 @@ export function createIntentClassifier(context = {}, categorySpec = DRS_CATEGORY
           { role: 'user', content: trimmed.slice(0, MAX_PROMPT_CHARS) },
         ]),
         invokeTimeoutMs,
+        'intent classification',
       );
       // content may be a string OR an array of content parts; coerce either way.
       const content = contentToString(response?.content);
