@@ -43,12 +43,12 @@ jobs:
       contents: read
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
       - name: Setup Node & NPM
-        uses: adobe/mysticat-ci/.github/actions/setup-node-npm@v1
+        uses: adobe/mysticat-ci/.github/actions/setup-node-npm@v3
         env:
           MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN: ${{ secrets.MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN }}
 
@@ -92,17 +92,17 @@ jobs:
       id-token: write
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
       - name: Setup Node & NPM
-        uses: adobe/mysticat-ci/.github/actions/setup-node-npm@v1
+        uses: adobe/mysticat-ci/.github/actions/setup-node-npm@v3
         env:
           MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN: ${{ secrets.MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN }}
 
       - name: Configure AWS
-        uses: adobe/mysticat-ci/.github/actions/configure-aws@v1
+        uses: adobe/mysticat-ci/.github/actions/configure-aws@v3
         with:
           aws_role_to_assume: ${{ inputs.environment == 'dev'
             && format('arn:aws:iam::{0}:role/spacecat-role-github-actions', secrets.AWS_ACCOUNT_ID_DEV)
