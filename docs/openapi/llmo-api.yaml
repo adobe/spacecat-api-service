@@ -6039,6 +6039,12 @@ site-llmo-cloudflare-routes:
       name is not client-supplied. `zoneId` is a Cloudflare identifier (not a SpaceCat entity),
       so it is supplied in the request body.
 
+      The caller supplies the route `pattern`, but when that pattern targets the site's **root
+      host** (its apex or the apex's `www`), the service **normalizes only the host** to the
+      canonical serving host resolved from the base URL (apex/`www` chosen by redirect/DNS follow,
+      so an apex-only site is routed on its apex rather than a dead `www`), preserving the
+      client-supplied path. Specific-subdomain and wildcard patterns are left as sent.
+
       Before creating the route the service fetches the zone's existing routes and protects the
       customer's current routing using wildcard-aware host-overlap detection (not just exact
       pattern-string matching): if any existing route **bound to a different worker** shares a
@@ -6072,6 +6078,8 @@ site-llmo-cloudflare-routes:
                   Cloudflare route pattern. Its host must belong to the site's domain — the
                   host portion (after stripping any leading wildcard) has to equal the site's
                   canonical host (base URL host minus a leading `www.`) or be a subdomain of it.
+                  When it targets the site's root host, the host is normalized server-side to the
+                  canonical serving host (apex/`www`) while the path is preserved.
                 example: 'www.example.com/*'
     responses:
       '200':
