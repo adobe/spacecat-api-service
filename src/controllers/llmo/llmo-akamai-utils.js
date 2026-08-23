@@ -24,18 +24,23 @@
  * and dependency-free so it can be unit-tested and previewed offline (no Akamai credentials).
  */
 
-// Loop guard: one of the headers the routing rule ALREADY injects via
-// modifyIncomingRequestHeader (see buildRoutingRule). No real client ever sends this on its own —
-// only this rule sets it. On the first pass it doesn't exist yet; on Akamai's internal failover
-// retry of the SAME request it is still attached (the retry continues the same request context,
-// not a fresh replay), so a DOES_NOT_EXIST check detects "is this a retry" using a header we need
-// anyway — no advanced XML or dedicated marker required.
-const LOOP_GUARD_HEADER = 'x-edgeoptimize-api-key';
-
-// A header we never set. The routing rule's loop guard requires it to be ABSENT, and the
-// failover-test rule keys on its absence too. Kept as a named constant so both rules reference the
-// same header name.
+// Failover marker, and the routing rule's loop guard.
+//
+// This header is set ONLY by the fail-action2 Advanced XML, when Akamai recreates a request that
+// failed against live.edgeoptimize.net. It is never present on a fresh client request, and — this
+// is the important part — it stays absent however many times the rule tree is evaluated on the way
+// to origin (edge, parent tier in a tiered distribution, and so on).
+//
+// A header that the routing rule injects itself cannot be used for this. It is present from the
+// moment the rule first matches, so any later re-evaluation of the tree sees the rule's own output
+// and stops matching, sending traffic to the property's default origin instead of Edge Optimize.
+//
+// The Advanced XML that sets this marker CANNOT be deployed through PAPI — advanced behaviors are
+// read-only and only Akamai representatives can add them. The rule set below is deployed without
+// it, and the customer is told to have Akamai support add the snippet; until they do, failover is
+// not functional.
 const FAILOVER_MARKER_HEADER = 'x-edgeoptimize-request';
+const FAILOVER_MARKER_VALUE = 'fo';
 
 // Stable defaults for the managed rule config. These mirror the doc 1:1 and are service-owned
 // (not caller-supplied); only the per-site hostname and the LLMO API key are injected at runtime
@@ -210,12 +215,19 @@ const behaviorCaching = () => ({
   },
 });
 
-// Every request-header criterion we emit is a presence check (EXISTS / DOES_NOT_EXIST): PAPI
-// ignores value/match flags for those, and including them wouldn't match what PAPI itself emits.
-const criterionRequestHeader = (header, matchOperator) => ({
-  name: 'requestHeader',
-  options: { headerName: header, matchOperator },
-});
+// Presence checks (EXISTS / DOES_NOT_EXIST) carry no value/match flags — PAPI ignores them and
+// including them wouldn't match what PAPI itself emits. Value checks (IS_ONE_OF / IS_NOT_ONE_OF)
+// do; the field names below mirror what PAPI emits for a value-matching requestHeader criterion.
+const criterionRequestHeader = (header, matchOperator, values) => {
+  const options = { headerName: header, matchOperator };
+  if (matchOperator === 'IS_ONE_OF' || matchOperator === 'IS_NOT_ONE_OF') {
+    options.values = [...(values || [])];
+    options.matchCaseSensitiveValue = true;
+    options.matchWildcardName = false;
+    options.matchWildcardValue = false;
+  }
+  return { name: 'requestHeader', options };
+};
 
 const criterionMatchResponseCode = (lower, upper) => ({
   name: 'matchResponseCode',
@@ -258,7 +270,10 @@ export function buildSiteFailoverRule(cfg) {
     behaviors: [behaviorFailActionAlternateHostname(cfg.failover.alternateHostname)],
     children: [],
     comments: 'Managed by Adobe LLM Optimizer (Optimize at Edge). On origin failure, fails over '
-      + "to the property's normal origin so the end user still gets a response.",
+      + "to the property's normal origin so the end user still gets a response. "
+      + 'ACTION REQUIRED: ask Akamai support to add the fail-action2 Advanced XML to this rule so '
+      + 'the recreated request is tagged with x-edgeoptimize-request: fo. Advanced behaviors '
+      + 'cannot be added through the API. Until it is added, failover is not functional.',
   };
 }
 
@@ -304,26 +319,15 @@ export function buildRoutingRule(cfg) {
     criterionUserAgent(cfg.match.userAgents),
     criterionFileExtension(cfg.match.fileExtensions),
   );
-  // Loop guard: exclude requests that already carry one of the headers this rule injects (see
-  // LOOP_GUARD_HEADER) — true for Akamai's internal failover retry of the SAME request, never
-  // true for a fresh client request.
+  // Loop guard: skip requests already tagged by the failover marker, i.e. Akamai's recreate of a
+  // request that failed against Edge Optimize. See FAILOVER_MARKER_HEADER for why the marker has
+  // to come from the fail-action2 XML rather than from a header this rule sets itself.
   //
   // TRUST ASSUMPTION: this keys on the mere presence of a client-suppliable header, so a client
-  // that forges x-edgeoptimize-api-key (or x-edgeoptimize-request) can suppress Optimize-at-Edge
-  // routing for itself or force a false x-edgeoptimize-fo. That is acceptable here: the only party
-  // harmed is the forging client (it opts itself out of optimization), and stripping/validating
-  // these at the edge before rule evaluation would require Advanced Metadata, which this GA-only
-  // rule set deliberately avoids. Revisit if these headers ever gate anything security-sensitive.
-  const incomingHeaders = cfg.incomingRequestHeaders;
-  const guardHeader = LOOP_GUARD_HEADER in incomingHeaders
-    ? LOOP_GUARD_HEADER
-    : Object.keys(incomingHeaders)[0];
-  if (guardHeader) {
-    criteria.push(criterionRequestHeader(guardHeader, 'DOES_NOT_EXIST'));
-  }
-  // Belt-and-suspenders: also require the failover marker header to be absent. We never set it, so
-  // this is always true today, but it keeps the routing rule symmetric with the failover-test rule
-  // and future-proofs against a marker being introduced.
+  // that forges x-edgeoptimize-request can suppress Optimize-at-Edge routing for itself or force a
+  // false x-edgeoptimize-fo. That is acceptable here: the only party harmed is the forging client
+  // (it opts itself out of optimization). Revisit if this header ever gates anything
+  // security-sensitive.
   criteria.push(criterionRequestHeader(FAILOVER_MARKER_HEADER, 'DOES_NOT_EXIST'));
 
   return {
@@ -340,11 +344,10 @@ export function buildRoutingRule(cfg) {
  * The sibling "EdgeOptimize Failover - Test Header" rule. Must be a SIBLING of the routing rule
  * (same hierarchy level) so it is evaluated on the failover-recreated request.
  *
- * Detection is XML-free / no Advanced Metadata: the routing rule injects the
- * `x-edgeoptimize-api-key` request header on the first pass and it PERSISTS into Akamai's internal
- * failover recreate, whereas the advanced fail-action2 marker (`x-edgeoptimize-request`) is not
- * used. So "api-key header EXISTS AND the failover marker DOES_NOT_EXIST" identifies the
- * recreated request, and we surface it as the `x-edgeoptimize-fo` response header.
+ * The recreated request is identified by the failover marker that the fail-action2 Advanced XML
+ * attaches to it (`x-edgeoptimize-request: fo`), and we surface it as the `x-edgeoptimize-fo`
+ * response header. That XML cannot be deployed through PAPI, so this rule stays inert until an
+ * Akamai representative adds the snippet to the Site Failover Behavior rule.
  * @param {object} cfg
  * @returns {object}
  */
@@ -352,14 +355,14 @@ export function buildFailoverTestRule(cfg) {
   return {
     name: cfg.ruleNames.failoverTest,
     criteria: [
-      criterionRequestHeader(LOOP_GUARD_HEADER, 'EXISTS'),
-      criterionRequestHeader(FAILOVER_MARKER_HEADER, 'DOES_NOT_EXIST'),
+      criterionRequestHeader(FAILOVER_MARKER_HEADER, 'IS_ONE_OF', [FAILOVER_MARKER_VALUE]),
     ],
     criteriaMustSatisfy: 'all',
     behaviors: [behaviorModifyOutgoingResponseHeader('x-edgeoptimize-fo', 'true')],
     children: [],
     comments: 'Managed by Adobe LLM Optimizer (Optimize at Edge). Surfaces failover as the '
-      + 'x-edgeoptimize-fo response header, detected without advanced metadata.',
+      + 'x-edgeoptimize-fo response header. Requires the fail-action2 Advanced XML, which only '
+      + 'Akamai support can add.',
   };
 }
 
