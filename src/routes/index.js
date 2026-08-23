@@ -96,6 +96,8 @@ function isStaticRoute(routePattern) {
  * @param {Object} featureFlagsController - Organization feature flags (mysticat) controller.
  * @param {Object} pageRelationshipsController - The page relationships controller.
  * @param {Object} ephemeralRunController - The ephemeral run batch controller.
+ * @param {Object} analyticsController - The ABV custom-dashboard analytics query controller.
+ * @param {Object} dashboardsController - The ABV custom-dashboard CRUD controller.
  * @param {Object} autofixChecksController - Autofix checks controller for autofix deploy.
  * @param {Object} siteDetectionController - The site detection controller.
  * @param {Object} plgOnboardingController - The PLG onboarding controller.
@@ -185,6 +187,8 @@ export default function getRouteHandlers(
   redirectsController,
   auditPolicyController,
   promptSuggestionSchedulesController,
+  analyticsController,
+  dashboardsController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -238,6 +242,27 @@ export default function getRouteHandlers(
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId/status': brandsController.transitionBrandStatusForOrg,
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId': brandsController.deleteBrandForOrg,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/activate': brandsController.activateBrandForOrg,
+    // ABV custom-dashboard analytics query API (v1: fixture data, see llmo-analytics.js).
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/analytics/metadata': analyticsController.getMetadata,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/analytics/query': analyticsController.runQuery,
+    // ABV custom-dashboard CRUD (v1: in-memory store, see llmo-dashboards.js).
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/dashboards': dashboardsController.listDashboards,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/dashboards': dashboardsController.createDashboard,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId': dashboardsController.getDashboard,
+    'PATCH /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId': dashboardsController.updateDashboard,
+    'DELETE /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId': dashboardsController.deleteDashboard,
+    // eslint-disable-next-line max-len
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/duplicate': dashboardsController.duplicateDashboard,
+    // eslint-disable-next-line max-len
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/star': dashboardsController.starDashboard,
+    // eslint-disable-next-line max-len
+    'DELETE /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/star': dashboardsController.unstarDashboard,
+    // eslint-disable-next-line max-len
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/tiles': dashboardsController.addTile,
+    // eslint-disable-next-line max-len
+    'PATCH /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/tiles/:tileId': dashboardsController.updateTile,
+    // eslint-disable-next-line max-len
+    'DELETE /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/tiles/:tileId': dashboardsController.removeTile,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': serenityController.listPrompts,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': serenityController.createPrompts,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete': serenityController.bulkDeletePrompts,
