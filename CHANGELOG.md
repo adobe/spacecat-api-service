@@ -1,3 +1,10 @@
+## [1.763.1](https://github.com/adobe/spacecat-api-service/compare/v1.763.0...v1.763.1) (2026-08-24)
+
+
+### Bug Fixes
+
+* **prompts:** chunk upsertPrompts' existing-rows lookup past 1000 ids ([#3126](https://github.com/adobe/spacecat-api-service/issues/3126)) ([9bbc1b8](https://github.com/adobe/spacecat-api-service/commit/9bbc1b84e694c8b73d95158adb87e8aeb6229178))
+
 # [1.763.0](https://github.com/adobe/spacecat-api-service/compare/v1.762.0...v1.763.0) (2026-08-24)
 
 
