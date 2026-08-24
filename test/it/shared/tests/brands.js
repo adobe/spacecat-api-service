@@ -14,6 +14,7 @@ import { expect } from 'chai';
 import {
   ORG_1_ID,
   BRAND_1_ID,
+  SITE_1_ID,
   SITE_2_ID,
   SITE_2_BASE_URL,
   SITE_3_ID, // belongs to ORG_2, not ORG_1 (seed-data/sites.js) — used for cross-org tests
@@ -339,6 +340,56 @@ export default function brandsTests(getHttpClient, resetData) {
       const liveWithName = liveList.body.brands.filter((b) => b.name === NAME);
       expect(liveWithName).to.have.lengthOf(1);
       expect(liveWithName[0].id).to.equal(createC.body.id);
+    });
+  });
+
+  describe('Brands v2 primary-site re-point (serenity-docs#349)', () => {
+    // Per-test reset: test 1 moves BRAND_1 off SITE_1, which test 2 relies on
+    // still being BRAND_1's active primary.
+    beforeEach(() => resetData());
+
+    it('re-points an ACTIVE brand to a different free site (was immutable pre-#349)', async () => {
+      const http = getHttpClient();
+
+      // BRAND_1 is seeded ACTIVE, anchored to SITE_1. It carries only the legacy
+      // semrush_workspace_id (NOT a sub-workspace pointer), so this is a flat-mode
+      // re-point — no Semrush propagation, provable in the pure-PostgreSQL suite.
+      const before = await http.admin.get(`/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}`);
+      expect(before.status).to.equal(200);
+      expect(before.body.status).to.equal('active');
+      expect(before.body.baseSiteId).to.equal(SITE_1_ID);
+
+      // SITE_2 is a free ORG_1 site (no active brand's primary). Re-point onto it.
+      const repoint = await http.admin.patch(`/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}`, {
+        baseSiteId: SITE_2_ID,
+      });
+      expect(repoint.status).to.equal(200);
+      expect(repoint.body.baseSiteId).to.equal(SITE_2_ID);
+      expect(repoint.body.baseUrl).to.equal(SITE_2_BASE_URL);
+      expect(repoint.body.status).to.equal('active');
+    });
+
+    it('rejects re-pointing to a site already owned by another ACTIVE brand with 409 siteUrlTaken', async () => {
+      const http = getHttpClient();
+
+      // A fresh pending brand in ORG_1 that tries to claim SITE_1 — still the
+      // seeded ACTIVE BRAND_1's primary — must be refused with the typed code the
+      // frontend maps to a specific message.
+      const create = await http.admin.post(`/v2/orgs/${ORG_1_ID}/brands`, {
+        name: 'Wants An Active Brand Site', region: ['US'], status: 'pending',
+      });
+      expect(create.status).to.equal(201);
+      const { id: brandId } = create.body;
+
+      const res = await http.admin.patch(`/v2/orgs/${ORG_1_ID}/brands/${brandId}`, {
+        baseSiteId: SITE_1_ID,
+      });
+      expect(res.status).to.equal(409);
+      expect(res.body.code).to.equal('siteUrlTaken');
+
+      // No partial write — the brand keeps its (absent) anchor.
+      const getRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/brands/${brandId}`);
+      expect(getRes.body.baseSiteId == null).to.equal(true);
     });
   });
 }

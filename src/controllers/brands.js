@@ -70,7 +70,10 @@ import { isFacsRebacResource } from '../routes/facs-capabilities.js';
 import { provisionBrandSubworkspace, provisionBrandSubworkspaceBare, emptyProvisionedWorkspace } from '../support/serenity/brand-provisioning.js';
 import { computeWriteDeadline } from '../support/serenity/intent-classification.js';
 import { ensureMarketSite } from '../support/serenity/site-linkage.js';
-import { upsertMappingRow, linkSiteToLiveRows } from '../support/serenity/mapping-rows.js';
+import {
+  upsertMappingRow, linkSiteToLiveRows, projectsForSite, relinkSiteForRows,
+} from '../support/serenity/mapping-rows.js';
+import { propagateSiteUrlToSemrush } from '../support/serenity/site-url-propagation.js';
 import { createSerenityTransport } from '../support/serenity/rest-transport.js';
 import { isSemrushTransportError, unwrapTransportCause } from '../support/serenity/errors.js';
 import { logUpstreamError } from '../support/serenity/upstream-log.js';
@@ -2205,6 +2208,94 @@ function BrandsController(ctx, log, env) {
       // that reason — so the rollout-flag read for the response must not be the one
       // exception.
       const serenityScopes = await readSerenityFlagScopes(spaceCatId, postgrestClient);
+
+      // serenity-docs#349 (re-point): a user picks an EXISTING onboarded Site in the
+      // org to become this brand's primary site. This replaces the earlier free-text
+      // baseURL-rename flow — the frontend now sends `{ baseSiteId }` here rather than
+      // calling PATCH /sites with a new baseURL. Validation + Semrush propagation run
+      // BEFORE the row is persisted, so a rejected target or a Semrush failure fails
+      // the whole re-point rather than leaving SpaceCat ahead of Semrush.
+      if (hasText(updates.baseSiteId)) {
+        const current = await getBrandById(spaceCatId, brandUuid, postgrestClient);
+        const oldSiteId = current?.baseSiteId || null;
+        // Only act on an actual change; re-submitting the same site is a no-op that
+        // falls through to the normal update below.
+        if (current && updates.baseSiteId !== oldSiteId) {
+          // The target must be an onboarded Site in THIS org.
+          const { data: targetSite, error: targetErr } = await postgrestClient
+            .from('sites')
+            .select('id, base_url')
+            .eq('id', updates.baseSiteId)
+            .eq('organization_id', spaceCatId)
+            .maybeSingle();
+          if (targetErr) {
+            throw new Error(`Failed to resolve target site: ${targetErr.message}`);
+          }
+          if (!targetSite) {
+            return notFound(`Target site not found in organization: ${updates.baseSiteId}`);
+          }
+
+          // Eligibility (matches the frontend picker's filter, backend is authority):
+          // the target may not already be the primary site of ANOTHER active brand.
+          // Pending brands don't block; the brand's own current site is the no-op above.
+          const owningBrand = await getBrandBySite(
+            spaceCatId,
+            updates.baseSiteId,
+            postgrestClient,
+            log,
+          );
+          if (owningBrand && owningBrand.id !== brandUuid) {
+            return createResponse({ code: 'siteUrlTaken' }, 409);
+          }
+
+          // Active + Semrush sub-workspace brand: the tracked projects follow the new
+          // site's URL. Read the mapping rows against the OLD site, propagate to Semrush
+          // FIRST (propagate-before-persist), then re-link the rows to the new site.
+          if (current.status === 'active' && hasText(current.semrushSubWorkspaceId)) {
+            const rows = await projectsForSite(context.dataAccess, brandUuid, oldSiteId);
+            try {
+              await propagateSiteUrlToSemrush({
+                dataAccess: context.dataAccess,
+                transport: createSerenityTransport({
+                  env: context.env,
+                  imsToken: await resolveSemrushImsToken(context, log, 'brands'),
+                }),
+                workspaceId: current.semrushSubWorkspaceId,
+                brandId: brandUuid,
+                siteId: oldSiteId,
+                brandIdentity: { name: current.name, aliases: current.brandAliases },
+                newBaseURL: targetSite.base_url,
+                log,
+                rows,
+              });
+            } catch (propagationError) {
+              const err = /** @type {{status?: number, message?: string, code?: string}} */ (
+                unwrapTransportCause(propagationError)
+              );
+              log.error('updateBrand: Semrush URL propagation failed on primary-site re-point', {
+                brandId,
+                oldSiteId,
+                newSiteId: updates.baseSiteId,
+                status: err?.status,
+                error: err?.message,
+              });
+              if (isSemrushTransportError(err)) {
+                // Never echo an upstream message (embeds the gateway host + workspace/
+                // project UUIDs) — mirrors the sites.js #349 error hygiene.
+                return createResponse({ message: 'Failed to update the tracked URL in Semrush' }, 502);
+              }
+              const status = err?.status || 500;
+              // toQuotaExceededError() sets status=409, code='quotaExceeded' — passes through.
+              return createResponse({
+                message: status === 500 ? 'Failed to update the tracked URL in Semrush' : err.message,
+                ...(err?.code ? { code: err.code } : {}),
+              }, status);
+            }
+            // Semrush is now ahead of SpaceCat — safe to move the SpaceCat-side links.
+            await relinkSiteForRows(context.dataAccess, rows, updates.baseSiteId, log);
+          }
+        }
+      }
 
       const updatedRow = await updateBrand({
         organizationId: spaceCatId,
