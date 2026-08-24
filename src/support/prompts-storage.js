@@ -824,15 +824,32 @@ export async function upsertPrompts({
       const cols = includeIntent
         ? 'id,prompt_id,text,regions,status,source,intent'
         : 'id,prompt_id,text,regions,status,source';
-      let q = postgrestClient
+      const baseQuery = () => postgrestClient
         .from('prompts')
         .select(cols)
         .eq('organization_id', organizationId)
         .eq('brand_id', brandUuid);
-      if (incomingIds.length > 0) {
-        q = q.in('prompt_id', incomingIds);
+      if (incomingIds.length === 0) {
+        return baseQuery();
       }
-      return q;
+      // Chunk the `prompt_id=in.(...)` filter the same way getIntentsByPromptIds
+      // does (INTENT_LOOKUP_CHUNK_SIZE) — PostgREST caps any single response at
+      // 1000 rows, so an unchunked IN-list over a brand with >1000 matching
+      // existing prompts silently drops the excess. Those dropped rows then look
+      // "new" below and get misrouted to INSERT, colliding with
+      // uq_prompt_text_region_source_per_brand (confirmed live, 2026-08-24: a
+      // 1000-id batch against a brand with ~1200 existing prompts came back
+      // missing ~200 of them, and the resulting INSERT 409'd).
+      return Promise.all(
+        chunkArray(incomingIds, INTENT_LOOKUP_CHUNK_SIZE)
+          .map((batch) => baseQuery().in('prompt_id', batch)),
+      ).then((results) => {
+        const firstError = results.find((r) => r.error)?.error || null;
+        if (firstError) {
+          return { data: null, error: firstError };
+        }
+        return { data: results.flatMap((r) => r.data || []), error: null };
+      });
     }),
     buildLookupMaps(organizationId, postgrestClient),
   ]);
