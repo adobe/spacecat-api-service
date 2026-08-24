@@ -529,6 +529,52 @@ describe('StateAccessMappingsController', () => {
       expect(body.updatedAt).to.equal('2026-01-01T00:00:00Z');
     });
 
+    it('defaults the composite-key qualifier to \'all\' when omitted', async () => {
+      const createStub = sinon.stub().resolves({ created: [makeRow()], skipped: [] });
+      const { Controller } = await loadController({ createFacsAccessMappings: createStub });
+      const ctx = makeContext({ body: validBody });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(201);
+      expect(createStub.firstCall.args[1]).to.include({
+        compositeKeyType: 'all', compositeKeyValue: 'all',
+      });
+    });
+
+    it('passes the composite-key qualifier through when provided', async () => {
+      const createStub = sinon.stub().resolves({ created: [makeRow()], skipped: [] });
+      const { Controller } = await loadController({ createFacsAccessMappings: createStub });
+      const ctx = makeContext({
+        body: { ...validBody, compositeKeyType: 'opportunity', compositeKeyValue: 'security' },
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(201);
+      expect(createStub.firstCall.args[1]).to.include({
+        compositeKeyType: 'opportunity', compositeKeyValue: 'security',
+      });
+    });
+
+    it('returns 400 when compositeKeyValue is provided empty', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ body: { ...validBody, compositeKeyValue: '' } });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('surfaces the composite-key qualifier in the created DTO', async () => {
+      const row = makeRow({ composite_key_type_1: 'opportunity', composite_key_value_1: 'security' });
+      const { Controller } = await loadController({
+        createFacsAccessMappings: sinon.stub().resolves({ created: [row], skipped: [] }),
+      });
+      const ctx = makeContext({
+        body: { ...validBody, compositeKeyType: 'opportunity', compositeKeyValue: 'security' },
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(201);
+      const body = await res.json();
+      expect(body.compositeKeyType).to.equal('opportunity');
+      expect(body.compositeKeyValue).to.equal('security');
+    });
+
     it('injects the baseline can_view when the request omits it', async () => {
       const created = makeRow();
       const createStub = sinon.stub().resolves({ created: [created], skipped: [] });

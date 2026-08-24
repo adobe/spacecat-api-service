@@ -13728,6 +13728,19 @@ StateAccessMapping:
     resourceId:
       type: string
       example: '11111111-2222-4333-9444-555555555555'
+    compositeKeyType:
+      type: [string, 'null']
+      description: |
+        First composite-key qualifier *type* narrowing the binding below the
+        resource (e.g. `opportunity`). `all` — or null on legacy rows —
+        means the binding spans the whole resource.
+      example: opportunity
+    compositeKeyValue:
+      type: [string, 'null']
+      description: |
+        Value paired with `compositeKeyType` (e.g. an opportunity type such as
+        `security`). `all` or null means resource-wide.
+      example: security
     imsOrgId:
       type: string
       example: ABC123@AdobeOrg
@@ -13778,6 +13791,19 @@ StateAccessMappingCreateRequest:
     resourceId:
       type: string
       example: '11111111-2222-4333-9444-555555555555'
+    compositeKeyType:
+      type: string
+      description: |
+        Optional first composite-key qualifier *type* narrowing the binding
+        below the resource (e.g. `opportunity`). Omit — or send `all` — for a
+        resource-wide binding; defaults to `all` server-side.
+      example: opportunity
+    compositeKeyValue:
+      type: string
+      description: |
+        Value paired with `compositeKeyType` (e.g. `security`). Omit — or send
+        `all` — for a resource-wide binding; defaults to `all` server-side.
+      example: security
     grantedCapabilities:
       type: array
       minItems: 1

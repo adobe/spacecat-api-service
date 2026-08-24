@@ -84,13 +84,24 @@ function applySubjectFilter(query, { subjectType, subjectId }) {
   return q;
 }
 
-function applyResourceFilter(query, { resourceType, resourceId }) {
+function applyResourceFilter(query, {
+  resourceType, resourceId, compositeKeyType, compositeKeyValue,
+}) {
   let q = query;
   if (resourceType) {
     q = q.eq('resource_type', resourceType);
   }
   if (resourceId) {
     q = q.eq('resource_id', resourceId);
+  }
+  // Composite-key qualifier filters (opt-in) — only narrow when supplied, so
+  // qualifier-agnostic callers (listResourceIdsWithCapability, the sites/brands
+  // list filter) are unaffected. See rebac-composite-resource-key.md.
+  if (compositeKeyType) {
+    q = q.eq('composite_key_type_1', compositeKeyType);
+  }
+  if (compositeKeyValue) {
+    q = q.eq('composite_key_value_1', compositeKeyValue);
   }
   return q;
 }
@@ -543,6 +554,8 @@ export async function insertFacsAccessMappingAuditEvent(postgrestClient, event =
  * @param {string[]} args.grantedCapabilities  - REQUIRED, non-empty.
  * @param {Array<{ type: 'user'|'org', id: string }>} args.subjects
  * @param {string} [args.createdBy] - IMS user id of the grantor (audit).
+ * @param {string} [args.compositeKeyType]  - Composite-key qualifier type (default 'all').
+ * @param {string} [args.compositeKeyValue] - Composite-key qualifier value (default 'all').
  * @returns {Promise<{ created: object[], skipped: Array<{ subject: object, reason: string }> }>}
  */
 export async function createFacsAccessMappings(postgrestClient, {
@@ -553,6 +566,8 @@ export async function createFacsAccessMappings(postgrestClient, {
   grantedCapabilities,
   subjects,
   createdBy,
+  compositeKeyType,
+  compositeKeyValue,
 }) {
   if (!Array.isArray(subjects) || subjects.length === 0) {
     return { created: [], skipped: [] };
@@ -574,6 +589,10 @@ export async function createFacsAccessMappings(postgrestClient, {
     ims_org_id: imsOrgId,
     product,
     granted_capabilities: grantedCapabilities,
+    // Composite-key qualifier (opt-in). Omitted → 'all' (site-wide) — matches the
+    // column default and keeps existing callers backward-compatible.
+    composite_key_type_1: compositeKeyType ?? 'all',
+    composite_key_value_1: compositeKeyValue ?? 'all',
     created_by: createdBy ?? null,
     // On create, last-modified is the creation itself — stamp the creator so a
     // fresh row's `updated_by` reflects the actor. `updated_by` is NOT NULL;

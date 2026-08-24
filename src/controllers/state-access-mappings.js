@@ -158,6 +158,8 @@ function toMappingDto(row) {
     subjectId: row.subject_id,
     resourceType: row.resource_type,
     resourceId: row.resource_id,
+    compositeKeyType: row.composite_key_type_1 ?? null,
+    compositeKeyValue: row.composite_key_value_1 ?? null,
     imsOrgId: row.ims_org_id,
     product: row.product,
     grantedCapabilities: row.granted_capabilities ?? [],
@@ -309,6 +311,8 @@ function StateAccessMappingsController(context) {
       subjectId: queryParams.subjectId,
       resourceType: queryParams.resourceType,
       resourceId: queryParams.resourceId,
+      compositeKeyType: queryParams.compositeKeyType,
+      compositeKeyValue: queryParams.compositeKeyValue,
       limit: queryParams.limit,
     };
   }
@@ -604,6 +608,8 @@ function StateAccessMappingsController(context) {
     resourceId,
     capabilitiesToStore,
     createdBy,
+    compositeKeyType,
+    compositeKeyValue,
   }) {
     try {
       const { postgrestClient } = ctx.dataAccess.services;
@@ -615,6 +621,8 @@ function StateAccessMappingsController(context) {
         grantedCapabilities: capabilitiesToStore,
         subjects: [{ type: subjectType, id: subjectId }],
         createdBy,
+        compositeKeyType,
+        compositeKeyValue,
       });
       if (result.created.length === 0 && result.skipped.length > 0) {
         // Active duplicate already exists — upsert semantics: overwrite the
@@ -628,6 +636,11 @@ function StateAccessMappingsController(context) {
           subjectId,
           resourceType,
           resourceId,
+          // The active-row unique key now includes the qualifier, so the conflict
+          // re-lookup must match it too — otherwise the upsert could overwrite a
+          // different-qualifier binding for the same subject+resource.
+          compositeKeyType,
+          compositeKeyValue,
           limit: 1,
         });
         const conflictId = existing[0]?.id ?? null;
@@ -839,6 +852,7 @@ function StateAccessMappingsController(context) {
     }
     const {
       subjectType, subjectId, resourceType, resourceId, grantedCapabilities,
+      compositeKeyType, compositeKeyValue,
     } = data;
 
     if (!ALLOWED_SUBJECT_TYPES.has(subjectType)) {
@@ -892,6 +906,16 @@ function StateAccessMappingsController(context) {
       product,
     );
 
+    // Composite-key qualifier (opt-in; ADR D6). When provided it must be a non-empty
+    // string (no catalog validation, per D5 — it is matched against the live resource
+    // at enforcement); omitted → 'all' (site-wide), preserving current behavior.
+    if (compositeKeyType !== undefined && !hasText(compositeKeyType)) {
+      return badRequest('compositeKeyType, when provided, must be a non-empty string');
+    }
+    if (compositeKeyValue !== undefined && !hasText(compositeKeyValue)) {
+      return badRequest('compositeKeyValue, when provided, must be a non-empty string');
+    }
+
     return persistMappingBinding(ctx, {
       imsOrgId,
       product,
@@ -901,6 +925,8 @@ function StateAccessMappingsController(context) {
       resourceId,
       capabilitiesToStore,
       createdBy,
+      compositeKeyType: hasText(compositeKeyType) ? compositeKeyType : 'all',
+      compositeKeyValue: hasText(compositeKeyValue) ? compositeKeyValue : 'all',
     });
   }
 
@@ -949,6 +975,8 @@ function StateAccessMappingsController(context) {
       resourceType,
       resourceId,
       grantedCapabilities,
+      compositeKeyType,
+      compositeKeyValue,
     } = data;
 
     // Product comes from the body (NOT the x-product header). Must reference a
@@ -1021,6 +1049,15 @@ function StateAccessMappingsController(context) {
       product,
     );
 
+    // Composite-key qualifier (opt-in; ADR D6). Non-empty string when provided (no
+    // catalog validation, per D5); omitted → 'all' (site-wide).
+    if (compositeKeyType !== undefined && !hasText(compositeKeyType)) {
+      return badRequest('compositeKeyType, when provided, must be a non-empty string');
+    }
+    if (compositeKeyValue !== undefined && !hasText(compositeKeyValue)) {
+      return badRequest('compositeKeyValue, when provided, must be a non-empty string');
+    }
+
     return persistMappingBinding(ctx, {
       imsOrgId,
       product,
@@ -1032,6 +1069,8 @@ function StateAccessMappingsController(context) {
       // Audit trail only: record the real admin/service caller. No mapping
       // access-scope data is derived from authInfo.
       createdBy: resolveCallerUserIdent(ctx),
+      compositeKeyType: hasText(compositeKeyType) ? compositeKeyType : 'all',
+      compositeKeyValue: hasText(compositeKeyValue) ? compositeKeyValue : 'all',
     });
   }
 

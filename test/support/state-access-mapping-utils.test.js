@@ -321,6 +321,40 @@ describe('state-access-mapping-utils helpers', () => {
       expect(client.fromCalls).to.have.length(0);
     });
 
+    it('defaults the composite-key qualifier columns to \'all\' when omitted', async () => {
+      const client = fakePostgrestClient({ insertResults: [{ data: [{ id: 'm1' }], error: null }] });
+      await createFacsAccessMappings(client, {
+        imsOrgId: 'org-1',
+        product: 'ASO',
+        resourceType: 'site',
+        resourceId: 'site-1',
+        grantedCapabilities: ['aso/can_edit'],
+        subjects: [{ type: 'user', id: 'A@AdobeID' }],
+      });
+      expect(client.insertArgs[0]).to.include({
+        composite_key_type_1: 'all',
+        composite_key_value_1: 'all',
+      });
+    });
+
+    it('inserts the provided composite-key qualifier columns', async () => {
+      const client = fakePostgrestClient({ insertResults: [{ data: [{ id: 'm1' }], error: null }] });
+      await createFacsAccessMappings(client, {
+        imsOrgId: 'org-1',
+        product: 'ASO',
+        resourceType: 'site',
+        resourceId: 'site-1',
+        grantedCapabilities: ['aso/can_edit'],
+        subjects: [{ type: 'user', id: 'A@AdobeID' }],
+        compositeKeyType: 'opportunity',
+        compositeKeyValue: 'security',
+      });
+      expect(client.insertArgs[0]).to.include({
+        composite_key_type_1: 'opportunity',
+        composite_key_value_1: 'security',
+      });
+    });
+
     it('returns immediately when subjects is not an array', async () => {
       const client = fakePostgrestClient();
       const out = await createFacsAccessMappings(client, {
