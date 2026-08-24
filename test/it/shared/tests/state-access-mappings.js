@@ -685,6 +685,60 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
         expect(res.body.product).to.equal('ASO');
         expect(res.body.resourceType).to.equal('site');
         expect(res.body.grantedCapabilities).to.have.members(['aso/can_view', 'aso/can_edit']);
+        // D6: the composite qualifier defaults to the site-wide sentinel ('all')
+        // when the request omits it — a plain site-scoped binding, as before.
+        expect(res.body.compositeKeyType).to.equal('all');
+        expect(res.body.compositeKeyValue).to.equal('all');
+      });
+
+      it('POST creates a composite-scoped ASO binding (opportunity/security)', async () => {
+        const http = getHttpClient();
+        const res = await http.facsManager.post(
+          BASE,
+          {
+            subjectType: 'user',
+            subjectId: USER_SUBJECT,
+            resourceType: 'site',
+            resourceId: SITE_RESOURCE_ID,
+            compositeKeyType: 'opportunity',
+            compositeKeyValue: 'security',
+            grantedCapabilities: ['aso/can_view', 'aso/can_edit'],
+          },
+          { 'x-product': 'aso' },
+        );
+        // Same subject + resource as the site-wide row above, differing ONLY by
+        // the composite qualifier: this is a NEW row (201), not an upsert (200) —
+        // proving the qualifier is threaded through the duplicate-detection lookup.
+        expect(res.status).to.equal(201);
+        expect(res.body.compositeKeyType).to.equal('opportunity');
+        expect(res.body.compositeKeyValue).to.equal('security');
+      });
+
+      it('GET returns both the site-wide and composite-scoped bindings (composite is part of uniqueness)', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get(
+          `${BASE}?resourceType=site&resourceId=${SITE_RESOURCE_ID}`,
+        );
+        expect(res.status).to.equal(200);
+        // Two DISTINCT active rows for the same subject+resource — only possible
+        // because composite_key_type_1/value_1 are in the active-row unique index
+        // (pre-composite the partial unique index allowed just one active row here).
+        expect(res.body.items).to.be.an('array').with.lengthOf(2);
+        const qualifiers = res.body.items
+          .map((m) => `${m.compositeKeyType}/${m.compositeKeyValue}`);
+        expect(qualifiers).to.have.members(['all/all', 'opportunity/security']);
+      });
+
+      it('GET filters by the composite qualifier', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get(
+          `${BASE}?resourceType=site&resourceId=${SITE_RESOURCE_ID}`
+          + '&compositeKeyType=opportunity&compositeKeyValue=security',
+        );
+        expect(res.status).to.equal(200);
+        expect(res.body.items).to.be.an('array').with.lengthOf(1);
+        expect(res.body.items[0].compositeKeyType).to.equal('opportunity');
+        expect(res.body.items[0].compositeKeyValue).to.equal('security');
       });
     });
   });
