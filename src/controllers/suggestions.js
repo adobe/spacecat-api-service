@@ -1602,6 +1602,23 @@ function SuggestionsController(ctx, sqs, env) {
         try {
           promiseTokenResponse = await getIMSPromiseToken(context);
         } catch (e) {
+          // The suggestions were flipped to IN_PROGRESS above; a promise-token
+          // failure returns before any dispatch, so roll them back to NEW instead
+          // of stranding them IN_PROGRESS with no consumer (SITES-49388). Assess
+          // requests never flip status (succeededSuggestions === validSuggestions,
+          // still in their original state), so they must not be rolled back.
+          if (!isAssessAction && isNonEmptyArray(succeededSuggestions)) {
+            try {
+              await Suggestion.bulkUpdateStatus(
+                succeededSuggestions,
+                SuggestionModel.STATUSES.NEW,
+              );
+            } catch (rollbackError) {
+              context.log.error(
+                `[autofix] failed to roll back IN_PROGRESS after promise-token failure: ${rollbackError.message}`,
+              );
+            }
+          }
           if (e instanceof ErrorWithStatusCode) {
             return badRequest(e.message);
           }
@@ -1648,45 +1665,91 @@ function SuggestionsController(ctx, sqs, env) {
       url: urlParam,
       ...(precheckOnly === true && { precheckOnly: true }),
     });
-    if (shouldGroupSuggestionsForAutofix(opportunity.getType())) {
-      await Promise.all(
-        suggestionGroups.map(({
-          groupedSuggestions,
-          url,
-          relationshipContext,
-        }) => sendAutofixMessage(
-          sqs,
-          queueUrl,
-          siteId,
-          opportunityId,
-          groupedSuggestions.map((s) => s.getId()),
-          promiseTokenResponse,
-          variations,
-          action,
-          customData,
-          {
-            ...autofixOptions(url),
-            ...(isObject(relationshipContext) && { relationshipContext }),
-          },
-        )),
-      );
-    } else {
-      await sendAutofixMessage(
+    // Build dispatch units (one per URL group, or one for the whole batch) so each
+    // send can be settled independently — one group's send failure must not
+    // fail-fast the rest (the old bare Promise.all) or strand its already-
+    // IN_PROGRESS suggestions with no rollback (SITES-49388).
+    const dispatchUnits = shouldGroupSuggestionsForAutofix(opportunity.getType())
+      ? suggestionGroups.map(({ groupedSuggestions, url, relationshipContext }) => ({
+        ids: groupedSuggestions.map((s) => s.getId()),
+        options: {
+          ...autofixOptions(url),
+          ...(isObject(relationshipContext) && { relationshipContext }),
+        },
+      }))
+      : [{
+        ids: succeededSuggestions.map((s) => s.getId()),
+        options: autofixOptions(requestUrl),
+      }];
+
+    const sendResults = await Promise.allSettled(
+      dispatchUnits.map((unit) => sendAutofixMessage(
         sqs,
         queueUrl,
         siteId,
         opportunityId,
-        succeededSuggestions.map((s) => s.getId()),
+        unit.ids,
         promiseTokenResponse,
         variations,
         action,
         customData,
-        autofixOptions(requestUrl),
-      );
+        unit.options,
+      )),
+    );
+
+    // Roll back suggestions whose dispatch failed: they were flipped to IN_PROGRESS
+    // but no consumer will pick them up, so return them to NEW (re-appliable)
+    // instead of leaving them stuck forever. No FixEntity exists for a failed
+    // dispatch, so a plain status flip is safe (SITES-49388).
+    const failedDispatchIds = new Set(
+      sendResults.flatMap(
+        (res, i) => (res.status === 'rejected' ? dispatchUnits[i].ids : []),
+      ),
+    );
+    if (failedDispatchIds.size > 0) {
+      sendResults.forEach((res, i) => {
+        if (res.status === 'rejected') {
+          context.log.error(
+            `[autofix] dispatch failed for site ${siteId} opportunity ${opportunityId} `
+            + `suggestions [${dispatchUnits[i].ids.join(',')}]: ${res.reason?.message || res.reason}`,
+          );
+        }
+      });
+      // Only apply/apply-all flipped suggestions to IN_PROGRESS; assess never did,
+      // so its rows must not be flipped to NEW even when the dispatch fails.
+      const toRollBack = isAssessAction
+        ? []
+        : succeededSuggestions.filter((s) => failedDispatchIds.has(s.getId()));
+      if (isNonEmptyArray(toRollBack)) {
+        try {
+          await Suggestion.bulkUpdateStatus(toRollBack, SuggestionModel.STATUSES.NEW);
+        } catch (rollbackError) {
+          context.log.error(
+            `[autofix] failed to roll back IN_PROGRESS after dispatch failure: ${rollbackError.message}`,
+          );
+        }
+      }
+      // Reflect the failures in the 207 response so the caller doesn't treat them
+      // as in-flight successes.
+      response.suggestions = response.suggestions.map((entry) => (
+        failedDispatchIds.has(entry.uuid)
+          ? { ...entry, statusCode: 502, message: 'Failed to dispatch autofix' }
+          : entry
+      ));
+      response.metadata = {
+        ...response.metadata,
+        success: response.metadata.success - failedDispatchIds.size,
+        failed: response.metadata.failed + failedDispatchIds.size,
+      };
     }
 
-    if (!precheckOnly && succeededSuggestions.length > 0) {
-      context.log.info('[autofix-triggered]', auditFields);
+    // Log the trigger against the post-rollback success count: if every dispatch
+    // failed and all rows were rolled back, nothing was actually triggered.
+    if (!precheckOnly && response.metadata.success > 0) {
+      context.log.info('[autofix-triggered]', {
+        ...auditFields,
+        succeededSuggestionCount: response.metadata.success,
+      });
     }
 
     return createResponse(response, 207);
