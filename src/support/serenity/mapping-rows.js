@@ -276,6 +276,46 @@ export async function projectsForSite(dataAccess, brandId, siteId) {
 }
 
 /**
+ * Deliberately re-points the given LIVE mapping rows onto a new `siteId` — the
+ * sanctioned counterpart to the create-time linkers (`linkSiteToRow` /
+ * `linkSiteToLiveRows`), which REFUSE to overwrite an existing link because a
+ * create must never steal a row another market already claimed. A brand
+ * primary-site re-point (serenity-docs#349) IS that deliberate act, so this one
+ * DOES overwrite. The rows are supplied by the caller (already read via
+ * `projectsForSite` against the OLD site, before Semrush was re-pointed), so
+ * this makes no read of its own — it just moves the links the caller resolved.
+ *
+ * Same best-effort contract as the rest of this module: never throws, uses
+ * allSettled so one row's failure doesn't abandon the others, and logs the
+ * alarmed write-failure token for reconcile. Called only AFTER the Semrush
+ * projects were successfully re-pointed, so a residual failure here is drift
+ * (rows still name the old site while Semrush tracks the new one), recoverable
+ * by reconcile — never a reason to fail an edit whose upstream half succeeded.
+ *
+ * @param {any} dataAccess
+ * @param {Array<any>|null|undefined} rows - live rows to re-link (from `projectsForSite`).
+ * @param {string|null|undefined} siteId - the new Site to point them at.
+ * @param {any} [log]
+ */
+export async function relinkSiteForRows(dataAccess, rows, siteId, log) {
+  const BrandSemrushProject = dataAccess?.BrandSemrushProject;
+  if (!BrandSemrushProject || !siteId || !hasText(siteId)
+      || !Array.isArray(rows) || rows.length === 0) {
+    return;
+  }
+  const results = await Promise.allSettled(rows.map(async (row) => {
+    row.setSiteId(siteId);
+    await row.save();
+  }));
+  const failed = results.filter((r) => r.status === 'rejected');
+  if (failed.length > 0) {
+    log?.error?.(`serenity mapping row: ${WRITE_FAILED_TOKEN} — partial site re-link`, {
+      siteId, op: 're-link-site', failed: failed.length, total: rows.length,
+    });
+  }
+}
+
+/**
  * Links `siteId` onto the ONE live mapping row named by `semrushProjectId`.
  *
  * The per-market counterpart to `linkSiteToLiveRows`. A market's `site_id` is

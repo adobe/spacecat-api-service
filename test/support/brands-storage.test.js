@@ -2622,28 +2622,32 @@ describe('brands-storage', () => {
       expect(result).to.not.be.null;
     });
 
-    it('ignores baseSiteId when brand already has a site_id (immutable)', async () => {
-      const fullBrandRow = makeBrandRow({ site_id: 'existing-site-id' });
-
-      const postgrestClient = createTableMockClient({
+    it('re-points baseSiteId on an already-anchored brand — the deliberate #349 path (was immutable)', async () => {
+      // serenity-docs#349: an explicit updateBrand re-point now MOVES an existing
+      // primary site (the controller validates eligibility + drives Semrush first).
+      // The SILENT-overwrite guard stays in upsertBrand, not here.
+      const client = createCapturingClient({
         brands: [
-          // 1st call: select current site_id (already set → ignore)
-          { data: { site_id: 'existing-site-id' }, error: null },
-          // 2nd call: update succeeds (without site_id in patch)
+          // 1st call: select current row — brand already anchored to a different site
+          { data: { site_id: 'existing-site-id', status: 'active' }, error: null },
+          // 2nd call: update succeeds (site_id now in the patch)
           { data: { id: BRAND_ID }, error: null },
           // 3rd call: getBrandById re-fetch
-          { data: fullBrandRow, error: null },
+          { data: makeBrandRow({ site_id: 'different-site-id' }), error: null },
         ],
+        sites: { data: { id: 'different-site-id' }, error: null }, // target belongs to org
       });
 
       const result = await updateBrand({
         organizationId: ORG_ID,
         brandId: BRAND_ID,
         updates: { baseSiteId: 'different-site-id' },
-        postgrestClient,
+        postgrestClient: client,
       });
 
       expect(result).to.not.be.null;
+      const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
+      expect(brandsUpdate.row.site_id).to.equal('different-site-id');
     });
 
     it('clears site_id when a pending brand passes baseSiteId: null (LLMO-5870)', async () => {
