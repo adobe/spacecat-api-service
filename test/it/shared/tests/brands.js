@@ -36,6 +36,9 @@ export default function brandsTests(getHttpClient, resetData) {
           brandContext: '  Context for claims extraction  ',
           mentionSentimentGuidance: '  Sentiment guidance text  ',
           region: ['US'],
+          // SITES-49202: active brands now require a base site (site_id); a
+          // URL-less create must be pending (matches the flat-mode idiom below).
+          status: 'pending',
         },
       );
       expect(createRes.status).to.equal(201);
@@ -104,6 +107,8 @@ export default function brandsTests(getHttpClient, resetData) {
       // the data layer without triggering the upstream Semrush re-sync.
       const createRes = await http.admin.post(`/v2/orgs/${ORG_1_ID}/brands`, {
         name: 'Aliases Roundtrip Brand',
+        // SITES-49202: URL-less create must be pending (active now needs site_id).
+        status: 'pending',
         region: ['us', 'de'],
         brandAliases: [
           { name: 'Acme', regions: [] },
@@ -294,7 +299,7 @@ export default function brandsTests(getHttpClient, resetData) {
       //    renaming the row to `${NAME}_deleted` (uq_brand_name_per_org spans
       //    deleted rows, so keeping the original name would block recreation).
       const createA = await http.admin.post(`/v2/orgs/${ORG_1_ID}/brands`, {
-        name: NAME, region: ['US'],
+        name: NAME, region: ['US'], status: 'pending',
       });
       expect(createA.status).to.equal(201);
       const brandAId = createA.body.id;
@@ -305,7 +310,7 @@ export default function brandsTests(getHttpClient, resetData) {
       // 2. Recreating a brand with the ORIGINAL name now succeeds (previously
       //    rejected by uq_brand_name_per_org) and yields a NEW brand id.
       const createB = await http.admin.post(`/v2/orgs/${ORG_1_ID}/brands`, {
-        name: NAME, region: ['US'],
+        name: NAME, region: ['US'], status: 'pending',
       });
       expect(createB.status).to.equal(201);
       expect(createB.body.id).to.not.equal(brandAId);
@@ -319,7 +324,7 @@ export default function brandsTests(getHttpClient, resetData) {
 
       // 4. The name is still free — a third create with the same name succeeds.
       const createC = await http.admin.post(`/v2/orgs/${ORG_1_ID}/brands`, {
-        name: NAME, region: ['US'],
+        name: NAME, region: ['US'], status: 'pending',
       });
       expect(createC.status).to.equal(201);
       expect(createC.body.id).to.not.equal(brandAId);
