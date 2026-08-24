@@ -243,6 +243,20 @@ const routeFacsCapabilities = {
     'POST /consumers/register', // admin
   ],
 
+  /**
+   * Products with FACS enforcement live. A product that has a `PRODUCTS_ROUTES`
+   * entry below but is NOT listed here is treated as "recognized but not yet
+   * onboarded": `facsWrapper` bypasses the FACS layer for it entirely, leaving
+   * its routes governed by the controller-level ACL (the same posture legacy IMS
+   * tokens already have). This is what keeps ACO — whose `PRODUCTS_ROUTES` map is
+   * still empty (`ACO: {}`) — from 403-ing on routes that LLMO/ASO also declare.
+   *
+   * A missing or unrecognized `x-product` is deliberately NOT covered by this
+   * list: the wrapper still fail-closes on those so FACS cannot be evaded with a
+   * bogus header. Add a product here the moment its routes go live under FACS.
+   */
+  FACS_ONBOARDED_PRODUCTS: ['LLMO', 'ASO'],
+
   PRODUCTS_ROUTES: {
   // LLMO — first product to enrol in FACS.
   //

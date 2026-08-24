@@ -91,6 +91,7 @@ describe('routeFacsCapabilities', () => {
       // flow through JWT.facs_permissions + state-layer org-scoped rows.
       expect(routeFacsCapabilities).to.have.all.keys(
         'INTERNAL_ROUTES',
+        'FACS_ONBOARDED_PRODUCTS',
         'PRODUCTS_ROUTES',
         'PRODUCTS_FACS_RESOURCE_PARAM_ALIASES',
         'PRODUCTS_FACS_SECONDARY_RESOURCE',
@@ -104,6 +105,30 @@ describe('routeFacsCapabilities', () => {
 
     it('PRODUCTS_ROUTES is an object', () => {
       expect(routeFacsCapabilities.PRODUCTS_ROUTES).to.be.an('object');
+    });
+  });
+
+  describe('FACS_ONBOARDED_PRODUCTS', () => {
+    it('is an array of unique uppercase product codes', () => {
+      const onboarded = routeFacsCapabilities.FACS_ONBOARDED_PRODUCTS;
+      expect(onboarded).to.be.an('array');
+      onboarded.forEach((product) => {
+        expect(product, `onboarded product '${product}'`).to.be.a('string');
+        expect(product, `onboarded product '${product}' must be uppercase`)
+          .to.equal(product.toUpperCase());
+      });
+      expect(new Set(onboarded).size, 'FACS_ONBOARDED_PRODUCTS has duplicate entries')
+        .to.equal(onboarded.length);
+    });
+
+    it('every onboarded product has a PRODUCTS_ROUTES entry', () => {
+      // A product cannot be enforced by facsWrapper without a route map, and the
+      // wrapper only bypasses *recognized* products, so the two lists must agree.
+      const productKeys = Object.keys(routeFacsCapabilities.PRODUCTS_ROUTES);
+      const orphans = routeFacsCapabilities.FACS_ONBOARDED_PRODUCTS
+        .filter((product) => !productKeys.includes(product));
+      expect(orphans, `onboarded products missing from PRODUCTS_ROUTES: ${orphans.join(', ')}`)
+        .to.deep.equal([]);
     });
   });
 
