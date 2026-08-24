@@ -13,6 +13,7 @@
 import { expect } from 'chai';
 import sinon from 'sinon';
 import esmock from 'esmock';
+import { filterOpportunitiesByFacsComposite } from '../../src/support/facs-composite-resolvers.js';
 
 describe('facs-composite-resolvers (asoOpportunityComposite)', () => {
   let sandbox;
@@ -116,11 +117,49 @@ describe('facs-composite-resolvers (asoOpportunityComposite)', () => {
     expect(context.log.warn.calledWithMatch({ tag: 'facs-composite', reason: 'site-mismatch' })).to.be.true;
   });
 
-  it('opportunity LIST route defers to the controller', async () => {
+  it('opportunity LIST route defers and stashes the caller\'s permitted types', async () => {
+    listStub.resolves([{ composite_key_value_1: 'security', granted_capabilities: [CAP] }]);
     const res = await mod.asoOpportunityComposite(context, {
       ...baseArgs, routePattern: 'GET /sites/:siteId/opportunities', routeParams: { siteId: 'site-1' },
     });
     expect(res).to.equal('defer');
+    expect(context.attributes.facsComposite).to.deep.equal({
+      product: 'ASO', resourceType: 'site', values: ['security'],
+    });
+  });
+
+  it('LIST route stashes the WILDCARD sentinel for a site-wide binding', async () => {
+    listStub.resolves([
+      { composite_key_value_1: 'security', granted_capabilities: [CAP] },
+      { composite_key_value_1: 'all', granted_capabilities: [CAP] },
+    ]);
+    const res = await mod.asoOpportunityComposite(context, {
+      ...baseArgs, routePattern: 'GET /sites/:siteId/opportunities', routeParams: { siteId: 'site-1' },
+    });
+    expect(res).to.equal('defer');
+    expect(context.attributes.facsComposite.values).to.equal('all');
+  });
+
+  it('by-status LIST route defers and stashes permitted types', async () => {
+    listStub.resolves([{ composite_key_value_1: 'security', granted_capabilities: [CAP] }]);
+    const res = await mod.asoOpportunityComposite(context, {
+      ...baseArgs,
+      routePattern: 'GET /sites/:siteId/opportunities/by-status/:status',
+      routeParams: { siteId: 'site-1', status: 'NEW' },
+    });
+    expect(res).to.equal('defer');
+    expect(context.attributes.facsComposite.values).to.deep.equal(['security']);
+  });
+
+  it('top-paid LIST route defers and stashes permitted types', async () => {
+    listStub.resolves([{ composite_key_value_1: 'security', granted_capabilities: [CAP] }]);
+    const res = await mod.asoOpportunityComposite(context, {
+      ...baseArgs,
+      routePattern: 'GET /sites/:siteId/opportunities/top-paid',
+      routeParams: { siteId: 'site-1' },
+    });
+    expect(res).to.equal('defer');
+    expect(context.attributes.facsComposite.values).to.deep.equal(['security']);
   });
 
   it('non-opportunity route: grants on ANY active site binding with the capability', async () => {
@@ -175,5 +214,32 @@ describe('facs-composite-resolvers (asoOpportunityComposite)', () => {
 
   it('exposes asoOpportunityComposite in the compositeResolvers registry', () => {
     expect(mod.compositeResolvers.asoOpportunityComposite).to.equal(mod.asoOpportunityComposite);
+  });
+});
+
+describe('filterOpportunitiesByFacsComposite (D4 list filter)', () => {
+  const opp = (type) => ({ getType: () => type });
+
+  it('returns the list unchanged when no facsComposite marker is set', () => {
+    const list = [opp('security'), opp('alt-text')];
+    expect(filterOpportunitiesByFacsComposite({ attributes: {} }, list)).to.equal(list);
+  });
+
+  it('returns the list unchanged for a WILDCARD (all) grant', () => {
+    const list = [opp('security'), opp('alt-text')];
+    const ctx = { attributes: { facsComposite: { values: 'all' } } };
+    expect(filterOpportunitiesByFacsComposite(ctx, list)).to.equal(list);
+  });
+
+  it('narrows to the permitted types', () => {
+    const list = [opp('security'), opp('alt-text'), opp('meta-tags')];
+    const ctx = { attributes: { facsComposite: { values: ['security', 'meta-tags'] } } };
+    const out = filterOpportunitiesByFacsComposite(ctx, list);
+    expect(out.map((o) => o.getType())).to.deep.equal(['security', 'meta-tags']);
+  });
+
+  it('returns an empty list when the permitted set is empty', () => {
+    const ctx = { attributes: { facsComposite: { values: [] } } };
+    expect(filterOpportunitiesByFacsComposite(ctx, [opp('security')])).to.deep.equal([]);
   });
 });

@@ -64,12 +64,30 @@ function bindingGrants(bindings, capability, values) {
 }
 
 /**
- * True for the ASO opportunity COLLECTION route (`GET /sites/:siteId/opportunities`),
- * which has no single opportunity to type-scope against and is instead
- * result-filtered by the controller (rebac-composite-resource-key.md D4).
+ * The composite values the caller is permitted for `capability`, for
+ * result-filtering a collection (D4). Returns the WILDCARD sentinel (`'all'`)
+ * when any qualifying binding is site-wide (unrestricted); otherwise the distinct
+ * set of typed values granted. An empty array means "granted nothing" → the
+ * controller returns an empty list.
+ */
+function permittedValues(bindings, capability) {
+  const granting = bindings.filter((b) => (b.granted_capabilities ?? []).includes(capability));
+  if (granting.some((b) => b.composite_key_value_1 === WILDCARD)) {
+    return WILDCARD;
+  }
+  return [...new Set(granting.map((b) => b.composite_key_value_1))];
+}
+
+/**
+ * True for an ASO opportunity COLLECTION route — the site-level list
+ * (`GET …/opportunities`), `…/opportunities/by-status/:status`, and
+ * `…/opportunities/top-paid`. None has a single opportunity to type-scope
+ * against; they are result-filtered by the controller (D4). The item route
+ * (`…/opportunities/:opportunityId`) is handled earlier via its route param, so
+ * it never reaches here.
  */
 function isOpportunityListRoute(routePattern) {
-  return typeof routePattern === 'string' && /^GET\s.*\/opportunities$/.test(routePattern);
+  return typeof routePattern === 'string' && /^GET\s.*\/opportunities(\/|$)/.test(routePattern);
 }
 
 /**
@@ -151,13 +169,42 @@ export async function asoOpportunityComposite(context, {
   }
 
   if (isOpportunityListRoute(routePattern)) {
-    // Opportunity LIST — controller filters results to permitted types (D4).
+    // Opportunity LIST (list / by-status / top-paid): the wrapper can't type-scope
+    // a whole collection, so stash the caller's permitted opportunity types for the
+    // controller to result-filter by (D4). WILDCARD ('all') → unrestricted.
+    context.attributes = context.attributes ?? {};
+    context.attributes.facsComposite = {
+      product,
+      resourceType: 'site',
+      values: permittedValues(bindings, capability),
+    };
     return 'defer';
   }
 
   // Any other ASO site route (non-opportunity, incl. opportunity create): not
   // opportunity-scoped → grant iff any active site binding carries the capability.
   return bindingGrants(bindings, capability, null);
+}
+
+/**
+ * Apply the D4 opportunity-list ReBAC filter. The ASO resolver stashes the
+ * caller's permitted opportunity types on `context.attributes.facsComposite` when
+ * it defers a collection route; this narrows the fetched opportunities to those
+ * types. No marker (non-FACS / admin / not deferred) or a WILDCARD (`'all'`,
+ * site-wide) grant → the list is returned unchanged. An empty permitted set →
+ * empty list.
+ *
+ * @param {object} context - request context.
+ * @param {object[]} opportunities - Opportunity models (expose `getType()`).
+ * @returns {object[]} the permitted subset.
+ */
+export function filterOpportunitiesByFacsComposite(context, opportunities) {
+  const composite = context?.attributes?.facsComposite;
+  if (!composite || composite.values === WILDCARD) {
+    return opportunities;
+  }
+  const permitted = new Set(composite.values);
+  return opportunities.filter((o) => permitted.has(o.getType()));
 }
 
 /**

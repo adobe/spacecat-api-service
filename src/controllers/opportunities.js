@@ -30,6 +30,7 @@ import { OpportunityDto } from '../dto/opportunity.js';
 import { isValidLocale } from '../utils/validations.js';
 import { applyFieldProjection } from '../utils/field-projection.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { filterOpportunitiesByFacsComposite } from '../support/facs-composite-resolvers.js';
 import {
   grantSuggestionsForOpportunity,
   revokeExistingGrants,
@@ -121,7 +122,9 @@ function OpportunitiesController(ctx) {
     }
 
     const allOpptys = await Opportunity.allBySiteId(siteId);
-    const opptys = (await filterForSummitPlg(site, allOpptys, context))
+    const summitFiltered = await filterForSummitPlg(site, allOpptys, context);
+    // D4: narrow to the caller's ReBAC-permitted opportunity types (composite key).
+    const opptys = filterOpportunitiesByFacsComposite(context, summitFiltered)
       .map((oppty) => OpportunityDto.toJSON(oppty, locale));
 
     const { list, error } = applyFieldProjection(opptys, context.data?.fields);
@@ -161,7 +164,9 @@ function OpportunitiesController(ctx) {
     }
 
     const allOpptys = await Opportunity.allBySiteIdAndStatus(siteId, status);
-    const opptys = (await filterForSummitPlg(site, allOpptys, context))
+    const summitFiltered = await filterForSummitPlg(site, allOpptys, context);
+    // D4: narrow to the caller's ReBAC-permitted opportunity types (composite key).
+    const opptys = filterOpportunitiesByFacsComposite(context, summitFiltered)
       .map((oppty) => OpportunityDto.toJSON(oppty, locale));
 
     const { list, error } = applyFieldProjection(opptys, context.data?.fields);
