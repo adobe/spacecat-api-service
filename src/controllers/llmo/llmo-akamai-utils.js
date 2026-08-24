@@ -161,14 +161,21 @@ const behaviorSetVariable = (name, value) => ({
   },
 });
 
+// MODIFY, not ADD. The routing rule matches on every Akamai server that handles the request —
+// edge AND any parent server in a tiered distribution — so these behaviors execute more than once
+// for the same request. ADD would append a second copy each time (e.g. a duplicated
+// X-Forwarded-Host, which the edge worker rejects with a 403). MODIFY sets the value, so running it
+// N times yields one
+// header carrying our value, regardless of how many tiers evaluate the tree.
+// avoidDuplicateHeaders is belt-and-suspenders for the same reason.
 const behaviorModifyHeader = (name, header, value) => ({
   name,
   options: {
-    action: 'ADD',
-    standardAddHeaderName: 'OTHER',
+    action: 'MODIFY',
+    standardModifyHeaderName: 'OTHER',
     customHeaderName: header,
-    headerValue: value,
-    avoidDuplicateHeaders: false,
+    newHeaderValue: value,
+    avoidDuplicateHeaders: true,
   },
 });
 
@@ -603,9 +610,17 @@ export function redactSecrets(tree) {
     }
     (rule.behaviors || []).forEach((b) => {
       if (b?.name === 'modifyIncomingRequestHeader' && SECRET_HEADERS.has(b.options?.customHeaderName)) {
-        // Mutating a deep clone we own, not the caller's tree.
-        // eslint-disable-next-line no-param-reassign
-        b.options.headerValue = REDACTED;
+        // Mutating a deep clone we own, not the caller's tree. MODIFY behaviors carry the value in
+        // newHeaderValue; legacy ADD behaviors (older deployed properties) carry it in headerValue.
+        // Redact whichever is present so a secret never leaks regardless of which the tree uses.
+        /* eslint-disable no-param-reassign */
+        if (typeof b.options.newHeaderValue === 'string') {
+          b.options.newHeaderValue = REDACTED;
+        }
+        if (typeof b.options.headerValue === 'string') {
+          b.options.headerValue = REDACTED;
+        }
+        /* eslint-enable no-param-reassign */
       }
     });
     (rule.children || []).forEach(walk);
@@ -670,11 +685,14 @@ export function getManagedFetcherKey(tree) {
       return;
     }
     (rule.behaviors || []).forEach((b) => {
+      // MODIFY behaviors carry the value in newHeaderValue; legacy ADD behaviors carry it in
+      // headerValue. Read whichever is present so this works against both forms.
+      const value = b?.options?.newHeaderValue ?? b?.options?.headerValue;
       if (found === null
         && b?.name === 'modifyIncomingRequestHeader'
         && b.options?.customHeaderName === FETCHER_KEY_HEADER
-        && typeof b.options?.headerValue === 'string') {
-        found = b.options.headerValue;
+        && typeof value === 'string') {
+        found = value;
       }
     });
     (rule.children || []).forEach(walk);

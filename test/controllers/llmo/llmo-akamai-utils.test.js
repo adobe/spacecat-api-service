@@ -117,7 +117,11 @@ describe('llmo-akamai-utils', () => {
       const apiKeyHeader = routing.behaviors.find(
         (b) => b.name === 'modifyIncomingRequestHeader' && b.options.customHeaderName === 'x-edgeoptimize-api-key',
       );
-      expect(apiKeyHeader.options.headerValue).to.equal(API_KEY);
+      expect(apiKeyHeader.options.newHeaderValue).to.equal(API_KEY);
+      // Idempotent under multi-tier (edge + parent) re-evaluation: MODIFY sets the value
+      // rather than appending, and avoidDuplicateHeaders guards against a second copy.
+      expect(apiKeyHeader.options.action).to.equal('MODIFY');
+      expect(apiKeyHeader.options.avoidDuplicateHeaders).to.equal(true);
       const cacheId = findBehavior(routing, 'cacheId');
       expect(cacheId.options.variableName).to.equal(cfg.cacheKeyVariable.name);
     });
@@ -183,7 +187,7 @@ describe('llmo-akamai-utils', () => {
       expect(marker.options.matchCaseSensitiveValue).to.equal(true);
       const resp = findBehavior(rule, 'modifyOutgoingResponseHeader');
       expect(resp.options.customHeaderName).to.equal('x-edgeoptimize-fo');
-      expect(resp.options.headerValue).to.equal('true');
+      expect(resp.options.newHeaderValue).to.equal('true');
     });
   });
 
