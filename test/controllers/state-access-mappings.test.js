@@ -529,7 +529,7 @@ describe('StateAccessMappingsController', () => {
       expect(body.updatedAt).to.equal('2026-01-01T00:00:00Z');
     });
 
-    it('defaults the composite-key qualifier to \'all\' when omitted', async () => {
+    it('defaults the composite-key qualifier to \'all\' for a product with no composite dimension (LLMO)', async () => {
       const createStub = sinon.stub().resolves({ created: [makeRow()], skipped: [] });
       const { Controller } = await loadController({ createFacsAccessMappings: createStub });
       const ctx = makeContext({ body: validBody });
@@ -537,6 +537,30 @@ describe('StateAccessMappingsController', () => {
       expect(res.status).to.equal(201);
       expect(createStub.firstCall.args[1]).to.include({
         compositeKeyType: 'all', compositeKeyValue: 'all',
+      });
+    });
+
+    it('defaults the composite-key TYPE to the product dimension for ASO (opportunity/all)', async () => {
+      const createStub = sinon.stub().resolves({
+        created: [makeRow({ product: 'ASO', resource_type: 'site' })], skipped: [],
+      });
+      const { Controller } = await loadController({ createFacsAccessMappings: createStub });
+      const ctx = makeContext({
+        product: 'ASO',
+        body: {
+          subjectType: 'user',
+          subjectId: 'someone@AdobeID',
+          resourceType: 'site',
+          resourceId: VALID_UUID_RES,
+          grantedCapabilities: ['aso/can_view'],
+        },
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(201);
+      // ASO scopes by opportunity type: a plain create defaults to ('opportunity','all'),
+      // aligning with the #923 backfill so it dedups against existing rows.
+      expect(createStub.firstCall.args[1]).to.include({
+        compositeKeyType: 'opportunity', compositeKeyValue: 'all',
       });
     });
 

@@ -1286,7 +1286,16 @@ const routeFacsCapabilities = {
    * See mysticat-architecture/platform/decisions/rebac-composite-resource-key.md.
    */
   PRODUCTS_FACS_COMPOSITE_RESOURCE: {
-    ASO: { resourceType: 'site', resolver: 'asoOpportunityComposite' },
+    // `defaultCompositeKeyType` is the product's composite scope DIMENSION: new
+    // mappings created without an explicit compositeKeyType default to it (value
+    // defaults to 'all' = every value in that dimension). ASO scopes by opportunity
+    // type, so a plain ASO site grant is ('opportunity','all') — matching the #923
+    // backfill of existing rows. Products absent from this map default to 'all'.
+    ASO: {
+      resourceType: 'site',
+      resolver: 'asoOpportunityComposite',
+      defaultCompositeKeyType: 'opportunity',
+    },
   },
 
   /**

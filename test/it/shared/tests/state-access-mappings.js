@@ -685,9 +685,10 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
         expect(res.body.product).to.equal('ASO');
         expect(res.body.resourceType).to.equal('site');
         expect(res.body.grantedCapabilities).to.have.members(['aso/can_view', 'aso/can_edit']);
-        // D6: the composite qualifier defaults to the site-wide sentinel ('all')
-        // when the request omits it — a plain site-scoped binding, as before.
-        expect(res.body.compositeKeyType).to.equal('all');
+        // D6: for ASO the composite TYPE defaults to the product dimension
+        // ('opportunity') and the value to 'all' when omitted — aligning with the
+        // #923 backfill so a plain create dedups against existing rows.
+        expect(res.body.compositeKeyType).to.equal('opportunity');
         expect(res.body.compositeKeyValue).to.equal('all');
       });
 
@@ -727,7 +728,7 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
         expect(res.body.items).to.be.an('array').with.lengthOf(2);
         const qualifiers = res.body.items
           .map((m) => `${m.compositeKeyType}/${m.compositeKeyValue}`);
-        expect(qualifiers).to.have.members(['all/all', 'opportunity/security']);
+        expect(qualifiers).to.have.members(['opportunity/all', 'opportunity/security']);
       });
 
       it('GET filters by the composite qualifier', async () => {

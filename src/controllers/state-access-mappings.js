@@ -87,6 +87,18 @@ function getProductResourceTypes(product) {
   return Object.keys(resourceMap);
 }
 
+/**
+ * Default composite-key TYPE for a product's create path. A product with a
+ * composite scope dimension (ASO → 'opportunity') defaults new mappings to that
+ * dimension (value defaults to 'all' = every value in it), so a plain grant lines
+ * up with the migrated/backfilled rows and dedups against them. Products without a
+ * composite dimension fall back to the 'all' sentinel (no scoping).
+ */
+function defaultCompositeKeyTypeFor(product) {
+  return routeFacsCapabilities.PRODUCTS_FACS_COMPOSITE_RESOURCE?.[product]?.defaultCompositeKeyType
+    ?? 'all';
+}
+
 function encodeCursor(offset) {
   return Buffer.from(JSON.stringify({ offset }), 'utf8').toString('base64url');
 }
@@ -907,8 +919,9 @@ function StateAccessMappingsController(context) {
     );
 
     // Composite-key qualifier (opt-in; ADR D6). When provided it must be a non-empty
-    // string (no catalog validation, per D5 — it is matched against the live resource
-    // at enforcement); omitted → 'all' (site-wide), preserving current behavior.
+    // string (no catalog validation, per D5 — matched against the live resource at
+    // enforcement). Omitted → the product's default composite dimension (ASO →
+    // 'opportunity'; others → 'all'), with value → 'all' (every value in it).
     if (compositeKeyType !== undefined && !hasText(compositeKeyType)) {
       return badRequest('compositeKeyType, when provided, must be a non-empty string');
     }
@@ -925,7 +938,9 @@ function StateAccessMappingsController(context) {
       resourceId,
       capabilitiesToStore,
       createdBy,
-      compositeKeyType: hasText(compositeKeyType) ? compositeKeyType : 'all',
+      compositeKeyType: hasText(compositeKeyType)
+        ? compositeKeyType
+        : defaultCompositeKeyTypeFor(product),
       compositeKeyValue: hasText(compositeKeyValue) ? compositeKeyValue : 'all',
     });
   }
@@ -1050,7 +1065,8 @@ function StateAccessMappingsController(context) {
     );
 
     // Composite-key qualifier (opt-in; ADR D6). Non-empty string when provided (no
-    // catalog validation, per D5); omitted → 'all' (site-wide).
+    // catalog validation, per D5); omitted → product default composite type
+    // (ASO → 'opportunity'; others → 'all'), value → 'all'.
     if (compositeKeyType !== undefined && !hasText(compositeKeyType)) {
       return badRequest('compositeKeyType, when provided, must be a non-empty string');
     }
@@ -1069,7 +1085,9 @@ function StateAccessMappingsController(context) {
       // Audit trail only: record the real admin/service caller. No mapping
       // access-scope data is derived from authInfo.
       createdBy: resolveCallerUserIdent(ctx),
-      compositeKeyType: hasText(compositeKeyType) ? compositeKeyType : 'all',
+      compositeKeyType: hasText(compositeKeyType)
+        ? compositeKeyType
+        : defaultCompositeKeyTypeFor(product),
       compositeKeyValue: hasText(compositeKeyValue) ? compositeKeyValue : 'all',
     });
   }

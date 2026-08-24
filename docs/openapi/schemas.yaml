@@ -13795,8 +13795,9 @@ StateAccessMappingCreateRequest:
       type: string
       description: |
         Optional first composite-key qualifier *type* narrowing the binding
-        below the resource (e.g. `opportunity`). Omit — or send `all` — for a
-        resource-wide binding; defaults to `all` server-side.
+        below the resource. Omitted → the product's default composite dimension
+        (ASO → `opportunity`; products without composite scoping → `all`). Paired
+        `compositeKeyValue` still defaults to `all` (every value in the dimension).
       example: opportunity
     compositeKeyValue:
       type: string
