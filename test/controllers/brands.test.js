@@ -6175,6 +6175,197 @@ describe('Brands Controller', () => {
       return Mocked.default(context, loggerStub, mockEnv);
     }
 
+    describe('primary-site re-point (serenity-docs#349)', () => {
+      const OLD_SITE = '0b4dcf79-fe5f-410b-b11f-641f0bf56da3';
+      const NEW_SITE = 'b2222222-2222-4222-b222-222222222222';
+      const NEW_BASE_URL = 'https://new-site.com';
+
+      // A postgrestClient whose only real read is the target `sites` lookup — every
+      // brand read/write in the handler is stubbed out via the brands-storage mock.
+      function sitesPostgrest({ targetSite = { id: NEW_SITE, base_url: NEW_BASE_URL } } = {}) {
+        return {
+          from: sinon.stub().callsFake(() => ({
+            select: sinon.stub().returnsThis(),
+            eq: sinon.stub().returnsThis(),
+            maybeSingle: sinon.stub().resolves({ data: targetSite, error: null }),
+          })),
+        };
+      }
+
+      async function buildRepointController({
+        current,
+        updateBrand = sinon.stub().resolves({
+          ...current, baseSiteId: NEW_SITE, baseUrl: NEW_BASE_URL,
+        }),
+        getBrandBySite = sinon.stub().resolves(null),
+        propagateSiteUrlToSemrush = sinon.stub().resolves({ projectsUpdated: 1 }),
+        projectsForSite = sinon.stub().resolves([{ getSemrushProjectId: () => 'proj-1' }]),
+        relinkSiteForRows = sinon.stub().resolves(),
+      } = {}) {
+        const Mocked = await esmock('../../src/controllers/brands.js', {
+          '../../src/support/brands-storage.js': {
+            updateBrand,
+            getBrandById: sinon.stub().resolves(current),
+            getBrandBySite,
+            readSerenityFlagScopes: sinon.stub().resolves({ orgRow: null, brandRows: new Map() }),
+            getBrandCompetitors: sinon.stub().resolves([]),
+          },
+          '../../src/support/prompts-storage.js': { resolveBrandUuid: sinon.stub().resolves(BRAND_UUID) },
+          '../../src/support/serenity/site-url-propagation.js': { propagateSiteUrlToSemrush },
+          '../../src/support/serenity/mapping-rows.js': { projectsForSite, relinkSiteForRows },
+          '../../src/support/serenity/rest-transport.js': {
+            createSerenityTransport: sinon.stub().returns({ name: 't' }),
+          },
+          '../../src/support/utils.js': { resolveSemrushImsToken: sinon.stub().resolves('ims-tok') },
+        });
+        const stubs = {
+          updateBrand,
+          getBrandBySite,
+          propagateSiteUrlToSemrush,
+          projectsForSite,
+          relinkSiteForRows,
+        };
+        return { controller: Mocked.default(context, loggerStub, mockEnv), stubs };
+      }
+
+      function repointRequest(dataAccessOverride) {
+        return {
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: { baseSiteId: NEW_SITE },
+          dataAccess: { ...mockDataAccess, services: { postgrestClient: dataAccessOverride } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        };
+      }
+
+      it('re-points an active Semrush brand: propagates new URL, re-links rows, returns 200', async () => {
+        const current = {
+          id: BRAND_UUID,
+          name: 'Acme',
+          status: 'active',
+          baseSiteId: OLD_SITE,
+          semrushSubWorkspaceId: 'ws-9',
+          brandAliases: [{ name: 'Acme Inc', regions: [] }],
+        };
+        const { controller, stubs } = await buildRepointController({ current });
+
+        const response = await controller.updateBrandForOrg(repointRequest(sitesPostgrest()));
+
+        expect(response.status).to.equal(200);
+        expect(stubs.propagateSiteUrlToSemrush).to.have.been.calledOnce;
+        const propArgs = stubs.propagateSiteUrlToSemrush.firstCall.args[0];
+        expect(propArgs.newBaseURL).to.equal(NEW_BASE_URL);
+        expect(propArgs.workspaceId).to.equal('ws-9');
+        expect(propArgs.siteId).to.equal(OLD_SITE);
+        expect(propArgs.rows).to.have.length(1);
+        // Re-link runs only AFTER a successful Semrush propagation.
+        expect(stubs.relinkSiteForRows).to.have.been.calledOnceWith(
+          sinon.match.any,
+          sinon.match.array,
+          NEW_SITE,
+        );
+        expect(stubs.propagateSiteUrlToSemrush).to.have.been.calledBefore(stubs.relinkSiteForRows);
+      });
+
+      it('returns 409 siteUrlTaken when the target is another active brand\'s primary site', async () => {
+        const current = {
+          id: BRAND_UUID, name: 'Acme', status: 'active', baseSiteId: OLD_SITE, semrushSubWorkspaceId: 'ws-9',
+        };
+        const { controller, stubs } = await buildRepointController({
+          current,
+          getBrandBySite: sinon.stub().resolves({ id: 'other-brand-uuid' }),
+        });
+
+        const response = await controller.updateBrandForOrg(repointRequest(sitesPostgrest()));
+
+        expect(response.status).to.equal(409);
+        const body = await response.json();
+        expect(body.code).to.equal('siteUrlTaken');
+        expect(stubs.propagateSiteUrlToSemrush).to.not.have.been.called;
+        expect(stubs.updateBrand).to.not.have.been.called;
+      });
+
+      it('makes no Semrush calls when re-pointing a non-Semrush (flat-mode) brand', async () => {
+        const current = {
+          id: BRAND_UUID, name: 'Acme', status: 'active', baseSiteId: OLD_SITE, semrushSubWorkspaceId: null,
+        };
+        const { controller, stubs } = await buildRepointController({ current });
+
+        const response = await controller.updateBrandForOrg(repointRequest(sitesPostgrest()));
+
+        expect(response.status).to.equal(200);
+        expect(stubs.propagateSiteUrlToSemrush).to.not.have.been.called;
+        expect(stubs.relinkSiteForRows).to.not.have.been.called;
+        expect(stubs.updateBrand).to.have.been.calledOnce;
+      });
+
+      it('passes a quota 409 (code quotaExceeded) through and does not persist', async () => {
+        const current = {
+          id: BRAND_UUID, name: 'Acme', status: 'active', baseSiteId: OLD_SITE, semrushSubWorkspaceId: 'ws-9',
+        };
+        const quotaErr = Object.assign(new Error('quota'), { status: 409, code: 'quotaExceeded' });
+        const { controller, stubs } = await buildRepointController({
+          current,
+          propagateSiteUrlToSemrush: sinon.stub().rejects(quotaErr),
+        });
+
+        const response = await controller.updateBrandForOrg(repointRequest(sitesPostgrest()));
+
+        expect(response.status).to.equal(409);
+        const body = await response.json();
+        expect(body.code).to.equal('quotaExceeded');
+        expect(stubs.relinkSiteForRows).to.not.have.been.called;
+        expect(stubs.updateBrand).to.not.have.been.called;
+      });
+
+      it('maps a Semrush transport error to 502 without leaking upstream detail', async () => {
+        const current = {
+          id: BRAND_UUID, name: 'Acme', status: 'active', baseSiteId: OLD_SITE, semrushSubWorkspaceId: 'ws-9',
+        };
+        const transportErr = new SerenityTransportError(503, 'Semrush POST https://gw/internal failed: 503', {});
+        const { controller, stubs } = await buildRepointController({
+          current,
+          propagateSiteUrlToSemrush: sinon.stub().rejects(transportErr),
+        });
+
+        const response = await controller.updateBrandForOrg(repointRequest(sitesPostgrest()));
+
+        expect(response.status).to.equal(502);
+        const body = await response.json();
+        expect(body.message).to.equal('Failed to update the tracked URL in Semrush');
+        expect(body.message).to.not.contain('gw/internal');
+        expect(stubs.updateBrand).to.not.have.been.called;
+      });
+
+      it('returns 404 when the target site is not in the org', async () => {
+        const current = {
+          id: BRAND_UUID, name: 'Acme', status: 'active', baseSiteId: OLD_SITE, semrushSubWorkspaceId: 'ws-9',
+        };
+        const { controller, stubs } = await buildRepointController({ current });
+
+        const response = await controller.updateBrandForOrg(
+          repointRequest(sitesPostgrest({ targetSite: null })),
+        );
+
+        expect(response.status).to.equal(404);
+        expect(stubs.propagateSiteUrlToSemrush).to.not.have.been.called;
+        expect(stubs.updateBrand).to.not.have.been.called;
+      });
+
+      it('treats re-submitting the same baseSiteId as a no-op (no Semrush, still 200)', async () => {
+        const current = {
+          id: BRAND_UUID, name: 'Acme', status: 'active', baseSiteId: NEW_SITE, semrushSubWorkspaceId: 'ws-9',
+        };
+        const { controller, stubs } = await buildRepointController({ current });
+
+        const response = await controller.updateBrandForOrg(repointRequest(sitesPostgrest()));
+
+        expect(response.status).to.equal(200);
+        expect(stubs.propagateSiteUrlToSemrush).to.not.have.been.called;
+        expect(stubs.updateBrand).to.have.been.calledOnce;
+      });
+    });
+
     it('re-syncs brand URLs across markets when a URL field changes on a sub-workspace brand', async () => {
       const updated = {
         id: BRAND_UUID,

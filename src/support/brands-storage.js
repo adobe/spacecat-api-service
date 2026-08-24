@@ -1423,25 +1423,26 @@ export async function updateBrand({
     }
   }
 
-  // baseSiteId mutation rules (LLMO-5870):
+  // baseSiteId mutation rules:
   //  - First set (NULL -> value): allowed for any brand.
-  //  - Re-point (value -> different value): allowed ONLY for pending brands, so a
-  //    draft can swap its primary URL before activation.
+  //  - Re-point (value -> different value): allowed for ANY brand via THIS explicit
+  //    updateBrand path (serenity-docs#349). A user deliberately picks an existing
+  //    Site in the org to become the brand's primary site, and the controller
+  //    (updateBrandForOrg) validates eligibility + drives the Semrush propagation
+  //    before this write. This is the sanctioned re-point path — NOT to be confused
+  //    with the SILENT overwrite guard that stays in upsertBrand (the automated
+  //    re-onboard path, LLMO-5556: mongodb.com -> learn.mongodb.com etc.), which
+  //    still refuses to move an existing site_id.
   //  - Clear (value -> NULL): allowed ONLY for pending brands, so the site can be
-  //    freed for reuse by another brand.
-  // Active brands stay immutable-once-set: a routine field save that echoes a
-  // stale baseSiteId must never re-point or strip a live brand's anchor (the
-  // LLMO-5556 / express.adobe.com regression guard). Clearing a pending brand's
-  // site_id is safe at the DB level — the partial unique index
-  // (brands_base_site_unique) skips NULLs and chk_active_brand_has_site_id only
-  // constrains active brands. The unique index still rejects a re-point that
-  // collides with another brand's primary URL.
+  //    freed for reuse by another brand. Active brands keep chk_active_brand_has_site_id.
+  // The partial unique index (brands_base_site_unique) skips NULLs and still rejects
+  // a re-point that collides with another brand's primary URL at the DB level.
   const isPending = (existing?.status || '').toLowerCase() === 'pending';
   if (wantsClearBaseSite) {
     if (isPending) {
       patch.site_id = null;
     }
-  } else if (hasText(updates.baseSiteId) && (!existing?.site_id || isPending)) {
+  } else if (hasText(updates.baseSiteId) && updates.baseSiteId !== existing?.site_id) {
     // serenity-docs#346: same org-ID mismatch guard as upsertBrand — verify the
     // new/re-pointed site actually belongs to this brand's org before persisting.
     const brandLabel = existing?.name || brandId;
