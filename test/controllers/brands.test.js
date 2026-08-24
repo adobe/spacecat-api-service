@@ -6182,7 +6182,9 @@ describe('Brands Controller', () => {
 
       // A postgrestClient whose only real read is the target `sites` lookup — every
       // brand read/write in the handler is stubbed out via the brands-storage mock.
-      function sitesPostgrest({ targetSite = { id: NEW_SITE, base_url: NEW_BASE_URL } } = {}) {
+      function sitesPostgrest({
+        targetSite = { id: NEW_SITE, base_url: NEW_BASE_URL, organization_id: ORGANIZATION_ID },
+      } = {}) {
         return {
           from: sinon.stub().callsFake(() => ({
             select: sinon.stub().returnsThis(),
@@ -6337,19 +6339,29 @@ describe('Brands Controller', () => {
         expect(stubs.updateBrand).to.not.have.been.called;
       });
 
-      it('returns 404 when the target site is not in the org', async () => {
+      it('does not intercept a cross-org / missing target: skips Semrush and defers to updateBrand (org-anchor guard owns brand_site_org_mismatch)', async () => {
+        // A target that is missing (null) or belongs to another org must NOT be handled by
+        // the re-point block — it falls through to updateBrand, whose anchor guard raises the
+        // pre-existing `brand_site_org_mismatch` 409 (brands-storage.js / serenity-docs#346).
+        // The controller must not short-circuit that with a bespoke 404, nor touch Semrush.
         const current = {
           id: BRAND_UUID, name: 'Acme', status: 'active', baseSiteId: OLD_SITE, semrushSubWorkspaceId: 'ws-9',
         };
         const { controller, stubs } = await buildRepointController({ current });
 
         const response = await controller.updateBrandForOrg(
-          repointRequest(sitesPostgrest({ targetSite: null })),
+          // Target exists but in a DIFFERENT org — the cross-org case the IT test pins to 409.
+          repointRequest(sitesPostgrest({
+            targetSite: { id: NEW_SITE, base_url: NEW_BASE_URL, organization_id: 'some-other-org' },
+          })),
         );
 
-        expect(response.status).to.equal(404);
+        // No Semrush side effects; the re-point block yielded to updateBrand.
         expect(stubs.propagateSiteUrlToSemrush).to.not.have.been.called;
-        expect(stubs.updateBrand).to.not.have.been.called;
+        expect(stubs.relinkSiteForRows).to.not.have.been.called;
+        expect(stubs.updateBrand).to.have.been.calledOnce;
+        // updateBrand is stubbed to resolve here; the real 409 mapping is covered by the IT test.
+        expect(response.status).to.equal(200);
       });
 
       it('treats re-submitting the same baseSiteId as a no-op (no Semrush, still 200)', async () => {
