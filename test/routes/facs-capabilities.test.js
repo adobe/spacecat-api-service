@@ -130,6 +130,20 @@ describe('routeFacsCapabilities', () => {
       expect(orphans, `onboarded products missing from PRODUCTS_ROUTES: ${orphans.join(', ')}`)
         .to.deep.equal([]);
     });
+
+    it('every product with a non-empty route map is onboarded', () => {
+      // Inverse guard: a product that declares FACS-governed routes but is NOT in
+      // FACS_ONBOARDED_PRODUCTS would have those routes silently bypass FACS (they
+      // look protected but the wrapper never enforces them) — the more dangerous
+      // failure mode. ACO is intentionally excluded: its map is still empty ({}).
+      const onboarded = routeFacsCapabilities.FACS_ONBOARDED_PRODUCTS;
+      const populated = Object.entries(routeFacsCapabilities.PRODUCTS_ROUTES)
+        .filter(([, routes]) => Object.keys(routes).length > 0)
+        .map(([product]) => product);
+      const unenforced = populated.filter((product) => !onboarded.includes(product));
+      expect(unenforced, `products with routes but not onboarded (routes silently bypass FACS): ${unenforced.join(', ')}`)
+        .to.deep.equal([]);
+    });
   });
 
   describe('INTERNAL_ROUTES', () => {
