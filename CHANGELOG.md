@@ -1,3 +1,10 @@
+# [1.762.0](https://github.com/adobe/spacecat-api-service/compare/v1.761.0...v1.762.0) (2026-08-24)
+
+
+### Features
+
+* **brands:** re-point a brand's primary site to an existing Site ([#349](https://github.com/adobe/spacecat-api-service/issues/349)) ([#3123](https://github.com/adobe/spacecat-api-service/issues/3123)) ([1152e90](https://github.com/adobe/spacecat-api-service/commit/1152e90dbdf4d37092f09ad5e02a90d126de5a45)), closes [#3098](https://github.com/adobe/spacecat-api-service/issues/3098)
+
 # [1.761.0](https://github.com/adobe/spacecat-api-service/compare/v1.760.2...v1.761.0) (2026-08-20)
 
 
