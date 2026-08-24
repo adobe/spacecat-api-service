@@ -688,8 +688,8 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
         // D6: for ASO the composite TYPE defaults to the product dimension
         // ('opportunity') and the value to 'all' when omitted — aligning with the
         // #923 backfill so a plain create dedups against existing rows.
-        expect(res.body.compositeKeyType).to.equal('opportunity');
-        expect(res.body.compositeKeyValue).to.equal('all');
+        expect(res.body.compositeKeyType1).to.equal('opportunity');
+        expect(res.body.compositeKeyValue1).to.equal('all');
       });
 
       it('POST creates a composite-scoped ASO binding (opportunity/security)', async () => {
@@ -701,8 +701,8 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
             subjectId: USER_SUBJECT,
             resourceType: 'site',
             resourceId: SITE_RESOURCE_ID,
-            compositeKeyType: 'opportunity',
-            compositeKeyValue: 'security',
+            compositeKeyType1: 'opportunity',
+            compositeKeyValue1: 'security',
             grantedCapabilities: ['aso/can_view', 'aso/can_edit'],
           },
           { 'x-product': 'aso' },
@@ -711,8 +711,8 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
         // the composite qualifier: this is a NEW row (201), not an upsert (200) —
         // proving the qualifier is threaded through the duplicate-detection lookup.
         expect(res.status).to.equal(201);
-        expect(res.body.compositeKeyType).to.equal('opportunity');
-        expect(res.body.compositeKeyValue).to.equal('security');
+        expect(res.body.compositeKeyType1).to.equal('opportunity');
+        expect(res.body.compositeKeyValue1).to.equal('security');
       });
 
       it('GET returns both the site-wide and composite-scoped bindings (composite is part of uniqueness)', async () => {
@@ -727,7 +727,7 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
         // (pre-composite the partial unique index allowed just one active row here).
         expect(res.body.items).to.be.an('array').with.lengthOf(2);
         const qualifiers = res.body.items
-          .map((m) => `${m.compositeKeyType}/${m.compositeKeyValue}`);
+          .map((m) => `${m.compositeKeyType1}/${m.compositeKeyValue1}`);
         expect(qualifiers).to.have.members(['opportunity/all', 'opportunity/security']);
       });
 
@@ -735,13 +735,13 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get(
           `${BASE}?resourceType=site&resourceId=${SITE_RESOURCE_ID}`
-          + '&compositeKeyType=opportunity&compositeKeyValue=security',
+          + '&compositeKeyType1=opportunity&compositeKeyValue1=security',
           { 'x-product': 'aso' },
         );
         expect(res.status).to.equal(200);
         expect(res.body.items).to.be.an('array').with.lengthOf(1);
-        expect(res.body.items[0].compositeKeyType).to.equal('opportunity');
-        expect(res.body.items[0].compositeKeyValue).to.equal('security');
+        expect(res.body.items[0].compositeKeyType1).to.equal('opportunity');
+        expect(res.body.items[0].compositeKeyValue1).to.equal('security');
       });
     });
   });

@@ -346,8 +346,8 @@ describe('state-access-mapping-utils helpers', () => {
         resourceId: 'site-1',
         grantedCapabilities: ['aso/can_edit'],
         subjects: [{ type: 'user', id: 'A@AdobeID' }],
-        compositeKeyType: 'opportunity',
-        compositeKeyValue: 'security',
+        compositeKeyType1: 'opportunity',
+        compositeKeyValue1: 'security',
       });
       expect(client.insertArgs[0]).to.include({
         composite_key_type_1: 'opportunity',

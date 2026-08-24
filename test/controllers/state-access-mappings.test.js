@@ -536,7 +536,7 @@ describe('StateAccessMappingsController', () => {
       const res = await Controller(ctx).createMapping(ctx);
       expect(res.status).to.equal(201);
       expect(createStub.firstCall.args[1]).to.include({
-        compositeKeyType: 'all', compositeKeyValue: 'all',
+        compositeKeyType1: 'all', compositeKeyValue1: 'all',
       });
     });
 
@@ -560,43 +560,94 @@ describe('StateAccessMappingsController', () => {
       // ASO scopes by opportunity type: a plain create defaults to ('opportunity','all'),
       // aligning with the #923 backfill so it dedups against existing rows.
       expect(createStub.firstCall.args[1]).to.include({
-        compositeKeyType: 'opportunity', compositeKeyValue: 'all',
+        compositeKeyType1: 'opportunity', compositeKeyValue1: 'all',
       });
     });
 
-    it('passes the composite-key qualifier through when provided', async () => {
-      const createStub = sinon.stub().resolves({ created: [makeRow()], skipped: [] });
+    // Composite key is ASO-scoped: builds a valid ASO/site create body.
+    const asoBody = (overrides = {}) => ({
+      subjectType: 'user',
+      subjectId: 'someone@AdobeID',
+      resourceType: 'site',
+      resourceId: VALID_UUID_RES,
+      grantedCapabilities: ['aso/can_view'],
+      ...overrides,
+    });
+
+    it('passes the composite-key value through when provided (ASO)', async () => {
+      const createStub = sinon.stub().resolves({
+        created: [makeRow({ product: 'ASO', resource_type: 'site' })], skipped: [],
+      });
       const { Controller } = await loadController({ createFacsAccessMappings: createStub });
       const ctx = makeContext({
-        body: { ...validBody, compositeKeyType: 'opportunity', compositeKeyValue: 'security' },
+        product: 'ASO',
+        body: asoBody({ compositeKeyType1: 'opportunity', compositeKeyValue1: 'security' }),
       });
       const res = await Controller(ctx).createMapping(ctx);
       expect(res.status).to.equal(201);
       expect(createStub.firstCall.args[1]).to.include({
-        compositeKeyType: 'opportunity', compositeKeyValue: 'security',
+        compositeKeyType1: 'opportunity', compositeKeyValue1: 'security',
       });
     });
 
-    it('returns 400 when compositeKeyValue is provided empty', async () => {
+    it('anchors compositeKeyType1 from config even when the value alone is sent (ASO)', async () => {
+      const createStub = sinon.stub().resolves({
+        created: [makeRow({ product: 'ASO', resource_type: 'site' })], skipped: [],
+      });
+      const { Controller } = await loadController({ createFacsAccessMappings: createStub });
+      const ctx = makeContext({ product: 'ASO', body: asoBody({ compositeKeyValue1: 'security' }) });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(201);
+      expect(createStub.firstCall.args[1]).to.include({
+        compositeKeyType1: 'opportunity', compositeKeyValue1: 'security',
+      });
+    });
+
+    it('returns 400 when compositeKeyValue1 is provided empty (ASO)', async () => {
       const { Controller } = await loadController();
-      const ctx = makeContext({ body: { ...validBody, compositeKeyValue: '' } });
+      const ctx = makeContext({ product: 'ASO', body: asoBody({ compositeKeyValue1: '' }) });
       const res = await Controller(ctx).createMapping(ctx);
       expect(res.status).to.equal(400);
     });
 
-    it('surfaces the composite-key qualifier in the created DTO', async () => {
-      const row = makeRow({ composite_key_type_1: 'opportunity', composite_key_value_1: 'security' });
+    it('rejects a compositeKeyType1 that does not match the product slot (ASO)', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({
+        product: 'ASO',
+        body: asoBody({ compositeKeyType1: 'brand', compositeKeyValue1: 'security' }),
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('rejects a composite key for a product with no composite slots (LLMO)', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({
+        body: { ...validBody, compositeKeyType1: 'opportunity', compositeKeyValue1: 'security' },
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('surfaces the composite-key qualifier in the created DTO (ASO)', async () => {
+      const row = makeRow({
+        product: 'ASO',
+        resource_type: 'site',
+        composite_key_type_1: 'opportunity',
+        composite_key_value_1: 'security',
+      });
       const { Controller } = await loadController({
         createFacsAccessMappings: sinon.stub().resolves({ created: [row], skipped: [] }),
       });
       const ctx = makeContext({
-        body: { ...validBody, compositeKeyType: 'opportunity', compositeKeyValue: 'security' },
+        product: 'ASO',
+        body: asoBody({ compositeKeyType1: 'opportunity', compositeKeyValue1: 'security' }),
       });
       const res = await Controller(ctx).createMapping(ctx);
       expect(res.status).to.equal(201);
       const body = await res.json();
-      expect(body.compositeKeyType).to.equal('opportunity');
-      expect(body.compositeKeyValue).to.equal('security');
+      expect(body.compositeKeyType1).to.equal('opportunity');
+      expect(body.compositeKeyValue1).to.equal('security');
     });
 
     it('injects the baseline can_view when the request omits it', async () => {

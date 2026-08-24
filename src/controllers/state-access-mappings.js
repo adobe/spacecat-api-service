@@ -88,15 +88,39 @@ function getProductResourceTypes(product) {
 }
 
 /**
- * Default composite-key TYPE for a product's create path. A product with a
- * composite scope dimension (ASO → 'opportunity') defaults new mappings to that
- * dimension (value defaults to 'all' = every value in it), so a plain grant lines
- * up with the migrated/backfilled rows and dedups against them. Products without a
- * composite dimension fall back to the 'all' sentinel (no scoping).
+ * Resolve + validate the composite-key SLOT(S) for a create request. Slot types
+ * are anchored per product in PRODUCTS_FACS_COMPOSITE_RESOURCE.compositeKeySlots
+ * (ordered; index i → DB columns composite_key_type_<i+1>/value_<i+1>). A slot's
+ * TYPE is not client-chosen: a supplied `compositeKeyType1` must equal the
+ * product's configured slot-1 dimension (ASO → 'opportunity'), else it is
+ * rejected; a product that declares no slots (e.g. LLMO) rejects any composite
+ * key. Type is filled from config; value defaults to 'all' (wildcard). Anchoring
+ * the type here keeps slot _1 permanently bound to its entity, so a future slot
+ * _2 (a different entity) can never be cross-wired.
+ *
+ * @returns {{ compositeKeyType1: string, compositeKeyValue1: string }
+ *   | { error: Response }}
  */
-function defaultCompositeKeyTypeFor(product) {
-  return routeFacsCapabilities.PRODUCTS_FACS_COMPOSITE_RESOURCE?.[product]?.defaultCompositeKeyType
-    ?? 'all';
+function resolveCompositeKeys(product, compositeKeyType1, compositeKeyValue1) {
+  const slots = routeFacsCapabilities
+    .PRODUCTS_FACS_COMPOSITE_RESOURCE?.[product]?.compositeKeySlots ?? [];
+  if (slots.length === 0) {
+    if (compositeKeyType1 !== undefined || compositeKeyValue1 !== undefined) {
+      return { error: badRequest(`Product ${product} does not support composite keys`) };
+    }
+    return { compositeKeyType1: 'all', compositeKeyValue1: 'all' };
+  }
+  const [slot1Type] = slots;
+  if (compositeKeyType1 !== undefined && compositeKeyType1 !== slot1Type) {
+    return { error: badRequest(`compositeKeyType1 for ${product} must be '${slot1Type}'`) };
+  }
+  if (compositeKeyValue1 !== undefined && !hasText(compositeKeyValue1)) {
+    return { error: badRequest('compositeKeyValue1, when provided, must be a non-empty string') };
+  }
+  return {
+    compositeKeyType1: slot1Type,
+    compositeKeyValue1: hasText(compositeKeyValue1) ? compositeKeyValue1 : 'all',
+  };
 }
 
 function encodeCursor(offset) {
@@ -170,8 +194,8 @@ function toMappingDto(row) {
     subjectId: row.subject_id,
     resourceType: row.resource_type,
     resourceId: row.resource_id,
-    compositeKeyType: row.composite_key_type_1 ?? null,
-    compositeKeyValue: row.composite_key_value_1 ?? null,
+    compositeKeyType1: row.composite_key_type_1 ?? null,
+    compositeKeyValue1: row.composite_key_value_1 ?? null,
     imsOrgId: row.ims_org_id,
     product: row.product,
     grantedCapabilities: row.granted_capabilities ?? [],
@@ -323,8 +347,8 @@ function StateAccessMappingsController(context) {
       subjectId: queryParams.subjectId,
       resourceType: queryParams.resourceType,
       resourceId: queryParams.resourceId,
-      compositeKeyType: queryParams.compositeKeyType,
-      compositeKeyValue: queryParams.compositeKeyValue,
+      compositeKeyType1: queryParams.compositeKeyType1,
+      compositeKeyValue1: queryParams.compositeKeyValue1,
       limit: queryParams.limit,
     };
   }
@@ -620,8 +644,8 @@ function StateAccessMappingsController(context) {
     resourceId,
     capabilitiesToStore,
     createdBy,
-    compositeKeyType,
-    compositeKeyValue,
+    compositeKeyType1,
+    compositeKeyValue1,
   }) {
     try {
       const { postgrestClient } = ctx.dataAccess.services;
@@ -633,8 +657,8 @@ function StateAccessMappingsController(context) {
         grantedCapabilities: capabilitiesToStore,
         subjects: [{ type: subjectType, id: subjectId }],
         createdBy,
-        compositeKeyType,
-        compositeKeyValue,
+        compositeKeyType1,
+        compositeKeyValue1,
       });
       if (result.created.length === 0 && result.skipped.length > 0) {
         // Active duplicate already exists — upsert semantics: overwrite the
@@ -651,8 +675,8 @@ function StateAccessMappingsController(context) {
           // The active-row unique key now includes the qualifier, so the conflict
           // re-lookup must match it too — otherwise the upsert could overwrite a
           // different-qualifier binding for the same subject+resource.
-          compositeKeyType,
-          compositeKeyValue,
+          compositeKeyType1,
+          compositeKeyValue1,
           limit: 1,
         });
         const conflictId = existing[0]?.id ?? null;
@@ -864,7 +888,7 @@ function StateAccessMappingsController(context) {
     }
     const {
       subjectType, subjectId, resourceType, resourceId, grantedCapabilities,
-      compositeKeyType, compositeKeyValue,
+      compositeKeyType1, compositeKeyValue1,
     } = data;
 
     if (!ALLOWED_SUBJECT_TYPES.has(subjectType)) {
@@ -918,15 +942,12 @@ function StateAccessMappingsController(context) {
       product,
     );
 
-    // Composite-key qualifier (opt-in; ADR D6). When provided it must be a non-empty
-    // string (no catalog validation, per D5 — matched against the live resource at
-    // enforcement). Omitted → the product's default composite dimension (ASO →
-    // 'opportunity'; others → 'all'), with value → 'all' (every value in it).
-    if (compositeKeyType !== undefined && !hasText(compositeKeyType)) {
-      return badRequest('compositeKeyType, when provided, must be a non-empty string');
-    }
-    if (compositeKeyValue !== undefined && !hasText(compositeKeyValue)) {
-      return badRequest('compositeKeyValue, when provided, must be a non-empty string');
+    // Composite-key slot(s): the TYPE is anchored + validated per product+slot
+    // (ASO slot 1 = 'opportunity'), not client-chosen; the VALUE is matched against
+    // the live resource at enforcement (per D5). See resolveCompositeKeys.
+    const composite = resolveCompositeKeys(product, compositeKeyType1, compositeKeyValue1);
+    if (composite.error) {
+      return composite.error;
     }
 
     return persistMappingBinding(ctx, {
@@ -938,10 +959,8 @@ function StateAccessMappingsController(context) {
       resourceId,
       capabilitiesToStore,
       createdBy,
-      compositeKeyType: hasText(compositeKeyType)
-        ? compositeKeyType
-        : defaultCompositeKeyTypeFor(product),
-      compositeKeyValue: hasText(compositeKeyValue) ? compositeKeyValue : 'all',
+      compositeKeyType1: composite.compositeKeyType1,
+      compositeKeyValue1: composite.compositeKeyValue1,
     });
   }
 
@@ -990,8 +1009,8 @@ function StateAccessMappingsController(context) {
       resourceType,
       resourceId,
       grantedCapabilities,
-      compositeKeyType,
-      compositeKeyValue,
+      compositeKeyType1,
+      compositeKeyValue1,
     } = data;
 
     // Product comes from the body (NOT the x-product header). Must reference a
@@ -1064,14 +1083,12 @@ function StateAccessMappingsController(context) {
       product,
     );
 
-    // Composite-key qualifier (opt-in; ADR D6). Non-empty string when provided (no
-    // catalog validation, per D5); omitted → product default composite type
-    // (ASO → 'opportunity'; others → 'all'), value → 'all'.
-    if (compositeKeyType !== undefined && !hasText(compositeKeyType)) {
-      return badRequest('compositeKeyType, when provided, must be a non-empty string');
-    }
-    if (compositeKeyValue !== undefined && !hasText(compositeKeyValue)) {
-      return badRequest('compositeKeyValue, when provided, must be a non-empty string');
+    // Composite-key slot(s): TYPE anchored + validated per product+slot (ASO slot 1
+    // = 'opportunity'), not client-chosen; value defaults to 'all'. See
+    // resolveCompositeKeys.
+    const composite = resolveCompositeKeys(product, compositeKeyType1, compositeKeyValue1);
+    if (composite.error) {
+      return composite.error;
     }
 
     return persistMappingBinding(ctx, {
@@ -1085,10 +1102,8 @@ function StateAccessMappingsController(context) {
       // Audit trail only: record the real admin/service caller. No mapping
       // access-scope data is derived from authInfo.
       createdBy: resolveCallerUserIdent(ctx),
-      compositeKeyType: hasText(compositeKeyType)
-        ? compositeKeyType
-        : defaultCompositeKeyTypeFor(product),
-      compositeKeyValue: hasText(compositeKeyValue) ? compositeKeyValue : 'all',
+      compositeKeyType1: composite.compositeKeyType1,
+      compositeKeyValue1: composite.compositeKeyValue1,
     });
   }
 

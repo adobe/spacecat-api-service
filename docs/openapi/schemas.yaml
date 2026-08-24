@@ -13728,18 +13728,19 @@ StateAccessMapping:
     resourceId:
       type: string
       example: '11111111-2222-4333-9444-555555555555'
-    compositeKeyType:
+    compositeKeyType1:
       type: [string, 'null']
       description: |
-        First composite-key qualifier *type* narrowing the binding below the
-        resource (e.g. `opportunity`). `all` — or null on legacy rows —
-        means the binding spans the whole resource.
+        Composite-key slot 1 *type* (DB `composite_key_type_1`) — the scope
+        dimension the binding is narrowed by. Product-anchored (ASO →
+        `opportunity`); `all` (or null on legacy rows) means no composite scoping.
       example: opportunity
-    compositeKeyValue:
+    compositeKeyValue1:
       type: [string, 'null']
       description: |
-        Value paired with `compositeKeyType` (e.g. an opportunity type such as
-        `security`). `all` or null means resource-wide.
+        Composite-key slot 1 *value* (DB `composite_key_value_1`) paired with
+        `compositeKeyType1` (e.g. an opportunity type such as `security`). `all`
+        or null means every value in the dimension (site-wide).
       example: security
     imsOrgId:
       type: string
@@ -13791,19 +13792,20 @@ StateAccessMappingCreateRequest:
     resourceId:
       type: string
       example: '11111111-2222-4333-9444-555555555555'
-    compositeKeyType:
+    compositeKeyType1:
       type: string
       description: |
-        Optional first composite-key qualifier *type* narrowing the binding
-        below the resource. Omitted → the product's default composite dimension
-        (ASO → `opportunity`; products without composite scoping → `all`). Paired
-        `compositeKeyValue` still defaults to `all` (every value in the dimension).
+        Optional composite-key slot 1 *type* (mirrors DB `composite_key_type_1`).
+        Anchored per product: when sent it MUST equal the product's slot-1
+        dimension (ASO → `opportunity`) or the request is rejected; omit to have it
+        filled from config. Products without composite scoping reject this field.
       example: opportunity
-    compositeKeyValue:
+    compositeKeyValue1:
       type: string
       description: |
-        Value paired with `compositeKeyType` (e.g. `security`). Omit — or send
-        `all` — for a resource-wide binding; defaults to `all` server-side.
+        Composite-key slot 1 *value* (mirrors DB `composite_key_value_1`) paired
+        with `compositeKeyType1` (e.g. `security`). Omit — or send `all` — to scope
+        to every value in the dimension; defaults to `all` server-side.
       example: security
     grantedCapabilities:
       type: array
