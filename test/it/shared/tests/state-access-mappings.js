@@ -718,6 +718,7 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.admin.get(
           `${BASE}?resourceType=site&resourceId=${SITE_RESOURCE_ID}`,
+          { 'x-product': 'aso' },
         );
         expect(res.status).to.equal(200);
         // Two DISTINCT active rows for the same subject+resource — only possible
@@ -734,6 +735,7 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
         const res = await http.admin.get(
           `${BASE}?resourceType=site&resourceId=${SITE_RESOURCE_ID}`
           + '&compositeKeyType=opportunity&compositeKeyValue=security',
+          { 'x-product': 'aso' },
         );
         expect(res.status).to.equal(200);
         expect(res.body.items).to.be.an('array').with.lengthOf(1);
