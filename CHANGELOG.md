@@ -1,3 +1,24 @@
+## [1.763.1](https://github.com/adobe/spacecat-api-service/compare/v1.763.0...v1.763.1) (2026-08-24)
+
+
+### Bug Fixes
+
+* **prompts:** chunk upsertPrompts' existing-rows lookup past 1000 ids ([#3126](https://github.com/adobe/spacecat-api-service/issues/3126)) ([9bbc1b8](https://github.com/adobe/spacecat-api-service/commit/9bbc1b84e694c8b73d95158adb87e8aeb6229178))
+
+# [1.763.0](https://github.com/adobe/spacecat-api-service/compare/v1.762.0...v1.763.0) (2026-08-24)
+
+
+### Features
+
+* scope AI Visibility stats-by-country to subdomain via search_type ([#3124](https://github.com/adobe/spacecat-api-service/issues/3124)) ([ed44111](https://github.com/adobe/spacecat-api-service/commit/ed44111ee541d4ddf86a00942719969c30ed189a)), closes [#3093](https://github.com/adobe/spacecat-api-service/issues/3093) [Hi#level](https://github.com/Hi/issues/level) [#3093](https://github.com/adobe/spacecat-api-service/issues/3093)
+
+# [1.762.0](https://github.com/adobe/spacecat-api-service/compare/v1.761.0...v1.762.0) (2026-08-24)
+
+
+### Features
+
+* **brands:** re-point a brand's primary site to an existing Site ([#349](https://github.com/adobe/spacecat-api-service/issues/349)) ([#3123](https://github.com/adobe/spacecat-api-service/issues/3123)) ([1152e90](https://github.com/adobe/spacecat-api-service/commit/1152e90dbdf4d37092f09ad5e02a90d126de5a45)), closes [#3098](https://github.com/adobe/spacecat-api-service/issues/3098)
+
 # [1.761.0](https://github.com/adobe/spacecat-api-service/compare/v1.760.2...v1.761.0) (2026-08-20)
 
 

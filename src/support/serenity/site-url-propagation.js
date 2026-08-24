@@ -54,10 +54,16 @@ import { projectsForSite } from './mapping-rows.js';
  *   - the brand's own identity, for `ensureOwnBrandBenchmark`'s `brand` param.
  * @param {string} params.newBaseURL - the site's new `baseURL`, as submitted.
  * @param {object} [params.log]
+ * @param {Array<any>} [params.rows] - pre-resolved live `BrandSemrushProject` rows to
+ *   re-point, when the caller already read them (e.g. the brand primary-site re-point in
+ *   brands.js, which reads the rows against the OLD siteId, propagates here, THEN re-links
+ *   them to the new site). When omitted, the rows are looked up by `siteId` via
+ *   `projectsForSite` (the site-rename path in sites.js).
  * @returns {Promise<{projectsUpdated: number}>}
  */
 export async function propagateSiteUrlToSemrush({
   dataAccess, transport, workspaceId, brandId, siteId, brandIdentity, newBaseURL, log,
+  rows: rowsParam,
 }) {
   const newIdentity = siteIdentityFromUrlString(newBaseURL);
   const newDomain = hostnameFromUrlString(newBaseURL);
@@ -70,7 +76,7 @@ export async function propagateSiteUrlToSemrush({
     throw new Error(`site-url-propagation: could not derive a URL identity from "${newBaseURL}"`);
   }
 
-  const rows = await projectsForSite(dataAccess, brandId, siteId);
+  const rows = rowsParam ?? await projectsForSite(dataAccess, brandId, siteId);
   if (rows.length === 0) {
     // No live project mapped to this site yet (e.g. the mapping row's siteId link is
     // still pending a best-effort write). Not an error — the caller still persists the
