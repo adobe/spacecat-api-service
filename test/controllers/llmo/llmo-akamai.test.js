@@ -287,10 +287,10 @@ describe('LlmoAkamaiController', () => {
       // The header is present (deploy adds it too), but its value is redacted in the returned tree.
       const fetcher = headers.find((o) => o.customHeaderName === 'x-edgeoptimize-fetcher-key');
       expect(fetcher).to.exist;
-      expect(fetcher.headerValue).to.equal('***');
+      expect(fetcher.newHeaderValue).to.equal('***');
       // redactSecrets also redacts the LLMO API key.
       const apiKey = headers.find((o) => o.customHeaderName === 'x-edgeoptimize-api-key');
-      expect(apiKey.headerValue).to.equal('***');
+      expect(apiKey.newHeaderValue).to.equal('***');
     });
 
     it('redacts the LLMO API key from the previewed merged tree', async () => {
@@ -423,9 +423,9 @@ describe('LlmoAkamaiController', () => {
       const fetcher = headers.find((o) => o.customHeaderName === 'x-edgeoptimize-fetcher-key');
       expect(fetcher).to.exist;
       // 32 random bytes as hex (`openssl rand -hex 32`).
-      expect(fetcher.headerValue).to.match(/^[0-9a-f]{64}$/);
+      expect(fetcher.newHeaderValue).to.match(/^[0-9a-f]{64}$/);
       // The deployed key is returned once and matches what was baked into the rule.
-      expect(body.fetcherKey).to.equal(fetcher.headerValue);
+      expect(body.fetcherKey).to.equal(fetcher.newHeaderValue);
     });
 
     it('mints a fresh fetcher key on each deploy (rotation)', async () => {
