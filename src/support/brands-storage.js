@@ -1507,7 +1507,24 @@ export async function updateBrand({
   if (updates.expectedUpdatedAt !== undefined) {
     updateQuery = updateQuery.eq('updated_at', updates.expectedUpdatedAt);
   }
-  const { data, error } = await updateQuery.select('id').maybeSingle();
+  // serenity-docs#349 / #3131 follow-up (LLMO — live e2e on prod): select the SAME
+  // wide embed getBrandById reads, directly off THIS UPDATE's own
+  // `Prefer: return=representation` — PostgREST embeds resources on an UPDATE's
+  // RETURNING exactly like it does on a GET. That makes `data` below a
+  // guaranteed-fresh snapshot: it comes back on the very request that just
+  // committed the write, and — confirmed against this env's Vault config
+  // (`dx_mysticat/prod/api-service` POSTGREST_URL=`http://data-svc-balanced.internal`)
+  // and mysticat-data-service's `reader.tf` ALB rules — every non-GET/HEAD/OPTIONS
+  // request on that host lands on the writer fleet, no exceptions. A plain
+  // follow-up `getBrandById()` call is a bare GET, and GETs on that same host ARE
+  // routed to a *separate* PostgREST fleet reading Aurora's reader endpoint — a
+  // real, independently-replicating replica with nonzero lag, not the same node
+  // the write just landed on. That is the confirmed mechanism behind the
+  // brand_repoint_not_persisted false-positive: the write commits on the writer,
+  // but the very next GET can still be served stale data by the reader. Selecting
+  // the full embed here means the common case (see below) never needs that
+  // second, possibly-stale GET at all.
+  const { data, error } = await updateQuery.select(BRAND_SELECT).maybeSingle();
 
   if (error) {
     if (error.code === '23505' && error.message?.includes('brands_base_site_unique')) {
@@ -1551,7 +1568,41 @@ export async function updateBrand({
     ]);
   }
 
-  return getBrandById(organizationId, brandId, postgrestClient);
+  // Whether a follow-up read is even needed depends on what this call actually
+  // changed. `data` already reflects this UPDATE's own committed `brands` row —
+  // including the `base_site` join that drives baseSiteId/baseUrl — with none of
+  // the reader-replica staleness risk described above. A request that touched no
+  // child-table collection can therefore return it directly: no second read, no
+  // race, period.
+  const childTablesTouched = updates.brandAliases !== undefined
+    || updates.competitors !== undefined
+    || updates.socialAccounts !== undefined
+    || updates.earnedContent !== undefined
+    || updates.urls !== undefined;
+
+  if (!childTablesTouched) {
+    return mapDbBrandToV2(data);
+  }
+
+  // The child-table syncs above ran as separate requests AFTER this UPDATE
+  // committed, so their effect isn't part of `data`'s RETURNING payload — a
+  // follow-up read is genuinely unavoidable to pick up aliases/competitors/
+  // social/earned/urls. That follow-up is a plain GET, so on this host it CAN be
+  // served by the lagging reader fleet described above. Rather than trust it for
+  // the one field the #3131 safety net downstream actually gates on, override
+  // baseSiteId/baseUrl with the values this call already knows are correct from
+  // `data` — read back on the writer, in this same request, from the very UPDATE
+  // that changed `site_id` (or deliberately left it unchanged). This makes the
+  // re-point contract (returned baseSiteId always reflects the just-applied
+  // write) hold unconditionally, regardless of how stale the follow-up read's
+  // OTHER fields might transiently be.
+  const freshRow = await getBrandById(organizationId, brandId, postgrestClient);
+  if (!freshRow) {
+    return null;
+  }
+  freshRow.baseSiteId = data.base_site?.id || data.site_id || null;
+  freshRow.baseUrl = data.base_site?.base_url || null;
+  return freshRow;
 }
 
 /**
