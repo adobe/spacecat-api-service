@@ -15,7 +15,9 @@ import {
   EDGE_OPTIMIZE_DEFAULTS,
   buildRuleConfig,
   buildParentRule,
-  buildRoutingRule,
+  buildRoutingEdgeRule,
+  buildRoutingParentRule,
+  buildRemoveMarkerRule,
   buildSiteFailoverRule,
   buildFailoverTestRule,
   buildFragments,
@@ -28,6 +30,10 @@ import {
   redactSecrets,
   redactPapiErrors,
 } from '../../../src/controllers/llmo/llmo-akamai-utils.js';
+
+const EDGE_ROUTED_MARKER = 'x-edgeoptimize-edge-routed';
+const LEGACY_WRAPPER_NAME = 'Optimize at Edge';
+const LEGACY_ROUTING_NAME = 'Optimize at Edge Routing';
 
 const HOSTNAME = 'www.example.com';
 const API_KEY = 'llmo-api-key-xyz';
@@ -79,61 +85,55 @@ describe('llmo-akamai-utils', () => {
     });
   });
 
-  describe('buildRoutingRule', () => {
+  describe('buildRoutingEdgeRule', () => {
     let cfg;
-    let routing;
+    let edge;
     beforeEach(() => {
       cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
-      routing = buildRoutingRule(cfg);
+      edge = buildRoutingEdgeRule(cfg);
     });
 
-    it('is named from the config and scoped to the site hostname', () => {
-      expect(routing.name).to.equal(cfg.ruleNames.routing);
-      const host = findCriterion(routing, 'hostname');
-      expect(host.options.values).to.deep.equal([HOSTNAME]);
-      expect(host.options.matchOperator).to.equal('IS_ONE_OF');
-    });
-
-    it('matches AI-bot user agents and HTML/extensionless files', () => {
-      const ua = findCriterion(routing, 'userAgent');
-      expect(ua.options.matchWildcard).to.equal(true);
-      // Values are wildcarded (*GPTBot*) so they match real UA strings, not only an exact "GPTBot".
-      expect(ua.options.values).to.include('*GPTBot*');
-      expect(ua.options.values.every((v) => v.startsWith('*') && v.endsWith('*'))).to.equal(true);
-      const ext = findCriterion(routing, 'fileExtension');
-      expect(ext.options.values).to.include('EMPTY_STRING');
-      expect(ext.options.values).to.include('html');
+    it('is named "Routing Edge" and matches the client-facing pass (CLIENT_REQ + api-key absent)', () => {
+      expect(edge.name).to.equal(cfg.ruleNames.routingEdge);
+      const requestType = findCriterion(edge, 'requestType');
+      expect(requestType.options.matchOperator).to.equal('IS');
+      expect(requestType.options.value).to.equal('CLIENT_REQ');
+      const guard = edge.criteria.find(
+        (c) => c.name === 'requestHeader' && c.options.headerName === 'x-edgeoptimize-api-key',
+      );
+      expect(guard.options.matchOperator).to.equal('DOES_NOT_EXIST');
     });
 
     it('sets the Edge Optimize origin with custom SAN and both CA sets', () => {
-      const origin = findBehavior(routing, 'origin');
+      const origin = findBehavior(edge, 'origin');
       expect(origin.options.hostname).to.equal('live.edgeoptimize.net');
       expect(origin.options.customValidCnValues).to.include('*.edgeoptimize.net');
       expect(origin.options.standardCertificateAuthorities).to.include('THIRD_PARTY_AMAZON');
       expect(origin.options.trueClientIpClientSetting).to.equal(true);
     });
 
-    it('injects the api key header and folds the cache-key variable into the cache id', () => {
-      const apiKeyHeader = routing.behaviors.find(
+    it('injects the api key header via MODIFY (newHeaderValue) and folds the cache-key variable into the cache id', () => {
+      const apiKeyHeader = edge.behaviors.find(
         (b) => b.name === 'modifyIncomingRequestHeader' && b.options.customHeaderName === 'x-edgeoptimize-api-key',
       );
-      expect(apiKeyHeader.options.headerValue).to.equal(API_KEY);
-      const cacheId = findBehavior(routing, 'cacheId');
+      expect(apiKeyHeader.options.action).to.equal('MODIFY');
+      expect(apiKeyHeader.options.newHeaderValue).to.equal(API_KEY);
+      expect(apiKeyHeader.options).to.not.have.property('headerValue');
+      const cacheId = findBehavior(edge, 'cacheId');
       expect(cacheId.options.variableName).to.equal(cfg.cacheKeyVariable.name);
     });
 
-    it('guards against re-routing an already-failed-over request', () => {
-      const guards = routing.criteria.filter(
-        (c) => c.name === 'requestHeader' && c.options.matchOperator === 'DOES_NOT_EXIST',
+    it('injects the internal edge-routed marker (=true) via MODIFY', () => {
+      const marker = edge.behaviors.find(
+        (b) => b.name === 'modifyIncomingRequestHeader' && b.options.customHeaderName === EDGE_ROUTED_MARKER,
       );
-      const guardedHeaders = guards.map((g) => g.options.headerName);
-      expect(guardedHeaders).to.include('x-edgeoptimize-api-key');
-      expect(guardedHeaders).to.include('x-edgeoptimize-request');
+      expect(marker.options.action).to.equal('MODIFY');
+      expect(marker.options.newHeaderValue).to.equal('true');
     });
 
     it('nests a Site Failover child rule pointing back at the site hostname', () => {
-      expect(routing.children).to.have.length(1);
-      const failover = routing.children[0];
+      expect(edge.children).to.have.length(1);
+      const failover = edge.children[0];
       expect(failover.name).to.equal('Site Failover Behavior');
       expect(findBehavior(failover, 'failAction').options.contentHostname).to.equal(HOSTNAME);
     });
@@ -141,11 +141,60 @@ describe('llmo-akamai-utils', () => {
     it('adds the WAF-bypass header only when enabled', () => {
       const cfgWaf = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
       cfgWaf.wafBypass = { enabled: true, headerName: 'x-edgeoptimize-fetcher-key', value: 'secret' };
-      const rule = buildRoutingRule(cfgWaf);
+      const rule = buildRoutingEdgeRule(cfgWaf);
       const waf = rule.behaviors.find(
         (b) => b.name === 'modifyIncomingRequestHeader' && b.options.customHeaderName === 'x-edgeoptimize-fetcher-key',
       );
       expect(waf).to.not.equal(undefined);
+    });
+  });
+
+  describe('buildRoutingParentRule', () => {
+    let cfg;
+    let parent;
+    beforeEach(() => {
+      cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
+      parent = buildRoutingParentRule(cfg);
+    });
+
+    it('is named "Routing Parent" and matches the parent pass (IS_NOT CLIENT_REQ + marker=true)', () => {
+      expect(parent.name).to.equal(cfg.ruleNames.routingParent);
+      const requestType = findCriterion(parent, 'requestType');
+      expect(requestType.options.matchOperator).to.equal('IS_NOT');
+      expect(requestType.options.value).to.equal('CLIENT_REQ');
+      const marker = parent.criteria.find(
+        (c) => c.name === 'requestHeader' && c.options.headerName === EDGE_ROUTED_MARKER,
+      );
+      expect(marker.options.matchOperator).to.equal('IS_ONE_OF');
+      expect(marker.options.values).to.deep.equal(['true']);
+    });
+
+    it('re-applies the origin + cacheId but does NOT re-inject the credential headers', () => {
+      expect(findBehavior(parent, 'origin').options.hostname).to.equal('live.edgeoptimize.net');
+      expect(findBehavior(parent, 'cacheId')).to.not.equal(undefined);
+      const injectsApiKey = parent.behaviors.some(
+        (b) => b.name === 'modifyIncomingRequestHeader' && b.options.customHeaderName === 'x-edgeoptimize-api-key',
+      );
+      expect(injectsApiKey).to.equal(false);
+    });
+
+    it('nests the marker-removal child before the Site Failover child', () => {
+      expect(parent.children.map((c) => c.name)).to.deep.equal([
+        cfg.ruleNames.removeMarker,
+        'Site Failover Behavior',
+      ]);
+    });
+  });
+
+  describe('buildRemoveMarkerRule', () => {
+    it('strips the edge-routed marker from the incoming request before origin', () => {
+      const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
+      const rule = buildRemoveMarkerRule(cfg);
+      expect(rule.name).to.equal(cfg.ruleNames.removeMarker);
+      expect(rule.criteria).to.deep.equal([]);
+      const del = findBehavior(rule, 'modifyIncomingRequestHeader');
+      expect(del.options.action).to.equal('DELETE');
+      expect(del.options.customHeaderName).to.equal(EDGE_ROUTED_MARKER);
     });
   });
 
@@ -180,25 +229,43 @@ describe('llmo-akamai-utils', () => {
   });
 
   describe('buildParentRule / buildFragments', () => {
-    it('wraps the routing rule and its failover-test sibling under one parent', () => {
+    it('wraps the two routing rules and the failover-test sibling under one parent', () => {
       const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
       const parent = buildParentRule(cfg);
       expect(parent.name).to.equal(cfg.ruleNames.parent);
       expect(parent.children.map((c) => c.name)).to.deep.equal([
-        cfg.ruleNames.routing,
+        cfg.ruleNames.routingEdge,
+        cfg.ruleNames.routingParent,
         cfg.ruleNames.failoverTest,
       ]);
       expect(buildFragments(cfg).parentRule.name).to.equal(cfg.ruleNames.parent);
     });
+
+    it('carries the shared gating criteria (hostname, user agents, file extension, loop guard)', () => {
+      const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
+      const parent = buildParentRule(cfg);
+      expect(findCriterion(parent, 'hostname').options.values).to.deep.equal([HOSTNAME]);
+      const ua = findCriterion(parent, 'userAgent');
+      expect(ua.options.matchWildcard).to.equal(true);
+      expect(ua.options.values).to.include('*GPTBot*');
+      const ext = findCriterion(parent, 'fileExtension');
+      expect(ext.options.values).to.include.members(['html', 'EMPTY_STRING']);
+      // Worker-callback loop guard lives on the wrapper now.
+      const guard = parent.criteria.find(
+        (c) => c.name === 'requestHeader' && c.options.headerName === 'x-edgeoptimize-request',
+      );
+      expect(guard.options.matchOperator).to.equal('DOES_NOT_EXIST');
+    });
   });
 
   describe('managedRuleNames', () => {
-    it('returns the parent, routing, and failover-test rule names', () => {
+    it('returns the top-level managed names (wrapper, failover-test, and legacy wrapper + routing names)', () => {
       const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
       expect(managedRuleNames(cfg)).to.deep.equal([
         cfg.ruleNames.parent,
-        cfg.ruleNames.routing,
         cfg.ruleNames.failoverTest,
+        LEGACY_WRAPPER_NAME,
+        LEGACY_ROUTING_NAME,
       ]);
     });
   });
@@ -210,8 +277,8 @@ describe('llmo-akamai-utils', () => {
     });
 
     it('detects the wrapped layout (parent at top level)', () => {
-      const tree = { rules: { children: [{ name: 'Existing' }, { name: 'Optimize at Edge' }] } };
-      expect(detectManagedRuleNames(tree)).to.deep.equal(['Optimize at Edge']);
+      const tree = { rules: { children: [{ name: 'Existing' }, { name: 'ABV - Optimize at Edge' }] } };
+      expect(detectManagedRuleNames(tree)).to.deep.equal(['ABV - Optimize at Edge']);
     });
 
     it('detects the legacy flat layout and a trailing-space name, deduped', () => {
@@ -359,7 +426,7 @@ describe('llmo-akamai-utils', () => {
         rules: {
           name: 'default',
           children: [
-            { name: cfg.ruleNames.routing, children: [] },
+            { name: LEGACY_ROUTING_NAME, children: [] },
             { name: cfg.ruleNames.failoverTest, children: [] },
             { name: 'Existing Rule', children: [] },
           ],
@@ -441,7 +508,7 @@ describe('llmo-akamai-utils', () => {
         rules: {
           name: 'default',
           children: [
-            { name: cfg.ruleNames.routing },
+            { name: LEGACY_ROUTING_NAME },
             { name: 'Keep' },
             { name: cfg.ruleNames.parent },
             { name: cfg.ruleNames.failoverTest },
@@ -512,35 +579,25 @@ describe('llmo-akamai-utils', () => {
   describe('branch coverage — edge configs', () => {
     const base = () => buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
 
-    it('converts an empty-string file extension to EMPTY_STRING', () => {
+    it('converts an empty-string file extension to EMPTY_STRING (on the wrapper)', () => {
       const cfg = base();
       cfg.match.fileExtensions = ['html', ''];
-      const rule = buildRoutingRule(cfg);
+      const rule = buildParentRule(cfg);
       expect(findCriterion(rule, 'fileExtension').options.values).to.include('EMPTY_STRING');
     });
 
-    it('omits the hostname criterion when hostnames are absent', () => {
+    it('omits the hostname criterion when hostnames are absent (on the wrapper)', () => {
       const cfg = base();
       delete cfg.match.hostnames;
-      const rule = buildRoutingRule(cfg);
+      const rule = buildParentRule(cfg);
       expect(findCriterion(rule, 'hostname')).to.equal(undefined);
     });
 
     it('tolerates a config without removeIncomingResponseHeaders', () => {
       const cfg = base();
       delete cfg.removeIncomingResponseHeaders;
-      const rule = buildRoutingRule(cfg);
+      const rule = buildRoutingEdgeRule(cfg);
       expect(rule.behaviors.some((b) => b.name === 'modifyIncomingResponseHeader')).to.equal(false);
-    });
-
-    it('falls back to the first incoming header for the loop guard when the api-key header is absent', () => {
-      const cfg = base();
-      cfg.incomingRequestHeaders = { 'x-custom-first': 'v', 'x-edgeoptimize-config': 'c' };
-      const rule = buildRoutingRule(cfg);
-      const guards = rule.criteria.filter(
-        (c) => c.name === 'requestHeader' && c.options.matchOperator === 'DOES_NOT_EXIST',
-      );
-      expect(guards.map((g) => g.options.headerName)).to.include('x-custom-first');
     });
 
     it('merges into a tree whose default rule has no children array', () => {

@@ -258,8 +258,8 @@ describe('LlmoAkamaiController', () => {
       expect(body.latestVersion).to.equal(7);
       expect(body.currentChildRules).to.deep.equal(['Existing']);
       // The OAE wrapper is appended LAST so its origin + cacheId win (Akamai is last-match-wins).
-      expect(body.mergedChildRules).to.deep.equal(['Existing', 'Optimize at Edge']);
-      expect(body.mergedChildRules[body.mergedChildRules.length - 1]).to.equal('Optimize at Edge');
+      expect(body.mergedChildRules).to.deep.equal(['Existing', 'ABV - Optimize at Edge']);
+      expect(body.mergedChildRules[body.mergedChildRules.length - 1]).to.equal('ABV - Optimize at Edge');
       // plan is now a fast read-only preview: NO dry-run, NO version created — the slow validate
       // call moved to deploy (it timed out past the CDN window on large properties).
       expect(mockAkamaiClient.createVersion).to.not.have.been.called;
@@ -287,10 +287,10 @@ describe('LlmoAkamaiController', () => {
       // The header is present (deploy adds it too), but its value is redacted in the returned tree.
       const fetcher = headers.find((o) => o.customHeaderName === 'x-edgeoptimize-fetcher-key');
       expect(fetcher).to.exist;
-      expect(fetcher.headerValue).to.equal('***');
+      expect(fetcher.newHeaderValue).to.equal('***');
       // redactSecrets also redacts the LLMO API key.
       const apiKey = headers.find((o) => o.customHeaderName === 'x-edgeoptimize-api-key');
-      expect(apiKey.headerValue).to.equal('***');
+      expect(apiKey.newHeaderValue).to.equal('***');
     });
 
     it('redacts the LLMO API key from the previewed merged tree', async () => {
@@ -333,7 +333,7 @@ describe('LlmoAkamaiController', () => {
       const [, version, , , ops] = mockAkamaiClient.patchRuleTree.firstCall.args;
       expect(version).to.equal(8);
       const parent = ops.find((o) => o.op === 'add' && o.path.startsWith('/rules/children')).value;
-      expect(parent.name).to.equal('Optimize at Edge');
+      expect(parent.name).to.equal('ABV - Optimize at Edge');
       expect(mockAkamaiClient.updateRuleTree).to.not.have.been.called;
     });
 
@@ -423,9 +423,9 @@ describe('LlmoAkamaiController', () => {
       const fetcher = headers.find((o) => o.customHeaderName === 'x-edgeoptimize-fetcher-key');
       expect(fetcher).to.exist;
       // 32 random bytes as hex (`openssl rand -hex 32`).
-      expect(fetcher.headerValue).to.match(/^[0-9a-f]{64}$/);
+      expect(fetcher.newHeaderValue).to.match(/^[0-9a-f]{64}$/);
       // The deployed key is returned once and matches what was baked into the rule.
-      expect(body.fetcherKey).to.equal(fetcher.headerValue);
+      expect(body.fetcherKey).to.equal(fetcher.newHeaderValue);
     });
 
     it('mints a fresh fetcher key on each deploy (rotation)', async () => {
@@ -473,7 +473,7 @@ describe('LlmoAkamaiController', () => {
       // The OAE wrapper is carried in the child-add op's value; drill into its routing child.
       const routingFromOps = (ops) => ops
         .find((o) => o.op === 'add' && o.path.startsWith('/rules/children')).value
-        .children.find((c) => c.name === 'Optimize at Edge Routing');
+        .children.find((c) => c.name === 'Routing Edge');
 
       // Default tree here (RULE_TREE) HAS caching -> OAE routing rule must NOT add its own.
       await controller.deploy(withData(propertyRef));
@@ -503,7 +503,7 @@ describe('LlmoAkamaiController', () => {
       rules: {
         name: 'default',
         behaviors: [],
-        children: [{ name: 'Existing' }, { name: 'Optimize at Edge', children: [] }],
+        children: [{ name: 'Existing' }, { name: 'ABV - Optimize at Edge', children: [] }],
         variables: [],
       },
     };
@@ -530,7 +530,7 @@ describe('LlmoAkamaiController', () => {
       const body = await res.json();
       expect(res.status).to.equal(200);
       expect(body.deployed).to.equal(true);
-      expect(body.managedRulesPresent).to.deep.equal(['Optimize at Edge']);
+      expect(body.managedRulesPresent).to.deep.equal(['ABV - Optimize at Edge']);
     });
 
     it('checks a specific version when one is supplied', async () => {
