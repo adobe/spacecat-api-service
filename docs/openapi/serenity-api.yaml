@@ -1451,9 +1451,11 @@ v2-serenity-brand-presence-subreddits:
         in: query
         required: false
         description: |
-          Comma-separated Semrush project UUIDs to scope to (e.g.
-          `projectId=<uuid1>,<uuid2>`). Alias `project_id`. Omitted →
-          aggregate across the brand's markets. Maximum 8 ids; each must be a valid UUID (400 otherwise).
+          Comma-separated Semrush project UUIDs. Alias `project_id`. Omitted →
+          the element aggregates across all of the brand's markets. Each id must be a
+          valid UUID (400 otherwise). Note: this endpoint scopes to a SINGLE project —
+          only the first id is forwarded to the element; the rest are validated for
+          ownership but not used (multi-project merge is not implemented).
         schema: { type: string, pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}){0,7}$' }
       - name: project_id
         in: query

@@ -12651,6 +12651,7 @@ SerenityBrandPresenceSentimentOverview:
 SerenityBrandPresenceSubredditRow:
   type: object
   description: Per-subreddit Reddit stats for one (subreddit, project).
+  required: [subreddit, subredditKey, mentions, prompts, responsesWithCitations, threads, visibility]
   properties:
     subreddit:
       type: string
