@@ -243,6 +243,14 @@ const routeFacsCapabilities = {
     'POST /consumers/register', // admin
   ],
 
+  /**
+   * Products with FACS enforcement live (consumed by `facsWrapper` — see its
+   * `FACS_ONBOARDED_PRODUCTS` docs for the fail-closed semantics). Any product with
+   * routes below MUST be listed here, or those routes silently bypass FACS —
+   * enforced by `test/routes/facs-capabilities.test.js`. Add one when its routes go live.
+   */
+  FACS_ONBOARDED_PRODUCTS: ['LLMO', 'ASO'],
+
   PRODUCTS_ROUTES: {
   // LLMO — first product to enrol in FACS.
   //
