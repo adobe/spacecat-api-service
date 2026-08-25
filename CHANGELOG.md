@@ -1,3 +1,17 @@
+## [1.763.6](https://github.com/adobe/spacecat-api-service/compare/v1.763.5...v1.763.6) (2026-08-25)
+
+
+### Bug Fixes
+
+* **brands:** eliminate read-after-write race behind false brand_repoint_not_persisted 500 ([#3132](https://github.com/adobe/spacecat-api-service/issues/3132)) ([d705616](https://github.com/adobe/spacecat-api-service/commit/d7056169aeb4263e488fa152ced113f2f35c2aa8)), closes [serenity-docs#349](https://github.com/serenity-docs/issues/349) [#3123](https://github.com/adobe/spacecat-api-service/issues/3123) [#3131](https://github.com/adobe/spacecat-api-service/issues/3131) [#3131](https://github.com/adobe/spacecat-api-service/issues/3131) [serenity-docs#349](https://github.com/serenity-docs/issues/349) [#3123](https://github.com/adobe/spacecat-api-service/issues/3123) [#3131](https://github.com/adobe/spacecat-api-service/issues/3131)
+
+## [1.763.5](https://github.com/adobe/spacecat-api-service/compare/v1.763.4...v1.763.5) (2026-08-25)
+
+
+### Bug Fixes
+
+* **brands:** surface a re-point that fails to persist instead of a silent 200 ([#3131](https://github.com/adobe/spacecat-api-service/issues/3131)) ([850b0c3](https://github.com/adobe/spacecat-api-service/commit/850b0c3dee481b7a5a9f34a24b711b237e68a190)), closes [serenity-docs#349](https://github.com/serenity-docs/issues/349) [#3123](https://github.com/adobe/spacecat-api-service/issues/3123) [serenity-docs#349](https://github.com/serenity-docs/issues/349) [#3123](https://github.com/adobe/spacecat-api-service/issues/3123)
+
 ## [1.763.4](https://github.com/adobe/spacecat-api-service/compare/v1.763.3...v1.763.4) (2026-08-25)
 
 

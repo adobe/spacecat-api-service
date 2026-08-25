@@ -16,7 +16,7 @@ on:
         description: 'Environment to deploy the serenity job runner worker to'
         required: true
         type: choice
-        options: [dev, stage]
+        options: [dev, stage, prod]
         default: dev
 
 jobs:
@@ -69,13 +69,12 @@ jobs:
   # (create_serenity_job_runner_esms defaults false in every environment) -
   # tying it to every push would add permanent CI surface for a feature not
   # yet in continuous use. Trigger manually via the Actions tab or
-  # `gh workflow run ci.yaml -f environment=dev`.
+  # `gh workflow run ci.yaml -f environment=<dev|stage|prod>`.
   #
-  # Prod is intentionally not an option here: prod deploys go through
-  # `npm run semantic-release` (an exec plugin, not a direct `npm run deploy`
-  # call), which does not yet invoke deploy:worker. Wiring the worker into the
-  # release process is a separate follow-up once it needs continuous prod
-  # deployment.
+  # Prod is a manual-dispatch target too (gated to `main` by the `if` below,
+  # like stage). It is deliberately NOT wired into `npm run semantic-release`
+  # yet — automatic per-release worker deploys are a separate follow-up; until
+  # then a prod worker rollout is an explicit `-f environment=prod` dispatch.
   deploy-worker:
     if: >-
       github.event_name == 'workflow_dispatch' &&
@@ -86,7 +85,7 @@ jobs:
       group: deploy-worker-${{ inputs.environment }}
       cancel-in-progress: false
     needs: [ci]
-    environment: ${{ inputs.environment == 'dev' && 'dev-branches' || 'stage' }}
+    environment: ${{ inputs.environment == 'dev' && 'dev-branches' || inputs.environment }}
     permissions:
       contents: read
       id-token: write
@@ -106,10 +105,12 @@ jobs:
         with:
           aws_role_to_assume: ${{ inputs.environment == 'dev'
             && format('arn:aws:iam::{0}:role/spacecat-role-github-actions', secrets.AWS_ACCOUNT_ID_DEV)
-            || format('arn:aws:iam::{0}:role/spacecat-role-github-actions', secrets.AWS_ACCOUNT_ID_STAGE) }}
+            || (inputs.environment == 'stage'
+            && format('arn:aws:iam::{0}:role/spacecat-role-github-actions', secrets.AWS_ACCOUNT_ID_STAGE)
+            || format('arn:aws:iam::{0}:role/spacecat-role-github-actions', secrets.AWS_ACCOUNT_ID_PROD)) }}
 
       - name: Deploy worker
-        run: npm run ${{ inputs.environment == 'dev' && 'deploy-dev:worker' || 'deploy-stage:worker' }}
+        run: npm run ${{ inputs.environment == 'dev' && 'deploy-dev:worker' || (inputs.environment == 'stage' && 'deploy-stage:worker' || 'deploy:worker') }}
         env:
           AWS_REGION: us-east-1
           # hedy resolves --aws-region from this HLX_-prefixed env var, not
@@ -117,7 +118,7 @@ jobs:
           # client) - the reusable service-ci workflow sets this at its own
           # workflow level, which this repo-local job doesn't inherit.
           HLX_AWS_REGION: us-east-1
-          AWS_ACCOUNT_ID: ${{ inputs.environment == 'dev' && secrets.AWS_ACCOUNT_ID_DEV || secrets.AWS_ACCOUNT_ID_STAGE }}
+          AWS_ACCOUNT_ID: ${{ inputs.environment == 'dev' && secrets.AWS_ACCOUNT_ID_DEV || (inputs.environment == 'stage' && secrets.AWS_ACCOUNT_ID_STAGE || secrets.AWS_ACCOUNT_ID_PROD) }}
           VPC_SUBNET_1: ${{ secrets.VPC_SUBNET_1 }}
           VPC_SUBNET_2: ${{ secrets.VPC_SUBNET_2 }}
           VPC_SG_ID: ${{ secrets.VPC_SG_ID }}
