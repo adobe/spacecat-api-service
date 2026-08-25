@@ -1,3 +1,10 @@
+## [1.763.2](https://github.com/adobe/spacecat-api-service/compare/v1.763.1...v1.763.2) (2026-08-25)
+
+
+### Bug Fixes
+
+* onboard LLMO/ASO to FACS; bypass not-yet-onboarded products (ACO) ([#3127](https://github.com/adobe/spacecat-api-service/issues/3127)) ([3c3c410](https://github.com/adobe/spacecat-api-service/commit/3c3c41096a5576ca34e24065a624e38dd76be186)), closes [adobe/spacecat-shared#1893](https://github.com/adobe/spacecat-shared/issues/1893) [adobe/spacecat-shared#1893](https://github.com/adobe/spacecat-shared/issues/1893)
+
 ## [1.763.1](https://github.com/adobe/spacecat-api-service/compare/v1.763.0...v1.763.1) (2026-08-24)
 
 
