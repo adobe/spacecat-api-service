@@ -56,12 +56,28 @@ const { imsClientWrapper } = /** @type {{ imsClientWrapper: Function }} */ (
 // and api-service's env-scoped AppRole already grants read on `dx_mysticat/data/{env}/api-service`.
 //
 // AWS_ENV is a deploy-time Lambda env var (set per environment in the worker deploy scripts).
-// A wrong or missing value fails closed rather than reading another environment's secrets:
-// api-service's AppRole is scoped to a single env, so requesting a different env's path is denied.
+// A wrong env fails closed rather than reading another environment's secrets: api-service's
+// AppRole is scoped to a single env, so requesting a different env's path is denied. We read
+// ONLY AWS_ENV (not the generic ENV, which CI runners and container runtimes set routinely and
+// would be an unsafe input to a Vault-path decision), and throw on absence rather than defaulting
+// to a working-looking path — so a misconfigured deploy surfaces this message in the cold-start
+// log instead of an opaque Vault 403.
 const VAULT_SERVICE = 'api-service';
+
+/**
+ * vaultSecrets options that make this worker reuse api-service's Vault identity (bootstrap
+ * secret + env-scoped data path) instead of a dedicated AppRole for its own function name.
+ * Exported for unit testing only — not a public contract.
+ */
 export const vaultOpts = {
   bootstrapPath: `/mysticat/bootstrap/${VAULT_SERVICE}`,
-  name: (/** @type {{ env?: Record<string, string> }} */ ctx) => `${ctx.env?.AWS_ENV || ctx.env?.ENV || 'dev'}/${VAULT_SERVICE}`,
+  name: (/** @type {{ env?: Record<string, string> }} */ ctx) => {
+    const env = ctx.env?.AWS_ENV;
+    if (!env) {
+      throw new Error('[serenity-job-runner] AWS_ENV must be set (see the worker deploy scripts) to resolve the Vault secrets path');
+    }
+    return `${env}/${VAULT_SERVICE}`;
+  },
 };
 
 /**
