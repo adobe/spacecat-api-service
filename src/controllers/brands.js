@@ -2220,12 +2220,20 @@ function BrandsController(ctx, log, env) {
       // calling PATCH /sites with a new baseURL. Validation + Semrush propagation run
       // BEFORE the row is persisted, so a rejected target or a Semrush failure fails
       // the whole re-point rather than leaving SpaceCat ahead of Semrush.
+      // Hoisted out of the `hasText(updates.baseSiteId)` block below so the
+      // post-write verification (right before the `return ok(updated)`) can tell
+      // a genuine re-point request apart from a same-site no-op resubmit or a
+      // plain field edit that never touched baseSiteId at all.
+      let repointOldSiteId = null;
+      let repointRequested = false;
       if (hasText(updates.baseSiteId)) {
         const current = await getBrandById(spaceCatId, brandUuid, postgrestClient);
         const oldSiteId = current?.baseSiteId || null;
+        repointOldSiteId = oldSiteId;
         // Only act on an actual change; re-submitting the same site is a no-op that
         // falls through to the normal update below.
         if (current && updates.baseSiteId !== oldSiteId) {
+          repointRequested = true;
           // Resolve the target by id ALONE — do NOT filter by org here. A missing or
           // cross-org target must fall through to updateBrand, whose anchor guard raises
           // the existing `brand_site_org_mismatch` 409 (brands-storage.js, serenity-docs#346);
@@ -2316,6 +2324,34 @@ function BrandsController(ctx, log, env) {
       if (!updatedRow) {
         return notFound(`Brand not found: ${brandId}`);
       }
+
+      // serenity-docs#349 hardening: a re-point that was actually eligible (passed
+      // the siteUrlTaken/Semrush gates above and reached updateBrand) must land.
+      // Live e2e testing surfaced a silent-no-op shape where updateBrand/its
+      // final re-read reported success (200, no thrown error) yet the returned
+      // row still carried the OLD baseSiteId — most consistent with a stale read
+      // on the post-write re-fetch rather than anything in this repo's write-path
+      // logic (which this handler's own unit + IT coverage exercises directly and
+      // finds correct, including when the target is already one of the brand's
+      // OWN secondary siteIds). Rather than let that stale read silently masquerade
+      // as a successful re-point, treat the mismatch as a hard failure: log full
+      // context for on-call and surface a typed 500 the caller can retry, instead
+      // of a 200 that lies about what was persisted.
+      if (repointRequested && updatedRow.baseSiteId !== updates.baseSiteId) {
+        log.error('brands: re-point did not persist — updateBrand returned a row still '
+          + 'carrying the old baseSiteId (possible stale read on the post-write re-fetch)', {
+          brandId,
+          organizationId: spaceCatId,
+          oldSiteId: repointOldSiteId,
+          requestedSiteId: updates.baseSiteId,
+          returnedSiteId: updatedRow.baseSiteId,
+        });
+        return createResponse({
+          message: 'The primary site could not be verified as updated. Please retry.',
+          code: 'brand_repoint_not_persisted',
+        }, 500);
+      }
+
       const updated = withSerenityState(updatedRow, serenityScopes);
 
       if (beforeForWipeCheck) {

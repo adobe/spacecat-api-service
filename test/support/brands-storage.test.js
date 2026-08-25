@@ -2650,6 +2650,61 @@ describe('brands-storage', () => {
       expect(brandsUpdate.row.site_id).to.equal('different-site-id');
     });
 
+    it('re-points baseSiteId to a site that is already one of the brand\'s OWN '
+      + 'secondary siteIds (serenity-docs#349 live-testing regression: this must NOT '
+      + 'be treated as a no-op)', async () => {
+      // Live e2e testing on a real org found that re-pointing a brand's primary site
+      // onto a site that was already listed among the brand's own secondary siteIds
+      // (via brand_sites) came back as a silent no-op: 200, but baseSiteId/updatedAt
+      // unchanged. This function has no code path that even reads brand_sites when
+      // deciding whether to write site_id (updateBrand's own pre-write `existing`
+      // read is a plain `site_id` column read, not a brand_sites join), so a target
+      // already known to the brand must be re-pointed exactly like any other target.
+      const client = createCapturingClient({
+        brands: [
+          // 1st call: select current row — brand anchored to OLD_SITE.
+          { data: { site_id: 'old-primary-site-id', status: 'active' }, error: null },
+          // 2nd call: update succeeds.
+          { data: { id: BRAND_ID }, error: null },
+          // 3rd call: getBrandById re-fetch — site_id now NEW_SITE, and brand_sites
+          // still lists OLD_SITE + NEW_SITE + a third secondary (mirrors the live
+          // bug report: the target was already a secondary URL before the re-point).
+          {
+            data: makeBrandRow({
+              site_id: 'new-secondary-site-id',
+              status: 'active',
+              updated_at: '2026-01-02T00:00:00Z',
+              brand_sites: [
+                { site_id: 'old-primary-site-id', paths: [], sites: { base_url: 'https://haha.com' } },
+                { site_id: 'new-secondary-site-id', paths: [], sites: { base_url: 'https://example.com' } },
+                { site_id: 'third-site-id', paths: [], sites: { base_url: 'https://you.com' } },
+              ],
+            }),
+            error: null,
+          },
+        ],
+        sites: { data: { id: 'new-secondary-site-id' }, error: null }, // target belongs to org
+      });
+
+      const result = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { baseSiteId: 'new-secondary-site-id' },
+        postgrestClient: client,
+      });
+
+      expect(result).to.not.be.null;
+      const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
+      // The write itself must carry the NEW site_id — never silently dropped or
+      // reverted because the target was already a known secondary.
+      expect(brandsUpdate.row.site_id).to.equal('new-secondary-site-id');
+      expect(result.baseSiteId).to.equal('new-secondary-site-id');
+      expect(result.updatedAt).to.equal('2026-01-02T00:00:00Z');
+      expect(result.siteIds).to.include.members([
+        'old-primary-site-id', 'new-secondary-site-id', 'third-site-id',
+      ]);
+    });
+
     it('clears site_id when a pending brand passes baseSiteId: null (LLMO-5870)', async () => {
       const client = createCapturingClient({
         brands: [
