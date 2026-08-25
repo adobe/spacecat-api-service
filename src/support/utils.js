@@ -42,6 +42,7 @@ import {
   PROMISE_TOKEN_REQUIRED_ERROR_CODE,
 } from '../utils/constants.js';
 import { updateRumConfig } from './rum-config-service.js';
+import { notifyForcedTierDowngrade } from './slack/tier-change-alert.js';
 // Two signals indicate a previous paid onboarding:
 // 1. ahref-paid-pages import — unique to the paid profile's import set.
 // 2. onboardConfig.lastProfile === 'paid' — set for sites backfilled via script or onboarded
@@ -85,19 +86,10 @@ export const sanitizeExecutionName = (value) => {
   return executionName.slice(0, 80);
 };
 
-/**
- * Checks if the url parameter "url" equals "ALL".
- * @param {string} url - URL parameter.
- * @returns {boolean} True if url equals "ALL", false otherwise.
- */
-export const isAuditForAllUrls = (url) => url.toUpperCase() === 'ALL';
-
-/**
- * Checks if the deliveryType parameter "deliveryType" equals "ALL".
- * @param {string} deliveryType - deliveryType parameter.
- * @returns {boolean} True if deliveryType equals "ALL", false otherwise.
- */
-export const isAuditForAllDeliveryTypes = (deliveryType) => deliveryType.toUpperCase() === 'ALL';
+// Re-exported from a dependency-free leaf so lower-level modules (e.g. utils/slack/base.js) can
+// use these predicates without importing this hub module — importing them from here would create
+// an import cycle once this module imports slack helpers (SITES-50179).
+export { isAuditForAllUrls, isAuditForAllDeliveryTypes } from './audit-run-scope.js';
 
 /**
  * Sends an audit message for a single URL.
@@ -2045,7 +2037,7 @@ export const onboardSingleSite = async (
       log.info(`Preserving ${existingTier} tier for org ${organizationId} - skipping entitlement/enrollment write during onboard of ${baseURL}`);
       await say(`:lock: Org for \`${baseURL}\` is on the *${existingTier}* tier — onboarding will NOT change the tier, entitlement, or enrollment. Running audits and opportunities only. (Use *Force Tier Update* to override.)`);
     } else {
-      await createEntitlementAndEnrollment(
+      const { entitlement } = await createEntitlementAndEnrollment(
         site,
         context,
         slackContext,
@@ -2053,6 +2045,30 @@ export const onboardSingleSite = async (
         EntitlementModel.PRODUCT_CODES.ASO,
         tier,
       );
+
+      // SITES-50179: the Force Tier Update escape hatch was exercised on a protected org
+      // (isProtectedOrg is only true here when forceTierUpdate bypassed the guard above). If it
+      // downgraded a PLG/PRE_ONBOARD org to FREE_TRIAL — the exact transition that silently exposed
+      // the full opportunity set in the original incident — alert the team so every deliberate
+      // override is visible without manual auditing. Best-effort: never blocks onboarding.
+      if (isProtectedOrg && tier === EntitlementModel.TIERS.FREE_TRIAL) {
+        await notifyForcedTierDowngrade(
+          {
+            baseURL,
+            organizationId,
+            imsOrgID,
+            siteId: site.getId(),
+            entitlementId: entitlement?.getId?.(),
+            fromTier: existingTier,
+            toTier: tier,
+            profileName,
+            sourceChannelId: slackContext.channelId,
+            sourceThreadTs: slackContext.threadTs,
+          },
+          env,
+          log,
+        );
+      }
     }
 
     // Create new project or assign existing project
