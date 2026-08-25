@@ -41,6 +41,8 @@ import {
   buildCitedDomainsPayload,
   transformCitedDomainsResponse,
   transformCitedDomainsResponses,
+  buildSubredditsPayload,
+  transformSubredditsResponse,
   buildTopicPromptsPayload,
   transformTopicPromptsResponse,
   aggregateTopicsFromPrompts,
@@ -325,6 +327,32 @@ export function createElementsService(transport, log) {
         buildCitedDomainsPayload({ ...rest, projectId: ids[0] }),
       );
       return transformCitedDomainsResponse(raw, rest);
+    },
+
+    /**
+     * Fetches per-subreddit Reddit stats from the Subreddits element (faf56e29),
+     * normalized into `{ subreddits: [...], totalCount }`. (Inside the surrounding
+     * c8-ignore region — same POC coverage treatment as the sibling methods here.)
+     *
+     * Single call (no per-project fan-out): the element aggregates across ALL of the
+     * workspace's projects when no `project_id` is supplied (verified live). A
+     * caller-supplied project id scopes to that one project. `projectIds` (a CSV the
+     * controller already parsed + ownership-checked) is narrowed to its first id here.
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params - Query params (model/platform, startDate, endDate,
+     *   projectIds, page, pageSize).
+     * @returns {Promise<{ subreddits: object[], totalCount: number }>}
+     */
+    async getSubreddits(workspaceId, params) {
+      const { projectIds, ...rest } = params;
+      const projectId = Array.isArray(projectIds) ? projectIds.find(hasText) : undefined;
+      const raw = await transport.fetchElement(
+        workspaceId,
+        ELEMENT_IDS.SUBREDDITS,
+        buildSubredditsPayload({ ...rest, projectId }),
+      );
+      return transformSubredditsResponse(raw, rest);
     },
 
     /**

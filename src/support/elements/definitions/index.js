@@ -33,6 +33,7 @@ export {
 export {
   buildCitedDomainsPayload, transformCitedDomainsResponse, transformCitedDomainsResponses,
 } from './cited-domains.js';
+export { buildSubredditsPayload, transformSubredditsResponse } from './subreddits.js';
 export { buildTopicPromptsPayload, transformTopicPromptsResponse } from './topic-prompts.js';
 export { aggregateTopicsFromPrompts } from './topics-insights.js';
 export {
