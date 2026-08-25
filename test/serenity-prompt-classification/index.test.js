@@ -172,3 +172,27 @@ describe('serenity-prompt-classification worker entry', () => {
     expect(job.getStatus()).to.equal('COMPLETED');
   });
 });
+
+describe('serenity-prompt-classification vault config', () => {
+  let vaultOpts;
+
+  before(async () => {
+    ({ vaultOpts } = await import('../../src/serenity-prompt-classification/index.js'));
+  });
+
+  it('reuses api-service\'s Secrets Manager bootstrap secret (no dedicated worker bootstrap)', () => {
+    expect(vaultOpts.bootstrapPath).to.equal('/mysticat/bootstrap/api-service');
+  });
+
+  it('reads api-service\'s env-scoped Vault path, resolving env from AWS_ENV', () => {
+    expect(vaultOpts.name({ env: { AWS_ENV: 'prod' } })).to.equal('prod/api-service');
+    expect(vaultOpts.name({ env: { AWS_ENV: 'stage' } })).to.equal('stage/api-service');
+    expect(vaultOpts.name({ env: { AWS_ENV: 'dev' } })).to.equal('dev/api-service');
+  });
+
+  it('throws an actionable error when AWS_ENV is unset (no silent default, no generic ENV fallback)', () => {
+    expect(() => vaultOpts.name({ env: { ENV: 'stage' } })).to.throw('AWS_ENV must be set');
+    expect(() => vaultOpts.name({ env: {} })).to.throw('AWS_ENV must be set');
+    expect(() => vaultOpts.name({})).to.throw('AWS_ENV must be set');
+  });
+});
