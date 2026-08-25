@@ -25,10 +25,17 @@
  * - BYOCDN sites: customer-facing onboarding email (header shows To/cc with customer + org).
  * - Adobe-managed sites: internal coordination email (header instructs LLMO team to reply-all
  *   and loop in CSE / Commerce team).
+ * - Post Office template `llmo_cdn_opt_in_notification` should use templateData:
+ *   `isPaidTier` (boolean), `customerTier` (e.g. PAID, FREE_TRIAL), `tierKnown` (boolean).
+ *   Tier is loaded from org LLMO entitlement (DB); no separate entitlement API call.
  */
+
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 
 import { sendEmail } from '../../support/email-service.js';
 import { CDN_TYPES, CDN_DISPLAY_NAMES } from './llmo-utils.js';
+
+const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
 
 const OPT_IN_NOTIFICATION_TEMPLATE = 'llmo_cdn_opt_in_notification';
 const EXCLUDED_MEMBER_STATUSES = new Set(['BLOCKED', 'DELETED']);
@@ -112,6 +119,43 @@ async function getOrgMembersCsv(context, orgId) {
 }
 
 /**
+ * Resolves LLMO entitlement tier for the org (same source as GET /organizations/{id}/entitlements).
+ * @returns {{ customerTier: string, isPaidTier: boolean, tierKnown: boolean }}
+ */
+async function getCustomerTierInfo(context, orgId) {
+  const unknown = { customerTier: '', isPaidTier: false, tierKnown: false };
+  if (!orgId) {
+    return unknown;
+  }
+
+  const entitlementModel = context?.dataAccess?.Entitlement;
+  if (!entitlementModel?.findByOrganizationIdAndProductCode) {
+    return unknown;
+  }
+
+  try {
+    const entitlement = await entitlementModel.findByOrganizationIdAndProductCode(
+      orgId,
+      LLMO_PRODUCT_CODE,
+    );
+    const tier = entitlement?.getTier?.() || '';
+    if (!tier) {
+      return unknown;
+    }
+    return {
+      customerTier: tier,
+      isPaidTier: tier === EntitlementModel.TIERS.PAID,
+      tierKnown: true,
+    };
+  } catch (error) {
+    context?.log?.warn?.(
+      `[cdn-opt-in-notification] Failed to fetch LLMO entitlement for org=${orgId}: ${error.message}`,
+    );
+    return unknown;
+  }
+}
+
+/**
  * @param {Object} context - Request context with env, log, dataAccess.
  * @param {Object} params
  * @param {string} params.siteId
@@ -145,7 +189,10 @@ export async function notifyOptInIfNeeded(context, params) {
     const adobeManaged = Boolean(cdnEntry?.adobeManaged);
     const commerceManaged = Boolean(cdnEntry?.commerceManaged);
     const replyAllTeam = cdnEntry?.replyAllTeam || '';
-    const orgMembers = await getOrgMembersCsv(context, orgId);
+    const [orgMembers, tierInfo] = await Promise.all([
+      getOrgMembersCsv(context, orgId),
+      getCustomerTierInfo(context, orgId),
+    ]);
 
     if (!cdnKnown) {
       log.warn(`[cdn-opt-in-notification] Unknown CDN type for site=${siteId} — sending notification without CDN-specific guidance (cdnType="${cdnType ?? ''}")`);
@@ -161,9 +208,15 @@ export async function notifyOptInIfNeeded(context, params) {
       adobeManaged,
       commerceManaged,
       replyAllTeam,
+      customerTier: tierInfo.customerTier,
+      isPaidTier: tierInfo.isPaidTier,
+      tierKnown: tierInfo.tierKnown,
     };
 
-    log.info(`[cdn-opt-in-notification] Sending ${OPT_IN_NOTIFICATION_TEMPLATE} for site=${siteId} cdnType=${cdnType} cdnKnown=${cdnKnown}`);
+    log.info(
+      `[cdn-opt-in-notification] Sending ${OPT_IN_NOTIFICATION_TEMPLATE} for site=${siteId} `
+      + `cdnType=${cdnType} cdnKnown=${cdnKnown} tierKnown=${tierInfo.tierKnown} isPaidTier=${tierInfo.isPaidTier}`,
+    );
 
     const result = await sendEmail(context, {
       recipients,
