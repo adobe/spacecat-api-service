@@ -14102,3 +14102,616 @@ OnboardingProvisioningResponse:
         workspace (or its parent) before this call — Semrush's 409 response,
         which is treated as success rather than an error.
       example: true
+
+# ============================================================================
+# ABV custom dashboards (v1 prototype) — analytics query + dashboard/tile CRUD.
+# `analysis` is the query endpoint's governed metric/dimension definition;
+# `visualization` is a presentation-only, unvalidated blob (chartType/axes/
+# colors) the API stores and returns as-is. See llmo-analytics.js /
+# llmo-dashboards.js / in-memory-dashboard-store.js for the implementation
+# this mirrors, and project-elmo-ui's src/api/customDashboardsApi.ts for the
+# client-side type definitions this was written from.
+# ============================================================================
+
+AnalyticsDimensionType:
+  type: string
+  enum: [time, enum]
+  description: Whether the dimension is a time grain (e.g. week) or an enumerated value set.
+
+AnalyticsFilterOperator:
+  type: string
+  enum: [equals, notEquals, in, notIn]
+  description: Comparison operator for an AnalyticsFilter. Allowed operators depend on the dimension's type.
+
+AnalyticsDimension:
+  type: object
+  description: A groupable/filterable attribute in the governed metrics catalog.
+  properties:
+    id:
+      type: string
+      example: 'platform'
+    displayName:
+      type: string
+      example: 'LLM Platform'
+    type:
+      $ref: '#/AnalyticsDimensionType'
+    allowedValues:
+      type: array
+      items:
+        type: string
+      description: 'Present for `type: enum` dimensions — the closed set of legal values.'
+    supportsGrouping:
+      type: boolean
+      description: Whether this dimension may be used as an Analysis `x`/group-by field.
+    supportsFiltering:
+      type: boolean
+      description: Whether this dimension may appear in an Analysis `filters` entry.
+    supportsSearch:
+      type: boolean
+      description: Whether the dimension's allowed values support typeahead search in the UI.
+    isHierarchical:
+      type: boolean
+    supportsMultiSelect:
+      type: boolean
+      description: Whether a filter on this dimension may carry more than one value.
+  required:
+    - id
+    - displayName
+    - type
+    - supportsGrouping
+    - supportsFiltering
+    - supportsSearch
+    - isHierarchical
+    - supportsMultiSelect
+  example:
+    id: 'platform'
+    displayName: 'LLM Platform'
+    type: 'enum'
+    allowedValues: ['chatgpt-paid', 'chatgpt-free', 'google-ai-overview', 'perplexity', 'copilot', 'gemini']
+    supportsGrouping: true
+    supportsFiltering: true
+    supportsSearch: false
+    isHierarchical: false
+    supportsMultiSelect: true
+
+AnalyticsMetric:
+  type: object
+  description: A measurable quantity in the governed metrics catalog, with the dimensions it can be grouped/filtered by.
+  properties:
+    id:
+      type: string
+      example: 'brandMentions'
+    displayName:
+      type: string
+      example: 'Brand Mentions'
+    description:
+      type: string
+    dataType:
+      type: string
+      example: 'number'
+    unit:
+      type: string
+      enum: [percent, count, decimal]
+    supportedAggregations:
+      type: array
+      items:
+        type: string
+      example: ['sum']
+    supportedDimensions:
+      type: array
+      description: >-
+        Full AnalyticsDimension objects on GET /analytics/metadata; on
+        AnalyticsQueryResult (the query response's `metric`) this is instead
+        an array of dimension id strings.
+      items:
+        $ref: '#/AnalyticsDimension'
+    supportedGrains:
+      type: array
+      items:
+        type: string
+      example: ['week']
+    supportedComparisons:
+      type: array
+      items:
+        type: string
+      example: ['none', 'previousPeriod']
+  required:
+    - id
+    - displayName
+    - description
+    - dataType
+    - unit
+    - supportedAggregations
+    - supportedDimensions
+    - supportedGrains
+    - supportedComparisons
+
+AnalyticsMetadata:
+  type: object
+  description: The full governed catalog — every metric with its supported dimensions inlined.
+  properties:
+    metrics:
+      type: array
+      items:
+        $ref: '#/AnalyticsMetric'
+    dimensions:
+      type: array
+      items:
+        $ref: '#/AnalyticsDimension'
+    grains:
+      type: array
+      items:
+        type: string
+      example: ['week']
+  required:
+    - metrics
+    - dimensions
+    - grains
+
+AnalyticsFilter:
+  type: object
+  description: One `dimension operator values` clause. Every filter is checked against the governed catalog server-side (dimension must support filtering, operator must be legal for the dimension's type, values must be in `allowedValues`).
+  properties:
+    dimension:
+      type: string
+      example: 'platform'
+    operator:
+      $ref: '#/AnalyticsFilterOperator'
+    values:
+      type: array
+      items:
+        type: string
+      minItems: 1
+  required:
+    - dimension
+    - operator
+    - values
+
+AnalyticsSort:
+  type: object
+  properties:
+    by:
+      type: string
+      description: The metric id or one of the requested dimension ids.
+    direction:
+      type: string
+      enum: [asc, desc]
+  required:
+    - by
+    - direction
+
+Analysis:
+  type: object
+  description: >-
+    The persisted, visualization-agnostic definition of what a tile queries —
+    the request body for POST /analytics/query, and the value stored at
+    `Tile.analysis`. Validated against the governed catalog (AnalyticsMetadata)
+    on every query; an unsupported metric/dimension/filter combination is a 400.
+  properties:
+    metric:
+      type: string
+      example: 'brandMentions'
+    dimensions:
+      type: array
+      items:
+        type: string
+      description: Group-by dimension ids, in order — index 0 becomes the chart's x-axis, index 1 (if present) becomes the color/series split.
+      maxItems: 2
+    time:
+      type: object
+      properties:
+        grain:
+          type: string
+          example: 'week'
+        dateFrom:
+          type: string
+          format: date
+        dateTo:
+          type: string
+          format: date
+      required:
+        - grain
+        - dateFrom
+        - dateTo
+    filters:
+      type: array
+      items:
+        $ref: '#/AnalyticsFilter'
+    sort:
+      oneOf:
+        - $ref: '#/AnalyticsSort'
+        - type: 'null'
+    limit:
+      type: integer
+      minimum: 1
+      maximum: 500
+      default: 100
+  required:
+    - metric
+    - dimensions
+    - time
+    - filters
+  example:
+    metric: 'brandMentions'
+    dimensions: ['platform']
+    time:
+      grain: 'week'
+      dateFrom: '2026-05-01'
+      dateTo: '2026-07-31'
+    filters: []
+
+AnalyticsRow:
+  type: object
+  description: One result row — the requested metric plus whichever dimension ids were grouped by, keyed by id.
+  additionalProperties:
+    type:
+      - string
+      - number
+  example:
+    platform: 'chatgpt-paid'
+    brandMentions: 42
+
+AnalyticsQueryResult:
+  type: object
+  description: Response body for POST /analytics/query.
+  properties:
+    metric:
+      allOf:
+        - $ref: '#/AnalyticsMetric'
+      description: Same shape as AnalyticsMetric, except `supportedDimensions` is an array of dimension id strings here rather than full AnalyticsDimension objects.
+    dimensions:
+      type: array
+      items:
+        $ref: '#/AnalyticsDimension'
+      description: Full dimension objects for the ids requested in the Analysis, in the same order.
+    rows:
+      type: array
+      items:
+        $ref: '#/AnalyticsRow'
+    meta:
+      type: object
+      properties:
+        rowCount:
+          type: integer
+        truncated:
+          type: boolean
+          description: True when `limit` cut off further rows.
+      required:
+        - rowCount
+        - truncated
+  required:
+    - metric
+    - dimensions
+    - rows
+    - meta
+
+ChartType:
+  type: string
+  enum: [kpi, line, bar, table]
+
+ColorTheme:
+  type: string
+  enum: [classic, warm, cool]
+  description: Series color palette. Defaults to `classic` when absent (pre-existing tiles).
+
+Visualization:
+  type: object
+  description: >-
+    The presentation-only definition of a tile — never validated server-side
+    (an opaque, pass-through blob), swappable independently of `Analysis`
+    (changing chart type never touches the underlying query).
+  properties:
+    chartType:
+      $ref: '#/ChartType'
+    x:
+      type: string
+      description: Dimension id used for the x-axis / group-by category. Usually `Analysis.dimensions[0]`.
+    y:
+      type: string
+    color:
+      type: string
+      description: Dimension id used to split into multiple series/colors. Usually `Analysis.dimensions[1]`.
+    colorTheme:
+      $ref: '#/ColorTheme'
+    barLayout:
+      type: string
+      enum: [vertical, horizontal]
+      description: >-
+        `chartType: bar` only — bars rising from the x-axis vs. extending
+        right from category labels. Defaults to `vertical` when absent
+        (pre-existing tiles).
+  required:
+    - chartType
+
+TileSize:
+  type: string
+  enum: [S, M, L, FULL]
+
+TileLayout:
+  type: object
+  properties:
+    size:
+      $ref: '#/TileSize'
+    order:
+      type: integer
+      description: Position among the dashboard's tiles, ascending.
+  required:
+    - size
+    - order
+
+TileSnapshotPoint:
+  type: object
+  properties:
+    label:
+      type: string
+    values:
+      type: array
+      items:
+        type:
+          - number
+          - 'null'
+  required:
+    - label
+    - values
+
+TileSnapshot:
+  type: object
+  description: >-
+    A frozen chart captured from a chat table, with no governed Analysis
+    behind it — unlike a normal tile, this never refreshes; it's exactly the
+    data that was on screen when it was captured.
+  properties:
+    kind:
+      type: string
+      enum: [bar, line]
+    categoryLabel:
+      type: string
+    seriesLabels:
+      type: array
+      items:
+        type: string
+    points:
+      type: array
+      items:
+        $ref: '#/TileSnapshotPoint'
+    capturedAt:
+      $ref: '#/DateTime'
+  required:
+    - kind
+    - categoryLabel
+    - seriesLabels
+    - points
+    - capturedAt
+
+Tile:
+  type: object
+  properties:
+    id:
+      type: string
+      format: uuid
+    title:
+      type: string
+    analysis:
+      allOf:
+        - $ref: '#/Analysis'
+      description: Present for a governed tile; absent for a snapshot tile (`snapshot` is set instead).
+    visualization:
+      $ref: '#/Visualization'
+    snapshot:
+      $ref: '#/TileSnapshot'
+    layout:
+      $ref: '#/TileLayout'
+    localOverrides:
+      type: array
+      items:
+        $ref: '#/AnalyticsFilter'
+  required:
+    - id
+    - title
+    - layout
+    - localOverrides
+
+TileInput:
+  type: object
+  description: Request body for POST .../dashboards/{dashboardId}/tiles.
+  properties:
+    title:
+      type: string
+    analysis:
+      $ref: '#/Analysis'
+    visualization:
+      $ref: '#/Visualization'
+    snapshot:
+      $ref: '#/TileSnapshot'
+    layout:
+      $ref: '#/TileLayout'
+    localOverrides:
+      type: array
+      items:
+        $ref: '#/AnalyticsFilter'
+  required:
+    - title
+    - analysis
+    - visualization
+    - layout
+
+TileUpdateInput:
+  type: object
+  description: >-
+    Request body for PATCH .../dashboards/{dashboardId}/tiles/{tileId}. Every
+    field is optional; only supplied fields are patched.
+  properties:
+    title:
+      type: string
+    analysis:
+      $ref: '#/Analysis'
+    visualization:
+      $ref: '#/Visualization'
+    snapshot:
+      $ref: '#/TileSnapshot'
+    layout:
+      $ref: '#/TileLayout'
+    localOverrides:
+      type: array
+      items:
+        $ref: '#/AnalyticsFilter'
+
+DashboardVisibility:
+  type: string
+  enum: [private, org]
+  description: '`org` shares the dashboard with everyone in the organization; `private` is visible only to the owner and anyone on `sharedWith`.'
+
+DashboardControl:
+  type: object
+  description: A per-dashboard filter/setting (e.g. a brand, date-range, platform, or region scope) that a tile's query can read — this, not brand-partitioned storage, is how a dashboard narrows what its tiles show.
+  properties:
+    id:
+      type: string
+    dimension:
+      type: string
+    value:
+      type:
+        - array
+        - 'null'
+      items:
+        type: string
+  required:
+    - id
+    - dimension
+    - value
+
+DashboardShare:
+  type: object
+  properties:
+    userId:
+      type: string
+    role:
+      type: string
+      enum: [viewer, editor]
+  required:
+    - userId
+    - role
+
+Dashboard:
+  type: object
+  description: >-
+    An org-level, top-level object — not partitioned by brand, so it stays
+    visible across a brand switch. `DashboardControl`s (not storage
+    partitioning) are where a per-dashboard brand/date-range/platform/region
+    scope belongs.
+  properties:
+    id:
+      type: string
+      format: uuid
+    name:
+      type: string
+    description:
+      type: string
+    ownerId:
+      type: string
+      description: Stable owner identity — the creator's email, derived server-side from the caller's session. Never client-supplied.
+      example: 'user@example.com'
+    ownerName:
+      type: string
+      description: >-
+        Display name for `ownerId`. Only ever populated when the requesting
+        caller IS the owner (resolved from their own IMS profile) — omitted
+        for another user's dashboard, since resolving a display name for an
+        arbitrary owner would need an address-book lookup this v1 doesn't
+        have. Clients should fall back to showing `ownerId` when absent.
+    visibility:
+      $ref: '#/DashboardVisibility'
+    sharedWith:
+      type: array
+      items:
+        $ref: '#/DashboardShare'
+    controls:
+      type: array
+      items:
+        $ref: '#/DashboardControl'
+    sections:
+      type: array
+      items: {}
+      description: Reserved for future dashboard layout grouping. Always empty in v1.
+    tiles:
+      type: array
+      items:
+        $ref: '#/Tile'
+    isStarred:
+      type: boolean
+      description: Whether the requesting caller has starred this dashboard. Per-caller, not global — computed server-side from the caller's own starred list on every response.
+    createdAt:
+      $ref: '#/DateTime'
+    updatedAt:
+      $ref: '#/DateTime'
+    schemaVersion:
+      type: integer
+  required:
+    - id
+    - name
+    - description
+    - ownerId
+    - visibility
+    - sharedWith
+    - controls
+    - sections
+    - tiles
+    - isStarred
+    - createdAt
+    - updatedAt
+    - schemaVersion
+
+DashboardListResponse:
+  type: object
+  properties:
+    dashboards:
+      type: array
+      items:
+        $ref: '#/Dashboard'
+  required:
+    - dashboards
+
+DashboardCreateInput:
+  type: object
+  properties:
+    name:
+      type: string
+    description:
+      type: string
+    visibility:
+      $ref: '#/DashboardVisibility'
+    controls:
+      type: array
+      items:
+        $ref: '#/DashboardControl'
+  required:
+    - name
+
+DashboardUpdateInput:
+  type: object
+  description: Every field is optional; only supplied fields are patched.
+  properties:
+    name:
+      type: string
+    description:
+      type: string
+    visibility:
+      $ref: '#/DashboardVisibility'
+    controls:
+      type: array
+      items:
+        $ref: '#/DashboardControl'
+    sections:
+      type: array
+      items: {}
+    sharedWith:
+      type: array
+      items:
+        $ref: '#/DashboardShare'
+
+DashboardDuplicateInput:
+  type: object
+  properties:
+    name:
+      type: string
+      description: Defaults to "<source name> (copy)" when omitted.

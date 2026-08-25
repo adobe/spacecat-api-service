@@ -65,6 +65,42 @@ describe('LlmoDashboardsController', () => {
     expect(body.ownerId).to.equal('owner@example.com');
   });
 
+  it('includes ownerName from the caller\'s own IMS profile', async () => {
+    const namedCtx = {
+      ...mockContext,
+      attributes: {
+        authInfo: {
+          getProfile: () => ({ email: 'owner@example.com', first_name: 'Ada', last_name: 'Lovelace' }),
+        },
+      },
+      data: { name: 'My Dashboard' },
+    };
+    const controller = LlmoDashboardsController(namedCtx);
+    const response = await controller.createDashboard(namedCtx);
+    const body = await response.json();
+    expect(body.ownerName).to.equal('Ada Lovelace');
+  });
+
+  it('omits ownerName for a dashboard viewed by someone other than its owner', async () => {
+    const controller = LlmoDashboardsController(mockContext);
+    const createResponse = await controller.createDashboard({
+      ...mockContext, data: { name: 'D1', visibility: 'org' },
+    });
+    const { id } = await createResponse.json();
+    const otherCtx = {
+      ...asUser('other@example.com'),
+      params: { ...mockContext.params, dashboardId: id },
+    };
+    otherCtx.attributes = {
+      authInfo: {
+        getProfile: () => ({ email: 'other@example.com', first_name: 'Grace', last_name: 'Hopper' }),
+      },
+    };
+    const response = await controller.getDashboard(otherCtx);
+    const body = await response.json();
+    expect(body.ownerName).to.be.undefined;
+  });
+
   it('rejects create without a name', async () => {
     const controller = LlmoDashboardsController(mockContext);
     mockContext.data = {};
@@ -79,6 +115,24 @@ describe('LlmoDashboardsController', () => {
     const body = await response.json();
     expect(body.dashboards).to.have.lengthOf(1);
     expect(body.dashboards[0].name).to.equal('D1');
+  });
+
+  it('keeps a dashboard visible after switching the selected brand (org-scoped, not brand-scoped)', async () => {
+    const controller = LlmoDashboardsController(mockContext);
+    const createResponse = await controller.createDashboard({
+      ...mockContext, params: { ...mockContext.params, brandId: 'brand-a' }, data: { name: 'D1' },
+    });
+    const { id } = await createResponse.json();
+
+    const otherBrandCtx = { ...mockContext, params: { ...mockContext.params, brandId: 'brand-b' } };
+
+    const listResponse = await controller.listDashboards(otherBrandCtx);
+    const listBody = await listResponse.json();
+    expect(listBody.dashboards.map((d) => d.id)).to.include(id);
+
+    otherBrandCtx.params = { ...otherBrandCtx.params, dashboardId: id };
+    const getResponse = await controller.getDashboard(otherBrandCtx);
+    expect(getResponse.status).to.equal(200);
   });
 
   it('404s getDashboard for an unknown id', async () => {

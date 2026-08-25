@@ -20,12 +20,20 @@ export const DashboardDto = {
   /**
    * @param {Object} dashboard - a record from in-memory-dashboard-store.js
    * @param {string} callerUserId - the requesting user, to compute `isStarred`
+   * @param {string} [callerDisplayName] - the requesting user's display name (from their
+   *   own IMS profile). Only ever populated for the caller's own dashboards — resolving a
+   *   display name for an arbitrary *other* owner (an org-shared dashboard someone else
+   *   created) would need an address-book-style lookup this v1 doesn't have. Omitted
+   *   (not just falsy) for anyone else's dashboard so clients fall back to showing `ownerId`.
    */
-  toJSON: (dashboard, callerUserId) => ({
+  toJSON: (dashboard, callerUserId, callerDisplayName) => ({
     id: dashboard.id,
     name: dashboard.name,
     description: dashboard.description,
     ownerId: dashboard.ownerId,
+    ...(dashboard.ownerId === callerUserId && callerDisplayName
+      ? { ownerName: callerDisplayName }
+      : {}),
     visibility: dashboard.visibility,
     sharedWith: dashboard.sharedWith,
     controls: dashboard.controls,

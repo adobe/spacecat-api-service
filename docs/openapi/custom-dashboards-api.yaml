@@ -1,0 +1,598 @@
+v2-custom-dashboards-analytics-metadata:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID). Accepted for URL consistency with other brand-scoped endpoints — the governed metrics/dimensions catalog is not brand-specific.
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags:
+      - custom-dashboards
+      - llmo
+    summary: Get the governed analytics catalog
+    description: |
+      Returns every metric and dimension the ABV custom-dashboard analytics
+      query endpoint (`POST .../analytics/query`) will accept, with each
+      metric's `supportedDimensions` expanded to full dimension objects. This
+      is the single source of truth an `Analysis` is validated against — an
+      unsupported metric/dimension/filter combination in the query endpoint
+      is a 400, not silently ignored.
+
+      v1: a single fact domain (brand presence), a single grain (`week`),
+      backed by an in-repo static catalog (no database dependency).
+    operationId: getCustomDashboardsAnalyticsMetadata
+    security:
+      - session_token: []
+      - api_key: []
+    responses:
+      '200':
+        description: Catalog retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AnalyticsMetadata'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+
+v2-custom-dashboards-analytics-query:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID). Scopes which brand's data the fixture/future-real data source is seeded from.
+      schema:
+        type: string
+        format: uuid
+  post:
+    tags:
+      - custom-dashboards
+      - llmo
+    summary: Run a governed analytics query
+    description: |
+      Validates the request body against the governed catalog
+      (`GET .../analytics/metadata`) and returns result rows. v1 has zero
+      database dependency — rows are deterministic fixture data, seeded by
+      `(orgId, brandId, metric, dimensions)` so the same request always
+      returns the same numbers, and different orgs/brands see different
+      numbers. This governance boundary (metric exists, dimensions are
+      supported by that metric, filter operators/values are legal for each
+      dimension's type) is identical regardless of whether the data source
+      behind it is a fixture or a real query engine.
+    operationId: runCustomDashboardsAnalyticsQuery
+    security:
+      - session_token: []
+      - api_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/Analysis'
+    responses:
+      '200':
+        description: Query executed successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AnalyticsQueryResult'
+      '400':
+        description: |
+          The Analysis failed governance validation — one of: unsupported
+          metric; a dimension not supported by that metric; missing/invalid
+          `time` (grain not supported by the metric, or `dateFrom`/`dateTo`
+          not `YYYY-MM-DD` / `dateFrom` after `dateTo`); a filter on a
+          non-filterable dimension, with an operator illegal for that
+          dimension's type, with no values, or with a value outside the
+          dimension's `allowedValues`; an invalid `sort.by`/`sort.direction`;
+          or `limit` outside `1..500`. The response body message states which.
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+
+v2-custom-dashboards-list:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: |
+        Brand ID (UUID). Accepted for URL consistency with other
+        brand-scoped endpoints, but NOT used to scope which dashboards are
+        visible — a Dashboard is an org-level, top-level object and stays
+        visible across a brand switch (see the Dashboard schema). Use a
+        `DashboardControl` on the dashboard itself for a per-dashboard brand
+        filter.
+      schema:
+        type: string
+        format: uuid
+    - name: filter
+      in: query
+      required: false
+      description: |
+        - `mine`: dashboards owned by the caller
+        - `shared`: dashboards visible to the caller but NOT owned by them (org-visible or on `sharedWith`)
+        - `starred`: dashboards the caller has starred
+        - omitted: every dashboard visible to the caller (owned, org-visible, or shared with them)
+      schema:
+        type: string
+        enum: [mine, shared, starred]
+    - name: search
+      in: query
+      required: false
+      description: Case-insensitive substring match against `name` and `description`.
+      schema:
+        type: string
+  get:
+    tags:
+      - custom-dashboards
+      - llmo
+    summary: List dashboards visible to the caller
+    operationId: listCustomDashboards
+    security:
+      - session_token: []
+      - api_key: []
+    responses:
+      '200':
+        description: Dashboards retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/DashboardListResponse'
+      '403':
+        description: |
+          Forbidden. Either the user does not have access to this
+          organization, or the caller's identity could not be resolved from
+          the session (no email claim on the authenticated profile).
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+  post:
+    tags:
+      - custom-dashboards
+      - llmo
+    summary: Create a dashboard
+    description: |
+      The caller becomes the dashboard's owner (`ownerId`, derived
+      server-side from the authenticated session — never client-supplied).
+    operationId: createCustomDashboard
+    security:
+      - session_token: []
+      - api_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/DashboardCreateInput'
+    responses:
+      '201':
+        description: Dashboard created successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Dashboard'
+      '400':
+        description: '`name` is missing, or `visibility` is not one of `private`/`org`.'
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+      '403':
+        description: |
+          Forbidden. Either the user does not have access to this
+          organization, or the caller's identity could not be resolved from
+          the session.
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+
+v2-custom-dashboard:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID). Accepted for URL consistency; not used to scope access — see `Dashboard`.
+      schema:
+        type: string
+        format: uuid
+    - name: dashboardId
+      in: path
+      required: true
+      description: Dashboard ID (UUID)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags:
+      - custom-dashboards
+      - llmo
+    summary: Get a dashboard by ID
+    operationId: getCustomDashboard
+    security:
+      - session_token: []
+      - api_key: []
+    responses:
+      '200':
+        description: Dashboard retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Dashboard'
+      '404':
+        description: |
+          Organization not found, or the dashboard does not exist / is not
+          visible to the caller (private and not owned by, or shared with,
+          the caller). A dashboard the caller cannot see 404s rather than
+          403s, so its existence isn't leaked.
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+      '500':
+        $ref: './responses.yaml#/500'
+  patch:
+    tags:
+      - custom-dashboards
+      - llmo
+    summary: Update a dashboard
+    description: 'Only the owner, or a `sharedWith` entry with `role: editor`, may update a dashboard. Every field is optional; only supplied fields are patched.'
+    operationId: updateCustomDashboard
+    security:
+      - session_token: []
+      - api_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/DashboardUpdateInput'
+    responses:
+      '200':
+        description: Dashboard updated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Dashboard'
+      '400':
+        description: '`visibility` is not one of `private`/`org`.'
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+      '403':
+        description: The caller is neither the owner nor an editor on `sharedWith`.
+      '404':
+        description: Organization not found, or the dashboard does not exist / is not visible to the caller.
+      '500':
+        $ref: './responses.yaml#/500'
+  delete:
+    tags:
+      - custom-dashboards
+      - llmo
+    summary: Delete a dashboard
+    description: Only the owner may delete a dashboard (editors on `sharedWith` may not).
+    operationId: deleteCustomDashboard
+    security:
+      - session_token: []
+      - api_key: []
+    responses:
+      '204':
+        description: Dashboard deleted successfully
+      '403':
+        description: The caller is not the dashboard's owner.
+      '404':
+        description: Organization not found, or the dashboard does not exist / is not visible to the caller.
+      '500':
+        $ref: './responses.yaml#/500'
+
+v2-custom-dashboard-duplicate:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID). Accepted for URL consistency; not used to scope access — see `Dashboard`.
+      schema:
+        type: string
+        format: uuid
+    - name: dashboardId
+      in: path
+      required: true
+      description: Dashboard ID (UUID) of the dashboard to duplicate
+      schema:
+        type: string
+        format: uuid
+  post:
+    tags:
+      - custom-dashboards
+      - llmo
+    summary: Duplicate a dashboard
+    description: |
+      The caller (not the source dashboard's owner) becomes the copy's
+      owner. The copy is always created `private` with an empty
+      `sharedWith`/starred state, regardless of the source's visibility —
+      duplicating a dashboard someone shared with you doesn't also share
+      your copy back with them. Any caller who can view the source (owner,
+      org-visible, or on `sharedWith`) may duplicate it.
+    operationId: duplicateCustomDashboard
+    security:
+      - session_token: []
+      - api_key: []
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/DashboardDuplicateInput'
+    responses:
+      '201':
+        description: Dashboard duplicated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Dashboard'
+      '404':
+        description: Organization not found, or the source dashboard does not exist / is not visible to the caller.
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+      '500':
+        $ref: './responses.yaml#/500'
+
+v2-custom-dashboard-star:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID). Accepted for URL consistency; not used to scope access — see `Dashboard`.
+      schema:
+        type: string
+        format: uuid
+    - name: dashboardId
+      in: path
+      required: true
+      description: Dashboard ID (UUID)
+      schema:
+        type: string
+        format: uuid
+  post:
+    tags:
+      - custom-dashboards
+      - llmo
+    summary: Star a dashboard
+    description: Per-caller — stars this dashboard for the requesting user only, without affecting anyone else's starred list for it.
+    operationId: starCustomDashboard
+    security:
+      - session_token: []
+      - api_key: []
+    responses:
+      '200':
+        description: Dashboard starred successfully (`isStarred` is now `true` for this caller)
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Dashboard'
+      '404':
+        description: Organization not found, or the dashboard does not exist / is not visible to the caller.
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+      '500':
+        $ref: './responses.yaml#/500'
+  delete:
+    tags:
+      - custom-dashboards
+      - llmo
+    summary: Unstar a dashboard
+    operationId: unstarCustomDashboard
+    security:
+      - session_token: []
+      - api_key: []
+    responses:
+      '200':
+        description: Dashboard unstarred successfully (`isStarred` is now `false` for this caller)
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Dashboard'
+      '404':
+        description: Organization not found, or the dashboard does not exist / is not visible to the caller.
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+      '500':
+        $ref: './responses.yaml#/500'
+
+v2-custom-dashboard-tiles:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID). Accepted for URL consistency; not used to scope access — see `Dashboard`.
+      schema:
+        type: string
+        format: uuid
+    - name: dashboardId
+      in: path
+      required: true
+      description: Dashboard ID (UUID)
+      schema:
+        type: string
+        format: uuid
+  post:
+    tags:
+      - custom-dashboards
+      - llmo
+    summary: Add a tile to a dashboard
+    description: 'Only the owner, or a `sharedWith` entry with `role: editor`, may add tiles.'
+    operationId: addCustomDashboardTile
+    security:
+      - session_token: []
+      - api_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/TileInput'
+    responses:
+      '201':
+        description: Tile added successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Tile'
+      '400':
+        description: One or more of `title`, `analysis`, `visualization`, `layout` is missing.
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+      '403':
+        description: The caller is neither the owner nor an editor on `sharedWith`.
+      '404':
+        description: Organization not found, or the dashboard does not exist / is not visible to the caller.
+      '500':
+        $ref: './responses.yaml#/500'
+
+v2-custom-dashboard-tile:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID). Accepted for URL consistency; not used to scope access — see `Dashboard`.
+      schema:
+        type: string
+        format: uuid
+    - name: dashboardId
+      in: path
+      required: true
+      description: Dashboard ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: tileId
+      in: path
+      required: true
+      description: Tile ID (UUID)
+      schema:
+        type: string
+        format: uuid
+  patch:
+    tags:
+      - custom-dashboards
+      - llmo
+    summary: Update a tile
+    description: 'Only the owner, or a `sharedWith` entry with `role: editor`, may update tiles. Every field is optional; only supplied fields are patched.'
+    operationId: updateCustomDashboardTile
+    security:
+      - session_token: []
+      - api_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/TileUpdateInput'
+    responses:
+      '200':
+        description: Tile updated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Tile'
+      '403':
+        description: The caller is neither the owner nor an editor on `sharedWith`.
+      '404':
+        description: Organization or dashboard not found (or not visible to the caller), or the tile does not exist on this dashboard.
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+      '500':
+        $ref: './responses.yaml#/500'
+  delete:
+    tags:
+      - custom-dashboards
+      - llmo
+    summary: Remove a tile
+    description: 'Only the owner, or a `sharedWith` entry with `role: editor`, may remove tiles.'
+    operationId: removeCustomDashboardTile
+    security:
+      - session_token: []
+      - api_key: []
+    responses:
+      '204':
+        description: Tile removed successfully
+      '403':
+        description: The caller is neither the owner nor an editor on `sharedWith`.
+      '404':
+        description: Organization or dashboard not found (or not visible to the caller), or the tile does not exist on this dashboard.
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+      '500':
+        $ref: './responses.yaml#/500'

@@ -84,6 +84,13 @@ tags:
       Hybrid permission model — state-layer access mappings + capability views.
   - name: semrush-onboarding
     description: Semrush onboarding notification operations
+  - name: custom-dashboards
+    description: >-
+      ABV custom dashboards (v1 prototype) — governed analytics query plus
+      dashboard/tile CRUD. Dashboards persist in-memory server-side and the
+      analytics query returns deterministic fixture data; see
+      llmo-dashboards.js / llmo-analytics.js for why and how this swaps to a
+      real data source later without changing the API contract.
 
 paths:
   /audits/latest/{auditType}:
@@ -206,6 +213,22 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-url-inspector-prompts-count'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/url-prompts:
     $ref: './serenity-api.yaml#/v2-serenity-url-inspector-url-prompts'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/analytics/metadata:
+    $ref: './custom-dashboards-api.yaml#/v2-custom-dashboards-analytics-metadata'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/analytics/query:
+    $ref: './custom-dashboards-api.yaml#/v2-custom-dashboards-analytics-query'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/dashboards:
+    $ref: './custom-dashboards-api.yaml#/v2-custom-dashboards-list'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/dashboards/{dashboardId}:
+    $ref: './custom-dashboards-api.yaml#/v2-custom-dashboard'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/dashboards/{dashboardId}/duplicate:
+    $ref: './custom-dashboards-api.yaml#/v2-custom-dashboard-duplicate'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/dashboards/{dashboardId}/star:
+    $ref: './custom-dashboards-api.yaml#/v2-custom-dashboard-star'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/dashboards/{dashboardId}/tiles:
+    $ref: './custom-dashboards-api.yaml#/v2-custom-dashboard-tiles'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/dashboards/{dashboardId}/tiles/{tileId}:
+    $ref: './custom-dashboards-api.yaml#/v2-custom-dashboard-tile'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/{organizationId}/entitlements:

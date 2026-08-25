@@ -32,8 +32,18 @@ function now() {
   return new Date().toISOString();
 }
 
-function assertOrgBrandScope(dashboard, orgId, brandId) {
-  return dashboard.orgId === orgId && dashboard.brandId === brandId;
+// A dashboard is an org-level, top-level object — not partitioned by brand. It's
+// visible regardless of which brand is selected in the UI; `Dashboard.controls` (not
+// this scope check) is where a per-dashboard brand filter belongs, the same way it
+// already carries date-range/platform/region controls for what a tile queries
+// against. Checking `brandId` here was the exact bug the frontend mock deliberately
+// avoided (see customDashboardsMockApi.ts's `getScopedStore`): it made a dashboard
+// vanish the moment you switched brands, instead of just changing what its tiles
+// show. `brandId` is still accepted/stored below (every route path includes it, and
+// it's harmless to record which brand context a dashboard was created from) — it's
+// just never used to gate access.
+function assertOrgScope(dashboard, orgId) {
+  return dashboard.orgId === orgId;
 }
 
 export function resetStore() {
@@ -41,10 +51,10 @@ export function resetStore() {
 }
 
 export function listDashboards({
-  orgId, brandId, ownerId, filter, search,
+  orgId, ownerId, filter, search,
 }) {
   const all = [...dashboardsById.values()]
-    .filter((d) => assertOrgBrandScope(d, orgId, brandId));
+    .filter((d) => assertOrgScope(d, orgId));
 
   const visible = all.filter((d) => (
     d.ownerId === ownerId
@@ -70,9 +80,9 @@ export function listDashboards({
   return filtered.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
-export function getDashboard({ id, orgId, brandId }) {
+export function getDashboard({ id, orgId }) {
   const dashboard = dashboardsById.get(id);
-  if (!dashboard || !assertOrgBrandScope(dashboard, orgId, brandId)) {
+  if (!dashboard || !assertOrgScope(dashboard, orgId)) {
     return null;
   }
   return dashboard;

@@ -49,6 +49,17 @@ function LlmoDashboardsController(context) {
     return profile?.email;
   };
 
+  /** Display name for the DTO's `ownerName` — same first/last-name field fallbacks
+   * `user-details.js` uses for the IMS profile. `undefined` (not a placeholder string)
+   * when neither is present, so `DashboardDto.toJSON` cleanly omits the field. */
+  const getCallerDisplayName = (ctx) => {
+    const profile = ctx.attributes?.authInfo?.getProfile?.();
+    const first = profile?.first_name || profile?.given_name;
+    const last = profile?.last_name || profile?.family_name;
+    const name = [first, last].filter(Boolean).join(' ').trim();
+    return name || undefined;
+  };
+
   /** A caller may see a dashboard when they own it, it's org-visible, or they're on the
    * share list — the same rule `in-memory-dashboard-store.js#listDashboards` applies for
    * listing, restated here for single-dashboard reads. */
@@ -68,12 +79,15 @@ function LlmoDashboardsController(context) {
     if (!hasText(callerId)) {
       return forbidden('Unable to resolve caller identity');
     }
+    const callerDisplayName = getCallerDisplayName(ctx);
     const { spaceCatId, brandId } = ctx.params;
     const { filter, search } = ctx.data ?? {};
     const dashboards = store.listDashboards({
       orgId: spaceCatId, brandId, ownerId: callerId, filter, search,
     });
-    return ok({ dashboards: dashboards.map((d) => DashboardDto.toJSON(d, callerId)) });
+    return ok({
+      dashboards: dashboards.map((d) => DashboardDto.toJSON(d, callerId, callerDisplayName)),
+    });
   };
 
   const getDashboard = async (ctx) => {
@@ -87,7 +101,7 @@ function LlmoDashboardsController(context) {
     if (!dashboard || !canView(dashboard, callerId)) {
       return notFound(`Dashboard not found: ${dashboardId}`);
     }
-    return ok(DashboardDto.toJSON(dashboard, callerId));
+    return ok(DashboardDto.toJSON(dashboard, callerId, getCallerDisplayName(ctx)));
   };
 
   const createDashboard = async (ctx) => {
@@ -112,7 +126,7 @@ function LlmoDashboardsController(context) {
     const dashboard = store.createDashboard({
       orgId: spaceCatId, brandId, ownerId: callerId, name, description, visibility, controls,
     });
-    return createResponse(DashboardDto.toJSON(dashboard, callerId), 201);
+    return createResponse(DashboardDto.toJSON(dashboard, callerId, getCallerDisplayName(ctx)), 201);
   };
 
   const updateDashboard = async (ctx) => {
@@ -146,7 +160,7 @@ function LlmoDashboardsController(context) {
     const updated = store.updateDashboard({
       id: dashboardId, orgId: spaceCatId, brandId, patch,
     });
-    return ok(DashboardDto.toJSON(updated, callerId));
+    return ok(DashboardDto.toJSON(updated, callerId, getCallerDisplayName(ctx)));
   };
 
   const deleteDashboard = async (ctx) => {
@@ -182,7 +196,7 @@ function LlmoDashboardsController(context) {
     const copy = store.duplicateDashboard({
       id: dashboardId, orgId: spaceCatId, brandId, ownerId: callerId, name,
     });
-    return createResponse(DashboardDto.toJSON(copy, callerId), 201);
+    return createResponse(DashboardDto.toJSON(copy, callerId, getCallerDisplayName(ctx)), 201);
   };
 
   const setStarred = (starred) => async (ctx) => {
@@ -199,7 +213,7 @@ function LlmoDashboardsController(context) {
     const updated = store.setStarred({
       id: dashboardId, orgId: spaceCatId, brandId, userId: callerId, starred,
     });
-    return ok(DashboardDto.toJSON(updated, callerId));
+    return ok(DashboardDto.toJSON(updated, callerId, getCallerDisplayName(ctx)));
   };
 
   const addTile = async (ctx) => {
