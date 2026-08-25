@@ -24,15 +24,59 @@
 
 const NAMESPACE = 'Mysticat/GitHubService';
 
+// Module-scoped flag so we warn at most once per Lambda instance when the
+// environment falls back to the default. Emitting per-request would flood the
+// log for every invocation on a mis-configured deploy; once-per-instance is
+// enough for ops to notice on the first cold start and still avoid confusing
+// on-call with a warn spike that dwarfs the actual outcome events.
+let envFallbackWarned = false;
+
 /**
  * Resolves the deployment environment name from process/Lambda env vars.
  * Precedence: AWS_ENV > ENV > 'dev'.
  *
+ * If neither variable is set the caller falls back to 'dev'. In prod that is a
+ * silent mis-labeling — every metric routes to the dev dashboard while prod
+ * dashboards read as zero traffic. Pass `log` to have this warned once per
+ * Lambda instance (via `log.warn`) so a broken deploy manifest surfaces on the
+ * very first invocation rather than staying invisible until someone spot-checks
+ * the wrong-tier dashboard.
+ *
  * @param {object} env - The env object (context.env or process.env)
+ * @param {object} [opts] - Options
+ * @param {object} [opts.log] - Optional logger for the default-fallback warning
  * @returns {string} Environment name
  */
-export function resolveEnvironment(env = {}) {
-  return env.AWS_ENV || env.ENV || 'dev';
+export function resolveEnvironment(env = {}, { log } = {}) {
+  if (env.AWS_ENV) {
+    return env.AWS_ENV;
+  }
+  if (env.ENV) {
+    return env.ENV;
+  }
+  // Defensive: some callers pass a partial logger (info/error only) — helix
+  // and Lambda contexts historically only guarantee `log.info`, so `log.warn`
+  // may be absent. Skip silently rather than crash the request path.
+  if (log && typeof log.warn === 'function' && !envFallbackWarned) {
+    envFallbackWarned = true;
+    log.warn(
+      '[metrics-emf] resolveEnvironment: neither AWS_ENV nor ENV is set — '
+      + "defaulting to 'dev'. In a production deploy this mis-labels metrics; "
+      + 'check the Lambda env-var manifest.',
+    );
+  }
+  return 'dev';
+}
+
+/**
+ * Test-only: reset the module-scoped warn-once latch so unit tests can verify
+ * the first-call semantics without cross-test bleed. Exported (not prefixed
+ * with an underscore, which lint forbids) but named to make its scope obvious
+ * so no production caller reaches for it by mistake.
+ */
+// eslint-disable-next-line camelcase
+export function resetEnvFallbackWarnedForTest() {
+  envFallbackWarned = false;
 }
 
 /**

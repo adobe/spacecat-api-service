@@ -81,7 +81,7 @@ class AsoOverlayKeyHandler extends AbstractHandler {
 
     // From here on, we're on the overlay route — every outcome is worth a metric.
     const emitOpts = {
-      environment: resolveEnvironment(context.env),
+      environment: resolveEnvironment(context.env, { log: context.log }),
       namespace: ASO_OVERLAY_NAMESPACE,
     };
 

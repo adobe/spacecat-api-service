@@ -80,7 +80,7 @@ class GitHubWebhookHmacHandler extends AbstractHandler {
     // Best-effort metric helpers — defined here so context.env is in scope.
     // Both swallow errors (emitMetric is itself best-effort, and these are
     // called on auth-rejection paths where we must never throw).
-    const environment = resolveEnvironment(context.env);
+    const environment = resolveEnvironment(context.env, { log: context.log });
     const rejected = (reason) => emitMetric(
       { name: 'WebhookRejected', dimensions: { Reason: reason } },
       { environment },
