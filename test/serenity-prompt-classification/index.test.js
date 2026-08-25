@@ -172,3 +172,26 @@ describe('serenity-prompt-classification worker entry', () => {
     expect(job.getStatus()).to.equal('COMPLETED');
   });
 });
+
+describe('serenity-prompt-classification vault config', () => {
+  let vaultOpts;
+
+  before(async () => {
+    ({ vaultOpts } = await import('../../src/serenity-prompt-classification/index.js'));
+  });
+
+  it('reuses api-service\'s Secrets Manager bootstrap secret (no dedicated worker bootstrap)', () => {
+    expect(vaultOpts.bootstrapPath).to.equal('/mysticat/bootstrap/api-service');
+  });
+
+  it('reads api-service\'s env-scoped Vault path, resolving env from AWS_ENV', () => {
+    expect(vaultOpts.name({ env: { AWS_ENV: 'prod' } })).to.equal('prod/api-service');
+    expect(vaultOpts.name({ env: { AWS_ENV: 'stage' } })).to.equal('stage/api-service');
+  });
+
+  it('falls back ENV then dev when AWS_ENV is unset (wrong env fails closed on the per-env AppRole)', () => {
+    expect(vaultOpts.name({ env: { ENV: 'stage' } })).to.equal('stage/api-service');
+    expect(vaultOpts.name({ env: {} })).to.equal('dev/api-service');
+    expect(vaultOpts.name({})).to.equal('dev/api-service');
+  });
+});
