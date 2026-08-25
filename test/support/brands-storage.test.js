@@ -2664,16 +2664,44 @@ describe('brands-storage', () => {
         brands: [
           // 1st call: select current row — brand anchored to OLD_SITE.
           { data: { site_id: 'old-primary-site-id', status: 'active' }, error: null },
-          // 2nd call: update succeeds.
-          { data: { id: BRAND_ID }, error: null },
-          // 3rd call: getBrandById re-fetch — site_id now NEW_SITE, and brand_sites
-          // still lists OLD_SITE + NEW_SITE + a third secondary (mirrors the live
-          // bug report: the target was already a secondary URL before the re-point).
+          // 2nd call: the UPDATE's own RETURNING (BRAND_SELECT embed) — what a real
+          // PostgREST `Prefer: return=representation` response looks like on this
+          // UPDATE. site_id now NEW_SITE, and brand_sites still lists OLD_SITE +
+          // NEW_SITE + a third secondary (mirrors the live bug report: the target
+          // was already a secondary URL before the re-point). This call is
+          // guaranteed to land on the writer (see updateBrand's comment), so — per
+          // the fix — updateBrand builds its result directly from THIS row when
+          // (as here) no child-table collection was touched by the same PATCH.
           {
             data: makeBrandRow({
               site_id: 'new-secondary-site-id',
+              base_site: { id: 'new-secondary-site-id', base_url: 'https://example.com' },
               status: 'active',
               updated_at: '2026-01-02T00:00:00Z',
+              brand_sites: [
+                { site_id: 'old-primary-site-id', paths: [], sites: { base_url: 'https://haha.com' } },
+                { site_id: 'new-secondary-site-id', paths: [], sites: { base_url: 'https://example.com' } },
+                { site_id: 'third-site-id', paths: [], sites: { base_url: 'https://you.com' } },
+              ],
+            }),
+            error: null,
+          },
+          // 3rd call: getBrandById re-fetch. Deliberately modeled as STALE — still
+          // shows the OLD site_id/updatedAt — to simulate the CONFIRMED production
+          // mechanism (serenity-docs#349 follow-up): this env's postgrestClient
+          // points at `data-svc-balanced.internal`, where a bare GET can be served
+          // by a lagging Aurora reader replica even though the write already
+          // committed on the writer. Because this PATCH touches no child-table
+          // collection, the fix never issues this call at all. If a future change
+          // reintroduced the old unconditional getBrandById() re-fetch, this stale
+          // fixture would make the assertions below fail — proving this test
+          // actually exercises the race, not just a mock that was never stale.
+          {
+            data: makeBrandRow({
+              site_id: 'old-primary-site-id',
+              base_site: { id: 'old-primary-site-id', base_url: 'https://haha.com' },
+              status: 'active',
+              updated_at: '2026-01-01T00:00:00Z',
               brand_sites: [
                 { site_id: 'old-primary-site-id', paths: [], sites: { base_url: 'https://haha.com' } },
                 { site_id: 'new-secondary-site-id', paths: [], sites: { base_url: 'https://example.com' } },
@@ -2852,9 +2880,13 @@ describe('brands-storage', () => {
     });
 
     it('normalizes brand guidance fields in update patch', async () => {
+      // No baseSiteId/status/expectedUpdatedAt here, so there is no pre-read: the
+      // 1st brands call IS the UPDATE's own RETURNING. Since this PATCH touches no
+      // child-table collection, updateBrand returns straight off this row (no
+      // follow-up read at all) — so it must already carry the applied values, the
+      // same way a real `Prefer: return=representation` response would.
       const client = createCapturingClient({
         brands: [
-          { data: { id: BRAND_ID }, error: null },
           {
             data: makeBrandRow({
               brand_context: null,
@@ -3057,11 +3089,13 @@ describe('brands-storage', () => {
     });
 
     it('handles non-string region values in updates', async () => {
+      // region-only patch: no child-table collection touched, so updateBrand
+      // returns straight off the UPDATE's own RETURNING row (1st/only brands call)
+      // — no follow-up read.
       const fullBrandRow = makeBrandRow({ regions: ['42'] });
 
       const postgrestClient = createTableMockClient({
         brands: [
-          { data: { id: BRAND_ID }, error: null },
           { data: fullBrandRow, error: null },
         ],
       });
