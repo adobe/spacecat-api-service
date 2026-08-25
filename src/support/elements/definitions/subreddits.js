@@ -32,8 +32,8 @@ import { resolveElementModel } from '../constants.js';
  *
  * @param {object} [params]
  * @param {string} [params.model] - AI model filter (Semrush engine name or UI platform
- *   code). Translated + validated via {@link resolveElementModel}.
- * @param {string} [params.platform] - Legacy alias for `model`; `model` takes precedence.
+ *   code), translated + validated via {@link resolveElementModel}. Omitted or unknown →
+ *   defaults to `search-gpt` (the resolver's fallback), consistent with sibling definitions.
  * @param {string} params.startDate - ISO date (YYYY-MM-DD). Required — the controller
  *   validates it and rejects a missing/invalid range with 400, so there is no default here.
  * @param {string} params.endDate - ISO date (YYYY-MM-DD). Required (see startDate).
@@ -41,9 +41,9 @@ import { resolveElementModel } from '../constants.js';
  *   simple). Omitted → all of the workspace's projects.
  */
 export function buildSubredditsPayload({
-  model, platform, startDate, endDate, projectId,
+  model, startDate, endDate, projectId,
 } = {}) {
-  const resolvedModel = resolveElementModel(model || platform);
+  const resolvedModel = resolveElementModel(model);
 
   const advancedFilters = [
     { op: 'or', filters: [{ op: 'eq', val: resolvedModel, col: 'CBF_model' }] },
@@ -79,8 +79,9 @@ function parsePagination({ page, pageSize } = {}) {
  *                    responsesWithCitations, threads, visibility, projectId }], totalCount }
  *
  * Numeric fields use `Number(x) || 0` (not `Number(x ?? 0)`) so a non-numeric value coerces
- * to 0 instead of NaN. Rows are sorted by `mentions` descending, then paginated client-side
- * (Semrush has no server-side paging); `totalCount` is the pre-slice row count.
+ * to 0 instead of NaN. Rows are sorted by `mentions` descending, tie-broken by `subredditKey`
+ * so pagination is deterministic when counts are equal, then paginated client-side (Semrush
+ * has no server-side paging); `totalCount` is the pre-slice row count.
  *
  * @param {object} raw - Raw response from the Elements API.
  * @param {object} [params] - Query params (page, pageSize).
@@ -100,7 +101,7 @@ export function transformSubredditsResponse(raw, params = {}) {
       visibility: Number(row.visibility) || 0,
       projectId: row.project_id || '',
     }))
-    .sort((a, b) => b.mentions - a.mentions);
+    .sort((a, b) => b.mentions - a.mentions || a.subredditKey.localeCompare(b.subredditKey));
 
   const { page, pageSize } = parsePagination(params);
   const totalCount = rows.length;
