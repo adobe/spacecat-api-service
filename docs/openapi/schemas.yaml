@@ -12648,6 +12648,63 @@ SerenityBrandPresenceSentimentOverview:
             description: Stubbed empty (parity with the legacy contract).
             items: { type: object }
 
+SerenityBrandPresenceSubredditRow:
+  type: object
+  description: Per-subreddit Reddit stats for one (subreddit, project).
+  properties:
+    subreddit:
+      type: string
+      description: Subreddit display name (with the `r/` prefix).
+      example: 'r/Lovesac'
+    subredditKey:
+      type: string
+      description: Subreddit name without the `r/` prefix.
+      example: 'Lovesac'
+    link:
+      type: string
+      description: Subreddit link/handle as returned by the element.
+      example: 'r/Lovesac'
+    mentions:
+      type: integer
+      example: 4407
+    prompts:
+      type: integer
+      description: Number of prompts whose responses cited this subreddit.
+      example: 430
+    responsesWithCitations:
+      type: integer
+      example: 2603
+    threads:
+      type: integer
+      example: 1879
+    visibility:
+      type: number
+      format: float
+      description: Within-window visibility share for the subreddit (0..1).
+      example: 0.7477736282677392
+    projectId:
+      type: string
+      format: uuid
+      description: Semrush project the row belongs to.
+      example: 'cb4f6443-e01f-4075-a586-85511f136e31'
+
+SerenityBrandPresenceSubreddits:
+  type: object
+  description: |
+    Per-subreddit Reddit stats from the Semrush "Subreddits" element (faf56e29),
+    sorted by `mentions` descending (tie-broken by `subredditKey`) and paginated.
+    `totalCount` is the full pre-pagination row count. In workspace-wide mode (no
+    `projectId`) the same subreddit can appear once per project.
+  required: [subreddits, totalCount]
+  properties:
+    subreddits:
+      type: array
+      items:
+        $ref: '#/SerenityBrandPresenceSubredditRow'
+    totalCount:
+      type: integer
+      example: 107
+
 SerenityBrandPresenceTopics:
   type: object
   description: |
