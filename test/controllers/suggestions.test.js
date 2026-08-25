@@ -240,11 +240,13 @@ describe('Suggestions Controller', () => {
       getId: sandbox.stub().returns(SITE_ID),
       getDeliveryType: sandbox.stub().returns(SiteModel.DELIVERY_TYPES.AEM_EDGE),
       getOrganizationId: sandbox.stub().returns('test-org-id'),
+      getOrganization: sandbox.stub().resolves({ getImsOrgId: () => 'test-ims-org@AdobeOrg' }),
     };
     siteNotEnabled = {
       getId: sandbox.stub().returns(SITE_ID_NOT_ENABLED),
       getDeliveryType: sandbox.stub().returns(SiteModel.DELIVERY_TYPES.AEM_EDGE),
       getOrganizationId: sandbox.stub().returns('test-org-id'),
+      getOrganization: sandbox.stub().resolves({ getImsOrgId: () => 'test-ims-org@AdobeOrg' }),
     };
 
     removeStub = sandbox.stub().resolves();
@@ -4512,6 +4514,66 @@ describe('Suggestions Controller', () => {
       });
 
       expect(response.status).to.not.equal(403);
+    });
+
+    it('auto-fix suggestions allows AEM Edge Freemium caller in the ASO-EDS-Autofix-users IMS group', async () => {
+      const mockTierClient = {
+        checkValidEntitlement: sandbox.stub().resolves({
+          entitlement: { getTier: () => 'PLG' },
+          siteEnrollment: { getId: () => 'enrollment-1' },
+        }),
+      };
+      const isImsGroupMemberStub = sandbox.stub().resolves(true);
+      const ControllerWithGroupMember = await esmock('../../src/controllers/suggestions.js', {
+        '@adobe/spacecat-shared-tier-client': { default: { createForSite: sandbox.stub().resolves(mockTierClient) } },
+        '../../src/support/ims-group.js': { isImsGroupMember: isImsGroupMemberStub },
+      });
+      const controllerWithGroupMember = ControllerWithGroupMember({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'ASO' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithGroupMember.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.not.equal(403);
+      expect(isImsGroupMemberStub).to.have.been.calledWithMatch(
+        sinon.match.any,
+        sinon.match({ groupName: 'ASO-EDS-Autofix-users' }),
+      );
+    });
+
+    it('auto-fix suggestions returns 403 for AEM Edge Freemium caller not in the ASO-EDS-Autofix-users IMS group', async () => {
+      const mockTierClient = {
+        checkValidEntitlement: sandbox.stub().resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          siteEnrollment: { getId: () => 'enrollment-2' },
+        }),
+      };
+      const ControllerWithNonMember = await esmock('../../src/controllers/suggestions.js', {
+        '@adobe/spacecat-shared-tier-client': { default: { createForSite: sandbox.stub().resolves(mockTierClient) } },
+        '../../src/support/ims-group.js': { isImsGroupMember: sandbox.stub().resolves(false) },
+      });
+      const controllerWithNonMember = ControllerWithNonMember({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'ASO' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithNonMember.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body.message).to.equal('unauthorized');
+      expect(context.log.warn).to.have.been.calledWithMatch(/not in 'ASO-EDS-Autofix-users' IMS group/);
     });
 
     it('auto-fix suggestions returns 400 if site not enabled for autofix', async () => {
