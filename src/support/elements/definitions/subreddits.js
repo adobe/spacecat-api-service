@@ -12,21 +12,7 @@
 
 import { resolveElementModel } from '../constants.js';
 
-// Legacy default window is a rolling 28 days (mirrors cited-domains). Kept inline so this
-// definition stays pure and does not import controller code.
-const DEFAULT_WINDOW_DAYS = 28;
-
 /* c8 ignore start -- SITES-POC subreddits endpoint; unit tests intentionally deferred */
-function defaultDateRange() {
-  const end = new Date();
-  const start = new Date();
-  start.setDate(start.getDate() - DEFAULT_WINDOW_DAYS);
-  return {
-    startDate: start.toISOString().slice(0, 10),
-    endDate: end.toISOString().slice(0, 10),
-  };
-}
-
 /**
  * Builds the payload for the Subreddits element (faf56e29). The element is a `table`
  * returning one row per (subreddit, project) with mentions/prompts/threads/
@@ -48,8 +34,9 @@ function defaultDateRange() {
  * @param {string} [params.model] - AI model filter (Semrush engine name or UI platform
  *   code). Translated + validated via {@link resolveElementModel}.
  * @param {string} [params.platform] - Legacy alias for `model`; `model` takes precedence.
- * @param {string} [params.startDate] - ISO date (YYYY-MM-DD). Defaults to 28 days ago.
- * @param {string} [params.endDate] - ISO date (YYYY-MM-DD). Defaults to today.
+ * @param {string} params.startDate - ISO date (YYYY-MM-DD). Required — the controller
+ *   validates it and rejects a missing/invalid range with 400, so there is no default here.
+ * @param {string} params.endDate - ISO date (YYYY-MM-DD). Required (see startDate).
  * @param {string} [params.projectId] - Semrush project id to scope to (top-level +
  *   simple). Omitted → all of the workspace's projects.
  */
@@ -57,14 +44,11 @@ export function buildSubredditsPayload({
   model, platform, startDate, endDate, projectId,
 } = {}) {
   const resolvedModel = resolveElementModel(model || platform);
-  const defaults = defaultDateRange();
-  const start = startDate || defaults.startDate;
-  const end = endDate || defaults.endDate;
 
   const advancedFilters = [
     { op: 'or', filters: [{ op: 'eq', val: resolvedModel, col: 'CBF_model' }] },
-    { op: 'gte', val: start, col: 'CBF_date__start' },
-    { op: 'lte', val: end, col: 'CBF_date__end' },
+    { op: 'gte', val: startDate, col: 'CBF_date__start' },
+    { op: 'lte', val: endDate, col: 'CBF_date__end' },
   ];
 
   return {
