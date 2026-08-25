@@ -1,3 +1,10 @@
+## [1.763.3](https://github.com/adobe/spacecat-api-service/compare/v1.763.2...v1.763.3) (2026-08-25)
+
+
+### Bug Fixes
+
+* **onboard:** alert plg_onboardings when Force Tier Update downgrades PLG/Pre-onboard → Free_Trial ([#3129](https://github.com/adobe/spacecat-api-service/issues/3129)) ([de0e630](https://github.com/adobe/spacecat-api-service/commit/de0e630f53acbc561f25780acde8debb0ac63f35)), closes [Hi#level](https://github.com/Hi/issues/level) [hi#signal](https://github.com/hi/issues/signal)
+
 ## [1.763.2](https://github.com/adobe/spacecat-api-service/compare/v1.763.1...v1.763.2) (2026-08-25)
 
 
