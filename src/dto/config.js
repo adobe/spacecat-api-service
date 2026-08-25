@@ -40,7 +40,7 @@ const toListJSON = (config) => {
   if (isNonEmptyObject(json.llmo)) {
     result.llmo = {};
     const {
-      dataFolder, brand, tags, customerIntent, detectedCdn,
+      dataFolder, brand, tags, customerIntent, detectedCdn, showWww,
     } = json.llmo;
     if (dataFolder) {
       result.llmo.dataFolder = dataFolder;
@@ -57,6 +57,13 @@ const toListJSON = (config) => {
     if (detectedCdn) {
       result.llmo.detectedCdn = detectedCdn;
     }
+    // Whether to display the site's own domain with a leading "www." (LLMO-6673).
+    // A UI-relevant display flag, so it must ride along in the slim list response —
+    // without it the UI reads `showWww: undefined` from list-sourced sites and the
+    // www transform silently no-ops (e.g. the admin cross-org site list).
+    if (showWww) {
+      result.llmo.showWww = showWww;
+    }
   }
   if (isNonEmptyObject(json.edgeOptimizeConfig)) {
     result.edgeOptimizeConfig = json.edgeOptimizeConfig;
@@ -68,7 +75,12 @@ const toListJSON = (config) => {
     result.brandConfig = json.brandConfig;
   }
   if (isNonEmptyObject(json.fetchConfig)) {
-    result.fetchConfig = json.fetchConfig;
+    // Only expose overrideBaseURL in list responses. headers can hold credentials
+    // (Authorization, Cookie, etc.) and shouldn't be returned in bulk.
+    const { overrideBaseURL } = json.fetchConfig;
+    if (overrideBaseURL) {
+      result.fetchConfig = { overrideBaseURL };
+    }
   }
   if (isNonEmptyObject(json.handlers)) {
     result.handlers = json.handlers;

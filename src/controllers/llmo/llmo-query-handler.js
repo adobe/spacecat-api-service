@@ -10,13 +10,13 @@
  * governing permissions and limitations under the License.
  */
 
-import { SPACECAT_USER_AGENT, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
 import {
   applyFilters,
   applyInclusions,
   applySort,
   LLMO_SHEETDATA_SOURCE_URL,
 } from './llmo-utils.js';
+import { fetchLlmoSource } from './llmo-source.js';
 
 const processData = (data, queryParams) => {
   let processedData = data;
@@ -75,7 +75,7 @@ const processData = (data, queryParams) => {
 };
 
 const fetchAndProcessSingleFile = async (context, llmoConfig, filePath, queryParams) => {
-  const { log, env } = context;
+  const { log } = context;
   const { sheet } = context.data;
 
   const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${llmoConfig.dataFolder}/${filePath}`);
@@ -95,63 +95,13 @@ const fetchAndProcessSingleFile = async (context, llmoConfig, filePath, queryPar
   const urlAsString = url.toString();
   log.info(`Fetching single file with path: ${urlAsString}`);
 
-  // Create an AbortController with a 15-second timeout
-  // to prevent large data fetches keeping the Lambda running for too long
-  const TIMEOUT_MS = 15000;
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS); // 15 seconds
-
-  // Validate API key exists before making the request
-  if (!env.LLMO_HLX_API_KEY) {
-    clearTimeout(timeoutId);
-    throw new Error('LLMO_HLX_API_KEY environment variable is not configured');
+  const result = await fetchLlmoSource(context, urlAsString);
+  if (result.noData) {
+    return { noData: true };
   }
 
-  // Start timing the source fetch
-  const sourceFetchStartTime = Date.now();
-
-  try {
-    // Fetch data from the external endpoint using the dataFolder from config
-    const response = await fetch(url.toString(), {
-      headers: {
-        Authorization: `token ${env.LLMO_HLX_API_KEY}`,
-        'User-Agent': SPACECAT_USER_AGENT,
-        'Accept-Encoding': 'br',
-      },
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      log.debug(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
-      throw new Error(`External API returned ${response.status}: ${response.statusText}`);
-    }
-
-    // Get the raw response data
-    const rawData = await response.json();
-    const fetchTime = Date.now() - sourceFetchStartTime;
-
-    log.info(`✓ Fetch from HELIX ${filePath}: ${fetchTime}ms`);
-
-    // Process the data with all query parameters
-    const processStartTime = Date.now();
-    const processedData = processData(rawData, queryParams);
-    const processTime = Date.now() - processStartTime;
-
-    log.info(`✓ Data processing completed in ${processTime}ms`);
-
-    return {
-      data: processedData,
-      headers: response.headers ? Object.fromEntries(response.headers.entries()) : {},
-    };
-  } catch (error) {
-    clearTimeout(timeoutId);
-    if (error.name === 'AbortError') {
-      log.debug(`Request timeout after ${TIMEOUT_MS}ms for file: ${filePath}`);
-      throw new Error(`Request timeout after ${TIMEOUT_MS}ms`);
-    }
-    throw error;
-  }
+  const processedData = processData(result.data, queryParams);
+  return { data: processedData, headers: result.headers };
 };
 
 /**
@@ -197,17 +147,16 @@ const fetchAndProcessMultipleFiles = async (context, llmoConfig, files, queryPar
     files,
     async (filePath) => {
       try {
-        const { data } = await fetchAndProcessSingleFile(
+        const single = await fetchAndProcessSingleFile(
           context,
           llmoConfig,
           filePath,
           queryParams,
         );
-        return {
-          path: filePath,
-          status: 'success',
-          data,
-        };
+        if (single.noData) {
+          return { path: filePath, status: 'no_data' };
+        }
+        return { path: filePath, status: 'success', data: single.data };
       } catch (error) {
         log.debug(`Error fetching and processing file ${filePath}: ${error.message}`);
         return {

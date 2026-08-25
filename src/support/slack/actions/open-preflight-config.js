@@ -167,6 +167,28 @@ export default function openPreflightConfig(lambdaContext) {
               text: 'Document Authoring: main--site--owner.aem.live. CS/CS-Crosswalk: AEM CS URL (author-p12345-e67890.adobeaemcloud.com). AMS URL (https://author.adobecqms.net).',
             },
           },
+          {
+            type: 'input',
+            block_id: 'content_source_path_input',
+            optional: true,
+            element: {
+              type: 'plain_text_input',
+              action_id: 'content_source_path',
+              placeholder: {
+                type: 'plain_text',
+                text: '/content/mysite',
+              },
+              initial_value: currentDeliveryConfig.contentSourcePath || '',
+            },
+            label: {
+              type: 'plain_text',
+              text: 'Content Source Path',
+            },
+            hint: {
+              type: 'plain_text',
+              text: 'Required for Cloud Service when multiple sites in this organization share the same program and environment ID. Optional otherwise.',
+            },
+          },
         ],
       };
 

@@ -13,6 +13,7 @@ import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { ImsPromiseClient } from '@adobe/spacecat-shared-ims-client';
+import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import URI from 'urijs';
 import {
   hasText,
@@ -20,12 +21,12 @@ import {
   isValidUrl,
   isObject,
   isNonEmptyObject,
-  resolveCanonicalUrl,
   isValidIMSOrgId,
   detectAEMVersion,
   detectLocale,
   wwwUrlResolver as sharedWwwUrlResolver,
   getLastNumberOfWeeks,
+  resolveCanonicalUrl,
 } from '@adobe/spacecat-shared-utils';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import RUMAPIClient, { RUM_BUNDLER_API_HOST } from '@adobe/spacecat-shared-rum-api-client';
@@ -35,7 +36,13 @@ import worldCountries from 'world-countries';
 import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import {
   STATUS_BAD_REQUEST,
+  STATUS_UNAUTHORIZED,
+  X_PROMISE_TOKEN_HEADER,
+  X_PROMISE_AUDIENCE_HEADER,
+  PROMISE_TOKEN_REQUIRED_ERROR_CODE,
 } from '../utils/constants.js';
+import { updateRumConfig } from './rum-config-service.js';
+import { notifyForcedTierDowngrade } from './slack/tier-change-alert.js';
 // Two signals indicate a previous paid onboarding:
 // 1. ahref-paid-pages import — unique to the paid profile's import set.
 // 2. onboardConfig.lastProfile === 'paid' — set for sites backfilled via script or onboarded
@@ -79,19 +86,10 @@ export const sanitizeExecutionName = (value) => {
   return executionName.slice(0, 80);
 };
 
-/**
- * Checks if the url parameter "url" equals "ALL".
- * @param {string} url - URL parameter.
- * @returns {boolean} True if url equals "ALL", false otherwise.
- */
-export const isAuditForAllUrls = (url) => url.toUpperCase() === 'ALL';
-
-/**
- * Checks if the deliveryType parameter "deliveryType" equals "ALL".
- * @param {string} deliveryType - deliveryType parameter.
- * @returns {boolean} True if deliveryType equals "ALL", false otherwise.
- */
-export const isAuditForAllDeliveryTypes = (deliveryType) => deliveryType.toUpperCase() === 'ALL';
+// Re-exported from a dependency-free leaf so lower-level modules (e.g. utils/slack/base.js) can
+// use these predicates without importing this hub module — importing them from here would create
+// an import cycle once this module imports slack helpers (SITES-50179).
+export { isAuditForAllUrls, isAuditForAllDeliveryTypes } from './audit-run-scope.js';
 
 /**
  * Sends an audit message for a single URL.
@@ -247,21 +245,38 @@ export const sendInternalReportRunMessage = async (
 
 /**
  * Sends a message to run a global import job to the provided SQS queue.
- * Global imports don't require a siteId - they run across all data.
+ * Global imports don't require a siteId - they run across all data - but an optional siteId
+ * scopes the run to just that one site (e.g. for an ad hoc re-check), and optional force /
+ * validateOnly flags (only meaningful alongside a siteId) tell the target handler to skip, or
+ * run only, whatever gating check it normally requires, when it supports them.
  *
  * @param {Object} sqs - The SQS service object.
  * @param {string} queueUrl - The SQS queue URL.
  * @param {string} importType - The type of global import to run.
  * @param {Object} slackContext - The Slack context for notifications.
+ * @param {Object} [options] - Optional single-site scoping.
+ * @param {string} [options.siteId] - Site ID to scope the run to a single site.
+ * @param {boolean} [options.force] - Skip the handler's normal gating check for that site.
+ * @param {boolean} [options.validateOnly] - Run only the handler's validation check for that
+ *   site, without applying whatever result it normally gates.
+ * @param {string} [options.forcedBy] - Slack user who requested the force/validateOnly run
+ *   (log context).
  */
 export const sendGlobalImportRunMessage = async (
   sqs,
   queueUrl,
   importType,
   slackContext,
+  {
+    siteId, force, forcedBy, validateOnly,
+  } = {},
 ) => sqs.sendMessage(queueUrl, {
   type: importType,
   slackContext,
+  ...(siteId && { siteId }),
+  ...(force && { force }),
+  ...(validateOnly && { validateOnly }),
+  ...(forcedBy && { forcedBy }),
 });
 
 export const sendReportTriggerMessage = async (
@@ -363,6 +378,33 @@ export const triggerA11yCodefixForOpportunity = async (
   { opportunityId, opportunityType, aggregationKey },
 );
 
+/**
+ * Sends a message to the llmo-experimentation-engine-queue to manually (re-)trigger Mystique
+ * impact measurement for a GeoExperiment (see adobe/spacecat-infrastructure#655 for the queue,
+ * llmo-experimentation-engine's docs/decisions/004-manual-impact-measurement-retrigger.md for the
+ * handler contract).
+ *
+ * NOTE: this does NOT create or start an experiment. It only requests the impact-measurement
+ * report for an already-existing GeoExperiment that is ongoing or completed. The experiment must
+ * already exist; the engine re-validates eligibility itself before resubmitting and no-ops if the
+ * experiment is not in a measurable state.
+ *
+ * @param {string} geoExperimentId - The GeoExperiment ID to trigger measurement for.
+ * @param {string} triggeredBy - Identity of the caller, for the engine's log line
+ *   (e.g. an IMS user id/email resolved from the request's auth profile).
+ * @param {Object} lambdaContext - The Lambda context object (sqs, env).
+ * @return {Promise} - A promise representing the SQS send operation.
+ */
+export const triggerGeoExperimentImpactMeasurement = async (
+  geoExperimentId,
+  triggeredBy,
+  lambdaContext,
+) => lambdaContext.sqs.sendMessage(lambdaContext.env.LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL, {
+  type: 'TRIGGER_IMPACT_MEASUREMENT',
+  geoExperimentId,
+  triggeredBy: triggeredBy || 'unknown',
+});
+
 // todo: prototype - untested
 /* c8 ignore start */
 export const triggerExperimentationCandidates = async (
@@ -454,18 +496,22 @@ export const triggerInternalReportRun = async (
 );
 
 /**
- * Triggers a global import run (imports that don't require a siteId).
+ * Triggers a global import run (imports that don't require a siteId, though an optional
+ * siteId can scope the run to a single site, and force/forcedBy can ask the handler to skip
+ * its normal gating check for that site, for handlers that support both).
  *
  * @param {Object} config - The configuration object.
  * @param {string} importType - The type of global import to run.
  * @param {Object} slackContext - The Slack context for notifications.
  * @param {Object} lambdaContext - The Lambda context with SQS service.
+ * @param {Object} [options] - Optional single-site scoping — see sendGlobalImportRunMessage.
  */
 export const triggerGlobalImportRun = async (
   config,
   importType,
   slackContext,
   lambdaContext,
+  options,
 ) => sendGlobalImportRunMessage(
   lambdaContext.sqs,
   config.getQueues().imports,
@@ -474,6 +520,7 @@ export const triggerGlobalImportRun = async (
     channelId: slackContext.channelId,
     threadTs: slackContext.threadTs,
   },
+  options,
 );
 
 /**
@@ -566,13 +613,22 @@ export async function findDeliveryType(url) {
 }
 
 /**
- * Error class with a status code property.
+ * Error class with a status code property. An optional machine-readable `code`
+ * may be assigned by callers after construction (e.g. serenity handlers tag
+ * errors with `ERROR_CODES.*` for downstream branching).
  * @extends Error
  */
 export class ErrorWithStatusCode extends Error {
+  /**
+   * @param {string} message human-readable error message
+   * @param {number} status HTTP status code to surface
+   */
   constructor(message, status) {
     super(message);
+    /** @type {number} */
     this.status = status;
+    /** @type {string|undefined} */
+    this.code = undefined;
   }
 }
 
@@ -609,36 +665,52 @@ export function isViewAsTrialRequest(requestContext) {
 }
 
 /**
+ * Returns true when the request originates from the sites-optimizer-ui client
+ * and carries the x-view-full-experience header, i.e. an internal user has asked
+ * to view the full (non-PLG-limited) experience. This only inspects the headers;
+ * the admin gate that actually authorises the bypass is applied by the caller
+ * (see getIsSummitPlgEnabled), so a customer sending the header alone changes nothing.
+ * @param {Object} requestContext - Per-request context with pathInfo.headers
+ * @returns {boolean}
+ */
+export function isViewFullExperienceRequest(requestContext) {
+  const headers = requestContext?.pathInfo?.headers;
+  return headers?.['x-client-type'] === 'sites-optimizer-ui'
+    && headers?.['x-view-full-experience'] === 'true';
+}
+
+/**
  * Returns whether the summit-plg audit handler is enabled for the site in configuration.
  * No entitlement check; use when the site was already resolved via TierClient (e.g. sites-resolve).
  * @param {Object} site - Site entity
  * @param {Object} context - Request context with dataAccess, log
  * @param {Object} [requestContext] - Optional per-request context; when provided, the check
  *   is gated on the x-client-type header being 'sites-optimizer-ui'.
+ * @param {Object} [accessControlUtil] - Optional AccessControlUtil for the caller. Required
+ *   to honour the internal "view full experience" override; when the request carries
+ *   x-view-full-experience and the caller has admin access, PLG limiting is bypassed.
  * @returns {Promise<boolean>}
  */
-export async function getIsSummitPlgEnabled(site, context, requestContext) {
+export async function getIsSummitPlgEnabled(site, context, requestContext, accessControlUtil) {
   try {
     if (requestContext) {
       const clientType = requestContext.pathInfo?.headers?.['x-client-type'];
       if (clientType !== 'sites-optimizer-ui') {
         return false;
       }
+      // Internal "View full experience" override: an admin caller (e.g. running a
+      // custom demo) can bypass PLG limiting to see the full paid experience without
+      // changing the site's tier. Gated on hasAdminAccess() so a customer cannot
+      // self-unlock entitlement-gated data merely by sending the header.
+      if (isViewFullExperienceRequest(requestContext)
+        && accessControlUtil?.hasAdminAccess?.()) {
+        return false;
+      }
       if (isViewAsTrialRequest(requestContext)) {
         return true;
       }
     }
-    const { Configuration, Entitlement } = context.dataAccess || {};
-    if (!Configuration) {
-      return false;
-    }
-    const configuration = await Configuration.findLatest();
-    if (!configuration || typeof configuration.isHandlerEnabledForSite !== 'function') {
-      return false;
-    }
-    if (!configuration.isHandlerEnabledForSite('summit-plg', site)) {
-      return false;
-    }
+    const { Entitlement } = context.dataAccess || {};
 
     const organizationId = site.getOrganizationId();
     if (!Entitlement || !organizationId) {
@@ -658,6 +730,46 @@ export async function getIsSummitPlgEnabled(site, context, requestContext) {
 }
 
 /**
+ * Returns the org's ASO entitlement, or null if none exists. Issues a single Entitlement
+ * lookup — callers that need both the tier and other derived flags (e.g. PLG-tier check)
+ * should call this once and derive everything from the result, rather than calling
+ * this and {@link getAsoTier} separately (which would each issue their own lookup).
+ * @param {string} organizationId - Organization id
+ * @param {Object} context - Request context with dataAccess, log
+ * @returns {Promise<Object|null>}
+ */
+export async function getAsoEntitlement(organizationId, context) {
+  try {
+    const { Entitlement } = context.dataAccess || {};
+    if (!Entitlement || !organizationId) {
+      return null;
+    }
+
+    return await Entitlement.findByOrganizationIdAndProductCode(
+      organizationId,
+      EntitlementModel.PRODUCT_CODES.ASO,
+    );
+  } catch (err) {
+    context.log?.error?.('Error resolving ASO entitlement:', err);
+    return null;
+  }
+}
+
+/**
+ * Returns the org's ASO entitlement tier, or null if none exists.
+ * Callers that already have the org's ASO entitlement in hand (e.g. via TierClient,
+ * when the request's x-product header is already ASO) should read the tier directly
+ * off it instead of calling this — it always issues its own Entitlement lookup.
+ * @param {string} organizationId - Organization id
+ * @param {Object} context - Request context with dataAccess, log
+ * @returns {Promise<string|null>}
+ */
+export async function getAsoTier(organizationId, context) {
+  const entitlement = await getAsoEntitlement(organizationId, context);
+  return entitlement?.getTier() ?? null;
+}
+
+/**
  * Get the IMS user token from the context.
  * @param {object} context - The context of the request.
  * @returns {string} imsUserToken - The IMS User access token.
@@ -673,8 +785,86 @@ export function getImsUserToken(context) {
 }
 
 /**
+ * Get the IMS user token, but ONLY when the caller authenticated via IMS.
+ * The Semrush gateway only understands IMS user tokens, so any flow that
+ * forwards the caller's bearer upstream (serenity proxy, brand provisioning,
+ * brand-edit re-sync) must refuse a non-IMS credential rather than proxy it.
+ * An S2S consumer reaching an `organization:write` route would otherwise have
+ * its non-IMS bearer forwarded to Semrush.
+ * @param {object} context - The request context (attributes.authInfo + headers).
+ * @returns {string} imsUserToken - The validated IMS user access token.
+ * @throws {ErrorWithStatusCode} 401 when the caller is not IMS-authenticated.
+ */
+export function getImsUserTokenStrict(context) {
+  const authInfo = context?.attributes?.authInfo;
+  // Local/automated-E2E escape hatch — mirrors the serenity controller's
+  // requireImsBearer. When SERENITY_ALLOW_NON_IMS_AUTH is set, trust the present
+  // bearer even if the authInfo is not IMS-typed: locally `SKIP_AUTH=true`
+  // injects a mock (non-IMS) admin authInfo, and these flows forward the bearer
+  // to the Semrush vendor MOCK, which ignores it. NO deployed environment sets
+  // this flag (it is never written to Vault), so production auth is unaffected —
+  // the real Semrush gateway still validates the forwarded token end to end.
+  //
+  // Defense-in-depth: the hatch is HARD-DISABLED in production regardless of the
+  // flag, so an accidental SERENITY_ALLOW_NON_IMS_AUTH in prod can never open the
+  // gate — prod always fails closed and requires real IMS auth. Both AWS_ENV and
+  // ENV are checked because the codebase reads prod from either.
+  const isProd = context?.env?.AWS_ENV === 'prod' || context?.env?.ENV === 'prod';
+  const allowNonIms = !isProd && context?.env?.SERENITY_ALLOW_NON_IMS_AUTH === 'true';
+  // Fail closed: forward the bearer upstream ONLY for a caller we can positively
+  // confirm authenticated via IMS (or when the escape hatch is explicitly set).
+  // A missing/non-standard authInfo (no getType) is treated as "not IMS" and
+  // refused, rather than falling through to proxy an unverified bearer to the
+  // Semrush gateway.
+  if (!allowNonIms && (typeof authInfo?.getType !== 'function' || authInfo.getType() !== 'ims')) {
+    // Reached only when resolveSemrushImsToken's x-promise-token check found
+    // nothing (it never falls through to here when the header is present) —
+    // a non-IMS caller has no other way to authenticate to Semrush, so point
+    // them at the promise-token flow instead of a bare "not authenticated".
+    const err = new ErrorWithStatusCode(
+      `IMS authentication required; send the ${X_PROMISE_TOKEN_HEADER} header instead`,
+      STATUS_UNAUTHORIZED,
+    );
+    err.code = PROMISE_TOKEN_REQUIRED_ERROR_CODE;
+    throw err;
+  }
+  return getImsUserToken(context);
+}
+
+/**
+ * Resolves which IMS promise-token pair a request selects, from the optional
+ * `x-promise-audience` header. Absent/empty => `undefined` (the default pair,
+ * unchanged behavior); `semrush` => the dedicated Semrush pair. Any other value
+ * throws 400 (fail closed) rather than silently minting/exchanging on the wrong
+ * pair. The pair selector is forwarded to `ImsPromiseClient.createFrom`.
+ * @param {object} context - The request context.
+ * @returns {string|undefined} The ImsPromiseClient pair selector, or undefined.
+ * @throws {ErrorWithStatusCode} 400 when the header carries an unknown audience.
+ */
+export function resolvePromisePair(context) {
+  const raw = context?.pathInfo?.headers?.[X_PROMISE_AUDIENCE_HEADER];
+  if (!hasText(raw)) {
+    return undefined;
+  }
+  const audience = raw.trim();
+  if (audience.toLowerCase() === 'semrush') {
+    return ImsPromiseClient.PROMISE_PAIR.SEMRUSH;
+  }
+  // Reflect the rejected value back, but sanitize (strip CR/LF and non-ASCII, per
+  // the repo's header-hygiene convention) and bound its length so a hostile header
+  // cannot inject into or bloat the 400 body / logs.
+  throw new ErrorWithStatusCode(
+    `Unknown promise audience: ${cleanupHeaderValue(audience).slice(0, 40)}`,
+    STATUS_BAD_REQUEST,
+  );
+}
+
+/**
  * Get an IMS promise token from the authorization header in context.
  * @param {object} context - The context of the request.
+ * @param {string} [pair] - Optional IMS promise-pair selector (see
+ *   {@link resolvePromisePair}). Selects which emitter client-id/secret/definition
+ *   set mints the token. Omitted => the default pair.
  * @returns {Promise<{
  *   promise_token: string,
  *   expires_in: number,
@@ -682,7 +872,7 @@ export function getImsUserToken(context) {
  * }>} - The promise token response.
  * @throws {ErrorWithStatusCode} - If the Authorization header is missing.
  */
-export async function getIMSPromiseToken(context) {
+export async function getIMSPromiseToken(context, pair) {
   // get IMS promise token and attach to queue message
   let userToken;
   try {
@@ -693,6 +883,7 @@ export async function getIMSPromiseToken(context) {
   const imsPromiseClient = ImsPromiseClient.createFrom(
     context,
     ImsPromiseClient.CLIENT_TYPE.EMITTER,
+    { pair },
   );
 
   return imsPromiseClient.getPromiseToken(
@@ -705,10 +896,13 @@ export async function getIMSPromiseToken(context) {
  * Exchange a promise token for an IMS access token.
  * @param {object} context - The context of the request.
  * @param {string} promiseToken - The promise token to exchange (e.g. from request payload).
+ * @param {string} [pair] - Optional IMS promise-pair selector (see
+ *   {@link resolvePromisePair}). Omitted => the default pair. MUST match the pair
+ *   that minted the token, or IMS rejects the exchange.
  * @returns {Promise<{ access_token: string }>} The access token response.
  * @throws {ErrorWithStatusCode} - If the promise token is missing.
  */
-export async function exchangePromiseToken(context, promiseToken) {
+export async function exchangePromiseToken(context, promiseToken, pair) {
   if (!promiseToken) {
     throw new ErrorWithStatusCode('Missing promise token', STATUS_BAD_REQUEST);
   }
@@ -716,6 +910,7 @@ export async function exchangePromiseToken(context, promiseToken) {
   const imsClient = ImsPromiseClient.createFrom(
     context,
     ImsPromiseClient.CLIENT_TYPE.CONSUMER,
+    { pair },
   );
 
   const accessToken = (await imsClient.exchangeToken(
@@ -723,6 +918,94 @@ export async function exchangePromiseToken(context, promiseToken) {
     !!context.env?.AUTOFIX_CRYPT_SECRET && !!context.env?.AUTOFIX_CRYPT_SALT,
   )).access_token;
   return accessToken;
+}
+
+/**
+ * The authenticated caller's own IMS user id, read from their auth profile.
+ *
+ * `user_id`, then `sub`, then `email` — three carriers of the SAME value, in
+ * decreasing directness. All three matter, because which ones are populated
+ * depends on the auth handler: a SpaceCat JWT carries the id on `sub` AND
+ * `email` (the auth service deliberately puts the IMS user id, not the real
+ * address, in the `email` claim), while `AdobeImsHandler` deletes `user_id` from
+ * the profile it builds and leaves the id only on `email`. `email` therefore is
+ * NOT a human address here — it is the platform's user-id alias, which is why
+ * the pre-existing writers of `prompts.updated_by` (`brands.js`) and the api-key
+ * surface read it directly (see the ASO-607 rationale in
+ * `support/api-key-ims-handler.js`). For the caller's human address use
+ * `trial_email` / `preferred_username` instead — never this id.
+ *
+ * This is the SINGLE definition of "who is calling" for identity that is written
+ * into data and later read back for display: server-owned authorship stamps
+ * (`createdBy` / `updatedBy`) resolve the id to write through here, and
+ * `/organizations/{id}/userDetails` resolves the caller's own id through here as
+ * well. Both sides moving together is what keeps a stamped id resolvable —
+ * reading a different claim on either side silently degrades authorship to an
+ * unresolved author.
+ *
+ * NOT the identity to forward upstream (that is a token, see
+ * {@link resolveSemrushImsToken}) and NOT an authorization signal — a caller is
+ * already authenticated by the time this runs; an unresolvable identity is a
+ * display concern, never an access decision.
+ *
+ * @param {object} context - The request context.
+ * @returns {string|null} The caller's IMS user id, or null when unresolvable.
+ */
+export function resolveCallerImsUserId(context) {
+  const profile = context?.attributes?.authInfo?.getProfile?.();
+  const raw = profile?.user_id ?? profile?.sub ?? profile?.email;
+  return hasText(raw) ? String(raw) : null;
+}
+
+/**
+ * Resolves the IMS access token to forward to the Semrush gateway for a request.
+ *
+ * Preferred path: the caller sends `x-promise-token` (minted by POST /auth/v2/promise).
+ * This lets a caller authenticate to spacecat itself with a NON-IMS credential (e.g. a
+ * spacecat JWT on `Authorization`) while still supplying an IMS-exchangeable token for
+ * the upstream Semrush call. The promise token is checked FIRST and, when present,
+ * `getImsUserTokenStrict` (and its `authInfo.getType() === 'ims'` gate) is never invoked.
+ *
+ * Fallback path: no `x-promise-token` — behaves exactly as `getImsUserTokenStrict`,
+ * requiring IMS-type auth and forwarding the `Authorization: Bearer <ims-token>` as-is.
+ *
+ * Shared by every "forward the user's bearer to Semrush" surface: the serenity and
+ * elements proxies, and brand create/edit/provisioning re-sync. The serenity and
+ * elements proxies pass their own IMS-bearer gate (which additionally supports a
+ * test-only non-IMS escape hatch) as `fallback`; callers with no such escape hatch
+ * can omit it and get the strict `getImsUserTokenStrict` behavior.
+ * @param {object} context - The request context.
+ * @param {object} [log] - Logger used to record a promise-token exchange failure.
+ * @param {string} [logLabel] - Prefix for the exchange-failure log line (e.g. 'brands').
+ * @param {(context: object) => string} [fallback] - Called when no promise token is
+ *   present; defaults to `getImsUserTokenStrict`.
+ * @returns {Promise<string>} The IMS access token to forward upstream.
+ * @throws {ErrorWithStatusCode} 401 when neither a promise token nor the fallback works;
+ *   400 when `x-promise-audience` carries an unknown value (see {@link resolvePromisePair}).
+ */
+export async function resolveSemrushImsToken(
+  context,
+  log,
+  logLabel = 'utils',
+  fallback = getImsUserTokenStrict,
+) {
+  const pair = resolvePromisePair(context);
+  const promiseTokenHeader = context?.pathInfo?.headers?.[X_PROMISE_TOKEN_HEADER];
+  if (hasText(promiseTokenHeader)) {
+    let decoded = promiseTokenHeader;
+    try {
+      decoded = decodeURIComponent(promiseTokenHeader);
+    } catch {
+      // Bearer-style tokens may contain literal %; use as-is.
+    }
+    try {
+      return await exchangePromiseToken(context, decoded, pair);
+    } catch (e) {
+      log?.error(`${logLabel}: promise token exchange failed`, { error: e?.message });
+      throw new ErrorWithStatusCode('Invalid or expired promise token', STATUS_UNAUTHORIZED);
+    }
+  }
+  return fallback(context);
 }
 
 /**
@@ -982,6 +1265,54 @@ export const updateCodeConfig = async (site, host, slackContext, log) => {
 
   // TODO: Add AEM CS pattern code config resolution here
   log.debug(`Host '${host}' does not match a supported pattern for code config resolution`);
+};
+
+/**
+ * Derives a top-level `code` config object from a site's `hlxConfig`, for EDS
+ * sites discovered/onboarded via the Franklin aggregated config API. The
+ * repo coordinates are already resolved into `hlxConfig` at discovery time
+ * (`hlxConfig.code` from the aggregated config, `hlxConfig.rso` from the EDS
+ * hostname), but only the top-level `code` attribute is read by downstream
+ * consumers (the import-worker's code import and the autofix-worker's code-PR
+ * flow). This bridges the two so those consumers work without depending on
+ * `hlxConfig`, and lets `hlxConfig.code` be retired later.
+ *
+ * `hlxConfig` shape:
+ *   - hlxConfig.rso  = { ref, tld, site, owner }   (repo name is `rso.site`)
+ *   - hlxConfig.code = { owner, repo, source: { url, type } }
+ *
+ * owner/repo are sourced from `hlxConfig.code` first, falling back to
+ * `hlxConfig.rso`; `ref` comes from `rso` (default `main`); `type` defaults to
+ * `github`. Produces the top-level `code` shape the import-worker and
+ * autofix-worker consume via `site.getCode()` (they read `code`, not hlxConfig).
+ *
+ * @param {Object} hlxConfig - The site's hlxConfig object.
+ * @returns {Object|null} A `code`-shaped object ({ type, owner, repo, ref, url }),
+ *   or null when owner/repo cannot be resolved.
+ */
+export const deriveCodeFromHlxConfig = (hlxConfig) => {
+  if (!isObject(hlxConfig)) {
+    return null;
+  }
+
+  const hlxCode = isObject(hlxConfig.code) ? hlxConfig.code : {};
+  const rso = isObject(hlxConfig.rso) ? hlxConfig.rso : {};
+
+  const owner = hlxCode.owner || rso.owner;
+  // In the RSO the repository name is carried as `site`.
+  const repo = hlxCode.repo || rso.site;
+
+  if (!hasText(owner) || !hasText(repo)) {
+    return null;
+  }
+
+  return {
+    type: hlxCode.source?.type || 'github',
+    owner,
+    repo,
+    ref: rso.ref || 'main',
+    url: hlxCode.source?.url || `https://github.com/${owner}/${repo}`,
+  };
 };
 
 /**
@@ -1454,6 +1785,10 @@ export async function queueDeliveryConfigWriter(
  * @param {Object} context - Lambda context containing dataAccess, log, etc.
  * @param {Object} additionalParams - Additional parameters
  * @param {string} additionalParams.tier - Entitlement tier
+ * @param {boolean} [additionalParams.forceTierUpdate] - When true, allows the onboard
+ *   command to change a PLG/PRE_ONBOARD org's tier/entitlement and audit config. By
+ *   default these tiers are preserved (SITES-49886). Separate from `force`, which only
+ *   overrides the paid-profile downgrade guard.
  * @param {Object} options - Additional options
  * @param {Function} options.urlProcessor - Function to process the URL
  *                                          (e.g., extractURLFromSlackInput)
@@ -1578,6 +1913,63 @@ export const onboardSingleSite = async (
       return reportLine;
     }
 
+    // Only one domain is supported under a PLG ASO entitlement — that's an org-level
+    // record, not per-site. The RESTRICTED_TIERS check above only blocks *requesting*
+    // tier=PLG here; it does nothing to stop this command from onboarding a brand-new
+    // domain (tier FREE_TRIAL/PAID) into an org that already holds a PLG entitlement
+    // bound to a different site. SITES-49886 (#3074) stopped that from silently
+    // downgrading/retiering the shared entitlement, but still lets the new domain's
+    // Site row get created and its audits/opportunities run once. Block it outright
+    // here instead — mirroring the "one onboarded domain per IMS org" invariant the
+    // dedicated PLG flow enforces (see handleExistingOnboardedDomain) — unless the
+    // caller already owns that entitlement's enrollment (re-onboarding the same site)
+    // or explicitly overrides via forceTierUpdate (same escape hatch as SITES-49886).
+    // PRE_ONBOARD is deliberately not covered here — it's an internal staging tier
+    // without the "single customer-facing domain" constraint PLG has.
+    // Fail-open on lookup errors — getAsoEntitlement already swallows its own and
+    // returns null.
+    //
+    // Resolve the org from the site itself when it already exists, not from imsOrgID.
+    // createSiteAndOrganization ignores imsOrgID entirely for an existing site and always
+    // keys off site.getOrganizationId() — imsOrgID can legitimately point elsewhere (it
+    // defaults to env.DEMO_IMS_ORG when the caller omits it on a re-onboard). Checking
+    // imsOrgID's org here would look at the wrong org's entitlement, let a re-onboard that
+    // should be blocked run its full pipeline (audits, CDN detection, brand-profile) for
+    // nothing, and only have the later protected-tier check (which does use the site's real
+    // org) skip the entitlement write after all that work already happened. Only fall back
+    // to resolving by imsOrgID for a genuinely new site, where there's no existing org to read.
+    try {
+      const orgId = prefetchedSite
+        ? prefetchedSite.getOrganizationId()
+        : (await dataAccess.Organization.findByImsOrgId(imsOrgID))?.getId();
+      const asoEntitlement = orgId ? await getAsoEntitlement(orgId, context) : null;
+      const existingTier = asoEntitlement?.getTier() ?? null;
+
+      if (existingTier === EntitlementModel.TIERS.PLG) {
+        const existingEnrollments = prefetchedSite
+          ? await prefetchedSite.getSiteEnrollments()
+          : [];
+        const isSameEnrolledSite = existingEnrollments?.some(
+          (se) => se.getEntitlementId() === asoEntitlement.getId(),
+        );
+
+        if (!isSameEnrolledSite) {
+          if (additionalParams.forceTierUpdate) {
+            log.warn(`Force-onboarding ${baseURL} into IMS org ${imsOrgID} despite an existing ${existingTier} entitlement bound to a different site; that site's enrollment will NOT be revoked automatically.`);
+            await say(`:warning: IMS org \`${imsOrgID}\` already has a *${existingTier}* ASO entitlement bound to a different site. Proceeding anyway (Force Tier Update) — that site's enrollment will *not* be revoked automatically.`);
+          } else {
+            reportLine.errors = `Blocked: IMS org ${imsOrgID} already has a ${existingTier}-tier ASO entitlement bound to a different site — only one domain is supported per org on this tier`;
+            reportLine.status = 'Failed';
+            log.error(`Refusing to onboard ${baseURL} into IMS org ${imsOrgID}: existing ${existingTier} entitlement is bound to a different site`);
+            await say(`:x: IMS org \`${imsOrgID}\` already has a *${existingTier}* ASO entitlement bound to a different site. Only one domain is supported per org on this tier — use the PLG onboarding flow to displace it, or select *Force Tier Update* to override.`);
+            return reportLine;
+          }
+        }
+      }
+    } catch (singleDomainGuardError) {
+      log.warn(`Single-domain tier guard check failed for IMS org ${imsOrgID}, skipping guard:`, singleDomainGuardError);
+    }
+
     await say(`:gear: Starting environment setup for site ${baseURL} with imsOrgID: ${imsOrgID} and tier: ${tier} using the ${profileName} profile`);
     await say(':key: Please make sure you have access to the AEM Shared Production Demo environment. Request access here: https://demo.adobe.com/demos/internal/AemSharedProdEnv.html');
 
@@ -1622,15 +2014,62 @@ export const onboardSingleSite = async (
       prefetchedSite,
     );
 
+    // Protected-tier guard (SITES-49886): ASO entitlements are org-level. If the org
+    // already holds a PLG or PRE_ONBOARD ASO entitlement, the onboard command must NOT
+    // touch the tier/entitlement/enrollment — TierClient.createEntitlement(FREE_TRIAL)
+    // would otherwise overwrite (downgrade) the existing tier, exposing all opportunities
+    // instead of the limited PLG set. Onboarding is unsupported for these tiers; we only
+    // run audits/opportunities once (below) and leave the earlier config untouched.
+    // An explicit additionalParams.forceTierUpdate is the sole escape hatch (kept separate
+    // from `force`, which only overrides the paid-profile downgrade guard).
+    const existingAso = await getAsoEntitlement(organizationId, context);
+    const existingTier = existingAso?.getTier() ?? null;
+    const PROTECTED_EXISTING_TIERS = [
+      EntitlementModel.TIERS.PLG,
+      EntitlementModel.TIERS.PRE_ONBOARD,
+    ];
+    const isProtectedOrg = existingTier != null && PROTECTED_EXISTING_TIERS.includes(existingTier);
+    const preserveProtectedTier = isProtectedOrg && !additionalParams.forceTierUpdate;
+
     // Create entitlement and enrollment
-    await createEntitlementAndEnrollment(
-      site,
-      context,
-      slackContext,
-      reportLine,
-      EntitlementModel.PRODUCT_CODES.ASO,
-      tier,
-    );
+    if (preserveProtectedTier) {
+      reportLine.tier = existingTier; // report the true, unchanged tier
+      log.info(`Preserving ${existingTier} tier for org ${organizationId} - skipping entitlement/enrollment write during onboard of ${baseURL}`);
+      await say(`:lock: Org for \`${baseURL}\` is on the *${existingTier}* tier — onboarding will NOT change the tier, entitlement, or enrollment. Running audits and opportunities only. (Use *Force Tier Update* to override.)`);
+    } else {
+      const { entitlement } = await createEntitlementAndEnrollment(
+        site,
+        context,
+        slackContext,
+        reportLine,
+        EntitlementModel.PRODUCT_CODES.ASO,
+        tier,
+      );
+
+      // SITES-50179: the Force Tier Update escape hatch was exercised on a protected org
+      // (isProtectedOrg is only true here when forceTierUpdate bypassed the guard above). If it
+      // downgraded a PLG/PRE_ONBOARD org to FREE_TRIAL — the exact transition that silently exposed
+      // the full opportunity set in the original incident — alert the team so every deliberate
+      // override is visible without manual auditing. Best-effort: never blocks onboarding.
+      if (isProtectedOrg && tier === EntitlementModel.TIERS.FREE_TRIAL) {
+        await notifyForcedTierDowngrade(
+          {
+            baseURL,
+            organizationId,
+            imsOrgID,
+            siteId: site.getId(),
+            entitlementId: entitlement?.getId?.(),
+            fromTier: existingTier,
+            toTier: tier,
+            profileName,
+            sourceChannelId: slackContext.channelId,
+            sourceThreadTs: slackContext.threadTs,
+          },
+          env,
+          log,
+        );
+      }
+    }
 
     // Create new project or assign existing project
     const project = await createProject(
@@ -1676,6 +2115,7 @@ export const onboardSingleSite = async (
       log.error(error);
       reportLine.errors = error;
       reportLine.status = 'Failed';
+      await say(`:x: ${error}`);
       return reportLine;
     }
 
@@ -1684,6 +2124,7 @@ export const onboardSingleSite = async (
       log.error(error);
       reportLine.errors = error;
       reportLine.status = 'Failed';
+      await say(`:x: ${error}`);
       return reportLine;
     }
 
@@ -1691,23 +2132,25 @@ export const onboardSingleSite = async (
     reportLine.imports = importTypes.join(', ');
     const siteConfig = site.getConfig();
 
-    // Enabled imports only if there are not already enabled
+    // Enable imports that are not already enabled. Enabling here only writes the
+    // entry to site config; imports are not scheduled from site config, so there's
+    // no disable step required later — the initial triggerImportRun below fires
+    // each import exactly once regardless of enable state.
     const imports = siteConfig.getImports();
-    const importsEnabled = [];
     for (const importType of importTypes) {
-      const isEnabled = isImportEnabled(importType, imports);
-      if (!isEnabled) {
+      if (!isImportEnabled(importType, imports)) {
         siteConfig.enableImport(importType);
-        importsEnabled.push(importType);
       }
     }
 
-    // Resolve canonical URL for the site from the base URL
     let resolvedUrl = await resolveCanonicalUrl(baseURL);
-    if (resolvedUrl === null) {
+    // Falsy check covers null (timeout), undefined (unexpected), and '' (empty resolution)
+    if (!resolvedUrl) {
       log.warn(`Unable to resolve canonical URL for site ${siteID}, using base URL: ${baseURL}`);
+      await say(`:warning: Could not resolve canonical URL for ${baseURL}. Using base URL as fallback.`);
       resolvedUrl = baseURL;
     }
+
     const { pathname: baseUrlPathName, origin: baseUrlOrigin } = new URL(baseURL);
     log.info(`Base url: ${baseURL} -> Resolved url: ${resolvedUrl} for site ${siteID}`);
     const { pathname: resolvedUrlPathName, origin: resolvedUrlOrigin } = new URL(resolvedUrl);
@@ -1731,6 +2174,8 @@ export const onboardSingleSite = async (
       ...(additionalParams.force ? { forcedOverride: true } : {}),
     }, { maxHistory: MAX_ONBOARD_HISTORY });
 
+    const hasDomainKey = await updateRumConfig(site, context, { save: false });
+    siteConfig.updateRumConfig(hasDomainKey);
     site.setConfig(Config.toDynamoItem(siteConfig));
     try {
       await site.save();
@@ -1783,35 +2228,75 @@ export const onboardSingleSite = async (
 
     const auditTypes = Object.keys(profile.audits);
 
-    const latestConfiguration = await Configuration.findLatest();
+    // Determine scheduledRun early so we only enable audits in config for paid/scheduled profiles
+    const scheduledRun = additionalParams.scheduledRun !== undefined
+      ? additionalParams.scheduledRun
+      : (profile.config?.scheduledRun || false);
 
-    // Check which audits are not already enabled
-    const auditsEnabled = [];
-    for (const auditType of auditTypes) {
-      /* eslint-disable no-await-in-loop */
-      const isEnabled = latestConfiguration.isHandlerEnabledForSite(auditType, site);
-      if (!isEnabled) {
-        latestConfiguration.enableHandlerForSite(auditType, site);
-        auditsEnabled.push(auditType);
-      }
-    }
-
-    if (auditsEnabled.length > 0) {
-      try {
-        await latestConfiguration.save();
-        log.debug(`Enabled the following audits for site ${siteID}: ${auditsEnabled.join(', ')}`);
-      } catch (error) {
-        log.error(`Failed to save configuration for site ${siteID}:`, error);
-        throw error;
-      }
+    // Sync audits in the site's configuration to this run's intent — done fully
+    // in-process, so the workflow no longer posts a message to the task processor
+    // for audits (nor for imports, which don't need disabling per the block above).
+    //   - Scheduled or protected (paid) profiles: enable any audit that isn't yet
+    //     enabled, so the shared scheduler picks them up on recurring runs.
+    //   - Free-trial, non-scheduled runs: disable any audit that IS currently
+    //     enabled, so a prior scheduled/paid enablement can't leak this run's audit
+    //     set into the scheduler. The direct triggerAuditForSite calls below still
+    //     fire once — enable status only gates scheduling, not triggering.
+    const wantEnabled = scheduledRun || profile.protected;
+    // Protected-tier orgs (SITES-49886): leave the existing audit scheduling config exactly
+    // as-is. Enabling/disabling handlers here would alter a PLG/PRE_ONBOARD customer's
+    // recurring-audit setup; we only run audits once (below). Skipped unless forceTierUpdate.
+    if (preserveProtectedTier) {
+      log.debug(`Preserving existing audit configuration for ${existingTier}-tier site ${siteID}`);
     } else {
-      log.debug(`All audits are already enabled for site ${siteID}`);
+      const latestConfiguration = await Configuration.findLatest();
+      const auditsChanged = [];
+      for (const auditType of auditTypes) {
+        /* eslint-disable no-await-in-loop */
+        const isEnabled = latestConfiguration.isHandlerEnabledForSite(auditType, site);
+        if (wantEnabled && !isEnabled) {
+          latestConfiguration.enableHandlerForSite(auditType, site);
+          auditsChanged.push(auditType);
+        } else if (!wantEnabled && isEnabled) {
+          latestConfiguration.disableHandlerForSite(auditType, site);
+          auditsChanged.push(auditType);
+        }
+      }
+
+      if (auditsChanged.length > 0) {
+        try {
+          await latestConfiguration.save();
+          if (wantEnabled) {
+            log.debug(`Enabled the following audits for site ${siteID}: ${auditsChanged.join(', ')}`);
+            if (scheduledRun) {
+              await say(
+                `:calendar: *Scheduled onboarding:* These audits were enabled in site configuration for recurring runs: ${auditsChanged.join(', ')}`,
+              );
+            }
+          } else {
+            log.debug(`Disabled the following previously-enabled audits for site ${siteID}: ${auditsChanged.join(', ')}`);
+          }
+        } catch (error) {
+          log.error(`Failed to save configuration for site ${siteID}:`, error);
+          throw error;
+        }
+      } else {
+        log.debug(`Audit configuration already matches the desired state (${wantEnabled ? 'enabled' : 'disabled'}) for site ${siteID}`);
+      }
     }
 
     reportLine.audits = auditTypes.join(', ');
     const auditsMessage = reportLine.audits || 'None';
     const importsMessage = reportLine.imports || 'None';
-    await say(`:white_check_mark: *For site ${baseURL}*: Enabled imports: ${importsMessage} and audits: ${auditsMessage}`);
+    let statusMessage;
+    if (preserveProtectedTier) {
+      statusMessage = `:white_check_mark: *For site ${baseURL}*: Audit scheduling config preserved (${existingTier} tier); triggered audits once: ${auditsMessage}`;
+    } else if (scheduledRun) {
+      statusMessage = `:white_check_mark: *For site ${baseURL}*: Adding imports: ${importsMessage} and audits: ${auditsMessage} to scheduled run`;
+    } else {
+      statusMessage = `:white_check_mark: *For site ${baseURL}*: Enabled imports: ${importsMessage}; triggered (not scheduled) audits: ${auditsMessage}`;
+    }
+    await say(statusMessage);
 
     // trigger audit runs
     if (auditTypes.length > 0) {
@@ -1819,17 +2304,13 @@ export const onboardSingleSite = async (
     }
     for (const auditType of auditTypes) {
       /* eslint-disable no-await-in-loop */
-      if (!latestConfiguration.isHandlerEnabledForSite(auditType, site)) {
-        await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
-      } else {
-        await triggerAuditForSite(
-          site,
-          auditType,
-          undefined,
-          slackContext,
-          context,
-        );
-      }
+      await triggerAuditForSite(
+        site,
+        auditType,
+        undefined,
+        slackContext,
+        context,
+      );
     }
 
     // Opportunity status job
@@ -1849,29 +2330,7 @@ export const onboardSingleSite = async (
       },
     };
 
-    const scheduledRun = additionalParams.scheduledRun !== undefined
-      ? additionalParams.scheduledRun
-      : (profile.config?.scheduledRun || false);
-
     await say(`:information_source: Scheduled run: ${scheduledRun}`);
-
-    // Disable imports and audits job - only disable what was enabled during onboarding
-    const disableImportAndAuditJob = {
-      type: 'disable-import-audit-processor',
-      siteId: siteID,
-      siteUrl: baseURL,
-      imsOrgId: imsOrgID,
-      organizationId,
-      taskContext: {
-        importTypes: importsEnabled || [],
-        auditTypes: auditsEnabled || [],
-        scheduledRun,
-        slackContext: {
-          channelId: slackContext.channelId,
-          threadTs: slackContext.threadTs,
-        },
-      },
-    };
 
     // Demo URL job
     const demoURLJob = {
@@ -1905,10 +2364,15 @@ export const onboardSingleSite = async (
       },
     };
 
-    // Prepare and start step function workflow with the necessary parameters
+    // Prepare and start step function workflow with the necessary parameters.
+    // No disableImportAndAuditJob: imports don't need to be disabled (their enable
+    // status does not schedule them), and audits have already been enabled or disabled
+    // in-process above based on scheduledRun / profile.protected. The
+    // disable-import-audit-processor handler is therefore no longer invoked from this
+    // path — its step in the onboarding state machine and the handler itself can be
+    // removed in a follow-up.
     const workflowInput = {
       opportunityStatusJob,
-      disableImportAndAuditJob,
       demoURLJob,
       cwvDemoSuggestionsJob,
       workflowWaitTime: workflowWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS,
@@ -1942,6 +2406,26 @@ export const onboardSingleSite = async (
  * @returns {Array} - The filtered sites array.
  */
 /**
+ * Parses a comma-separated env var into a trimmed, non-empty string array.
+ * @param {string} value
+ * @returns {string[]}
+ */
+export function parseCommaSeparatedEnvList(value) {
+  return (value || '').split(',').map((id) => id.trim()).filter(Boolean);
+}
+
+/**
+ * Returns true if orgId (Spacecat UUID) is listed in the ASO_PLG_EXCLUDED_ORGS env var.
+ * Used to bypass PLG-wizard gating for internal / demo orgs whose tier is PRE_ONBOARD.
+ * @param {string} orgId - Spacecat organization UUID (not IMS org ID).
+ * @param {object} env
+ * @returns {boolean}
+ */
+export function isInternalOrg(orgId, env) {
+  return parseCommaSeparatedEnvList(env.ASO_PLG_EXCLUDED_ORGS).includes(orgId);
+}
+
+/**
  * Allow-list of entitlement tiers that are visible to customers via the API.
  * Any tier not in this list (e.g. PRE_ONBOARD) is treated as internal-only.
  * Adding a new tier here explicitly opts it into customer visibility.
@@ -1952,6 +2436,32 @@ export const CUSTOMER_VISIBLE_TIERS = [
   EntitlementModel.TIERS.PAID,
   EntitlementModel.TIERS.PLG,
 ];
+
+/**
+ * Returns the set of product codes the organization currently has a valid entitlement for.
+ * Iterates over the known PRODUCT_CODES enum and probes TierClient per code; codes whose
+ * entitlement is absent are filtered out.
+ *
+ * Used by the cross-product sites-listing branch (SITES-46454, Phase 1 of multi-product
+ * login support — see
+ * mysticat-architecture/platform/decisions/cross-product-sites-listing-via-client-id-scope.md).
+ * No other caller should need this today.
+ *
+ * @param {object} context - Request context (carries dataAccess + log).
+ * @param {object} organization - The Organization model.
+ * @returns {Promise<string[]>} Product codes (e.g. ['ASO','LLMO']); empty when the org has
+ *   no entitlements.
+ */
+export const getEntitledProductCodes = async (context, organization) => {
+  const productCodes = Object.values(EntitlementModel.PRODUCT_CODES);
+  const results = await Promise.all(productCodes.map(async (code) => {
+    const { entitlement } = await TierClient
+      .createForOrg(context, organization, code)
+      .checkValidEntitlement();
+    return isNonEmptyObject(entitlement) ? code : null;
+  }));
+  return results.filter(Boolean);
+};
 
 export const filterSitesForProductCode = async (
   context,

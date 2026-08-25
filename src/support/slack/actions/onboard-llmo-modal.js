@@ -25,36 +25,58 @@ import {
 } from '../../../controllers/llmo/llmo-onboarding.js';
 import { triggerBrandProfileAgent } from '../../brand-profile-trigger.js';
 
+// LLMO-4683: ISO 3166-1 alpha-2 region for the onboarding modal.
+// Operator types the brand's primary market so DRS prompt generation conditions
+// the LLM on the right region. Empty → DRS client default ('US') applies.
+const REGION_REGEX = /^[A-Z]{2}$/;
+
+function buildRegionInputBlock() {
+  return {
+    type: 'input',
+    block_id: 'region_input',
+    optional: true,
+    element: {
+      type: 'plain_text_input',
+      action_id: 'region',
+      placeholder: {
+        type: 'plain_text',
+        text: 'e.g. US, IN, BR — leave blank for default (US)',
+      },
+    },
+    label: {
+      type: 'plain_text',
+      text: 'Brand Region (ISO 3166-1 alpha-2, optional)',
+    },
+  };
+}
+
 /**
  * Slack button `value` for `start_llmo_onboarding`: plain URL (legacy) or JSON
- * `{ brandURL, tempOnboarding?: true }`.
+ * `{ brandURL }`.
  *
  * @param {string} [raw]
- * @returns {{ brandURL: string, tempOnboarding: boolean }}
+ * @returns {{ brandURL: string }}
  */
 export function parseStartLlmoOnboardingButtonValue(raw) {
   if (raw == null || raw === '') {
-    return { brandURL: '', tempOnboarding: false };
+    return { brandURL: '' };
   }
   const trimmed = String(raw).trim();
   if (trimmed.startsWith('{')) {
     try {
       const parsed = JSON.parse(trimmed);
       if (parsed && typeof parsed.brandURL === 'string') {
-        return {
-          brandURL: parsed.brandURL.trim(),
-          tempOnboarding: parsed.tempOnboarding === true,
-        };
+        return { brandURL: parsed.brandURL.trim() };
       }
     } catch {
       // fall through to raw string
     }
   }
-  return { brandURL: trimmed, tempOnboarding: false };
+  return { brandURL: trimmed };
 }
 
 // site isn't on spacecat yet
-async function fullOnboardingModal(body, client, respond, brandURL, tempOnboarding = false) {
+async function fullOnboardingModal(body, client, respond, brandURL) {
   const { user } = body;
 
   // Update the original message to show user's choice
@@ -76,7 +98,6 @@ async function fullOnboardingModal(body, client, respond, brandURL, tempOnboardi
         originalChannel,
         originalThreadTs,
         brandURL,
-        ...(tempOnboarding ? { tempOnboarding: true } : {}),
       }),
       title: {
         type: 'plain_text',
@@ -176,13 +197,14 @@ async function fullOnboardingModal(body, client, respond, brandURL, tempOnboardi
             text: 'Delivery Type',
           },
         },
+        buildRegionInputBlock(),
       ],
     },
   });
 }
 
 // site is already on spacecat
-async function elmoOnboardingModal(body, client, respond, brandURL, tempOnboarding = false) {
+async function elmoOnboardingModal(body, client, respond, brandURL) {
   const { user } = body;
 
   // Update the original message to show user's choice
@@ -204,7 +226,6 @@ async function elmoOnboardingModal(body, client, respond, brandURL, tempOnboardi
         originalChannel,
         originalThreadTs,
         brandURL,
-        ...(tempOnboarding ? { tempOnboarding: true } : {}),
       }),
       title: {
         type: 'plain_text',
@@ -258,6 +279,7 @@ async function elmoOnboardingModal(body, client, respond, brandURL, tempOnboardi
             text: 'IMS Organization ID',
           },
         },
+        buildRegionInputBlock(),
       ],
     },
   });
@@ -334,18 +356,18 @@ export function startLLMOOnboarding(lambdaContext) {
       const { Site } = dataAccess;
 
       // check current onboarding status
-      const { brandURL, tempOnboarding } = parseStartLlmoOnboardingButtonValue(
+      const { brandURL } = parseStartLlmoOnboardingButtonValue(
         actions?.[0]?.value,
       );
       const site = await Site.findByBaseURL(brandURL);
 
       if (!site) {
-        await fullOnboardingModal(body, client, respond, brandURL, tempOnboarding);
+        await fullOnboardingModal(body, client, respond, brandURL);
         log.debug(`User ${user.id} started full onboarding process for ${brandURL}.`);
         return;
       }
 
-      await elmoOnboardingModal(body, client, respond, brandURL, tempOnboarding);
+      await elmoOnboardingModal(body, client, respond, brandURL);
       log.debug(`User ${user.id} started LLMO onboarding process for ${brandURL} with existing site ${site.getId()}.`);
     } catch (e) {
       log.error('Error handling start onboarding:', e);
@@ -363,7 +385,8 @@ export function startLLMOOnboarding(lambdaContext) {
  * @param {string} input.brandName
  * @param {string} input.imsOrgId
  * @param {string} [input.deliveryType]
- * @param {boolean} [input.tempOnboarding] If true, skip helix-query.yaml update.
+ * @param {string} [input.region] Optional ISO 3166-1 alpha-2 region code (LLMO-4683)
+ *   forwarded to DRS prompt generation. Omitted → DRS client default ('US') applies.
  * @param {Object} lambdaCtx
  * @param {Object} slackCtx
  */
@@ -371,7 +394,7 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
   const { log, env } = lambdaCtx;
   const { say } = slackCtx;
   const {
-    baseURL, brandName, imsOrgId, deliveryType, tempOnboarding,
+    baseURL, brandName, imsOrgId, deliveryType, region,
   } = input;
 
   const dataFolder = generateDataFolder(baseURL, env.ENV);
@@ -398,7 +421,7 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
         brandName,
         imsOrgId,
         deliveryType,
-        ...(tempOnboarding ? { tempOnboarding: true } : {}),
+        ...(region ? { region } : {}),
       },
       lambdaCtx,
       safeSay,
@@ -406,13 +429,14 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
 
     const { site, siteId } = result;
 
+    const regionLine = region ? `\n:globe_with_meridians: *Region:* ${region}` : '';
     const message = `:white_check_mark: *LLMO onboarding completed successfully!*
 
 :link: *Site:* ${baseURL}
 :identification_card: *Site ID:* ${siteId}
 :file_folder: *Data Folder:* ${dataFolder}
 :label: *Brand:* ${brandName}
-:identification_card: *IMS Org ID:* ${imsOrgId}
+:identification_card: *IMS Org ID:* ${imsOrgId}${regionLine}
 
 The LLMO Customer Analysis handler has been triggered. It will take a few minutes to complete.`;
 
@@ -447,14 +471,12 @@ export function onboardLLMOModal(lambdaContext) {
       let originalChannel;
       let originalThreadTs;
       let brandURL;
-      let tempOnboarding;
       try {
         /* c8 ignore next */
         const metadata = JSON.parse(view.private_metadata || '{}');
         originalChannel = metadata.originalChannel;
         originalThreadTs = metadata.originalThreadTs;
         brandURL = metadata.brandURL;
-        tempOnboarding = metadata.tempOnboarding === true;
       } catch (error) {
         log.warn('Failed to parse private metadata:', error);
       }
@@ -462,6 +484,8 @@ export function onboardLLMOModal(lambdaContext) {
       const brandName = values.brand_name_input.brand_name.value;
       const imsOrgId = values.ims_org_input.ims_org_id.value;
       const deliveryType = values.delivery_type_input?.delivery_type?.selected_option?.value;
+      const regionRaw = values.region_input?.region?.value;
+      const region = regionRaw ? regionRaw.trim().toUpperCase() : undefined;
 
       if (!brandName || !imsOrgId) {
         await ack({
@@ -474,14 +498,24 @@ export function onboardLLMOModal(lambdaContext) {
         return;
       }
 
+      if (region && !REGION_REGEX.test(region)) {
+        await ack({
+          response_action: 'errors',
+          errors: {
+            region_input: 'Region must be an ISO 3166-1 alpha-2 country code (e.g. US, IN, BR)',
+          },
+        });
+        return;
+      }
+
       log.info('Onboarding request with parameters:', {
         brandName,
         imsOrgId,
         deliveryType: deliveryType ?? 'not set',
+        region: region ?? 'not set',
         brandURL,
         originalChannel,
         originalThreadTs,
-        tempOnboarding: tempOnboarding === true,
       });
 
       // eslint-disable-next-line max-statements-per-line
@@ -511,7 +545,7 @@ export function onboardLLMOModal(lambdaContext) {
         baseURL: brandURL,
         imsOrgId,
         deliveryType,
-        ...(tempOnboarding ? { tempOnboarding: true } : {}),
+        ...(region ? { region } : {}),
       }, lambdaContext, slackContext);
 
       log.debug(`Onboard LLMO modal processed for user ${user.id}, site ${brandURL}`);

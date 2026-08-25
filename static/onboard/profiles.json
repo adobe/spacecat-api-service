@@ -23,16 +23,11 @@
 	},
 	"aso_plg": {
 		"audits": {
+			"scrape-top-pages": {},
 			"alt-text": {},
 			"cwv": {},
 			"broken-backlinks": {},
-			"scrape-top-pages": {},
-			"broken-backlinks-auto-suggest": {},
-			"broken-backlinks-auto-fix": {},
-			"alt-text-auto-fix": {},
-			"alt-text-auto-suggest-mystique": {},
-			"cwv-auto-fix": {},
-			"cwv-auto-suggest": {}
+			"alt-text-auto-suggest-mystique": {}
 		},
 		"imports": {
 			"organic-traffic": {},
@@ -53,9 +48,6 @@
 			"sitemap": {},
 			"cwv": {},
 			"alt-text": {},
-			"broken-backlinks-auto-suggest": {},
-			"meta-tags-auto-suggest": {},
-			"broken-internal-links-auto-suggest": {},
 			"forms-opportunities": {}
 		},
 		"imports": {
@@ -74,7 +66,6 @@
 			"scrape-top-pages": {},
 			"broken-backlinks": {},
 			"broken-internal-links": {},
-			"experimentation-opportunities": {},
 			"meta-tags": {},
 			"product-metatags": {},
 			"commerce-product-enrichments": {},
@@ -82,19 +73,11 @@
 			"redirect-chains": {},
 			"cwv": {},
 			"alt-text": {},
-			"broken-backlinks-auto-suggest": {},
-			"meta-tags-auto-suggest": {},
-			"broken-internal-links-auto-suggest": {},
-			"broken-backlinks-auto-fix": {},
-			"meta-tags-auto-fix": {},
-			"product-metatags-auto-fix": {},
-			"broken-internal-links-auto-fix": {},
 			"forms-opportunities": {},
 			"accessibility": {},
 			"hreflang": {},
 			"canonical": {},
-			"security-vulnerabilities": {},
-			"security-vulnerabilities-auto-suggest": {}
+			"security-vulnerabilities": {}
 		},
 		"imports": {
 			"organic-traffic" : {},
@@ -116,22 +99,18 @@
 			"scrape-top-pages": {},
 			"broken-backlinks": {},
 			"broken-internal-links": {},
-			"experimentation-opportunities": {},
 			"meta-tags": {},
 			"redirect-chains": {},
 			"cwv": {},
 			"alt-text": {},
-			"broken-backlinks-auto-suggest": {},
-			"meta-tags-auto-suggest": {},
-			"broken-internal-links-auto-suggest": {},
-			"broken-backlinks-auto-fix": {},
-			"meta-tags-auto-fix": {},
-			"broken-internal-links-auto-fix": {},
 			"forms-opportunities": {},
 			"accessibility": {},
 			"hreflang": {},
 			"security-vulnerabilities": {},
-			"security-vulnerabilities-auto-suggest": {}
+			"structured-data": {},
+			"sitemap": {},
+			"money-pages": {},
+			"cwv-trends-audit": {}
 		},
 		"imports": {
 			"organic-traffic" : {},
@@ -140,6 +119,8 @@
 			"all-traffic": {},
             "traffic-analysis": {},
 			"user-engagement": {},
+			"cwv-trends-onboard": {},
+			"cwv-trends-daily": {},
 			"cwv-weekly": {},
 			"ahref-paid-pages": {}
 		},

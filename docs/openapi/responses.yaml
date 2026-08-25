@@ -18,6 +18,11 @@
   headers:
     X-Error:
       $ref: './headers.yaml#/xError'
+'400-no-tier':
+  description: Bad request. Tier is required or invalid.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
 '400-no-organization-id':
   description: Bad request. Organization ID is required.
   headers:
@@ -154,6 +159,18 @@
       $ref: './headers.yaml#/xError'
 '503':
   description: Service Unavailable.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
+'502':
+  description: |
+    Bad gateway. The upstream LLMO data source returned a server error.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
+'504':
+  description: |
+    Gateway timeout. The upstream LLMO data source did not respond within the request timeout.
   headers:
     X-Error:
       $ref: './headers.yaml#/xError'

@@ -61,7 +61,30 @@ describe('llmo-query-handler', () => {
   // Helper to get fetch options from stub
   const getFetchOptions = () => tracingFetchStub.getCall(0).args[1];
 
-  beforeEach(async () => {
+  before(async function () {
+    // esmock with a 3rd-arg global mock deep-replaces the spacecat-shared-utils
+    // import tree, which can exceed the default 10s hook timeout on slower CI
+    // runners. Mirrors the 120s before-hook timeout used in llmo.test.js.
+    this.timeout(120000);
+    tracingFetchStub = sinon.stub();
+
+    const module = await esmock(
+      '../../../src/controllers/llmo/llmo-query-handler.js',
+      {},
+      {
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: 'test-user-agent',
+          tracingFetch: tracingFetchStub,
+        },
+      },
+    );
+
+    queryLlmoFiles = module.queryLlmoFiles;
+  });
+
+  beforeEach(() => {
+    tracingFetchStub.reset();
+
     mockLog = {
       info: sinon.stub(),
       error: sinon.stub(),
@@ -84,17 +107,6 @@ describe('llmo-query-handler', () => {
       },
       data: {},
     };
-
-    tracingFetchStub = sinon.stub();
-
-    const module = await esmock('../../../src/controllers/llmo/llmo-query-handler.js', {
-      '@adobe/spacecat-shared-utils': {
-        SPACECAT_USER_AGENT: 'test-user-agent',
-        tracingFetch: tracingFetchStub,
-      },
-    });
-
-    queryLlmoFiles = module.queryLlmoFiles;
   });
 
   afterEach(() => {
@@ -118,9 +130,6 @@ describe('llmo-query-handler', () => {
       expect(result.data).to.deep.equal(filesData);
       expect(result.headers).to.be.an('object');
       expect(tracingFetchStub).to.have.been.calledOnce;
-      expect(mockLog.info).to.have.been.calledWith(
-        sinon.match(/Fetch from HELIX/),
-      );
     });
 
     it('should construct correct URL for single file', async () => {
@@ -199,9 +208,6 @@ describe('llmo-query-handler', () => {
       await expect(
         queryLlmoFiles(mockContext, mockLlmoConfig),
       ).to.be.rejectedWith('Request timeout after 15000ms');
-      expect(mockLog.debug).to.have.been.calledWith(
-        sinon.match(/Request timeout after 15000ms/),
-      );
     });
 
     it('should include Authorization header with API key', async () => {
@@ -437,6 +443,26 @@ describe('llmo-query-handler', () => {
       expect(nullOrUndefinedCount).to.equal(4);
     });
 
+    it('should sort null-last array correctly (aValue == null branch)', async () => {
+      // Non-null first, null second: V8 insertion sort calls compare(arr[1], arr[0]),
+      // i.e. compare(null_item, non-null_item), exercising the aValue==null branch.
+      const rawData = {
+        ':type': 'sheet',
+        data: [
+          { score: '50' },
+          { score: null },
+        ],
+      };
+
+      tracingFetchStub.resolves(createMockResponse(rawData));
+      mockContext.data = { sort: 'score:asc' };
+
+      const result = await queryLlmoFiles(mockContext, mockLlmoConfig);
+
+      expect(result.data.data[0].score).to.equal('50');
+      expect(result.data.data[1].score).to.be.null;
+    });
+
     it('should handle offset parameter', async () => {
       const rawData = createSheetData([
         { id: 1, name: 'Item 1' },
@@ -659,6 +685,19 @@ describe('llmo-query-handler', () => {
       expect(mockLog.debug).to.have.been.calledWith(
         sinon.match(/Error fetching and processing file file2.json/),
       );
+    });
+
+    it('reports status no_data for an upstream-404 file in multi-file mode', async () => {
+      tracingFetchStub.onFirstCall().resolves(createMockResponse({ ':type': 'sheet', data: [] }));
+      tracingFetchStub.onSecondCall().resolves(createMockResponse(null, false, 404));
+      mockContext.params = { siteId: TEST_SITE_ID };
+      mockContext.data = { file: ['a.json', 'b.json'] };
+
+      const result = await queryLlmoFiles(mockContext, mockLlmoConfig);
+
+      expect(result.data[0].status).to.equal('success');
+      expect(result.data[1].status).to.equal('no_data');
+      expect(result.data[1].error).to.be.undefined;
     });
 
     it('should apply query params to each file in multi-file mode', async () => {

@@ -102,6 +102,8 @@ describe('Trial User Controller', () => {
 
   const mockAccessControlUtil = {
     hasAccess: sandbox.stub().resolves(true),
+    hasAdminAccess: sandbox.stub().returns(false),
+    hasS2SCapability: sandbox.stub().resolves({ allowed: false, reason: 'no-capability' }),
   };
 
   const mockLogger = {
@@ -119,6 +121,8 @@ describe('Trial User Controller', () => {
     // Create a mock AccessControlUtil instance that will be used by the controller
     const mockAccessControlUtilInstance = {
       hasAccess: sandbox.stub().resolves(true),
+      hasAdminAccess: sandbox.stub().returns(false),
+      hasS2SCapability: sandbox.stub().resolves({ allowed: false, reason: 'no-capability' }),
     };
 
     // Stub AccessControlUtil.fromContext to return our mock instance
@@ -168,8 +172,10 @@ describe('Trial User Controller', () => {
     mockDataAccess.TrialUser.allByEmailId = sandbox.stub().resolves([]);
     mockDataAccess.Organization.findById = sandbox.stub().resolves(mockOrganization);
 
-    // Store reference to the mock instance for test manipulation
+    // Store references to the mock instance for test manipulation
     mockAccessControlUtil.hasAccess = mockAccessControlUtilInstance.hasAccess;
+    mockAccessControlUtil.hasAdminAccess = mockAccessControlUtilInstance.hasAdminAccess;
+    mockAccessControlUtil.hasS2SCapability = mockAccessControlUtilInstance.hasS2SCapability;
   });
 
   afterEach(() => {
@@ -362,6 +368,82 @@ describe('Trial User Controller', () => {
       const body = await result.json();
       expect(body.message).to.equal('Organization lookup failed');
       expect(mockLogger.error).to.have.been.calledWith(`Error getting trial users for organization ${organizationId}: ${orgError.message}`);
+    });
+
+    it('should allow admin without calling hasS2SCapability or hasAccess', async () => {
+      mockAccessControlUtil.hasAdminAccess.returns(true);
+
+      const context = {
+        params: { organizationId },
+        dataAccess: mockDataAccess,
+        log: mockLogger,
+        invocation: { id: 'req-admin' },
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ is_admin: true })
+            .withAuthenticated(true),
+        },
+      };
+
+      const result = await trialUserController.getByOrganizationID(context);
+
+      expect(result.status).to.equal(200);
+      expect(mockAccessControlUtil.hasS2SCapability).to.not.have.been.called;
+      expect(mockAccessControlUtil.hasAccess).to.not.have.been.called;
+    });
+
+    it('should allow S2S consumer with trialUser:read capability', async () => {
+      mockAccessControlUtil.hasAdminAccess.returns(false);
+      mockAccessControlUtil.hasS2SCapability.resolves({
+        allowed: true,
+        clientId: 's2s-client-id',
+        consumerId: 's2s-consumer-id',
+      });
+
+      const context = {
+        params: { organizationId },
+        dataAccess: mockDataAccess,
+        log: mockLogger,
+        invocation: { id: 'req-123' },
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({})
+            .withAuthenticated(true),
+        },
+      };
+
+      const result = await trialUserController.getByOrganizationID(context);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body).to.be.an('array');
+      expect(mockLogger.info).to.have.been.calledWithMatch(/\[s2s\] GET \/organizations\/:organizationId\/trial-users granted/);
+    });
+
+    it('should deny S2S consumer without trialUser:read capability and no org access', async () => {
+      mockAccessControlUtil.hasAdminAccess.returns(false);
+      mockAccessControlUtil.hasS2SCapability.resolves({ allowed: false, reason: 'missing-capability' });
+      mockAccessControlUtil.hasAccess.resolves(false);
+
+      const context = {
+        params: { organizationId },
+        dataAccess: mockDataAccess,
+        log: mockLogger,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({})
+            .withAuthenticated(true),
+        },
+      };
+
+      const result = await trialUserController.getByOrganizationID(context);
+
+      expect(result.status).to.equal(403);
+      const body = await result.json();
+      expect(body.message).to.equal('Access denied to this organization');
     });
   });
 

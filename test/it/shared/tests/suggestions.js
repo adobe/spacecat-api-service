@@ -21,6 +21,7 @@ import {
   SUGG_1_ID,
   SUGG_2_ID,
   FIX_1_ID,
+  FIX_2_ID,
   NON_EXISTENT_SUGG_ID,
 } from '../seed-ids.js';
 
@@ -77,6 +78,20 @@ export default function suggestionTests(getHttpClient, resetData) {
         );
         expect(res.status).to.equal(200);
         expect(res.body).to.be.an('array').with.lengthOf(0);
+      });
+
+      it('returns 400 for malformed locale parameter', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}?locale=INVALID`);
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: accepts valid locale parameter and returns suggestions', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}?locale=fr_fr`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array');
+        res.body.forEach((s) => expectSuggestionDto(s));
       });
     });
 
@@ -227,11 +242,12 @@ export default function suggestionTests(getHttpClient, resetData) {
         expect(res.body.data[0].id).to.equal(FIX_1_ID);
       });
 
-      it('user: returns empty for suggestion with no fix associations', async () => {
+      it('user: returns fixes linked to SUGG_2 via junction', async () => {
         const http = getHttpClient();
         const res = await http.user.get(`${BASE}/${SUGG_2_ID}/fixes`);
         expect(res.status).to.equal(200);
-        expect(res.body.data).to.be.an('array').with.lengthOf(0);
+        expect(res.body.data).to.be.an('array').with.lengthOf(1);
+        expect(res.body.data[0].id).to.equal(FIX_2_ID);
       });
 
       it('user: returns 200 with empty data for non-existent suggestion', async () => {
@@ -385,6 +401,38 @@ export default function suggestionTests(getHttpClient, resetData) {
         expect(updated.skipDetail).to.equal('Fix was applied manually');
       });
 
+      it('user: rejects an illegal transition (OUTDATED -> FIXED) with 400 and keeps the stored status (SITES-49063)', async () => {
+        const http = getHttpClient();
+        // fresh suggestion (created as NEW) so this case is isolated from testSuggId
+        const created = await http.user.post(BASE, [
+          { type: 'CODE_CHANGE', rank: 61, data: { title: 'Illegal transition test' } },
+        ]);
+        expect(created.status).to.equal(207);
+        const { id } = created.body.suggestions[0].suggestion;
+
+        // NEW -> OUTDATED is a legal transition
+        const toOutdated = await http.user.patch(`${BASE}/status`, [
+          { id, status: 'OUTDATED' },
+        ]);
+        expectBatch207(toOutdated, 1, 'suggestions');
+        expect(toOutdated.body.suggestions[0].statusCode).to.equal(200);
+
+        // OUTDATED -> FIXED is illegal: per-item 400 inside a 207 batch, no write
+        const toFixed = await http.user.patch(`${BASE}/status`, [
+          { id, status: 'FIXED' },
+        ]);
+        expectBatch207(toFixed, 1, 'suggestions');
+        expect(toFixed.body.metadata.success).to.equal(0);
+        expect(toFixed.body.metadata.failed).to.equal(1);
+        expect(toFixed.body.suggestions[0].statusCode).to.equal(400);
+        expect(toFixed.body.suggestions[0].message).to.equal('Illegal status transition: OUTDATED -> FIXED');
+
+        // the stored row must retain OUTDATED (the guard prevented the write end-to-end)
+        const check = await http.user.get(`${BASE}/${id}`);
+        expect(check.status).to.equal(200);
+        expect(check.body.status).to.equal('OUTDATED');
+      });
+
       it('user: returns 403 for denied site', async () => {
         const http = getHttpClient();
         const res = await http.user.patch(`${DENIED_BASE}/status`, [
@@ -434,6 +482,33 @@ export default function suggestionTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.user.delete(`${BASE}/${NON_EXISTENT_SUGG_ID}`);
         expect(res.status).to.equal(404);
+      });
+    });
+
+    // ── S2S auto-fix access control ──
+
+    describe('PATCH .../suggestions/auto-fix (S2S capability gate)', () => {
+      before(() => resetData());
+
+      it('s2sConsumerReadOnly: returns 403 — lacks fixEntity:create capability (Layer 1)', async () => {
+        // s2sConsumerReadOnly holds site:read + site:write but not fixEntity:create.
+        // The s2sAuthWrapper rejects at Layer 1 before the controller is reached.
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadOnly.patch(
+          `${BASE}/auto-fix`,
+          { suggestionIds: [SUGG_1_ID] },
+        );
+        expect(res.status).to.equal(403);
+      });
+
+      it('s2sConsumerReadAll: returns 403 — lacks fixEntity:create capability (Layer 1)', async () => {
+        // s2sConsumerReadAll holds site:readAll + organization:readAll but not fixEntity:create.
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadAll.patch(
+          `${BASE}/auto-fix`,
+          { suggestionIds: [SUGG_1_ID] },
+        );
+        expect(res.status).to.equal(403);
       });
     });
   });

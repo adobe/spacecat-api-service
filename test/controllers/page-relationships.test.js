@@ -377,6 +377,78 @@ describe('Page Relationships Controller', () => {
       expect(body.relationships['row-abs'].pageId).to.equal('pg-123');
     });
 
+    it('uses a caller-supplied x-promise-token header and skips minting via IMS', async () => {
+      // SITES-47960 — the ASO UI now sends a session JWT in Authorization (not an
+      // IMS bearer) and forwards the promise token it fetched in x-promise-token.
+      // The controller must consume that token directly (bypassing getIMSPromiseToken,
+      // which would 401 on the JWT) and exchange it for the IMS access token.
+      isAEMAuthoredSiteStub.returns(true);
+      requestContext.pathInfo.headers = {
+        authorization: 'Bearer session-jwt',
+        'x-promise-token': 'caller-promise-token',
+      };
+      resolvePageIdsStub.resolves([{ url: '/us/en/page1', pageId: 'pg-1' }]);
+      fetchRelationshipsStub.callsFake(async (authorURL, items) => ({
+        results: {
+          [items[0].key]: { pageId: items[0].pageId, upstream: { chain: [] } },
+        },
+        errors: {},
+      }));
+
+      const controller = PageRelationshipsController(controllerContext);
+      const response = await controller.search(requestContext);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(getIMSPromiseTokenStub).to.not.have.been.called;
+      expect(exchangePromiseTokenStub).to.have.been.calledOnceWithExactly(requestContext, 'caller-promise-token');
+      expect(resolvePageIdsStub.firstCall.args[3]).to.equal('test-ims-token');
+      expect(body.relationships).to.have.property('row-1');
+    });
+
+    it('falls back to minting an IMS promise token when no x-promise-token header is present', async () => {
+      // Backward compatibility: IMS-authenticated callers that do not supply a
+      // promise token still work via the getIMSPromiseToken fallback.
+      isAEMAuthoredSiteStub.returns(true);
+      resolvePageIdsStub.resolves([{ url: '/us/en/page1', pageId: 'pg-1' }]);
+      fetchRelationshipsStub.callsFake(async (authorURL, items) => ({
+        results: {
+          [items[0].key]: { pageId: items[0].pageId, upstream: { chain: [] } },
+        },
+        errors: {},
+      }));
+
+      const controller = PageRelationshipsController(controllerContext);
+      const response = await controller.search(requestContext);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(getIMSPromiseTokenStub).to.have.been.calledOnceWithExactly(requestContext);
+      expect(exchangePromiseTokenStub).to.have.been.calledOnceWithExactly(requestContext, 'test-promise-token');
+      expect(body.relationships).to.have.property('row-1');
+    });
+
+    it('returns 401 when the IMS token exchange fails for a caller-supplied promise token', async () => {
+      // SITES-47960 — a rejected/expired promise token must surface the exchange
+      // status (401), not crash. Mirrors the previous 401 path (test above) but
+      // driven through the x-promise-token branch.
+      isAEMAuthoredSiteStub.returns(true);
+      requestContext.pathInfo.headers = {
+        authorization: 'Bearer session-jwt',
+        'x-promise-token': 'expired-promise-token',
+      };
+      exchangePromiseTokenStub.rejects(new ErrorWithStatusCode('IMS getPromiseToken request failed with status: 401', 401));
+
+      const controller = PageRelationshipsController(controllerContext);
+      const response = await controller.search(requestContext);
+      const body = await response.json();
+
+      expect(response.status).to.equal(401);
+      expect(body.message).to.equal('IMS getPromiseToken request failed with status: 401');
+      expect(getIMSPromiseTokenStub).to.not.have.been.called;
+      expect(resolvePageIdsStub).to.not.have.been.called;
+    });
+
     it('maps upstream relationship payload to sourceType and minimal chain shape', async () => {
       isAEMAuthoredSiteStub.returns(true);
       requestContext.data = {
@@ -577,13 +649,18 @@ describe('Page Relationships Controller', () => {
       expect(body.errors['row-2'].error).to.equal('HTTP 404');
     });
 
-    it('keeps absolute URL for lookup when suggestion host differs from site host', async () => {
+    it('normalizes to pathname when suggestion host differs from site host (e.g. www vs no-www)', async () => {
+      // Regression: previously returned the full URL on host mismatch, which
+      // downstream resolvePageIds would concatenate with the site base URL
+      // producing https://example.com/https://www.example.com/... — see PR linked
+      // in the function comment for the original report.
       isAEMAuthoredSiteStub.returns(true);
+      mockSite.getBaseURL.returns('https://example.com');
       requestContext.data = {
-        pages: [{ key: 'row-external', pageUrl: 'https://external.example.com/us/en/page1', suggestionType: 'Missing Title' }],
+        pages: [{ key: 'row-www', pageUrl: 'https://www.example.com/us/en/page1', suggestionType: 'Missing Title' }],
       };
       resolvePageIdsStub.resolves([
-        { url: 'https://external.example.com/us/en/page1', pageId: 'pg-1' },
+        { url: '/us/en/page1', pageId: 'pg-1' },
       ]);
       fetchRelationshipsStub.callsFake(async (authorURL, items) => ({
         results: {
@@ -600,19 +677,57 @@ describe('Page Relationships Controller', () => {
       const body = await response.json();
 
       expect(response.status).to.equal(200);
-      expect(resolvePageIdsStub.firstCall.args[2]).to.deep.equal(['https://external.example.com/us/en/page1']);
-      expect(fetchRelationshipsStub.firstCall.args[1][0].key).to.equal('row-external');
-      expect(body.relationships).to.have.property('row-external');
-      expect(body.relationships['row-external'].pagePath).to.equal('https://external.example.com/us/en/page1');
-      expect(body.relationships['row-external'].pageId).to.equal('pg-1');
+      expect(resolvePageIdsStub.firstCall.args[2]).to.deep.equal(['/us/en/page1']);
+      expect(fetchRelationshipsStub.firstCall.args[1][0].key).to.equal('row-www');
+      expect(body.relationships).to.have.property('row-www');
+      expect(body.relationships['row-www'].pagePath).to.equal('/us/en/page1');
+      expect(body.relationships['row-www'].pageId).to.equal('pg-1');
     });
 
-    it('keeps absolute URL when normalization cannot parse site base URL', async () => {
+    it('normalizes to pathname even when site base URL is unparseable', async () => {
+      // site baseURL is no longer parsed by normalizePageUrlForLookup; the
+      // function works off the suggestion URL alone. An invalid baseURL must
+      // not block normalization.
       isAEMAuthoredSiteStub.returns(true);
       mockSite.getBaseURL.returns('invalid-site-url');
       requestContext.data = {
         pages: [{ key: 'row-invalid-base', pageUrl: 'https://example.com/us/en/page1', suggestionType: 'Missing Title' }],
       };
+      resolvePageIdsStub.resolves([{ url: '/us/en/page1', pageId: 'pg-1' }]);
+      fetchRelationshipsStub.callsFake(async (authorURL, items) => ({
+        results: {
+          [items[0].key]: {
+            pageId: items[0].pageId,
+            upstream: { chain: [] },
+          },
+        },
+        errors: {},
+      }));
+      const controller = PageRelationshipsController(controllerContext);
+
+      const response = await controller.search(requestContext);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(resolvePageIdsStub.firstCall.args[2]).to.deep.equal(['/us/en/page1']);
+      expect(fetchRelationshipsStub.firstCall.args[1][0].key).to.equal('row-invalid-base');
+      expect(body.relationships).to.have.property('row-invalid-base');
+      expect(body.relationships['row-invalid-base'].pagePath).to.equal('/us/en/page1');
+      expect(body.relationships['row-invalid-base'].pageId).to.equal('pg-1');
+    });
+
+    it('passes through original input when URL constructor throws on a malformed absolute URL', async () => {
+      // Covers the catch branch of normalizePageUrlForLookup: the input passes the
+      // /^https?:\/\//i regex but the URL constructor rejects it (e.g. unparseable
+      // host). Function returns the original trimmed string instead of crashing.
+      isAEMAuthoredSiteStub.returns(true);
+      requestContext.data = {
+        pages: [{ key: 'row-malformed', pageUrl: 'https://example.com/us/en/page1', suggestionType: 'Missing Title' }],
+      };
+      // eslint-disable-next-line prefer-arrow-callback -- arrow functions cannot be used with `new`
+      sandbox.replace(globalThis, 'URL', function FailingURL() {
+        throw new TypeError('Invalid URL');
+      });
       resolvePageIdsStub.resolves([{ url: 'https://example.com/us/en/page1', pageId: 'pg-1' }]);
       fetchRelationshipsStub.callsFake(async (authorURL, items) => ({
         results: {
@@ -630,10 +745,8 @@ describe('Page Relationships Controller', () => {
 
       expect(response.status).to.equal(200);
       expect(resolvePageIdsStub.firstCall.args[2]).to.deep.equal(['https://example.com/us/en/page1']);
-      expect(fetchRelationshipsStub.firstCall.args[1][0].key).to.equal('row-invalid-base');
-      expect(body.relationships).to.have.property('row-invalid-base');
-      expect(body.relationships['row-invalid-base'].pagePath).to.equal('https://example.com/us/en/page1');
-      expect(body.relationships['row-invalid-base'].pageId).to.equal('pg-1');
+      expect(body.relationships).to.have.property('row-malformed');
+      expect(body.relationships['row-malformed'].pageId).to.equal('pg-1');
     });
 
     it('falls back to root path when normalized absolute URL has empty pathname', async () => {

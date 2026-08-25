@@ -11,7 +11,7 @@
  */
 
 import { expect } from 'chai';
-import { validateRepoUrl, checkBodySize } from '../../src/utils/validations.js';
+import { validateRepoUrl, checkBodySize, isValidLocale } from '../../src/utils/validations.js';
 
 // Helper to build Uint8Array of given length
 function makeBytes(len) {
@@ -56,6 +56,29 @@ describe('utils/validations', () => {
     it('considers null / undefined as empty', () => {
       expect(checkBodySize(null, 1)).to.be.true;
       expect(checkBodySize(undefined, 1)).to.be.true;
+    });
+  });
+
+  describe('isValidLocale', () => {
+    it('returns true for null or undefined (absent param is valid)', () => {
+      expect(isValidLocale(null)).to.be.true;
+      expect(isValidLocale(undefined)).to.be.true;
+    });
+
+    it('returns true for valid locale codes', () => {
+      expect(isValidLocale('fr_fr')).to.be.true;
+      expect(isValidLocale('ja_jp')).to.be.true;
+      expect(isValidLocale('de_de')).to.be.true;
+      expect(isValidLocale('en_us')).to.be.true;
+    });
+
+    it('returns false for malformed locale codes', () => {
+      expect(isValidLocale('fr-FR')).to.be.false; // hyphen not underscore
+      expect(isValidLocale('FR_FR')).to.be.false; // uppercase
+      expect(isValidLocale('fr')).to.be.false; // too short
+      expect(isValidLocale('fr_fr_fr')).to.be.false; // too long
+      expect(isValidLocale('')).to.be.false;
+      expect(isValidLocale(123)).to.be.false;
     });
   });
 });

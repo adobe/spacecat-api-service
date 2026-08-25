@@ -14,6 +14,7 @@
 import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
+import esmock from 'esmock';
 import {
   createUrlInspectorStatsHandler,
   createUrlInspectorOwnedUrlsHandler,
@@ -434,9 +435,10 @@ describe('URL Inspector Handlers', () => {
   });
 
   describe('createUrlInspectorOwnedUrlsHandler', () => {
-    it('returns paginated owned URLs', async () => {
+    it('returns paginated owned URLs with agentic + referral fields mapped', async () => {
       const rpcData = [
         {
+          url_id: '11111111-1111-4111-8111-111111111111',
           url: 'https://example.com/page1',
           citations: 42,
           prompts_cited: 12,
@@ -444,6 +446,18 @@ describe('URL Inspector Handlers', () => {
           regions: ['US', 'DE'],
           weekly_citations: [{ week: '2026-W10', value: 20 }],
           weekly_prompts_cited: [{ week: '2026-W10', value: 5 }],
+          agentic_hits: 160,
+          agentic_hits_trend: [
+            { week_start: '2026-01-12', value: 100 },
+            { week_start: '2026-01-19', value: 60 },
+          ],
+          referral_hits: 9400,
+          referral_hits_trend: [
+            { week_start: '2026-01-12', value: 4400 },
+            { week_start: '2026-01-19', value: 5000 },
+          ],
+          avg_citability_score: 88.0,
+          deployed_at_edge: true,
           total_count: 100,
         },
         {
@@ -454,6 +468,28 @@ describe('URL Inspector Handlers', () => {
           regions: ['US'],
           weekly_citations: [{ week: '2026-W10', value: 15 }],
           weekly_prompts_cited: [{ week: '2026-W10', value: 4 }],
+          agentic_hits: 0,
+          agentic_hits_trend: [],
+          referral_hits: 0,
+          referral_hits_trend: [],
+          avg_citability_score: null,
+          deployed_at_edge: false,
+          total_count: 100,
+        },
+        {
+          // Row that OMITS citability/deployed entirely (defends the deploy-order
+          // gap where an older RPC hasn't shipped the columns yet).
+          url: 'https://example.com/page3',
+          citations: 10,
+          prompts_cited: 2,
+          products: [],
+          regions: [],
+          weekly_citations: [],
+          weekly_prompts_cited: [],
+          agentic_hits: 0,
+          agentic_hits_trend: [],
+          referral_hits: 0,
+          referral_hits_trend: [],
           total_count: 100,
         },
       ];
@@ -467,11 +503,122 @@ describe('URL Inspector Handlers', () => {
       const body = await response.json();
 
       expect(response.status).to.equal(200);
-      expect(body.urls).to.have.length(2);
+      expect(body.urls).to.have.length(3);
       expect(body.totalCount).to.equal(100);
       expect(body.urls[0].url).to.equal('https://example.com/page1');
       expect(body.urls[0].citations).to.equal(42);
+      // LLMO-5992: url_id (real source_urls.id) is surfaced so the URL Details
+      // "Prompt Analysis" drilldown can key rpc_url_inspector_url_prompts on a
+      // real uuid. A row that omits url_id (older RPC build) falls back to ''.
+      expect(body.urls[0].urlId).to.equal('11111111-1111-4111-8111-111111111111');
+      expect(body.urls[2].urlId).to.equal('');
       expect(body.urls[0].weeklyCitations).to.deep.equal([{ week: '2026-W10', value: 20 }]);
+      // Server-side agentic merge (LLMO-4526 M2): the dashboard reads these
+      // straight off each row, so they must come through camelCased and the
+      // trend's snake_case `week_start` must be normalised to `weekStart`.
+      expect(body.urls[0].agenticHits).to.equal(160);
+      expect(body.urls[0].agenticHitsTrend).to.deep.equal([
+        { weekStart: '2026-01-12', value: 100 },
+        { weekStart: '2026-01-19', value: 60 },
+      ]);
+      expect(body.urls[1].agenticHits).to.equal(0);
+      expect(body.urls[1].agenticHitsTrend).to.deep.equal([]);
+      // Server-side referral merge (LLMO-4729 Decision A pull-in): same
+      // camelCase + weekStart normalisation as agentic. The dashboard renders
+      // these in the Owned URLs table's Referral Hits column + sparkline.
+      expect(body.urls[0].referralHits).to.equal(9400);
+      expect(body.urls[0].referralHitsTrend).to.deep.equal([
+        { weekStart: '2026-01-12', value: 4400 },
+        { weekStart: '2026-01-19', value: 5000 },
+      ]);
+      expect(body.urls[1].referralHits).to.equal(0);
+      expect(body.urls[1].referralHitsTrend).to.deep.equal([]);
+      // LLMO-5586: citability/deployed are NOT surfaced here — the owned table
+      // sources them UI-side (single citability source, Anuj's RCV hook).
+      expect(body.urls[0]).to.not.have.property('avgCitabilityScore');
+      expect(body.urls[0]).to.not.have.property('deployedAtEdge');
+    });
+
+    // Same defence-in-depth as the agentic-trend test below — referral side
+    // gets its own coverage so the `??` fallbacks inside the referral
+    // trend's `.map` callback are pinned.
+    it('coerces null fields inside referral_hits_trend points (weekStart→null, value→0)', async () => {
+      const rpcData = [
+        {
+          url: 'https://example.com/page1',
+          citations: 1,
+          prompts_cited: 1,
+          products: [],
+          regions: [],
+          weekly_citations: [],
+          weekly_prompts_cited: [],
+          agentic_hits: 0,
+          agentic_hits_trend: [],
+          referral_hits: 0,
+          referral_hits_trend: [
+            { week_start: null, value: null },
+            { /* week_start missing entirely */ value: 5 },
+            { week_start: '2026-01-12' /* value missing entirely */ },
+          ],
+          total_count: 1,
+        },
+      ];
+
+      const { context } = createContext({}, {}, {
+        rpcResults: { rpc_url_inspector_owned_urls: { data: rpcData, error: null } },
+      });
+
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.urls[0].referralHitsTrend).to.deep.equal([
+        { weekStart: null, value: 0 },
+        { weekStart: null, value: 5 },
+        { weekStart: '2026-01-12', value: 0 },
+      ]);
+    });
+
+    // Defence-in-depth: PostgREST occasionally returns null on numeric / text
+    // columns when the underlying JSONB element omits a key. The handler
+    // collapses missing `week_start` to null and missing `value` to 0 so the
+    // dashboard's WoW indicator never NaN-explodes a sparkline. This pins
+    // both `??` fallback branches inside the trend `.map` callback.
+    it('coerces null fields inside agentic_hits_trend points (weekStart→null, value→0)', async () => {
+      const rpcData = [
+        {
+          url: 'https://example.com/page1',
+          citations: 1,
+          prompts_cited: 1,
+          products: [],
+          regions: [],
+          weekly_citations: [],
+          weekly_prompts_cited: [],
+          agentic_hits: 0,
+          agentic_hits_trend: [
+            { week_start: null, value: null },
+            { /* week_start missing entirely */ value: 5 },
+            { week_start: '2026-01-12' /* value missing entirely */ },
+          ],
+          total_count: 1,
+        },
+      ];
+
+      const { context } = createContext({}, {}, {
+        rpcResults: { rpc_url_inspector_owned_urls: { data: rpcData, error: null } },
+      });
+
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.urls[0].agenticHitsTrend).to.deep.equal([
+        { weekStart: null, value: 0 },
+        { weekStart: null, value: 5 },
+        { weekStart: '2026-01-12', value: 0 },
+      ]);
     });
 
     it('returns empty result when no data', async () => {
@@ -544,7 +691,7 @@ describe('URL Inspector Handlers', () => {
       expect(response.status).to.equal(500);
     });
 
-    it('passes filters and handles null row fields', async () => {
+    it('passes filters and handles null row fields (agentic + referral + brand-presence)', async () => {
       const rpcData = [{
         url: 'https://example.com/page1',
         citations: null,
@@ -553,6 +700,10 @@ describe('URL Inspector Handlers', () => {
         regions: null,
         weekly_citations: null,
         weekly_prompts_cited: null,
+        agentic_hits: null,
+        agentic_hits_trend: null,
+        referral_hits: null,
+        referral_hits_trend: null,
         total_count: null,
       }];
 
@@ -573,12 +724,188 @@ describe('URL Inspector Handlers', () => {
       expect(body.urls[0].regions).to.deep.equal([]);
       expect(body.urls[0].weeklyCitations).to.deep.equal([]);
       expect(body.urls[0].weeklyPromptsCited).to.deep.equal([]);
+      // Defence-in-depth: null/undefined agentic columns must collapse to
+      // safe defaults so the UI's WoW trend / sparkline never NaNs.
+      expect(body.urls[0].agenticHits).to.equal(0);
+      expect(body.urls[0].agenticHitsTrend).to.deep.equal([]);
+      // Same defence for the LLMO-4729 referral columns.
+      expect(body.urls[0].referralHits).to.equal(0);
+      expect(body.urls[0].referralHitsTrend).to.deep.equal([]);
       expect(body.totalCount).to.equal(0);
 
       const rpcCall = rpcStub.firstCall;
       expect(rpcCall.args[1].p_brand_id).to.equal(BRAND_ID);
       expect(rpcCall.args[1].p_category).to.equal('cat-1');
       expect(rpcCall.args[1].p_region).to.equal('US');
+      // Without `agentTypes` in the query string the handler must NOT add
+      // p_agent_types to the RPC payload — keeps the contract compatible
+      // with internal tooling that still calls the older 9-arg signature.
+      expect(rpcCall.args[1]).to.not.have.property('p_agent_types');
+      // Same back-compat guarantee for `p_referral_source` (LLMO-4729
+      // Decision A pull-in): when the caller does not supply
+      // `referralSource`, the handler MUST omit the parameter entirely so
+      // the call still works against mysticat builds that pre-date the
+      // LLMO-4729 migration. The new RPC has DEFAULT 'optel', so the
+      // omitted-param path still reads from referral_traffic_optel
+      // server-side without any wire-shape coupling here.
+      expect(rpcCall.args[1]).to.not.have.property('p_referral_source');
+    });
+
+    it('forwards comma-separated agentTypes as p_agent_types array', async () => {
+      const { context, rpcStub } = createContext(
+        {},
+        { agentTypes: 'Chatbots,Research' },
+        { rpcResults: { rpc_url_inspector_owned_urls: { data: [], error: null } } },
+      );
+
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      const rpcCall = rpcStub.firstCall;
+      expect(rpcCall.args[1].p_agent_types).to.deep.equal(['Chatbots', 'Research']);
+    });
+
+    it('also accepts agentTypes as an array (no extra serialisation)', async () => {
+      const { context, rpcStub } = createContext(
+        {},
+        { agentTypes: ['Chatbots', 'Research'] },
+        { rpcResults: { rpc_url_inspector_owned_urls: { data: [], error: null } } },
+      );
+
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      await handler(context);
+
+      const rpcCall = rpcStub.firstCall;
+      expect(rpcCall.args[1].p_agent_types).to.deep.equal(['Chatbots', 'Research']);
+    });
+
+    it('drops unknown agentTypes values and omits the param when empty', async () => {
+      const { context, rpcStub } = createContext(
+        {},
+        // The first three are unknown; the parser drops them all and the
+        // resulting list collapses to null, which means the handler should
+        // omit p_agent_types entirely (rather than sending an empty array
+        // that the RPC would interpret as an empty inclusion list).
+        { agentTypes: 'NotAType,, ,unknown' },
+        { rpcResults: { rpc_url_inspector_owned_urls: { data: [], error: null } } },
+      );
+
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      await handler(context);
+
+      const rpcCall = rpcStub.firstCall;
+      expect(rpcCall.args[1]).to.not.have.property('p_agent_types');
+    });
+
+    it('canonicalises agentTypes casing before forwarding', async () => {
+      const { context, rpcStub } = createContext(
+        {},
+        // Mixed-case + snake_case alias + an unknown filler — the canonical
+        // values must come back regardless of the input shape.
+        { agent_types: 'chatbots, RESEARCH, training-bots' },
+        { rpcResults: { rpc_url_inspector_owned_urls: { data: [], error: null } } },
+      );
+
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      await handler(context);
+
+      const rpcCall = rpcStub.firstCall;
+      // 'training-bots' is unknown (canonical is 'Training bots') so it's
+      // dropped — keeps the URL Inspector PG inclusion list intentionally
+      // narrow until somebody plumbs Training bots into the dashboard.
+      expect(rpcCall.args[1].p_agent_types).to.deep.equal(['Chatbots', 'Research']);
+    });
+
+    // -----------------------------------------------------------------------
+    // LLMO-4729 (Decision A pull-in) — referralSource forwarding
+    // -----------------------------------------------------------------------
+    // The owned-URLs handler reads the optional `referralSource` query param
+    // and forwards it as `p_referral_source` to rpc_url_inspector_owned_urls
+    // so the RPC reads from the right `referral_traffic_<source>` table.
+    // Whitelist mirrors the one in llmo-referral-traffic.js.
+
+    it('forwards referralSource query param as p_referral_source', async () => {
+      const { context, rpcStub } = createContext(
+        {},
+        { referralSource: 'cdn' },
+        { rpcResults: { rpc_url_inspector_owned_urls: { data: [], error: null } } },
+      );
+
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      await handler(context);
+
+      expect(rpcStub.firstCall.args[1].p_referral_source).to.equal('cdn');
+    });
+
+    it('accepts referral_source snake_case alias', async () => {
+      const { context, rpcStub } = createContext(
+        {},
+        { referral_source: 'ga4' },
+        { rpcResults: { rpc_url_inspector_owned_urls: { data: [], error: null } } },
+      );
+
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      await handler(context);
+
+      expect(rpcStub.firstCall.args[1].p_referral_source).to.equal('ga4');
+    });
+
+    it('falls back to optel for unknown referralSource values', async () => {
+      const { context, rpcStub } = createContext(
+        {},
+        // Unknown value; mirrors the parser's rejection of
+        // not-on-the-whitelist sources (defence in depth — the underlying
+        // RPC's CASE statement falls through to optel too, but doing it in
+        // the handler avoids a wasted RPC trip on hostile input).
+        { referralSource: 'nope' },
+        { rpcResults: { rpc_url_inspector_owned_urls: { data: [], error: null } } },
+      );
+
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      await handler(context);
+
+      expect(rpcStub.firstCall.args[1].p_referral_source).to.equal('optel');
+    });
+
+    it('forwards every whitelisted referralSource verbatim', async () => {
+      // Pin the known sources so a future contributor adding (or
+      // removing) one in the whitelist must update this assertion in lock-
+      // step with the controller + the underlying RPC's CASE branches.
+      for (const source of ['optel', 'cdn', 'adobe_analytics', 'ga4', 'cja']) {
+        // eslint-disable-next-line no-await-in-loop
+        const { context, rpcStub } = createContext(
+          {},
+          { referralSource: source },
+          { rpcResults: { rpc_url_inspector_owned_urls: { data: [], error: null } } },
+        );
+        const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+        // eslint-disable-next-line no-await-in-loop
+        await handler(context);
+        expect(
+          rpcStub.firstCall.args[1].p_referral_source,
+          `whitelist member '${source}' should round-trip`,
+        ).to.equal(source);
+      }
+    });
+
+    it('omits p_referral_source when referralSource is an empty string', async () => {
+      // Mirrors the agentTypes "drops unknown values and omits the param
+      // when empty" test (LLMO-4526). The parser treats an empty string as
+      // "no value supplied" so the handler MUST omit p_referral_source
+      // from the RPC payload — keeps the call compatible with mysticat
+      // builds that pre-date the LLMO-4729 migration. The post-LLMO-4729
+      // RPC has DEFAULT 'optel' so the omitted-param path still reads
+      // from referral_traffic_optel server-side.
+      const { context, rpcStub } = createContext(
+        {},
+        { referralSource: '' },
+        { rpcResults: { rpc_url_inspector_owned_urls: { data: [], error: null } } },
+      );
+      const handler = createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess());
+      await handler(context);
+
+      expect(rpcStub.firstCall.args[1]).to.not.have.property('p_referral_source');
     });
   });
 
@@ -1238,6 +1565,71 @@ describe('URL Inspector Handlers', () => {
       expect(response.status).to.equal(500);
     });
 
+    /**
+     * LLMO-4526 — URL Inspector PG dashboard's owned-URLs flow synthesises
+     * `url-${index}-${slug}` ids because rpc_url_inspector_owned_urls does
+     * not return source_urls.id. When that synthetic id is forwarded to
+     * rpc_url_inspector_url_prompts (which takes a UUID), Postgres returns
+     * SQLSTATE 22P02 (`invalid input syntax for type uuid`). Coercing that
+     * to "no prompts for this row" keeps the URL Details dialog functional
+     * (agentic chart + URL info still render) instead of forcing the UI
+     * to render an opaque error state.
+     */
+    it('coerces invalid-UUID RPC errors to 200 + empty prompts (LLMO-4526)', async () => {
+      const synthUrlId = 'url-3-https---www-adobe-com-products-firefly-html-utm-source-chatgpt-com';
+      const { context } = createContext(
+        {},
+        { urlId: synthUrlId },
+        {
+          rpcResults: {
+            rpc_url_inspector_url_prompts: {
+              data: null,
+              error: {
+                code: '22P02',
+                message: `invalid input syntax for type uuid: "${synthUrlId}"`,
+              },
+            },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorUrlPromptsHandler(
+        getOrgAndValidateAccess(),
+      );
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body).to.deep.equal({ prompts: [] });
+    });
+
+    it('coerces invalid-UUID RPC errors detected by message even when code is missing', async () => {
+      const synthUrlId = 'not-a-uuid';
+      const { context } = createContext(
+        {},
+        { urlId: synthUrlId },
+        {
+          rpcResults: {
+            rpc_url_inspector_url_prompts: {
+              data: null,
+              error: {
+                message: 'invalid input syntax for uuid: "not-a-uuid"',
+              },
+            },
+          },
+        },
+      );
+
+      const handler = createUrlInspectorUrlPromptsHandler(
+        getOrgAndValidateAccess(),
+      );
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body).to.deep.equal({ prompts: [] });
+    });
+
     it('uses url_id alias and handles null row fields', async () => {
       const urlId = '44444444-4444-4444-4444-444444444444';
       const rpcData = [{
@@ -1274,6 +1666,384 @@ describe('URL Inspector Handlers', () => {
       const rpcCall = rpcStub.firstCall;
       expect(rpcCall.args[1].p_url_id).to.equal(urlId);
       expect(rpcCall.args[1].p_start_date).to.equal('2026-01-01');
+    });
+  });
+
+  describe('createUrlInspectorPromptsByUrlHandler', () => {
+    const BRAND_UUID = '55555555-5555-5555-5555-555555555555';
+    const WORKSPACE_ID = 'workspace-1';
+    const PARENT_WORKSPACE_ID = 'parent-workspace-1';
+
+    let resolveBrandUuidStub;
+    let resolveBrandWorkspaceStub;
+    let getUrlPromptsStub;
+    let createUrlInspectorPromptsByUrlHandler;
+
+    beforeEach(async () => {
+      resolveBrandUuidStub = sinon.stub().resolves(BRAND_UUID);
+      resolveBrandWorkspaceStub = sinon.stub().resolves({
+        mode: 'subworkspace',
+        workspaceId: WORKSPACE_ID,
+        parentWorkspaceId: PARENT_WORKSPACE_ID,
+      });
+      getUrlPromptsStub = sinon.stub().resolves([]);
+
+      ({ createUrlInspectorPromptsByUrlHandler } = await esmock(
+        '../../../src/controllers/llmo/llmo-url-inspector.js',
+        {
+          '../../../src/support/prompts-storage.js': {
+            resolveBrandUuid: resolveBrandUuidStub,
+          },
+          '../../../src/support/serenity/workspace-resolver.js': {
+            resolveBrandWorkspace: resolveBrandWorkspaceStub,
+          },
+          '../../../src/support/elements/elements-transport.js': {
+            createElementsTransport: sinon.stub().returns({ fetchElement: sinon.stub() }),
+          },
+          '../../../src/support/elements/elements-service.js': {
+            createElementsService: sinon.stub().returns({ getUrlPrompts: getUrlPromptsStub }),
+          },
+          '../../../src/support/utils.js': {
+            resolveSemrushImsToken: sinon.stub().resolves('test-ims-token'),
+          },
+        },
+      ));
+    });
+
+    it('returns badRequest when siteId is missing', async () => {
+      const { context } = createContext({}, { siteId: undefined, url: 'https://example.com/a' });
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns badRequest when neither url nor urlId is provided', async () => {
+      const { context } = createContext({}, {});
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns badRequest for invalid platform value', async () => {
+      const { context } = createContext(
+        {},
+        { url: 'https://example.com/a', platform: 'invalid-model-name' },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      expect(response.status).to.equal(400);
+    });
+
+    it('falls back to Mysticat when resolveBrandUuid finds no matching brand', async () => {
+      resolveBrandUuidStub.resolves(null);
+      const urlId = '66666666-6666-6666-6666-666666666666';
+      const { context, rpcStub } = createContext(
+        { brandId: BRAND_UUID },
+        { url: 'https://example.com/a', urlId },
+        { rpcResults: { rpc_url_inspector_url_prompts: { data: [], error: null } } },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      expect(resolveBrandWorkspaceStub).to.not.have.been.called;
+      expect(rpcStub).to.have.been.calledWith('rpc_url_inspector_url_prompts', sinon.match({ p_url_id: urlId }));
+    });
+
+    it('single-hop by-url RPC handles null data from RPC gracefully', async () => {
+      resolveBrandWorkspaceStub.resolves({ mode: 'flat', workspaceId: null, parentWorkspaceId: null });
+      const { context } = createContext(
+        { brandId: BRAND_UUID },
+        { url: 'https://example.com/a' },
+        {
+          rpcResults: {
+            rpc_url_inspector_prompts_by_url: { data: null, error: null },
+          },
+        },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body).to.deep.equal({ prompts: [] });
+    });
+
+    it('single-hop by-url RPC handles null row fields', async () => {
+      resolveBrandWorkspaceStub.resolves({ mode: 'flat', workspaceId: null, parentWorkspaceId: null });
+      const rpcData = [{
+        prompt: null, category: null, region: null, topics: null, citations: null,
+      }];
+      const { context } = createContext(
+        { brandId: BRAND_UUID },
+        { url: 'https://example.com/a' },
+        {
+          rpcResults: {
+            rpc_url_inspector_prompts_by_url: { data: rpcData, error: null },
+          },
+        },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.prompts[0].prompt).to.equal('');
+      expect(body.prompts[0].category).to.equal('');
+      expect(body.prompts[0].region).to.equal('');
+      expect(body.prompts[0].topics).to.equal('');
+      expect(body.prompts[0].citations).to.equal(0);
+    });
+
+    it('returns internalServerError when the Semrush service throws a non-Error value', async () => {
+      // eslint-disable-next-line prefer-promise-reject-errors -- covers e?.message||e fallback
+      getUrlPromptsStub.callsFake(() => Promise.reject('semrush boom'));
+      const { context } = createContext(
+        { brandId: BRAND_UUID },
+        { url: 'https://example.com/a' },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      expect(response.status).to.equal(500);
+    });
+
+    it('returns forbidden when site does not belong to org', async () => {
+      const { context, limitStub } = createContext({}, { url: 'https://example.com/a' });
+      limitStub.resolves({ data: [], error: null });
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      expect(response.status).to.equal(403);
+    });
+
+    it('routes to Semrush when the brand has an active sub-workspace and url is given', async () => {
+      getUrlPromptsStub.resolves([
+        {
+          prompt: 'what is x', category: '', region: '', topics: '', citations: 0,
+        },
+      ]);
+      const { context, rpcStub } = createContext(
+        { brandId: BRAND_UUID },
+        { url: 'https://example.com/a' },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.prompts).to.have.length(1);
+      expect(body.prompts[0].prompt).to.equal('what is x');
+      expect(getUrlPromptsStub).to.have.been.calledWith(WORKSPACE_ID, sinon.match({
+        url: 'https://example.com/a',
+        projectIds: [],
+        model: 'all',
+      }));
+      // Semrush path never touches the Mysticat RPC.
+      expect(rpcStub).to.not.have.been.called;
+    });
+
+    it('passes the raw (un-normalized) model to Semrush, not the Mysticat-enum value', async () => {
+      getUrlPromptsStub.resolves([]);
+      const { context } = createContext(
+        { brandId: BRAND_UUID },
+        { url: 'https://example.com/a', model: 'chatgpt-free' },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      await handler(context);
+
+      expect(getUrlPromptsStub).to.have.been.calledWith(WORKSPACE_ID, sinon.match({
+        model: 'chatgpt-free',
+      }));
+    });
+
+    it('falls back to Mysticat when Semrush eligibility resolution throws', async () => {
+      resolveBrandWorkspaceStub.rejects(new Error('Brand data-access not available on context'));
+      const urlId = '66666666-6666-6666-6666-666666666666';
+      const { context, rpcStub } = createContext(
+        { brandId: BRAND_UUID },
+        { url: 'https://example.com/a', urlId },
+        { rpcResults: { rpc_url_inspector_url_prompts: { data: [], error: null } } },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      expect(getUrlPromptsStub).to.not.have.been.called;
+      expect(rpcStub).to.have.been.calledWith('rpc_url_inspector_url_prompts', sinon.match({ p_url_id: urlId }));
+      expect(context.log.error).to.have.been.calledWith(
+        sinon.match(/Semrush eligibility check failed/),
+      );
+    });
+
+    it('falls back to Mysticat when eligibility resolution rejects with a non-Error value', async () => {
+      // eslint-disable-next-line prefer-promise-reject-errors -- covers e?.message||e fallback
+      resolveBrandWorkspaceStub.callsFake(() => Promise.reject('workspace lookup boom'));
+      const urlId = '66666666-6666-6666-6666-666666666666';
+      const { context, rpcStub } = createContext(
+        { brandId: BRAND_UUID },
+        { url: 'https://example.com/a', urlId },
+        { rpcResults: { rpc_url_inspector_url_prompts: { data: [], error: null } } },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      expect(rpcStub).to.have.been.calledWith('rpc_url_inspector_url_prompts', sinon.match({ p_url_id: urlId }));
+      expect(context.log.error).to.have.been.calledWith(
+        sinon.match(/Semrush eligibility check failed: workspace lookup boom/),
+      );
+    });
+
+    it('falls back to Mysticat when brandId is "all" even if url is given', async () => {
+      const urlId = '66666666-6666-6666-6666-666666666666';
+      const { context, rpcStub } = createContext(
+        { brandId: 'all' },
+        { url: 'https://example.com/a', urlId },
+        { rpcResults: { rpc_url_inspector_url_prompts: { data: [], error: null } } },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      expect(resolveBrandUuidStub).to.not.have.been.called;
+      expect(rpcStub).to.have.been.calledWith('rpc_url_inspector_url_prompts', sinon.match({ p_url_id: urlId }));
+    });
+
+    it('falls back to Mysticat when the brand is flat-mode (no sub-workspace of its own)', async () => {
+      resolveBrandWorkspaceStub.resolves({
+        mode: 'flat', workspaceId: PARENT_WORKSPACE_ID, parentWorkspaceId: PARENT_WORKSPACE_ID,
+      });
+      const urlId = '66666666-6666-6666-6666-666666666666';
+      const { context, rpcStub } = createContext(
+        { brandId: BRAND_UUID },
+        { url: 'https://example.com/a', urlId },
+        { rpcResults: { rpc_url_inspector_url_prompts: { data: [], error: null } } },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      expect(getUrlPromptsStub).to.not.have.been.called;
+      expect(rpcStub).to.have.been.calledWith('rpc_url_inspector_url_prompts', sinon.match({ p_url_id: urlId }));
+    });
+
+    it('falls back to the single-hop Mysticat by-url RPC when the brand is not Semrush-eligible and no urlId is given', async () => {
+      resolveBrandWorkspaceStub.resolves({ mode: 'flat', workspaceId: null, parentWorkspaceId: null });
+      const { context, rpcStub } = createContext(
+        { brandId: BRAND_UUID },
+        { url: 'https://example.com/a' },
+        {
+          rpcResults: {
+            rpc_url_inspector_prompts_by_url: {
+              data: [{
+                prompt: 'what is x', category: '', region: '', topics: '', citations: 3,
+              }],
+              error: null,
+            },
+          },
+        },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.prompts).to.have.length(1);
+      expect(body.prompts[0].citations).to.equal(3);
+      expect(getUrlPromptsStub).to.not.have.been.called;
+      expect(rpcStub).to.have.been.calledWith('rpc_url_inspector_prompts_by_url', sinon.match({
+        p_url: 'https://example.com/a',
+      }));
+    });
+
+    it('returns internalServerError when the single-hop Mysticat by-url RPC errors', async () => {
+      resolveBrandWorkspaceStub.resolves({ mode: 'flat', workspaceId: null, parentWorkspaceId: null });
+      const { context } = createContext(
+        { brandId: BRAND_UUID },
+        { url: 'https://example.com/a' },
+        {
+          rpcResults: {
+            rpc_url_inspector_prompts_by_url: { data: null, error: { message: 'boom' } },
+          },
+        },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      expect(response.status).to.equal(500);
+    });
+
+    it('refuses the sub-workspace when it equals the org parent workspace, then falls back to Mysticat', async () => {
+      resolveBrandWorkspaceStub.resolves({
+        mode: 'subworkspace', workspaceId: 'same-ws', parentWorkspaceId: 'same-ws',
+      });
+      const urlId = '66666666-6666-6666-6666-666666666666';
+      const { context } = createContext(
+        { brandId: BRAND_UUID },
+        { url: 'https://example.com/a', urlId },
+        { rpcResults: { rpc_url_inspector_url_prompts: { data: [], error: null } } },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      expect(getUrlPromptsStub).to.not.have.been.called;
+      expect(context.log.error.firstCall.args[0]).to.include('sub-workspace equals org parent workspace');
+    });
+
+    it('returns internalServerError when the Semrush service call throws', async () => {
+      getUrlPromptsStub.rejects(new Error('semrush boom'));
+      const { context } = createContext(
+        { brandId: BRAND_UUID },
+        { url: 'https://example.com/a' },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+      expect(response.status).to.equal(500);
+    });
+
+    it('logs the status code when the Semrush call throws an ErrorWithStatusCode', async () => {
+      const err = new Error('Invalid or expired promise token');
+      err.status = 401;
+      getUrlPromptsStub.rejects(err);
+      const { context } = createContext(
+        { brandId: BRAND_UUID },
+        { url: 'https://example.com/a' },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(500);
+      expect(context.log.error).to.have.been.calledWith(
+        sinon.match(/Invalid or expired promise token.*\[status=401\]/),
+      );
+    });
+
+    it('does not resolve brand workspace at all for a urlId-only request (no url given)', async () => {
+      const urlId = '66666666-6666-6666-6666-666666666666';
+      const { context, rpcStub } = createContext(
+        { brandId: BRAND_UUID },
+        { urlId },
+        { rpcResults: { rpc_url_inspector_url_prompts: { data: [], error: null } } },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      expect(resolveBrandUuidStub).to.not.have.been.called;
+      expect(resolveBrandWorkspaceStub).to.not.have.been.called;
+      expect(rpcStub).to.have.been.calledWith('rpc_url_inspector_url_prompts', sinon.match({ p_url_id: urlId }));
+    });
+
+    it('applies the same 28-day default date range on the Semrush branch as the Mysticat branch', async () => {
+      const { context } = createContext(
+        { brandId: BRAND_UUID },
+        { url: 'https://example.com/a' },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      await handler(context);
+
+      const call = getUrlPromptsStub.firstCall;
+      expect(call.args[1].startDate).to.be.a('string').and.not.empty;
+      expect(call.args[1].endDate).to.be.a('string').and.not.empty;
     });
   });
 

@@ -6,6 +6,12 @@
 
 https://opensource.adobe.com/spacecat-api-service/
 
+### Semrush proxy (`/serenity/*`)
+
+Server-side proxy in front of the Semrush AIO API. See [docs/serenity.md](docs/serenity.md)
+for the operator guide (auth flow, workspace resolution, error envelopes, smoke
+runbook).
+
 ### Build documentation locally
 
 ```bash
@@ -194,17 +200,14 @@ $ npm run lint
 
 ### Integration Tests
 
-Integration tests validate the full API lifecycle against real database backends (DynamoDB and PostgreSQL). They test routing, controllers, DTOs, access control, and data access in a single pass — no mocks.
+Integration tests validate the full API lifecycle against a real PostgreSQL backend. They test routing, controllers, DTOs, access control, and data access in a single pass — no mocks.
 
 ```bash
-# DynamoDB suite (requires Java 17+)
-$ npx mocha --require test/it/dynamo/harness.js --timeout 30000 'test/it/dynamo/**/*.test.js'
-
 # PostgreSQL suite (requires Docker + ECR access)
 $ npx mocha --require test/it/postgres/harness.js --timeout 30000 'test/it/postgres/**/*.test.js'
 ```
 
-Both suites run automatically in CI as parallel GitHub Actions jobs. For the full guide on structure, extending tests, and troubleshooting, see [test/it/README.md](test/it/README.md).
+The PostgreSQL suite runs automatically in CI as a GitHub Actions job. For the full guide on structure, extending tests, and troubleshooting, see [test/it/README.md](test/it/README.md).
 
 ## Required ENV Variables
 
@@ -274,3 +277,7 @@ The `multipartFormData` wrapper uses the following optional env variables:
 MULTIPART_FORM_FILE_COUNT_LIMIT=Maximum number of files which can be included in a multipart/form-data request (defaults to 5)
 MULTIPART_FORM_MAX_FILE_SIZE_MB=Maximum file size in MB for a single file in a multipart/form-data request (defaults to 20)
 ```
+
+## Operations & Runbooks
+
+- [Release-caused outage (diagnose → verify → revert)](docs/runbooks/release-caused-outage.md) — what to do when the API starts failing broadly after a deploy, including how to confirm a release is the cause before reverting and the `main is not a function` bundle-failure signature.

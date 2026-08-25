@@ -20,6 +20,7 @@ import {
   hasText, isValidUrl, isNonEmptyObject,
 } from '@adobe/spacecat-shared-utils';
 import AccessControlUtil from '../support/access-control-util.js';
+import { CAP_CONFIGURATION_WRITE } from '../routes/capability-constants.js';
 
 /**
  * @param {object} ctx - Context of the request.
@@ -30,13 +31,29 @@ export default (ctx) => {
   if (!isNonEmptyObject(ctx)) {
     throw new Error('Context required');
   }
-  const { dataAccess } = ctx;
+  const { dataAccess, log } = ctx;
   if (!isNonEmptyObject(dataAccess)) {
     throw new Error('Data access required');
   }
 
   const { Configuration, Site, Organization } = dataAccess;
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
+
+  const authorizeConfigWrite = async (context, route, message) => {
+    const requestId = context?.invocation?.id || 'unknown';
+    const isAdmin = accessControlUtil.hasAdminAccess();
+    const s2sResult = isAdmin
+      ? { allowed: false, reason: 'admin-bypass' }
+      : await accessControlUtil.hasS2SCapability(CAP_CONFIGURATION_WRITE);
+    if (!isAdmin && !s2sResult.allowed) {
+      log.info(`[acl] Denied ${route} - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} requestId=${requestId}`);
+      return forbidden(message);
+    }
+    if (s2sResult.allowed) {
+      log.info(`[s2s] ${route} granted clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} capability=${CAP_CONFIGURATION_WRITE} requestId=${requestId}`);
+    }
+    return null;
+  };
 
   const validateInput = ({
     baseURL, organizationId, auditType, enable,
@@ -72,14 +89,15 @@ export default (ctx) => {
    * @returns {Promise<Response|*>}
    */
   const execute = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can change configuration settings.');
+    const denied = await authorizeConfigWrite(context, 'PATCH /configurations/sites/audits', 'Only admins can change configuration settings.');
+    if (denied) {
+      return denied;
     }
     if (!isNonEmptyObject(context)) {
       return internalServerError('An error occurred while trying to enable or disable audits.');
     }
 
-    const { data: requestBody, log } = context;
+    const { data: requestBody } = context;
 
     if (!requestBody || requestBody.length === 0) {
       return badRequest('Request body is required.');
@@ -165,7 +183,10 @@ export default (ctx) => {
 
       if (hasUpdates === true) {
         const { authInfo: { profile } } = context.attributes;
-        configuration.setUpdatedBy(profile.email || 'system');
+        const s2sClientId = context.s2sConsumer?.getClientId?.();
+        configuration.setUpdatedBy(
+          profile.email || (s2sClientId ? `s2s:${s2sClientId}` : 'system'),
+        );
         await configuration.save();
       }
 

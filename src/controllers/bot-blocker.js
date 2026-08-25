@@ -72,10 +72,18 @@ function BotBlockerController(ctx, log) {
         return internalServerError('Site has no baseURL configured');
       }
 
-      log.debug(`Checking bot blocker for site ${siteId} with baseURL: ${baseURL}`);
+      // Mirror what the real scraper sends so the probe is a faithful predictor
+      // of scrape success. Without this, sites that allowlist scraper traffic via
+      // a custom header (e.g. Akamai Bot Manager requiring `Accept-Language`)
+      // probe as blocked even though scrapes succeed.
+      // Defensive `?.` chain matches spacecat-scrape-job-manager — older
+      // `@adobe/spacecat-shared-data-access` versions without `getScraperConfig`
+      // silently fall back to `{}`, preserving today's behavior.
+      const customHeaders = site.getConfig()?.getScraperConfig?.()?.headers || {};
 
-      // Call the bot blocker detection function
-      const result = await detectBotBlocker({ baseUrl: baseURL });
+      log.debug(`Checking bot blocker for site ${siteId} with baseURL: ${baseURL}, customHeaders: ${Object.keys(customHeaders).join(',') || 'none'}`);
+
+      const result = await detectBotBlocker({ baseUrl: baseURL, headers: customHeaders });
 
       log.debug(`Bot blocker check completed for site ${siteId}: crawlable=${result.crawlable}, type=${result.type}, confidence=${result.confidence}`);
 

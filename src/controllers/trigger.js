@@ -19,6 +19,7 @@ import canonical from './trigger/canonical.js';
 import sitemap from './trigger/sitemap.js';
 import backlinks from './trigger/backlinks.js';
 import organictraffic from './trigger/organictraffic.js';
+import rumConfigRefresh from './trigger/rum-config-refresh.js';
 
 const AUDITS = {
   apex,
@@ -27,6 +28,7 @@ const AUDITS = {
   sitemap,
   'broken-backlinks': backlinks,
   'organic-traffic': organictraffic,
+  'rum-config-refresh': rumConfigRefresh,
 };
 
 /**

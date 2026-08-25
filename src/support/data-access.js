@@ -10,30 +10,14 @@
  * governing permissions and limitations under the License.
  */
 
-import dataAccessV2 from '@adobe/spacecat-shared-data-access-v2';
 import dataAccessV3 from '@adobe/spacecat-shared-data-access';
 
-/**
- * Data access middleware wrapper that selects between v2 (DynamoDB) and v3 (Postgres)
- * based on the DATA_SERVICE_PROVIDER environment variable.
- *
- * @param {Function} fn - The next middleware/handler function to wrap.
- * @returns {Function} - The wrapped function.
- */
-/* c8 ignore start */
 export default function dataAccess(fn) {
   return async (request, context) => {
-    const { env } = context;
-
-    if (env.DATA_SERVICE_PROVIDER === 'postgres') {
-      if (!env.POSTGREST_URL) {
-        throw new Error(
-          'DATA_SERVICE_PROVIDER is set to "postgres" but POSTGREST_URL is not configured',
-        );
-      }
-      return dataAccessV3(fn)(request, context);
+    const { env = {} } = context;
+    if (!env.POSTGREST_URL) {
+      throw new Error('POSTGREST_URL is not configured');
     }
-    return dataAccessV2(fn)(request, context);
+    return dataAccessV3(fn)(request, context);
   };
 }
-/* c8 ignore stop */

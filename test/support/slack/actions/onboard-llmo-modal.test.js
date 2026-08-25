@@ -55,6 +55,7 @@ describe('onboard-llmo-modal', () => {
         getImports: sinonSandbox.stub().returns([]),
       }),
       setConfig: sinonSandbox.stub(),
+      getSiteEnrollments: sinonSandbox.stub().resolves([]),
       save: sinonSandbox.stub().resolves(),
     };
   };
@@ -123,20 +124,30 @@ describe('onboard-llmo-modal', () => {
     sendMessage: sinonSandbox.stub(),
   });
 
-  const createDefaultMockPostgrestClient = (sinonSandbox) => ({
-    from: sinonSandbox.stub().callsFake(() => ({
+  const createDefaultMockPostgrestClient = (sinonSandbox) => {
+    // One chain link that is both further-chainable and awaitable, so a single
+    // fake serves the brands lookup (which ends in `.maybeSingle()`) and the
+    // feature-flags org-row lookup (three `.eq()`s, awaited directly). Both
+    // resolve to "no row", so the flag write lands as an insert.
+    const link = {
+      eq: sinonSandbox.stub().callsFake(() => link),
+      maybeSingle: sinonSandbox.stub().resolves({ data: null, error: null }),
+      then: (onFulfilled) => Promise.resolve({ data: [], error: null }).then(onFulfilled),
+    };
+    const writeResult = () => sinonSandbox.stub().returns({
       select: sinonSandbox.stub().returns({
-        eq: sinonSandbox.stub().returns({
-          maybeSingle: sinonSandbox.stub().resolves({ data: null, error: null }),
-        }),
+        single: sinonSandbox.stub().resolves({ data: { flag_value: true }, error: null }),
       }),
-      upsert: sinonSandbox.stub().returns({
-        select: sinonSandbox.stub().returns({
-          single: sinonSandbox.stub().resolves({ data: { flag_value: true }, error: null }),
-        }),
-      }),
-    })),
-  });
+    });
+    return {
+      from: sinonSandbox.stub().callsFake(() => ({
+        select: sinonSandbox.stub().returns(link),
+        // `upsert` is the brand write (upsertBrand); `insert` is the flag write.
+        upsert: writeResult(),
+        insert: writeResult(),
+      })),
+    };
+  };
 
   const createDefaultMockLambdaCtx = (sinonSandbox, overrides = {}) => {
     const mockSite = overrides.mockSite || createDefaultMockSite(sinonSandbox);
@@ -432,12 +443,59 @@ describe('onboard-llmo-modal', () => {
       });
     });
 
-    it('should not call GitHub when tempOnboarding skips helix-query.yaml update', async () => {
+    it('should surface region in the success message when supplied (LLMO-4683)', async () => {
       const input = {
         baseURL: 'https://example.com',
         brandName: 'Test Brand',
         imsOrgId: 'ABC123@AdobeOrg',
         deliveryType: 'aem_edge',
+        region: 'IN',
+      };
+
+      const mockSite = createDefaultMockSite(sandbox);
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockSite });
+      const slackCtx = createDefaultMockSlackCtx(sandbox);
+      const sayStub = slackCtx.say;
+
+      global.fetch = createDefaultMockFetch(sandbox);
+
+      await onboardSite(input, lambdaCtx, slackCtx);
+
+      expect(sayStub).to.have.been.calledWith(sinon.match(':globe_with_meridians: *Region:* IN'));
+    });
+
+    it('should omit region from the success message when not supplied (LLMO-4683)', async () => {
+      const input = {
+        baseURL: 'https://example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        deliveryType: 'aem_edge',
+      };
+
+      const mockSite = createDefaultMockSite(sandbox);
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockSite });
+      const slackCtx = createDefaultMockSlackCtx(sandbox);
+      const sayStub = slackCtx.say;
+
+      global.fetch = createDefaultMockFetch(sandbox);
+
+      await onboardSite(input, lambdaCtx, slackCtx);
+
+      const successCall = sayStub.getCalls().find(
+        (call) => typeof call.args[0] === 'string'
+          && call.args[0].includes('LLMO onboarding completed successfully'),
+      );
+      expect(successCall, 'success message was sent').to.exist;
+      expect(successCall.args[0]).to.not.include(':globe_with_meridians:');
+    });
+
+    it('should always call GitHub to update helix-query.yaml, ignoring a stray tempOnboarding param (LLMO-7141)', async () => {
+      const input = {
+        baseURL: 'https://example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        deliveryType: 'aem_edge',
+        // No longer a supported input — must have zero effect.
         tempOnboarding: true,
       };
 
@@ -450,7 +508,7 @@ describe('onboard-llmo-modal', () => {
 
       await onboardSite(input, lambdaCtx, slackCtx);
 
-      expect(octokitMock).to.not.have.been.called;
+      expect(octokitMock).to.have.been.called;
       expect(triggerBrandProfileAgentStub).to.have.been.calledOnce;
     });
 
@@ -1119,10 +1177,10 @@ example-com:
       await onboardSite(input, lambdaCtx, slackCtx);
 
       // Verify that warning messages were sent for existing data folder in YAML
-      expect(slackCtx.say).to.have.been.calledWith('Helix query yaml already contains string example-com. Skipping GitHub update.');
+      expect(slackCtx.say).to.have.been.calledWith('Helix query yaml already has an index definition for example-com. Skipping GitHub update.');
 
       // Verify that warning was logged
-      expect(lambdaCtx.log.warn).to.have.been.calledWith('Helix query yaml already contains string example-com. Skipping update.');
+      expect(lambdaCtx.log.warn).to.have.been.calledWith('Helix query yaml already has an index definition for example-com. Skipping update.');
 
       // Verify that createOrUpdateFileContents was not called since the data folder already exists
       const octokitInstance = testOctokitMock.getCall(0).returnValue;
@@ -1180,16 +1238,16 @@ example-com:
         brandName: 'Test Brand',
         imsOrgId: 'ABC123@AdobeOrg',
         deliveryType: 'aem_edge',
+        region: 'not set',
         brandURL: 'https://example.com',
         originalChannel: 'C1234567890',
         originalThreadTs: '1234567890.123456',
-        tempOnboarding: false,
       });
       expect(lambdaCtx.log.debug).to.have.been.calledWith('Onboard LLMO modal processed for user U1234567890, site https://example.com');
       expect(mockAck).to.have.been.calledOnce;
     });
 
-    it('should pass tempOnboarding from private_metadata to onboarding (log and onboardSite)', async () => {
+    it('should ignore a stray tempOnboarding in private_metadata (LLMO-7141: flag removed)', async () => {
       const mockBody = {
         view: {
           state: {
@@ -1231,14 +1289,143 @@ example-com:
 
       await handler({ ack: mockAck, body: mockBody, client: mockClient });
 
+      // A stray tempOnboarding in legacy private_metadata must not surface anywhere —
+      // no such field is read, logged, or forwarded any more.
       expect(lambdaCtx.log.info).to.have.been.calledWith('Onboarding request with parameters:', {
         brandName: 'Test Brand',
         imsOrgId: 'ABC123@AdobeOrg',
         deliveryType: 'aem_edge',
+        region: 'not set',
         brandURL: 'https://example.com',
         originalChannel: 'C1234567890',
         originalThreadTs: '1234567890.123456',
-        tempOnboarding: true,
+      });
+    });
+
+    it('should forward region from modal selection to onboarding (log and onboardSite) (LLMO-4683)', async () => {
+      const mockBody = {
+        view: {
+          state: {
+            values: {
+              brand_name_input: {
+                brand_name: { value: 'Test Brand IN' },
+              },
+              ims_org_input: {
+                ims_org_id: { value: 'ABC123@AdobeOrg' },
+              },
+              delivery_type_input: {
+                delivery_type: {
+                  selected_option: { value: 'aem_edge' },
+                },
+              },
+              region_input: {
+                region: { value: 'IN' },
+              },
+            },
+          },
+          private_metadata: JSON.stringify({
+            originalChannel: 'C1234567890',
+            originalThreadTs: '1234567890.123456',
+            brandURL: 'https://example.com',
+          }),
+        },
+        user: { id: 'U1234567890' },
+      };
+
+      const mockAck = sandbox.stub();
+      const mockClient = {
+        chat: {
+          postMessage: sandbox.stub().resolves(),
+        },
+      };
+
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox);
+
+      const { onboardLLMOModal } = mockedModule;
+      const handler = onboardLLMOModal(lambdaCtx);
+
+      await handler({ ack: mockAck, body: mockBody, client: mockClient });
+
+      expect(lambdaCtx.log.info).to.have.been.calledWith('Onboarding request with parameters:', {
+        brandName: 'Test Brand IN',
+        imsOrgId: 'ABC123@AdobeOrg',
+        deliveryType: 'aem_edge',
+        region: 'IN',
+        brandURL: 'https://example.com',
+        originalChannel: 'C1234567890',
+        originalThreadTs: '1234567890.123456',
+      });
+    });
+
+    it('should normalize lowercase / whitespace region to uppercase ISO code (LLMO-4683)', async () => {
+      const mockBody = {
+        view: {
+          state: {
+            values: {
+              brand_name_input: { brand_name: { value: 'Test Brand BR' } },
+              ims_org_input: { ims_org_id: { value: 'ABC123@AdobeOrg' } },
+              delivery_type_input: { delivery_type: { selected_option: { value: 'aem_edge' } } },
+              region_input: { region: { value: '  br  ' } },
+            },
+          },
+          private_metadata: JSON.stringify({
+            originalChannel: 'C1234567890',
+            originalThreadTs: '1234567890.123456',
+            brandURL: 'https://example.com',
+          }),
+        },
+        user: { id: 'U1234567890' },
+      };
+
+      const mockAck = sandbox.stub();
+      const mockClient = { chat: { postMessage: sandbox.stub().resolves() } };
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox);
+
+      const { onboardLLMOModal } = mockedModule;
+      const handler = onboardLLMOModal(lambdaCtx);
+
+      await handler({ ack: mockAck, body: mockBody, client: mockClient });
+
+      expect(lambdaCtx.log.info).to.have.been.calledWith(
+        'Onboarding request with parameters:',
+        sinon.match({ region: 'BR' }),
+      );
+    });
+
+    it('should reject invalid region with a Slack input error (LLMO-4683)', async () => {
+      const mockBody = {
+        view: {
+          state: {
+            values: {
+              brand_name_input: { brand_name: { value: 'Test Brand' } },
+              ims_org_input: { ims_org_id: { value: 'ABC123@AdobeOrg' } },
+              delivery_type_input: { delivery_type: { selected_option: { value: 'aem_edge' } } },
+              region_input: { region: { value: 'usa' } },
+            },
+          },
+          private_metadata: JSON.stringify({
+            originalChannel: 'C1234567890',
+            originalThreadTs: '1234567890.123456',
+            brandURL: 'https://example.com',
+          }),
+        },
+        user: { id: 'U1234567890' },
+      };
+
+      const mockAck = sandbox.stub();
+      const mockClient = { chat: { postMessage: sandbox.stub().resolves() } };
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox);
+
+      const { onboardLLMOModal } = mockedModule;
+      const handler = onboardLLMOModal(lambdaCtx);
+
+      await handler({ ack: mockAck, body: mockBody, client: mockClient });
+
+      expect(mockAck).to.have.been.calledWith({
+        response_action: 'errors',
+        errors: {
+          region_input: 'Region must be an ISO 3166-1 alpha-2 country code (e.g. US, IN, BR)',
+        },
       });
     });
 
@@ -1430,10 +1617,10 @@ example-com:
         brandName: 'Test Brand',
         imsOrgId: 'ABC123@AdobeOrg',
         deliveryType: 'aem_edge',
+        region: 'not set',
         brandURL: undefined, // Should be undefined when parsing fails
         originalChannel: undefined,
         originalThreadTs: undefined,
-        tempOnboarding: false,
       });
     });
   });
@@ -1443,24 +1630,22 @@ example-com:
       const { parseStartLlmoOnboardingButtonValue } = mockedModule;
       expect(parseStartLlmoOnboardingButtonValue('https://example.com')).to.deep.equal({
         brandURL: 'https://example.com',
-        tempOnboarding: false,
       });
     });
 
-    it('parses JSON payload with tempOnboarding', () => {
+    it('parses JSON payload, ignoring any stray tempOnboarding field (LLMO-7141)', () => {
       const { parseStartLlmoOnboardingButtonValue } = mockedModule;
       expect(parseStartLlmoOnboardingButtonValue(JSON.stringify({
         brandURL: 'https://example.com',
         tempOnboarding: true,
       }))).to.deep.equal({
         brandURL: 'https://example.com',
-        tempOnboarding: true,
       });
     });
 
     it('returns empty brandURL when raw is null, undefined, or empty string', () => {
       const { parseStartLlmoOnboardingButtonValue } = mockedModule;
-      const empty = { brandURL: '', tempOnboarding: false };
+      const empty = { brandURL: '' };
       expect(parseStartLlmoOnboardingButtonValue(null)).to.deep.equal(empty);
       expect(parseStartLlmoOnboardingButtonValue(undefined)).to.deep.equal(empty);
       expect(parseStartLlmoOnboardingButtonValue('')).to.deep.equal(empty);
@@ -1470,7 +1655,6 @@ example-com:
       const { parseStartLlmoOnboardingButtonValue } = mockedModule;
       expect(parseStartLlmoOnboardingButtonValue('{invalid-json')).to.deep.equal({
         brandURL: '{invalid-json',
-        tempOnboarding: false,
       });
     });
   });
@@ -1518,7 +1702,7 @@ example-com:
       expect(meta.tempOnboarding).to.be.undefined;
     });
 
-    it('should pass tempOnboarding into full onboarding modal private_metadata', async () => {
+    it('should ignore a stray tempOnboarding in the button value for full onboarding modal (LLMO-7141)', async () => {
       const mockBody = {
         user: { id: 'user123' },
         actions: [{
@@ -1552,7 +1736,7 @@ example-com:
       });
 
       const meta = JSON.parse(mockClient.views.open.getCall(0).args[0].view.private_metadata);
-      expect(meta.tempOnboarding).to.equal(true);
+      expect(meta.tempOnboarding).to.be.undefined;
     });
 
     it('should call elmoOnboardingModal when site is found but no brand configured', async () => {
@@ -1599,7 +1783,7 @@ example-com:
       expect(lambdaCtx.log.debug).to.have.been.calledWith('User user123 started LLMO onboarding process for https://example.com with existing site site123.');
     });
 
-    it('should pass tempOnboarding into elmo onboarding modal private_metadata', async () => {
+    it('should ignore a stray tempOnboarding in the button value for elmo onboarding modal (LLMO-7141)', async () => {
       const mockBody = {
         user: { id: 'user123' },
         actions: [{
@@ -1639,7 +1823,7 @@ example-com:
       });
 
       const meta = JSON.parse(mockClient.views.open.getCall(0).args[0].view.private_metadata);
-      expect(meta.tempOnboarding).to.equal(true);
+      expect(meta.tempOnboarding).to.be.undefined;
     });
 
     it('should call elmoOnboardingModal when site is found with brand configured', async () => {

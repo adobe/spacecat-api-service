@@ -43,8 +43,6 @@ function expectAuditDto(audit) {
  * Shared Audit & LatestAudit endpoint tests.
  * Runs identically against both DynamoDB (v2) and PostgreSQL (v3).
  *
- * All tests are read-only (PATCH config mutation deferred to Tier 2).
- *
  * @param {() => object} getHttpClient - Getter returning the initialized HTTP client
  * @param {() => Promise<void>} resetData - Truncates all data and re-seeds baseline
  */
@@ -243,6 +241,86 @@ export default function auditTests(getHttpClient, resetData) {
       it('returns 400 for invalid UUID', async () => {
         const http = getHttpClient();
         const res = await http.admin.get('/sites/not-a-uuid/audits/latest');
+        expect(res.status).to.equal(400);
+      });
+    });
+
+    // ── PATCH config (includedURLs / excludedURLs) ──
+
+    describe('PATCH /sites/:siteId/:auditType', () => {
+      before(() => resetData());
+
+      it('user: merges includedURLs into handler config', async () => {
+        const http = getHttpClient();
+        const res = await http.user.patch(`/sites/${SITE_1_ID}/${AUDIT_TYPE_CWV}`, {
+          includedURLs: ['https://site1.example.com/include-1'],
+        });
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('object');
+        expect(res.body.includedURLs).to.be.an('array').that.includes('https://site1.example.com/include-1');
+      });
+
+      it('user: replaces includedURLs atomically with replaceIncludedURLs: true', async () => {
+        const http = getHttpClient();
+        // First add two URLs
+        await http.user.patch(`/sites/${SITE_1_ID}/${AUDIT_TYPE_CWV}`, {
+          includedURLs: ['https://site1.example.com/old-1', 'https://site1.example.com/old-2'],
+          replaceIncludedURLs: true,
+        });
+        // Now replace with one URL
+        const res = await http.user.patch(`/sites/${SITE_1_ID}/${AUDIT_TYPE_CWV}`, {
+          includedURLs: ['https://site1.example.com/kept'],
+          replaceIncludedURLs: true,
+        });
+        expect(res.status).to.equal(200);
+        expect(res.body.includedURLs).to.deep.equal(['https://site1.example.com/kept']);
+      });
+
+      it('user: clears includedURLs when empty array is sent', async () => {
+        const http = getHttpClient();
+        await http.user.patch(`/sites/${SITE_1_ID}/${AUDIT_TYPE_CWV}`, {
+          includedURLs: ['https://site1.example.com/to-clear'],
+        });
+        const res = await http.user.patch(`/sites/${SITE_1_ID}/${AUDIT_TYPE_CWV}`, {
+          includedURLs: [],
+        });
+        expect(res.status).to.equal(200);
+        expect(res.body.includedURLs).to.deep.equal([]);
+      });
+
+      it('user: GET /sites/:siteId reflects persisted includedURLs after PATCH', async () => {
+        const http = getHttpClient();
+        const url = 'https://site1.example.com/persist-check';
+        await http.user.patch(`/sites/${SITE_1_ID}/${AUDIT_TYPE_CWV}`, {
+          includedURLs: [url],
+          replaceIncludedURLs: true,
+        });
+        const getRes = await http.user.get(`/sites/${SITE_1_ID}`);
+        expect(getRes.status).to.equal(200);
+        const handlerCfg = getRes.body?.config?.handlers?.[AUDIT_TYPE_CWV];
+        expect(handlerCfg).to.be.an('object');
+        expect(handlerCfg.includedURLs).to.be.an('array').that.includes(url);
+      });
+
+      it('user: returns 400 for invalid URL in includedURLs', async () => {
+        const http = getHttpClient();
+        const res = await http.user.patch(`/sites/${SITE_1_ID}/${AUDIT_TYPE_CWV}`, {
+          includedURLs: ['not-a-valid-url'],
+        });
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: returns 403 for denied site', async () => {
+        const http = getHttpClient();
+        const res = await http.user.patch(`/sites/${SITE_3_ID}/${AUDIT_TYPE_CWV}`, {
+          includedURLs: ['https://site3.example.com/page'],
+        });
+        expect(res.status).to.equal(403);
+      });
+
+      it('user: returns 400 when no valid update fields are provided', async () => {
+        const http = getHttpClient();
+        const res = await http.user.patch(`/sites/${SITE_1_ID}/${AUDIT_TYPE_CWV}`, {});
         expect(res.status).to.equal(400);
       });
     });

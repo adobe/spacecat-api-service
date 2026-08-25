@@ -11,22 +11,88 @@
  */
 
 import {
-  hasText, isNonEmptyObject, isValidUUID, isValidUrl, isNonEmptyArray, DELIVERY_TYPES,
+  hasText, isNonEmptyObject, isValidUUID, isValidUrl, isNonEmptyArray,
 } from '@adobe/spacecat-shared-utils';
 import {
   badRequest, internalServerError, notFound, ok, accepted,
 } from '@adobe/spacecat-shared-http-utils';
-import { AsyncJob, Site as SiteModel } from '@adobe/spacecat-shared-data-access';
-import { retrievePageAuthentication } from '@adobe/spacecat-shared-ims-client';
-import { TierClient } from '@adobe/spacecat-shared-tier-client';
-import { getCookieValue, getIMSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
+import { AsyncJob } from '@adobe/spacecat-shared-data-access';
+import { ErrorWithStatusCode } from '../support/utils.js';
+import { getHeader } from '../support/http-headers.js';
+import {
+  MISSING_X_PROMISE_TOKEN_MESSAGE,
+  PROMISE_BASED_AUTHORING_TYPES,
+  STATUS_BAD_REQUEST,
+  X_PROMISE_TOKEN_HEADER,
+} from '../utils/constants.js';
 
 export const AUDIT_STEP_IDENTIFY = 'identify';
 export const AUDIT_STEP_SUGGEST = 'suggest';
 
-const PROMISE_BASED_TYPES = [
-  SiteModel.AUTHORING_TYPES.CS, SiteModel.AUTHORING_TYPES.CS_CW, SiteModel.AUTHORING_TYPES.AMS,
-];
+const ACCESSIBILITY_AUDIT_NAME = 'accessibility';
+
+/**
+ * Counts the number of issues for a single preflight audit. Three counting modes:
+ *  - accessibility: sum of the integer `occurrences` across opportunities
+ *    (each opportunity is an issue "type" with N occurrences).
+ *  - opportunities whose `issue` is an array (e.g. links): sum of the issue-array
+ *    lengths (each entry is one issue).
+ *  - all others: one issue per opportunity that has a truthy `issue` (exactly one
+ *    issue per opportunity).
+ * @param {Object} audit - A PreflightAudit: { name, type, opportunities }
+ * @returns {number} Total issue count for the audit
+ */
+export function countIssuesForAudit(audit) {
+  const opportunities = Array.isArray(audit?.opportunities) ? audit.opportunities : [];
+  if (audit?.name === ACCESSIBILITY_AUDIT_NAME) {
+    return opportunities.reduce((sum, opp) => sum + (opp?.occurrences ?? 0), 0);
+  }
+  return opportunities.reduce((count, opp) => {
+    if (Array.isArray(opp?.issue)) {
+      return count + opp.issue.length;
+    }
+    if (opp?.issue) {
+      return count + 1;
+    }
+    return count;
+  }, 0);
+}
+
+/**
+ * Process identifier tagged onto the preflight outcome logs so a single log
+ * line tells you which surface emitted it.
+ *  - PREFLIGHT_PROCESS_AUDW → audit-worker path: POST/GET /preflight/jobs (SQS)
+ */
+export const PREFLIGHT_PROCESS_AUDW = 'audw';
+
+/**
+ * Emits the server-side observability log for a terminal AsyncJob when preflight is
+ * polled, from the getPreflightJobStatusAndResult (audit-worker path) poll handler.
+ * @param {Object} log - The logger instance
+ * @param {string} processName - PREFLIGHT_PROCESS_AUDW
+ * @param {Object} job - The AsyncJob entity (its getId() is the logged jobId)
+ */
+export function logPreflightOutcome(log, processName, job) {
+  const jobId = job.getId();
+  const status = job.getStatus();
+  const result = job.getResult();
+  if (status === AsyncJob.Status.COMPLETED && isNonEmptyArray(result)) {
+    const summary = result.map((r) => ({
+      pageUrl: r?.pageUrl,
+      step: r?.step,
+      audits: (Array.isArray(r?.audits) ? r.audits : []).map((a) => ({
+        name: a?.name,
+        type: a?.type,
+        opportunities: Array.isArray(a?.opportunities) ? a.opportunities.length : 0,
+        issues: countIssuesForAudit(a),
+      })),
+    }));
+    log.info(`[Preflight] Run complete. jobId=${jobId} process=${processName} status=${status} results=${JSON.stringify(summary)}`);
+  } else if (status === AsyncJob.Status.FAILED) {
+    const err = job.getError();
+    log.warn(`[Preflight] Run failed. jobId=${jobId} process=${processName} status=${status} errorCode=${err?.code ?? 'none'} errorMessage=${err?.message ?? 'none'}`);
+  }
+}
 
 /**
  * Creates a preflight controller instance
@@ -93,75 +159,61 @@ function PreflightController(ctx, log, env) {
   }
 
   /**
+   * Checks if authentication is enabled for a given URL
+   * @param {string} url - The URL to check
+   * @returns {Promise<boolean>} True if authentication is enabled, false otherwise
+   */
+  async function checkEnableAuthentication(url) {
+    const headResponse = await fetch(url, {
+      method: 'HEAD',
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    log.debug(`checkEnableAuthentication for ${url} returned status: ${headResponse.status}`);
+
+    return headResponse.status === 401 || headResponse.status === 403;
+  }
+
+  /**
+   * Resolves the IMS promise token for promise-based authoring types (CS, CS_CW, AMS).
+   * @param {Object} site - Site entity
+   * @param {Object} context - Request context with pathInfo.headers
+   * @returns {Promise<{ promise_token: string } | null>} Token object, or null
+   * @throws {ErrorWithStatusCode} 400 when the header is missing or empty
+   */
+  async function resolvePromiseToken(site, context) {
+    if (!PROMISE_BASED_AUTHORING_TYPES.includes(site.getAuthoringType())) {
+      return null;
+    }
+    let promiseTokenHeader = getHeader(context, X_PROMISE_TOKEN_HEADER);
+    if (hasText(promiseTokenHeader)) {
+      try {
+        promiseTokenHeader = decodeURIComponent(promiseTokenHeader);
+      } catch {
+        // Bearer-style tokens may contain literal %; use trimmed value as-is
+      }
+    }
+    // Re-check after decode
+    if (hasText(promiseTokenHeader)) {
+      return { promise_token: promiseTokenHeader };
+    }
+    throw new ErrorWithStatusCode(MISSING_X_PROMISE_TOKEN_MESSAGE, STATUS_BAD_REQUEST);
+  }
+
+  /**
    * Creates a new preflight job. For promise-based authoring types (CS, CS_CW, AMS),
-   * the promise token is resolved from the promiseToken cookie sent by the browser
-   * (set via /auth/promise endpoint), otherwise falls back to creating one from
-   * the Authorization header via IMS.
+   * the promise token must be sent on the `x-promise-token` header (from POST /auth/v2/promise).
    * @param {Object} context - The request context
    * @param {Object} context.data - The request data
    * @param {string[]} context.data.urls - Array of URLs to process
    * @param {string} context.data.step - The audit step
    * @param {string} context.data.siteId - The siteId, if it's an AMS site
    * @param {Object} [context.pathInfo] - The path info object
-   * @param {Object} [context.pathInfo.headers] - Request headers; must include a
-   *   `cookie` header with `promiseToken=<token>` for CS/CS_CW/AMS authoring types
+   * @param {Object} [context.pathInfo.headers] - Request headers; must include `x-promise-token`
    * @returns {Promise<Object>} The HTTP response object
-   */
-  /**
-   * Checks if a handler type is enabled for a site, including product code
-   * entitlement verification. Mirrors the audit worker's isAuditEnabledForSite.
-   */
-  async function isAuditEnabledForSite(type, site, configuration) {
-    const handler = configuration.getHandlers()?.[type];
-    if (!handler) {
-      log.info(`Handler ${type} not found in Configuration`);
-      return false;
-    }
-    if (isNonEmptyArray(handler.productCodes)) {
-      const tierContext = { dataAccess, log };
-      const enrollmentChecks = await Promise.all(
-        handler.productCodes.map(async (productCode) => {
-          try {
-            const tierClient = await TierClient.createForSite(tierContext, site, productCode);
-            const tierResult = await tierClient.checkValidEntitlement();
-            return tierResult.siteEnrollment || false;
-          } catch (e) {
-            log.error(`Failed to check entitlement for ${productCode}: ${e.message}`);
-            return false;
-          }
-        }),
-      );
-      if (!enrollmentChecks.some((has) => has)) {
-        log.info(`No valid site enrollment for handler ${type} with product codes ${handler.productCodes} for site ${site.getId()}`);
-        return false;
-      }
-    } else {
-      log.info(`Handler ${type} has no product codes`);
-      return false;
-    }
-    return configuration.isHandlerEnabledForSite(type, site);
-  }
-
-  async function checkEnableAuthentication(previewBaseURL) {
-    const headResponse = await fetch(previewBaseURL, {
-      method: 'HEAD',
-      headers: { 'Content-Type': 'application/json' },
-    });
-    return headResponse.status === 401 || headResponse.status === 403;
-  }
-
-  async function resolvePromiseToken(site, context) {
-    if (!PROMISE_BASED_TYPES.includes(site.getAuthoringType())) {
-      return null;
-    }
-    const cookieToken = getCookieValue(context, 'promiseToken');
-    if (hasText(cookieToken)) {
-      return { promise_token: cookieToken };
-    }
-    return getIMSPromiseToken(context);
-  }
-
+  */
   const createPreflightJob = async (context) => {
+    log.debug('createPreflightJob started');
     const { data } = context;
     try {
       validateRequestData(data);
@@ -173,18 +225,22 @@ function PreflightController(ctx, log, env) {
     try {
       const isDev = env.AWS_ENV === 'dev';
       const step = data.step.toLowerCase();
-      let site;
       const url = new URL(data.urls[0]);
       const previewBaseURL = `${url.protocol}//${url.hostname}`;
+
+      let site;
       if (isValidUUID(data.siteId)) {
         site = await dataAccess.Site.findById(data.siteId);
       } else {
         site = await dataAccess.Site.findByPreviewURL(previewBaseURL);
       }
 
+      log.debug(`createPreflightJob url: ${url}, siteId: ${data.siteId}, step: ${step}`);
+
       if (!site) {
         throw new Error(`No site found for preview URL: ${previewBaseURL}`);
       }
+
       const enableAuthentication = await checkEnableAuthentication(previewBaseURL);
 
       let promiseTokenResponse;
@@ -199,19 +255,27 @@ function PreflightController(ctx, log, env) {
       }
 
       // Create a new async job
+      const jobPayload = {
+        siteId: site.getId(),
+        urls: data.urls,
+        step,
+        enableAuthentication,
+      };
+
+      log.debug(`createPreflightJob creating async job with payload: ${JSON.stringify(jobPayload)}`);
+
       const job = await dataAccess.AsyncJob.create({
         status: 'IN_PROGRESS',
         metadata: {
-          payload: {
-            siteId: site.getId(),
-            urls: data.urls,
-            step,
-            enableAuthentication,
-          },
+          payload: jobPayload,
           jobType: 'preflight',
           tags: ['preflight'],
         },
       });
+
+      // Log for dashboard purposes
+      log.info(`[Preflight] created async job with jobId=${job.getId()}, siteId=${site.getId()}, `
+        + `orgId=${site.getOrganizationId()}, urls=${JSON.stringify(data.urls)}, step=${step}.`);
 
       try {
         // Send message to SQS to trigger the audit worker
@@ -219,13 +283,19 @@ function PreflightController(ctx, log, env) {
           jobId: job.getId(),
           siteId: site.getId(),
           type: 'preflight',
+          ...(ctx.traceId && { traceId: ctx.traceId }),
         };
-        if (PROMISE_BASED_TYPES.includes(site.getAuthoringType())) {
+
+        // remove the promiseToken from the message if it exists from the debug log
+        log.debug(`createPreflightJob sending message to SQS with payload: ${JSON.stringify(sqsMessage)}`);
+
+        if (PROMISE_BASED_AUTHORING_TYPES.includes(site.getAuthoringType())) {
           sqsMessage.promiseToken = promiseTokenResponse;
         }
+
         await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, sqsMessage);
       } catch (error) {
-        log.error(`Failed to send message to SQS: ${error.message}`);
+        log.error(`Failed to send message to SQS: ${error.message}, rolling back job ${job.getId()}`);
         // roll back the job
         await job.remove();
         throw new Error(`Failed to send message to SQS: ${error.message}`);
@@ -251,6 +321,8 @@ function PreflightController(ctx, log, env) {
    * @returns {Promise<Object>} The HTTP response object
    */
   const getPreflightJobStatusAndResult = async (context) => {
+    log.debug(`getPreflightJobStatusAndResult for jobId: ${context.params?.jobId}`);
+
     const jobId = context.params?.jobId;
 
     if (!isValidUUID(jobId)) {
@@ -265,6 +337,11 @@ function PreflightController(ctx, log, env) {
         log.error(`Job with ID ${jobId} not found`);
         return notFound(`Job with ID ${jobId} not found`);
       }
+
+      log.debug(`getPreflightJobStatusAndResult returning job: ${JSON.stringify(job)}`);
+
+      // Emit the terminal-state observability log (shared with the Mystique path).
+      logPreflightOutcome(log, PREFLIGHT_PROCESS_AUDW, job);
 
       return ok({
         jobId: job.getId(),
@@ -286,300 +363,9 @@ function PreflightController(ctx, log, env) {
     }
   };
 
-  /**
-   * Calls Mysticat's POST /v1/preflight/analyze and returns once the request is accepted.
-   * Mysticat processes the analysis asynchronously and writes results directly to the AsyncJob
-   * identified by scanId.
-   * @param {string} mysticatBaseUrl - The base URL of the Mystique service (MYSTIQUE_API_BASE_URL).
-   * @param {string} scanId - The AsyncJob ID used as the scan identifier for write-back.
-   * @param {string} siteId - The site ID.
-   * @param {string} url - The page URL to analyze.
-   * @param {string} step - The audit step (identify or suggest).
-   * @param {string} [promiseToken] - Optional promise token forwarded as x-promise-token for
-   *   authenticated CMS page fetching (CS, CS_CW, AMS sites).
-   */
-  async function callMysticatAnalyze(
-    mysticatBaseUrl,
-    scanId,
-    siteId,
-    url,
-    step,
-    authorizationHeader,
-    audits,
-  ) {
-    const response = await fetch(`${mysticatBaseUrl}/v1/preflight/analyze`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(hasText(authorizationHeader) && { Authorization: authorizationHeader }),
-      },
-      body: JSON.stringify({
-        site_id: siteId,
-        url,
-        mode: step,
-        scan_id: scanId,
-        persist: true,
-        ...(audits !== undefined && { audits }),
-      }),
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Mysticat returned ${response.status}: ${text}`);
-    }
-  }
-
-  /**
-   * Creates a new beta preflight job by proxying to Mysticat's analyze endpoint.
-   * For promise-based authoring types (CS, CS_CW, AMS), the promise token is resolved
-   * from the promiseToken cookie if present, otherwise falls back to IMS. The promise
-   * token is then exchanged for a full IMS access token via the promise_exchange grant.
-   * For non-promise-based sites that require authentication, a static PAGE_AUTH_TOKEN
-   * is retrieved from AWS Secrets Manager. The resolved token is forwarded to Mysticat
-   * as an Authorization header (Bearer for AEM_CS with promise token, token otherwise).
-   * @param {Object} context - The request context
-   * @param {Object} context.data - The request data
-   * @param {string} context.data.url - Single URL to analyze
-   * @param {string} context.data.step - The audit step (identify or suggest)
-   * @param {string} [context.data.siteId] - Optional site ID
-   * @param {Object} [context.pathInfo] - The path info object
-   * @param {Object} [context.pathInfo.headers] - Request headers; must include a
-   *   `cookie` header with `promiseToken=<token>` for CS/CS_CW/AMS authoring types
-   * @returns {Promise<Object>} The HTTP response object
-   */
-  const createBetaPreflightJob = async (context) => {
-    const { data } = context;
-
-    if (!isNonEmptyObject(data)) {
-      return badRequest('Invalid request: missing application/json data');
-    }
-
-    if (!hasText(data.url) || !isValidUrl(data.url)) {
-      return badRequest('Invalid request: url must be a valid URL');
-    }
-
-    if (![AUDIT_STEP_IDENTIFY, AUDIT_STEP_SUGGEST].includes(data?.step?.toLowerCase())) {
-      return badRequest(
-        `Invalid request: step must be either ${AUDIT_STEP_IDENTIFY} or ${AUDIT_STEP_SUGGEST}`,
-      );
-    }
-
-    const step = data.step.toLowerCase();
-    const { url } = data;
-
-    const isDev = env.AWS_ENV === 'dev';
-
-    const normalizedMystiqueUrl = hasText(data.mystiqueUrl) && !data.mystiqueUrl.includes('://')
-      ? `https://${data.mystiqueUrl}`
-      : data.mystiqueUrl;
-
-    if (hasText(normalizedMystiqueUrl)) {
-      if (!isDev) {
-        return badRequest('mystiqueUrl override is only allowed in dev');
-      }
-      if (!isValidUrl(normalizedMystiqueUrl)) {
-        return badRequest('Invalid request: mystiqueUrl must be a valid URL');
-      }
-      if (!(/\.stage\.cloud\.adobe\.io$/).test(new URL(normalizedMystiqueUrl).hostname)) {
-        return badRequest('Invalid request: mystiqueUrl must be a valid Mystique ephemeral host');
-      }
-    }
-
-    const mysticatBaseUrl = (isDev && hasText(normalizedMystiqueUrl))
-      ? normalizedMystiqueUrl
-      : env.MYSTIQUE_API_BASE_URL;
-
-    try {
-      const previewBaseURL = `${new URL(url).protocol}//${new URL(url).hostname}`;
-      let site;
-      if (isValidUUID(data.siteId)) {
-        site = await dataAccess.Site.findById(data.siteId);
-      } else {
-        site = await dataAccess.Site.findByPreviewURL(previewBaseURL);
-      }
-
-      if (!site) {
-        throw new Error(`No site found for URL: ${previewBaseURL}`);
-      }
-
-      const enableAuthentication = await checkEnableAuthentication(previewBaseURL);
-
-      let authorizationHeader;
-      if (enableAuthentication) {
-        let promiseTokenObj;
-        try {
-          promiseTokenObj = await resolvePromiseToken(site, context);
-        } catch (e) {
-          log.error(`Failed to get promise token: ${e.message}`);
-          if (e instanceof ErrorWithStatusCode) {
-            return badRequest(e.message);
-          }
-          return internalServerError('Error getting promise token');
-        }
-        try {
-          const authOptions = promiseTokenObj ? { promiseToken: promiseTokenObj } : {};
-          const accessToken = await retrievePageAuthentication(site, context, authOptions);
-          const isBearer = site.getDeliveryType() === DELIVERY_TYPES.AEM_CS
-            && !!promiseTokenObj;
-          authorizationHeader = `${isBearer ? 'Bearer' : 'token'} ${accessToken}`;
-        } catch (e) {
-          log.error(`Failed to retrieve page authentication: ${e.message}`);
-          return internalServerError('Error retrieving page authentication');
-        }
-      }
-
-      // Resolve Configuration and check preflight enablement for the site.
-      let configuration;
-      try {
-        configuration = await dataAccess.Configuration.findLatest();
-        if (!configuration) {
-          return internalServerError('Configuration not available');
-        }
-      } catch (e) {
-        log.error(`Failed to load Configuration: ${e.message}`);
-        return internalServerError('Failed to load audit configuration');
-      }
-
-      // Check that the preflight handler is enabled for this site
-      // (includes product code entitlement check, matching the audit worker)
-      const preflightEnabled = await isAuditEnabledForSite('preflight', site, configuration);
-
-      // Resolve individual preflight audits.
-      // Convention: handler types are suffixed with -preflight (e.g. headings-preflight).
-      // Strip the suffix so names match Mysticat's audit registry (e.g. headings).
-      const enabledAudits = configuration.getEnabledAuditsForSite(site);
-      const preflightAudits = enabledAudits
-        .filter((type) => type.endsWith('-preflight'))
-        .map((type) => type.replace(/-preflight$/, ''));
-
-      // Always create the job so callers can poll for status
-      const job = await dataAccess.AsyncJob.create({
-        status: AsyncJob.Status.IN_PROGRESS,
-        metadata: {
-          payload: { siteId: site.getId(), url, step },
-          jobType: 'preflight-beta',
-          tags: ['preflight', 'beta'],
-        },
-      });
-
-      // Cancel if preflight is not enabled for the site
-      if (!preflightEnabled) {
-        const reason = `preflight audits disabled for site ${site.getId()}`;
-        log.info(`[preflight-beta] ${reason}`);
-        job.setStatus(AsyncJob.Status.CANCELLED);
-        job.setMetadata({
-          ...job.getMetadata(),
-          payload: { ...job.getMetadata().payload, reason },
-        });
-        await job.save();
-        return accepted({
-          jobId: job.getId(),
-          status: job.getStatus(),
-          createdAt: job.getCreatedAt(),
-          pollUrl: `https://spacecat.experiencecloud.live/api/${isDev ? 'ci' : 'v1'}`
-            + `/preflight/beta/jobs/${job.getId()}`,
-        });
-      }
-
-      // Cancel if no individual preflight audits are enabled
-      if (preflightAudits.length === 0) {
-        const reason = `all individual preflight audits disabled for site ${site.getId()}`;
-        log.info(`[preflight-beta] ${reason}`);
-        job.setStatus(AsyncJob.Status.CANCELLED);
-        job.setMetadata({
-          ...job.getMetadata(),
-          payload: { ...job.getMetadata().payload, reason },
-        });
-        await job.save();
-        return accepted({
-          jobId: job.getId(),
-          status: job.getStatus(),
-          createdAt: job.getCreatedAt(),
-          pollUrl: `https://spacecat.experiencecloud.live/api/${isDev ? 'ci' : 'v1'}`
-            + `/preflight/beta/jobs/${job.getId()}`,
-        });
-      }
-
-      try {
-        await callMysticatAnalyze(
-          mysticatBaseUrl,
-          job.getId(),
-          site.getId(),
-          url,
-          step,
-          authorizationHeader,
-          preflightAudits,
-        );
-      } catch (mysticatError) {
-        log.error(`Mysticat analyze failed: ${mysticatError.message}`);
-        job.setStatus(AsyncJob.Status.FAILED);
-        job.setError({ code: 'MYSTICAT_ERROR', message: mysticatError.message });
-        job.setEndedAt(new Date().toISOString());
-        await job.save();
-        return internalServerError(`Mysticat analyze failed: ${mysticatError.message}`);
-      }
-
-      return accepted({
-        jobId: job.getId(),
-        status: job.getStatus(),
-        createdAt: job.getCreatedAt(),
-        pollUrl: `https://spacecat.experiencecloud.live/api/${isDev ? 'ci' : 'v1'}`
-          + `/preflight/beta/jobs/${job.getId()}`,
-      });
-    } catch (error) {
-      log.error(`Failed to create beta preflight job: ${error.message}`);
-      return internalServerError(error.message);
-    }
-  };
-
-  /**
-   * Gets the status and result of a beta preflight job.
-   * @param {Object} context - The request context
-   * @param {Object} context.params - The request parameters
-   * @param {string} context.params.jobId - The ID of the job to retrieve
-   * @returns {Promise<Object>} The HTTP response object
-   */
-  const getBetaPreflightJobStatusAndResult = async (context) => {
-    const jobId = context.params?.jobId;
-
-    if (!isValidUUID(jobId)) {
-      log.error(`Invalid jobId: ${jobId}`);
-      return badRequest('Invalid jobId');
-    }
-
-    try {
-      const job = await dataAccess.AsyncJob.findById(jobId);
-
-      if (!job) {
-        log.error(`Job with ID ${jobId} not found`);
-        return notFound(`Job with ID ${jobId} not found`);
-      }
-
-      return ok({
-        jobId: job.getId(),
-        status: job.getStatus(),
-        createdAt: job.getCreatedAt(),
-        updatedAt: job.getUpdatedAt(),
-        startedAt: job.getStartedAt(),
-        endedAt: job.getEndedAt(),
-        recordExpiresAt: job.getRecordExpiresAt(),
-        resultLocation: job.getResultLocation(),
-        resultType: job.getResultType(),
-        result: job.getResult(),
-        error: job.getError(),
-        metadata: job.getMetadata(),
-      });
-    } catch (error) {
-      log.error(`Failed to get beta preflight job status: ${error.message}`);
-      return internalServerError(error.message);
-    }
-  };
-
   return {
     createPreflightJob,
     getPreflightJobStatusAndResult,
-    createBetaPreflightJob,
-    getBetaPreflightJobStatusAndResult,
   };
 }
 

@@ -20,3 +20,26 @@ export class UnauthorizedProductError extends Error {
     this.name = 'UnauthorizedProductError';
   }
 }
+
+/**
+ * Throws a typed HTTP error when `error` matches a known Postgres constraint violation code.
+ *
+ * Storage functions handle the same handful of PG error codes (23503 FK violation,
+ * 23505 unique constraint, …) and each needs to surface a different HTTP status.
+ * This utility centralises the code→status→message mapping so callers declare
+ * intent rather than repeating if/throw chains.
+ *
+ * @param {object} error - PostgREST error with `.code` and `.message` fields
+ * @param {Record<string, {status: number, message: string}>} codeMap
+ *   Keys are Postgres error codes; values carry the HTTP status and the
+ *   client-facing message.  Postgres internals (table names, constraint names)
+ *   should not appear in `message` — keep them in `.cause` for operator triage.
+ */
+export function throwOnPgConstraintViolation(error, codeMap) {
+  const entry = codeMap[error?.code];
+  if (entry) {
+    const typed = new Error(entry.message, { cause: error });
+    typed.status = entry.status;
+    throw typed;
+  }
+}

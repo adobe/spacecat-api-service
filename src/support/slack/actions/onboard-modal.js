@@ -461,6 +461,32 @@ export function startOnboarding(lambdaContext) {
             },
             {
               type: 'input',
+              block_id: 'force_tier_update_input',
+              optional: true,
+              element: {
+                type: 'checkboxes',
+                action_id: 'force_tier_update',
+                options: [
+                  {
+                    text: {
+                      type: 'plain_text',
+                      text: 'Force tier update',
+                    },
+                    description: {
+                      type: 'plain_text',
+                      text: 'Allow onboard to change a PLG/Pre-onboard tier (normally preserved).',
+                    },
+                    value: 'override',
+                  },
+                ],
+              },
+              label: {
+                type: 'plain_text',
+                text: 'Force Tier Update',
+              },
+            },
+            {
+              type: 'input',
               block_id: 'language_input',
               element: {
                 type: 'plain_text_input',
@@ -596,8 +622,17 @@ export function onboardSiteModal(lambdaContext) {
   const { Site, Configuration } = dataAccess;
 
   return async ({ ack, body, client }) => {
+    let siteUrl;
+    // Initialize responseChannel early so the catch block can always notify the user.
+    // Falls back to DM if the channel context is not yet resolved.
+    let responseChannel = body?.user?.id;
+    let responseThreadTs;
+    let user;
+    let profile;
+    let imsOrgId;
     try {
-      const { view, user } = body;
+      let view;
+      ({ view, user } = body);
       const { values } = view.state;
 
       // Extract original channel and thread context from private metadata
@@ -611,9 +646,9 @@ export function onboardSiteModal(lambdaContext) {
         log.warn('Failed to parse private metadata:', error);
       }
 
-      const siteUrl = values.site_url_input.site_url.value;
-      const imsOrgId = values.ims_org_input.ims_org_id.value || env.DEMO_IMS_ORG;
-      const profile = values.profile_input.profile.selected_option?.value || 'demo';
+      siteUrl = values.site_url_input.site_url.value;
+      imsOrgId = values.ims_org_input.ims_org_id.value || env.DEMO_IMS_ORG;
+      profile = values.profile_input.profile.selected_option?.value || 'demo';
       const deliveryType = values.delivery_type_input.delivery_type.selected_option?.value;
       const authoringType = values.authoring_type_input.authoring_type.selected_option?.value;
       const waitTime = values.wait_time_input.wait_time.value;
@@ -624,6 +659,8 @@ export function onboardSiteModal(lambdaContext) {
       const forceOnboard = values.force_onboard_input?.force_onboard?.selected_options?.some(
         (opt) => opt.value === 'force',
       ) ?? false;
+      const forceTierUpdate = values.force_tier_update_input?.force_tier_update
+        ?.selected_options?.some((opt) => opt.value === 'override') ?? false;
       const projectId = values.project_id_input.project_id.value;
       const language = values.language_input.language.value;
       const region = values.region_input.region.value;
@@ -641,8 +678,8 @@ export function onboardSiteModal(lambdaContext) {
 
       // Create a slack context for the onboarding process
       // Use original channel/thread if available, otherwise fall back to DM
-      const responseChannel = originalChannel || body.user.id;
-      const responseThreadTs = originalChannel ? originalThreadTs : undefined;
+      responseChannel = originalChannel || body.user.id;
+      responseThreadTs = originalChannel ? originalThreadTs : undefined;
 
       const slackContext = {
         say: async (message) => {
@@ -683,8 +720,9 @@ export function onboardSiteModal(lambdaContext) {
         }
       }
 
-      const configuration = await Configuration.findLatest();
       await ack();
+
+      const configuration = await Configuration.findLatest();
 
       const additionalParams = {};
       if (deliveryType && deliveryType !== 'auto') {
@@ -707,6 +745,9 @@ export function onboardSiteModal(lambdaContext) {
       if (forceOnboard) {
         additionalParams.force = true;
       }
+      if (forceTierUpdate) {
+        additionalParams.forceTierUpdate = true;
+      }
       if (projectId) {
         additionalParams.projectId = projectId;
       }
@@ -725,7 +766,22 @@ export function onboardSiteModal(lambdaContext) {
         thread_ts: responseThreadTs,
       });
 
-      const botProtectionResult = await detectBotBlocker({ baseUrl: siteUrl });
+      let botProtectionResult = { crawlable: true, type: 'unknown', confidence: 0 };
+      try {
+        botProtectionResult = await detectBotBlocker({ baseUrl: siteUrl });
+        log.info(`Bot blocker result for ${siteUrl}: crawlable=${botProtectionResult.crawlable}, type=${botProtectionResult.type}`);
+      } catch (e) {
+        log.warn(`Bot blocker detection failed for ${siteUrl}, proceeding with onboarding`, e);
+        try {
+          await client.chat.postMessage({
+            channel: responseChannel,
+            text: `:warning: Bot protection detection skipped for ${siteUrl} — audits may be affected if the site has bot protection.`,
+            thread_ts: responseThreadTs,
+          });
+        } catch (slackErr) {
+          log.warn(`Failed to post bot-blocker warning for ${siteUrl}`, slackErr);
+        }
+      }
 
       // Send warning if bot protection is detected
       if (!botProtectionResult.crawlable) {
@@ -813,12 +869,27 @@ ${deliveryConfigInfo}${previewConfigInfo}
       log.debug(`Onboard site modal processed for user ${user.id}, site ${siteUrl}`);
     } catch (error) {
       log.error('Error handling onboard site modal:', error);
-      await ack({
-        response_action: 'errors',
-        errors: {
-          site_url_input: 'There was an error processing the onboarding request.',
-        },
-      });
+      const safeMessage = (error?.message || 'unknown error').slice(0, 200);
+      try {
+        if (responseChannel) {
+          await client.chat.postMessage({
+            channel: responseChannel,
+            text: `:x: Onboarding failed for \`${siteUrl || 'unknown site'}\``
+              + `\n*Triggered by:* ${user?.name || 'unknown'} | *Profile:* ${profile || 'unknown'} | *IMS Org:* ${imsOrgId || 'unknown'}`
+              + `\n*Error:* ${safeMessage}`,
+            thread_ts: responseThreadTs,
+          });
+        } else {
+          await ack({
+            response_action: 'errors',
+            errors: {
+              site_url_input: 'There was an error processing the onboarding request.',
+            },
+          });
+        }
+      } catch (postError) {
+        log.error('Failed to notify channel of onboarding error:', postError);
+      }
     }
   };
 }

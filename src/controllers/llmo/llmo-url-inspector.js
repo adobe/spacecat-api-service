@@ -11,7 +11,7 @@
  */
 
 import {
-  ok, badRequest, forbidden, internalServerError,
+  badRequest, forbidden, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 
 import {
@@ -23,6 +23,14 @@ import {
   validateSiteBelongsToOrg,
   validateModel,
 } from './llmo-brand-presence.js';
+import { parseAgentTypes } from './llmo-agent-types.js';
+import { cachedOk } from '../../support/cached-response.js';
+import { resolveBrandUuid } from '../../support/prompts-storage.js';
+import { resolveBrandWorkspace } from '../../support/serenity/workspace-resolver.js';
+import { createElementsTransport } from '../../support/elements/elements-transport.js';
+import { createElementsService } from '../../support/elements/elements-service.js';
+import { ALL_PLATFORMS } from '../../support/elements/constants.js';
+import { resolveSemrushImsToken } from '../../support/utils.js';
 
 /**
  * URL Inspector handlers for org-based routes.
@@ -45,6 +53,28 @@ import {
  *   - `brandId` is read from ctx.params (path segment), NOT from query string.
  *   - `brandId === 'all'` or missing → no brand filter (`p_brand_id = NULL`).
  */
+
+// Mirror the referral controller's source whitelist (LLMO-4261).
+// Used by the owned-urls handler to forward `p_referral_source` to
+// `rpc_url_inspector_owned_urls` (LLMO-4729 Decision A pull-in). When the
+// caller supplies an unknown value we collapse it to `'optel'` for parity
+// with /url-inspector. When the caller does not supply a value at all we
+// return `undefined` so the handler can OMIT the parameter entirely — this
+// keeps the RPC contract back-compat with mysticat builds that pre-date
+// LLMO-4729 (the older 8/9-arg signature would 404 with PGRST202 on an
+// unknown 10th positional parameter), and PostgREST then applies the
+// function's own `DEFAULT 'optel'` on the new build. Mirrors the same
+// "omit when absent" pattern used for `p_agent_types` (LLMO-4526).
+const VALID_REFERRAL_SOURCES = new Set(['optel', 'cdn', 'adobe_analytics', 'ga4', 'cja']);
+const DEFAULT_REFERRAL_SOURCE = 'optel';
+
+function parseReferralSource(q) {
+  const raw = q.referralSource ?? q.referral_source;
+  if (!raw) {
+    return undefined;
+  }
+  return VALID_REFERRAL_SOURCES.has(raw) ? raw : DEFAULT_REFERRAL_SOURCE;
+}
 
 /**
  * Resolve platform/model from request. Returns null when absent (no default model).
@@ -182,7 +212,7 @@ export function createUrlInspectorStatsHandler(getOrgAndValidateAccess) {
 
       const weeklyTrends = [...weeklyByKey.values()].sort((a, b) => a.week.localeCompare(b.week));
 
-      return ok({ stats, weeklyTrends });
+      return cachedOk({ stats, weeklyTrends });
     },
   );
 }
@@ -190,6 +220,21 @@ export function createUrlInspectorStatsHandler(getOrgAndValidateAccess) {
 /**
  * Creates the getUrlInspectorOwnedUrls handler.
  * Paginated per-URL citation aggregates with JSONB weekly arrays for WoW trends.
+ *
+ * Server-side agentic merge (LLMO-4526 multi-persona PR review M2): each row
+ * carries `agenticHits` and `agenticHitsTrend` joined from
+ * `agentic_traffic_weekly` for the same site / date range, scoped by an
+ * optional `agentTypes` inclusion list. Before this lived in the UI, the
+ * dashboard merged a separate by-URL agentic call that capped at 500 rows,
+ * so owned URLs ranked beyond the top 500 silently showed `agenticHits = 0`.
+ * Doing the JOIN in the RPC means the table can paginate 50 owned URLs at a
+ * time without losing fidelity.
+ *
+ * Server-side referral merge (LLMO-4729 Decision A pull-in): each row also
+ * carries `referralHits` and `referralHitsTrend` joined from
+ * `referral_traffic_<source>` for the same site / date range, scoped by the
+ * `referralSource` query param (default `'optel'`). Replaces the always-N/A
+ * Referral Hits column the table used to render before this work landed.
  * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
  */
 export function createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess) {
@@ -202,6 +247,7 @@ export function createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess) {
       const params = parseFilterDimensionsParams(ctx);
       const pagination = parsePaginationParams(ctx, { defaultPageSize: 50 });
       const defaults = defaultDateRange();
+      const q = ctx.data || /* c8 ignore next */ {};
 
       if (!shouldApplyFilter(params.siteId)) {
         return badRequest('siteId is required for URL Inspector endpoints');
@@ -223,8 +269,17 @@ export function createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess) {
 
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
       const offset = pagination.page * pagination.pageSize;
+      const agentTypes = parseAgentTypes(q.agentTypes ?? q.agent_types);
+      const referralSource = parseReferralSource(q);
 
-      const { data, error } = await client.rpc('rpc_url_inspector_owned_urls', {
+      // Only forward p_agent_types and p_referral_source when the caller
+      // actually supplied a value. Omitting them keeps the RPC contract
+      // compatible with internal tooling (and the integration-test image)
+      // that pre-dates the additive parameters (LLMO-4526 added
+      // p_agent_types; LLMO-4729 added p_referral_source). The new RPC has
+      // DEFAULT 'optel' on p_referral_source, so the omitted-param path
+      // still reads from referral_traffic_optel server-side.
+      const rpcParams = {
         p_site_id: params.siteId,
         p_start_date: params.startDate || defaults.startDate,
         p_end_date: params.endDate || defaults.endDate,
@@ -234,7 +289,15 @@ export function createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess) {
         p_brand_id: filterByBrandId,
         p_limit: pagination.pageSize,
         p_offset: offset,
-      });
+      };
+      if (agentTypes) {
+        rpcParams.p_agent_types = agentTypes;
+      }
+      if (referralSource !== undefined) {
+        rpcParams.p_referral_source = referralSource;
+      }
+
+      const { data, error } = await client.rpc('rpc_url_inspector_owned_urls', rpcParams);
 
       if (error) {
         ctx.log.error(`URL Inspector owned URLs RPC error: ${error.message}`);
@@ -245,6 +308,13 @@ export function createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess) {
       const totalCount = rows.length > 0 ? Number(rows[0].total_count ?? 0) : 0;
 
       const urls = rows.map((r) => ({
+        // url_id is the real source_urls.id (LLMO-5992). The URL Details
+        // "Prompt Analysis" drilldown forwards it as p_url_id to
+        // rpc_url_inspector_url_prompts; without it the dashboard synthesised a
+        // fake id that failed the uuid parse and returned no prompts. Mirrors
+        // getUrlInspectorDomainUrls. Empty-string fallback keeps the shape
+        // stable if an older RPC build (pre-url_id) is deployed.
+        urlId: r.url_id || '',
         url: r.url,
         citations: Number(r.citations ?? 0),
         promptsCited: Number(r.prompts_cited ?? 0),
@@ -252,9 +322,23 @@ export function createUrlInspectorOwnedUrlsHandler(getOrgAndValidateAccess) {
         regions: r.regions || [],
         weeklyCitations: r.weekly_citations || [],
         weeklyPromptsCited: r.weekly_prompts_cited || [],
+        agenticHits: Number(r.agentic_hits ?? 0),
+        agenticHitsTrend: Array.isArray(r.agentic_hits_trend)
+          ? r.agentic_hits_trend.map((point) => ({
+            weekStart: point.week_start ?? null,
+            value: Number(point.value ?? 0),
+          }))
+          : [],
+        referralHits: Number(r.referral_hits ?? 0),
+        referralHitsTrend: Array.isArray(r.referral_hits_trend)
+          ? r.referral_hits_trend.map((point) => ({
+            weekStart: point.week_start ?? null,
+            value: Number(point.value ?? 0),
+          }))
+          : [],
       }));
 
-      return ok({ urls, totalCount });
+      return cachedOk({ urls, totalCount });
     },
   );
 }
@@ -346,7 +430,7 @@ export function createUrlInspectorTrendingUrlsHandler(getOrgAndValidateAccess) {
         totalCitations: entry.prompts.reduce((sum, p) => sum + p.citationCount, 0),
       }));
 
-      return ok({ urls, totalNonOwnedUrls });
+      return cachedOk({ urls, totalNonOwnedUrls });
     },
   );
 }
@@ -419,7 +503,7 @@ export function createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess) {
         regions: r.regions || '',
       }));
 
-      return ok({ domains, totalCount });
+      return cachedOk({ domains, totalCount });
     },
   );
 }
@@ -503,9 +587,85 @@ export function createUrlInspectorDomainUrlsHandler(
         regions: r.regions || '',
       }));
 
-      return ok({ urls, totalCount });
+      return cachedOk({ urls, totalCount });
     },
   );
+}
+
+/** Shared row shape for rpc_url_inspector_url_prompts and its by-url sibling. */
+function mapPromptRows(data) {
+  const rows = data || [];
+  return rows.map((r) => ({
+    prompt: r.prompt || '',
+    category: r.category || '',
+    region: r.region || '',
+    topics: r.topics || '',
+    citations: Number(r.citations ?? 0),
+  }));
+}
+
+/**
+ * Fetches prompts that cited `urlId` via rpc_url_inspector_url_prompts.
+ * Shared by createUrlInspectorUrlPromptsHandler and
+ * createUrlInspectorPromptsByUrlHandler.
+ * @param {object} client - PostgREST client.
+ * @param {object} log - Logger.
+ * @param {{siteId: string, urlId: string, startDate: string, endDate: string,
+ *   model: string|null}} rpcInputs
+ * @returns {Promise<{prompts: Array<object>}|{error: object}>}
+ */
+async function fetchUrlPromptsViaMysticat(client, log, {
+  siteId, urlId, startDate, endDate, model,
+}) {
+  const { data, error } = await client.rpc('rpc_url_inspector_url_prompts', {
+    p_site_id: siteId,
+    p_start_date: startDate,
+    p_end_date: endDate,
+    p_url_id: urlId,
+    p_platform: model,
+  });
+
+  if (error) {
+    // 22P02 (invalid uuid) happens with synthetic url_ids from the owned-urls
+    // dashboard fallback (LLMO-4526) — treat as empty, not an error.
+    if (error.code === '22P02' || /invalid input syntax for( type)? uuid/i.test(error.message)) {
+      log.info(`URL Inspector URL prompts: invalid url_id "${urlId}" — returning empty prompt list`);
+      return { prompts: [] };
+    }
+    log.error(`URL Inspector URL prompts RPC error: ${error.message}`);
+    return { error: internalServerError('Internal error processing URL Inspector prompts') };
+  }
+
+  return { prompts: mapPromptRows(data) };
+}
+
+/**
+ * Fetches prompts that cited `url` via rpc_url_inspector_prompts_by_url,
+ * which resolves the URL to a source_urls.id internally (no domain-urls
+ * pagination needed).
+ * @param {object} client - PostgREST client.
+ * @param {object} log - Logger.
+ * @param {{siteId: string, url: string, startDate: string, endDate: string,
+ *   model: string|null}} rpcInputs
+ * @returns {Promise<{prompts: Array<object>}|{error: object}>}
+ */
+async function fetchUrlPromptsByUrlViaMysticat(client, log, {
+  siteId, url, startDate, endDate, model,
+}) {
+  const { data, error } = await client.rpc('rpc_url_inspector_prompts_by_url', {
+    p_site_id: siteId,
+    p_url: url,
+    p_start_date: startDate,
+    p_end_date: endDate,
+    p_platform: model,
+  });
+
+  if (error) {
+    log.error(`URL Inspector prompts-by-url RPC error: ${error.message}`);
+    return { error: internalServerError('Internal error processing URL Inspector prompts') };
+  }
+
+  return { prompts: mapPromptRows(data) };
 }
 
 /**
@@ -553,29 +713,148 @@ export function createUrlInspectorUrlPromptsHandler(
         return badRequest(modelError);
       }
 
-      const { data, error } = await client.rpc('rpc_url_inspector_url_prompts', {
-        p_site_id: params.siteId,
-        p_start_date: params.startDate || defaults.startDate,
-        p_end_date: params.endDate || defaults.endDate,
-        p_url_id: urlId,
-        p_platform: model,
+      const result = await fetchUrlPromptsViaMysticat(client, ctx.log, {
+        siteId: params.siteId,
+        urlId,
+        startDate: params.startDate || defaults.startDate,
+        endDate: params.endDate || defaults.endDate,
+        model,
       });
+      if (result.error) {
+        return result.error;
+      }
+      return cachedOk({ prompts: result.prompts });
+    },
+  );
+}
 
-      if (error) {
-        ctx.log.error(`URL Inspector URL prompts RPC error: ${error.message}`);
-        return internalServerError('Internal error processing URL Inspector URL prompts');
+/**
+ * True only when brandId resolves to a real brand with its own active
+ * Semrush sub-workspace — a flat-mode brand (shared parent workspace) is
+ * never eligible, since prompts/projects live only in a brand's own
+ * sub-workspace.
+ * @param {object} ctx - Request context.
+ * @param {string} spaceCatId - SpaceCat organization UUID.
+ * @param {string} brandId - Brand id/name from the route (path param).
+ * @param {object} client - PostgREST client (also usable as postgrestClient).
+ * @returns {Promise<{eligible: boolean, workspaceId?: string}>}
+ */
+async function resolveSemrushEligibility(ctx, spaceCatId, brandId, client) {
+  if (!brandId || brandId === 'all') {
+    return { eligible: false };
+  }
+  const brandUuid = await resolveBrandUuid(spaceCatId, brandId, client);
+  if (!brandUuid) {
+    return { eligible: false };
+  }
+  const { mode, workspaceId, parentWorkspaceId } = await resolveBrandWorkspace(
+    ctx,
+    spaceCatId,
+    brandUuid,
+  );
+  if (mode !== 'subworkspace') {
+    return { eligible: false };
+  }
+  if (workspaceId === parentWorkspaceId) {
+    ctx.log.error('url-inspector-prompts-by-url: brand sub-workspace equals org parent workspace - refusing', {
+      brandUuid, spaceCatId, workspaceId,
+    });
+    return { eligible: false };
+  }
+  return { eligible: true, workspaceId };
+}
+
+/**
+ * "Prompts that cited this URL", routed to Semrush (if eligible and `url`
+ * given), else the urlId-based RPC (if `urlId` given), else the single-hop
+ * by-url RPC. Both RPC branches share the same 28-day default date range.
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createUrlInspectorPromptsByUrlHandler(
+  getOrgAndValidateAccess,
+) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'url-inspector-prompts-by-url',
+    async (ctx, client) => {
+      const { spaceCatId, brandId } = ctx.params;
+      const params = parseFilterDimensionsParams(ctx);
+      const defaults = defaultDateRange();
+      const q = ctx.data || /* c8 ignore next */ {};
+
+      if (!shouldApplyFilter(params.siteId)) {
+        return badRequest('siteId is required for URL Inspector endpoints');
       }
 
-      const rows = data || [];
-      const prompts = rows.map((r) => ({
-        prompt: r.prompt || '',
-        category: r.category || '',
-        region: r.region || '',
-        topics: r.topics || '',
-        citations: Number(r.citations ?? 0),
-      }));
+      const { url } = q;
+      const urlId = q.urlId || q.url_id;
+      if (!url && !urlId) {
+        return badRequest('Either url or urlId is required for URL prompt breakdown');
+      }
 
-      return ok({ prompts });
+      const siteBelongsToOrg = await validateSiteBelongsToOrg(
+        client,
+        spaceCatId,
+        params.siteId,
+      );
+      if (!siteBelongsToOrg) {
+        return forbidden('Site does not belong to the organization');
+      }
+
+      const { model, error: modelError } = resolveUrlInspectorPlatform(params);
+      if (modelError) {
+        return badRequest(modelError);
+      }
+
+      const startDate = params.startDate || defaults.startDate;
+      const endDate = params.endDate || defaults.endDate;
+
+      // Falls back to the Mysticat branch (rather than propagating) if
+      // eligibility resolution itself throws (e.g. Brand/Organization
+      // data-access unavailable, or a DB read error).
+      const { eligible, workspaceId } = url
+        ? await resolveSemrushEligibility(ctx, spaceCatId, brandId, client)
+          .catch((e) => {
+            ctx.log.error(`URL Inspector prompts-by-url Semrush eligibility check failed: ${e?.message || e}`);
+            return { eligible: false };
+          })
+        : { eligible: false };
+
+      if (eligible) {
+        try {
+          const imsToken = await resolveSemrushImsToken(ctx, ctx.log, 'url-inspector-prompts-by-url');
+          const service = createElementsService(
+            createElementsTransport({ env: ctx.env, imsToken }),
+            ctx.log,
+          );
+          // Semrush and Mysticat use different model vocabularies (UI platform
+          // codes vs the llm_model enum) — reuse the raw request value here
+          // rather than `model` (already normalized to the Mysticat enum),
+          // so resolveElementModel/isAllPlatforms can do their own translation.
+          const semrushModel = shouldApplyFilter(params.model) ? params.model : ALL_PLATFORMS;
+          const prompts = await service.getUrlPrompts(workspaceId, {
+            url, model: semrushModel, startDate, endDate, projectIds: [],
+          });
+          return cachedOk({ prompts });
+        } catch (e) {
+          const statusPart = e?.status ? ` [status=${e.status}]` : '';
+          ctx.log.error(`URL Inspector prompts-by-url Semrush error: ${e?.message || e}${statusPart}`);
+          return internalServerError('Internal error processing URL Inspector prompts');
+        }
+      }
+
+      const result = urlId
+        ? await fetchUrlPromptsViaMysticat(client, ctx.log, {
+          siteId: params.siteId, urlId, startDate, endDate, model,
+        })
+        : await fetchUrlPromptsByUrlViaMysticat(client, ctx.log, {
+          siteId: params.siteId, url, startDate, endDate, model,
+        });
+      if (result.error) {
+        return result.error;
+      }
+      return cachedOk({ prompts: result.prompts });
     },
   );
 }
@@ -680,7 +959,7 @@ export function createUrlInspectorFilterDimensionsHandler(getOrgAndValidateAcces
         return internalServerError('Internal error processing URL Inspector filter dimensions');
       }
 
-      return ok(data);
+      return cachedOk(data);
     },
   );
 }

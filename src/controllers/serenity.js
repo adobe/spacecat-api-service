@@ -1,0 +1,1929 @@
+/*
+ * Copyright 2026 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+
+// @ts-check
+
+import {
+  createResponse, forbidden, internalServerError, noContent, notFound, accepted,
+} from '@adobe/spacecat-shared-http-utils';
+import {
+  hasText, isNonEmptyObject, isValidUUID, siteIdentityFromUrlString,
+} from '@adobe/spacecat-shared-utils';
+import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
+
+import { createSerenityTransport } from '../support/serenity/rest-transport.js';
+import { isSemrushTransportError, unwrapTransportCause } from '../support/serenity/errors.js';
+import {
+  resolveBrandWorkspace,
+  clearBrandWorkspaceCache,
+} from '../support/serenity/workspace-resolver.js';
+import {
+  handleListPrompts,
+  handleCreatePrompts,
+  handleUpdatePrompt,
+  handleBulkDeletePrompts,
+  validateDeferPublish,
+  BULK_PROMPTS_MAX_ITEMS,
+  resolveCallerId,
+} from '../support/serenity/handlers/prompts.js';
+import { createAndEnqueueJob } from '../support/serenity/async-job-runner.js';
+import { CLASSIFY_PROMPTS_JOB_TYPE } from '../support/serenity/handlers/classify-prompts-job.js';
+import {
+  handleListMarkets,
+  handleGetMarket,
+  handleCreateMarket,
+  handleDeleteMarket,
+  handleListTags,
+  handleListModels,
+  handleUpdateModels,
+  listGlobalModelCatalog,
+  listLanguageCatalog,
+} from '../support/serenity/handlers/markets.js';
+import {
+  handleListMarketsSubworkspace,
+  handleGetMarketSubworkspace,
+  handleCreateMarketSubworkspace,
+  handleDeleteMarketSubworkspace,
+  handleListTagsSubworkspace,
+  handleListModelsSubworkspace,
+  handleUpdateModelsSubworkspace,
+} from '../support/serenity/handlers/markets-subworkspace.js';
+import {
+  handleListPromptsSubworkspace,
+  handleCreatePromptsSubworkspace,
+  handleUpdatePromptSubworkspace,
+  handleBulkDeletePromptsSubworkspace,
+} from '../support/serenity/handlers/prompts-subworkspace.js';
+import {
+  handleCreateTag,
+  handleCreateTagSubworkspace,
+  handleUpdateTag,
+  handleUpdateTagSubworkspace,
+} from '../support/serenity/handlers/tags.js';
+import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
+import { isSerenityActiveForBrand } from '../support/serenity/serenity-active.js';
+import { MAX_TOPICS_ON_CREATE } from '../support/serenity/brand-provisioning.js';
+import { resolveDefaultModelIds } from '../support/serenity/default-models.js';
+import { marketForGeoTargetId } from '../support/serenity/locations.js';
+import { brandNeedles, classifyBrandedTag } from '../support/serenity/branded-classifier.js';
+import { computeWriteDeadline } from '../support/serenity/intent-classification.js';
+import AccessControlUtil from '../support/access-control-util.js';
+import { resolveBrandUuid } from '../support/prompts-storage.js';
+import {
+  getBrandAliases, getBrandUrlSources, getBrandCompetitors, updateBrand, getBrandBaseSiteId,
+} from '../support/brands-storage.js';
+import { ErrorWithStatusCode, resolveSemrushImsToken as resolveImsTokenViaPromise } from '../support/utils.js';
+import {
+  ensureMarketSite,
+  resolveSiteIdentity,
+  unlinkMarketSiteIfOrphaned,
+} from '../support/serenity/site-linkage.js';
+import { X_PROMISE_TOKEN_HEADER, PROMISE_TOKEN_REQUIRED_ERROR_CODE } from '../utils/constants.js';
+import {
+  tombstoneAllForBrand,
+  linkSiteToLiveRows,
+  linkSiteToRow,
+} from '../support/serenity/mapping-rows.js';
+import { logUpstreamError } from '../support/serenity/upstream-log.js';
+
+const MAX_ERR_MSG_LEN = 500;
+const BEARER_PREFIX = 'Bearer ';
+// Upper bound on markets per activate request. Each market drives sequential
+// upstream create+publish calls in the request thread, so an unbounded array
+// could pin the Lambda (same rationale as MAX_MODEL_IDS on PUT /serenity/models).
+const MAX_MARKETS = 50;
+
+/**
+ * Strips characters HTTP headers can't carry (CR/LF/non-ASCII) and caps length.
+ * Prevents response splitting and keeps error bodies bounded.
+ */
+function safeError(msg) {
+  return cleanupHeaderValue(String(msg || '')).slice(0, MAX_ERR_MSG_LEN);
+}
+
+/**
+ * Extracts query params from the request URL. Does NOT fall back to
+ * `context.data` (the request body) — body keys must never become query keys
+ * on a GET (silent attribute-confusion vector).
+ */
+function extractQuery(context) {
+  if (context?.request?.url) {
+    try {
+      const u = new URL(context.request.url);
+      const out = {};
+      for (const [k, v] of u.searchParams) {
+        // tagIds is multi-value — collected below via getAll(); excluded here
+        // to avoid last-write-wins clobbering the array. Any future multi-value
+        // param should follow the same pattern.
+        if (k !== 'tagIds') {
+          out[k] = v;
+        }
+      }
+      const tagIdsAll = u.searchParams.getAll('tagIds');
+      if (tagIdsAll.length > 0) {
+        out.tagIds = tagIdsAll;
+      }
+      return out;
+    } catch { /* fall through to empty */ }
+  }
+  return {};
+}
+
+function parsedQuery(context) {
+  const raw = extractQuery(context);
+  /** @type {Record<string, string | string[] | number | null>} */
+  const out = { ...raw };
+  if (raw.geoTargetId !== undefined) {
+    const n = parseInt(raw.geoTargetId, 10);
+    out.geoTargetId = Number.isFinite(n) ? n : null;
+  }
+  if (raw.page !== undefined) {
+    const n = parseInt(raw.page, 10);
+    out.page = Number.isFinite(n) ? n : null;
+  }
+  if (raw.limit !== undefined) {
+    const n = parseInt(raw.limit, 10);
+    out.limit = Number.isFinite(n) ? n : null;
+  }
+  return out;
+}
+
+function errorTokenForStatus(status) {
+  switch (status) {
+    case 401: return 'authenticationRequired';
+    case 403: return 'forbidden';
+    case 404: return 'notFound';
+    case 409: return 'conflict';
+    case 503: return 'configurationError';
+    default: return 'invalidRequest';
+  }
+}
+
+/**
+ * Request-context ids for the structured upstream-error log line
+ * (SITES-49993): the tenant ids from the route plus the resolved Semrush
+ * workspace from `authorize` — the latter is what attributes a
+ * ProjectEngineApiError (which carries no ids of its own) to a tenant.
+ * `auth` is the hoisted `authorize` result and may still be undefined (or its
+ * `{error}` variant) when the throw happened before/inside authorization.
+ * @param {object} [ctx]
+ * @param {{ brandUuid?: string, workspaceId?: string | null }} [auth]
+ * @returns {Record<string, unknown>}
+ */
+function reqCtxOf(ctx, auth) {
+  return {
+    spaceCatId: ctx?.params?.spaceCatId,
+    brandId: ctx?.params?.brandId,
+    brandUuid: auth?.brandUuid,
+    workspaceId: auth?.workspaceId,
+  };
+}
+
+function mapError(e, log, reqCtx = {}) {
+  if (e instanceof ErrorWithStatusCode) {
+    const status = Number.isInteger(e.status) ? e.status : 400;
+    // Handlers can set `e.code` (e.g. 'marketNotFound') to pin a specific
+    // error token in the response envelope; falls back to the status-based
+    // default for plain throws.
+    const errorToken = e.code && hasText(e.code) ? e.code : errorTokenForStatus(status);
+    return createResponse(
+      { error: errorToken, message: safeError(e.message) },
+      status,
+    );
+  }
+  // A Project Engine call now throws ProjectEngineApiError directly (LLMO-6386, adaptPE retired).
+  // On its no-HTTP-response path (per-attempt timeout / exhausted network / a missing-IMS-token
+  // 401) the status is `undefined` and the original throw is carried as `.cause` — the retired
+  // adaptPE boundary used to rethrow that cause, so unwrap it here to keep the mapping below
+  // yielding the SAME HTTP code (auth → 401, timeout → 502, raw network → 500). A bare undefined
+  // status would otherwise flatten all three to 502, silently regressing the auth response.
+  const err = unwrapTransportCause(e);
+  if (isSemrushTransportError(err)) {
+    logUpstreamError(log, 'Serenity upstream error', err, reqCtx);
+    if (err.status === 401 || err.status === 403) {
+      // Do NOT echo err.message here: the transport error message embeds the full
+      // gateway URL (internal host + workspace/project UUIDs). Return a generic
+      // message and keep the detail to the log.error above (matches the 502 branch).
+      return createResponse(
+        { error: errorTokenForStatus(err.status), message: 'Upstream authorization failed' },
+        err.status,
+      );
+    }
+    if (err.status === 409) {
+      // An upstream refusal of a conflicting write (e.g. a prompt rename onto a
+      // sibling prompt's exact text — serenity-docs#63) is the caller's to act
+      // on, not an upstream outage: surface the status and the `conflict` token
+      // instead of flattening it into the generic 502. Message stays redacted
+      // for the same reason as the 401/403 branch above.
+      return createResponse(
+        { error: errorTokenForStatus(err.status), message: 'Upstream rejected the request as a conflict' },
+        err.status,
+      );
+    }
+    return createResponse({
+      error: 'serenityUpstreamError',
+      message: 'Upstream request failed',
+    }, 502);
+  }
+  // Not an upstream error: keep the Error as the second argument — the stack
+  // is the useful part here — and carry the tenant ids in the message.
+  log.error(`Serenity controller error ${JSON.stringify(reqCtx)}`, err);
+  return createResponse(
+    { error: 'internalServerError', message: 'Internal server error' },
+    500,
+  );
+}
+
+/**
+ * Pulls the IMS bearer from the inbound Authorization header. Throws 401 if
+ * missing OR if the caller authenticated by some other mechanism. The
+ * upstream gateway only understands IMS user tokens; we refuse to forward
+ * anything else.
+ *
+ * NOTE — this is NOT the only path into the handlers below: `x-promise-token`
+ * (see `resolveSemrushImsToken`) is a SECOND, always-on (including production)
+ * way to reach them without passing this function's IMS-type check, by
+ * exchanging the promise token for an IMS token instead of forwarding
+ * `Authorization` directly. This function's gate — and the test-only escape
+ * hatch below — only govern the plain-bearer fallback path.
+ *
+ * SECURITY MODEL — this proxy is NOT the auth boundary; Semrush is. The bearer
+ * we forward is validated AGAIN by the real Semrush gateway on every upstream
+ * call (it rejects an invalid/expired/forged token with 401/403, which the
+ * transport surfaces as a typed Semrush error — ProjectEngineApiError for a
+ * Project Engine call, SerenityTransportError for a User Manager one — both
+ * classified by isSemrushTransportError). This local check is only a
+ * fail-fast + shape guard so we do not forward a token Semrush will obviously
+ * reject; it never substitutes for the upstream's own validation.
+ *
+ * Test-only escape hatch: when `SERENITY_ALLOW_NON_IMS_AUTH === 'true'` AND the
+ * runtime is not production, the IMS-type check is skipped so an authenticated
+ * NON-IMS caller (e.g. the
+ * locally-signed JWT the integration-test harness mints) can reach the
+ * handlers. This is sound because (a) production auth is unaffected — Semrush
+ * still validates the forwarded token end to end — and (b) the integration
+ * tests run against the Semrush vendor MOCKS, which intentionally do not
+ * validate the bearer, so the token's value never matters there, only that an
+ * authenticated identity is present. Mirrors `SERENITY_ALLOW_WORKSPACE_DELETE`
+ * in rest-transport.js: an explicit opt-in flag that NO deployed environment
+ * sets (it is never written to Vault `dx_mysticat/<env>/api-service`); it is
+ * for local + automated E2E only. The Authorization-header requirement still
+ * holds — a bearer must be present to forward upstream.
+ */
+function requireImsBearer(ctx) {
+  const authInfo = ctx?.attributes?.authInfo;
+  // Hard-disable the escape hatch in production, mirroring getImsUserTokenStrict:
+  // even if SERENITY_ALLOW_NON_IMS_AUTH were somehow set in a prod env, a non-IMS
+  // caller must never reach the handlers there.
+  const isProd = ctx?.env?.AWS_ENV === 'prod' || ctx?.env?.ENV === 'prod';
+  const allowNonIms = !isProd && ctx?.env?.SERENITY_ALLOW_NON_IMS_AUTH === 'true';
+  if (!allowNonIms && authInfo?.getType && authInfo.getType() !== 'ims') {
+    // Reached only when x-promise-token was absent (resolveSemrushImsToken checks
+    // that header first and never falls through to here when it's present) — a
+    // non-IMS caller has no other way to authenticate to Semrush, so point them
+    // at the promise-token flow instead of a bare "not authenticated" message.
+    const err = new ErrorWithStatusCode(
+      `Serenity proxy requires IMS authentication; send the ${X_PROMISE_TOKEN_HEADER} header instead`,
+      401,
+    );
+    err.code = PROMISE_TOKEN_REQUIRED_ERROR_CODE;
+    throw err;
+  }
+  const header = ctx?.pathInfo?.headers?.authorization;
+  if (!hasText(header) || !header.startsWith(BEARER_PREFIX)) {
+    throw new ErrorWithStatusCode(
+      'Missing or invalid Authorization header',
+      401,
+    );
+  }
+  return header.substring(BEARER_PREFIX.length);
+}
+
+/**
+ * Builds an async reload callback that re-reads the brand's CURRENT
+ * semrush_sub_workspace_id from the data layer. ensureSubworkspace uses it as
+ * a lost-update concurrency guard so a parallel activation cannot orphan a
+ * freshly-created, resourced sub-workspace.
+ */
+export function brandPointerReloader(ctx, brandUuid) {
+  return async () => {
+    const Brand = ctx?.dataAccess?.Brand;
+    if (!Brand || typeof Brand.findById !== 'function') {
+      return null;
+    }
+    const fresh = await Brand.findById(brandUuid);
+    return fresh?.getSemrushSubWorkspaceId?.() ?? null;
+  };
+}
+
+// Logged at most once per process: makes an accidental SERENITY_ALLOW_NON_IMS_AUTH
+// enablement in a deployed environment visible in the logs (the flag bypasses the
+// IMS-type gate — it must only ever be set for local/automated E2E).
+let warnedNonImsAuth = false;
+
+function SerenityController(context, log, env) {
+  if (!isNonEmptyObject(context)) {
+    throw new Error('Context required');
+  }
+  if (!log) {
+    throw new Error('Log required');
+  }
+  if (!warnedNonImsAuth && (context?.env || env)?.SERENITY_ALLOW_NON_IMS_AUTH === 'true') {
+    warnedNonImsAuth = true;
+    log.warn('[serenity] SERENITY_ALLOW_NON_IMS_AUTH is enabled — the IMS-type auth gate is bypassed. This is test-only and must never be set in a deployed environment.');
+  }
+
+  /**
+   * Resolves the IMS access token to forward to the Semrush gateway.
+   *
+   * Preferred path: the caller sends `x-promise-token` (minted by
+   * POST /auth/v2/promise). This lets a caller authenticate to spacecat itself
+   * with a NON-IMS credential (e.g. a spacecat JWT on `Authorization`) while
+   * still supplying an IMS-exchangeable token for the upstream Semrush call —
+   * mirrors the existing pattern in edge-routing-auth.js / fixes.js. The promise
+   * token is checked FIRST and, when present, `requireImsBearer` (and its
+   * `authInfo.getType() === 'ims'` gate) is never invoked, since `Authorization`
+   * is not expected to carry an IMS token in that case. This is a SECOND,
+   * always-on (including production) bypass of that gate, distinct from the
+   * SERENITY_ALLOW_NON_IMS_AUTH test-only escape hatch above.
+   *
+   * Fallback path: no `x-promise-token` — behaves exactly as before, requiring
+   * IMS-type auth and forwarding the `Authorization: Bearer <ims-token>` as-is.
+   *
+   * Delegates the promise-token decode/exchange to the shared
+   * `resolveSemrushImsToken` helper in support/utils.js (also used by
+   * elements.js and the brand create/edit/provisioning re-sync paths),
+   * passing this controller's own `requireImsBearer` as the fallback since it
+   * additionally supports the SERENITY_ALLOW_NON_IMS_AUTH test-only escape hatch.
+   */
+  async function resolveSemrushImsToken(ctx) {
+    return resolveImsTokenViaPromise(ctx, log, 'serenity', requireImsBearer);
+  }
+
+  /**
+   * Verifies the caller has access to the addressed org AND the brand
+   * belongs to that org, then resolves the org's upstream workspace.
+   *
+   * UUID-only brand guard: serenity endpoints reject non-UUID `:brandId`
+   * with 400 at the controller boundary. UUIDs are immutable; a renamed
+   * brand between page load and a PATCH/DELETE would otherwise silently
+   * 404 (or worse, resolve to a different row on a name collision).
+   *
+   * Returns either `{ error: Response }` or
+   * `{ brandUuid, mode, workspaceId, parentWorkspaceId }`:
+   *   - `mode` is 'subworkspace' when brands.semrush_sub_workspace_id is set, else 'flat'
+   *   - `workspaceId` is the workspace handlers call upstream (subworkspace ws in subworkspace
+   *     mode, org parent in flat mode)
+   *   - `parentWorkspaceId` is the org parent (needed for subworkspace create/activate)
+   */
+  async function authorize(ctx) {
+    const spaceCatId = ctx?.params?.spaceCatId;
+    const brandId = ctx?.params?.brandId;
+    if (!isValidUUID(brandId)) {
+      return {
+        error: createResponse(
+          {
+            error: 'invalidRequest',
+            message: 'brandId must be a UUID on the /serenity/* surface',
+          },
+          400,
+        ),
+      };
+    }
+    const Organization = ctx?.dataAccess?.Organization;
+    if (!Organization || typeof Organization.findById !== 'function') {
+      return { error: internalServerError('Organization data-access not available') };
+    }
+    const organization = await Organization.findById(spaceCatId);
+    if (!organization) {
+      return { error: notFound(`Organization not found: ${spaceCatId}`) };
+    }
+    const accessControl = AccessControlUtil.fromContext(ctx);
+    if (!await accessControl.hasAccess(organization)) {
+      return { error: forbidden('User does not have access to this organization') };
+    }
+    const postgrestClient = ctx.dataAccess?.services?.postgrestClient;
+    if (!postgrestClient?.from) {
+      return {
+        error: createResponse(
+          { error: 'configurationError', message: 'PostgREST client not available' },
+          503,
+        ),
+      };
+    }
+    // Per-brand serenity rollout gate. Serenity is "active" for a brand only
+    // when its resolved `LLMO/serenity` value is ON *and* a Semrush workspace
+    // resolves for it (the workspace half is enforced below by
+    // resolveBrandWorkspace). The value resolves the brand's own override row
+    // first and falls back to the organization's row, so an org that activated
+    // everything at once still answers for all of its brands, while a
+    // mid-migration org serves only the brands its waves have released. While a
+    // brand is inactive its UI keeps reading the normal backend data — even if a
+    // `semrush_sub_workspace_id` has already been backfilled for rollout prep —
+    // so reject the serenity surface with a 404 (the same "no serenity here"
+    // contract the UI already handles for a brand without a workspace).
+    //
+    // This resolves AFTER brand resolution, where the org-wide gate it replaces
+    // ran before it to avoid leaking brand existence. That ordering is no longer
+    // load-bearing: every caller reaching this point has passed
+    // `hasAccess(organization)` above and can already enumerate the org's brands
+    // via `GET /organizations/:id/brands`, so keeping the precise "brand not
+    // found" body reveals nothing a shared 404 would hide, and it stays
+    // diagnosable mid-wave.
+    const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
+    if (!brandUuid) {
+      return { error: notFound(`Brand not found for organization: ${brandId}`) };
+    }
+    if (!await isSerenityActiveForBrand(ctx, spaceCatId, brandUuid, log)) {
+      return { error: notFound('Serenity is not active for this brand') };
+    }
+    // resolveBrandWorkspace resolves the parent workspace once and returns it
+    // alongside the mode, so activate can mint a sub-workspace without a second
+    // org lookup. A brand already in subworkspace mode resolves against its OWN
+    // workspace, so a missing/cleared parent must NOT 404 it out of a
+    // functioning sub-workspace - only flat mode without a parent is a genuine
+    // "no workspace" 404 (in flat mode workspaceId IS the parent).
+    const { mode, workspaceId, parentWorkspaceId } = await resolveBrandWorkspace(
+      ctx,
+      spaceCatId,
+      brandUuid,
+    );
+    if (mode !== 'subworkspace' && (!workspaceId || !hasText(workspaceId))) {
+      return { error: notFound('Organization has no semrush_workspace_id') };
+    }
+    // Hard invariant: a brand's sub-workspace must NEVER be the org's shared
+    // parent workspace. If they coincide (misconfiguration / bad backfill / a
+    // gateway create that handed back the parent id), every sub-workspace
+    // operation - most dangerously deactivate's decommission, which deletes all
+    // projects and releases the allocation - would run against the shared
+    // parent pool and wipe it for every brand in the org. Refuse all operations
+    // until the pointer is corrected, rather than act on the parent.
+    if (mode === 'subworkspace' && workspaceId === parentWorkspaceId) {
+      log.error('serenity: brand sub-workspace equals org parent workspace - refusing', {
+        brandUuid, spaceCatId, workspaceId,
+      });
+      return {
+        error: createResponse(
+          {
+            error: 'workspaceMisconfigured',
+            message: 'Brand sub-workspace must not be the organization parent workspace',
+          },
+          409,
+        ),
+      };
+    }
+    return {
+      brandUuid, mode, workspaceId, parentWorkspaceId,
+    };
+  }
+
+  function buildTransport(ctx, imsToken) {
+    return createSerenityTransport({ env: ctx.env || env, imsToken });
+  }
+
+  /** Loads the Brand model instance (for subworkspace-mode write/lifecycle flows). */
+  async function loadBrand(ctx, brandUuid) {
+    const Brand = ctx?.dataAccess?.Brand;
+    if (!Brand || typeof Brand.findById !== 'function') {
+      throw new ErrorWithStatusCode('Brand data-access not available', 500);
+    }
+    const brand = await Brand.findById(brandUuid);
+    if (!brand) {
+      throw new ErrorWithStatusCode(`Brand not found: ${brandUuid}`, 404);
+    }
+    return brand;
+  }
+
+  /**
+   * Builds the server-side `branded`/`non-branded` `type`-value classifier for the
+   * manual prompt create/edit paths (serenity-docs#31). Loads the brand's display
+   * name + aliases ONCE per request, then returns a pure
+   * `(text, geoTargetId) => TYPE_VALUE` closure: each prompt's market is derived
+   * from its geoTargetId and the alias needles are region-clamped to that market
+   * (memoized per market). This is the SAME classifier the AI-generation and
+   * onboarding paths use, so a prompt is classified identically no matter how it
+   * is written; the client never controls the value.
+   */
+  async function buildPromptTypeClassifier(ctx, brandUuid) {
+    const brand = await loadBrand(ctx, brandUuid);
+    const brandName = brand.getName?.() || '';
+    const brandAliases = await getBrandAliases(
+      brandUuid,
+      ctx.dataAccess.services.postgrestClient,
+    );
+    const needlesByMarket = new Map();
+    return (text, geoTargetId) => {
+      const market = marketForGeoTargetId(geoTargetId) || '';
+      let needles = needlesByMarket.get(market);
+      if (!needles) {
+        needles = brandNeedles(brandName, brandAliases, market);
+        needlesByMarket.set(market, needles);
+      }
+      return classifyBrandedTag(text, needles);
+    };
+  }
+
+  const listPrompts = async (ctx) => {
+    let auth;
+    try {
+      const imsToken = await resolveSemrushImsToken(ctx);
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const result = auth.mode === 'subworkspace'
+        ? await handleListPromptsSubworkspace(transport, auth.workspaceId, parsedQuery(ctx), log)
+        : await handleListPrompts(
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          auth.workspaceId,
+          parsedQuery(ctx),
+        );
+      return createResponse(result, 200);
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
+  const createPrompts = async (ctx) => {
+    let auth;
+    try {
+      const imsToken = await resolveSemrushImsToken(ctx);
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      // serenity-docs#33: CSV import is the ONLY bulk write path that routes to
+      // the async job runner — every other write path (single create, single
+      // edit, UI multi-add) stays synchronous. Routing is by SOURCE, not array
+      // length: `deferPublish` is the exact flag CSV-chunking already sets
+      // (see handleCreatePrompts' docstring) precisely because a UI multi-add
+      // never sets it, so a three-prompt UI add never pays queue+worker+publish
+      // latency. Flat-mode brands only for now — see this PR's report for why
+      // subworkspace-mode CSV import stays on the synchronous path.
+      const body = ctx.data || {};
+      if (auth.mode !== 'subworkspace' && validateDeferPublish(body)) {
+        const prompts = Array.isArray(body.prompts) ? body.prompts : [];
+        if (prompts.length === 0) {
+          return createResponse(
+            { error: 'invalidRequest', message: 'Body must include a non-empty prompts array' },
+            400,
+          );
+        }
+        if (prompts.length > BULK_PROMPTS_MAX_ITEMS) {
+          return createResponse(
+            { error: 'invalidRequest', message: `prompts array exceeds maxItems=${BULK_PROMPTS_MAX_ITEMS}` },
+            400,
+          );
+        }
+        const job = await createAndEnqueueJob(ctx, {
+          jobType: CLASSIFY_PROMPTS_JOB_TYPE,
+          metadata: {
+            mode: 'create',
+            brandId: auth.brandUuid,
+            semrushWorkspaceId: auth.workspaceId,
+            prompts,
+            // Authorship (LLMO-6289): capture the caller id at enqueue time — from
+            // the auth profile, never the forwarded upstream bearer — so the async
+            // classify-on-create job stamps the submitter, not the job runner.
+            callerId: resolveCallerId(ctx),
+          },
+        });
+        return accepted({ jobId: job.getId(), status: job.getStatus() });
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const classifyPromptType = await buildPromptTypeClassifier(ctx, auth.brandUuid);
+      // serenity-docs#32: one shared write-budget deadline for classify + create
+      // + publish, computed once at request entry.
+      const writeDeadline = computeWriteDeadline();
+      // CORRECTNESS-CRITICAL (LLMO-6289): resolve the caller identity ONCE, from
+      // the request's auth profile — NEVER from the bearer forwarded upstream —
+      // and thread it into every write below to stamp created_*/updated_*.
+      const callerId = resolveCallerId(ctx);
+      const result = auth.mode === 'subworkspace'
+        ? await handleCreatePromptsSubworkspace(
+          transport,
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          log,
+          classifyPromptType,
+          ctx.env,
+          writeDeadline,
+          callerId,
+          {
+            // serenity-docs#72 §5: feeds the quota-rejection Slack alert (opt-in via
+            // SERENITY_QUOTA_ALERTS_ENABLED) — never required, a no-op when unset.
+            orgId: ctx?.params?.spaceCatId,
+            brandId: auth.brandUuid,
+          },
+        )
+        : await handleCreatePrompts(
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          log,
+          classifyPromptType,
+          ctx.env,
+          writeDeadline,
+          callerId,
+          { orgId: ctx?.params?.spaceCatId },
+        );
+      return createResponse(result, 200);
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
+  const updatePrompt = async (ctx) => {
+    let auth;
+    try {
+      const imsToken = await resolveSemrushImsToken(ctx);
+      const { semrushPromptId } = ctx?.params || {};
+      if (!hasText(semrushPromptId)) {
+        throw new ErrorWithStatusCode('Missing semrushPromptId', 400);
+      }
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const classifyPromptType = await buildPromptTypeClassifier(ctx, auth.brandUuid);
+      const writeDeadline = computeWriteDeadline();
+      // Caller identity for the updated_* stamp — resolved from the auth profile,
+      // never the forwarded upstream bearer (LLMO-6289).
+      const callerId = resolveCallerId(ctx);
+      const result = auth.mode === 'subworkspace'
+        ? await handleUpdatePromptSubworkspace(
+          transport,
+          auth.workspaceId,
+          semrushPromptId,
+          ctx.data || {},
+          log,
+          classifyPromptType,
+          ctx.env,
+          writeDeadline,
+          callerId,
+        )
+        : await handleUpdatePrompt(
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          auth.workspaceId,
+          semrushPromptId,
+          ctx.data || {},
+          log,
+          classifyPromptType,
+          ctx.env,
+          writeDeadline,
+          callerId,
+        );
+      return createResponse(result.body, result.status);
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
+  const bulkDeletePrompts = async (ctx) => {
+    let auth;
+    try {
+      const imsToken = await resolveSemrushImsToken(ctx);
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      // Requester identity (LLMO-6289 pattern, SITES-50099 audit trail): resolve
+      // from the auth profile — NEVER the forwarded upstream bearer — and thread
+      // it through so the delete audit log line attributes the caller, not the
+      // Semrush service principal.
+      const callerId = resolveCallerId(ctx);
+      const result = auth.mode === 'subworkspace'
+        ? await handleBulkDeletePromptsSubworkspace(
+          transport,
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          log,
+          {
+            orgId: ctx?.params?.spaceCatId, brandId: auth.brandUuid, env: ctx.env || env, callerId,
+          },
+        )
+        : await handleBulkDeletePrompts(
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          log,
+          { orgId: ctx?.params?.spaceCatId, env: ctx.env || env, callerId },
+        );
+      return createResponse(result, 200);
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
+  const listMarkets = async (ctx) => {
+    let auth;
+    try {
+      const imsToken = await resolveSemrushImsToken(ctx);
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const result = auth.mode === 'subworkspace'
+        ? await handleListMarketsSubworkspace(
+          transport,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (auth.workspaceId),
+          // Passed so the live slices can be enriched with each market's siteId
+          // from the brand's mapping rows (LLMO-6405 Phase 2); best-effort.
+          ctx.dataAccess,
+          log,
+        )
+        : await handleListMarkets(
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          auth.workspaceId,
+        );
+      return createResponse(result, 200);
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
+  const getMarket = async (ctx) => {
+    let auth;
+    try {
+      // IMS bearer is required on the whole surface. Flat mode is a pure DB
+      // read (no upstream), but subworkspace mode reads the live listing, so the token
+      // is captured here and a transport built only when needed.
+      const imsToken = await resolveSemrushImsToken(ctx);
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { geoTargetId: pGeo, languageCode: pLang } = ctx?.params || {};
+      // Strict digit match — same rationale as deleteMarket: parseInt would
+      // coerce '2840abc' → 2840 and silently resolve a different slice.
+      const geoTargetId = /^\d+$/.test(String(pGeo || '')) ? Number(pGeo) : null;
+      const languageCode = pLang ? String(pLang).toLowerCase() : null;
+      const result = auth.mode === 'subworkspace'
+        ? await handleGetMarketSubworkspace(
+          buildTransport(ctx, imsToken),
+          auth.brandUuid,
+          auth.workspaceId,
+          geoTargetId,
+          languageCode,
+          log,
+          // Enrich the resolved slice with its siteId (LLMO-6405 Phase 2).
+          ctx.dataAccess,
+        )
+        : await handleGetMarket(ctx.dataAccess, auth.brandUuid, geoTargetId, languageCode);
+      return createResponse(result, 200);
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
+  const createMarket = async (ctx) => {
+    let auth;
+    try {
+      // Shared write-budget deadline, computed once at request entry so intent
+      // classification during topic/prompt generation budgets against the true
+      // request start (serenity-docs#32).
+      const writeDeadline = computeWriteDeadline();
+      const imsToken = await resolveSemrushImsToken(ctx);
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const requestBody = ctx.data || {};
+      // Optional siteId (LLMO-6405 Phase 2): a market created from an already-
+      // onboarded URL carries its SpaceCat Site UUID, so the client can send
+      // `siteId` instead of a raw `brandDomain`. Captured once for both the
+      // domain derivation and the direct site link below. Absent → unchanged.
+      const suppliedSiteId = hasText(requestBody.siteId) ? requestBody.siteId : null;
+      // A supplied Site is resolved and ownership-checked HERE, before either mode
+      // dispatches, because the id the caller names decides what the market's
+      // project analyses: it lands on `brand_to_semrush_projects.site_id`, the
+      // per-market source of truth for `settings.ai.primary_url`. Neither handler
+      // can make that check — the sub-workspace one has no Site access, and the
+      // flat one has no organization — so a Site from another organization would
+      // otherwise be recorded verbatim and point this project at someone else's
+      // site. Unresolvable and cross-org both answer the same 400: whether the id
+      // is unknown or simply not yours is not the caller's business.
+      let suppliedSiteIdentity = null;
+      if (suppliedSiteId) {
+        const orgId = ctx?.params?.spaceCatId;
+        suppliedSiteIdentity = await resolveSiteIdentity(
+          ctx.dataAccess,
+          suppliedSiteId,
+          log,
+          orgId,
+        );
+        if (!suppliedSiteIdentity?.domain || !hasText(suppliedSiteIdentity.domain)) {
+          return createResponse(
+            { error: 'invalidRequest', message: 'siteId did not resolve to a site domain' },
+            400,
+          );
+        }
+      }
+      let result;
+      if (auth.mode === 'subworkspace') {
+        const brand = await loadBrand(ctx, auth.brandUuid);
+        // The subworkspace create handler has no Site access (narrowed dataAccess),
+        // so derive the Semrush project domain from the supplied siteId HERE when
+        // brandDomain is absent. A supplied-but-unresolvable siteId is a hard 400.
+        // `primaryUrl` is always DERIVED here, never taken from the request. It is
+        // not part of the documented create-market contract, and passing a caller's
+        // value straight through would put an unvalidated string on the Semrush
+        // project. Set unconditionally so a client that sends one is ignored rather
+        // than trusted.
+        let effectiveBody = {
+          ...requestBody,
+          primaryUrl: siteIdentityFromUrlString(requestBody.brandDomain),
+        };
+        if (suppliedSiteIdentity && !hasText(requestBody.brandDomain)) {
+          // Both values from the read above, for the same reason the domain is
+          // derived here at all: the handler has no Site access. Only `primaryUrl`
+          // can carry a subpath — `brandDomain` is a bare FQDN because a path there
+          // is rejected upstream.
+          effectiveBody = {
+            ...effectiveBody,
+            brandDomain: suppliedSiteIdentity.domain,
+            primaryUrl: suppliedSiteIdentity.primaryUrl ?? undefined,
+          };
+        }
+        // Brand aliases are brand-level but region-scoped: the create handler
+        // clamps each to the new market's region before writing brand_names.
+        const brandAliases = await getBrandAliases(
+          auth.brandUuid,
+          ctx.dataAccess.services.postgrestClient,
+        );
+        // Brand URLs (own sites + social + earned) are brand-level too: read the
+        // persisted set and push it (region-filtered) onto the new market.
+        const brandUrlSources = await getBrandUrlSources(
+          auth.brandUuid,
+          ctx.dataAccess.services.postgrestClient,
+        );
+        // Competitors ("other brands to track") merge into the new market's CI list.
+        const competitors = await getBrandCompetitors(
+          auth.brandUuid,
+          ctx.dataAccess.services.postgrestClient,
+        );
+        // Optional prompt/topic generation for this market, defaulting to off so
+        // the endpoint's behavior is unchanged unless the caller opts in.
+        const genMarketTopics = effectiveBody.generatePrompts === true;
+        // LLMO-6554: this brand is already active, so its sub-workspace (and
+        // likely other markets) already exists — mirror whichever models those
+        // markets already track, falling back to the canonical net-new default
+        // only if none of them has any (see resolveDefaultModelIds). Without
+        // this, "Add Market" on an active brand attached zero models and the
+        // subsequent publish 405'd as a disguised empty-units quota rejection.
+        const newMarketModelIds = await resolveDefaultModelIds(
+          transport,
+          /** @type {string} */ (auth.workspaceId),
+          auth.brandUuid,
+          log,
+        );
+        result = await handleCreateMarketSubworkspace(
+          transport,
+          brand,
+          auth.parentWorkspaceId ?? '',
+          effectiveBody,
+          log,
+          null,
+          brandPointerReloader(ctx, auth.brandUuid),
+          {
+            modelIds: newMarketModelIds,
+            generateTopics: genMarketTopics,
+            topicCap: genMarketTopics ? MAX_TOPICS_ON_CREATE : 0,
+            brandAliases,
+            brandUrlSources,
+            competitors,
+            env: ctx.env,
+            writeDeadline,
+            // auth.brandUuid is an already-persisted brand row here (loadBrand
+            // above), so the mapping-row upsert's FK to brands is satisfied —
+            // see mapping-rows.js upsertMappingRow doc.
+            // Narrowed to the one model the mapping-row helpers touch (defense
+            // in depth: this options bag flows into markets-subworkspace.js and
+            // shouldn't carry access to unrelated tables).
+            dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
+            // Sub-workspace titles are bare brand names, so ensureSubworkspace needs the Brand
+            // collection to tell this brand's own interrupted create from a same-named sibling
+            // brand's workspace. Only consulted when this brand has no sub-workspace yet.
+            brandCollection: ctx.dataAccess.Brand,
+            // serenity-docs#72 §5: feeds the quota-rejection Slack alert (opt-in via
+            // SERENITY_QUOTA_ALERTS_ENABLED) — never required, a no-op when unset.
+            orgId: ctx?.params?.spaceCatId,
+            // Caller identity for the created_* stamp on any generated prompt
+            // (LLMO-6289) — from the auth profile, never the upstream bearer.
+            callerId: resolveCallerId(ctx),
+          },
+        );
+        // Mirror this market as a SpaceCat Site (+ brand_sites link), once its
+        // Semrush project is created. Best-effort: never fails a live market.
+        if (result?.status === 201) {
+          const linkedSiteId = await ensureMarketSite(ctx, {
+            // The org from the route, which is the same org the brand belongs to
+            // (resolveBrandUuid scopes the brand lookup to it). It cannot come
+            // from the Brand model: that schema deliberately does not map
+            // `organization_id` (brand.schema.js), so there is no accessor for it
+            // — and asking for one yields `undefined`, which `ensureMarketSite`
+            // treats as bad input and returns null for WITHOUT logging. That is
+            // the one silent path it has, which is why a market never carried a
+            // site despite every visible step succeeding.
+            organizationId: ctx?.params?.spaceCatId,
+            brandId: auth.brandUuid,
+            // The url this market TRACKS, which is what its Site must mirror —
+            // `brandDomain` is the host it is filed under and drops any subpath.
+            // The two coincide whenever both derive from one input; they part as
+            // soon as a market carries a url of its own, and the Site must follow
+            // the tracked value, never the host.
+            domain: effectiveBody.primaryUrl ?? effectiveBody.brandDomain,
+            // When the caller supplied a siteId, link THAT site directly (skip the
+            // domain→Site find-or-create); the client already holds the identity.
+            siteId: suppliedSiteId ?? undefined,
+            updatedBy: 'serenity-create-market',
+            // Market-create: the brand_sites mirror is best-effort, so bind the
+            // market↔site on the mapping row (what the DTO surfaces) even if that
+            // secondary mirror write doesn't land (LLMO-6405). Unlike activate, a
+            // mirror hiccup must not leave the just-created market with no siteId.
+            requireLink: false,
+            log,
+          });
+          // Bind the market↔site on THIS market's row — the per-market source of
+          // truth for the url its project tracks, and what the sub-workspace
+          // list/get enrichment surfaces. Scoped to the one row named by the new
+          // project id: a market created against its own url must not have that
+          // site spread across whichever sibling rows are unlinked (mapping-rows.js).
+          // `in` rather than a cast: the handler returns a success|error union
+          // that a `status === 201` test cannot narrow, and this both satisfies
+          // that and stays a real runtime guard — a future error shape reaching
+          // here feeds no id to the link instead of `undefined` silently.
+          const projectId = result.body && 'projectId' in result.body
+            ? result.body.projectId
+            : null;
+          if (projectId) {
+            await linkSiteToRow(ctx.dataAccess, projectId, linkedSiteId, log);
+          } else {
+            // Unreachable while the handler keeps its 201 contract (a created
+            // market always names its project). Worth a line if that ever
+            // changes: the market silently keeps no site otherwise, which is
+            // exactly the failure this whole path exists to have fixed.
+            log?.warn?.('serenity create-market: 201 without a projectId — market left unlinked', {
+              brandId: auth.brandUuid, siteId: linkedSiteId,
+            });
+          }
+        }
+      } else {
+        // Flat handler self-derives brandDomain from siteId (it has Site access).
+        result = await handleCreateMarket(
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          auth.workspaceId,
+          requestBody,
+          log,
+        );
+      }
+      return createResponse(result.body, result.status);
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
+  const deleteMarket = async (ctx) => {
+    let auth;
+    try {
+      const imsToken = await resolveSemrushImsToken(ctx);
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { geoTargetId: pGeo, languageCode: pLang } = ctx?.params || {};
+      // Strict digit match: `parseInt('2840abc', 10)` returns 2840, which would
+      // silently route /markets/2840abc/en to the legit (2840, en) slice. The
+      // OpenAPI contract declares `geoTargetId: integer, minimum: 1`, so the
+      // path segment must be all digits.
+      const geoTargetId = /^\d+$/.test(String(pGeo || '')) ? Number(pGeo) : null;
+      const languageCode = pLang ? String(pLang).toLowerCase() : null;
+      const transport = buildTransport(ctx, imsToken);
+      // Both delete handlers resolve to { status: 204, deletedSiteId } on success
+      // (errors throw → mapError). The response is an empty 204 either way; the
+      // deletedSiteId feeds the R12 orphan-link cleanup below.
+      const deleteResult = await (auth.mode === 'subworkspace'
+        ? handleDeleteMarketSubworkspace(
+          transport,
+          auth.workspaceId,
+          geoTargetId,
+          languageCode,
+          log,
+          // Narrowed to the one model the mapping-row helpers touch — see the
+          // create-market call site above for the same rationale.
+          {
+            dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
+          },
+        )
+        : handleDeleteMarket(
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          auth.workspaceId,
+          geoTargetId,
+          languageCode,
+          log,
+        ));
+
+      // R12 (LLMO-6405): when the deleted market was the LAST live market on its
+      // (non-primary) Site, remove the now-orphaned brand_sites 'serenity' link.
+      // Best-effort: never fails the 204. The brand's PRIMARY site (brands.site_id)
+      // is protected — resolved here and passed to the reference-count guard. If
+      // the primary-site lookup itself fails, skip the unlink entirely (fail-safe:
+      // never risk removing the primary link on a transient read error).
+      const deletedSiteId = deleteResult?.deletedSiteId ?? null;
+      if (hasText(deletedSiteId)) {
+        let primarySiteId = null;
+        let primaryResolved = true;
+        try {
+          primarySiteId = await getBrandBaseSiteId(
+            ctx?.params?.spaceCatId,
+            /** @type {string} */ (auth.brandUuid),
+            ctx.dataAccess.services.postgrestClient,
+          );
+        } catch (lookupErr) {
+          primaryResolved = false;
+          log.warn('serenity deleteMarket: primary-site lookup failed; skipping brand_sites unlink', {
+            brandId: auth.brandUuid,
+            error: lookupErr?.message,
+          });
+        }
+        if (primaryResolved) {
+          await unlinkMarketSiteIfOrphaned(ctx, {
+            brandId: auth.brandUuid,
+            siteId: deletedSiteId,
+            primarySiteId,
+          }, log);
+        }
+      }
+      return noContent();
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
+  const listTags = async (ctx) => {
+    let auth;
+    try {
+      const imsToken = await resolveSemrushImsToken(ctx);
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const result = auth.mode === 'subworkspace'
+        ? await handleListTagsSubworkspace(transport, auth.workspaceId, parsedQuery(ctx), log)
+        : await handleListTags(
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          auth.workspaceId,
+          parsedQuery(ctx),
+          log,
+        );
+      return createResponse(result, 200);
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
+  /**
+   * POST /serenity/tags — register a bare-named prompt tag beneath a dimension
+   * root, on a single market (the (geoTargetId, languageCode) slice in the body).
+   * `type` names the dimension (one of ALL_DIMENSIONS). An open `category` value
+   * is customer-authored and may name a `parentId` inside its own dimension; a
+   * closed dimension's value comes from a fixed vocabulary and is resolved or
+   * created under its own root, never under a caller-chosen parent. The UI's
+   * "Categories" view, for one, is derived from the `category` root's descendants
+   * across a brand's markets.
+   * Dispatches by workspace mode, mirroring the tags/markets handlers.
+   */
+  const createTag = async (ctx) => {
+    let auth;
+    try {
+      const imsToken = await resolveSemrushImsToken(ctx);
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      // authorize() guarantees brandUuid (404s a missing brand) and, in flat
+      // mode, a non-null workspaceId (404s 'no semrush_workspace_id'); assert
+      // the invariant for the typed handler, mirroring activate().
+      const result = auth.mode === 'subworkspace'
+        ? await handleCreateTagSubworkspace(
+          transport,
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          log,
+        )
+        : await handleCreateTag(
+          transport,
+          ctx.dataAccess,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          log,
+        );
+      return createResponse(result.body, result.status);
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
+  /**
+   * PATCH /serenity/tags/:tagId — rename and/or re-parent a single AIO tag in
+   * place (the nested Categories edit path). `tagId` is the upstream tag id from a
+   * prior tags list; the body carries the tag's full `name` (required upstream)
+   * and an optional `parentId` to re-parent. An unknown tagId surfaces upstream as
+   * a 404. Dispatches by workspace mode, mirroring createTag / updatePrompt.
+   */
+  const updateTag = async (ctx) => {
+    let auth;
+    try {
+      const imsToken = await resolveSemrushImsToken(ctx);
+      const { tagId } = ctx?.params || {};
+      if (!hasText(tagId)) {
+        throw new ErrorWithStatusCode('Missing tagId', 400);
+      }
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const result = auth.mode === 'subworkspace'
+        ? await handleUpdateTagSubworkspace(
+          transport,
+          /** @type {string} */ (auth.workspaceId),
+          tagId,
+          ctx.data || {},
+          log,
+        )
+        : await handleUpdateTag(
+          transport,
+          ctx.dataAccess,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (auth.workspaceId),
+          tagId,
+          ctx.data || {},
+          log,
+        );
+      return createResponse(result.body, result.status);
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
+  const listModels = async (ctx) => {
+    let auth;
+    try {
+      const imsToken = await resolveSemrushImsToken(ctx);
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const result = auth.mode === 'subworkspace'
+        ? await handleListModelsSubworkspace(transport, auth.workspaceId, parsedQuery(ctx), log)
+        : await handleListModels(
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          auth.workspaceId,
+          parsedQuery(ctx),
+        );
+      return createResponse(result, 200);
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
+  /**
+   * GET /v2/orgs/:spaceCatId/serenity/models — the brand-INDEPENDENT global AI
+   * model catalog. The add-brand wizard needs the catalog before a brand (and
+   * its workspace) exists, so this authorizes at the org level and reads the
+   * workspace-independent `GET /v1/ai_models` catalog. No brand/workspace
+   * resolution, no geo/lang params.
+   */
+  const listOrgModels = async (ctx) => {
+    try {
+      const imsToken = await resolveSemrushImsToken(ctx);
+      const spaceCatId = ctx?.params?.spaceCatId;
+      if (!isValidUUID(spaceCatId)) {
+        return createResponse(
+          { error: 'invalidRequest', message: 'spaceCatId must be a UUID' },
+          400,
+        );
+      }
+      const Organization = ctx?.dataAccess?.Organization;
+      if (!Organization || typeof Organization.findById !== 'function') {
+        return internalServerError('Organization data-access not available');
+      }
+      const organization = await Organization.findById(spaceCatId);
+      if (!organization) {
+        return notFound(`Organization not found: ${spaceCatId}`);
+      }
+      const accessControl = AccessControlUtil.fromContext(ctx);
+      if (!await accessControl.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const result = await listGlobalModelCatalog(transport);
+      return createResponse(result, 200);
+    } catch (e) {
+      // Org-level route: no authorize()/workspace resolution here.
+      return mapError(e, log, reqCtxOf(ctx));
+    }
+  };
+
+  /**
+   * GET /v2/orgs/:spaceCatId/serenity/languages — the brand-INDEPENDENT catalog
+   * of languages Semrush AIO supports. The add-brand wizard needs it before a
+   * brand (and its workspace) exists to limit the language picker to codes that
+   * will actually resolve (org-level auth, no brand/workspace resolution).
+   */
+  const listOrgLanguages = async (ctx) => {
+    try {
+      const imsToken = await resolveSemrushImsToken(ctx);
+      const spaceCatId = ctx?.params?.spaceCatId;
+      if (!isValidUUID(spaceCatId)) {
+        return createResponse(
+          { error: 'invalidRequest', message: 'spaceCatId must be a UUID' },
+          400,
+        );
+      }
+      const Organization = ctx?.dataAccess?.Organization;
+      if (!Organization || typeof Organization.findById !== 'function') {
+        return internalServerError('Organization data-access not available');
+      }
+      const organization = await Organization.findById(spaceCatId);
+      if (!organization) {
+        return notFound(`Organization not found: ${spaceCatId}`);
+      }
+      const accessControl = AccessControlUtil.fromContext(ctx);
+      if (!await accessControl.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const result = await listLanguageCatalog(transport);
+      return createResponse(result, 200);
+    } catch (e) {
+      // Org-level route: no authorize()/workspace resolution here.
+      return mapError(e, log, reqCtxOf(ctx));
+    }
+  };
+
+  const updateModels = async (ctx) => {
+    let auth;
+    try {
+      const imsToken = await resolveSemrushImsToken(ctx);
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const result = auth.mode === 'subworkspace'
+        ? await handleUpdateModelsSubworkspace(
+          transport,
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          log,
+          {
+            env: ctx.env || env,
+            orgId: ctx?.params?.spaceCatId,
+            brandId: auth.brandUuid,
+          },
+        )
+        : await handleUpdateModels(
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          log,
+          { orgId: ctx?.params?.spaceCatId, env: ctx.env || env },
+        );
+      return createResponse(result, 200);
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
+  /**
+   * POST /serenity/activate — flips a brand into subworkspace mode (design flow 5):
+   * ensure the subworkspace, then per caller-supplied market create a draft,
+   * publish once, and confirm. Sets brands.status = 'active' once ≥1 market is
+   * live. Body: { brandDomain, brandNames, brandDisplayName?, markets: [{ market,
+   * languageCode }] }. Markets are supplied by the caller (reactivation
+   * re-supplies them — there is no stored memory).
+   */
+  const activate = async (ctx) => {
+    let auth;
+    try {
+      // Shared write-budget deadline, computed once at request entry so intent
+      // classification during per-market topic/prompt generation budgets against
+      // the true request start rather than per-market function entry
+      // (serenity-docs#32).
+      const writeDeadline = computeWriteDeadline();
+      const imsToken = await resolveSemrushImsToken(ctx);
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      // authorize() guarantees a resolved brand (it 404s a missing one), but the
+      // `{ error } | { brandUuid, ... }` union leaves `brandUuid` typed
+      // `string | undefined`. Assert the non-null invariant once for the typed
+      // data-access helpers below.
+      // eslint-disable-next-line prefer-destructuring
+      const brandUuid = /** @type {string} */ (auth.brandUuid);
+      const body = ctx.data || {};
+      const transport = buildTransport(ctx, imsToken);
+      const brand = await loadBrand(ctx, brandUuid);
+      // SITES-49448: brands.pending_semrush_provisioning (the wizard's "Save as
+      // pending" stash) is retired — markets, primary URL, and generatePrompts
+      // come from the request body only. A reactivation re-supplies them.
+      // Whether to generate topics/prompts for the provisioned project(s);
+      // default false preserves the historical activate behavior (projects
+      // published without generated prompts).
+      const generatePrompts = body.generatePrompts === true;
+      const wasPending = brand.getStatus?.() === 'pending';
+      // The Semrush project domain: the request's brandDomain.
+      // SITES-49448 retired the pending_semrush_provisioning stash, so brandDomain
+      // now comes from the request body only (no stashed-URL fallback).
+      const { brandDomain } = body;
+      const suppliedUrlOrDomain = hasText(brandDomain);
+      // serenity-docs#348: the FULL tracked URL (subdomain/subpath preserved),
+      // threaded to the market handler so it PATCHes `settings.ai.primary_url`.
+      // Unlike `brandDomain` above (host-only) this keeps the raw tracked URL
+      // intact; the handler normalizes it via `siteIdentityFromUrlString`.
+      // Precedence mirrors markets.js (body.primaryUrl > body.brandDomain): a
+      // body-threaded full URL wins, else the host-only body.brandDomain as a
+      // last resort. (The stashed-wizard-URL tier is gone with SITES-49448.)
+      const brandDomainFallback = hasText(brandDomain) ? brandDomain : null;
+      const brandPrimaryUrl = hasText(body.primaryUrl)
+        ? body.primaryUrl
+        : brandDomainFallback;
+
+      // ----- Pending-brand activation is ALWAYS sub-workspace-only (LLMO-6405) -----
+      // Markets are Semrush projects added afterwards from the Markets tab, never
+      // auto-created at activation — so a pending brand activates to just its
+      // sub-workspace (the anchor, persisted by ensureSubworkspace) plus a status
+      // flip. The brand's primary site (brands.site_id) was set at create for
+      // every brand created after LLMO-6405 — but SITES-49449 tightened
+      // chk_active_brand_has_site_id to require site_id unconditionally, so a
+      // legacy pre-LLMO-6405 pending brand with none would otherwise provision a
+      // live sub-workspace upstream and THEN fail the active-flip write with a
+      // raw DB constraint violation. Guard it upfront instead of wasting that
+      // provisioning call, mirroring the flat-brand activate handler's own guard
+      // (brands.js) for the same legacy-drain scenario.
+      // Reactivation of an already ACTIVE brand (body-driven markets) is handled
+      // by the branches below.
+      if (wasPending) {
+        const existingSiteId = await getBrandBaseSiteId(
+          /** @type {string} */ (ctx?.params?.spaceCatId),
+          brandUuid,
+          ctx.dataAccess.services.postgrestClient,
+        );
+        if (!existingSiteId) {
+          throw new ErrorWithStatusCode(`Brand has no onboarded primary site: ${brandUuid}`, 400);
+        }
+        const pendingWorkspaceId = await ensureSubworkspace(
+          transport,
+          brand,
+          auth.parentWorkspaceId ?? '',
+          log,
+          {},
+          brandPointerReloader(ctx, auth.brandUuid),
+          {
+            // createReadiness 'skip' (LLMO-6569): pending→active is sub-workspace-only — no project
+            // or prompts are created here — so skip the up-to-30s settle poll. This is the path
+            // where a poll timeout otherwise leaves the brand row present but its sub-workspace
+            // pointer unwritten (the "created upstream, never linked" orphan); persisting the
+            // pointer immediately closes that window. Self-heals on retry, but the user ate a 504.
+            createReadiness: 'skip',
+            brandCollection: ctx?.dataAccess?.Brand,
+          },
+        );
+        let pendingActivateSucceeded = true;
+        if (typeof brand.setStatus === 'function') {
+          brand.setStatus('active');
+        }
+        try {
+          await brand.save();
+        } catch (saveError) {
+          pendingActivateSucceeded = false;
+          log.error('serenity activate: SERENITY_ACTIVATE_SAVE_DIVERGENCE — sub-workspace ensured upstream but failed to persist active status', {
+            brandId: auth.brandUuid,
+            semrushWorkspaceId: pendingWorkspaceId,
+            error: saveError?.message,
+          });
+        }
+        log.info('serenity activate: completed (pending → active, sub-workspace only)', {
+          brandId: auth.brandUuid,
+          semrushWorkspaceId: pendingWorkspaceId,
+          fullySucceeded: pendingActivateSucceeded,
+        });
+        if (pendingActivateSucceeded) {
+          return createResponse(
+            { brandId: auth.brandUuid, status: 'active', markets: [] },
+            200,
+          );
+        }
+        // Sub-workspace ensured upstream but the active flip did not persist — the
+        // brand stays pending; a retry converges (the sub-workspace 409s idempotently).
+        return createResponse(
+          {
+            brandId: auth.brandUuid,
+            status: 'pending',
+            error: 'serenityActivationIncomplete',
+            message: 'Sub-workspace provisioned but the active status could not be persisted.',
+            markets: [],
+          },
+          502,
+        );
+      }
+
+      // ----- Sub-workspace-only activation (no primary URL → no project) -----
+      // Reactivation of an already-ACTIVE brand with no primary URL — a no-op flip.
+      // (A pending brand never reaches here; it returned above.) Ensure its
+      // sub-workspace and re-affirm active.
+      if (!hasText(brandDomain)) {
+        // A URL/domain WAS supplied but did not resolve to a hostname → bad input.
+        // Fail fast (a silent fallback would mask the typo).
+        if (suppliedUrlOrDomain) {
+          throw new ErrorWithStatusCode('brandDomain is required to provision a Semrush market', 400);
+        }
+        if (generatePrompts) {
+          throw new ErrorWithStatusCode('A primary URL is required to generate prompts', 400);
+        }
+        const bareWorkspaceId = await ensureSubworkspace(
+          transport,
+          brand,
+          auth.parentWorkspaceId ?? '',
+          log,
+          {},
+          brandPointerReloader(ctx, auth.brandUuid),
+          {
+            // createReadiness 'skip' (LLMO-6569): bare reactivation of an already-active brand is
+            // sub-workspace-only (no project/prompts), so skip the settle poll — same safety and
+            // orphan-window rationale as the pending→active branch above.
+            createReadiness: 'skip',
+            brandCollection: ctx?.dataAccess?.Brand,
+          },
+        );
+        let bareSucceeded = true;
+        if (typeof brand.setStatus === 'function') {
+          brand.setStatus('active');
+        }
+        try {
+          await brand.save();
+        } catch (saveError) {
+          // An already-active brand's re-flip failed transiently; it stays active
+          // (the flip was a no-op anyway). Log and return 207.
+          bareSucceeded = false;
+          log.error('serenity activate: SERENITY_ACTIVATE_SAVE_DIVERGENCE — sub-workspace ensured upstream but failed to persist active status', {
+            brandId: auth.brandUuid,
+            semrushWorkspaceId: bareWorkspaceId,
+            error: saveError?.message,
+          });
+        }
+        log.info('serenity activate: completed (sub-workspace only, active reactivation)', {
+          brandId: auth.brandUuid,
+          semrushWorkspaceId: bareWorkspaceId,
+          fullySucceeded: bareSucceeded,
+        });
+        return createResponse(
+          { brandId: auth.brandUuid, status: 'active', markets: [] },
+          bareSucceeded ? 200 : 207,
+        );
+      }
+
+      // ----- Project activation (primary URL present) -----
+      // Markets come from the body (reactivation). A URL with no market supplied
+      // provisions a single US/EN fallback project — the same default
+      // brand-provisioning.js applies on the direct-create path.
+      const requestedMarkets = Array.isArray(body.markets) ? body.markets : [];
+      const markets = requestedMarkets.length > 0
+        ? requestedMarkets
+        : [{ market: 'US', languageCode: 'en' }];
+      if (markets.length > MAX_MARKETS) {
+        throw new ErrorWithStatusCode(`markets must not exceed ${MAX_MARKETS} entries`, 400);
+      }
+      // Brand aliases are brand-level but region-scoped: read once; each market's
+      // create clamps them to that market's region before writing brand_names.
+      const brandAliases = await getBrandAliases(
+        brandUuid,
+        ctx.dataAccess.services.postgrestClient,
+      );
+      // Brand URLs are brand-level: read once, push (region-filtered) per market.
+      const brandUrlSources = await getBrandUrlSources(
+        brandUuid,
+        ctx.dataAccess.services.postgrestClient,
+      );
+      // Competitors are brand-level too: read once, merge (region-filtered) per market.
+      const competitors = await getBrandCompetitors(
+        brandUuid,
+        ctx.dataAccess.services.postgrestClient,
+      );
+
+      // Ensure the sub-workspace ONCE for the whole batch, then create each market against the
+      // resolved workspace. (Calling ensureSubworkspace per market would re-poll N times —
+      // seconds of redundant settling that risks the Lambda timeout.)
+      const workspaceId = await ensureSubworkspace(
+        transport,
+        brand,
+        auth.parentWorkspaceId ?? '',
+        log,
+        {},
+        brandPointerReloader(ctx, auth.brandUuid),
+        { brandCollection: ctx?.dataAccess?.Brand },
+      );
+      // LLMO-6554: resolved ONCE for the whole batch (same brand, so every market
+      // in this request gets the same default) — mirrors whichever models the
+      // brand's existing markets already track, falling back to the canonical
+      // net-new default set when none do. A per-market `modelIds` in the body
+      // still wins when supplied (see marketModelIds below), preserving the
+      // override for any API-driven caller.
+      const defaultModelIds = await resolveDefaultModelIds(
+        transport,
+        workspaceId,
+        brandUuid,
+        log,
+      );
+      // Caller identity for the created_* stamp on generated prompts, resolved
+      // ONCE for the whole activate batch (LLMO-6289) — from the auth profile,
+      // never the forwarded upstream bearer.
+      const callerId = resolveCallerId(ctx);
+      const results = [];
+      for (const m of markets) {
+        const createBody = {
+          market: m.market,
+          languageCode: m.languageCode,
+          brandDomain,
+          primaryUrl: brandPrimaryUrl ?? undefined,
+          brandNames: body.brandNames,
+          brandDisplayName: body.brandDisplayName,
+          name: m.name,
+        };
+        // AI models (LLMs) the draft staged for this market (or that the activate
+        // request supplied). handleCreateMarketSubworkspace reads them from its
+        // OPTIONS arg (NOT the body) and attaches them to the project before
+        // publish; omitted/empty → the resolved default (LLMO-6554) applies.
+        const marketModelIds = Array.isArray(m.modelIds) && m.modelIds.length > 0
+          ? m.modelIds
+          : defaultModelIds;
+        let r;
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          r = await handleCreateMarketSubworkspace(
+            transport,
+            brand,
+            auth.parentWorkspaceId ?? '',
+            createBody,
+            log,
+            workspaceId,
+            null,
+            {
+              modelIds: marketModelIds,
+              // Generate topics/prompts only when the brand opted in. When false
+              // the project is published empty (no prompts) — today's default.
+              generateTopics: generatePrompts,
+              topicCap: generatePrompts ? MAX_TOPICS_ON_CREATE : 0,
+              // SITES-49206: Semrush no longer enforces AI limits, so an empty-units
+              // publish no longer 405s — every market now publishes with 'require'
+              // regardless of whether it has models/prompts attached.
+              publishMode: 'require',
+              brandAliases,
+              brandUrlSources,
+              competitors,
+              env: ctx.env,
+              writeDeadline,
+              // `brand` was loaded via loadBrand above — an already-persisted
+              // row, so the mapping-row upsert's FK to brands is satisfied.
+              // Narrowed to the one model the mapping-row helpers touch — see
+              // the single-market create call site for the same rationale.
+              dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
+              // serenity-docs#72 §5: feeds the quota-rejection Slack alert (opt-in via
+              // SERENITY_QUOTA_ALERTS_ENABLED) — never required, a no-op when unset.
+              orgId: ctx?.params?.spaceCatId,
+              callerId,
+            },
+          );
+        } catch (e) {
+          // A single market failing must NOT abort the batch: markets already
+          // published in this loop are live upstream, and aborting would leave
+          // them live while the brand stays pending with no per-market record.
+          // Record the failure and continue; the multi-status response reports
+          // it per market. (A generic message - never the upstream error text,
+          // which carries the gateway URL.)
+          log?.error?.('serenity activate: market create failed', {
+            market: m.market,
+            languageCode: m.languageCode,
+            status: e?.status,
+          });
+          r = {
+            status: e?.status || 502,
+            body: { error: 'serenityUpstreamError', message: 'Market activation failed' },
+          };
+        }
+        // 201 = created+published now; 409 = sliceExists (already live upstream).
+        // Both mean the slice IS live (a full idempotent re-activate where every
+        // market 409s is a complete success). The live/failed tally is derived
+        // from `results` after the loop (see allMarketsLive below).
+        results.push({
+          market: m.market,
+          languageCode: m.languageCode,
+          status: r.status,
+          body: r.body,
+        });
+      }
+
+      // ALL-OR-NOTHING activation. The brand flips to 'active' ONLY when the
+      // full provisioning chain succeeded:
+      //   1. sub-workspace ensured (above; throws → caught → error response),
+      //   2. EVERY market's project published (status 201/409 — all live),
+      //   3. the brand is linked to its sub-workspace (semrushWorkspaceId,
+      //      persisted by ensureSubworkspace above), AND
+      //   4. every provisioned market is mirrored as a Site + brand_sites row
+      //      (type='serenity').
+      // If ANY step fails, a brand that was pending STAYS pending — its workspace
+      // pointer is left intact so a retry converges idempotently (live markets
+      // return 409; the site-link re-runs) — and the response is an error. (An
+      // already-active brand re-supplying markets is never downgraded.)
+      const allMarketsLive = results.length > 0
+        && results.every((r) => r.status === 201 || r.status === 409);
+
+      // The brand_sites mirror is now a REQUIRED activation step (NOT
+      // best-effort): run it only once every market is live. Every market in
+      // this batch was provisioned against the single resolved `brandPrimaryUrl`
+      // (the body's tracked URL), so one idempotent ensure on that url links
+      // them all. A null return (any failure: bad input, cross-org, write error)
+      // keeps the brand pending below.
+      //
+      // Mirror the url the projects TRACK, not the host they are filed under.
+      // These markets were just provisioned on `brandPrimaryUrl`; anchoring their
+      // Site — which becomes `brands.site_id` via `baseSiteId` below, and the link
+      // `linkSiteToLiveRows` writes onto the mapping rows — to `brandDomain`
+      // instead would leave a brand analysing `nba.com/kings` recorded against the
+      // root `nba.com` Site. It also stops sibling brands on one apex from
+      // colliding on `brands_base_site_unique`. Identical for a body-supplied
+      // `brandDomain` (a bare FQDN by contract, whose identity is itself); only a
+      // body-threaded `primaryUrl` carrying a subpath moves. A null value is the
+      // same malformed input the project provisioning above already rejected, and
+      // resolves to null here, keeping the brand pending.
+      let siteLinked = false;
+      let linkedSiteId = null;
+      if (allMarketsLive) {
+        linkedSiteId = await ensureMarketSite(ctx, {
+          // From the route, not the Brand entity: `brand.schema.js` deliberately
+          // does not map `organization_id`, so no accessor is generated for it and
+          // `brand.getOrganizationId?.()` is always `undefined`. `ensureMarketSite`
+          // reads that as bad input and returns null through its one early return
+          // that logs nothing — every market goes live upstream while the site
+          // link never lands, so activation answers a permanent 207 with
+          // `baseSiteId` never written and nothing warning. The route org is
+          // exact here: authorize() resolved the brand scoped to it.
+          organizationId: ctx?.params?.spaceCatId,
+          brandId: auth.brandUuid,
+          domain: brandPrimaryUrl,
+          updatedBy: 'serenity-activate',
+          log,
+        });
+        siteLinked = !!linkedSiteId && hasText(linkedSiteId);
+        // Best-effort, scope-guarded to unlinked live rows (mapping-rows.js) —
+        // never overwrites an existing link. All markets in this batch share
+        // one resolved primary URL and thus one mirror Site, so by-brand picks
+        // up every row this batch wrote (including 409/already-live ones).
+        await linkSiteToLiveRows(ctx.dataAccess, auth.brandUuid, linkedSiteId, log);
+      }
+
+      let fullySucceeded = allMarketsLive && siteLinked;
+
+      if (fullySucceeded) {
+        try {
+          // Persist status + primary site in ONE atomic write via the
+          // storage helper (the Brand model exposes no site_id setter, so a
+          // model.save() can't set it — this is why Serenity historically never
+          // populated brands.site_id). baseSiteId is the primary domain's mirror
+          // Site (linkedSiteId): a NULL->value first set, allowed on the pending
+          // brand. updateBrand's own guard rejects activating without a base site,
+          // so this is where an active Serenity brand becomes site-anchored — same
+          // authoritative brands.site_id contract as the brandalf activate path.
+          await updateBrand({
+            organizationId: ctx?.params?.spaceCatId,
+            brandId: brandUuid,
+            updates: {
+              status: 'active',
+              baseSiteId: linkedSiteId,
+            },
+            postgrestClient: ctx.dataAccess.services.postgrestClient,
+            updatedBy: 'serenity-activate',
+          });
+        } catch (saveError) {
+          fullySucceeded = false;
+          // TERMINAL: the primary domain is already another active brand's primary
+          // site (brands_base_site_unique -> 409). The markets are live upstream,
+          // but the brand CANNOT activate on this domain, so it stays pending. This
+          // is NOT the retryable divergence below — a retry re-collides forever — so
+          // surface a clean 409 naming the conflict; the operator must pick a
+          // different primary URL (mirrors the brandalf activate behavior).
+          if (saveError?.status === 409) {
+            log.info('serenity activate: SERENITY_ACTIVATE_SITE_CONFLICT — primary site already owned by another active brand; brand stays pending', {
+              brandId: auth.brandUuid,
+              semrushWorkspaceId: workspaceId,
+              siteId: linkedSiteId,
+            });
+            return createResponse(
+              {
+                brandId: auth.brandUuid,
+                status: 'pending',
+                error: 'serenityActivationSiteConflict',
+                message: 'This site is already the primary URL for another brand',
+                markets: results,
+              },
+              409,
+            );
+          }
+          // Divergence seam: markets live + site linked upstream, but persisting
+          // the 'active' flip failed transiently -> the brand stays 'pending'. A
+          // re-activate converges (idempotent). Emit a DISTINCT, greppable token so
+          // the orphaned status is alertable, then fall through to the error
+          // response (do NOT collapse to a bare mapError 5xx — that discards the
+          // per-market results telling the caller what went live).
+          log.error('serenity activate: SERENITY_ACTIVATE_SAVE_DIVERGENCE — markets live + site linked upstream but failed to persist active status', {
+            brandId: auth.brandUuid,
+            semrushWorkspaceId: workspaceId,
+            marketsLive: results.filter((r) => r.status === 201 || r.status === 409).length,
+            error: saveError?.message,
+          });
+        }
+      }
+
+      const marketsLiveCount = results.filter((r) => r.status === 201 || r.status === 409).length;
+      log.info('serenity activate: completed', {
+        brandId: auth.brandUuid,
+        semrushWorkspaceId: workspaceId,
+        fullySucceeded,
+        siteLinked,
+        marketsTotal: results.length,
+        marketsLive: marketsLiveCount,
+        marketsFailed: results.length - marketsLiveCount,
+      });
+
+      if (fullySucceeded) {
+        return createResponse(
+          {
+            brandId: auth.brandUuid,
+            status: 'active',
+            baseSiteId: linkedSiteId,
+            markets: results,
+          },
+          200,
+        );
+      }
+
+      // Not fully succeeded. The body-driven market path (reactivation / onboarding
+      // API) runs ONLY for a brand that is already ACTIVE — a pending brand activates
+      // sub-workspace-only above (LLMO-6405) and never reaches here. An already-active
+      // brand is never downgraded on a partial failure: a failed market is reported as
+      // 207 Multi-Status while the brand stays active.
+      return createResponse(
+        { brandId: auth.brandUuid, status: 'active', markets: results },
+        207,
+      );
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
+  /**
+   * POST /serenity/deactivate — decommissions the brand's sub-workspace
+   * (design flow 6): delete every project, then DISCONNECT the brand by clearing its
+   * semrush_sub_workspace_id pointer. The sub-workspace itself is never deleted — production never
+   * deletes a sub-workspace (upstream deprovisioning is Semrush CS's act) — it is left empty and
+   * unowned. There is no allocation to reclaim: a sub-workspace is created without a `resources`
+   * payload and nothing ever transfers units onto it (see docs/serenity.md).
+   * Clearing the pointer flips the brand back to flat mode, so a future
+   * activate allocates a fresh sub-workspace. Sets brands.status = 'pending'.
+   * No-op decommission (still 200) for a brand with no sub-workspace.
+   */
+  const deactivate = async (ctx) => {
+    let auth;
+    try {
+      const imsToken = await resolveSemrushImsToken(ctx);
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const brand = await loadBrand(ctx, auth.brandUuid);
+      const subworkspaceId = brand.getSemrushSubWorkspaceId?.();
+      if (hasText(subworkspaceId)) {
+        await decommissionBrandWorkspace(
+          transport,
+          subworkspaceId,
+          log,
+          auth.parentWorkspaceId ?? undefined,
+          {
+            enforceLinkedGuard:
+              (ctx.env || env)?.SERENITY_ENFORCE_LINKED_SUBWORKSPACE_GUARD === 'true',
+          },
+        );
+        // Disconnect the brand from the now-emptied, floor-lowered sub-workspace (never
+        // deleted); clearing the pointer is what returns the brand to flat mode.
+        // Invalidate the resolver cache HERE —
+        // before the save — so that even if save() throws, the resolver can't
+        // keep routing to the already-emptied sub-workspace for the full
+        // positive-TTL window (the upstream is empty the moment decommission
+        // returns).
+        brand.setSemrushSubWorkspaceId?.(null);
+        clearBrandWorkspaceCache();
+        // Every project the brand owned is gone now that decommission emptied
+        // the sub-workspace — tombstone the brand's live mapping rows
+        // (best-effort, spec §4.2). By-brand because decommission only knows
+        // the workspace id; also sweeps rows whose upstream project had
+        // already vanished before decommission ran.
+        await tombstoneAllForBrand(ctx.dataAccess, auth.brandUuid, log);
+      }
+      brand.setStatus?.('pending');
+      if (typeof brand.save === 'function') {
+        try {
+          await brand.save();
+        } catch (saveError) {
+          // Non-atomic seam: the sub-workspace was already decommissioned
+          // (emptied + allocation released) upstream, but persisting the
+          // cleared pointer / pending status failed. The state is divergent —
+          // brands.semrush_sub_workspace_id still points at the now-empty
+          // sub-workspace and status is not 'pending'. A re-activate converges
+          // (the re-grant path re-uses the emptied workspace), so this
+          // self-heals, but emit a DISTINCT, greppable token so the orphan is
+          // alertable rather than indistinguishable from an ordinary upstream
+          // error. Re-throw to mapError after recording it.
+          log.error('serenity deactivate: SERENITY_DEACTIVATE_SAVE_DIVERGENCE — decommissioned upstream but failed to persist pointer/status', {
+            brandId: auth.brandUuid,
+            decommissionedWorkspaceId: hasText(subworkspaceId) ? subworkspaceId : null,
+            error: saveError?.message,
+          });
+          throw saveError;
+        }
+      }
+      log.info('serenity deactivate: completed', {
+        brandId: auth.brandUuid,
+        decommissionedWorkspaceId: hasText(subworkspaceId) ? subworkspaceId : null,
+        status: 'pending',
+      });
+      return createResponse({ brandId: auth.brandUuid, status: 'pending' }, 200);
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
+  return {
+    listPrompts,
+    createPrompts,
+    updatePrompt,
+    bulkDeletePrompts,
+    listMarkets,
+    getMarket,
+    createMarket,
+    deleteMarket,
+    listTags,
+    createTag,
+    updateTag,
+    listModels,
+    listOrgModels,
+    listOrgLanguages,
+    updateModels,
+    activate,
+    deactivate,
+  };
+}
+
+export default SerenityController;

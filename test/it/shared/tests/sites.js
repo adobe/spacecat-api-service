@@ -14,6 +14,7 @@ import { expect } from 'chai';
 import { expectISOTimestamp } from '../helpers/assertions.js';
 import {
   ORG_1_ID,
+  ORG_1_IMS_ORG_ID,
   ORG_2_ID,
   SITE_1_ID,
   SITE_1_BASE_URL,
@@ -23,8 +24,11 @@ import {
   SITE_4_BASE_URL,
   SITE_LEGACY_LLMO_ID,
   SITE_NEW_LLMO_ID,
+  MARKET_SITE_1_ID,
+  MARKET_SITE_1_BASE_URL,
   NON_EXISTENT_SITE_ID,
   PROJECT_1_ID,
+  PROJECT_2_ID,
 } from '../seed-ids.js';
 
 // LLMO-4176 mode-resolution test sites are seeded with intentionally
@@ -73,6 +77,22 @@ function expectSiteListDto(site) {
 }
 
 /**
+ * Returns true if every element is <= the previous one (ties allowed) — used to
+ * assert `sort=<field>:desc` ordering without hardcoding the expected sequence.
+ */
+function isNonIncreasing(values) {
+  return values.every((v, i) => i === 0 || v <= values[i - 1]);
+}
+
+/**
+ * Returns true if every element is >= the previous one (ties allowed) — used to
+ * assert `sort=<field>:asc` ordering without hardcoding the expected sequence.
+ */
+function isNonDecreasing(values) {
+  return values.every((v, i) => i === 0 || v >= values[i - 1]);
+}
+
+/**
  * Shared Site endpoint tests.
  * Runs identically against both DynamoDB (v2) and PostgreSQL (v3).
  *
@@ -86,20 +106,23 @@ export default function siteTests(getHttpClient, resetData) {
     // ── Read-only assertions on baseline seed ──
 
     describe('GET /sites', () => {
-      it('admin: returns all sites (excluding default org)', async () => {
+      it('admin: returns the first page of all sites (no exclusion)', async () => {
         const http = getHttpClient();
         const res = await http.admin.get('/sites');
         expect(res.status).to.equal(200);
-        // getAll excludes DEFAULT_ORGANIZATION_ID (ORG_1) sites (SITE_1, SITE_2)
-        // Returns SITE_3 (ORG_2) + SITE_4 (ORG_3) + SITE_LEGACY_LLMO + SITE_NEW_LLMO
-        // (LLMO-4176 mode-resolution test fixtures, neither under ORG_1).
-        expect(res.body).to.be.an('array').with.lengthOf(4);
+        // No limit/cursor returns the first page (limit defaults to 100) as the
+        // `{ sites, pagination }` envelope. No org filtering is applied, so all 7
+        // seeded sites come back on the first page (under the default limit, so
+        // hasMore is false).
+        expect(res.body).to.be.an('object').that.has.all.keys('sites', 'pagination');
+        expect(res.body.sites).to.be.an('array').with.lengthOf(7);
+        expect(res.body.pagination).to.include({ hasMore: false });
         // Skip the LLMO fixtures in the DTO check — they have intentional
         // historical/future createdAt values that fail the "recent" assertion.
-        res.body
+        res.body.sites
           .filter((s) => !LLMO_FIXTURE_SITE_IDS.has(s.id))
           .forEach((s) => expectSiteListDto(s));
-        const ids = res.body.map((s) => s.id);
+        const ids = res.body.sites.map((s) => s.id);
         expect(ids).to.include(SITE_3_ID);
         expect(ids).to.include(SITE_4_ID);
       });
@@ -107,6 +130,321 @@ export default function siteTests(getHttpClient, resetData) {
       it('user: returns 403', async () => {
         const http = getHttpClient();
         const res = await http.user.get('/sites');
+        expect(res.status).to.equal(403);
+      });
+
+      // ── S2S readAll capability path ──
+      // See docs/s2s/READALL_CAPABILITY_DESIGN.md.
+
+      it('s2sConsumerReadAll: returns the first page of all sites (site:readAll)', async () => {
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadAll.get('/sites');
+        expect(res.status).to.equal(200);
+        // Same first-page envelope as the admin path: all 7 seeded sites.
+        expect(res.body).to.be.an('object').that.has.all.keys('sites', 'pagination');
+        expect(res.body.sites).to.be.an('array').with.lengthOf(7);
+        expect(res.body.pagination).to.include({ hasMore: false });
+        const ids = res.body.sites.map((s) => s.id);
+        expect(ids).to.include(SITE_3_ID);
+        expect(ids).to.include(SITE_4_ID);
+      });
+
+      it('s2sConsumerReadOnly: returns 403 (only has site:read, no site:readAll)', async () => {
+        // Layer 1 (s2sAuthWrapper) denies - GET /sites now maps to site:readAll which
+        // CONSUMER_1 does NOT hold.
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadOnly.get('/sites');
+        expect(res.status).to.equal(403);
+      });
+
+      it('s2sConsumerUnknown: returns 403 (no Consumer row for the (clientId, imsOrgId) pair)', async () => {
+        // Trust-boundary assertion: a token signed correctly by the auth-service for
+        // a (clientId, imsOrgId) pair that has no Consumer row is rejected at Layer 1
+        // by the s2sAuthWrapper - the Consumer-record lookup is the load-bearing
+        // isolation invariant per the design.
+        const http = getHttpClient();
+        const res = await http.s2sConsumerUnknown.get('/sites');
+        expect(res.status).to.equal(403);
+      });
+
+      it('admin: returns the paginated envelope and advances via cursor', async () => {
+        // Pins both the controller↔DAL contract for the `returnCursor: true` shape AND
+        // the cursor round-trip that pagination exists to provide. Seed has 7 sites
+        // total, so limit=2 MUST yield exactly 2 sites with hasMore=true on page 1.
+        const http = getHttpClient();
+        const page1 = await http.admin.get('/sites?limit=2');
+        expect(page1.status).to.equal(200);
+        expect(page1.body).to.be.an('object').that.has.all.keys('sites', 'pagination');
+        expect(page1.body.sites).to.be.an('array').with.lengthOf(2);
+        expect(page1.body.pagination).to.include({ limit: 2, hasMore: true });
+        expect(page1.body.pagination.cursor).to.be.a('string').and.not.empty;
+        page1.body.sites
+          .filter((s) => !LLMO_FIXTURE_SITE_IDS.has(s.id))
+          .forEach((s) => expectSiteListDto(s));
+
+        // Page 2 must advance — no overlap with page 1, same envelope shape.
+        const page2 = await http.admin.get(`/sites?limit=2&cursor=${encodeURIComponent(page1.body.pagination.cursor)}`);
+        expect(page2.status).to.equal(200);
+        expect(page2.body.sites).to.be.an('array').with.lengthOf(2);
+        expect(page2.body.pagination.limit).to.equal(2);
+        const page1Ids = new Set(page1.body.sites.map((s) => s.id));
+        page2.body.sites.forEach((s) => expect(page1Ids.has(s.id)).to.be.false);
+      });
+
+      // ── baseUrlContains substring search (SITES-47203, ADR-006) ──
+      // These exercise the REAL PostgREST `ilike` path end-to-end (not a stub):
+      // the where-builder, deterministic ordering, N+1 hasMore, offset paging, and
+      // DB-level wildcard escaping against actual seeded rows.
+      it('admin: baseUrlContains returns only matching sites in the search envelope with the echo', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?baseUrlContains=semrush');
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('object').that.has.all.keys('sites', 'pagination');
+        expect(res.body.pagination).to.include({ hasMore: false, baseUrlContains: 'semrush' });
+        expect(res.body.sites).to.be.an('array').with.lengthOf(1);
+        expect(res.body.sites[0].baseURL).to.equal(MARKET_SITE_1_BASE_URL);
+        expectSiteListDto(res.body.sites[0]);
+      });
+
+      it('admin: baseUrlContains honors limit and reports hasMore (N+1 against real rows)', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?baseUrlContains=example.com&limit=2');
+        expect(res.status).to.equal(200);
+        expect(res.body.sites).to.be.an('array').with.lengthOf(2);
+        expect(res.body.pagination).to.include({ limit: 2, hasMore: true, baseUrlContains: 'example.com' });
+        // every returned row genuinely matches the substring (proves real ilike filtering)
+        res.body.sites.forEach((s) => expect(s.baseURL.toLowerCase()).to.include('example.com'));
+      });
+
+      it('admin: baseUrlContains pages by offset and returns a non-overlapping page', async () => {
+        const http = getHttpClient();
+        const page1 = await http.admin.get('/sites?baseUrlContains=example.com&limit=2&offset=0');
+        expect(page1.status).to.equal(200);
+        expect(page1.body.sites).to.be.an('array').with.lengthOf(2);
+        expect(page1.body.pagination).to.include({
+          limit: 2, offset: 0, hasMore: true, baseUrlContains: 'example.com',
+        });
+
+        const page2 = await http.admin.get('/sites?baseUrlContains=example.com&limit=2&offset=2');
+        expect(page2.status).to.equal(200);
+        expect(page2.body.pagination).to.include({
+          limit: 2, offset: 2, baseUrlContains: 'example.com',
+        });
+        // The two offset pages must not overlap (proves offset actually advanced).
+        const page1Ids = new Set(page1.body.sites.map((s) => s.id));
+        page2.body.sites.forEach((s) => expect(page1Ids.has(s.id)).to.be.false);
+      });
+
+      it('admin: baseUrlContains escapes LIKE wildcards so user % cannot widen the match', async () => {
+        // '%example' is escaped to a literal; no base_url literally contains "%example",
+        // so the result is empty. If escaping were broken it would behave like
+        // '%%example%' and match every *.example.com site.
+        const http = getHttpClient();
+        const res = await http.admin.get(`/sites?baseUrlContains=${encodeURIComponent('%example')}`);
+        expect(res.status).to.equal(200);
+        expect(res.body.sites).to.be.an('array').with.lengthOf(0);
+        expect(res.body.pagination).to.include({ hasMore: false });
+      });
+
+      it('admin: baseUrlContains shorter than 3 chars is rejected with 400', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?baseUrlContains=ab');
+        expect(res.status).to.equal(400);
+      });
+
+      it('admin: baseUrlContains with a negative offset is rejected with 400', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?baseUrlContains=example.com&offset=-1');
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: baseUrlContains still returns 403 (authz parity with the list endpoint)', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get('/sites?baseUrlContains=semrush');
+        expect(res.status).to.equal(403);
+      });
+
+      // ── deliveryType / isLive / sort (server-side filter/sort mode) ──
+      // Like baseUrlContains, these enter the offset-paginated envelope and exercise
+      // the REAL PostgREST `eq`/`and`/`order` path end-to-end: exact-match facet
+      // filtering, AND-combination across facets, and real ORDER BY for sort —
+      // against actual seeded rows (not a stub).
+      it('admin: deliveryType filters to only matching sites and echoes the value', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?deliveryType=aem_edge');
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('object').that.has.all.keys('sites', 'pagination');
+        expect(res.body.pagination).to.include({ hasMore: false, deliveryType: 'aem_edge' });
+        // Seed has 5 aem_edge sites (SITE_1, SITE_3, SITE_4, and the two LLMO
+        // fixtures); the rest are aem_cs (1, site2) and other (1, the market mirror).
+        expect(res.body.sites).to.be.an('array').with.lengthOf(5);
+        res.body.sites.forEach((s) => expect(s.deliveryType).to.equal('aem_edge'));
+      });
+
+      it('admin: deliveryType + baseUrlContains combine with AND, not OR', async () => {
+        const http = getHttpClient();
+        const res = await http
+          .admin.get('/sites?deliveryType=aem_edge&baseUrlContains=example.com');
+        expect(res.status).to.equal(200);
+        expect(res.body.pagination).to.include({
+          hasMore: false, deliveryType: 'aem_edge', baseUrlContains: 'example.com',
+        });
+        // All 5 aem_edge sites happen to be *.example.com, so AND yields the same 5
+        // as deliveryType alone; if the where-builder ever regressed to OR this would
+        // instead be 6 (also picking up the aem_cs site2.example.com).
+        expect(res.body.sites).to.be.an('array').with.lengthOf(5);
+        res.body.sites.forEach((s) => {
+          expect(s.deliveryType).to.equal('aem_edge');
+          expect(s.baseURL.toLowerCase()).to.include('example.com');
+        });
+      });
+
+      it('admin: isLive=true returns only live sites', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?isLive=true');
+        expect(res.status).to.equal(200);
+        expect(res.body.pagination).to.include({ hasMore: false, isLive: true });
+        // 6 of the 7 seeded sites are live; only site2.example.com is not.
+        expect(res.body.sites).to.be.an('array').with.lengthOf(6);
+        res.body.sites.forEach((s) => expect(s.isLive).to.equal(true));
+      });
+
+      it('admin: isLive=false returns only non-live sites', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?isLive=false');
+        expect(res.status).to.equal(200);
+        expect(res.body.pagination).to.include({ hasMore: false, isLive: false });
+        expect(res.body.sites).to.be.an('array').with.lengthOf(1);
+        res.body.sites.forEach((s) => expect(s.isLive).to.equal(false));
+      });
+
+      it('admin: sort=updatedAt:desc orders sites by non-increasing updatedAt', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?sort=updatedAt:desc');
+        expect(res.status).to.equal(200);
+        expect(res.body.pagination).to.include({ hasMore: false, sort: 'updatedAt:desc' });
+        expect(res.body.sites).to.be.an('array').with.lengthOf(7);
+        const updatedAts = res.body.sites.map((s) => new Date(s.updatedAt).getTime());
+        expect(isNonIncreasing(updatedAts)).to.equal(true);
+      });
+
+      it('admin: sort=baseURL:asc orders sites by non-decreasing baseURL', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?sort=baseURL:asc');
+        expect(res.status).to.equal(200);
+        expect(res.body.pagination).to.include({ hasMore: false, sort: 'baseURL:asc' });
+        expect(res.body.sites).to.be.an('array').with.lengthOf(7);
+        const baseUrls = res.body.sites.map((s) => s.baseURL);
+        expect(isNonDecreasing(baseUrls)).to.equal(true);
+      });
+
+      it('admin: deliveryType is rejected with 400 when not a recognized value', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?deliveryType=nope');
+        expect(res.status).to.equal(400);
+      });
+
+      it('admin: sort is rejected with 400 when the field is not recognized', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?sort=bogus:desc');
+        expect(res.status).to.equal(400);
+      });
+
+      it('admin: isLive is rejected with 400 when not "true" or "false"', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?isLive=maybe');
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: deliveryType still returns 403 (authz parity with the list endpoint)', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get('/sites?deliveryType=aem_edge');
+        expect(res.status).to.equal(403);
+      });
+
+      // ── tier / productCode (server-side entitlement-enrollment filter) ──
+      // Exercises the REAL entitlement/enrollment join end-to-end (not a stub), via
+      // Site.allByEnrollmentFiltered, against actual seeded rows. Seed enrollments:
+      // ENTITLEMENT_1 (LLMO, FREE_TRIAL, ORG_1) -> SITE_ENROLLMENT_1 -> SITE_1 only;
+      // ENTITLEMENT_3 (LLMO, PAID, ORG_3) -> SITE_ENROLLMENT_2/3 -> SITE_1 and SITE_4;
+      // ENTITLEMENT_2 (ASO, PAID, ORG_1) has no site enrollment at all. `GET /sites`
+      // is already a cross-tenant admin/S2S-readAll view with no org-scoping (see the
+      // "no exclusion" test above, which returns sites from ORG_1/2/3 alike), so tier/
+      // productCode composing across orgs here does not widen that existing scope.
+      it('admin: tier=FREE_TRIAL returns only the site enrolled at that tier and echoes tier', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?tier=FREE_TRIAL');
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('object').that.has.all.keys('sites', 'pagination');
+        expect(res.body.pagination).to.include({ hasMore: false, tier: 'FREE_TRIAL' });
+        expect(res.body.sites).to.be.an('array').with.lengthOf(1);
+        expect(res.body.sites[0].id).to.equal(SITE_1_ID);
+        expectSiteListDto(res.body.sites[0]);
+      });
+
+      it('admin: tier=PAID returns every site enrolled at that tier across orgs and echoes tier', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?tier=PAID');
+        expect(res.status).to.equal(200);
+        expect(res.body.pagination).to.include({ hasMore: false, tier: 'PAID' });
+        // ENTITLEMENT_3 (LLMO, PAID) is enrolled by SITE_1 (ORG_1) and SITE_4 (ORG_3);
+        // ENTITLEMENT_2 (ASO, PAID) has no enrollment and contributes nothing.
+        const ids = res.body.sites.map((s) => s.id);
+        expect(ids.sort()).to.deep.equal([SITE_1_ID, SITE_4_ID].sort());
+      });
+
+      it('admin: tier + baseUrlContains compose with AND, narrowing to the matching site', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?tier=PAID&baseUrlContains=delegate');
+        expect(res.status).to.equal(200);
+        expect(res.body.pagination).to.include({
+          hasMore: false, tier: 'PAID', baseUrlContains: 'delegate',
+        });
+        // tier=PAID alone yields {SITE_1, SITE_4}; only SITE_4's baseURL
+        // (site4-delegate.example.com) contains "delegate" — if the where-builder ever
+        // regressed to OR this would instead return both sites.
+        expect(res.body.sites).to.be.an('array').with.lengthOf(1);
+        expect(res.body.sites[0].id).to.equal(SITE_4_ID);
+      });
+
+      it('admin: tier + productCode compose, narrowing to sites enrolled under that product', async () => {
+        const http = getHttpClient();
+        // ENTITLEMENT_2 (ASO, PAID) has no site enrollment, unlike ENTITLEMENT_3
+        // (LLMO, PAID) — proves productCode genuinely narrows the join rather than
+        // being ignored once tier is already present.
+        const res = await http.admin.get('/sites?tier=PAID&productCode=ASO');
+        expect(res.status).to.equal(200);
+        expect(res.body.pagination).to.include({ hasMore: false, tier: 'PAID', productCode: 'ASO' });
+        expect(res.body.sites).to.be.an('array').that.is.empty;
+      });
+
+      it('admin: tier=PRE_ONBOARD is accepted (internal-only, not customer-visible) since this filter is already admin-gated', async () => {
+        const http = getHttpClient();
+        // Mirrors the sibling GET /sites/by-tier/PRE_ONBOARD IT test: no PRE_ONBOARD
+        // entitlement is seeded above, so this only asserts the value is ACCEPTED
+        // (200, echoed in pagination) rather than rejected with 400, not that any
+        // specific site is returned.
+        const res = await http.admin.get('/sites?tier=PRE_ONBOARD');
+        expect(res.status).to.equal(200);
+        expect(res.body.pagination).to.include({ hasMore: false, tier: 'PRE_ONBOARD' });
+        expect(res.body.sites).to.be.an('array');
+      });
+
+      it('admin: tier is rejected with 400 when not a recognized value', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?tier=BOGUS_TIER');
+        expect(res.status).to.equal(400);
+      });
+
+      it('admin: productCode is rejected with 400 when not a recognized value', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites?productCode=BOGUS_PRODUCT');
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: tier still returns 403 (authz parity with the list endpoint)', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get('/sites?tier=PAID');
         expect(res.status).to.equal(403);
       });
     });
@@ -186,6 +524,87 @@ export default function siteTests(getHttpClient, resetData) {
         const res = await http.delegatedUser.get(`/sites/${SITE_3_ID}`);
         expect(res.status).to.equal(403);
       });
+
+      // ── Read-only admin smoke tests ──
+      // readOnlyAdminWrapper is fail-closed: without a LaunchDarkly SDK key in the
+      // IT environment the feature-flag evaluation returns false, so ALL routes return
+      // 403 regardless of HTTP method. These tests verify:
+      //   1. The token is correctly parsed as a read-only admin identity.
+      //   2. The readOnlyAdminWrapper is wired and rejects the request (fail-closed).
+      // In an environment with the LD flag enabled, GET routes would return 200 and
+      // POST/mutating routes would return 403.
+      it('readOnlyAdmin: returns 403 for GET /sites/:siteId (fail-closed without LD flag)', async () => {
+        const http = getHttpClient();
+        const res = await http.readOnlyAdmin.get(`/sites/${SITE_1_ID}`);
+        expect(res.status).to.equal(403);
+      });
+
+      it('readOnlyAdmin: returns 403 for POST /sites (fail-closed without LD flag)', async () => {
+        const http = getHttpClient();
+        const res = await http.readOnlyAdmin.post('/sites', { baseURL: 'https://ro-admin-test.example.com' });
+        expect(res.status).to.equal(403);
+      });
+    });
+
+    describe('GET /sites/:siteId/identity', () => {
+      // readAll-class single-site route: returns only the routing identity and resolves
+      // imsOrgId via the site->organization join. Gated on site:readAll, NOT site:read,
+      // so it is cross-tenant and there is no hasAccess(site) per-entity check.
+      // See docs/s2s/READALL_CAPABILITY_DESIGN.md.
+
+      it('admin: returns the routing identity with the resolved imsOrgId', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get(`/sites/${SITE_1_ID}/identity`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.deep.equal({
+          siteId: SITE_1_ID,
+          organizationId: ORG_1_ID,
+          imsOrgId: ORG_1_IMS_ORG_ID,
+          baseURL: SITE_1_BASE_URL,
+          deliveryType: 'aem_edge',
+        });
+      });
+
+      it('s2sConsumerReadAll: returns the identity for any site (site:readAll, cross-tenant)', async () => {
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadAll.get(`/sites/${SITE_1_ID}/identity`);
+        expect(res.status).to.equal(200);
+        // Full-shape assertion (like the admin case) so an accidental extra field
+        // leaking through the readAll path is caught, not just siteId/imsOrgId.
+        expect(res.body).to.deep.equal({
+          siteId: SITE_1_ID,
+          organizationId: ORG_1_ID,
+          imsOrgId: ORG_1_IMS_ORG_ID,
+          baseURL: SITE_1_BASE_URL,
+          deliveryType: 'aem_edge',
+        });
+      });
+
+      it('s2sConsumerReadOnly: returns 403 (only has site:read, no site:readAll)', async () => {
+        // Layer 1 (s2sAuthWrapper) denies — the route maps to site:readAll which
+        // CONSUMER_1 does NOT hold.
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadOnly.get(`/sites/${SITE_1_ID}/identity`);
+        expect(res.status).to.equal(403);
+      });
+
+      it('s2sConsumerUnknown: returns 403 (no Consumer row for the (clientId, imsOrgId) pair)', async () => {
+        const http = getHttpClient();
+        const res = await http.s2sConsumerUnknown.get(`/sites/${SITE_1_ID}/identity`);
+        expect(res.status).to.equal(403);
+      });
+
+      it('admin: returns 404 for a non-existent site', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get(`/sites/${NON_EXISTENT_SITE_ID}/identity`);
+        expect(res.status).to.equal(404);
+      });
+
+      it('returns 400 for an invalid UUID', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites/not-a-uuid/identity');
+        expect(res.status).to.equal(400);
+      });
     });
 
     describe('GET /sites/by-base-url/:baseURL', () => {
@@ -233,9 +652,20 @@ export default function siteTests(getHttpClient, resetData) {
         });
       });
 
-      it('admin: returns empty array for unmatched delivery type', async () => {
+      it('admin: returns the Serenity market-mirror site for delivery type other', async () => {
         const http = getHttpClient();
         const res = await http.admin.get('/sites/by-delivery-type/other');
+        expect(res.status).to.equal(200);
+        // MARKET_SITE_1 (Semrush market mirror) is the only delivery_type=other site.
+        expect(res.body).to.be.an('array').with.lengthOf(1);
+        expect(res.body[0].id).to.equal(MARKET_SITE_1_ID);
+        expect(res.body[0].baseURL).to.equal(MARKET_SITE_1_BASE_URL);
+        expect(res.body[0].deliveryType).to.equal('other');
+      });
+
+      it('admin: returns empty array for unmatched delivery type', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites/by-delivery-type/aem_ams');
         expect(res.status).to.equal(200);
         expect(res.body).to.be.an('array').with.lengthOf(0);
       });
@@ -264,6 +694,67 @@ export default function siteTests(getHttpClient, resetData) {
         res.body.forEach((site) => {
           expect(site.deliveryType).to.equal('aem_edge');
         });
+      });
+    });
+
+    describe('GET /sites/by-tier/:tier', () => {
+      it('admin: returns sites enrolled at the given tier', async () => {
+        const http = getHttpClient();
+        // SITE_1 (ee222222 → dd333333) and SITE_4 (ee333333 → dd333333) are
+        // enrolled under ORG_3's LLMO PAID entitlement.
+        const res = await http.admin.get('/sites/by-tier/PAID?productCode=LLMO');
+        expect(res.status).to.equal(200);
+        expect(res.body.sites).to.be.an('array').with.lengthOf(2);
+        const ids = res.body.sites.map((site) => site.id);
+        expect(ids).to.include.members([SITE_1_ID, SITE_4_ID]);
+      });
+
+      it('admin: narrows by productCode', async () => {
+        const http = getHttpClient();
+        // SITE_1 (ee111111 → dd111111) is enrolled under ORG_1's LLMO FREE_TRIAL entitlement.
+        const res = await http.admin.get('/sites/by-tier/FREE_TRIAL?productCode=LLMO');
+        expect(res.status).to.equal(200);
+        expect(res.body.sites).to.be.an('array').with.lengthOf(1);
+        expect(res.body.sites[0].id).to.equal(SITE_1_ID);
+      });
+
+      it('admin: returns empty list for a tier with no enrollments', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites/by-tier/PLG?productCode=LLMO');
+        expect(res.status).to.equal(200);
+        expect(res.body.sites).to.be.an('array').with.lengthOf(0);
+      });
+
+      it('admin: returns 400 for an invalid tier', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites/by-tier/NOT_A_TIER?productCode=LLMO');
+        expect(res.status).to.equal(400);
+      });
+
+      it('admin: accepts PRE_ONBOARD (internal-only tier, not customer-visible)', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites/by-tier/PRE_ONBOARD?productCode=LLMO');
+        expect(res.status).to.equal(200);
+        expect(res.body.sites).to.be.an('array');
+      });
+
+      it('user: returns 403', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get('/sites/by-tier/PAID?productCode=LLMO');
+        expect(res.status).to.equal(403);
+      });
+
+      it('admin: projects sites to the requested fields', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites/by-tier/PAID?productCode=LLMO&fields=baseURL');
+        expect(res.status).to.equal(200);
+        expect(Object.keys(res.body.sites[0]).sort()).to.deep.equal(['baseURL', 'id']);
+      });
+
+      it('admin: returns 400 when fields matches no known field', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites/by-tier/PAID?productCode=LLMO&fields=nope');
+        expect(res.status).to.equal(400);
       });
     });
 
@@ -298,6 +789,67 @@ export default function siteTests(getHttpClient, resetData) {
           baseURL: 'https://user-attempt.example.com',
         });
         expect(res.status).to.equal(403);
+      });
+
+      it('admin: returns 400 for invalid x-product header', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.post(
+          '/sites',
+          { baseURL: 'https://invalid-product-header.example.com' },
+          { 'x-product': 'NOT_A_PRODUCT' },
+        );
+        expect(res.status).to.equal(400);
+        expect(res.body.message).to.match(/Unsupported product code/);
+      });
+
+      it('admin: x-product enrolls new site under existing ASO PAID entitlement', async () => {
+        const http = getHttpClient();
+        const baseURL = 'https://aso-trial-provisioned.example.com';
+        const createRes = await http.admin.post('/sites', { baseURL }, { 'x-product': 'ASO' });
+        expect(createRes.status).to.equal(201);
+        expectSiteDto(createRes.body);
+
+        const listRes = await http.admin.get(
+          `/organizations/${ORG_1_ID}/sites`,
+          { 'x-product': 'ASO' },
+        );
+        expect(listRes.status).to.equal(200);
+        const siteIds = listRes.body.map((s) => s.id);
+        expect(siteIds).to.include(createRes.body.id);
+
+        const entitlementsRes = await http.admin.get(`/organizations/${ORG_1_ID}/entitlements`);
+        const asoEntitlement = entitlementsRes.body.find((e) => e.productCode === 'ASO');
+        expect(asoEntitlement.tier).to.equal('PAID');
+      });
+
+      it('admin: without x-product header does not enroll site for ASO listing', async () => {
+        const http = getHttpClient();
+        const baseURL = 'https://no-write-time-product.example.com';
+        const createRes = await http.admin.post(
+          '/sites',
+          { baseURL },
+          { 'x-product': null },
+        );
+        expect(createRes.status).to.equal(201);
+
+        const listRes = await http.admin.get(
+          `/organizations/${ORG_1_ID}/sites`,
+          { 'x-product': 'ASO' },
+        );
+        expect(listRes.status).to.equal(200);
+        const siteIds = listRes.body.map((s) => s.id);
+        expect(siteIds).to.not.include(createRes.body.id);
+      });
+
+      it('admin: idempotent re-POST with x-product returns 200', async () => {
+        const http = getHttpClient();
+        const baseURL = 'https://idempotent-x-product.example.com';
+        const first = await http.admin.post('/sites', { baseURL }, { 'x-product': 'ASO' });
+        expect(first.status).to.equal(201);
+
+        const second = await http.admin.post('/sites', { baseURL }, { 'x-product': 'ASO' });
+        expect(second.status).to.equal(200);
+        expect(second.body.id).to.equal(first.body.id);
       });
     });
 
@@ -359,6 +911,295 @@ export default function siteTests(getHttpClient, resetData) {
           organizationId: ORG_2_ID,
         });
         expect(res.status).to.equal(403);
+      });
+
+      it('user: returns 403 when trying to change projectId', async () => {
+        // Re-parenting a site to a project in another org via this endpoint is
+        // disallowed (projects are org-scoped) — SITES-46200. SITE_1 belongs to
+        // PROJECT_1_ID, so patching it to PROJECT_2_ID must be rejected.
+        const http = getHttpClient();
+        const res = await http.user.patch(`/sites/${SITE_1_ID}`, {
+          projectId: PROJECT_2_ID,
+        });
+        expect(res.status).to.equal(403);
+      });
+
+      it('propagates a same-domain baseURL change for a site attached to a Semrush-managed brand (serenity-docs#349)', async () => {
+        // SITE_1 is the primary site of BRAND_1, which is Semrush-managed
+        // (semrush_workspace_id set in the seed; mirrored onto semrush_sub_workspace_id
+        // by the brands_sync_semrush_workspace_id DB trigger, so this brand resolves as
+        // a sub-workspace brand exactly like a serenity-first one). A same-registrable-
+        // domain baseURL change (site1.example.com -> semrush-managed-rename.example.com,
+        // both under example.com) is now accepted and propagated instead of refused —
+        // BRAND_1 has no `brand_to_semrush_projects` mapping row in this seed, so
+        // propagation resolves to zero mapped projects and no-ops (no Semrush mock call),
+        // then persists. Admin is used so the only thing gating the write is the
+        // Semrush-attachment/domain logic itself (not access control).
+        const http = getHttpClient();
+        const newBaseUrl = 'https://semrush-managed-rename.example.com';
+        const res = await http.admin.patch(`/sites/${SITE_1_ID}`, {
+          baseURL: newBaseUrl,
+        });
+        expect(res.status).to.equal(200);
+        expect(res.body.baseURL).to.equal(newBaseUrl);
+
+        const after = await http.admin.get(`/sites/${SITE_1_ID}`);
+        expect(after.status).to.equal(200);
+        expect(after.body.baseURL).to.equal(newBaseUrl);
+      });
+
+      it('propagates a cross-registrable-domain baseURL change for a Semrush-managed brand\'s site (serenity-docs#349)', async () => {
+        // Same brand-attachment as above, but the new URL is on a DIFFERENT registrable
+        // domain (example.org vs example.com). Live-verified against
+        // adobe-hackathon.semrush.com (2026-08-18) that a project's `domain` PATCH is
+        // accepted, persists, and a subsequent publish settles cleanly with no project
+        // recreation -- so this is no longer refused, matching the same-domain case.
+        const http = getHttpClient();
+        const newBaseUrl = 'https://cross-domain-rename.example.org';
+
+        const res = await http.admin.patch(`/sites/${SITE_1_ID}`, {
+          baseURL: newBaseUrl,
+        });
+        expect(res.status).to.equal(200);
+        expect(res.body.baseURL).to.equal(newBaseUrl);
+
+        const after = await http.admin.get(`/sites/${SITE_1_ID}`);
+        expect(after.status).to.equal(200);
+        expect(after.body.baseURL).to.equal(newBaseUrl);
+      });
+
+      it('returns 403 when changing the baseURL of a Semrush market-mirror site (linked via brand_sites)', async () => {
+        // MARKET_SITE_1 is linked to BRAND_1 via a brand_sites row (type='serenity'),
+        // not brands.site_id -- a market mirror, not the brand's own primary site.
+        // Market-mirror sites stay immutable regardless of domain (serenity-docs#349
+        // workstream 4 -- whether/how a mirror should follow a rename is still an open,
+        // unresolved decision, so this pass leaves them blocked).
+        const http = getHttpClient();
+        const res = await http.admin.patch(`/sites/${MARKET_SITE_1_ID}`, {
+          baseURL: 'https://semrush-market-renamed.example.fr',
+        });
+        expect(res.status).to.equal(403);
+
+        const after = await http.admin.get(`/sites/${MARKET_SITE_1_ID}`);
+        expect(after.status).to.equal(200);
+        expect(after.body.baseURL).to.equal(MARKET_SITE_1_BASE_URL);
+      });
+
+      it('deep-merges hlxConfig on a partial patch, preserving content.source (SITES-49362)', async () => {
+        const http = getHttpClient();
+        // Seed a crosswalk-shaped hlxConfig (content.source.type=markup).
+        const seed = await http.user.patch(`/sites/${testSiteId}`, {
+          hlxConfig: {
+            content: { source: { type: 'markup', url: 'https://author.example/bin/franklin.delivery/o/s/main' } },
+            rso: {
+              owner: 'o', site: 's', ref: 'main', tld: 'aem.live',
+            },
+          },
+        });
+        expect(seed.status).to.equal(200);
+        expect(seed.body.hlxConfig.content.source.type).to.equal('markup');
+
+        // A partial patch touching only rso must NOT drop the sibling content.source.
+        const res = await http.user.patch(`/sites/${testSiteId}`, {
+          hlxConfig: {
+            rso: {
+              owner: 'o', site: 's2', ref: 'main', tld: 'aem.live',
+            },
+          },
+        });
+        expect(res.status).to.equal(200);
+        expect(res.body.hlxConfig.content.source).to.deep.equal({
+          type: 'markup',
+          url: 'https://author.example/bin/franklin.delivery/o/s/main',
+        });
+        expect(res.body.hlxConfig.rso.site).to.equal('s2');
+      });
+    });
+
+    describe('PATCH /sites/:siteId/config/scraper', () => {
+      let scraperSiteId;
+
+      before(async () => {
+        await resetData();
+        // Use a test-scoped site under ORG_1 so `user` has access via the
+        // org-membership rule. Avoids mutating baseline seed entities so
+        // failures here don't bleed into other tests.
+        const http = getHttpClient();
+        const res = await http.admin.post('/sites', {
+          baseURL: 'https://scraper-config-test-scoped.example.com',
+        });
+        expect(res.status).to.equal(201);
+        scraperSiteId = res.body.id;
+      });
+
+      // Cases that exercise the shared `siteConfig.updateScraperConfig(...)`
+      // are skipped until the `@adobe/spacecat-shared-data-access` dep is
+      // bumped to a version that includes the new getter/setter (introduced
+      // in adobe/spacecat-shared#1618). With the currently-pinned shared
+      // version the controller call resolves to `undefined`, throws a
+      // TypeError, and the catch block re-throws it as 500. The other
+      // cases below — 403, 404, missing-body, malformed-UUID — short-circuit
+      // before reaching the shared method and pass on the current dep pin.
+      describe('cases requiring @adobe/spacecat-shared-data-access >= 3.71.0', () => {
+        it('user: persists scraperConfig.headers and returns the narrow shape', async () => {
+          const http = getHttpClient();
+          const payload = {
+            scraperConfig: {
+              headers: { 'Accept-Language': 'en-US,en;q=0.9' },
+            },
+          };
+          const res = await http.user.patch(
+            `/sites/${scraperSiteId}/config/scraper`,
+            payload,
+          );
+          expect(res.status).to.equal(200);
+          // Locks the contract: response carries only siteId + scraperConfig,
+          // not the full site (which may include unrelated secrets).
+          expect(res.body).to.have.all.keys('siteId', 'scraperConfig');
+          expect(res.body.siteId).to.equal(scraperSiteId);
+          expect(res.body.scraperConfig).to.deep.equal(payload.scraperConfig);
+
+          // Verify it actually persisted (not just echoed by the response).
+          const reread = await http.user.get(`/sites/${scraperSiteId}`);
+          expect(reread.status).to.equal(200);
+          expect(reread.body.config.scraperConfig).to.deep.equal(payload.scraperConfig);
+        });
+
+        it('user: replace semantics — partial body fully replaces stored value', async () => {
+          const http = getHttpClient();
+          // Seed an initial config first.
+          await http.user.patch(`/sites/${scraperSiteId}/config/scraper`, {
+            scraperConfig: { headers: { 'Accept-Language': 'fr-FR' } },
+          });
+          // PATCH with empty object should clear it.
+          const res = await http.user.patch(`/sites/${scraperSiteId}/config/scraper`, {
+            scraperConfig: {},
+          });
+          expect(res.status).to.equal(200);
+          expect(res.body.scraperConfig).to.deep.equal({});
+        });
+
+        it('user: rejects reserved header names', async () => {
+          const http = getHttpClient();
+          const res = await http.user.patch(`/sites/${scraperSiteId}/config/scraper`, {
+            scraperConfig: { headers: { Authorization: 'Bearer x' } },
+          });
+          expect(res.status).to.equal(400);
+          expect(res.body.message).to.match(/reserved scraper header/i);
+        });
+
+        it('user: rejects CRLF in header values', async () => {
+          const http = getHttpClient();
+          const res = await http.user.patch(`/sites/${scraperSiteId}/config/scraper`, {
+            scraperConfig: { headers: { 'X-Foo': 'a\r\nX-Bad: y' } },
+          });
+          expect(res.status).to.equal(400);
+        });
+      });
+
+      it('user: returns 403 for a denied site', async () => {
+        const http = getHttpClient();
+        const res = await http.user.patch(`/sites/${SITE_3_ID}/config/scraper`, {
+          scraperConfig: { headers: { 'Accept-Language': 'en-US' } },
+        });
+        expect(res.status).to.equal(403);
+      });
+
+      it('user: returns 404 for a non-existent site', async () => {
+        const http = getHttpClient();
+        const res = await http.user.patch(`/sites/${NON_EXISTENT_SITE_ID}/config/scraper`, {
+          scraperConfig: { headers: { 'Accept-Language': 'en-US' } },
+        });
+        expect(res.status).to.equal(404);
+      });
+
+      it('admin: returns 400 when scraperConfig is missing from the body', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.patch(
+          `/sites/${scraperSiteId}/config/scraper`,
+          {},
+        );
+        expect(res.status).to.equal(400);
+        expect(res.body.message).to.equal('Scraper config required');
+      });
+
+      it('admin: returns 400 when site ID is malformed', async () => {
+        // The framework's path-param middleware rejects malformed UUIDs in
+        // `src/index.js` via `isValidUUIDV4()` before the controller runs,
+        // so the message comes from the framework (not the controller's
+        // own `Invalid site ID` string, which is only reachable for the
+        // body-only validation cases).
+        const http = getHttpClient();
+        const res = await http.admin.patch('/sites/not-a-uuid/config/scraper', {
+          scraperConfig: { headers: { 'Accept-Language': 'en-US' } },
+        });
+        expect(res.status).to.equal(400);
+        expect(res.body.message).to.match(/site id is invalid/i);
+      });
+    });
+
+    describe('GET /sites/:siteId/config/scraper', () => {
+      let scraperSiteId;
+
+      before(async () => {
+        await resetData();
+        const http = getHttpClient();
+        const res = await http.admin.post('/sites', {
+          baseURL: 'https://scraper-config-get-test-scoped.example.com',
+        });
+        expect(res.status).to.equal(201);
+        scraperSiteId = res.body.id;
+      });
+
+      it('user: returns empty scraperConfig when none persisted', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${scraperSiteId}/config/scraper`);
+        expect(res.status).to.equal(200);
+        // Locks the "no missing case" contract — GET always returns an object,
+        // even before any PATCH has been applied.
+        expect(res.body).to.have.all.keys('siteId', 'scraperConfig');
+        expect(res.body.siteId).to.equal(scraperSiteId);
+        expect(res.body.scraperConfig).to.deep.equal({});
+      });
+
+      it('user: returns persisted scraperConfig after PATCH', async () => {
+        const http = getHttpClient();
+        const payload = {
+          scraperConfig: {
+            headers: { 'Accept-Language': 'en-US,en;q=0.9' },
+          },
+        };
+        const patchRes = await http.user.patch(
+          `/sites/${scraperSiteId}/config/scraper`,
+          payload,
+        );
+        expect(patchRes.status).to.equal(200);
+
+        const getRes = await http.user.get(`/sites/${scraperSiteId}/config/scraper`);
+        expect(getRes.status).to.equal(200);
+        // GET response shape must equal what PATCH returned — same envelope,
+        // same body. If a writer-then-reader sees a different shape, callers
+        // would have to handle two formats. Lock equality here.
+        expect(getRes.body).to.deep.equal(patchRes.body);
+      });
+
+      it('user: returns 403 for a denied site', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${SITE_3_ID}/config/scraper`);
+        expect(res.status).to.equal(403);
+      });
+
+      it('user: returns 404 for a non-existent site', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${NON_EXISTENT_SITE_ID}/config/scraper`);
+        expect(res.status).to.equal(404);
+      });
+
+      it('admin: returns 400 when site ID is malformed', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites/not-a-uuid/config/scraper');
+        expect(res.status).to.equal(400);
+        expect(res.body.message).to.match(/site id is invalid/i);
       });
     });
 

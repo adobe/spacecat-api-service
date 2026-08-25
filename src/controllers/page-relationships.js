@@ -30,6 +30,8 @@ import {
   fetchRelationships,
   buildCheckPath,
 } from '../support/aem-content-api.js';
+import { getHeader } from '../support/http-headers.js';
+import { X_PROMISE_TOKEN_HEADER } from '../utils/constants.js';
 
 const MAX_PAGES = 50;
 const EMPTY_RELATIONSHIPS_RESPONSE = {
@@ -46,19 +48,25 @@ function chunkPages(pages, chunkSize) {
   return chunks;
 }
 
-function normalizePageUrlForLookup(pageUrl, siteBaseURL) {
+/**
+ * Normalize a suggestion URL to a pathname suitable for AEM page resolution.
+ *
+ * AEM resolves pages by path, not by host, so the suggestion URL's host
+ * (which may differ from the site's canonical baseURL, e.g. `www.example.com`
+ * vs `example.com`, or a CDN/staging host) is irrelevant. Always reduce
+ * absolute URLs to their pathname; pass relative paths through unchanged.
+ *
+ * Prior behavior returned the full URL on host mismatch, which downstream
+ * `resolvePageIds` would concatenate with the site base URL producing
+ * malformed URLs like `https://example.com/https://www.example.com/page`.
+ */
+function normalizePageUrlForLookup(pageUrl) {
   const trimmed = pageUrl.trim();
   if (!/^https?:\/\//i.test(trimmed)) {
     return trimmed;
   }
-
   try {
-    const siteUrl = new URL(siteBaseURL);
-    const suggestionUrl = new URL(trimmed);
-    if (suggestionUrl.host !== siteUrl.host) {
-      return trimmed;
-    }
-    return suggestionUrl.pathname || '/';
+    return new URL(trimmed).pathname || '/';
   } catch (e) {
     return trimmed;
   }
@@ -187,7 +195,7 @@ function PageRelationshipsController(ctx) {
     for (const pageBatch of pageChunks) {
       const normalizedBatch = pageBatch.map((pageSpec) => ({
         ...pageSpec,
-        normalizedPageUrl: normalizePageUrlForLookup(pageSpec.pageUrl, baseURL),
+        normalizedPageUrl: normalizePageUrlForLookup(pageSpec.pageUrl),
       }));
       const pageUrls = normalizedBatch.map((pageSpec) => pageSpec.normalizedPageUrl);
       // eslint-disable-next-line no-await-in-loop
@@ -298,7 +306,22 @@ function PageRelationshipsController(ctx) {
 
     let imsToken;
     try {
-      const promiseTokenResponse = await getIMSPromiseToken(context);
+      // Prefer a caller-supplied promise token (forwarded by the ASO UI in the
+      // `x-promise-token` header) over minting one from the Authorization bearer.
+      // Since the UI switched to sending a session JWT in Authorization, minting
+      // via `getIMSPromiseToken` (which reads that header) fails IMS with 401.
+      // Mirrors the auto-fix handler in `suggestions.js` (`x-promise-token`
+      // header, falling back to `getIMSPromiseToken` for IMS-authenticated
+      // callers that don't supply one).
+      const headerToken = getHeader(context, X_PROMISE_TOKEN_HEADER);
+      let promiseTokenResponse;
+      if (hasText(headerToken)) {
+        log.info(`[page-relationships] using promise token from ${X_PROMISE_TOKEN_HEADER} header for site ${siteId}`);
+        promiseTokenResponse = { promise_token: headerToken };
+      } else {
+        log.info(`[page-relationships] no ${X_PROMISE_TOKEN_HEADER} header, minting promise token via IMS for site ${siteId}`);
+        promiseTokenResponse = await getIMSPromiseToken(context);
+      }
       imsToken = await exchangePromiseToken(context, promiseTokenResponse.promise_token);
     } catch (e) {
       if (e instanceof ErrorWithStatusCode) {

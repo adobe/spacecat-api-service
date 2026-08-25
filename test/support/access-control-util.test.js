@@ -20,6 +20,7 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
+import esmock from 'esmock';
 import AccessControlUtil from '../../src/support/access-control-util.js';
 
 use(chaiAsPromised);
@@ -81,6 +82,128 @@ describe('Access Control Util', () => {
     const accessControlUtil = AccessControlUtil.fromContext(context);
     expect(accessControlUtil.hasS2SAdminAccess()).to.be.true;
     expect(authInfo.isS2SAdmin).to.have.been.calledOnce;
+  });
+
+  describe('hasS2SCapability', () => {
+    function buildContext({ s2sConsumer, fresh } = {}) {
+      const Consumer = {
+        findByClientIdAndImsOrgId: sinon.stub().resolves(fresh),
+      };
+      return {
+        pathInfo: { headers: {} },
+        attributes: { authInfo: new AuthInfo().withType('jwt').withProfile({ user_id: 'u' }) },
+        dataAccess: {
+          Consumer,
+          Entitlement: { findByOrganizationIdAndProductCode: sinon.stub() },
+          TrialUser: {},
+          OrganizationIdentityProvider: {},
+        },
+        s2sConsumer,
+      };
+    }
+
+    function makeS2SConsumer(clientId = 'client-1', imsOrgId = 'AAA111111111111111111111@AdobeOrg') {
+      return {
+        getClientId: () => clientId,
+        getImsOrgId: () => imsOrgId,
+      };
+    }
+
+    function makeFresh({
+      id = 'consumer-id-1',
+      capabilities = ['site:readAll'],
+      status = 'ACTIVE',
+      revoked = false,
+    } = {}) {
+      return {
+        getId: () => id,
+        getCapabilities: () => capabilities,
+        getStatus: () => status,
+        isRevoked: () => revoked,
+      };
+    }
+
+    it('returns reason=not-s2s when context has no s2sConsumer', async () => {
+      const ctx = buildContext({ s2sConsumer: null });
+      const util = AccessControlUtil.fromContext(ctx);
+      const result = await util.hasS2SCapability('site:readAll');
+      expect(result.allowed).to.be.false;
+      expect(result.reason).to.equal('not-s2s');
+      expect(ctx.dataAccess.Consumer.findByClientIdAndImsOrgId).to.not.have.been.called;
+    });
+
+    it('returns reason=not-found when re-fetch returns null (deleted between L1 and L2)', async () => {
+      const ctx = buildContext({ s2sConsumer: makeS2SConsumer(), fresh: null });
+      const util = AccessControlUtil.fromContext(ctx);
+      const result = await util.hasS2SCapability('site:readAll');
+      expect(result.allowed).to.be.false;
+      expect(result.reason).to.equal('not-found');
+      expect(result.clientId).to.equal('client-1');
+      expect(result.consumerId).to.be.undefined;
+    });
+
+    it('returns reason=not-active when re-fetched consumer is SUSPENDED', async () => {
+      const fresh = makeFresh({ status: 'SUSPENDED' });
+      const ctx = buildContext({ s2sConsumer: makeS2SConsumer(), fresh });
+      const util = AccessControlUtil.fromContext(ctx);
+      const result = await util.hasS2SCapability('site:readAll');
+      expect(result.allowed).to.be.false;
+      expect(result.reason).to.equal('not-active');
+      expect(result.consumerId).to.equal('consumer-id-1');
+    });
+
+    it('returns reason=revoked when re-fetched consumer was revoked between L1 and L2', async () => {
+      const fresh = makeFresh({ revoked: true });
+      const ctx = buildContext({ s2sConsumer: makeS2SConsumer(), fresh });
+      const util = AccessControlUtil.fromContext(ctx);
+      const result = await util.hasS2SCapability('site:readAll');
+      expect(result.allowed).to.be.false;
+      expect(result.reason).to.equal('revoked');
+      expect(result.consumerId).to.equal('consumer-id-1');
+    });
+
+    it('returns reason=missing-capability when consumer is ACTIVE without the capability', async () => {
+      const fresh = makeFresh({ capabilities: ['site:read', 'organization:read'] });
+      const ctx = buildContext({ s2sConsumer: makeS2SConsumer(), fresh });
+      const util = AccessControlUtil.fromContext(ctx);
+      const result = await util.hasS2SCapability('site:readAll');
+      expect(result.allowed).to.be.false;
+      expect(result.reason).to.equal('missing-capability');
+      expect(result.consumerId).to.equal('consumer-id-1');
+      expect(result.clientId).to.equal('client-1');
+    });
+
+    it('returns allowed=true with full identity when consumer is ACTIVE and holds the capability', async () => {
+      const fresh = makeFresh({ capabilities: ['site:readAll'] });
+      const ctx = buildContext({ s2sConsumer: makeS2SConsumer(), fresh });
+      const util = AccessControlUtil.fromContext(ctx);
+      const result = await util.hasS2SCapability('site:readAll');
+      expect(result.allowed).to.be.true;
+      expect(result.reason).to.equal('granted');
+      expect(result.consumerId).to.equal('consumer-id-1');
+      expect(result.clientId).to.equal('client-1');
+    });
+
+    it('uses identity from context.s2sConsumer for the DB lookup (not from authInfo)', async () => {
+      const fresh = makeFresh();
+      const consumer = makeS2SConsumer('client-X', 'BBB222222222222222222222@AdobeOrg');
+      const ctx = buildContext({ s2sConsumer: consumer, fresh });
+      const util = AccessControlUtil.fromContext(ctx);
+      await util.hasS2SCapability('site:readAll');
+      expect(ctx.dataAccess.Consumer.findByClientIdAndImsOrgId).to.have.been.calledOnceWith(
+        'client-X',
+        'BBB222222222222222222222@AdobeOrg',
+      );
+    });
+
+    it('denies when consumer.getCapabilities() returns null/undefined', async () => {
+      const fresh = makeFresh({ capabilities: null });
+      const ctx = buildContext({ s2sConsumer: makeS2SConsumer(), fresh });
+      const util = AccessControlUtil.fromContext(ctx);
+      const result = await util.hasS2SCapability('site:readAll');
+      expect(result.allowed).to.be.false;
+      expect(result.reason).to.equal('missing-capability');
+    });
   });
 
   it('should throw an error if entity is not provided', async () => {
@@ -657,6 +780,7 @@ describe('Access Control Util', () => {
 
       mockTrialUser = {
         findByEmailId: sinon.stub(),
+        findByExternalUserId: sinon.stub(),
         create: sinon.stub(),
       };
 
@@ -1208,6 +1332,190 @@ describe('Access Control Util', () => {
         getTier: () => 'PAID',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
+
+      await expect(util.validateEntitlement(mockOrg, null, 'llmo')).to.not.be.rejected;
+    });
+
+    // profile.email carries an IMS user GUID, not an RFC-5322 address.
+    // Use a real GUID-shaped value so the fixture matches what production tokens contain.
+    const TEST_IMS_GUID = '145D1F646365E9C70A495FC8@17481f256365e20f495cc2.e';
+    const EXISTING_IMS_GUID = '1BB32091680634E20A495CA8@17481f256365e20f495cc2.e';
+
+    it('should find PAID-tier trial user by externalUserId and refresh lastSeenAt', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-paid',
+        getProductCode: () => 'llmo',
+        getTier: () => 'PAID',
+      };
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
+      mockAuthInfo.getProfile.returns({
+        email: TEST_IMS_GUID,
+        // no trial_email — paying-customer trial users don't store email
+      });
+
+      const existingUser = {
+        getExternalUserId: sinon.stub().returns(TEST_IMS_GUID),
+        setExternalUserId: sinon.stub(),
+        setLastSeenAt: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+      mockTrialUser.findByExternalUserId.resolves(existingUser);
+
+      await util.validateEntitlement(mockOrg, null, 'llmo');
+
+      expect(mockTrialUser.findByExternalUserId).to.have.been.calledWith(TEST_IMS_GUID);
+      expect(mockTrialUser.findByEmailId).to.not.have.been.called;
+      expect(existingUser.setExternalUserId).to.not.have.been.called;
+      expect(existingUser.setLastSeenAt).to.have.been.calledOnceWith(sinon.match.string);
+      expect(existingUser.save).to.have.been.calledOnce;
+    });
+
+    it('should fall back to legacy emailId lookup and backfill externalUserId when '
+      + 'PAID-tier trial user is not found by externalUserId', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-paid',
+        getProductCode: () => 'llmo',
+        getTier: () => 'PAID',
+      };
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
+      mockAuthInfo.getProfile.returns({
+        trial_email: 'trial@example.com',
+        email: TEST_IMS_GUID,
+      });
+      mockTrialUser.findByExternalUserId.resolves(null);
+
+      const existingUser = {
+        getExternalUserId: sinon.stub().returns(null),
+        setExternalUserId: sinon.stub(),
+        setLastSeenAt: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+      mockTrialUser.findByEmailId.resolves(existingUser);
+
+      await util.validateEntitlement(mockOrg, null, 'llmo');
+
+      expect(mockTrialUser.findByEmailId).to.have.been.calledWith('trial@example.com');
+      expect(existingUser.setExternalUserId).to.have.been.calledWith(TEST_IMS_GUID);
+      expect(existingUser.setLastSeenAt).to.have.been.calledOnceWith(sinon.match.string);
+      expect(existingUser.save).to.have.been.calledOnce;
+    });
+
+    it('should not overwrite externalUserId for a legacy PAID-tier user that already has it '
+      + 'set, but still refreshes lastSeenAt', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-paid',
+        getProductCode: () => 'llmo',
+        getTier: () => 'PAID',
+      };
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
+      mockAuthInfo.getProfile.returns({
+        trial_email: 'trial@example.com',
+        email: TEST_IMS_GUID,
+      });
+      mockTrialUser.findByExternalUserId.resolves(null);
+
+      const existingUser = {
+        getExternalUserId: sinon.stub().returns(EXISTING_IMS_GUID),
+        setExternalUserId: sinon.stub(),
+        setLastSeenAt: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+      mockTrialUser.findByEmailId.resolves(existingUser);
+
+      await util.validateEntitlement(mockOrg, null, 'llmo');
+
+      expect(existingUser.setExternalUserId).to.not.have.been.called;
+      expect(existingUser.setLastSeenAt).to.have.been.calledOnceWith(sinon.match.string);
+      expect(existingUser.save).to.have.been.calledOnce;
+    });
+
+    it('should skip trial user lookup for PAID-tier when profile has no email', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-paid',
+        getProductCode: () => 'llmo',
+        getTier: () => 'PAID',
+      };
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
+
+      mockAuthInfo.getProfile.returns({
+        trial_email: 'trial@example.com',
+        // no email field — neither lookup should be called
+      });
+
+      await util.validateEntitlement(mockOrg, null, 'llmo');
+
+      expect(mockTrialUser.findByExternalUserId).to.not.have.been.called;
+      expect(mockTrialUser.findByEmailId).to.not.have.been.called;
+    });
+
+    it('should do nothing for PAID-tier when neither externalUserId nor legacy emailId '
+      + 'lookup finds a trial user', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-paid',
+        getProductCode: () => 'llmo',
+        getTier: () => 'PAID',
+      };
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
+      mockAuthInfo.getProfile.returns({
+        trial_email: 'trial@example.com',
+        email: TEST_IMS_GUID,
+      });
+      mockTrialUser.findByExternalUserId.resolves(null);
+      mockTrialUser.findByEmailId.resolves(null);
+
+      await util.validateEntitlement(mockOrg, null, 'llmo');
+
+      expect(mockTrialUser.create).to.not.have.been.called;
+    });
+
+    it('should not look up a trial user for PAID-tier when caller is S2S consumer', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-paid',
+        getProductCode: () => 'llmo',
+        getTier: () => 'PAID',
+      };
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
+      mockAuthInfo.getProfile.returns({
+        trial_email: 'trial@example.com',
+        email: TEST_IMS_GUID,
+      });
+      mockAuthInfo.isS2SConsumer = sinon.stub().returns(true);
+
+      const existingUser = {
+        getExternalUserId: sinon.stub().returns(null),
+        setExternalUserId: sinon.stub(),
+        setLastSeenAt: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+      mockTrialUser.findByExternalUserId.resolves(existingUser);
+      mockTrialUser.findByEmailId.resolves(existingUser);
+
+      await util.validateEntitlement(mockOrg, null, 'llmo');
+
+      expect(mockTrialUser.findByExternalUserId).to.not.have.been.called;
+      expect(mockTrialUser.findByEmailId).to.not.have.been.called;
+      expect(existingUser.setExternalUserId).to.not.have.been.called;
+      expect(existingUser.save).to.not.have.been.called;
+    });
+
+    it('should not throw when PAID-tier lastSeenAt save fails', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-paid',
+        getProductCode: () => 'llmo',
+        getTier: () => 'PAID',
+      };
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
+      mockAuthInfo.getProfile.returns({
+        email: TEST_IMS_GUID,
+      });
+
+      const existingUser = {
+        getExternalUserId: sinon.stub().returns(TEST_IMS_GUID),
+        setExternalUserId: sinon.stub(),
+        setLastSeenAt: sinon.stub(),
+        save: sinon.stub().rejects(new Error('DDB throttle')),
+      };
+      mockTrialUser.findByExternalUserId.resolves(existingUser);
 
       await expect(util.validateEntitlement(mockOrg, null, 'llmo')).to.not.be.rejected;
     });
@@ -1779,6 +2087,86 @@ describe('Access Control Util', () => {
     });
   });
 
+  // Merged both test suites, keeping their setup isolated
+  describe('hasAdminReadAccess', () => {
+    function makeContext(authInfoOverrides) {
+      const authInfo = {
+        getType: () => 'jwt',
+        isAdmin: () => false,
+        isReadOnlyAdmin: () => false,
+        getScopes: () => [],
+        hasOrganization: sinon.stub().returns(false),
+        hasScope: sinon.stub().returns(false),
+        ...authInfoOverrides,
+      };
+      return {
+        log: {
+          info: () => {}, error: () => {}, warn: () => {}, debug: () => {},
+        },
+        pathInfo: { headers: { 'x-product': 'test' } },
+        attributes: { authInfo },
+        dataAccess: {
+          Entitlement: {},
+          TrialUser: {},
+          OrganizationIdentityProvider: {},
+        },
+      };
+    }
+
+    it('returns true when user is a full admin', () => {
+      const ctx = makeContext({ isAdmin: () => true, isReadOnlyAdmin: () => false });
+      const util = AccessControlUtil.fromContext(ctx);
+      expect(util.hasAdminReadAccess()).to.be.true;
+    });
+
+    it('returns true when user is a read-only admin', () => {
+      const ctx = makeContext({ isAdmin: () => false, isReadOnlyAdmin: () => true });
+      const util = AccessControlUtil.fromContext(ctx);
+      expect(util.hasAdminReadAccess()).to.be.true;
+    });
+
+    it('returns false when user is neither admin nor read-only admin', () => {
+      const ctx = makeContext({ isAdmin: () => false, isReadOnlyAdmin: () => false });
+      const util = AccessControlUtil.fromContext(ctx);
+      expect(util.hasAdminReadAccess()).to.be.false;
+    });
+
+    it('hasAdminAccess returns false for read-only admin (write guard is unchanged)', () => {
+      const ctx = makeContext({ isAdmin: () => false, isReadOnlyAdmin: () => true });
+      const util = AccessControlUtil.fromContext(ctx);
+      expect(util.hasAdminAccess()).to.be.false;
+    });
+
+    it('hasAccess bypasses org check for read-only admin', async () => {
+      const ctx = makeContext({ isAdmin: () => false, isReadOnlyAdmin: () => true });
+      const util = AccessControlUtil.fromContext(ctx);
+      const org = { getImsOrgId: () => 'some-org-id' };
+      org.constructor = { ENTITY_NAME: 'Organization' };
+      const result = await util.hasAccess(org);
+      expect(result).to.be.true;
+    });
+
+    it('hasAccess still enforces org check for regular non-admin user', async () => {
+      const ctx = makeContext({ isAdmin: () => false, isReadOnlyAdmin: () => false });
+      const util = AccessControlUtil.fromContext(ctx);
+      const org = { getImsOrgId: () => 'some-org-id' };
+      org.constructor = { ENTITY_NAME: 'Organization' };
+      // hasOrganization is stubbed to return false → access denied
+      const result = await util.hasAccess(org);
+      expect(result).to.be.false;
+    });
+
+    it('hasAdminReadAccess returns false when isReadOnlyAdmin is absent (legacy authInfo)', () => {
+      // Legacy authInfo objects may not have isReadOnlyAdmin at all; optional chaining must
+      // handle the missing method gracefully without throwing.
+      const ctx = makeContext({ isAdmin: () => false });
+      // Ensure the method is truly absent, not just returning false
+      delete ctx.attributes.authInfo.isReadOnlyAdmin;
+      const util = AccessControlUtil.fromContext(ctx);
+      expect(util.hasAdminReadAccess()).to.be.false;
+    });
+  });
+
   describe('isLLMOAdministrator — delegation-aware', () => {
     let mockSiteImsOrgAccess;
     let mockGrant;
@@ -1842,10 +2230,10 @@ describe('Access Control Util', () => {
         pathInfo: { headers: { 'x-product': 'llmo' } },
         attributes: { authInfo: mockAuthInfo },
         dataAccess: {
+          SiteImsOrgAccess: mockSiteImsOrgAccess,
           Entitlement: {},
           TrialUser: {},
           OrganizationIdentityProvider: {},
-          SiteImsOrgAccess: mockSiteImsOrgAccess,
         },
       };
     });
@@ -1915,6 +2303,177 @@ describe('Access Control Util', () => {
       expect(result).to.be.false;
       // _lastAccessWasDelegated was never set to true → JWT claim rules
       expect(util.isLLMOAdministrator()).to.be.true;
+    });
+  });
+
+  describe('hasLlmoCapabilityForSite', () => {
+    const site = { getId: () => 'site-1', getOrganizationId: () => 'org-uuid' };
+
+    function makeCtx({
+      profile = {}, facs, postgrest = true, suffix = '/sites/site-1/llmo/config', method = 'POST',
+    } = {}) {
+      return {
+        // Real FACS-governed route so the derived capability comes from the route
+        // map (POST /sites/:siteId/llmo/config → llmo/can_configure), not a hardcode.
+        pathInfo: { method, suffix, headers: { 'x-product': 'llmo' } },
+        attributes: {
+          authInfo: new AuthInfo().withType('jwt').withProfile(profile),
+          ...(facs ? { facs } : {}),
+        },
+        dataAccess: {
+          Entitlement: {},
+          TrialUser: {},
+          OrganizationIdentityProvider: {},
+          Organization: { findById: sinon.stub().resolves({ getImsOrgId: () => 'ABC@AdobeOrg' }) },
+          ...(postgrest ? { services: { postgrestClient: { from: () => ({}) } } } : {}),
+        },
+      };
+    }
+
+    let listBrandIdsForSite;
+    let listResourceIdsWithCapability;
+    let ACU;
+    beforeEach(async () => {
+      listBrandIdsForSite = sinon.stub();
+      listResourceIdsWithCapability = sinon.stub();
+      ({ default: ACU } = await esmock('../../src/support/access-control-util.js', {
+        '../../src/support/brands-storage.js': { listBrandIdsForSite },
+        '../../src/support/state-access-mapping-utils.js': { listResourceIdsWithCapability },
+      }));
+    });
+
+    it('not enrolled → falls back to legacy claim (admin → true)', async () => {
+      const util = ACU.fromContext(makeCtx({ profile: { is_llmo_administrator: true } }));
+      expect(await util.hasLlmoCapabilityForSite(site)).to.be.true;
+      expect(listBrandIdsForSite).to.not.have.been.called;
+    });
+
+    it('not enrolled → falls back to legacy claim (non-admin → false)', async () => {
+      const util = ACU.fromContext(makeCtx({ profile: { is_llmo_administrator: false } }));
+      expect(await util.hasLlmoCapabilityForSite(site)).to.be.false;
+    });
+
+    it('enrolled and NOT deferred → wrapper already confirmed the capability → allow', async () => {
+      // facs_enabled but no facs defer marker → JWT short-circuit / state admit upstream.
+      const util = ACU.fromContext(makeCtx({ profile: { facs_enabled: true } }));
+      expect(await util.hasLlmoCapabilityForSite(site)).to.be.true;
+      expect(listBrandIdsForSite).to.not.have.been.called;
+    });
+
+    it('enrolled and deferred → allows when a linked brand holds the capability', async () => {
+      listBrandIdsForSite.resolves(new Set(['brand-A', 'brand-B']));
+      listResourceIdsWithCapability.resolves(new Set(['brand-B']));
+      const util = ACU.fromContext(makeCtx({
+        profile: { facs_enabled: true },
+        facs: { enabled: true, product: 'LLMO', subjectId: 'u@AdobeID' },
+      }));
+      expect(await util.hasLlmoCapabilityForSite(site)).to.be.true;
+      expect(listResourceIdsWithCapability).to.have.been.calledWithMatch(sinon.match.any, {
+        product: 'LLMO', resourceType: 'brand', capability: 'llmo/can_configure',
+      });
+    });
+
+    it('enrolled and deferred → denies when no linked brand holds the capability', async () => {
+      listBrandIdsForSite.resolves(new Set(['brand-A']));
+      listResourceIdsWithCapability.resolves(new Set(['brand-Z']));
+      const util = ACU.fromContext(makeCtx({
+        profile: { facs_enabled: true },
+        facs: { enabled: true, product: 'LLMO', subjectId: 'u@AdobeID' },
+      }));
+      expect(await util.hasLlmoCapabilityForSite(site)).to.be.false;
+    });
+
+    it('enrolled and deferred → denies (fail closed) when postgrest is unavailable', async () => {
+      const util = ACU.fromContext(makeCtx({
+        profile: { facs_enabled: true },
+        facs: { enabled: true, product: 'LLMO', subjectId: 'u@AdobeID' },
+        postgrest: false,
+      }));
+      expect(await util.hasLlmoCapabilityForSite(site)).to.be.false;
+      expect(listBrandIdsForSite).to.not.have.been.called;
+    });
+
+    it('enrolled and deferred → denies when the site has no linked brands', async () => {
+      listBrandIdsForSite.resolves(new Set());
+      const util = ACU.fromContext(makeCtx({
+        profile: { facs_enabled: true },
+        facs: { enabled: true, product: 'LLMO', subjectId: 'u@AdobeID' },
+      }));
+      expect(await util.hasLlmoCapabilityForSite(site)).to.be.false;
+      expect(listResourceIdsWithCapability).to.not.have.been.called;
+    });
+
+    it('derives the capability from the route (edge-optimize → can_configure)', async () => {
+      listBrandIdsForSite.resolves(new Set(['brand-A']));
+      listResourceIdsWithCapability.resolves(new Set(['brand-A']));
+      const util = ACU.fromContext(makeCtx({
+        profile: { facs_enabled: true },
+        facs: { enabled: true, product: 'LLMO', subjectId: 'u@AdobeID' },
+        method: 'POST',
+        suffix: '/sites/site-1/llmo/edge-optimize-config',
+      }));
+      expect(await util.hasLlmoCapabilityForSite(site)).to.be.true;
+      expect(listResourceIdsWithCapability).to.have.been.calledWithMatch(sinon.match.any, {
+        capability: 'llmo/can_configure',
+      });
+    });
+
+    it('enrolled and deferred → denies (fail closed) when the route has no capability', async () => {
+      const util = ACU.fromContext(makeCtx({
+        profile: { facs_enabled: true },
+        facs: { enabled: true, product: 'LLMO', subjectId: 'u@AdobeID' },
+        method: 'GET',
+        suffix: '/not/a/facs/route',
+      }));
+      expect(await util.hasLlmoCapabilityForSite(site)).to.be.false;
+      expect(listBrandIdsForSite).to.not.have.been.called;
+    });
+  });
+
+  describe('llmoForbiddenMessage', () => {
+    function makeCtx({
+      profile = {}, facs, suffix = '/sites/site-1/llmo/config', method = 'POST',
+    } = {}) {
+      return {
+        pathInfo: { method, suffix, headers: { 'x-product': 'llmo' } },
+        attributes: {
+          authInfo: new AuthInfo().withType('jwt').withProfile(profile),
+          ...(facs ? { facs } : {}),
+        },
+        dataAccess: {
+          Entitlement: {}, TrialUser: {}, OrganizationIdentityProvider: {},
+        },
+      };
+    }
+
+    const LEGACY = 'Only LLMO administrators can update the LLMO config';
+
+    it('not FACS-enrolled → returns the legacy wording unchanged', () => {
+      const util = AccessControlUtil.fromContext(makeCtx({ profile: {} }));
+      expect(util.llmoForbiddenMessage(LEGACY)).to.equal(LEGACY);
+    });
+
+    it('FACS-enrolled → returns a capability-oriented message naming the route capability', () => {
+      // POST /sites/:siteId/llmo/config → llmo/can_configure
+      const util = AccessControlUtil.fromContext(makeCtx({
+        profile: { facs_enabled: true },
+        facs: { enabled: true, product: 'LLMO', subjectId: 'u@AdobeID' },
+      }));
+      const msg = util.llmoForbiddenMessage(LEGACY);
+      expect(msg).to.not.equal(LEGACY);
+      expect(msg).to.contain('llmo/can_configure');
+    });
+
+    it('FACS-enrolled but route capability unresolvable → generic LLMO permission message', () => {
+      const util = AccessControlUtil.fromContext(makeCtx({
+        profile: { facs_enabled: true },
+        facs: { enabled: true, product: 'LLMO', subjectId: 'u@AdobeID' },
+        method: 'GET',
+        suffix: '/not/a/facs/route',
+      }));
+      const msg = util.llmoForbiddenMessage(LEGACY);
+      expect(msg).to.not.equal(LEGACY);
+      expect(msg).to.contain('LLMO permission');
     });
   });
 });

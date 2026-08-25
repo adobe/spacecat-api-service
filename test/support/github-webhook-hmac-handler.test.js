@@ -1,0 +1,395 @@
+/*
+ * Copyright 2025 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+
+import { expect } from 'chai';
+import sinon from 'sinon';
+import crypto from 'crypto';
+import esmock from 'esmock';
+import GitHubWebhookHmacHandler from '../../src/support/github-webhook-hmac-handler.js';
+
+describe('GitHubWebhookHmacHandler', () => {
+  let handler;
+  let sandbox;
+  let mockLog;
+  const secret = 'test-webhook-secret';
+  const validPayload = JSON.stringify({ action: 'review_requested', installation: { id: 123 } });
+  // Default consolidated registry: a single github-public default entry whose
+  // inline webhook_secret is `secret`. validPayload has no repository -> null
+  // host -> classifies to this default entry.
+  const DEFAULT_DESTINATIONS = JSON.stringify({
+    'github-public': { match: { default: true }, webhook_secret: secret, reviewer_login: 'MysticatBot' },
+  });
+
+  function computeSignature(body, key = secret) {
+    return `sha256=${crypto.createHmac('sha256', key).update(body).digest('hex')}`;
+  }
+
+  function makeRequest(headers = {}, body = validPayload) {
+    return {
+      headers: { get: (name) => headers[name] || null },
+      text: sinon.stub().resolves(body),
+    };
+  }
+
+  function makeContext(overrides = {}) {
+    return {
+      pathInfo: { suffix: '/webhooks/github' },
+      env: { GITHUB_DESTINATIONS: DEFAULT_DESTINATIONS },
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    sandbox = sinon.createSandbox();
+    mockLog = {
+      info: sandbox.stub(),
+      warn: sandbox.stub(),
+      error: sandbox.stub(),
+    };
+    handler = new GitHubWebhookHmacHandler(mockLog);
+  });
+
+  afterEach(() => {
+    sandbox.restore();
+  });
+
+  it('returns AuthInfo with type github_webhook on valid signature', async () => {
+    const sig = computeSignature(validPayload);
+    const request = makeRequest({ 'x-hub-signature-256': sig });
+    const context = makeContext();
+
+    const result = await handler.checkAuth(request, context);
+
+    expect(result).to.not.be.null;
+    expect(result.type).to.equal('github_webhook');
+    expect(result.authenticated).to.be.true;
+  });
+
+  it('accepts webhook path without leading slash', async () => {
+    const sig = computeSignature(validPayload);
+    const request = makeRequest({ 'x-hub-signature-256': sig });
+    const context = makeContext({ pathInfo: { suffix: 'webhooks/github' } });
+
+    const result = await handler.checkAuth(request, context);
+
+    expect(result).to.not.be.null;
+    expect(result.type).to.equal('github_webhook');
+  });
+
+  it('accepts webhook path with leading slash', async () => {
+    const sig = computeSignature(validPayload);
+    const request = makeRequest({ 'x-hub-signature-256': sig });
+    const context = makeContext({ pathInfo: { suffix: '/webhooks/github' } });
+
+    const result = await handler.checkAuth(request, context);
+
+    expect(result).to.not.be.null;
+    expect(result.type).to.equal('github_webhook');
+  });
+
+  it('returns null for non-webhook path', async () => {
+    const sig = computeSignature(validPayload);
+    const request = makeRequest({ 'x-hub-signature-256': sig });
+    const context = makeContext({ pathInfo: { suffix: '/sites/123' } });
+
+    const result = await handler.checkAuth(request, context);
+
+    expect(result).to.be.null;
+    expect(request.text.called).to.be.false;
+  });
+
+  it('returns null when signature header is missing', async () => {
+    const request = makeRequest({});
+    const context = makeContext();
+
+    const result = await handler.checkAuth(request, context);
+
+    expect(result).to.be.null;
+  });
+
+  it('returns null and logs error when GITHUB_DESTINATIONS is not configured', async () => {
+    const sig = computeSignature(validPayload);
+    const request = makeRequest({ 'x-hub-signature-256': sig });
+    const context = makeContext({ env: {} });
+
+    const result = await handler.checkAuth(request, context);
+
+    expect(result).to.be.null;
+    expect(mockLog.error.calledOnce).to.be.true;
+    expect(mockLog.error.firstCall.args[0]).to.include('GITHUB_DESTINATIONS not configured');
+    expect(mockLog.error.firstCall.args[0]).to.include('misconfigured=true');
+  });
+
+  it('malformed signature + missing secret does NOT log secret error (format check runs first)', async () => {
+    // Regression guard for pre-auth log amplification: a request with a
+    // present-but-malformed signature must bail on the format check BEFORE
+    // hitting the secret-presence check, so a misconfigured instance does
+    // not spam error logs on every malformed probe.
+    const request = makeRequest({ 'x-hub-signature-256': 'abc123' });
+    const context = makeContext({ env: {} });
+
+    const result = await handler.checkAuth(request, context);
+
+    expect(result).to.be.null;
+    expect(mockLog.warn.calledOnce).to.be.true;
+    expect(mockLog.warn.firstCall.args[0]).to.include('Malformed');
+    expect(mockLog.error.called).to.be.false;
+  });
+
+  it('returns null and logs warn for malformed signature (missing sha256= prefix)', async () => {
+    const request = makeRequest({ 'x-hub-signature-256': 'abc123' });
+    const context = makeContext();
+
+    const result = await handler.checkAuth(request, context);
+
+    expect(result).to.be.null;
+    expect(mockLog.warn.calledOnce).to.be.true;
+    expect(mockLog.warn.firstCall.args[0]).to.include('Malformed');
+  });
+
+  it('returns null and logs warn for signature with wrong byte length', async () => {
+    const request = makeRequest({ 'x-hub-signature-256': 'sha256=tooshort' });
+    const context = makeContext();
+
+    const result = await handler.checkAuth(request, context);
+
+    expect(result).to.be.null;
+    expect(mockLog.warn.calledOnce).to.be.true;
+  });
+
+  it('returns null and logs warn for empty request body', async () => {
+    const sig = computeSignature(validPayload);
+    const request = makeRequest({ 'x-hub-signature-256': sig }, '');
+    const context = makeContext();
+
+    const result = await handler.checkAuth(request, context);
+
+    expect(result).to.be.null;
+    expect(mockLog.warn.calledOnce).to.be.true;
+    expect(mockLog.warn.firstCall.args[0]).to.include('Empty');
+  });
+
+  it('returns null and logs warn for invalid signature (wrong secret)', async () => {
+    const wrongSig = computeSignature(validPayload, 'wrong-secret');
+    const request = makeRequest({ 'x-hub-signature-256': wrongSig });
+    const context = makeContext();
+
+    const result = await handler.checkAuth(request, context);
+
+    expect(result).to.be.null;
+    expect(mockLog.warn.calledOnce).to.be.true;
+    expect(mockLog.warn.firstCall.args[0]).to.include('mismatch');
+  });
+
+  it('returns null and logs warn when content-length exceeds limit', async () => {
+    const sig = computeSignature(validPayload);
+    // 2 MiB, above our 1 MiB limit
+    const request = makeRequest({ 'x-hub-signature-256': sig, 'content-length': '2097152' });
+    const context = makeContext();
+
+    const result = await handler.checkAuth(request, context);
+
+    expect(result).to.be.null;
+    expect(mockLog.warn.calledOnce).to.be.true;
+    expect(mockLog.warn.firstCall.args[0]).to.include('Payload too large');
+    expect(request.text.called).to.be.false;
+  });
+
+  it('returns null and logs warn when actual body size exceeds limit', async () => {
+    const oversized = 'x'.repeat(1024 * 1024 + 1);
+    const sig = computeSignature(oversized);
+    // No content-length header so we only catch this after reading
+    const request = makeRequest({ 'x-hub-signature-256': sig }, oversized);
+    const context = makeContext();
+
+    const result = await handler.checkAuth(request, context);
+
+    expect(result).to.be.null;
+    expect(mockLog.warn.calledOnce).to.be.true;
+    expect(mockLog.warn.firstCall.args[0]).to.include('Payload too large after read');
+  });
+
+  it('rejects signature computed over JSON.stringify (proves raw body matters)', async () => {
+    // Raw body has specific whitespace; JSON.stringify would produce different bytes
+    const rawBody = '{"action":  "review_requested"}';
+    const reserialized = JSON.stringify(JSON.parse(rawBody));
+    expect(rawBody).to.not.equal(reserialized);
+
+    const sigFromRaw = computeSignature(rawBody);
+    const sigFromReserialized = computeSignature(reserialized);
+    expect(sigFromRaw).to.not.equal(sigFromReserialized);
+
+    // Handler should validate against raw body, not reserialized
+    const request = makeRequest({ 'x-hub-signature-256': sigFromRaw }, rawBody);
+    const context = makeContext();
+
+    const result = await handler.checkAuth(request, context);
+    expect(result).to.not.be.null;
+  });
+
+  describe('GITHUB_DESTINATIONS registry path (consolidated)', () => {
+    const ghecSecret = 'ghec-webhook-secret';
+    const DESTINATIONS = JSON.stringify({
+      ghec: {
+        match: { enterprise_slug: ['adobe-prd'] },
+        webhook_secret: ghecSecret,
+        reviewer_login: 'emu_reviewer',
+      },
+      'github-public': {
+        match: { default: true },
+        webhook_secret: secret,
+        reviewer_login: 'MysticatBot',
+      },
+    });
+    const publicBody = JSON.stringify({
+      action: 'review_requested',
+      installation: { id: 1 },
+      repository: { html_url: 'https://github.com/adobe/spacecat-api-service' },
+    });
+    const ghecBody = JSON.stringify({
+      action: 'review_requested',
+      installation: { id: 1 },
+      enterprise: { slug: 'adobe-prd' },
+      repository: { html_url: 'https://github.com/Adobe-AEM-Sites/aem-sites-architecture' },
+    });
+    const ghesBody = JSON.stringify({
+      action: 'review_requested',
+      installation: { id: 1 },
+      repository: { html_url: 'https://git.corp.adobe.com/experience-platform/mystique' },
+    });
+    const pingBody = JSON.stringify({ zen: 'Keep it simple', hook_id: 1 });
+
+    function destContext(extraEnv = {}) {
+      return makeContext({ env: { GITHUB_DESTINATIONS: DESTINATIONS, ...extraEnv } });
+    }
+
+    it('authenticates a github.com (default) webhook and attaches target_id github-public', async () => {
+      const request = makeRequest({ 'x-hub-signature-256': computeSignature(publicBody, secret) }, publicBody);
+      const result = await handler.checkAuth(request, destContext());
+      expect(result).to.not.be.null;
+      expect(result.type).to.equal('github_webhook');
+      expect(result.getProfile().target_id).to.equal('github-public');
+    });
+
+    it('attaches reviewer_login for the default (github-public) destination (required now)', async () => {
+      const request = makeRequest({ 'x-hub-signature-256': computeSignature(publicBody, secret) }, publicBody);
+      const result = await handler.checkAuth(request, destContext());
+      expect(result.getProfile().reviewer_login).to.equal('MysticatBot');
+    });
+
+    it('does not attach app_slug on the consolidated path', async () => {
+      const request = makeRequest({ 'x-hub-signature-256': computeSignature(publicBody, secret) }, publicBody);
+      const result = await handler.checkAuth(request, destContext());
+      expect(result.getProfile().app_slug).to.be.undefined;
+    });
+
+    it('authenticates a GHEC webhook against the inline webhook_secret and attaches target_id ghec', async () => {
+      const request = makeRequest({ 'x-hub-signature-256': computeSignature(ghecBody, ghecSecret) }, ghecBody);
+      const result = await handler.checkAuth(request, destContext());
+      expect(result).to.not.be.null;
+      expect(result.getProfile().target_id).to.equal('ghec');
+      expect(result.getProfile().reviewer_login).to.equal('emu_reviewer');
+    });
+
+    it('rejects a GHEC body signed with the github-public secret (wrong secret)', async () => {
+      const request = makeRequest({ 'x-hub-signature-256': computeSignature(ghecBody, secret) }, ghecBody);
+      const result = await handler.checkAuth(request, destContext());
+      expect(result).to.be.null;
+      expect(mockLog.warn.calledWithMatch('HMAC signature mismatch')).to.be.true;
+    });
+
+    it('skips (null) a non-github.com host without computing HMAC', async () => {
+      const request = makeRequest({ 'x-hub-signature-256': computeSignature(ghesBody, secret) }, ghesBody);
+      const result = await handler.checkAuth(request, destContext());
+      expect(result).to.be.null;
+      expect(mockLog.warn.calledWithMatch('Skipping webhook')).to.be.true;
+    });
+
+    it('treats a ping (no repository -> null host) as github-public, not skip', async () => {
+      const request = makeRequest({ 'x-hub-signature-256': computeSignature(pingBody, secret) }, pingBody);
+      const result = await handler.checkAuth(request, destContext());
+      expect(result).to.not.be.null;
+      expect(result.getProfile().target_id).to.equal('github-public');
+    });
+
+    it('returns null + error on malformed GITHUB_DESTINATIONS', async () => {
+      const request = makeRequest({ 'x-hub-signature-256': computeSignature(publicBody, secret) }, publicBody);
+      const result = await handler.checkAuth(request, destContext({ GITHUB_DESTINATIONS: 'not json' }));
+      expect(result).to.be.null;
+      expect(mockLog.error.calledWithMatch('Invalid GITHUB_DESTINATIONS')).to.be.true;
+    });
+
+    it('returns null + warn when the body is not valid JSON', async () => {
+      const malformed = 'not-json';
+      const request = makeRequest({ 'x-hub-signature-256': computeSignature(malformed, secret) }, malformed);
+      const result = await handler.checkAuth(request, destContext());
+      expect(result).to.be.null;
+      expect(mockLog.warn.calledWithMatch('not valid JSON')).to.be.true;
+    });
+
+    it('returns null + warn for an empty body', async () => {
+      const request = makeRequest({ 'x-hub-signature-256': computeSignature('', secret) }, '');
+      const result = await handler.checkAuth(request, destContext());
+      expect(result).to.be.null;
+      expect(mockLog.warn.calledWithMatch('Empty')).to.be.true;
+    });
+  });
+
+  describe('EMF metrics', () => {
+    let emitMetricStub;
+    let MockedHandler;
+
+    before(async () => {
+      emitMetricStub = sinon.stub();
+      const mod = await esmock('../../src/support/github-webhook-hmac-handler.js', {
+        '../../src/support/metrics-emf.js': {
+          emitMetric: emitMetricStub,
+          resolveEnvironment: () => 'dev',
+        },
+      });
+      MockedHandler = mod.default;
+    });
+
+    beforeEach(() => {
+      emitMetricStub.reset();
+    });
+
+    it('emits WebhookRejected with hmac_mismatch on bad signature', async () => {
+      const mockedHandler = new MockedHandler(mockLog);
+      const wrongSig = computeSignature(validPayload, 'wrong-secret');
+      const request = makeRequest({ 'x-hub-signature-256': wrongSig });
+      const context = makeContext();
+
+      const result = await mockedHandler.checkAuth(request, context);
+
+      expect(result).to.be.null;
+      const mismatch = emitMetricStub.getCalls()
+        .find((c) => c.args[0].name === 'WebhookRejected'
+          && c.args[0].dimensions?.Reason === 'hmac_mismatch');
+      expect(mismatch).to.exist;
+    });
+
+    it('emits WebhookDestinationsMisconfigured when GITHUB_DESTINATIONS is unset', async () => {
+      const mockedHandler = new MockedHandler(mockLog);
+      const sig = computeSignature(validPayload);
+      const request = makeRequest({ 'x-hub-signature-256': sig });
+      const context = makeContext({ env: {} });
+
+      const result = await mockedHandler.checkAuth(request, context);
+
+      expect(result).to.be.null;
+      const misconfigured = emitMetricStub.getCalls()
+        .find((c) => c.args[0].name === 'WebhookDestinationsMisconfigured');
+      expect(misconfigured).to.exist;
+    });
+  });
+});

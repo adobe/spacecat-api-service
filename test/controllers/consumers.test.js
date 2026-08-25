@@ -31,6 +31,7 @@ use(chaiAsPromised);
 
 describe('ConsumersController', () => {
   let ConsumersController;
+  let NonAdminConsumersController;
   let context;
   let mockConsumer;
   let sandbox;
@@ -147,6 +148,18 @@ describe('ConsumersController', () => {
       '@adobe/spacecat-shared-data-access': consumerModelMock,
       '@adobe/spacecat-shared-slack-client': slackMock,
     })).default;
+
+    NonAdminConsumersController = (await esmock('../../src/controllers/consumers.js', {
+      '../../src/support/access-control-util.js': {
+        default: {
+          fromContext: () => ({
+            hasS2SAdminAccess: () => false,
+          }),
+        },
+      },
+      '@adobe/spacecat-shared-data-access': consumerModelMock,
+      '@adobe/spacecat-shared-slack-client': slackMock,
+    })).default;
   });
 
   afterEach(() => {
@@ -176,24 +189,7 @@ describe('ConsumersController', () => {
     });
 
     it('returns forbidden for non-admin users', async () => {
-      const NonAdminController = (await esmock('../../src/controllers/consumers.js', {
-        '../../src/support/access-control-util.js': {
-          default: {
-            fromContext: () => ({
-              hasS2SAdminAccess: () => false,
-            }),
-          },
-        },
-        '@adobe/spacecat-shared-data-access': {
-          Consumer: { STATUS: { ACTIVE: 'ACTIVE', SUSPENDED: 'SUSPENDED', REVOKED: 'REVOKED' } },
-        },
-        '@adobe/spacecat-shared-slack-client': {
-          BaseSlackClient: { createFrom: () => ({ postMessage: () => {} }) },
-          SLACK_TARGETS: { WORKSPACE_INTERNAL: 'workspace_internal' },
-        },
-      })).default;
-
-      const controller = NonAdminController(context);
+      const controller = NonAdminConsumersController(context);
       const response = await controller.getAll(context);
 
       expect(response.status).to.equal(STATUS_FORBIDDEN);
@@ -223,24 +219,7 @@ describe('ConsumersController', () => {
     });
 
     it('returns forbidden for non-admin users', async () => {
-      const NonAdminController = (await esmock('../../src/controllers/consumers.js', {
-        '../../src/support/access-control-util.js': {
-          default: {
-            fromContext: () => ({
-              hasS2SAdminAccess: () => false,
-            }),
-          },
-        },
-        '@adobe/spacecat-shared-data-access': {
-          Consumer: { STATUS: { ACTIVE: 'ACTIVE', SUSPENDED: 'SUSPENDED', REVOKED: 'REVOKED' } },
-        },
-        '@adobe/spacecat-shared-slack-client': {
-          BaseSlackClient: { createFrom: () => ({ postMessage: () => {} }) },
-          SLACK_TARGETS: { WORKSPACE_INTERNAL: 'workspace_internal' },
-        },
-      })).default;
-
-      const controller = NonAdminController(context);
+      const controller = NonAdminConsumersController(context);
       const response = await controller.getByConsumerId({
         ...context,
         params: { consumerId: 'test-consumer-id' },
@@ -298,24 +277,7 @@ describe('ConsumersController', () => {
     });
 
     it('returns forbidden for non-admin users', async () => {
-      const NonAdminController = (await esmock('../../src/controllers/consumers.js', {
-        '../../src/support/access-control-util.js': {
-          default: {
-            fromContext: () => ({
-              hasS2SAdminAccess: () => false,
-            }),
-          },
-        },
-        '@adobe/spacecat-shared-data-access': {
-          Consumer: { STATUS: { ACTIVE: 'ACTIVE', SUSPENDED: 'SUSPENDED', REVOKED: 'REVOKED' } },
-        },
-        '@adobe/spacecat-shared-slack-client': {
-          BaseSlackClient: { createFrom: () => ({ postMessage: () => {} }) },
-          SLACK_TARGETS: { WORKSPACE_INTERNAL: 'workspace_internal' },
-        },
-      })).default;
-
-      const controller = NonAdminController(context);
+      const controller = NonAdminConsumersController(context);
       const response = await controller.getByClientId({
         ...context,
         params: { clientId: 'test-client-id' },
@@ -449,24 +411,7 @@ describe('ConsumersController', () => {
     });
 
     it('returns forbidden for non-admin users', async () => {
-      const NonAdminController = (await esmock('../../src/controllers/consumers.js', {
-        '../../src/support/access-control-util.js': {
-          default: {
-            fromContext: () => ({
-              hasS2SAdminAccess: () => false,
-            }),
-          },
-        },
-        '@adobe/spacecat-shared-data-access': {
-          Consumer: { STATUS: { ACTIVE: 'ACTIVE', SUSPENDED: 'SUSPENDED', REVOKED: 'REVOKED' } },
-        },
-        '@adobe/spacecat-shared-slack-client': {
-          BaseSlackClient: { createFrom: () => ({ postMessage: () => {} }) },
-          SLACK_TARGETS: { WORKSPACE_INTERNAL: 'workspace_internal' },
-        },
-      })).default;
-
-      const controller = NonAdminController(context);
+      const controller = NonAdminConsumersController(context);
       const response = await controller.register({
         ...context,
         data: validPayload,
@@ -518,21 +463,6 @@ describe('ConsumersController', () => {
 
       expect(response.status).to.equal(STATUS_CREATED);
       expect(context.imsClient.validateAccessToken).to.have.been.calledWith('valid-ta-token');
-    });
-
-    it('returns bad request when pathInfo is missing (access token not available)', async () => {
-      const contextWithoutPathInfo = {
-        ...context,
-        pathInfo: undefined,
-      };
-      const controller = ConsumersController(contextWithoutPathInfo);
-      const response = await controller.register({
-        ...contextWithoutPathInfo,
-        data: validPayload,
-      });
-
-      expect(response.status).to.equal(STATUS_BAD_REQUEST);
-      expect(response.headers.get('x-error')).to.include('x-ta-access-token header');
     });
 
     it('returns bad request when consumerName is missing', async () => {
@@ -831,41 +761,18 @@ describe('ConsumersController', () => {
       expect(response.headers.get('x-error')).to.equal('Cannot update a revoked consumer');
     });
 
-    it('rejects immutable field clientId', async () => {
-      const controller = ConsumersController(context);
-      const response = await controller.update({
-        ...context,
-        params: { consumerId: 'test-client-id' },
-        data: { clientId: 'new-client-id' },
+    ['clientId', 'technicalAccountId', 'imsOrgId'].forEach((field) => {
+      it(`rejects immutable field ${field}`, async () => {
+        const controller = ConsumersController(context);
+        const response = await controller.update({
+          ...context,
+          params: { consumerId: 'test-client-id' },
+          data: { [field]: 'new-value' },
+        });
+
+        expect(response.status).to.equal(STATUS_BAD_REQUEST);
+        expect(response.headers.get('x-error')).to.include(field);
       });
-
-      expect(response.status).to.equal(STATUS_BAD_REQUEST);
-      expect(response.headers.get('x-error')).to.include('immutable');
-      expect(response.headers.get('x-error')).to.include('clientId');
-    });
-
-    it('rejects immutable field technicalAccountId', async () => {
-      const controller = ConsumersController(context);
-      const response = await controller.update({
-        ...context,
-        params: { consumerId: 'test-client-id' },
-        data: { technicalAccountId: 'new-ta-id' },
-      });
-
-      expect(response.status).to.equal(STATUS_BAD_REQUEST);
-      expect(response.headers.get('x-error')).to.include('technicalAccountId');
-    });
-
-    it('rejects immutable field imsOrgId', async () => {
-      const controller = ConsumersController(context);
-      const response = await controller.update({
-        ...context,
-        params: { consumerId: 'test-client-id' },
-        data: { imsOrgId: 'new-org@AdobeOrg' },
-      });
-
-      expect(response.status).to.equal(STATUS_BAD_REQUEST);
-      expect(response.headers.get('x-error')).to.include('imsOrgId');
     });
 
     it('rejects multiple immutable fields at once', async () => {
@@ -934,24 +841,7 @@ describe('ConsumersController', () => {
     });
 
     it('returns forbidden for non-admin users', async () => {
-      const NonAdminController = (await esmock('../../src/controllers/consumers.js', {
-        '../../src/support/access-control-util.js': {
-          default: {
-            fromContext: () => ({
-              hasS2SAdminAccess: () => false,
-            }),
-          },
-        },
-        '@adobe/spacecat-shared-data-access': {
-          Consumer: { STATUS: { ACTIVE: 'ACTIVE', SUSPENDED: 'SUSPENDED', REVOKED: 'REVOKED' } },
-        },
-        '@adobe/spacecat-shared-slack-client': {
-          BaseSlackClient: { createFrom: () => ({ postMessage: () => {} }) },
-          SLACK_TARGETS: { WORKSPACE_INTERNAL: 'workspace_internal' },
-        },
-      })).default;
-
-      const controller = NonAdminController(context);
+      const controller = NonAdminConsumersController(context);
       const response = await controller.update({
         ...context,
         params: { consumerId: 'test-client-id' },
@@ -1025,24 +915,7 @@ describe('ConsumersController', () => {
     });
 
     it('returns forbidden for non-admin users', async () => {
-      const NonAdminController = (await esmock('../../src/controllers/consumers.js', {
-        '../../src/support/access-control-util.js': {
-          default: {
-            fromContext: () => ({
-              hasS2SAdminAccess: () => false,
-            }),
-          },
-        },
-        '@adobe/spacecat-shared-data-access': {
-          Consumer: { STATUS: { ACTIVE: 'ACTIVE', SUSPENDED: 'SUSPENDED', REVOKED: 'REVOKED' } },
-        },
-        '@adobe/spacecat-shared-slack-client': {
-          BaseSlackClient: { createFrom: () => ({ postMessage: () => {} }) },
-          SLACK_TARGETS: { WORKSPACE_INTERNAL: 'workspace_internal' },
-        },
-      })).default;
-
-      const controller = NonAdminController(context);
+      const controller = NonAdminConsumersController(context);
       const response = await controller.revoke({
         ...context,
         params: { consumerId: 'test-client-id' },

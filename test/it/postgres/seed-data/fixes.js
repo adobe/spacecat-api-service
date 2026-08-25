@@ -12,10 +12,14 @@
 
 /**
  * Immutable baseline fix entities for IT tests.
- * All under OPPTY_1 (SITE_1, accessible).
+ * FIX_1..FIX_3 are under OPPTY_1 (SITE_1, accessible).
  *
  * - FIX_1: CODE_CHANGE, PENDING — linked to SUGG_1 via junction
  * - FIX_2: CODE_CHANGE, DEPLOYED — different status for by-status filter
+ * - FIX_3: CODE_CHANGE, DEPLOYED — NO junction entry; must still be returned
+ *   with an empty suggestions array (the silent-drop bug this PR fixes)
+ * - FIX_4: CODE_CHANGE, FAILED — under OPPTY_4 (also SITE_1), for site-wide
+ *   aggregation tests that need fixes spread across more than one opportunity
  *
  * Format: snake_case (v3 / PostgreSQL / PostgREST)
  */
@@ -39,11 +43,27 @@ export const fixes = [
     change_details: { file: '/blocks/footer/footer.js', diff: '-old +new' },
     origin: 'spacecat',
   },
+  {
+    id: 'cc333333-3333-4333-b333-333333333333',
+    opportunity_id: 'aa111111-1111-4111-b111-111111111111',
+    type: 'CODE_CHANGE',
+    status: 'DEPLOYED',
+    change_details: { file: '/blocks/header/header.js', diff: '-a +b' },
+    origin: 'spacecat',
+  },
+  {
+    id: 'cc444444-4444-4444-a444-444444444444',
+    opportunity_id: 'aa444444-4444-4444-a444-444444444444',
+    type: 'CODE_CHANGE',
+    status: 'FAILED',
+    change_details: { file: '/blocks/structured-data/schema.js', diff: '+schema fix' },
+    origin: 'spacecat',
+  },
 ];
 
 /**
  * Junction table: fix_entity_suggestions
- * Links FIX_1 → SUGG_1
+ * Links FIX_1 → SUGG_1, FIX_2 → SUGG_2
  */
 export const fixEntitySuggestions = [
   {
@@ -51,5 +71,11 @@ export const fixEntitySuggestions = [
     suggestion_id: 'bb111111-1111-4111-b111-111111111111',
     opportunity_id: 'aa111111-1111-4111-b111-111111111111',
     fix_entity_created_at: '2025-01-20T12:00:00.000Z',
+  },
+  {
+    fix_entity_id: 'cc222222-2222-4222-a222-222222222222',
+    suggestion_id: 'bb222222-2222-4222-a222-222222222222',
+    opportunity_id: 'aa111111-1111-4111-b111-111111111111',
+    fix_entity_created_at: '2025-02-15T10:00:00.000Z',
   },
 ];

@@ -27,7 +27,14 @@ export const suggestions = [
     type: 'CODE_CHANGE',
     rank: 1,
     status: 'NEW',
-    data: { title: 'Update hero image', from: '/old-hero.png', to: '/new-hero.webp' },
+    data: {
+      title: 'Update hero image',
+      from: '/old-hero.png',
+      to: '/new-hero.webp',
+      i18n: {
+        fr_fr: { title: 'Mettre à jour l\'image hero' },
+      },
+    },
     kpi_deltas: { estimatedKPILift: 0.15 },
   },
   {

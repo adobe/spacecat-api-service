@@ -18,6 +18,7 @@ import {
   ok,
 } from '@adobe/spacecat-shared-http-utils';
 import { AgenticTrafficGlobalDto } from '../../dto/agentic-traffic-global.js';
+import { cachedOk } from '../../support/cached-response.js';
 
 const DEFAULT_LIMIT = 52;
 
@@ -149,7 +150,7 @@ export function createAgenticTrafficGlobalGetHandler(validateReadAccess) {
         throw new Error(error.message);
       }
 
-      return ok((data || []).map((row) => AgenticTrafficGlobalDto.toJSON(row)));
+      return cachedOk((data || []).map((row) => AgenticTrafficGlobalDto.toJSON(row)));
     } catch (e) {
       context.log.error(`Error listing global agentic traffic: ${e.message}`);
       return internalServerError('Failed to list global agentic traffic');

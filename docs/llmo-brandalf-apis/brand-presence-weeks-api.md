@@ -1,6 +1,6 @@
 # Brand Presence Weeks API
 
-Returns applicable ISO weeks (YYYY-Wnn) for the given model, optionally filtered by brand or site. Used to populate week selectors in the Brand Presence UI. Data is queried from `brand_metrics_weekly` via PostgREST (mysticat-data-service). The table stores pre-aggregated weekly metrics with `week` already in YYYY-Wnn format.
+Returns applicable ISO weeks (YYYY-Wnn) for the given model, optionally filtered by brand or site. Used to populate week selectors in the Brand Presence UI. Data is queried from `brand_presence_executions` via the `rpc_brand_presence_execution_date_range` RPC (mysticat-data-service). The RPC returns the min/max execution date range; the caller generates all ISO weeks between those dates.
 
 ---
 
@@ -28,46 +28,30 @@ Returns applicable ISO weeks (YYYY-Wnn) for the given model, optionally filtered
 
 ## Query Details
 
-The API queries `brand_metrics_weekly` via PostgREST. The table already has `week` in YYYY-Wnn format and the required filters (organization_id, model, site_id, brand_id). Results are ordered by `week` descending so the most recent weeks are returned within the limit.
+The API calls `rpc_brand_presence_execution_date_range` to get the min/max `execution_date` from `brand_presence_executions` for the given organization and model. The app then generates all ISO weeks between those dates and returns them sorted descending.
 
-**PostgREST query:**
+**RPC call:**
 ```javascript
-client
-  .from('brand_metrics_weekly')
-  .select('week')
-  .eq('organization_id', organizationId)
-  .eq('model', model)
-  // + .eq('site_id', siteId)   when siteId query param provided
-  // + .eq('brand_id', brandId)  when path has specific brand (not 'all')
-  .order('week', { ascending: false })
-  .limit(200000);
-```
-
-**Equivalent SQL:**
-```sql
-SELECT week
-FROM brand_metrics_weekly
-WHERE organization_id = :orgId
-  AND model = :model
-  -- AND site_id = :siteId   (when provided)
-  -- AND brand_id = :brandId (when single brand route)
-ORDER BY week DESC
-LIMIT 200000;
+const { data, error } = await client.rpc('rpc_brand_presence_execution_date_range', {
+  p_organization_id: organizationId,
+  p_model: model,
+  p_site_id: siteId ?? null,
+  p_brand_id: brandId ?? null,
+});
+// data: [{ min_date: '2026-01-12', max_date: '2026-03-15' }]
 ```
 
 **Parameter mapping:**
 | Query/Path | Maps to |
 |------------|---------|
-| `spaceCatId` (path) | `organization_id` |
-| `model` (query) | `model` |
-| `siteId` / `site_id` (query) | `site_id` |
-| `brandId` (path, when not `all`) | `brand_id` |
+| `spaceCatId` (path) | `p_organization_id` |
+| `model` (query) | `p_model` |
+| `siteId` / `site_id` (query) | `p_site_id` |
+| `brandId` (path, when not `all`) | `p_brand_id` |
 
-**Response processing:** Distinct `week` values are deduplicated (multiple rows can share the same week across category/topic/region) and sorted descending.
+**Response processing:** All ISO weeks between `min_date` and `max_date` are generated on the application side and returned sorted descending. Weeks with no executions within the range may appear (gap assumption).
 
-**Row limit:** 200,000 rows so all available weeks are returned. `brand_metrics_weekly` has many rows per week (site × brand × category × region × topic); a lower cap (e.g. 5,000) would truncate older weeks.
-
-**Data source (brand_metrics_weekly):** Pre-aggregated weekly metrics. One row per (site_id, week, model, brand_name, category_name, region_code, topic). Example columns used: `organization_id`, `site_id`, `week`, `model`, `brand_id`.
+**Data source:** `brand_presence_executions` via the `rpc_brand_presence_execution_date_range` RPC.
 
 ---
 
@@ -135,7 +119,7 @@ GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/weeks?mo
 | 400 | PostgREST/PostgreSQL query error |
 | 403 | User does not belong to the organization |
 | 403 | Site does not belong to the organization (when siteId provided) |
-| 200 | Success (weeks may be empty if no data in brand_metrics_weekly for the org/model) |
+| 200 | Success (weeks may be empty if no executions exist for the org/model) |
 
 ---
 

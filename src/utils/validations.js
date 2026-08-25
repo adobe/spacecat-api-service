@@ -47,8 +47,23 @@ function checkBodySize(data, maxSize) {
   return true;
 }
 
+/**
+ * Validates if the locale is a valid locale code in underscore form (e.g. 'fr_fr', 'ja_jp').
+ * Returns true when locale is null or undefined (absent parameter is valid).
+ *
+ * @param {string|null|undefined} locale - The locale code.
+ * @returns {boolean} true if the locale is absent or valid, false if it is malformed.
+ */
+function isValidLocale(locale) {
+  if (locale === undefined || locale === null) {
+    return true;
+  }
+  return typeof locale === 'string' && /^[a-z]{2}_[a-z]{2}$/.test(locale);
+}
+
 export {
   MAX_BODY_SIZE,
   validateRepoUrl,
   checkBodySize,
+  isValidLocale,
 };

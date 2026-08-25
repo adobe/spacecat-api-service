@@ -16,7 +16,7 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
-import approveSiteCandidate from '../../../../src/support/slack/actions/approve-site-candidate.js';
+import esmock from 'esmock';
 import {
   expectedAnnouncedMessage,
   expectedApprovedReply,
@@ -28,6 +28,23 @@ use(chaiAsPromised);
 use(sinonChai);
 
 describe('approveSiteCandidate', () => {
+  let approveSiteCandidate;
+  let updateRumConfigStub;
+
+  before(async () => {
+    updateRumConfigStub = sinon.stub().resolves(true);
+    approveSiteCandidate = (await esmock('../../../../src/support/slack/actions/approve-site-candidate.js', {
+      '../../../../src/support/rum-config-service.js': {
+        updateRumConfig: updateRumConfigStub,
+      },
+      '../../../../src/agents/org-detector/agent.js': {
+        default: {
+          fromContext: (ctx) => ctx.orgDetectorAgent || { detect: sinon.stub().resolves(null) },
+        },
+      },
+    })).default;
+  });
+
   const baseURL = 'https://spacecat.com';
   const hlxConfig = {
     hlxVersion: 4,
@@ -36,6 +53,14 @@ describe('approveSiteCandidate', () => {
       site: 'some-site',
       ref: 'main',
     },
+  };
+  // Top-level `code` derived from the hlxConfig fixture above (rso.site -> repo).
+  const derivedCode = {
+    type: 'github',
+    owner: 'some-owner',
+    repo: 'some-site',
+    ref: 'main',
+    url: 'https://github.com/some-owner/some-site',
   };
   let context;
   let slackClient;
@@ -47,6 +72,7 @@ describe('approveSiteCandidate', () => {
 
   beforeEach(async () => {
     clock = sinon.useFakeTimers();
+    updateRumConfigStub.resolves(true);
 
     slackClient = {
       postMessage: sinon.stub().resolves({ channelId: 'channel-id', threadId: 'thread-ts' }),
@@ -64,6 +90,7 @@ describe('approveSiteCandidate', () => {
       },
       log: {
         info: sinon.stub(),
+        warn: sinon.stub(),
         error: sinon.stub(),
       },
       env: {
@@ -85,6 +112,8 @@ describe('approveSiteCandidate', () => {
       getId: () => 'some-site-id',
       getBaseURL: () => baseURL,
       getIsLive: () => true,
+      getCode: sinon.stub().returns(null),
+      setCode: sinon.stub(),
       setDeliveryType: sinon.stub(),
       setHlxConfig: sinon.stub(),
       toggleLive: sinon.stub(),
@@ -126,6 +155,7 @@ describe('approveSiteCandidate', () => {
       {
         baseURL,
         hlxConfig,
+        code: derivedCode,
         isLive: true,
         organizationId: 'default',
       },
@@ -151,6 +181,7 @@ describe('approveSiteCandidate', () => {
       {
         baseURL,
         hlxConfig,
+        code: derivedCode,
         isLive: true,
         organizationId: 'friends-family-org',
       },
@@ -173,8 +204,40 @@ describe('approveSiteCandidate', () => {
     expect(site.toggleLive).to.have.been.calledOnce;
     expect(site.setDeliveryType).to.have.been.calledWith('aem_edge');
     expect(site.setHlxConfig).to.have.been.calledWith(hlxConfig);
+    // top-level code is backfilled from hlxConfig when the site has none
+    expect(site.setCode).to.have.been.calledWith(derivedCode);
     expect(site.save).to.have.been.calledOnce;
     expect(slackClient.postMessage).to.have.been.called; // the announcement
+  });
+
+  it('does not clobber an existing top-level code on an already-added site', async () => {
+    site.getIsLive = () => false;
+    site.getCode.returns({
+      type: 'github', owner: 'existing-owner', repo: 'existing-repo', ref: 'main', url: 'https://github.com/existing-owner/existing-repo',
+    });
+    context.dataAccess.SiteCandidate.findByBaseURL.withArgs(baseURL).resolves(siteCandidate);
+    context.dataAccess.Site.findByBaseURL.resolves(site);
+    site.save.resolves(site);
+
+    const approveFunction = approveSiteCandidate(context);
+    await approveFunction({ ack: ackMock, body: slackActionResponse, respond: respondMock });
+
+    expect(site.setHlxConfig).to.have.been.calledWith(hlxConfig);
+    expect(site.setCode).to.not.have.been.called;
+    expect(site.save).to.have.been.calledOnce;
+  });
+
+  it('omits top-level code on create when hlxConfig has no resolvable owner/repo', async () => {
+    siteCandidate.getHlxConfig = () => ({ hlxVersion: 5, rso: {} });
+    context.dataAccess.SiteCandidate.findByBaseURL.withArgs(baseURL).resolves(siteCandidate);
+    context.dataAccess.Site.findByBaseURL.resolves(null);
+    context.dataAccess.Site.create.resolves(site);
+
+    const approveFunction = approveSiteCandidate(context);
+    await approveFunction({ ack: ackMock, body: slackActionResponse, respond: respondMock });
+
+    const createArg = context.dataAccess.Site.create.firstCall.args[0];
+    expect(createArg).to.not.have.property('code');
   });
 
   it('should detect an org if it is not FnF and post a thread message with "approveOrg"/"rejectOrg" buttons', async () => {
@@ -237,5 +300,34 @@ describe('approveSiteCandidate', () => {
     ).to.be.rejectedWith('processing error');
 
     expect(context.log.error).to.have.been.calledWith('Error occurred while acknowledging site candidate approval');
+  });
+
+  it('should log a warning when updateRumConfig fails for a new site', async () => {
+    context.dataAccess.SiteCandidate.findByBaseURL.withArgs(baseURL).resolves(siteCandidate);
+    context.dataAccess.Site.findByBaseURL.resolves(null);
+    context.dataAccess.Site.create.resolves(site);
+    updateRumConfigStub.rejects(new Error('RUM API error'));
+
+    const approveFunction = approveSiteCandidate(context);
+    await approveFunction({ ack: ackMock, body: slackActionResponse, respond: respondMock });
+
+    expect(context.log.warn).to.have.been.calledWith(
+      `[approve-site-candidate] RUM config update failed for ${baseURL}: RUM API error`,
+    );
+  });
+
+  it('should log a warning when updateRumConfig fails for an existing site', async () => {
+    site.getIsLive = () => false;
+    context.dataAccess.SiteCandidate.findByBaseURL.withArgs(baseURL).resolves(siteCandidate);
+    context.dataAccess.Site.findByBaseURL.resolves(site);
+    site.save.resolves(site);
+    updateRumConfigStub.rejects(new Error('RUM API error'));
+
+    const approveFunction = approveSiteCandidate(context);
+    await approveFunction({ ack: ackMock, body: slackActionResponse, respond: respondMock });
+
+    expect(context.log.warn).to.have.been.calledWith(
+      `[approve-site-candidate] RUM config update failed for ${baseURL}: RUM API error`,
+    );
   });
 });

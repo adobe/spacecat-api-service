@@ -16,13 +16,35 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
-import approveFriendsFamily from '../../../../src/support/slack/actions/approve-friends-family.js';
+import esmock from 'esmock';
 import { expectedAnnouncedMessage, expectedApprovedFnFReply, slackFriendsFamilyResponse } from './slack-fixtures.js';
 
 use(chaiAsPromised);
 use(sinonChai);
 
 describe('approveSiteCandidate', () => {
+  let approveFriendsFamily;
+  let updateRumConfigStub;
+
+  before(async function () {
+    this.timeout(10000);
+    updateRumConfigStub = sinon.stub().resolves(true);
+    approveFriendsFamily = (await esmock(
+      '../../../../src/support/slack/actions/approve-friends-family.js',
+      {},
+      {
+        '../../../../src/support/rum-config-service.js': {
+          updateRumConfig: updateRumConfigStub,
+        },
+        '../../../../src/agents/org-detector/agent.js': {
+          default: {
+            fromContext: (ctx) => ctx.orgDetectorAgent || { detect: sinon.stub().resolves(null) },
+          },
+        },
+      },
+    )).default;
+  });
+
   const baseURL = 'https://spacecat.com';
   const hlxConfig = {
     hlxVersion: 4,
@@ -114,6 +136,13 @@ describe('approveSiteCandidate', () => {
     expect(context.dataAccess.Site.create.calledOnceWithExactly({
       baseURL,
       hlxConfig,
+      code: {
+        type: 'github',
+        owner: 'some-owner',
+        repo: 'some-site',
+        ref: 'main',
+        url: 'https://github.com/some-owner/some-site',
+      },
       isLive: true,
       organizationId: context.env.ORGANIZATION_ID_FRIENDS_FAMILY,
     })).to.be.true;

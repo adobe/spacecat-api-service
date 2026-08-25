@@ -26,6 +26,7 @@ export const OrganizationDto = {
     id: organization.getId(),
     name: organization.getName(),
     imsOrgId: organization.getImsOrgId(),
+    semrushWorkspaceId: organization.getSemrushWorkspaceId(),
     createdAt: organization.getCreatedAt(),
     updatedAt: organization.getUpdatedAt(),
     config: Config.toDynamoItem(organization.getConfig()),

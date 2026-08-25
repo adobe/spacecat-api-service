@@ -10,43 +10,21 @@
  * governing permissions and limitations under the License.
  */
 
-import { isValidUrl } from '@adobe/spacecat-shared-utils';
+import { hasText, isValidUrl } from '@adobe/spacecat-shared-utils';
 import { extractDeliveryConfigFromPreviewUrl } from './onboard-modal.js';
-
-/**
- * Extracts helix configuration from a helix preview URL
- * @param {string} previewUrl - The helix preview URL (e.g., main--site--owner.hlx.live)
- * @returns {Object|null} - The helix config object or null if invalid
- */
-function extractHelixConfigFromPreviewUrl(previewUrl) {
-  const url = new URL(previewUrl);
-  const domain = url.hostname;
-
-  // Parse helix RSO from domain using the same regex as hooks.js
-  const regex = /^([\w-]+)--([\w-]+)--([\w-]+)\.(hlx\.live|aem\.live)$/;
-  const match = domain.match(regex);
-
-  if (!match) {
-    return null;
-  }
-
-  return {
-    hlxVersion: 5,
-    rso: {
-      ref: match[1],
-      site: match[2],
-      owner: match[3],
-      tld: match[4],
-    },
-  };
-}
+import {
+  enablePreflightAuditForSite,
+  extractHelixConfigFromPreviewUrl,
+  isContentSourcePathRequired,
+  isCSAuthoringType,
+} from '../preflight/preflight-config.js';
 
 /**
  * Handles preflight configuration modal submission
  */
 export function preflightConfigModal(lambdaContext) {
   const { dataAccess, log } = lambdaContext;
-  const { Site, Configuration } = dataAccess;
+  const { Site } = dataAccess;
 
   return async ({ ack, body, client }) => {
     try {
@@ -65,6 +43,8 @@ export function preflightConfigModal(lambdaContext) {
 
       const authoringType = values.authoring_type_input?.authoring_type?.selected_option?.value;
       const previewUrl = values.preview_url_input?.preview_url?.value?.trim();
+      const contentSourcePath = values.content_source_path_input?.content_source_path?.value
+        ?.trim();
 
       if (!authoringType) {
         await ack({
@@ -86,13 +66,11 @@ export function preflightConfigModal(lambdaContext) {
         return;
       }
 
-      // Determine URL type based on authoring type and validate accordingly
       let deliveryConfigFromPreview = null;
       let helixConfigFromPreview = null;
       let amsAuthorUrl;
 
-      if (authoringType === 'cs' || authoringType === 'cs/crosswalk') {
-        // For AEM CS authoring types, expect AEM CS preview URL
+      if (isCSAuthoringType(authoringType)) {
         deliveryConfigFromPreview = extractDeliveryConfigFromPreviewUrl(previewUrl, null);
         if (!deliveryConfigFromPreview) {
           await ack({
@@ -137,10 +115,9 @@ export function preflightConfigModal(lambdaContext) {
         return;
       }
 
-      await ack();
-
       const site = await Site.findById(siteId);
       if (!site) {
+        await ack();
         await client.chat.postMessage({
           channel: channelId,
           text: ':x: Error: Site not found. Please try again.',
@@ -149,13 +126,44 @@ export function preflightConfigModal(lambdaContext) {
         return;
       }
 
+      if (deliveryConfigFromPreview) {
+        const contentSourcePathRequired = await isContentSourcePathRequired(
+          dataAccess,
+          site,
+          deliveryConfigFromPreview.programId,
+          deliveryConfigFromPreview.environmentId,
+          authoringType,
+        );
+
+        if (contentSourcePathRequired && !hasText(contentSourcePath)) {
+          await ack({
+            response_action: 'errors',
+            errors: {
+              content_source_path_input: 'Content source path is required when multiple sites in this organization share the same AEM CS program and environment.',
+            },
+          });
+          return;
+        }
+      }
+
+      await ack();
+
       site.setAuthoringType(authoringType);
 
       let configDetails = '';
       if (deliveryConfigFromPreview) {
-        site.setDeliveryConfig(deliveryConfigFromPreview);
+        const deliveryConfig = {
+          ...deliveryConfigFromPreview,
+        };
+        if (hasText(contentSourcePath)) {
+          deliveryConfig.contentSourcePath = contentSourcePath;
+        }
+        site.setDeliveryConfig(deliveryConfig);
         configDetails = `:gear: *Delivery Config:* Program ${deliveryConfigFromPreview.programId}, Environment ${deliveryConfigFromPreview.environmentId}\n`
                        + `:link: *Preview URL:* ${previewUrl}`;
+        if (hasText(contentSourcePath)) {
+          configDetails += `\n:file_folder: *Content Source Path:* ${contentSourcePath}`;
+        }
       } else if (helixConfigFromPreview) {
         site.setHlxConfig(helixConfigFromPreview);
         configDetails = `:gear: *Helix Config:* ${helixConfigFromPreview.rso.ref}--${helixConfigFromPreview.rso.site}--${helixConfigFromPreview.rso.owner}.${helixConfigFromPreview.rso.tld}\n`
@@ -168,10 +176,7 @@ export function preflightConfigModal(lambdaContext) {
       }
 
       await site.save();
-
-      const configuration = await Configuration.findLatest();
-      configuration.enableHandlerForSite(auditType, site);
-      await configuration.save();
+      await enablePreflightAuditForSite(site, dataAccess);
 
       await client.chat.postMessage({
         channel: channelId,

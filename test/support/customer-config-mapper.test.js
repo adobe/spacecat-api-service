@@ -50,6 +50,10 @@ describe('Customer Config Mapper', () => {
             ],
           },
         },
+        claims: {
+          brandContext: 'Photoshop is Adobe creative software.',
+          sentimentGuidance: 'Treat factual price mentions as neutral.',
+        },
       };
 
       const result = convertV1ToV2(llmoConfig, 'Adobe', '1234@AdobeOrg');
@@ -65,6 +69,8 @@ describe('Customer Config Mapper', () => {
       expect(brand.brandAliases).to.have.lengthOf(2);
       expect(brand.competitors).to.have.lengthOf(1);
       expect(brand.prompts).to.have.lengthOf(1);
+      expect(brand.brandContext).to.equal('Photoshop is Adobe creative software.');
+      expect(brand.mentionSentimentGuidance).to.equal('Treat factual price mentions as neutral.');
 
       const prompt = brand.prompts[0];
       expect(prompt.prompt).to.equal('What is the best photo editing software?');
@@ -127,6 +133,47 @@ describe('Customer Config Mapper', () => {
 
       const result = convertV1ToV2(llmoConfig, 'TestCo', 'test@org');
       expect(result.customer.brands[0].region).to.include('us');
+    });
+
+    it('normalizes legacy claims guidance for the v2 brand shape', () => {
+      const llmoConfig = {
+        brands: {
+          aliases: [
+            { name: 'Test Brand', regions: ['US'] },
+          ],
+        },
+        claims: {
+          brandContext: `  ${'a'.repeat(4001)}  `,
+          sentimentGuidance: '   ',
+        },
+        categories: {},
+        topics: {},
+      };
+
+      const result = convertV1ToV2(llmoConfig, 'TestCo', 'test@org');
+      expect(result.customer.brands[0].brandContext).to.have.lengthOf(4000);
+      expect(result.customer.brands[0].brandContext).to.equal('a'.repeat(4000));
+      expect(result.customer.brands[0].mentionSentimentGuidance).to.equal(null);
+    });
+
+    it('handles null and non-string legacy claims guidance values', () => {
+      const llmoConfig = {
+        brands: {
+          aliases: [
+            { name: 'Test Brand', regions: ['US'] },
+          ],
+        },
+        claims: {
+          brandContext: null,
+          sentimentGuidance: { text: 'ignore me' },
+        },
+        categories: {},
+        topics: {},
+      };
+
+      const result = convertV1ToV2(llmoConfig, 'TestCo', 'test@org');
+      expect(result.customer.brands[0].brandContext).to.equal(null);
+      expect(result.customer.brands[0].mentionSentimentGuidance).to.equal(undefined);
     });
 
     it('handles brand alias with regions property (array)', () => {
