@@ -1600,7 +1600,7 @@ export async function updateBrand({
   if (!freshRow) {
     return null;
   }
-  freshRow.baseSiteId = data.base_site?.id || data.site_id || null;
+  freshRow.baseSiteId = data.base_site?.id ?? data.site_id ?? null;
   freshRow.baseUrl = data.base_site?.base_url || null;
   return freshRow;
 }
