@@ -1,3 +1,10 @@
+## [1.763.4](https://github.com/adobe/spacecat-api-service/compare/v1.763.3...v1.763.4) (2026-08-25)
+
+
+### Bug Fixes
+
+* **serenity:** worker Lambda reuses api-service's Vault access, no new AppRole ([#3130](https://github.com/adobe/spacecat-api-service/issues/3130)) ([30bb770](https://github.com/adobe/spacecat-api-service/commit/30bb770408040282ef0ea87a997a4b33b62f89cc)), closes [serenity-docs#186](https://github.com/serenity-docs/issues/186)
+
 ## [1.763.3](https://github.com/adobe/spacecat-api-service/compare/v1.763.2...v1.763.3) (2026-08-25)
 
 
