@@ -91,7 +91,7 @@ export const EDGE_OPTIMIZE_DEFAULTS = Object.freeze({
 // a property from the old single-routing-rule design to the two-tier design leaves no orphans.
 const LEGACY_MANAGED_RULE_NAMES = Object.freeze(['Optimize at Edge', 'Optimize at Edge Routing']);
 
-const MANAGED_COMMENT_ROUTING = 'Managed by Adobe LLM Optimizer (Optimize at Edge). Routes '
+const MANAGED_COMMENT_ROUTING = 'Managed by Adobe Brand Visibility (Optimize at Edge). Routes '
   + 'AI-bot HTML traffic to live.edgeoptimize.net.';
 
 // ---------------------------------------------------------------------------
@@ -301,7 +301,7 @@ export function buildSiteFailoverRule(cfg) {
     criteriaMustSatisfy: 'any',
     behaviors: [behaviorFailActionAlternateHostname(cfg.failover.alternateHostname)],
     children: [],
-    comments: 'Managed by Adobe LLM Optimizer (Optimize at Edge). On origin failure, fails over '
+    comments: 'Managed by Adobe Brand Visibility (Optimize at Edge). On origin failure, fails over '
       + "to the property's normal origin so the end user still gets a response.",
   };
 }
@@ -407,7 +407,7 @@ export function buildRemoveMarkerRule(cfg) {
     criteriaMustSatisfy: 'all',
     behaviors: [behaviorRemoveIncomingRequestHeader(EDGE_ROUTED_MARKER_HEADER)],
     children: [],
-    comments: 'Managed by Adobe LLM Optimizer (Optimize at Edge). Removes the internal '
+    comments: 'Managed by Adobe Brand Visibility (Optimize at Edge). Removes the internal '
       + 'edge-routed marker header before the origin fetch.',
   };
 }
@@ -434,7 +434,7 @@ export function buildFailoverTestRule(cfg) {
     criteriaMustSatisfy: 'all',
     behaviors: [behaviorModifyOutgoingResponseHeader('x-edgeoptimize-fo', 'true')],
     children: [],
-    comments: 'Managed by Adobe LLM Optimizer (Optimize at Edge). Surfaces failover as the '
+    comments: 'Managed by Adobe Brand Visibility (Optimize at Edge). Surfaces failover as the '
       + 'x-edgeoptimize-fo response header, detected without advanced metadata.',
   };
 }
@@ -467,7 +467,7 @@ export function buildParentRule(cfg) {
     criteriaMustSatisfy: 'all',
     behaviors: [],
     children: [buildRoutingEdgeRule(cfg), buildRoutingParentRule(cfg), buildFailoverTestRule(cfg)],
-    comments: 'Managed by Adobe LLM Optimizer (Optimize at Edge). Routes AI-bot HTML traffic to '
+    comments: 'Managed by Adobe Brand Visibility (Optimize at Edge). Routes AI-bot HTML traffic to '
       + 'live.edgeoptimize.net via a two-tier (edge/parent) split, with per-rule site failover.',
   };
 }
@@ -492,7 +492,7 @@ function managedCacheKeyVariable(varName) {
   return {
     name: varName,
     value: '',
-    description: 'Edge Optimize cache key (managed by Adobe LLM Optimizer)',
+    description: 'Edge Optimize cache key (managed by Adobe Brand Visibility)',
     hidden: false,
     sensitive: false,
   };
