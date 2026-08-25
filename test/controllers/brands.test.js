@@ -6376,6 +6376,36 @@ describe('Brands Controller', () => {
         expect(stubs.propagateSiteUrlToSemrush).to.not.have.been.called;
         expect(stubs.updateBrand).to.have.been.calledOnce;
       });
+
+      it('does not disguise a stale post-write read as success: a re-point whose '
+        + 'updateBrand result still carries the OLD baseSiteId is surfaced as a hard '
+        + 'error, never a lying 200 (live e2e regression)', async () => {
+        // Live e2e testing on a real org found that a re-point onto a site already
+        // listed among the brand's own secondary siteIds came back 200 with the
+        // brand COMPLETELY unchanged (same baseSiteId, same updatedAt as the request's
+        // expectedUpdatedAt) — no error, no side effect. This reproduces that exact
+        // response shape by having updateBrand resolve a row that still carries the
+        // OLD baseSiteId (as it would if updateBrand's own post-write re-read served
+        // a stale snapshot) and asserts the controller now refuses to pass it through
+        // as a successful re-point.
+        const current = {
+          id: BRAND_UUID, name: 'Acme', status: 'active', baseSiteId: OLD_SITE, semrushSubWorkspaceId: null,
+        };
+        const staleUnchangedRow = {
+          ...current, baseSiteId: OLD_SITE, baseUrl: 'https://haha.com',
+        };
+        const { controller, stubs } = await buildRepointController({
+          current,
+          updateBrand: sinon.stub().resolves(staleUnchangedRow),
+        });
+
+        const response = await controller.updateBrandForOrg(repointRequest(sitesPostgrest()));
+
+        expect(response.status).to.equal(500);
+        const body = await response.json();
+        expect(body.code).to.equal('brand_repoint_not_persisted');
+        expect(stubs.updateBrand).to.have.been.calledOnce;
+      });
     });
 
     it('re-syncs brand URLs across markets when a URL field changes on a sub-workspace brand', async () => {
