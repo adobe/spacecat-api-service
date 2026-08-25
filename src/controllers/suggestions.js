@@ -1413,24 +1413,36 @@ function SuggestionsController(ctx, sqs, env) {
           // belong to the dedicated IMS group. Recover the caller's IMS identity
           // by exchanging the forwarded promise token — safe to consume here
           // because EDS fixes run under service credentials (not this token),
-          // unlike promise-based CS authoring. Fail-closed: a missing token or a
-          // failed group lookup denies.
-          const org = await site.getOrganization();
-          const imsOrgId = org?.getImsOrgId();
-          let imsUserToken;
+          // unlike promise-based CS authoring.
+          //
+          // Once the user is CONFIRMED freemium (blocked tier + active
+          // enrollment), the gate is fail-closed: any error resolving the org,
+          // token, or group membership denies. This inner try/catch is separate
+          // from the outer one on purpose — the outer catch stays fail-open for
+          // the tier-determination phase (so a transient TierClient error never
+          // blocks paid users), but must not swallow errors here and let a
+          // confirmed freemium caller through ungated.
           try {
-            imsUserToken = await getImsTokenFromPromiseToken(context);
-          } catch (tokenErr) {
-            context.log?.warn(`Auto-fix group check: could not resolve IMS token for site ${siteId}: ${tokenErr.message}`);
-          }
-          const isGroupMember = await isImsGroupMember(context, {
-            imsOrgId, imsUserToken, groupName: ASO_EDS_AUTOFIX_GROUP_NAME,
-          }, context.log);
-          if (!isGroupMember) {
-            context.log.warn(`Auto-fix blocked for site ${siteId}: AEM Edge Freemium caller not in '${ASO_EDS_AUTOFIX_GROUP_NAME}' IMS group`);
+            const org = await site.getOrganization();
+            const imsOrgId = org?.getImsOrgId();
+            let imsUserToken;
+            try {
+              imsUserToken = await getImsTokenFromPromiseToken(context);
+            } catch (tokenErr) {
+              context.log?.warn(`Auto-fix group check: could not resolve IMS token for site ${siteId}: ${tokenErr.message}`);
+            }
+            const isGroupMember = await isImsGroupMember(context, {
+              imsOrgId, imsUserToken, groupName: ASO_EDS_AUTOFIX_GROUP_NAME,
+            }, context.log);
+            if (!isGroupMember) {
+              context.log.warn(`Auto-fix blocked for site ${siteId}: AEM Edge Freemium caller not in '${ASO_EDS_AUTOFIX_GROUP_NAME}' IMS group`);
+              return forbidden('unauthorized');
+            }
+            context.log.info(`Auto-fix allowed for site ${siteId}: AEM Edge Freemium caller in '${ASO_EDS_AUTOFIX_GROUP_NAME}' IMS group`);
+          } catch (gateErr) {
+            context.log.warn(`Auto-fix blocked for site ${siteId}: freemium authorization gate error: ${gateErr.message}`);
             return forbidden('unauthorized');
           }
-          context.log.info(`Auto-fix allowed for site ${siteId}: AEM Edge Freemium caller in '${ASO_EDS_AUTOFIX_GROUP_NAME}' IMS group`);
         }
       } catch (e) {
         context.log?.warn(`Failed to check entitlement tier for site ${siteId}: ${e.message}`);

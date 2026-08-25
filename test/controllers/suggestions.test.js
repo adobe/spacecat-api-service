@@ -5673,6 +5673,37 @@ describe('Suggestions Controller', () => {
       expect(context.log.warn).to.have.been.calledWithMatch(/not in 'ASO-EDS-Autofix-users' IMS group/);
     });
 
+    it('auto-fix suggestions fails closed (403) for a confirmed AEM Edge Freemium user when the group gate errors', async () => {
+      const mockTierClient = {
+        checkValidEntitlement: sandbox.stub().resolves({
+          entitlement: { getTier: () => 'PLG' },
+          siteEnrollment: { getId: () => 'enrollment-1' },
+        }),
+      };
+      // Confirmed freemium (blocked tier + enrollment), but resolving the org
+      // throws — the gate must deny, not fall through the outer fail-open catch.
+      site.getOrganization.rejects(new Error('transient org lookup failure'));
+      const ControllerWithGateError = await esmock('../../src/controllers/suggestions.js', {
+        '@adobe/spacecat-shared-tier-client': { default: { createForSite: sandbox.stub().resolves(mockTierClient) } },
+      });
+      const controllerWithGateError = ControllerWithGateError({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'ASO' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithGateError.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body.message).to.equal('unauthorized');
+      expect(context.log.warn).to.have.been.calledWithMatch(/freemium authorization gate error/);
+    });
+
     it('auto-fix suggestions no longer blocks on the per-site autofix handler enabled-list (on-demand bypass)', async () => {
       mockSuggestion.allByOpportunityId.resolves([]);
       const response = await suggestionsControllerWithMock.autofixSuggestions({
