@@ -544,8 +544,10 @@ export function mergeIntoTree(ruleTree, cfg, insertIndex) {
   }
   ensureVariableDeclared(root.variables, managedCacheKeyVariable(cfg.cacheKeyVariable.name));
 
-  // eslint-disable-next-line no-use-before-define
-  const managedNames = new Set(managedRuleNames(cfg).map((name) => name.trim()));
+  const managedNames = new Set(
+    // eslint-disable-next-line no-use-before-define
+    [...managedRuleNames(cfg), ...LEGACY_MANAGED_RULE_NAMES].map((name) => name.trim()),
+  );
   // Match by TRIMMED name so a legacy `"Optimize at Edge "` (trailing space) is replaced, not left
   // as a duplicate — keeps this preview in step with buildRuleTreePatch (which also trims).
   const children = (root.children || []).filter((c) => !managedNames.has((c?.name ?? '').trim()));
@@ -566,12 +568,13 @@ export function mergeIntoTree(ruleTree, cfg, insertIndex) {
  * @returns {string[]}
  */
 export function managedRuleNames(cfg) {
-  // Only TOP-LEVEL managed names: the wrapper, the failover-test rule (top level in the oldest flat
-  // layout; nested inside the wrapper now), and legacy names to clean up on re-onboard. The
-  // two-tier
-  // routing rules live nested inside the wrapper and are removed along with it, so they are not
-  // listed here (and their generic names must not match a customer's own top-level rules).
-  return [cfg.ruleNames.parent, cfg.ruleNames.failoverTest, ...LEGACY_MANAGED_RULE_NAMES];
+  // The rules this deploy ADDS at the top level (surfaced to the review UI as "rules to add"):
+  // the wrapper plus the failover-test rule. The nested routing rules live inside the wrapper and
+  // their generic names must not match a customer's own top-level rules, so they are not listed.
+  // Legacy names (older layouts) are NOT included here; they are only removed during cleanup (see
+  // mergeIntoTree / buildRuleTreePatch), never "added", so listing them would wrongly show them
+  // as pending additions.
+  return [cfg.ruleNames.parent, cfg.ruleNames.failoverTest];
 }
 
 /**
@@ -639,7 +642,9 @@ export function buildRuleTreePatch(ruleTree, cfg, insertIndex) {
     ops.push({ op: 'add', path: '/rules/children', value: [buildParentRule(cfg)] });
   } else {
     const { children } = root;
-    const managed = new Set(managedRuleNames(cfg).map((name) => name.trim()));
+    const managed = new Set(
+      [...managedRuleNames(cfg), ...LEGACY_MANAGED_RULE_NAMES].map((name) => name.trim()),
+    );
     // Match by TRIMMED name so a legacy `"Optimize at Edge "` (trailing space) is cleaned up too.
     const isManaged = (child) => managed.has((child?.name ?? '').trim());
 

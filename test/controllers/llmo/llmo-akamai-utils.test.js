@@ -32,7 +32,6 @@ import {
 } from '../../../src/controllers/llmo/llmo-akamai-utils.js';
 
 const EDGE_ROUTED_MARKER = 'x-edgeoptimize-edge-routed';
-const LEGACY_WRAPPER_NAME = 'Optimize at Edge';
 const LEGACY_ROUTING_NAME = 'Optimize at Edge Routing';
 
 const HOSTNAME = 'www.example.com';
@@ -256,13 +255,11 @@ describe('llmo-akamai-utils', () => {
   });
 
   describe('managedRuleNames', () => {
-    it('returns the top-level managed names (wrapper, failover-test, and legacy wrapper + routing names)', () => {
+    it('returns the top-level rules to add (wrapper and failover-test), not legacy cleanup names', () => {
       const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
       expect(managedRuleNames(cfg)).to.deep.equal([
         cfg.ruleNames.parent,
         cfg.ruleNames.failoverTest,
-        LEGACY_WRAPPER_NAME,
-        LEGACY_ROUTING_NAME,
       ]);
     });
   });
