@@ -288,7 +288,8 @@ const behaviorFailActionAlternateHostname = (hostname) => ({
 // ---------------------------------------------------------------------------
 
 /**
- * Nested child rule of the routing rule ("Site Failover Behavior"): on a 4xx/5xx from
+ * Sibling rule of the two routing rules ("Site Failover Behavior"), evaluated for both.
+ * On a 4xx/5xx from
  * live.edgeoptimize.net or an origin timeout, fail over to the property's normal origin via the
  * alternate-hostname mechanism — standard GA behavior, no Advanced Metadata access needed.
  * @param {object} cfg
@@ -364,7 +365,7 @@ export function buildRoutingEdgeRule(cfg) {
     ],
     criteriaMustSatisfy: 'all',
     behaviors: buildCommonRoutingBehaviors(cfg, extraHeaders),
-    children: [buildSiteFailoverRule(cfg)],
+    children: [],
     comments: MANAGED_COMMENT_ROUTING,
   };
 }
@@ -388,7 +389,7 @@ export function buildRoutingParentRule(cfg) {
     criteriaMustSatisfy: 'all',
     behaviors: buildCommonRoutingBehaviors(cfg),
     // eslint-disable-next-line no-use-before-define
-    children: [buildRemoveMarkerRule(cfg), buildSiteFailoverRule(cfg)],
+    children: [buildRemoveMarkerRule(cfg)],
     comments: MANAGED_COMMENT_ROUTING,
   };
 }
@@ -466,7 +467,12 @@ export function buildParentRule(cfg) {
     criteria,
     criteriaMustSatisfy: 'all',
     behaviors: [],
-    children: [buildRoutingEdgeRule(cfg), buildRoutingParentRule(cfg), buildFailoverTestRule(cfg)],
+    children: [
+      buildRoutingEdgeRule(cfg),
+      buildRoutingParentRule(cfg),
+      buildSiteFailoverRule(cfg),
+      buildFailoverTestRule(cfg),
+    ],
     comments: 'Managed by Adobe Brand Visibility (Optimize at Edge). Routes AI-bot HTML traffic to '
       + 'live.edgeoptimize.net via a two-tier (edge/parent) split, with per-rule site failover.',
   };

@@ -131,11 +131,8 @@ describe('llmo-akamai-utils', () => {
       expect(marker.options.newHeaderValue).to.equal('true');
     });
 
-    it('nests a Site Failover child rule pointing back at the site hostname', () => {
-      expect(edge.children).to.have.length(1);
-      const failover = edge.children[0];
-      expect(failover.name).to.equal('Site Failover Behavior');
-      expect(findBehavior(failover, 'failAction').options.contentHostname).to.equal(HOSTNAME);
+    it('has no nested children (Site Failover is now a wrapper-level sibling)', () => {
+      expect(edge.children).to.have.length(0);
     });
 
     it('adds the WAF-bypass header only when enabled', () => {
@@ -178,10 +175,9 @@ describe('llmo-akamai-utils', () => {
       expect(injectsApiKey).to.equal(false);
     });
 
-    it('nests the marker-removal child before the Site Failover child', () => {
+    it('nests only the marker-removal child (Site Failover is now a wrapper-level sibling)', () => {
       expect(parent.children.map((c) => c.name)).to.deep.equal([
         cfg.ruleNames.removeMarker,
-        'Site Failover Behavior',
       ]);
     });
   });
@@ -229,13 +225,14 @@ describe('llmo-akamai-utils', () => {
   });
 
   describe('buildParentRule / buildFragments', () => {
-    it('wraps the two routing rules and the failover-test sibling under one parent', () => {
+    it('wraps the two routing rules, the site-failover sibling, and the failover-test sibling', () => {
       const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
       const parent = buildParentRule(cfg);
       expect(parent.name).to.equal(cfg.ruleNames.parent);
       expect(parent.children.map((c) => c.name)).to.deep.equal([
         cfg.ruleNames.routingEdge,
         cfg.ruleNames.routingParent,
+        'Site Failover Behavior',
         cfg.ruleNames.failoverTest,
       ]);
       expect(buildFragments(cfg).parentRule.name).to.equal(cfg.ruleNames.parent);
