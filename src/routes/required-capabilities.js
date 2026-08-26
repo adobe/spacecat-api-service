@@ -57,6 +57,10 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-preview',
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-live-preview',
 
+  // Deploy-permission probe - UI-only gate (JWT session callers). The customer
+  // surface is FACS-governed (llmo/aso can_deploy via facsWrapper); not for S2S.
+  'POST /sites/:siteId/permissions/check/deploy',
+
   // Geo experiment — write/delete endpoints used by DRS/UI
   'PATCH /sites/:siteId/geo-experiments/:geoExperimentId',
   'DELETE /sites/:siteId/geo-experiments/:geoExperimentId',

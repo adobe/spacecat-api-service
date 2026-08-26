@@ -422,6 +422,21 @@ xPromiseToken:
     type: string
   example: eyJhbGciOiJSUzI1NiIs...
 
+xProduct:
+  name: x-product
+  description: |
+    Selects the product policy for a FACS-governed request. Case-insensitive; must be `LLMO`
+    or `ASO`. Required on `POST /sites/{siteId}/permissions/check/deploy`, which returns **400**
+    when it is missing or unrecognized.
+  in: header
+  required: true
+  schema:
+    type: string
+    enum:
+      - LLMO
+      - ASO
+  example: ASO
+
 locale:
   name: locale
   description: |
