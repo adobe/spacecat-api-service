@@ -149,6 +149,32 @@ const FIXTURES = {
       }],
     },
   },
+  getSerenityPromptsJobStatus: {
+    expectedStatus: 200,
+    controllerMethod: 'getPromptsJobStatus',
+    // No handler: the controller reads the AsyncJob model directly. Pin a
+    // COMPLETED job owned by BRAND so the documented { jobId, status, result }
+    // shape is exercised. Metadata.brandId MUST match auth.brandUuid (BRAND) or
+    // the controller 404s (jobs are never leaked across brands).
+    params: { jobId: '00000000-0000-4000-8000-000000000000' },
+    asyncJob: {
+      getId: () => '00000000-0000-4000-8000-000000000000',
+      getStatus: () => 'COMPLETED',
+      getResult: () => ({
+        created: [{
+          semrushPromptId: 'sem-1',
+          geoTargetId: 2840,
+          languageCode: 'en',
+          text: 'sample',
+        }],
+        skipped: [],
+        failed: [],
+        published: true,
+      }),
+      getError: () => null,
+      getMetadata: () => ({ brandId: BRAND }),
+    },
+  },
   updateSerenityPrompt: {
     expectedStatus: 200,
     controllerMethod: 'updatePrompt',
@@ -801,7 +827,12 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         listGlobalModelCatalog: sinon.stub(),
         listLanguageCatalog: sinon.stub(),
       };
-      handlerStubs[fx.handlerName].resolves(fx.handlerResult);
+      // Most serenity ops route through a handler stub; a few (e.g.
+      // getSerenityPromptsJobStatus) read a data-access model directly and pin
+      // their state via `fx.asyncJob` instead of a handler.
+      if (fx.handlerName) {
+        handlerStubs[fx.handlerName].resolves(fx.handlerResult);
+      }
 
       const SerenityController = (await esmock(
         '../../src/controllers/serenity.js',
@@ -904,6 +935,11 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         data: fx.data,
         query: fx.query || {},
       });
+      // Ops that read an AsyncJob directly (no handler) get their job pinned here.
+      if (fx.asyncJob) {
+        ctx.dataAccess.AsyncJob = { findById: sinon.stub().resolves(fx.asyncJob) };
+      }
+
       const controller = SerenityController(ctx, fakeLog());
       const response = await controller[fx.controllerMethod](ctx);
 

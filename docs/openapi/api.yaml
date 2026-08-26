@@ -162,6 +162,8 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-prompt-by-id'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/bulk-delete:
     $ref: './serenity-api.yaml#/v2-serenity-prompts-bulk-delete'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/jobs/{jobId}:
+    $ref: './serenity-api.yaml#/v2-serenity-prompts-job-by-id'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/markets:
     $ref: './serenity-api.yaml#/v2-serenity-markets'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/markets/{geoTargetId}/{languageCode}:

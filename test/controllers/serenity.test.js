@@ -2792,10 +2792,56 @@ describe('SerenityController', () => {
         expect(enqueueArgs.jobType).to.equal('serenity-classify-prompts');
         expect(enqueueArgs.metadata).to.deep.equal({
           // callerId captured at enqueue time (LLMO-6289) — no auth profile on the
-          // test context, so it resolves to the `unknown` sentinel.
-          mode: 'create', brandId: BRAND, semrushWorkspaceId: WORKSPACE, prompts, callerId: 'unknown',
+          // test context, so it resolves to the `unknown` sentinel. The default
+          // resolveBrandWorkspaceStub is flat mode, so authMode is 'flat' and both
+          // workspace ids are the org parent WORKSPACE.
+          mode: 'create',
+          brandId: BRAND,
+          semrushWorkspaceId: WORKSPACE,
+          authMode: 'flat',
+          workspaceId: WORKSPACE,
+          parentWorkspaceId: WORKSPACE,
+          prompts,
+          callerId: 'unknown',
         });
         // The synchronous path never runs.
+        expect(handlers.handleCreatePrompts).to.not.have.been.called;
+      });
+
+      it('enqueues a serenity-classify-prompts job and returns 202 for subworkspace-mode CSV import, carrying authMode + parentWorkspaceId', async () => {
+        resolveBrandWorkspaceStub.resolves({
+          mode: 'subworkspace', workspaceId: SUBWS, parentWorkspaceId: WORKSPACE,
+        });
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const prompts = [{
+          text: 'What is your return policy?', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'],
+        }];
+        const response = await controller.createPrompts(fakeContext({
+          data: { deferPublish: true, prompts },
+        }));
+
+        expect(response.status).to.equal(202);
+        const body = await readBody(response);
+        expect(body).to.deep.equal({ jobId: 'job-abc', status: 'IN_PROGRESS' });
+        expect(createAndEnqueueJobStub).to.have.been.calledOnce;
+        const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
+        expect(enqueueArgs.jobType).to.equal('serenity-classify-prompts');
+        expect(enqueueArgs.metadata).to.deep.equal({
+          mode: 'create',
+          brandId: BRAND,
+          // In subworkspace mode `auth.workspaceId` IS the sub-workspace, and it is
+          // carried under both `semrushWorkspaceId` (backwards-compatible worker
+          // key) and the explicit `workspaceId`. `parentWorkspaceId` is the org
+          // parent; `authMode` selects the worker's subworkspace create branch.
+          semrushWorkspaceId: SUBWS,
+          authMode: 'subworkspace',
+          workspaceId: SUBWS,
+          parentWorkspaceId: WORKSPACE,
+          prompts,
+          callerId: 'unknown',
+        });
+        // Neither synchronous create handler runs.
+        expect(handlers.handleCreatePromptsSubworkspace).to.not.have.been.called;
         expect(handlers.handleCreatePrompts).to.not.have.been.called;
       });
 
@@ -2811,14 +2857,14 @@ describe('SerenityController', () => {
         expect(handlers.handleCreatePrompts).to.have.been.calledOnce;
       });
 
-      it('stays synchronous for subworkspace-mode brands even when deferPublish is true', async () => {
+      it('stays synchronous for subworkspace-mode brands when deferPublish is absent', async () => {
         resolveBrandWorkspaceStub.resolves({
           mode: 'subworkspace', workspaceId: SUBWS, parentWorkspaceId: WORKSPACE,
         });
         handlers.handleCreatePromptsSubworkspace.resolves({ created: 1, failed: [] });
         const controller = SerenityController({ env: {} }, fakeLog(), {});
         const response = await controller.createPrompts(fakeContext({
-          data: { deferPublish: true, prompts: [{ text: 'x', geoTargetId: 2840, languageCode: 'en' }] },
+          data: { prompts: [{ text: 'x', geoTargetId: 2840, languageCode: 'en' }] },
         }));
 
         expect(response.status).to.equal(200);
@@ -2847,6 +2893,78 @@ describe('SerenityController', () => {
 
         expect(response.status).to.equal(400);
         expect(createAndEnqueueJobStub).to.not.have.been.called;
+      });
+    });
+
+    describe('getPromptsJobStatus — async job polling (serenity-docs#33 Layer 1)', () => {
+      const JOB = '99999999-8888-7777-6666-555555555555';
+
+      function makeAsyncJob({
+        status = 'COMPLETED', result = null, error = null, brandId = BRAND,
+      } = {}) {
+        return {
+          getId: () => JOB,
+          getStatus: () => status,
+          getResult: () => result,
+          getError: () => error,
+          getMetadata: () => ({ brandId, promiseToken: { promise_token: 'secret' } }),
+        };
+      }
+
+      function ctxWithJob(job, { jobId = JOB } = {}) {
+        const ctx = fakeContext({ params: { jobId } });
+        ctx.dataAccess.AsyncJob = { findById: sinon.stub().resolves(job) };
+        return ctx;
+      }
+
+      it('returns 200 with the stable {jobId,status,result,error} contract for a COMPLETED job', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const result = { created: [{ semrushPromptId: 'p1' }], published: true };
+        const response = await controller.getPromptsJobStatus(
+          ctxWithJob(makeAsyncJob({ status: 'COMPLETED', result })),
+        );
+        expect(response.status).to.equal(200);
+        const body = await readBody(response);
+        expect(body).to.deep.equal({
+          jobId: JOB, status: 'COMPLETED', result, error: null,
+        });
+        // Secrets on the job metadata are never exposed.
+        expect(body).to.not.have.property('metadata');
+      });
+
+      it('surfaces the error envelope for a FAILED job', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const error = { code: 'NEEDS_REAUTH', message: 'Promise token exchange rejected' };
+        const response = await controller.getPromptsJobStatus(
+          ctxWithJob(makeAsyncJob({ status: 'FAILED', result: null, error })),
+        );
+        expect(response.status).to.equal(200);
+        const body = await readBody(response);
+        expect(body).to.deep.equal({
+          jobId: JOB, status: 'FAILED', result: null, error,
+        });
+      });
+
+      it('404s when the job does not exist', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.getPromptsJobStatus(ctxWithJob(null));
+        expect(response.status).to.equal(404);
+      });
+
+      it('404s (does not leak) when the job belongs to another brand', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.getPromptsJobStatus(
+          ctxWithJob(makeAsyncJob({ brandId: 'some-other-brand' })),
+        );
+        expect(response.status).to.equal(404);
+      });
+
+      it('400s on a non-UUID jobId', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.getPromptsJobStatus(
+          ctxWithJob(makeAsyncJob(), { jobId: 'not-a-uuid' }),
+        );
+        expect(response.status).to.equal(400);
       });
     });
 
