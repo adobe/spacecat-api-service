@@ -1268,20 +1268,10 @@ export async function upsertBrand({
     // whatever baseSiteId the caller supplied (or leave unset if they didn't).
     row.site_id = hasText(brand.baseSiteId) ? brand.baseSiteId : null;
   } else {
-    // Already anchored (existing.site_id is set) — site_id is immutable once
-    // persisted, so this call never changes it. But it MUST still be carried
-    // forward into `row` explicitly: this upsert always goes through
-    // `.upsert(row, { onConflict: 'organization_id,name' })`, and a column
-    // absent from that payload is not preserved on the resulting UPDATE — it
-    // ends up unset on the written row. Before this fix, re-submitting the
-    // brand's OWN already-correct baseSiteId (the common case: any caller
-    // that reads a brand back and re-upserts it verbatim) omitted site_id
-    // from every one of the three prior branches, silently clearing an
-    // already-anchored brand's site_id and tripping
-    // chk_active_brand_has_site_id — a 400 on a request that never intended
-    // to touch the anchor at all. Found via a brandalf migration script
-    // re-upserting already-onboarded brands (Grainger, Druva, Interface, ABB,
-    // Arkose Labs all hit this identically).
+    // Already anchored (existing.site_id is set) — site_id is immutable, so
+    // always carry the existing value forward explicitly rather than omit it
+    // (an absent column is not preserved by this upsert; see chk_active_brand_
+    // has_site_id in rethrowCheckViolation above).
     if (hasText(brand.baseSiteId) && brand.baseSiteId !== existing.site_id) {
       log.warn(`upsertBrand: ignoring baseSiteId change for brand "${brand.name}" `
         + `(org ${organizationId}) — primary site is immutable `

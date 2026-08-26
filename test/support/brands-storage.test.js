@@ -1379,6 +1379,7 @@ describe('brands-storage', () => {
       // upsert row entirely — silently clearing an already-anchored brand and
       // tripping chk_active_brand_has_site_id with a 400 on a request that
       // never intended to touch the anchor.
+      const log = { warn: sinon.stub(), info: sinon.stub(), error: sinon.stub() };
       const client = createCapturingClient({
         brands: [
           { data: { site_id: 'same-site' }, error: null }, // existing lookup
@@ -1391,10 +1392,14 @@ describe('brands-storage', () => {
         organizationId: ORG_ID,
         brand: { name: 'Test', baseSiteId: 'same-site' },
         postgrestClient: client,
+        log,
       });
 
       const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
       expect(brandsUpsert.row.site_id).to.equal('same-site');
+      // Distinguishes this happy re-upsert path from the rejected-change path
+      // above (LLMO-5556) — no attempted change here, so no warning either.
+      expect(log.warn).to.not.have.been.called;
     });
 
     it('carries forward site_id when re-upserting an already-anchored brand with NO baseSiteId in the body', async () => {
@@ -1402,6 +1407,7 @@ describe('brands-storage', () => {
       // baseSiteId altogether on an already-anchored brand also hit none of
       // the three original branches (all three require hasText(baseSiteId)
       // except the existing===null branch), dropping site_id the same way.
+      const log = { warn: sinon.stub(), info: sinon.stub(), error: sinon.stub() };
       const client = createCapturingClient({
         brands: [
           { data: { site_id: 'existing-site' }, error: null },
@@ -1414,10 +1420,12 @@ describe('brands-storage', () => {
         organizationId: ORG_ID,
         brand: { name: 'Test' },
         postgrestClient: client,
+        log,
       });
 
       const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
       expect(brandsUpsert.row.site_id).to.equal('existing-site');
+      expect(log.warn).to.not.have.been.called;
     });
 
     it('rejects a fresh create whose baseSiteId belongs to a different org (serenity-docs#346)', async () => {
