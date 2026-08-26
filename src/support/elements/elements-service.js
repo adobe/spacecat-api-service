@@ -45,6 +45,8 @@ import {
   transformSubredditsResponse,
   buildRedditThreadsPayload,
   transformRedditThreadsResponse,
+  buildYoutubeVideosPayload,
+  transformYoutubeVideosResponse,
   buildTopicPromptsPayload,
   transformTopicPromptsResponse,
   aggregateTopicsFromPrompts,
@@ -381,6 +383,32 @@ export function createElementsService(transport, log) {
         buildRedditThreadsPayload({ ...rest, projectId }),
       );
       return transformRedditThreadsResponse(raw, rest);
+    },
+
+    /**
+     * Fetches top YouTube videos by citation count from the YouTube Videos element
+     * (05e624db), normalized into `{ videos: [...], totalCount }`. (Inside the
+     * surrounding c8-ignore region — same POC coverage treatment as the sibling
+     * methods here.)
+     *
+     * Single call (no per-project fan-out), mirroring `getRedditThreads`. A
+     * caller-supplied project id scopes to that one project; `projectIds` (a CSV the
+     * controller already parsed + ownership-checked) is narrowed to its first id here.
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params - Query params (model/platform, startDate, endDate,
+     *   projectIds, page, pageSize).
+     * @returns {Promise<{ videos: object[], totalCount: number }>}
+     */
+    async getYoutubeVideos(workspaceId, params) {
+      const { projectIds, ...rest } = params;
+      const projectId = Array.isArray(projectIds) ? projectIds.find(hasText) : undefined;
+      const raw = await transport.fetchElement(
+        workspaceId,
+        ELEMENT_IDS.YOUTUBE_VIDEOS,
+        buildYoutubeVideosPayload({ ...rest, projectId }),
+      );
+      return transformYoutubeVideosResponse(raw, rest);
     },
 
     /**

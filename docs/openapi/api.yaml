@@ -200,6 +200,8 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-brand-presence-subreddits'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/reddit-threads:
     $ref: './serenity-api.yaml#/v2-serenity-brand-presence-reddit-threads'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/youtube-videos:
+    $ref: './serenity-api.yaml#/v2-serenity-brand-presence-youtube-videos'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/topics:
     $ref: './serenity-api.yaml#/v2-serenity-brand-presence-topics'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/topics/{topicId}/prompts:

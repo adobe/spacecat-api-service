@@ -12802,6 +12802,56 @@ SerenityBrandPresenceRedditThreads:
       type: integer
       example: 42
 
+SerenityBrandPresenceYoutubeVideoRow:
+  type: object
+  description: A single YouTube video ranked by citation count.
+  required: [channel, citations, link, prompts, video, views]
+  properties:
+    channel:
+      type: string
+      description: YouTube channel name. Empty string when the element has no channel data for this video.
+      example: 'Lovesac'
+    citations:
+      type: integer
+      description: Number of AI responses citing this video. Endpoint's ranking metric ("citation count").
+      example: 53
+    link:
+      type: string
+      description: Video URL.
+      example: 'https://www.youtube.com/watch?v=4ECf112-SSc'
+    prompts:
+      type: integer
+      description: Number of prompts whose responses cited this video.
+      example: 47
+    video:
+      type: string
+      description: Video title, as returned by the element.
+      example: 'Lovesac Product Guide - CitySac Overview'
+    views:
+      type: integer
+      description: View count, coerced to 0 when the element has no tracked view count for this video.
+      example: 106100
+    urlCbf:
+      type: string
+      description: Opaque Semrush custom-field-value key for the video URL.
+      example: '59bfcb03-11df-44ff-867a-ac2b30c49578:eq:https_C0L_//www.youtube.com/watch?v=4ECf112-SSc'
+
+SerenityBrandPresenceYoutubeVideos:
+  type: object
+  description: |
+    Top YouTube videos from the Semrush "YouTube Videos" element (05e624db), sorted by
+    `citations` descending (tie-broken by `urlCbf`) and paginated. `totalCount` is the
+    full pre-pagination row count.
+  required: [videos, totalCount]
+  properties:
+    videos:
+      type: array
+      items:
+        $ref: '#/SerenityBrandPresenceYoutubeVideoRow'
+    totalCount:
+      type: integer
+      example: 42
+
 SerenityBrandPresenceTopics:
   type: object
   description: |

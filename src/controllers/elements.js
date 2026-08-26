@@ -973,6 +973,72 @@ export default function ElementsController(context, log, env) {
   /* c8 ignore stop */
 
   /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/youtube-videos
+   * Returns top YouTube videos by citation count (channel, citations, prompts, views) from
+   * the YouTube Videos element (05e624db). Single upstream call (the element aggregates
+   * workspace-wide; a supplied projectId scopes to one project).
+   */
+  /* c8 ignore start -- SITES-POC youtube-videos endpoint; unit tests intentionally deferred */
+  const listYoutubeVideos = async (ctx) => {
+    try {
+      const auth = await authorizeOrg(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { workspaceId, brand } = auth;
+      const query = extractQuery(ctx);
+
+      // Date range is required + validated (mirrors reddit-threads/subreddits) —
+      // never silently default to a rolling window nor forward a malformed date to Semrush.
+      const startDate = query.startDate || query.start_date;
+      const endDate = query.endDate || query.end_date;
+      if (!hasText(startDate) || !hasText(endDate)) {
+        return badRequest('startDate and endDate are required (YYYY-MM-DD)');
+      }
+      if (!isYmdDate(startDate) || !isYmdDate(endDate)) {
+        return badRequest('startDate and endDate must be valid YYYY-MM-DD dates');
+      }
+      if (startDate > endDate) {
+        return badRequest('startDate must not be after endDate');
+      }
+      const MAX_RANGE_DAYS = 366;
+      const spanDays = (Date.parse(`${endDate}T00:00:00Z`)
+        - Date.parse(`${startDate}T00:00:00Z`)) / 86400000;
+      if (spanDays > MAX_RANGE_DAYS) {
+        return badRequest(`Date range must not exceed ${MAX_RANGE_DAYS} days`);
+      }
+
+      const service = await buildService(ctx);
+
+      // Project scoping: caller-supplied projectId(s) (CSV) scope to a single Semrush
+      // project (the service uses the first); absent → the element aggregates across all of
+      // the brand's markets. Any supplied id must belong to this brand.
+      const projectIds = extractProjectIds(query);
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
+      const ownershipError = checkProjectIdsOwnership(projectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
+
+      const params = {
+        projectIds,
+        model: query.model || query.platform,
+        startDate,
+        endDate,
+        page: query.page,
+        pageSize: query.pageSize,
+      };
+
+      const result = await service.getYoutubeVideos(workspaceId, params);
+      return ok(result);
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx));
+    }
+  };
+  /* c8 ignore stop */
+
+  /**
    * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview
    * Returns per-week brand sentiment (positive/neutral/negative percentages) sourced from
    * the Semrush Sentiment element, in the legacy `{ weeklyTrends: [...] }` contract so the
@@ -2115,6 +2181,7 @@ export default function ElementsController(context, log, env) {
     listCitedDomains,
     listSubreddits,
     listRedditThreads,
+    listYoutubeVideos,
     listSentimentOverview,
     listTopics,
     listTopicPrompts,

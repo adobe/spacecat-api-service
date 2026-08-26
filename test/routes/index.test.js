@@ -1025,6 +1025,7 @@ describe('getRouteHandlers', () => {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/subreddits',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/reddit-threads',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/youtube-videos',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics/:topicId/prompts',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls',
