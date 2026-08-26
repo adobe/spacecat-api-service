@@ -35,6 +35,14 @@ export const ELEMENT_IDS = Object.freeze({
   // Brand scoping is via the request's sub-workspace, not a filter (`CBF_ws_brand` is a no-op).
   CITED_DOMAINS: '98b91d00-9531-4120-b3b5-17cc27489fce',
 
+  // Subreddits — per-subreddit Reddit stats (`table`), one row per (subreddit, project):
+  // { subreddit, subreddit_key, link, mentions, prompts, responses_with_citations,
+  //   threads, visibility, project_id }. Honors date (`CBF_date__start`/`__end`) + `CBF_model`.
+  // Optional top-level `project_id` — omit → workspace-wide across ALL projects (verified
+  // live: omitted returns every project's rows; supplied scopes to that one). Brand scoping
+  // is via the request's sub-workspace, not a filter.
+  SUBREDDITS: 'faf56e29-ddda-4480-b639-586d526c9080',
+
   // URL Inspector — Owned URLs ("Your cited URLs" table). Two elements, both
   // scoped by a top-level `project_id` (region/market) + date + `CBF_model`;
   // neither honors a server-side content-type filter, so `domain_type='Owned'`

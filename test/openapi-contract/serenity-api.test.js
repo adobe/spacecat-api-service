@@ -458,6 +458,31 @@ const FIXTURES = {
       }],
     },
   },
+  listSerenityBrandPresenceSubreddits: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'listSubreddits',
+    serviceMethod: 'getSubreddits',
+    // startDate/endDate are required + validated by the controller before the
+    // service is called (see listSubreddits) — supply them via query.
+    query: { startDate: '2026-06-01', endDate: '2026-07-16' },
+    // getSubreddits returns the final { subreddits, totalCount } shape; the
+    // controller passes it straight through via ok().
+    handlerResult: {
+      subreddits: [{
+        subreddit: 'r/Lovesac',
+        subredditKey: 'Lovesac',
+        link: 'r/Lovesac',
+        mentions: 4407,
+        prompts: 430,
+        responsesWithCitations: 2603,
+        threads: 1879,
+        visibility: 0.7477736282677392,
+        projectId: 'cb4f6443-e01f-4075-a586-85511f136e31',
+      }],
+      totalCount: 107,
+    },
+  },
   listSerenityBrandPresenceTopics: {
     expectedStatus: 200,
     usesElementsController: true,
