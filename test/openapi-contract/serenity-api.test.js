@@ -483,6 +483,29 @@ const FIXTURES = {
       totalCount: 107,
     },
   },
+  listSerenityBrandPresenceRedditThreads: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'listRedditThreads',
+    serviceMethod: 'getRedditThreads',
+    // startDate/endDate are required + validated by the controller before the
+    // service is called (see listRedditThreads) — supply them via query.
+    query: { startDate: '2026-06-01', endDate: '2026-07-16' },
+    // getRedditThreads returns the final { threads, totalCount } shape; the
+    // controller passes it straight through via ok().
+    handlerResult: {
+      threads: [{
+        link: 'https://www.reddit.com/r/BuyItForLife/comments/1kqgvja/lovesac_sactional_is_it_worth_it',
+        mentions: 75,
+        prompts: 28,
+        responses: 62,
+        subreddit: 'r/BuyItForLife',
+        thread: 'LoveSac Sactional, is it worth it? : r/BuyItForLife - Reddit',
+        urlCbf: '59bfcb03-11df-44ff-867a-ac2b30c49578:eq:https_C0L_//www.reddit.com/r/BuyItForLife/comments/1kqgvja/lovesac_sactional_is_it_worth_it',
+      }],
+      totalCount: 42,
+    },
+  },
   listSerenityBrandPresenceTopics: {
     expectedStatus: 200,
     usesElementsController: true,
