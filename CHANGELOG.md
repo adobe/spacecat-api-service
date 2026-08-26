@@ -1,3 +1,31 @@
+# [1.766.0](https://github.com/adobe/spacecat-api-service/compare/v1.765.0...v1.766.0) (2026-08-26)
+
+
+### Features
+
+* **serenity:** route subworkspace CSV imports through the async job runner ([#3138](https://github.com/adobe/spacecat-api-service/issues/3138)) ([184ca22](https://github.com/adobe/spacecat-api-service/commit/184ca2287f3c317ecdc4ccdf30db9682bfbc0beb)), closes [serenity-docs#186](https://github.com/serenity-docs/issues/186) [serenity-docs#33](https://github.com/serenity-docs/issues/33) [serenity-docs#33](https://github.com/serenity-docs/issues/33) [#2920](https://github.com/adobe/spacecat-api-service/issues/2920)
+
+# [1.765.0](https://github.com/adobe/spacecat-api-service/compare/v1.764.1...v1.765.0) (2026-08-26)
+
+
+### Features
+
+* serenity introduce top reddit threads endpoints ([#3139](https://github.com/adobe/spacecat-api-service/issues/3139)) ([4f42978](https://github.com/adobe/spacecat-api-service/commit/4f42978de8e932633791cfae20b2dde5e664d575))
+
+## [1.764.1](https://github.com/adobe/spacecat-api-service/compare/v1.764.0...v1.764.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* revoke suggestion grants when a suggestion is deleted ([#3136](https://github.com/adobe/spacecat-api-service/issues/3136)) ([4c1b8b9](https://github.com/adobe/spacecat-api-service/commit/4c1b8b9b2936607eabff6c422d3c9a77151d8a5e))
+
+# [1.764.0](https://github.com/adobe/spacecat-api-service/compare/v1.763.6...v1.764.0) (2026-08-26)
+
+
+### Features
+
+* **serenity:** add brand-presence subreddits element endpoint ([#3135](https://github.com/adobe/spacecat-api-service/issues/3135)) ([3e83a04](https://github.com/adobe/spacecat-api-service/commit/3e83a04f3ff528e3334ad781758a953d3901a382)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 ## [1.763.6](https://github.com/adobe/spacecat-api-service/compare/v1.763.5...v1.763.6) (2026-08-25)
 
 
