@@ -15,6 +15,7 @@ import {
   ORG_1_ID, BRAND_1_ID, SITE_1_ID, SITE_2_ID,
 } from '../seed-ids.js';
 import { INTENT_ROOT_NAME } from '../../../../src/support/serenity/prompt-tags.js';
+import { SERENITY_CLASSIFY_JOB_ID } from '../../postgres/seed-data/async-jobs.js';
 
 /**
  * End-to-end tests for the /serenity/* surface (LLMO-5190), driven against the
@@ -258,6 +259,40 @@ export default function serenityTests(
       });
       expect(res.status).to.equal(400);
       expect(res.body.message).to.match(/type must be one of/i);
+    });
+  });
+
+  describe('Serenity API — poll a prompt-import (classify) job (serenity-docs#33 Layer 1)', () => {
+    const base = `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity`;
+
+    it('GET /serenity/prompts/jobs/:jobId returns the secret-free status contract for an owned COMPLETED job', async () => {
+      const res = await getHttpClient().admin.get(`${base}/prompts/jobs/${SERENITY_CLASSIFY_JOB_ID}`);
+      expect(res.status).to.equal(200);
+      // Exactly the four camelCase fields the UI is built against — nothing else.
+      expect(Object.keys(res.body).sort()).to.deep.equal(['error', 'jobId', 'result', 'status']);
+      expect(res.body.jobId).to.equal(SERENITY_CLASSIFY_JOB_ID);
+      expect(res.body.status).to.equal('COMPLETED');
+      expect(res.body.result).to.deep.include({ published: true, pendingClassificationCount: 0 });
+      expect(res.body.error).to.equal(null);
+      // The job's internal metadata (promise token etc.) must never leak.
+      expect(res.body).to.not.have.property('metadata');
+      expect(JSON.stringify(res.body)).to.not.match(/promise/i);
+    });
+
+    it('GET /serenity/prompts/jobs/:jobId 404s for an unknown job id', async () => {
+      const res = await getHttpClient().admin.get(`${base}/prompts/jobs/eeee9999-9999-4999-a999-999999999999`);
+      expect(res.status).to.equal(404);
+    });
+
+    it('GET /serenity/prompts/jobs/:jobId 404s (does not leak) for a job owned by another brand', async () => {
+      // The seeded COMPLETED preflight job carries no matching brandId.
+      const res = await getHttpClient().admin.get(`${base}/prompts/jobs/eeee1111-1111-4111-b111-111111111111`);
+      expect(res.status).to.equal(404);
+    });
+
+    it('GET /serenity/prompts/jobs/:jobId 400s on a non-UUID jobId', async () => {
+      const res = await getHttpClient().admin.get(`${base}/prompts/jobs/not-a-uuid`);
+      expect(res.status).to.equal(400);
     });
   });
 

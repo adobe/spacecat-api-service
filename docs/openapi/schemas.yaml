@@ -12065,6 +12065,53 @@ SerenityCreatePromptsResponse:
         were written as drafts and the caller must publish separately
         (serenity-docs#32).
 
+SerenityPromptsJobAccepted:
+  type: object
+  description: |
+    202 body for a CSV-import create (`deferPublish: true`). The write runs
+    asynchronously on the job runner; poll `jobId` at
+    `GET .../serenity/prompts/jobs/{jobId}`.
+  required: [jobId, status]
+  properties:
+    jobId:
+      type: string
+      format: uuid
+    status:
+      type: string
+      description: The job's initial state (IN_PROGRESS at enqueue time).
+      enum: [IN_PROGRESS, COMPLETED, FAILED]
+
+SerenityPromptsJobStatus:
+  type: object
+  description: |
+    Poll response for an async `serenity-classify-prompts` job. Secret-free by
+    design — the job's internal metadata (promise token etc.) is never exposed.
+  required: [jobId, status]
+  properties:
+    jobId:
+      type: string
+      format: uuid
+    status:
+      type: string
+      enum: [IN_PROGRESS, COMPLETED, FAILED]
+    result:
+      description: >
+        The job result once COMPLETED (the same envelope the synchronous create
+        returns: created/skipped/failed/published, plus
+        pendingClassificationCount/requeuedJobId). Null while IN_PROGRESS or on
+        FAILED.
+      oneOf:
+        - { $ref: '#/SerenityCreatePromptsResponse' }
+        - { type: 'null' }
+    error:
+      description: The failure envelope once FAILED; null otherwise.
+      oneOf:
+        - type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+        - { type: 'null' }
+
 SerenityUpdatePromptRequest:
   type: object
   description: |

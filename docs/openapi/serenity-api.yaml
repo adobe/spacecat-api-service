@@ -140,6 +140,15 @@ v2-serenity-prompts:
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityCreatePromptsResponse' }
+      '202':
+        description: |
+          The request was a CSV import (`deferPublish: true`) and was routed to
+          the async job runner (serenity-docs#33). The prompts are classified,
+          created, and published off the request thread. Poll the returned
+          `jobId` at `GET .../serenity/prompts/jobs/{jobId}` for status + result.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityPromptsJobAccepted' }
       '400': { $ref: './responses.yaml#/400' }
       '404':
         description: Organization, brand, or workspace not found, or serenity is not active for the organization.
@@ -268,6 +277,54 @@ v2-serenity-prompts-bulk-delete:
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-prompts-job-by-id:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+    - name: jobId
+      in: path
+      required: true
+      description: Async job id returned by the 202 CSV-import create response.
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: Poll a Serenity prompt-import (classify) job
+    description: |
+      Returns the status and, on completion, the result of an async
+      `serenity-classify-prompts` job created by the CSV-import path of
+      `POST .../serenity/prompts` (serenity-docs#33). Access is gated by the same
+      org/brand access + serenity-active checks as every other serenity endpoint;
+      a job that does not belong to the addressed brand 404s exactly like a
+      missing job (jobs are never leaked across brands). The response is
+      secret-free — only `{ jobId, status, result, error }`.
+    operationId: getSerenityPromptsJobStatus
+    security:
+      - session_token: []
+    responses:
+      '200':
+        description: Job status (and result when COMPLETED / error when FAILED).
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityPromptsJobStatus' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization, brand, or job not found, serenity is not active for the brand, or the job belongs to a different brand.
       '500': { $ref: './responses.yaml#/500' }
 
 # ─── Markets ──────────────────────────────────────────────────────────────────
