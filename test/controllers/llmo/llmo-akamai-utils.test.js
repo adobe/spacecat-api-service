@@ -117,7 +117,11 @@ describe('llmo-akamai-utils', () => {
       const apiKeyHeader = routing.behaviors.find(
         (b) => b.name === 'modifyIncomingRequestHeader' && b.options.customHeaderName === 'x-edgeoptimize-api-key',
       );
-      expect(apiKeyHeader.options.headerValue).to.equal(API_KEY);
+      expect(apiKeyHeader.options.newHeaderValue).to.equal(API_KEY);
+      // Idempotent under multi-tier (edge + parent) re-evaluation: MODIFY sets the value
+      // rather than appending, and avoidDuplicateHeaders guards against a second copy.
+      expect(apiKeyHeader.options.action).to.equal('MODIFY');
+      expect(apiKeyHeader.options.avoidDuplicateHeaders).to.equal(true);
       const cacheId = findBehavior(routing, 'cacheId');
       expect(cacheId.options.variableName).to.equal(cfg.cacheKeyVariable.name);
     });
@@ -127,8 +131,17 @@ describe('llmo-akamai-utils', () => {
         (c) => c.name === 'requestHeader' && c.options.matchOperator === 'DOES_NOT_EXIST',
       );
       const guardedHeaders = guards.map((g) => g.options.headerName);
-      expect(guardedHeaders).to.include('x-edgeoptimize-api-key');
       expect(guardedHeaders).to.include('x-edgeoptimize-request');
+    });
+
+    it('does not guard on a header the routing rule injects itself', () => {
+      // A self-injected header is present from the first match onwards, so any later
+      // re-evaluation of the rule tree (parent tier and so on) would stop matching.
+      const injected = Object.keys(cfg.incomingRequestHeaders);
+      const guardedHeaders = routing.criteria
+        .filter((c) => c.name === 'requestHeader')
+        .map((c) => c.options.headerName);
+      guardedHeaders.forEach((h) => expect(injected).to.not.include(h));
     });
 
     it('nests a Site Failover child rule pointing back at the site hostname', () => {
@@ -162,20 +175,19 @@ describe('llmo-akamai-utils', () => {
   });
 
   describe('buildFailoverTestRule', () => {
-    it('detects the failover recreate via persisted api-key + absent marker (no advanced metadata)', () => {
+    it('detects the failover recreate via the fail-action2 marker value', () => {
       const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
       const rule = buildFailoverTestRule(cfg);
       expect(rule.criteriaMustSatisfy).to.equal('all');
-      const ops = Object.fromEntries(
-        rule.criteria
-          .filter((c) => c.name === 'requestHeader')
-          .map((c) => [c.options.headerName, c.options.matchOperator]),
+      const marker = rule.criteria.find(
+        (c) => c.name === 'requestHeader' && c.options.headerName === 'x-edgeoptimize-request',
       );
-      expect(ops['x-edgeoptimize-api-key']).to.equal('EXISTS');
-      expect(ops['x-edgeoptimize-request']).to.equal('DOES_NOT_EXIST');
+      expect(marker.options.matchOperator).to.equal('IS_ONE_OF');
+      expect(marker.options.values).to.deep.equal(['fo']);
+      expect(marker.options.matchCaseSensitiveValue).to.equal(true);
       const resp = findBehavior(rule, 'modifyOutgoingResponseHeader');
       expect(resp.options.customHeaderName).to.equal('x-edgeoptimize-fo');
-      expect(resp.options.headerValue).to.equal('true');
+      expect(resp.options.newHeaderValue).to.equal('true');
     });
   });
 
@@ -533,14 +545,14 @@ describe('llmo-akamai-utils', () => {
       expect(rule.behaviors.some((b) => b.name === 'modifyIncomingResponseHeader')).to.equal(false);
     });
 
-    it('falls back to the first incoming header for the loop guard when the api-key header is absent', () => {
+    it('guards on the failover marker regardless of which headers are injected', () => {
       const cfg = base();
       cfg.incomingRequestHeaders = { 'x-custom-first': 'v', 'x-edgeoptimize-config': 'c' };
       const rule = buildRoutingRule(cfg);
       const guards = rule.criteria.filter(
         (c) => c.name === 'requestHeader' && c.options.matchOperator === 'DOES_NOT_EXIST',
       );
-      expect(guards.map((g) => g.options.headerName)).to.include('x-custom-first');
+      expect(guards.map((g) => g.options.headerName)).to.deep.equal(['x-edgeoptimize-request']);
     });
 
     it('merges into a tree whose default rule has no children array', () => {
