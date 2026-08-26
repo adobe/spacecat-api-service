@@ -5342,6 +5342,178 @@ describe('Suggestions Controller', () => {
       expect(context.log.info).to.have.been.calledWith('[autofix-triggered]', expectedFields);
     });
 
+    it('rolls back IN_PROGRESS suggestions to NEW and marks them 502 when the SQS dispatch fails (SITES-49388)', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(suggs[0])]);
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+      ]);
+      // The SQS send rejects → dispatch fails after the IN_PROGRESS flip.
+      mockSqs.sendMessage.rejects(new Error('SQS unavailable'));
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      // The failed dispatch is reflected as a failure, not an in-flight success.
+      expect(body.metadata).to.have.property('success', 0);
+      expect(body.metadata).to.have.property('failed', 1);
+      expect(body.suggestions[0]).to.have.property('statusCode', 502);
+      // The IN_PROGRESS rows were rolled back to NEW (a 2nd bulkUpdateStatus call).
+      expect(mockSuggestion.bulkUpdateStatus).to.have.been.calledWith(sinon.match.any, 'NEW');
+      expect(context.log.error).to.have.been.called;
+    });
+
+    it('does NOT roll back on dispatch failure for an assess request (assess never flipped to IN_PROGRESS) (SITES-49388)', async () => {
+      opportunity.getType = sandbox.stub().returns('alt-text');
+      mockSuggestion.allByOpportunityId.resolves([
+        mockSuggestionEntity(altTextSuggs[0]),
+        mockSuggestionEntity(altTextSuggs[1]),
+      ]);
+      mockSqs.sendMessage.rejects(new Error('SQS unavailable'));
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]], action: 'assess' },
+        ...context,
+      });
+
+      // The dispatch failure is still surfaced as a failure...
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata).to.have.property('success', 0);
+      expect(body.metadata).to.have.property('failed', 2);
+      // ...but assess rows were never flipped to IN_PROGRESS, so nothing is rolled back.
+      expect(mockSuggestion.bulkUpdateStatus).to.not.have.been.called;
+    });
+
+    it('rolls back IN_PROGRESS suggestions to NEW when promise-token creation fails pre-dispatch (SITES-49388)', async () => {
+      const rejectingTokenController = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/utils.js': {
+          getIMSPromiseToken: async () => { throw new Error('IMS down'); },
+          getIsSummitPlgEnabled: async () => true,
+        },
+      });
+      const controller = rejectingTokenController({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'abcd' } },
+        ...authContext,
+      }, mockSqs, {
+        AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+        LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+      });
+
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(suggs[0])]);
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await controller.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(500);
+      // Flipped to IN_PROGRESS, then rolled back to NEW when the token failed before dispatch.
+      expect(mockSuggestion.bulkUpdateStatus).to.have.been.calledWith(sinon.match.any, 'NEW');
+      // No message was ever dispatched.
+      expect(mockSqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('does NOT roll back on promise-token failure for an assess request (SITES-49388)', async () => {
+      const rejectingTokenController = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/utils.js': {
+          getIMSPromiseToken: async () => { throw new Error('IMS down'); },
+          getIsSummitPlgEnabled: async () => true,
+        },
+      });
+      const controller = rejectingTokenController({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'abcd' } },
+        ...authContext,
+      }, mockSqs, {
+        AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+        LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+      });
+
+      opportunity.getType = sandbox.stub().returns('alt-text');
+      mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(altTextSuggs[0])]);
+
+      const response = await controller.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        // precheckOnly false → the assess path still creates a promise token.
+        data: { suggestionIds: [SUGGESTION_IDS[0]], action: 'assess', precheckOnly: false },
+        ...context,
+      });
+
+      expect(response.status).to.equal(500);
+      // Assess never flipped status, so a token failure must not touch suggestion status.
+      expect(mockSuggestion.bulkUpdateStatus).to.not.have.been.called;
+    });
+
+    it('logs and swallows when the rollback itself fails after a dispatch failure (SITES-49388)', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(suggs[0])]);
+      // 1st call = IN_PROGRESS flip (ok); 2nd call = rollback to NEW (throws).
+      mockSuggestion.bulkUpdateStatus
+        .onFirstCall().resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' })])
+        .onSecondCall().rejects(new Error('db down'));
+      mockSqs.sendMessage.rejects(new Error('SQS unavailable'));
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      // The failed rollback is logged and swallowed — the 207 response still returns.
+      expect(response.status).to.equal(207);
+      expect(context.log.error).to.have.been.calledWith(
+        sinon.match(/failed to roll back IN_PROGRESS after dispatch failure/),
+      );
+    });
+
+    it('logs and swallows when the rollback itself fails after a promise-token failure (SITES-49388)', async () => {
+      const rejectingTokenController = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/utils.js': {
+          getIMSPromiseToken: async () => { throw new Error('IMS down'); },
+          getIsSummitPlgEnabled: async () => true,
+        },
+      });
+      const controller = rejectingTokenController({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'abcd' } },
+        ...authContext,
+      }, mockSqs, {
+        AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+        LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+      });
+
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(suggs[0])]);
+      // 1st call = IN_PROGRESS flip (ok); 2nd call = rollback to NEW (throws).
+      mockSuggestion.bulkUpdateStatus
+        .onFirstCall().resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' })])
+        .onSecondCall().rejects(new Error('db down'));
+
+      const response = await controller.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(500);
+      expect(context.log.error).to.have.been.calledWith(
+        sinon.match(/failed to roll back IN_PROGRESS after promise-token failure/),
+      );
+    });
+
     it('logs triggeredBy as unknown when profile email is absent', async () => {
       const savedProfile = context.attributes.authInfo.profile;
       context.attributes.authInfo.profile = null;
