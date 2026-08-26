@@ -43,6 +43,8 @@ import {
   transformCitedDomainsResponses,
   buildSubredditsPayload,
   transformSubredditsResponse,
+  buildRedditThreadsPayload,
+  transformRedditThreadsResponse,
   buildTopicPromptsPayload,
   transformTopicPromptsResponse,
   aggregateTopicsFromPrompts,
@@ -353,6 +355,32 @@ export function createElementsService(transport, log) {
         buildSubredditsPayload({ ...rest, projectId }),
       );
       return transformSubredditsResponse(raw, rest);
+    },
+
+    /**
+     * Fetches top Reddit threads by response count from the Reddit Threads element
+     * (5af96fd9), normalized into `{ threads: [...], totalCount }`. (Inside the
+     * surrounding c8-ignore region — same POC coverage treatment as the sibling
+     * methods here.)
+     *
+     * Single call (no per-project fan-out), mirroring `getSubreddits`. A
+     * caller-supplied project id scopes to that one project; `projectIds` (a CSV the
+     * controller already parsed + ownership-checked) is narrowed to its first id here.
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params - Query params (model/platform, startDate, endDate,
+     *   projectIds, page, pageSize).
+     * @returns {Promise<{ threads: object[], totalCount: number }>}
+     */
+    async getRedditThreads(workspaceId, params) {
+      const { projectIds, ...rest } = params;
+      const projectId = Array.isArray(projectIds) ? projectIds.find(hasText) : undefined;
+      const raw = await transport.fetchElement(
+        workspaceId,
+        ELEMENT_IDS.REDDIT_THREADS,
+        buildRedditThreadsPayload({ ...rest, projectId }),
+      );
+      return transformRedditThreadsResponse(raw, rest);
     },
 
     /**

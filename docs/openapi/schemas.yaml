@@ -12706,6 +12706,55 @@ SerenityBrandPresenceSubreddits:
       type: integer
       example: 107
 
+SerenityBrandPresenceRedditThreadRow:
+  type: object
+  description: A single Reddit thread ranked by response count.
+  required: [link, mentions, prompts, responses, subreddit, thread]
+  properties:
+    link:
+      type: string
+      description: Thread URL.
+      example: 'https://www.reddit.com/r/BuyItForLife/comments/1kqgvja/lovesac_sactional_is_it_worth_it'
+    mentions:
+      type: integer
+      example: 75
+    prompts:
+      type: integer
+      description: Number of prompts whose responses cited this thread.
+      example: 28
+    responses:
+      type: integer
+      description: Number of AI responses citing this thread. Endpoint's ranking metric ("citation count").
+      example: 62
+    subreddit:
+      type: string
+      description: Subreddit the thread belongs to (with the `r/` prefix).
+      example: 'r/BuyItForLife'
+    thread:
+      type: string
+      description: Thread title, as returned by the element.
+      example: 'LoveSac Sactional, is it worth it? : r/BuyItForLife - Reddit'
+    urlCbf:
+      type: string
+      description: Opaque Semrush custom-field-value key for the thread URL.
+      example: '59bfcb03-11df-44ff-867a-ac2b30c49578:eq:https_C0L_//www.reddit.com/r/BuyItForLife/comments/1kqgvja/lovesac_sactional_is_it_worth_it'
+
+SerenityBrandPresenceRedditThreads:
+  type: object
+  description: |
+    Top Reddit threads from the Semrush "Reddit Threads" element (5af96fd9), sorted by
+    `responses` descending (tie-broken by `urlCbf`) and paginated. `totalCount` is the
+    full pre-pagination row count.
+  required: [threads, totalCount]
+  properties:
+    threads:
+      type: array
+      items:
+        $ref: '#/SerenityBrandPresenceRedditThreadRow'
+    totalCount:
+      type: integer
+      example: 42
+
 SerenityBrandPresenceTopics:
   type: object
   description: |

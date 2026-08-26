@@ -269,6 +269,8 @@ export default function getRouteHandlers(
     // Per-subreddit Reddit stats (Subreddits element faf56e29).
     // eslint-disable-next-line max-len
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/subreddits': elementsController.listSubreddits,
+    // Top Reddit threads by response count (Reddit Threads element 5af96fd9).
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/reddit-threads': elementsController.listRedditThreads,
     // Data Insights per-topic table (grouped from the prompts-by-topic element).
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics': elementsController.listTopics,
     // Data Insights per-prompt drill-down: :topicId is the URL-encoded topic NAME.
