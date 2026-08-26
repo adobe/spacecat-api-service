@@ -1,3 +1,10 @@
+# [1.765.0](https://github.com/adobe/spacecat-api-service/compare/v1.764.1...v1.765.0) (2026-08-26)
+
+
+### Features
+
+* serenity introduce top reddit threads endpoints ([#3139](https://github.com/adobe/spacecat-api-service/issues/3139)) ([4f42978](https://github.com/adobe/spacecat-api-service/commit/4f42978de8e932633791cfae20b2dde5e664d575))
+
 ## [1.764.1](https://github.com/adobe/spacecat-api-service/compare/v1.764.0...v1.764.1) (2026-08-26)
 
 
