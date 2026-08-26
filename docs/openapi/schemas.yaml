@@ -12809,7 +12809,7 @@ SerenityBrandPresenceYoutubeVideoRow:
   properties:
     channel:
       type: string
-      description: YouTube channel name. `-` when the element has no channel data for this video.
+      description: YouTube channel name. Empty string when the element has no channel data for this video.
       example: 'Lovesac'
     citations:
       type: integer

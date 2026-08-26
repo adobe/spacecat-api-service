@@ -1697,7 +1697,8 @@ v2-serenity-brand-presence-youtube-videos:
       Returns the top YouTube videos (channel, citations, link, prompts, video title,
       views) from the Semrush "YouTube Videos" element (05e624db). Rows are sorted by
       `citations` descending (tie-broken by an internal video key) and paginated
-      server-side.
+      after retrieval (the full result set is fetched from the upstream element and
+      sliced in-memory; a large page offset is not a cheap upstream query).
 
       Brand-scoped via the brand's Semrush sub-workspace (resolved from `:brandId`).
       A single upstream call: the element aggregates across the whole workspace when
