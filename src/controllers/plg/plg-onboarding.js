@@ -44,6 +44,7 @@ import {
   resolveWwwUrl,
   updateCodeConfig,
 } from '../../support/utils.js';
+import { detectAuthWall } from '../../support/detect-auth-wall.js';
 import { loadProfileConfig, postSlackMessage } from '../../utils/slack/base.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import { ASO_PRODUCT_CODE, STATUSES, REVIEW_DECISIONS } from './plg-onboarding/constants.js';
@@ -60,6 +61,7 @@ import {
   bypassAemSiteCheck,
   bypassDomainAlreadyAssigned,
   bypassNonProdDomain,
+  bypassAuthenticatedSite,
 } from './plg-onboarding/bypass-handlers.js';
 import { getReviewerIdentity, isInternalOrg, isInternalOrgDemoSite } from './plg-onboarding/internal-org.js';
 
@@ -79,6 +81,7 @@ function injectFlowDeps(context) {
     LaunchDarklyClient,
     composeBaseURL,
     detectBotBlocker,
+    detectAuthWall,
     detectLocale,
     resolveCanonicalUrl,
     createOrFindOrganization,
@@ -549,6 +552,8 @@ function PlgOnboardingController(ctx) {
           );
         case REVIEW_REASONS.NON_PROD_DOMAIN:
           return await bypassNonProdDomain({ onboarding }, flowContext);
+        case REVIEW_REASONS.AUTHENTICATED_SITE:
+          return await bypassAuthenticatedSite({ onboarding }, flowContext);
         /* c8 ignore next 2 */
         default:
           return badRequest('Unknown review reason');

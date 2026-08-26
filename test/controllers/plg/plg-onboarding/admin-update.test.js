@@ -84,6 +84,7 @@ describe('PlgOnboardingController - update', function () {
     stubs.rumRetrieveDomainkeyStub.resolves('test-domainkey');
     stubs.rumApiClientCreateFromStub.returns({ retrieveDomainkey: stubs.rumRetrieveDomainkeyStub });
     stubs.detectBotBlockerStub.resolves({ crawlable: true });
+    stubs.detectAuthWallStub.resolves({ authenticated: false, signal: null });
     stubs.findDeliveryTypeStub.resolves('aem_edge');
     stubs.deriveProjectNameStub.returns('example.com');
     stubs.queueDeliveryConfigWriterStub.resolves({ ok: true });
@@ -1894,5 +1895,51 @@ describe('PlgOnboardingController - update', function () {
     });
 
     expect(res.status).to.equal(200);
+  });
+
+  it('BYPASS AUTHENTICATED_SITE: sets authWallCheckBypassed and re-runs flow', async () => {
+    const waitlistedRecord = createMockOnboarding({
+      status: 'WAITLISTED',
+      domain: 'portal.example.com',
+      waitlistReason: 'Domain portal.example.com requires authentication (login/SSO) to access, which ASO does not support (detected: login-url, resolved to https://portal.example.com/login).',
+    });
+    const rerunRecord = createMockOnboarding({ status: 'ONBOARDED', domain: 'portal.example.com' });
+
+    mockDataAccess.PlgOnboarding.findById.resolves(waitlistedRecord);
+    mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(rerunRecord);
+    mockDataAccess.Site.create.resolves(mockSite);
+
+    const res = await AdminAccessPlgController({ log: mockLog }).update({
+      dataAccess: mockDataAccess,
+      params: { onboardingId: TEST_ONBOARDING_ID },
+      data: { decision: 'BYPASSED', justification: 'Customer allowlisted our crawler' },
+      attributes: adminAuthAttributes,
+      env: mockEnv,
+      log: mockLog,
+    });
+
+    expect(res.status).to.equal(200);
+    expect(waitlistedRecord.setSteps).to.have.been.calledWithMatch({ authWallCheckBypassed: true });
+  });
+
+  it('UPHELD AUTHENTICATED_SITE: transitions WAITLISTED to REJECTED', async () => {
+    const waitlistedRecord = createMockOnboarding({
+      status: 'WAITLISTED',
+      domain: 'portal.example.com',
+      waitlistReason: 'Domain portal.example.com requires authentication (login/SSO) to access, which ASO does not support (detected: login-url).',
+    });
+    mockDataAccess.PlgOnboarding.findById.resolves(waitlistedRecord);
+
+    const res = await AdminAccessPlgController({ log: mockLog }).update({
+      dataAccess: mockDataAccess,
+      params: { onboardingId: TEST_ONBOARDING_ID },
+      data: { decision: 'UPHELD', justification: 'ASO does not support auth-gated sites' },
+      attributes: adminAuthAttributes,
+      env: mockEnv,
+      log: mockLog,
+    });
+
+    expect(res.status).to.equal(200);
+    expect(waitlistedRecord.setStatus).to.have.been.calledWith('REJECTED');
   });
 });

@@ -23,6 +23,7 @@ import {
   getReviewerIdentity, isFromAsoUI, isInternalOrg, isInternalOrgDemoSite,
 } from './internal-org.js';
 import {
+  AUTHENTICATED_SITE,
   DOMAIN_ALREADY_ASSIGNED,
   DOMAIN_ALREADY_ONBOARDED_IN_ORG,
   NON_PROD_DOMAIN,
@@ -455,6 +456,7 @@ export async function performAsoPlgOnboarding({
     RUMAPIClient,
     composeBaseURL,
     detectBotBlocker,
+    detectAuthWall,
     detectLocale,
     resolveCanonicalUrl,
     createOrFindOrganization,
@@ -653,6 +655,24 @@ export async function performAsoPlgOnboarding({
       onboarding.setSteps(steps);
       await persistAndNotify(onboarding, context);
       return onboarding;
+    }
+
+    // Step 4b: Authenticated-site check — ASO cannot audit login/SSO-gated sites, so route
+    // them to the manual-review waitlist before any site/entitlement is provisioned.
+    if (!steps.authWallCheckBypassed) {
+      const authWall = await detectAuthWall({ baseUrl: baseURL, log });
+      if (authWall.authenticated) {
+        log.info(`Domain ${domain} appears to require authentication (signal: ${authWall.signal}), moving to waitlist`);
+        let waitlistReason = `Domain ${domain} ${AUTHENTICATED_SITE} (detected: ${authWall.signal}`;
+        waitlistReason += authWall.finalUrl ? `, resolved to ${authWall.finalUrl}).` : ').';
+        onboarding.setStatus(STATUSES.WAITLISTED);
+        onboarding.setWaitlistReason(waitlistReason);
+        onboarding.setSiteId(site?.getId() || null);
+        onboarding.setSteps(steps);
+        await persistAndNotify(onboarding, context);
+        return onboarding;
+      }
+      steps.authWallChecked = true;
     }
 
     // Step 5: Create site if new

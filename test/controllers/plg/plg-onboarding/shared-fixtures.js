@@ -144,6 +144,7 @@ export function createSharedMocks(sandbox) {
   // Shared-utils stubs
   const composeBaseURLStub = sandbox.stub().returns(TEST_BASE_URL);
   const detectBotBlockerStub = sandbox.stub().resolves({ crawlable: true });
+  const detectAuthWallStub = sandbox.stub().resolves({ authenticated: false, signal: null });
   const detectLocaleStub = sandbox.stub().resolves({ language: 'en', region: 'US' });
   const resolveCanonicalUrlStub = sandbox.stub().resolves(TEST_BASE_URL);
 
@@ -244,6 +245,7 @@ export function createSharedMocks(sandbox) {
     updateRumConfigStub,
     composeBaseURLStub,
     detectBotBlockerStub,
+    detectAuthWallStub,
     detectLocaleStub,
     resolveCanonicalUrlStub,
     createOrFindOrganizationStub,
@@ -378,6 +380,7 @@ export function resetStubDefaults(stubs) {
   stubs.rumApiClientCreateFromStub.returns({ retrieveDomainkey: stubs.rumRetrieveDomainkeyStub });
   stubs.updateRumConfigStub.resolves(true);
   stubs.detectBotBlockerStub.resolves({ crawlable: true });
+  stubs.detectAuthWallStub.resolves({ authenticated: false, signal: null });
   stubs.detectLocaleStub.resolves({ language: 'en', region: 'US' });
   stubs.resolveCanonicalUrlStub.resolves(TEST_BASE_URL);
   stubs.createOrFindOrganizationStub.resolves(mockOrganization);

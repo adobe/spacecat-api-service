@@ -85,7 +85,7 @@ session for a different domain/org.
    | `400 Valid imsOrgId is required when onboarding as admin` | Token isn't resolving to admin (`hasAdminAccess()` false), so it fell to the self-service branch and rejected the org mismatch, **or** the org ID is malformed | Verify the caller's IMS token actually carries admin/scope; check `imsOrgId` format |
    | `400 ... not available for frescopa domains / demo/internal sites / internal organizations / paid customers` | A guardrail rejected the org/domain outright | This domain/org is intentionally excluded from PLG — don't try to force it through this endpoint |
    | `200` with `status: "ONBOARDED"` | Fully provisioned | Done — site/org/entitlement live |
-   | `200` with `status: "WAITLISTED"` | Provisioning paused; check `waitlistReason` | Common reason: another domain is already onboarded for this org (PLG allows one active domain per org). Report the reason to the user; don't retry blindly |
+   | `200` with `status: "WAITLISTED"` | Provisioning paused; check `waitlistReason` | Common reasons: another domain is already onboarded for this org (PLG allows one active domain per org); or the domain **requires authentication (login/SSO)** — ASO can't audit login-gated sites, so it's routed to manual review (`reason` includes `requires authentication`). Report the reason to the user; don't retry blindly |
    | `409` | Conflict (e.g. race with an existing onboarding record) | Re-check via `GET /plg/onboard/status/:imsOrgId` before retrying |
    | `500 Onboarding failed. Please try again later.` | Unhandled error in the onboarding pipeline | Check Lambda/Splunk logs for the failure — don't blind-retry a real provisioning call |
 

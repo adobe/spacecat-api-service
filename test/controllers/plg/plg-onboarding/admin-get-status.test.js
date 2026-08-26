@@ -83,6 +83,7 @@ describe('PlgOnboardingController - getStatus', function () {
     stubs.rumRetrieveDomainkeyStub.resolves('test-domainkey');
     stubs.rumApiClientCreateFromStub.returns({ retrieveDomainkey: stubs.rumRetrieveDomainkeyStub });
     stubs.detectBotBlockerStub.resolves({ crawlable: true });
+    stubs.detectAuthWallStub.resolves({ authenticated: false, signal: null });
     stubs.findDeliveryTypeStub.resolves('aem_edge');
     stubs.deriveProjectNameStub.returns('example.com');
     stubs.queueDeliveryConfigWriterStub.resolves({ ok: true });
