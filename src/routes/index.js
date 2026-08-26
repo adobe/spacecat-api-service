@@ -110,6 +110,12 @@ function isStaticRoute(routePattern) {
  * @param {Object} elementsController - Elements API controller (Semrush Elements wrappers).
  * @param {Object} proxyController - URL proxy controller for client-side previews.
  * @param {Object} brand24Controller - Brand24 API proxy controller (POC — Offsite Visibility).
+ * @param {Object} brand24MarketTopicsController - Cross-project competitor topic relevance
+ *   controller (POC — Market Topics tab).
+ * @param {Object} brand24DevxMentionsController - Mentions-by-event/topic proxy against a
+ *   separate, unverified Brand24 "devx" host (POC).
+ * @param {Object} semrushMarketTopicsController - Semrush AI-visibility Market Topics
+ *   controller (POC — replaces the Brand24-topics-sourced Market Topics tab).
  * @param {Object} marketDiscoveryController - Market Discovery controller (POC).
  * @param {Object} taskManagementController - Task-management (Jira ticket creation) controller.
  * @param {Object} onboardingController - Semrush onboarding notification controller.
@@ -183,6 +189,9 @@ export default function getRouteHandlers(
   elementsController,
   proxyController,
   brand24Controller,
+  brand24MarketTopicsController,
+  brand24DevxMentionsController,
+  semrushMarketTopicsController,
   marketDiscoveryController,
   taskManagementController,
   onboardingController,
@@ -501,6 +510,9 @@ export default function getRouteHandlers(
     'GET /tools/api-keys': apiKeyController.getApiKeys,
     'GET /tools/proxy': proxyController.getPreview,
     'GET /tools/brand24': brand24Controller.getData,
+    'GET /tools/brand24/market-topics': brand24MarketTopicsController.getMarketTopics,
+    'GET /tools/brand24-devx/mentions': brand24DevxMentionsController.getMentions,
+    'GET /tools/semrush/market-topics': semrushMarketTopicsController.getMarketTopics,
     'POST /tools/market-discovery': marketDiscoveryController.getCategories,
     'POST /tools/market-discovery/topic-sources': marketDiscoveryController.getTopicSources,
     'POST /tools/market-discovery/share-of-voice': marketDiscoveryController.getShareOfVoice,

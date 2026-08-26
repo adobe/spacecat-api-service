@@ -72,9 +72,13 @@ function Brand24Controller(context, log, env) {
       }
     }
 
+    // Range param names vary per endpoint — `daily-metrics` uses `from`/`to`, everything else
+    // uses `date_from`/`date_to` (see support/brand24/endpoints.js). Falls back to the common
+    // pair for any endpoint definition that predates `rangeParamNames`.
+    const [rangeFromParam, rangeToParam] = endpointDef.rangeParamNames ?? ['date_from', 'date_to'];
     const rangeError = validateDateRange(
-      upstreamQuery.get('date_from'),
-      upstreamQuery.get('date_to'),
+      upstreamQuery.get(rangeFromParam),
+      upstreamQuery.get(rangeToParam),
       endpointDef.maxRangeDays,
     );
     if (rangeError) {
