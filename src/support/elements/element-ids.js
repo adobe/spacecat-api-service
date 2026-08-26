@@ -43,6 +43,17 @@ export const ELEMENT_IDS = Object.freeze({
   // is via the request's sub-workspace, not a filter.
   SUBREDDITS: 'faf56e29-ddda-4480-b639-586d526c9080',
 
+  // Reddit Threads — top Reddit threads by response count (`table`), one row per thread:
+  // { link, mentions, prompts, responses, subreddit, thread, url_cbf }. Honors date
+  // (`CBF_date__start`/`__end`) + `CBF_model`, plus a comparison window
+  // (`CBF_date__start_comparison`/`__end_comparison`) and `comparison_data_formatting: 'join'`
+  // — unlike Subreddits, this element's discovery payload carries comparison columns, and
+  // (not yet verified live) they are assumed load-bearing rather than dropped. Optional
+  // top-level `project_id` — mirrors Subreddits' optional scoping (unverified for this
+  // element; assumed workspace-wide when omitted). Brand scoping is via the request's
+  // sub-workspace, not a filter.
+  REDDIT_THREADS: '5af96fd9-4f62-44d3-96c6-5c0604330f6a',
+
   // URL Inspector — Owned URLs ("Your cited URLs" table). Two elements, both
   // scoped by a top-level `project_id` (region/market) + date + `CBF_model`;
   // neither honors a server-side content-type filter, so `domain_type='Owned'`
