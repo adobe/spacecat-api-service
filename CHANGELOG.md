@@ -1,3 +1,11 @@
+# [1.767.0](https://github.com/adobe/spacecat-api-service/compare/v1.766.0...v1.767.0) (2026-08-26)
+
+
+### Features
+
+* introduce top youtube cited videos from semrush brand presence data ([#3140](https://github.com/adobe/spacecat-api-service/issues/3140)) ([d3ea3ca](https://github.com/adobe/spacecat-api-service/commit/d3ea3ca14dcb899a1810d2a3b6b37263b987c01b))
+* **llmo-akamai:** two-tier CLIENT_REQ Optimize at Edge routing ([#3134](https://github.com/adobe/spacecat-api-service/issues/3134)) ([38d7a79](https://github.com/adobe/spacecat-api-service/commit/38d7a79ac434087f94e6210d9296233e8a613c2f))
+
 # [1.766.0](https://github.com/adobe/spacecat-api-service/compare/v1.765.0...v1.766.0) (2026-08-26)
 
 
