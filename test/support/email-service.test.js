@@ -99,7 +99,8 @@ describe('email-service', () => {
       expect(url).to.include('templateName=test-template');
       expect(url).to.include('locale=en_US');
       expect(options.method).to.equal('POST');
-      expect(options.headers.Authorization).to.equal('IMS test-token');
+      expect(options.headers.Authorization).to.equal('Bearer test-token');
+      expect(options.headers['x-api-key']).to.equal('client-id');
       expect(options.headers['Content-Type']).to.equal('application/json');
       expect(options.headers.Accept).to.equal('application/json');
       const body = JSON.parse(options.body);
@@ -161,7 +162,7 @@ describe('email-service', () => {
       expect(result.success).to.be.true;
       expect(ImsClientStub.createFrom).to.not.have.been.called;
       const [, options] = fetchStub.firstCall.args;
-      expect(options.headers.Authorization).to.equal('IMS provided-token');
+      expect(options.headers.Authorization).to.equal('Bearer provided-token');
     });
 
     it('should return error when ADOBE_POSTOFFICE_ENDPOINT is not configured', async () => {
@@ -174,6 +175,19 @@ describe('email-service', () => {
 
       expect(result.success).to.be.false;
       expect(result.error).to.equal('ADOBE_POSTOFFICE_ENDPOINT is not configured');
+    });
+
+    it('should return error when LLMO_EMAIL_IMS_CLIENT_ID is not configured', async () => {
+      delete mockContext.env.LLMO_EMAIL_IMS_CLIENT_ID;
+
+      const result = await sendEmail(mockContext, {
+        recipients: ['test@example.com'],
+        templateName: 'test-template',
+      });
+
+      expect(result.success).to.be.false;
+      expect(result.error).to.equal('LLMO_EMAIL_IMS_CLIENT_ID is not configured');
+      expect(fetchStub).to.not.have.been.called;
     });
 
     it('should return error when ADOBE_POSTOFFICE_ENDPOINT uses HTTP instead of HTTPS', async () => {
@@ -245,6 +259,19 @@ describe('email-service', () => {
 
       expect(result.success).to.be.false;
       expect(result.error).to.equal('IMS unavailable');
+    });
+
+    it('should return error when IMS returns no access token', async () => {
+      imsClientInstance.getServiceAccessToken.resolves({});
+
+      const result = await sendEmail(mockContext, {
+        recipients: ['test@example.com'],
+        templateName: 'test-template',
+      });
+
+      expect(result.success).to.be.false;
+      expect(result.error).to.equal('IMS returned no access token');
+      expect(fetchStub).to.not.have.been.called;
     });
 
     it('should use custom locale when provided', async () => {
