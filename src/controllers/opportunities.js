@@ -33,6 +33,7 @@ import AccessControlUtil from '../support/access-control-util.js';
 import {
   grantSuggestionsForOpportunity,
   revokeExistingGrants,
+  revokeGrantsForOpportunity,
 } from '../support/grant-suggestions-handler.js';
 import { getIsSummitPlgEnabled } from '../support/utils.js';
 
@@ -378,6 +379,7 @@ function OpportunitiesController(ctx) {
     }
 
     try {
+      await revokeGrantsForOpportunity(dataAccess, opportunity);
       await opportunity.remove(); // also removes suggestions associated with opportunity
       return noContent();
     } catch (e) {

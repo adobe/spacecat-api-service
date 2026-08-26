@@ -490,6 +490,7 @@ describe('Suggestions Controller', () => {
       }),
       isSuggestionGranted: sandbox.stub().resolves(true),
       revokeSuggestionGrant: sandbox.stub().resolves({ success: true, revokedCount: 1 }),
+      findBySuggestionIds: sandbox.stub().resolves([]),
     };
 
     mockSuggestionDataAccess = {
@@ -6980,6 +6981,61 @@ describe('Suggestions Controller', () => {
       expect(mockSuggestionDataAccess.Suggestion.findById).to.have.been.calledOnce;
       expect(mockSuggestionDataAccess.Opportunity.findById).to.have.been.calledOnce;
       expect(removeStub).to.have.been.calledOnce;
+    });
+
+    it('revokes an existing grant before removing the suggestion', async () => {
+      mockSuggestionGrant.findBySuggestionIds.resolves([
+        { suggestion_id: SUGGESTION_IDS[0], grant_id: 'grant-1' },
+      ]);
+      const response = await suggestionsController.removeSuggestion({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+          suggestionId: SUGGESTION_IDS[0],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(204);
+      expect(mockSuggestionGrant.findBySuggestionIds).to.have.been.calledOnceWith(
+        [SUGGESTION_IDS[0]],
+      );
+      expect(mockSuggestionGrant.revokeSuggestionGrant).to.have.been.calledOnceWith('grant-1');
+      expect(mockSuggestionGrant.revokeSuggestionGrant)
+        .to.have.been.calledBefore(removeStub);
+      expect(removeStub).to.have.been.calledOnce;
+    });
+
+    it('removes the suggestion without revoking when it has no grant', async () => {
+      const response = await suggestionsController.removeSuggestion({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+          suggestionId: SUGGESTION_IDS[0],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(204);
+      expect(mockSuggestionGrant.revokeSuggestionGrant).to.not.have.been.called;
+      expect(removeStub).to.have.been.calledOnce;
+    });
+
+    it('returns internal server error and does not remove the suggestion when revoke fails', async () => {
+      mockSuggestionGrant.findBySuggestionIds.resolves([
+        { suggestion_id: SUGGESTION_IDS[0], grant_id: 'grant-1' },
+      ]);
+      mockSuggestionGrant.revokeSuggestionGrant.rejects(new Error('rpc failure'));
+      const response = await suggestionsController.removeSuggestion({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+          suggestionId: SUGGESTION_IDS[0],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(500);
+      const errorResponse = await response.json();
+      expect(errorResponse).to.have.property('message', 'Error removing suggestion');
+      expect(removeStub).to.not.have.been.called;
     });
   });
 

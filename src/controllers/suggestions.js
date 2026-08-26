@@ -66,7 +66,10 @@ import {
 import AccessControlUtil, { X_PRODUCT_HEADER } from '../support/access-control-util.js';
 import { redactFeedbackContent } from '../support/feedback-redaction.js';
 import { CAP_FIX_ENTITY_CREATE, CAP_SUGGESTION_WRITE } from '../routes/capability-constants.js';
-import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
+import {
+  grantSuggestionsForOpportunity,
+  revokeGrantsForSuggestions,
+} from '../support/grant-suggestions-handler.js';
 import { postSlackMessage } from '../utils/slack/base.js';
 import { createAtomicStrategy, deleteAtomicStrategy } from '../support/atomic-strategy-helper.js';
 
@@ -1731,6 +1734,7 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     try {
+      await revokeGrantsForSuggestions(SuggestionGrant, [suggestionId]);
       await suggestion.remove();
       return noContent();
     } catch (e) {
