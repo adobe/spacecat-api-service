@@ -1,3 +1,10 @@
+## [1.764.1](https://github.com/adobe/spacecat-api-service/compare/v1.764.0...v1.764.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* revoke suggestion grants when a suggestion is deleted ([#3136](https://github.com/adobe/spacecat-api-service/issues/3136)) ([4c1b8b9](https://github.com/adobe/spacecat-api-service/commit/4c1b8b9b2936607eabff6c422d3c9a77151d8a5e))
+
 # [1.764.0](https://github.com/adobe/spacecat-api-service/compare/v1.763.6...v1.764.0) (2026-08-26)
 
 
