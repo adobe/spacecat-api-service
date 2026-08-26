@@ -54,6 +54,16 @@ export const ELEMENT_IDS = Object.freeze({
   // sub-workspace, not a filter.
   REDDIT_THREADS: '5af96fd9-4f62-44d3-96c6-5c0604330f6a',
 
+  // YouTube Videos — top YouTube videos by citation count (`table`), one row per video:
+  // { channel, citations, link, prompts, video, views, url_cbf }. Honors date
+  // (`CBF_date__start`/`__end`) + `CBF_model`, plus a comparison window
+  // (`CBF_date__start_comparison`/`__end_comparison`) and `comparison_data_formatting: 'join'`,
+  // same shape as Reddit Threads. Optional top-level `project_id` (also set in
+  // `filters.simple`) scopes to a single project; omitted → workspace-wide. Brand scoping
+  // is via the request's sub-workspace, not a filter. `views` may be `null` upstream (not
+  // every video has a tracked view count).
+  YOUTUBE_VIDEOS: '05e624db-0314-4f93-9337-1fae5148f057',
+
   // URL Inspector — Owned URLs ("Your cited URLs" table). Two elements, both
   // scoped by a top-level `project_id` (region/market) + date + `CBF_model`;
   // neither honors a server-side content-type filter, so `domain_type='Owned'`

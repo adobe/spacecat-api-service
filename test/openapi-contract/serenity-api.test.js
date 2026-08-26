@@ -532,6 +532,29 @@ const FIXTURES = {
       totalCount: 42,
     },
   },
+  listSerenityBrandPresenceYoutubeVideos: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'listYoutubeVideos',
+    serviceMethod: 'getYoutubeVideos',
+    // startDate/endDate are required + validated by the controller before the
+    // service is called (see listYoutubeVideos) — supply them via query.
+    query: { startDate: '2026-06-01', endDate: '2026-07-16' },
+    // getYoutubeVideos returns the final { videos, totalCount } shape; the
+    // controller passes it straight through via ok().
+    handlerResult: {
+      videos: [{
+        channel: 'Lovesac',
+        citations: 53,
+        link: 'https://www.youtube.com/watch?v=4ECf112-SSc',
+        prompts: 47,
+        video: 'Lovesac Product Guide - CitySac Overview',
+        views: 106100,
+        urlCbf: '59bfcb03-11df-44ff-867a-ac2b30c49578:eq:https_C0L_//www.youtube.com/watch?v=4ECf112-SSc',
+      }],
+      totalCount: 42,
+    },
+  },
   listSerenityBrandPresenceTopics: {
     expectedStatus: 200,
     usesElementsController: true,
