@@ -1361,8 +1361,63 @@ describe('brands-storage', () => {
       });
 
       const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
-      expect(brandsUpsert.row).to.not.have.property('site_id');
+      // The attempted change to 'different-site' is rejected (warns, doesn't
+      // apply), but site_id must still be carried forward as the EXISTING
+      // value rather than omitted from the row entirely — an omitted column
+      // is not preserved by the upsert and would trip
+      // chk_active_brand_has_site_id on write (see the fix above this branch).
+      expect(brandsUpsert.row.site_id).to.equal('original-site');
       expect(log.warn).to.have.been.calledWithMatch('immutable');
+    });
+
+    it('carries forward site_id when re-upserting an already-anchored brand with the SAME baseSiteId', async () => {
+      // The exact case that was silently broken: a caller (e.g. a migration
+      // script) reads a brand back and re-submits its own already-correct
+      // baseSiteId verbatim. None of the three original branches matched this
+      // (existing !== null, existing.site_id already set, and the "changed"
+      // branch's inequality check is false), so site_id was omitted from the
+      // upsert row entirely — silently clearing an already-anchored brand and
+      // tripping chk_active_brand_has_site_id with a 400 on a request that
+      // never intended to touch the anchor.
+      const client = createCapturingClient({
+        brands: [
+          { data: { site_id: 'same-site' }, error: null }, // existing lookup
+          { data: { id: BRAND_ID, name: 'Test' }, error: null }, // upsert result
+          { data: makeBrandRow({ name: 'Test', site_id: 'same-site' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', baseSiteId: 'same-site' },
+        postgrestClient: client,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row.site_id).to.equal('same-site');
+    });
+
+    it('carries forward site_id when re-upserting an already-anchored brand with NO baseSiteId in the body', async () => {
+      // Same underlying gap, different trigger: a partial upsert that omits
+      // baseSiteId altogether on an already-anchored brand also hit none of
+      // the three original branches (all three require hasText(baseSiteId)
+      // except the existing===null branch), dropping site_id the same way.
+      const client = createCapturingClient({
+        brands: [
+          { data: { site_id: 'existing-site' }, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test', site_id: 'existing-site' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test' },
+        postgrestClient: client,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row.site_id).to.equal('existing-site');
     });
 
     it('rejects a fresh create whose baseSiteId belongs to a different org (serenity-docs#346)', async () => {
