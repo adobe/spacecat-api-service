@@ -33,6 +33,7 @@ import AccessControlUtil from '../support/access-control-util.js';
 import {
   grantSuggestionsForOpportunity,
   revokeExistingGrants,
+  revokeGrantsForOpportunity,
 } from '../support/grant-suggestions-handler.js';
 import { getIsSummitPlgEnabled } from '../support/utils.js';
 
@@ -375,6 +376,12 @@ function OpportunitiesController(ctx) {
     const opportunity = await Opportunity.findById(opportunityId);
     if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound('Opportunity not found');
+    }
+
+    try {
+      await revokeGrantsForOpportunity(dataAccess, opportunity);
+    } catch (revokeError) {
+      ctx.log?.warn?.(`Failed to revoke grants for opportunity ${opportunityId} on site ${siteId}`, revokeError?.message ?? revokeError);
     }
 
     try {
