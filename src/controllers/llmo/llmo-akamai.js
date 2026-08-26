@@ -23,8 +23,9 @@ import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { auditHostname } from './llmo-utils.js';
 import {
-  buildRuleConfig, mergeIntoTree, buildRuleTreePatch, managedRuleNames, redactSecrets,
-  redactPapiErrors, detectManagedRuleNames, estimateRuleTreeComplexity, getManagedFetcherKey,
+  buildRuleConfig, mergeIntoTree, buildRuleTreePatch, managedRuleNames, managedRuleTree,
+  redactSecrets, redactPapiErrors, detectManagedRuleNames, estimateRuleTreeComplexity,
+  getManagedFetcherKey,
 } from './llmo-akamai-utils.js';
 import { hasSubpath } from '../../support/edge-routing-utils.js';
 
@@ -561,6 +562,7 @@ function LlmoAkamaiController(ctx) {
         latestVersion: version,
         ruleFormat,
         managedRules: managedRuleNames(cfg),
+        managedRuleTree: managedRuleTree(cfg),
         // ruleTree.rules is guaranteed present here (mergeIntoTree throws otherwise, caught below);
         // only its children may be absent. merge always writes a children array.
         currentChildRules: (ruleTree.rules.children || []).map((c) => c.name),
@@ -763,6 +765,7 @@ function LlmoAkamaiController(ctx) {
         baseVersion,
         newVersion,
         managedRules: managedRuleNames(cfg),
+        managedRuleTree: managedRuleTree(cfg),
         warnings,
         // The minted fetcher key: the UI shows it so the customer can allowlist Optimize-at-Edge in
         // Bot Manager. Already baked into the deployed rule; this is the only time we return it.

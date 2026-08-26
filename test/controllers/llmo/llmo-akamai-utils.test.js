@@ -15,6 +15,7 @@ import {
   EDGE_OPTIMIZE_DEFAULTS,
   buildRuleConfig,
   buildParentRule,
+  managedRuleTree,
   buildRoutingEdgeRule,
   buildRoutingParentRule,
   buildRemoveMarkerRule,
@@ -261,6 +262,23 @@ describe('llmo-akamai-utils', () => {
         cfg.ruleNames.parent,
         cfg.ruleNames.failoverTest,
       ]);
+    });
+  });
+
+  describe('managedRuleTree', () => {
+    it('returns the added wrapper hierarchy (names only, no secrets)', () => {
+      const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY, fetcherKey: 'fk-secret' });
+      const tree = managedRuleTree(cfg);
+      expect(tree.name).to.equal(cfg.ruleNames.parent);
+      expect(tree.children.map((c) => c.name)).to.deep.equal([
+        cfg.ruleNames.routingEdge,
+        cfg.ruleNames.routingParent,
+        'Site Failover Behavior',
+        cfg.ruleNames.failoverTest,
+      ]);
+      const parentRule = tree.children.find((c) => c.name === cfg.ruleNames.routingParent);
+      expect(parentRule.children.map((c) => c.name)).to.deep.equal([cfg.ruleNames.removeMarker]);
+      expect(JSON.stringify(tree)).to.not.contain('fk-secret');
     });
   });
 

@@ -578,6 +578,18 @@ export function managedRuleNames(cfg) {
 }
 
 /**
+ * The full hierarchy of rules this deploy adds (the wrapper and everything nested inside it), as a
+ * {name, children} tree — for the review UI to show what the property will look like. Names only,
+ * no behaviors, so it carries no secrets.
+ * @param {object} cfg
+ * @returns {{name: string, children: object[]}}
+ */
+export function managedRuleTree(cfg) {
+  const toNode = (rule) => ({ name: rule.name, children: (rule.children || []).map(toNode) });
+  return toNode(buildParentRule(cfg));
+}
+
+/**
  * Detects which managed "Optimize at Edge" rules are already present at the TOP LEVEL of a rule
  * tree, by trimmed name. Used by the deploy-status endpoint to answer "did the OAE rule actually
  * land in this version?" by re-reading live Akamai state — the source of truth when a deploy's own
