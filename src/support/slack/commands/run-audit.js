@@ -31,6 +31,79 @@ import { triggerAuditForSite } from '../../utils.js';
 const PHRASES = ['run audit'];
 const LHS_MOBILE = 'lhs-mobile';
 const PRERENDER = 'prerender';
+
+// Offsite Opportunities audit types (LLMO-6973). Structured `audit_orchestration_start` /
+// `audit_orchestration_spacecat_request_dispatched` logging below is gated on this list so
+// every other audit type's existing behavior and log lines are left completely unchanged —
+// this command dispatches every audit type in the system through the same shared code path.
+const OFFSITE_AUDIT_TYPES = [
+  'offsite-brand-presence',
+  'cited-analysis',
+  'reddit-analysis',
+  'youtube-analysis',
+  'wikipedia-analysis',
+];
+const isOffsiteAuditType = (auditType) => OFFSITE_AUDIT_TYPES.includes(auditType);
+
+// Structured logging taxonomy constants (05-logging.md, "Structured logging taxonomy").
+// `domain` is a fixed marker on every line in this family. `audit` maps this command's
+// own audit-type strings to the short taxonomy values used across the doc/runbooks and
+// by spacecat-audit-worker's own AUDIT enum (offsite-logging.js) — match those exactly.
+const OFFSITE_DOMAIN = 'offsite';
+const OFFSITE_AUDIT_LOG_TYPE = {
+  'offsite-brand-presence': 'brand-presence',
+  'cited-analysis': 'cited',
+  'reddit-analysis': 'reddit',
+  'youtube-analysis': 'youtube',
+  'wikipedia-analysis': 'wikipedia',
+};
+const toOffsiteAuditLogType = (auditType) => OFFSITE_AUDIT_LOG_TYPE[auditType];
+
+/**
+ * Builds the success message for `audit_orchestration_spacecat_request_dispatched`.
+ * `offsite-brand-presence` uses its own wording to match the message
+ * `spacecat-jobs-dispatcher` emits for the same event/audit type.
+ * @param {string} auditType - The resolved offsite audit type.
+ * @returns {string} The message text.
+ */
+const getQueuedOffsiteMessage = (auditType) => (auditType === 'offsite-brand-presence'
+  ? 'Queued offsite-brand-presence for site'
+  : 'Queued offsite analysis for site');
+
+/**
+ * Strips control characters (including DEL) from externally-influenced error text
+ * (e.g. an SQS/AWS SDK error's `.name`/`.message`) before it goes into a structured log
+ * line, replacing each with a single space. Mirrors the narrow sanitization rule from
+ * spacecat-audit-worker's offsite-logging.js `sanitizeForLog` — this only guards against
+ * control-character injection into the log line, not a full port of that logger.
+ * @param {*} value - The raw value to sanitize.
+ * @returns {string} The sanitized string.
+ */
+function sanitizeErrorText(value) {
+  if (value == null) {
+    return '';
+  }
+  let out = '';
+  for (const ch of String(value)) {
+    const code = ch.codePointAt(0);
+    out += (code < 0x20 || code === 0x7f) ? ' ' : ch;
+  }
+  return out;
+}
+
+/**
+ * Renders a single `key=value` structured-log field for externally-influenced error text,
+ * quoting (and escaping embedded double quotes) whenever the sanitized value contains
+ * whitespace, `"`, or `=` — otherwise a raw AWS error message would break the field
+ * boundary of the line it's appended to. Mirrors offsite-logging.js's `renderField`.
+ * @param {string} key - The field name.
+ * @param {*} value - The raw value.
+ * @returns {string} The rendered `key=value` (or `key="value"`) field.
+ */
+function renderErrorField(key, value) {
+  const str = sanitizeErrorText(value);
+  return /[\s"=]/.test(str) ? `${key}="${str.replace(/"/g, "'")}"` : `${key}=${str}`;
+}
 const PRERENDER_MODES = {
   ALL: 'all',
   AI_ONLY: 'ai-only',
@@ -168,6 +241,9 @@ function RunAuditCommand(context) {
       const configuration = await Configuration.findLatest();
 
       if (!isNonEmptyObject(site)) {
+        if (isOffsiteAuditType(auditType)) {
+          log.error(`No site found with base URL domain=${OFFSITE_DOMAIN} audit=${toOffsiteAuditLogType(auditType)} event=audit_orchestration_start outcome=failure reason=site_not_found`);
+        }
         await postSiteNotFoundMessage(say, baseURL);
         return;
       }
@@ -223,23 +299,45 @@ function RunAuditCommand(context) {
 
         // Block audit if site has no enrollment for any of the product codes
         if (!entitlementChecks.some((hasEnrollment) => hasEnrollment)) {
+          if (isOffsiteAuditType(auditType)) {
+            log.error(`Site not entitled for this audit type domain=${OFFSITE_DOMAIN} audit=${toOffsiteAuditLogType(auditType)} event=audit_orchestration_start outcome=failure siteId=${site.getId()} reason=not_entitled`);
+          }
           await say(`:x: Will not audit site '${baseURL}' because site is not entitled for this audit.`);
           return;
         }
 
         // Block audit if the handler is explicitly disabled for this site (deny-list).
         if (configuration.isHandlerDisabledForSite(auditType, site)) {
+          if (isOffsiteAuditType(auditType)) {
+            log.error(`Handler disabled for this site domain=${OFFSITE_DOMAIN} audit=${toOffsiteAuditLogType(auditType)} event=audit_orchestration_start outcome=failure siteId=${site.getId()} reason=handler_disabled`);
+          }
           await say(`:x: Audit \`${auditType}\` is explicitly disabled for site \`${baseURL}\`. Re-enable it via the audit configuration before running on-demand.`);
           return;
         }
 
-        await triggerAuditForSite(
-          site,
-          auditType,
-          auditData,
-          slackContext,
-          context,
-        );
+        if (isOffsiteAuditType(auditType)) {
+          try {
+            await triggerAuditForSite(
+              site,
+              auditType,
+              auditData,
+              slackContext,
+              context,
+            );
+            log.info(`${getQueuedOffsiteMessage(auditType)} domain=${OFFSITE_DOMAIN} audit=${toOffsiteAuditLogType(auditType)} event=audit_orchestration_spacecat_request_dispatched outcome=success peer=spacecat-audit-worker direction=outbound siteId=${site.getId()}`);
+          } catch (error) {
+            log.error(`Failed to queue offsite analysis for site domain=${OFFSITE_DOMAIN} audit=${toOffsiteAuditLogType(auditType)} event=audit_orchestration_spacecat_request_dispatched outcome=failure peer=spacecat-audit-worker direction=outbound siteId=${site.getId()} reason=sqs_send_failed ${renderErrorField('errorName', error.name)} ${renderErrorField('errorMessage', error.message)}`);
+            throw error;
+          }
+        } else {
+          await triggerAuditForSite(
+            site,
+            auditType,
+            auditData,
+            slackContext,
+            context,
+          );
+        }
       }
     } catch (error) {
       log.error(`Error running audit ${auditType} for site ${baseURL}`, error);
@@ -355,7 +453,15 @@ function RunAuditCommand(context) {
         [baseURLInputArg, auditTypeInputArg, auditDataInputArg] = positionalArgs;
       }
 
-      log.info(`run-audit: baseURL="${baseURLInputArg}", auditType="${auditTypeInputArg}", auditData="${auditDataInputArg}"`);
+      if (isOffsiteAuditType(auditTypeInputArg)) {
+        log.info(
+          `run-audit: baseURL="${baseURLInputArg}", auditType="${auditTypeInputArg}", auditData="${auditDataInputArg}" `
+          + `domain=${OFFSITE_DOMAIN} audit=${toOffsiteAuditLogType(auditTypeInputArg)} `
+          + `event=audit_orchestration_start outcome=start auditType=${auditTypeInputArg} baseURL=${baseURLInputArg}`,
+        );
+      } else {
+        log.info(`run-audit: baseURL="${baseURLInputArg}", auditType="${auditTypeInputArg}", auditData="${auditDataInputArg}"`);
+      }
 
       const hasFiles = isNonEmptyArray(files);
       const baseURL = extractURLFromSlackInput(baseURLInputArg);
