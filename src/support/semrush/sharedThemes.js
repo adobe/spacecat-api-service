@@ -11,13 +11,16 @@
  */
 
 /**
- * Ported from the `brand24` repo's `src/lib/similar-topics.ts` `findSharedThemes` —
- * same keyword-overlap algorithm, adapted to Semrush's own topic field names (`topic`
- * instead of `topic_name`; no `description` field, so only the topic name itself is
- * tokenized). A "theme" is a significant keyword present in at least one topic of
- * EVERY compared brand (here always exactly 2: Lovesac + one competitor, called
- * per-competitor rather than all-four-at-once, so a real overlap between Lovesac and
- * ANY one competitor surfaces even when the others don't share it).
+ * Keyword-grouped market themes — the same "similar topics" idea as the `brand24` repo's
+ * `src/lib/similar-topics.ts` `findSharedThemes`: tokenize topic names, drop stopwords and
+ * every compared brand's own name/product words, and treat a significant keyword shared
+ * across brands as a "theme" carrying one representative topic per brand. Adapted here to
+ * Semrush's field names (`topic`/`topic_volume`; no `description`) and to the market-topics
+ * framing: a theme must include the BRAND plus at least one competitor (so it's a topic
+ * Lovesac AND the market talk about), rather than brand24's stricter "present in every
+ * brand" rule. Keywords that resolve to the same representative topics are merged into one
+ * theme (so "sectional" + "sofa" collapse when they point at the same topics), exactly as
+ * brand24 merges them.
  */
 
 // Common English function words plus AI-topic-summary filler that never makes a useful
@@ -47,22 +50,22 @@ function tokenize(text) {
 }
 
 /**
- * @param {{brand: string, topics: object[]}[]} brands - exactly the brands to intersect; a
- *   keyword theme must appear in a topic *name* of every one of them.
- * @returns {{keywords: string[], matches: {brand: string, topic: object}[], totalVolume: number}[]}
- *   Sorted by totalVolume descending.
+ * @param {{name: string, topics: object[]}} brand - the anchor brand; every theme must include it.
+ * @param {{name: string, topics: object[]}[]} competitors
+ * @returns {{keywords: string[], members: {brand: string, topic: object}[],
+ *   brandCount: number, peakVolume: number, totalMentions: number}[]} sorted by peakVolume desc.
+ *   `peakVolume` is the MAX of the members' topic volumes (topic demand is brand-independent —
+ *   summing would triple-count a topic several brands share); `totalMentions` is the SUM (mentions
+ *   are per-brand, so the total is the theme's whole-market mention count).
  */
-export function findSharedThemes(brands) {
-  const n = brands.length;
-  if (n === 0) {
-    return [];
-  }
+export function groupMarketThemes(brand, competitors) {
+  const allBrands = [brand, ...competitors];
 
-  // Brand-name words become extra stopwords (e.g. "lovesac", "west", "elm") so a
-  // competitor's own name mentioned in a topic doesn't masquerade as a shared theme.
+  // Every brand's own name words become extra stopwords (e.g. "lovesac", "west", "elm")
+  // so a competitor's own name in a topic doesn't masquerade as a shared theme.
   const brandWords = new Set();
-  for (const b of brands) {
-    for (const w of tokenize(b.brand)) {
+  for (const b of allBrands) {
+    for (const w of tokenize(b.name)) {
       brandWords.add(w);
     }
   }
@@ -71,7 +74,7 @@ export function findSharedThemes(brands) {
 
   // keyword -> (brand name -> topics carrying it)
   const kw = new Map();
-  for (const b of brands) {
+  for (const b of allBrands) {
     for (const topic of b.topics) {
       for (const token of new Set(tokensOf(topic))) {
         let perBrand = kw.get(token);
@@ -79,10 +82,10 @@ export function findSharedThemes(brands) {
           perBrand = new Map();
           kw.set(token, perBrand);
         }
-        let hits = perBrand.get(b.brand);
+        let hits = perBrand.get(b.name);
         if (!hits) {
           hits = [];
-          perBrand.set(b.brand, hits);
+          perBrand.set(b.name, hits);
         }
         hits.push(topic);
       }
@@ -91,23 +94,28 @@ export function findSharedThemes(brands) {
 
   const themes = [];
   for (const [keyword, perBrand] of kw) {
-    // A theme requires the keyword present in every compared brand.
-    if (perBrand.size === n) {
-      // Representative topic per brand: highest topic_volume among topics carrying the keyword.
-      const matches = brands.map((b) => {
-        const hits = perBrand.get(b.brand);
-        const topic = [...hits].sort((x, y) => (y.topic_volume ?? 0) - (x.topic_volume ?? 0))[0];
-        return { brand: b.brand, topic };
+    // Theme requires the anchor brand plus at least one competitor.
+    if (perBrand.has(brand.name) && perBrand.size >= 2) {
+      const members = allBrands
+        .filter((b) => perBrand.has(b.name))
+        .map((b) => {
+          const rep = [...perBrand.get(b.name)]
+            .sort((x, y) => (y.topic_volume ?? 0) - (x.topic_volume ?? 0))[0];
+          return { brand: b.name, topic: rep };
+        });
+      const peakVolume = members.reduce((max, m) => Math.max(max, m.topic.topic_volume ?? 0), 0);
+      const totalMentions = members.reduce((sum, m) => sum + (m.topic.mentions ?? 0), 0);
+      themes.push({
+        keywords: [keyword], members, brandCount: members.length, peakVolume, totalMentions,
       });
-      const totalVolume = matches.reduce((sum, m) => sum + (m.topic.topic_volume ?? 0), 0);
-      themes.push({ keywords: [keyword], matches, totalVolume });
     }
   }
 
-  // Merge themes whose representative topics are identical across all brands.
+  // Merge themes whose representative topics are identical (same member topic set) — keeps
+  // one theme with multiple keyword chips instead of near-duplicate rows.
   const merged = new Map();
   for (const theme of themes) {
-    const sig = theme.matches.map((m) => m.topic.topic_id ?? m.topic.topic).join(' | ');
+    const sig = theme.members.map((m) => m.topic.topic_id ?? m.topic.topic).sort().join(' | ');
     const existing = merged.get(sig);
     if (existing) {
       existing.keywords.push(...theme.keywords);
@@ -120,6 +128,6 @@ export function findSharedThemes(brands) {
   for (const theme of result) {
     theme.keywords.sort((a, b) => a.localeCompare(b));
   }
-  result.sort((a, b) => b.totalVolume - a.totalVolume);
+  result.sort((a, b) => b.peakVolume - a.peakVolume);
   return result;
 }

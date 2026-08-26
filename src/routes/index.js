@@ -116,7 +116,6 @@ function isStaticRoute(routePattern) {
  *   separate, unverified Brand24 "devx" host (POC).
  * @param {Object} semrushMarketTopicsController - Semrush AI-visibility Market Topics
  *   controller (POC — replaces the Brand24-topics-sourced Market Topics tab).
- * @param {Object} marketDiscoveryController - Market Discovery controller (POC).
  * @param {Object} taskManagementController - Task-management (Jira ticket creation) controller.
  * @param {Object} onboardingController - Semrush onboarding notification controller.
  * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
@@ -192,7 +191,6 @@ export default function getRouteHandlers(
   brand24MarketTopicsController,
   brand24DevxMentionsController,
   semrushMarketTopicsController,
-  marketDiscoveryController,
   taskManagementController,
   onboardingController,
   redirectsController,
@@ -513,9 +511,6 @@ export default function getRouteHandlers(
     'GET /tools/brand24/market-topics': brand24MarketTopicsController.getMarketTopics,
     'GET /tools/brand24-devx/mentions': brand24DevxMentionsController.getMentions,
     'GET /tools/semrush/market-topics': semrushMarketTopicsController.getMarketTopics,
-    'POST /tools/market-discovery': marketDiscoveryController.getCategories,
-    'POST /tools/market-discovery/topic-sources': marketDiscoveryController.getTopicSources,
-    'POST /tools/market-discovery/share-of-voice': marketDiscoveryController.getShareOfVoice,
     'GET /monitoring/drs-bp-pg-audit': drsBpPgAuditController.getProjectionAudit,
 
     // Hybrid permission model — state-layer management + capability
