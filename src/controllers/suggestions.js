@@ -1735,6 +1735,11 @@ function SuggestionsController(ctx, sqs, env) {
 
     try {
       await revokeGrantsForSuggestions(SuggestionGrant, [suggestionId]);
+    } catch (revokeError) {
+      context.log.warn(`Failed to revoke grants for suggestion ${suggestionId}`, revokeError?.message ?? revokeError);
+    }
+
+    try {
       await suggestion.remove();
       return noContent();
     } catch (e) {

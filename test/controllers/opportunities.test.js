@@ -1055,7 +1055,7 @@ describe('Opportunities Controller', () => {
     expect(mockOpportunitySuggestionGrant.revokeSuggestionGrant).to.not.have.been.called;
   });
 
-  it('returns 500 and does not remove the opportunity when revoking its grants fails', async () => {
+  it('still removes the opportunity and logs a warning when revoking its grants fails', async () => {
     const s1 = { getId: () => 'sugg-1' };
     mockOpportunitySuggestion.allByOpportunityId.resolves([s1]);
     mockOpportunitySuggestionGrant.findBySuggestionIds.resolves([
@@ -1067,10 +1067,9 @@ describe('Opportunities Controller', () => {
       params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
       data: {},
     });
-    expect(response.status).to.equal(500);
-    const error = await response.json();
-    expect(error).to.have.property('message', 'Error removing opportunity');
-    expect(removeSpy).to.not.have.been.called;
+    expect(response.status).to.equal(204);
+    expect(removeSpy).to.have.been.calledOnce;
+    expect(mockContext.log.warn).to.have.been.calledOnce;
   });
 
   it('returns 500 when removing an opportunity if there is a data access layer error', async () => {

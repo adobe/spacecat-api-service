@@ -380,6 +380,11 @@ function OpportunitiesController(ctx) {
 
     try {
       await revokeGrantsForOpportunity(dataAccess, opportunity);
+    } catch (revokeError) {
+      ctx.log?.warn?.(`Failed to revoke grants for opportunity ${opportunityId} on site ${siteId}`, revokeError?.message ?? revokeError);
+    }
+
+    try {
       await opportunity.remove(); // also removes suggestions associated with opportunity
       return noContent();
     } catch (e) {

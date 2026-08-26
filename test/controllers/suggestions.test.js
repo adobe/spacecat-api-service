@@ -7019,7 +7019,7 @@ describe('Suggestions Controller', () => {
       expect(removeStub).to.have.been.calledOnce;
     });
 
-    it('returns internal server error and does not remove the suggestion when revoke fails', async () => {
+    it('still removes the suggestion and logs a warning when revoking its grant fails', async () => {
       mockSuggestionGrant.findBySuggestionIds.resolves([
         { suggestion_id: SUGGESTION_IDS[0], grant_id: 'grant-1' },
       ]);
@@ -7032,10 +7032,9 @@ describe('Suggestions Controller', () => {
         },
         ...context,
       });
-      expect(response.status).to.equal(500);
-      const errorResponse = await response.json();
-      expect(errorResponse).to.have.property('message', 'Error removing suggestion');
-      expect(removeStub).to.not.have.been.called;
+      expect(response.status).to.equal(204);
+      expect(removeStub).to.have.been.calledOnce;
+      expect(context.log.warn).to.have.been.calledOnce;
     });
   });
 
