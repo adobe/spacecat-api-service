@@ -109,6 +109,19 @@ describe('routeFacsCapabilities', () => {
     });
   });
 
+  describe('PRODUCTS_FACS_COMPOSITE_RESOURCE.ASO (composite resolver config)', () => {
+    // The wrapper only invokes the composite resolver when compositeSpec.resourceType
+    // matches the resolved resource type; a wrong resourceType would silently skip the
+    // resolver and fail OPEN (unfiltered lists, un-type-scoped items). Pin the shape.
+    it('anchors ASO to site + the asoOpportunityComposite resolver + a single opportunity slot', () => {
+      const aso = routeFacsCapabilities.PRODUCTS_FACS_COMPOSITE_RESOURCE.ASO;
+      expect(aso).to.be.an('object');
+      expect(aso.resourceType).to.equal('site');
+      expect(aso.resolver).to.equal('asoOpportunityComposite');
+      expect(aso.compositeKeySlots).to.deep.equal(['opportunity']);
+    });
+  });
+
   describe('FACS_ONBOARDED_PRODUCTS', () => {
     it('is an array of unique uppercase product codes', () => {
       const onboarded = routeFacsCapabilities.FACS_ONBOARDED_PRODUCTS;

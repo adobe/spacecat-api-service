@@ -795,6 +795,37 @@ describe('StateAccessMappingsController', () => {
         .to.have.members(['llmo/can_configure', 'llmo/can_view']);
     });
 
+    it('re-looks-up the duplicate scoped by the composite qualifier on upsert (ASO)', async () => {
+      const existing = makeRow({
+        id: 'pre-existing-id',
+        product: 'ASO',
+        resource_type: 'site',
+        composite_key_type_1: 'opportunity',
+        composite_key_value_1: 'security',
+      });
+      const listStub = sinon.stub().resolves([existing]);
+      const { Controller } = await loadController({
+        createFacsAccessMappings: sinon.stub().resolves({
+          created: [],
+          skipped: [{ subject: { type: 'user', id: 'someone@AdobeID' }, reason: 'duplicate' }],
+        }),
+        listFacsAccessMappings: listStub,
+        updateFacsAccessMappingCapabilities: sinon.stub().resolves(existing),
+      });
+      const ctx = makeContext({
+        product: 'ASO',
+        body: asoBody({ compositeKeyType1: 'opportunity', compositeKeyValue1: 'security' }),
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(200);
+      // The conflict re-lookup MUST be scoped by the qualifier, else the upsert
+      // could overwrite a different-qualifier binding for the same subject+resource.
+      expect(listStub.calledOnce).to.be.true;
+      expect(listStub.firstCall.args[1]).to.include({
+        compositeKeyType1: 'opportunity', compositeKeyValue1: 'security',
+      });
+    });
+
     it('audits an update_capabilities (allow) event on upsert', async () => {
       const existing = makeRow({ id: 'pre-existing-id' });
       const { Controller, stubs } = await loadController({
@@ -975,6 +1006,39 @@ describe('StateAccessMappingsController', () => {
       });
       const res = await Controller(ctx).adminCreateMapping(ctx);
       expect(res.status).to.equal(201);
+    });
+
+    it('threads the composite qualifier into the admin create (ASO)', async () => {
+      const createStub = sinon.stub().resolves({
+        created: [makeRow({ product: 'ASO', resource_type: 'site' })], skipped: [],
+      });
+      const { Controller } = await loadController({ createFacsAccessMappings: createStub });
+      const ctx = makeContext({
+        isAdmin: true,
+        body: {
+          ...adminBody,
+          product: 'ASO',
+          resourceType: 'site',
+          grantedCapabilities: ['aso/can_view'],
+          compositeKeyType1: 'opportunity',
+          compositeKeyValue1: 'security',
+        },
+      });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(201);
+      expect(createStub.firstCall.args[1]).to.include({
+        compositeKeyType1: 'opportunity', compositeKeyValue1: 'security',
+      });
+    });
+
+    it('rejects a composite qualifier for a no-slot product on admin create (LLMO)', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({
+        isAdmin: true,
+        body: { ...adminBody, compositeKeyType1: 'opportunity', compositeKeyValue1: 'security' },
+      });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(400);
     });
 
     it("normalizes a bare 'org' subjectId so a bare imsOrgId + bare subjectId match (201)", async () => {
