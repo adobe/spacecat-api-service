@@ -653,6 +653,27 @@ describe('Suggestions Controller', () => {
       expect(byUrl['https://a.com/z']).to.equal(undefined);
     });
 
+    it('narrows opportunities by the caller\'s permitted composite types (D4)', async () => {
+      opptyAllBySiteId.resolves([
+        makeOppty('opp-meta', 'meta-tags', ['isElmo']),
+        makeOppty('opp-alt', 'alt-text', ['isElmo']),
+      ]);
+      suggestionAll.resolves([
+        makeSugg('opp-meta', { url: 'https://a.com/meta', edgeDeployed: true }),
+        makeSugg('opp-alt', { url: 'https://a.com/alt', edgeDeployed: true }),
+      ]);
+      // Caller is scoped to 'meta-tags' only.
+      const ctx = {
+        params: { siteId: SITE_ID },
+        attributes: { facsComposite: { values: ['meta-tags'] } },
+      };
+      const response = await buildController().getEdgeDeployedUrls(ctx);
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      // Only the permitted 'meta-tags' URL is exposed; the 'alt-text' one is filtered out.
+      expect(body.map((e) => e.url)).to.deep.equal(['https://a.com/meta']);
+    });
+
     it('queries suggestions once with an opportunity_id IN filter (no per-opportunity fan-out)', async () => {
       opptyAllBySiteId.resolves([
         makeOppty('opp-meta', 'meta-tags', ['isElmo']),

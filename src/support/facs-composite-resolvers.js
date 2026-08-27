@@ -79,15 +79,32 @@ function permittedValues(bindings, capability) {
 }
 
 /**
- * True for an ASO opportunity COLLECTION route — the site-level list
- * (`GET …/opportunities`), `…/opportunities/by-status/:status`, and
- * `…/opportunities/top-paid`. None has a single opportunity to type-scope
- * against; they are result-filtered by the controller (D4). The item route
- * (`…/opportunities/:opportunityId`) is handled earlier via its route param, so
- * it never reaches here.
+ * True for an ASO opportunity-DERIVED COLLECTION route — the site-level list
+ * (`GET …/opportunities`), `…/opportunities/by-status/:status`,
+ * `…/opportunities/top-paid`, and the two site-level collections that expose
+ * opportunity-derived data across ALL types: `…/fixes` (getAllForSite) and
+ * `…/edge-deployed-urls`. None has a single opportunity to type-scope against;
+ * each is result-filtered by its controller (D4) via
+ * `filterOpportunitiesByFacsComposite`. Item routes (carrying `:opportunityId`,
+ * incl. `…/opportunities/:opportunityId/fixes`) are handled earlier via their
+ * route param, so they never reach here.
+ *
+ * Keep this in sync with the controllers that call
+ * `filterOpportunitiesByFacsComposite`; the resolver defers here and the
+ * controller MUST narrow, else the collection leaks cross-type data.
  */
-function isOpportunityListRoute(routePattern) {
-  return typeof routePattern === 'string' && /^GET\s.*\/opportunities(\/|$)/.test(routePattern);
+function isOpportunityDerivedCollectionRoute(routePattern) {
+  return typeof routePattern === 'string'
+    && /^GET\s.*\/(opportunities(\/by-status\/[^/]+|\/top-paid)?|fixes|edge-deployed-urls)$/.test(routePattern);
+}
+
+/**
+ * True for the ASO opportunity CREATE route (`POST …/opportunities`, no
+ * `:opportunityId`). Type-scoped by the request body's opportunity type so a
+ * caller scoped to one type cannot create opportunities of another.
+ */
+function isOpportunityCreateRoute(routePattern) {
+  return typeof routePattern === 'string' && /^POST\s.*\/opportunities$/.test(routePattern);
 }
 
 /**
@@ -101,11 +118,14 @@ function isOpportunityListRoute(routePattern) {
  *    OR a binding for the opportunity's OWN type carries the route capability. The `'all'` check
  *    short-circuits BEFORE the Opportunity fetch, so site-wide grantees stay decoupled from
  *    Opportunity-record availability (INV-2 fail-closed applies only to the typed path).
- *  - **Opportunity LIST** route (`GET …/opportunities`): returns `'defer'` — the controller
- *    ReBAC-filters the results to the caller's permitted types.
- *  - **Any other ASO site route** (non-opportunity, incl. opportunity CREATE): grant iff ANY active
- *    site binding (regardless of qualifier) carries the capability — these routes are not
- *    opportunity-scoped.
+ *  - **Opportunity CREATE** route (`POST …/opportunities`): grant iff a site-wide (`'all'`) binding
+ *    OR a binding for the request body's opportunity type carries the capability — a type-scoped
+ *    caller cannot create opportunities of another type.
+ *  - **Opportunity-derived COLLECTION** route (`GET …/opportunities`, `…/by-status`, `…/top-paid`,
+ *    `…/fixes`, `…/edge-deployed-urls`): returns `'defer'` — the controller ReBAC-filters the
+ *    opportunity-derived results to the caller's permitted types.
+ *  - **Any other ASO site route** (non-opportunity): grant iff ANY active site binding (regardless
+ *    of qualifier) carries the capability — these routes are not opportunity-scoped.
  *
  * Fail-closed: missing postgrest / opportunity-not-found / opportunity-on-another-site → deny.
  * A thrown error is treated as deny by the wrapper. Each fail-closed branch logs (tag
@@ -168,9 +188,20 @@ export async function asoOpportunityComposite(context, {
     return bindingGrants(bindings, capability, [opportunity.getType()]);
   }
 
-  if (isOpportunityListRoute(routePattern)) {
-    // Opportunity LIST (list / by-status / top-paid): the wrapper can't type-scope
-    // a whole collection, so stash the caller's permitted opportunity types for the
+  if (isOpportunityCreateRoute(routePattern)) {
+    // Opportunity CREATE — type-scope by the body's intended opportunity type so
+    // a caller scoped to one type cannot create opportunities of another. A
+    // site-wide ('all') binding grants any type; a missing/absent body type
+    // grants only on an 'all' binding (fail-closed for typed-only callers).
+    const bodyType = context.data?.type;
+    const values = hasText(bodyType) ? [WILDCARD, bodyType] : [WILDCARD];
+    return bindingGrants(bindings, capability, values);
+  }
+
+  if (isOpportunityDerivedCollectionRoute(routePattern)) {
+    // Opportunity-derived COLLECTION (opportunity list / by-status / top-paid,
+    // site fixes, edge-deployed-urls): the wrapper can't type-scope a whole
+    // collection, so stash the caller's permitted opportunity types for the
     // controller to result-filter by (D4). WILDCARD ('all') → unrestricted.
     context.attributes = context.attributes ?? {};
     context.attributes.facsComposite = {
@@ -181,7 +212,7 @@ export async function asoOpportunityComposite(context, {
     return 'defer';
   }
 
-  // Any other ASO site route (non-opportunity, incl. opportunity create): not
+  // Any other ASO site route (non-opportunity, non-collection): not
   // opportunity-scoped → grant iff any active site binding carries the capability.
   return bindingGrants(bindings, capability, null);
 }

@@ -162,6 +162,60 @@ describe('facs-composite-resolvers (asoOpportunityComposite)', () => {
     expect(context.attributes.facsComposite.values).to.deep.equal(['security']);
   });
 
+  it('site fixes collection defers and stashes permitted types (D4)', async () => {
+    listStub.resolves([{ composite_key_value_1: 'security', granted_capabilities: [CAP] }]);
+    const res = await mod.asoOpportunityComposite(context, {
+      ...baseArgs, routePattern: 'GET /sites/:siteId/fixes', routeParams: { siteId: 'site-1' },
+    });
+    expect(res).to.equal('defer');
+    expect(context.attributes.facsComposite.values).to.deep.equal(['security']);
+  });
+
+  it('edge-deployed-urls collection defers and stashes permitted types (D4)', async () => {
+    listStub.resolves([{ composite_key_value_1: 'security', granted_capabilities: [CAP] }]);
+    const res = await mod.asoOpportunityComposite(context, {
+      ...baseArgs, routePattern: 'GET /sites/:siteId/edge-deployed-urls', routeParams: { siteId: 'site-1' },
+    });
+    expect(res).to.equal('defer');
+    expect(context.attributes.facsComposite.values).to.deep.equal(['security']);
+  });
+
+  it('opportunity CREATE: grants when a binding matches the body opportunity type', async () => {
+    listStub.resolves([{ composite_key_value_1: 'security', granted_capabilities: [CAP] }]);
+    context.data = { type: 'security' };
+    const res = await mod.asoOpportunityComposite(context, {
+      ...baseArgs, routePattern: 'POST /sites/:siteId/opportunities', routeParams: { siteId: 'site-1' },
+    });
+    expect(res).to.be.true;
+  });
+
+  it('opportunity CREATE: denies when the body type is not a permitted type', async () => {
+    listStub.resolves([{ composite_key_value_1: 'security', granted_capabilities: [CAP] }]);
+    context.data = { type: 'meta-tags' };
+    const res = await mod.asoOpportunityComposite(context, {
+      ...baseArgs, routePattern: 'POST /sites/:siteId/opportunities', routeParams: { siteId: 'site-1' },
+    });
+    expect(res).to.be.false;
+  });
+
+  it('opportunity CREATE: a site-wide (all) binding grants any body type', async () => {
+    listStub.resolves([{ composite_key_value_1: 'all', granted_capabilities: [CAP] }]);
+    context.data = { type: 'meta-tags' };
+    const res = await mod.asoOpportunityComposite(context, {
+      ...baseArgs, routePattern: 'POST /sites/:siteId/opportunities', routeParams: { siteId: 'site-1' },
+    });
+    expect(res).to.be.true;
+  });
+
+  it('opportunity CREATE: a missing body type grants only on a site-wide (all) binding', async () => {
+    listStub.resolves([{ composite_key_value_1: 'security', granted_capabilities: [CAP] }]);
+    context.data = {};
+    const res = await mod.asoOpportunityComposite(context, {
+      ...baseArgs, routePattern: 'POST /sites/:siteId/opportunities', routeParams: { siteId: 'site-1' },
+    });
+    expect(res).to.be.false;
+  });
+
   it('non-opportunity route: grants on ANY active site binding with the capability', async () => {
     listStub.resolves([{ composite_key_value_1: 'security', granted_capabilities: [CAP] }]);
     const res = await mod.asoOpportunityComposite(context, {
