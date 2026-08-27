@@ -428,9 +428,21 @@ describe('edge-routing-utils', () => {
   describe('resolveCanonicalHost', () => {
     let edgeUtilsResolve;
 
-    // Builds a minimal fetch Response-like object for the follow-redirects probe: `url` is where
-    // the client landed after following the entire redirect chain (fetch's own `Response.url`).
-    const response = (url) => ({ url });
+    // Builds a minimal fetch Response-like object for the manual-redirect probe.
+    const response = ({ status = 200, location } = {}) => ({
+      status,
+      headers: { get: (h) => (h === 'location' ? (location ?? null) : null) },
+    });
+
+    // Keys canned responses by the hostname being requested, so a test can assert that an
+    // off-domain host is never contacted at all (fetchByHost rejects if it's not in the map).
+    const fetchByHost = (byHost) => (url) => {
+      const { hostname } = new URL(url);
+      if (Object.prototype.hasOwnProperty.call(byHost, hostname)) {
+        return Promise.resolve(byHost[hostname]);
+      }
+      return Promise.reject(new Error(`unexpected probe of ${hostname}`));
+    };
 
     beforeEach(async () => {
       edgeUtilsResolve = await esmock('../../src/support/edge-routing-utils.js', {
@@ -459,39 +471,48 @@ describe('edge-routing-utils', () => {
       expect(fetchStub).to.not.have.been.called;
     });
 
-    it('appends www and confirms it serves by following the redirect chain (no redirect)', async () => {
+    it('appends www and confirms it serves (single hop, no redirect)', async () => {
       calculateForwardedHostStub.returns('www.example.com');
-      fetchStub.resolves(response('https://www.example.com/'));
+      fetchStub.resolves(response({ status: 200 }));
       const host = await edgeUtilsResolve.resolveCanonicalHost('https://example.com', log);
       expect(host).to.equal('www.example.com');
       expect(fetchStub).to.have.been.calledOnce;
       const [url, opts] = fetchStub.firstCall.args;
       expect(url).to.equal('https://www.example.com/');
-      expect(opts.redirect).to.equal('follow');
+      expect(opts.redirect).to.equal('manual');
     });
 
-    it('follows a same-domain redirect chain from www back to the apex (apex-only site)', async () => {
-      // Genting: www.gentingsingapore.com redirects to the apex. redirect:'follow' means the
-      // client already followed the chain — response.url is the final landing URL.
+    it('follows a same-domain redirect from www back to the apex (apex-only site)', async () => {
       calculateForwardedHostStub.returns('www.gentingsingapore.com');
-      fetchStub.resolves(response('https://gentingsingapore.com/'));
+      fetchStub.callsFake(fetchByHost({
+        'www.gentingsingapore.com': response({ status: 301, location: 'https://gentingsingapore.com/' }),
+        'gentingsingapore.com': response({ status: 200 }),
+      }));
       const host = await edgeUtilsResolve.resolveCanonicalHost('https://gentingsingapore.com', log);
       expect(host).to.equal('gentingsingapore.com');
+      expect(fetchStub).to.have.been.calledTwice;
     });
 
-    it('follows a same-domain redirect chain from the apex to www', async () => {
+    it('follows multiple same-domain hops before landing (within the hop cap)', async () => {
       calculateForwardedHostStub.returns('www.example.com');
-      fetchStub.resolves(response('https://www.example.com/home'));
+      fetchStub.onCall(0).resolves(response({ status: 301, location: 'https://example.com/mid' }));
+      fetchStub.onCall(1).resolves(response({ status: 301, location: 'https://www.example.com/final' }));
+      fetchStub.onCall(2).resolves(response({ status: 200 }));
       const host = await edgeUtilsResolve.resolveCanonicalHost('https://example.com', log);
       expect(host).to.equal('www.example.com');
+      expect(fetchStub).to.have.been.calledThrice;
     });
 
-    it('keeps the candidate when the redirect chain lands off-domain', async () => {
+    it('never contacts an off-domain redirect target — validates the Location before requesting it', async () => {
       calculateForwardedHostStub.returns('www.example.com');
-      fetchStub.resolves(response('https://tracker.other.com/'));
+      fetchStub.callsFake(fetchByHost({
+        'www.example.com': response({ status: 302, location: 'https://tracker.other.com/' }),
+        // 'tracker.other.com' deliberately absent — fetchByHost rejects if it's ever requested.
+      }));
       const host = await edgeUtilsResolve.resolveCanonicalHost('https://example.com', log);
       expect(host).to.equal('www.example.com');
-      expect(log.info).to.have.been.calledWithMatch('landed off-domain');
+      expect(fetchStub).to.have.been.calledOnce;
+      expect(log.info).to.have.been.calledWithMatch('redirects off-domain');
     });
 
     it('keeps the candidate when the probe errors (network/DNS failure, or blocked)', async () => {
@@ -502,18 +523,35 @@ describe('edge-routing-utils', () => {
       expect(log.info).to.have.been.calledWithMatch('Canonical probe');
     });
 
-    it('keeps the candidate when the final response URL is unparseable', async () => {
+    it('keeps the candidate when a redirect has no Location header', async () => {
       calculateForwardedHostStub.returns('www.example.com');
-      fetchStub.resolves(response('not a url'));
+      fetchStub.resolves(response({ status: 301 }));
       const host = await edgeUtilsResolve.resolveCanonicalHost('https://example.com', log);
       expect(host).to.equal('www.example.com');
+    });
+
+    it('keeps the candidate when a redirect Location is unparseable', async () => {
+      calculateForwardedHostStub.returns('www.example.com');
+      fetchStub.resolves(response({ status: 301, location: 'http://' }));
+      const host = await edgeUtilsResolve.resolveCanonicalHost('https://example.com', log);
+      expect(host).to.equal('www.example.com');
+    });
+
+    it('keeps the candidate and stops once the redirect hop cap is exceeded', async () => {
+      calculateForwardedHostStub.returns('www.example.com');
+      // Redirects to itself forever — never resolves and never leaves the domain.
+      fetchStub.resolves(response({ status: 301, location: 'https://www.example.com/' }));
+      const host = await edgeUtilsResolve.resolveCanonicalHost('https://example.com', log);
+      expect(host).to.equal('www.example.com');
+      expect(fetchStub.callCount).to.equal(4); // MAX_REDIRECT_HOPS (3) + 1 initial request
+      expect(log.info).to.have.been.calledWithMatch('exceeded');
     });
 
     it('classifies a multi-part-TLD apex (racq.com.au) as bare via the PSL, correcting calculateForwardedHost\'s dot-count miss', async () => {
       // calculateForwardedHost's dot-count heuristic sees 2 dots and (wrongly) leaves this
       // unchanged, as if it were a subdomain — the PSL override corrects it to www.
       calculateForwardedHostStub.returns('racq.com.au');
-      fetchStub.resolves(response('https://www.racq.com.au/'));
+      fetchStub.resolves(response({ status: 200 }));
       const host = await edgeUtilsResolve.resolveCanonicalHost('https://racq.com.au', log);
       expect(host).to.equal('www.racq.com.au');
       expect(fetchStub).to.have.been.calledOnce;

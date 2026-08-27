@@ -48,6 +48,17 @@ export const EDGE_OPTIMIZE_MARKING_DELAY_SECONDS = 300;
 
 const PROBE_TIMEOUT_MS = 5000;
 const CDN_CALL_TIMEOUT_MS = 5000;
+const MAX_REDIRECT_HOPS = 3;
+
+// HTTP status codes that carry a Location header we follow when probing for the serving host.
+const REDIRECT_STATUSES = new Set([301, 302, 307, 308]);
+
+/**
+ * Whether `host` is the site's apex (`rootHost`) or its www variant.
+ */
+const isSameSite = (host, rootHost) => (
+  host.startsWith('www.') ? host.slice(4) : host
+) === rootHost;
 
 /**
  * The registrable domain of a hostname via the Public Suffix List (tldts).
@@ -79,45 +90,66 @@ export function getHostnameWithoutWww(url, log) {
 }
 
 /**
- * Fetches `probeURL`, following redirects, to find the host it actually serves from.
- * Never throws: a failed probe or an off-domain landing host both return null.
+ * Fetches `probeURL` to find the host it actually serves from, following up to
+ * {@link MAX_REDIRECT_HOPS} redirects one at a time — each `Location` is validated as staying on
+ * the site's domain *before* it is requested, so an off-domain hop is never contacted.
+ * Never throws: a failed probe, an off-domain hop, or exceeding the hop cap all return null.
  *
- * @param {string} probeURL - The URL to probe (must include scheme).
- * @param {string} rootHost - The site's apex hostname (lowercased); the landing host must match
- *   this or its www variant, or it's treated as off-domain.
+ * @param {string} probeURL - The URL to probe (must include scheme, same-domain by construction).
+ * @param {string} rootHost - The site's apex hostname (lowercased); every hop must match this or
+ *   its www variant, or it's treated as off-domain.
  * @param {object} [log] - Logger.
  * @returns {Promise<string|null>} The final serving host, or null when undetermined.
  */
 async function followToServingHost(probeURL, rootHost, log) {
-  let res;
-  try {
-    // Same probe UA as probeSiteAndResolveDomain below, for consistent WAF treatment.
-    res = await fetch(probeURL, {
-      method: 'GET',
-      redirect: 'follow',
-      headers: { 'User-Agent': EDGE_OPTIMIZE_USER_AGENT },
-      timeout: PROBE_TIMEOUT_MS,
-    });
-  } catch (e) {
-    log?.info(`[edge-routing-utils] Canonical probe of ${probeURL} failed: ${e.message}`);
-    return null;
+  let currentURL = probeURL;
+  let currentHost = new URL(probeURL).hostname.toLowerCase();
+
+  for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop += 1) {
+    let res;
+    try {
+      // Same probe UA as probeSiteAndResolveDomain below, for consistent WAF treatment.
+      // eslint-disable-next-line no-await-in-loop -- each hop depends on the previous Location
+      res = await fetch(currentURL, {
+        method: 'GET',
+        redirect: 'manual',
+        headers: { 'User-Agent': EDGE_OPTIMIZE_USER_AGENT },
+        timeout: PROBE_TIMEOUT_MS,
+      });
+    } catch (e) {
+      log?.info(`[edge-routing-utils] Canonical probe of ${currentURL} failed: ${e.message}`);
+      return null;
+    }
+
+    if (!REDIRECT_STATUSES.has(res.status)) {
+      log?.info(`[edge-routing-utils] ${probeURL} resolves to ${currentHost}`);
+      return currentHost;
+    }
+
+    const location = res.headers.get('location');
+    if (!location) {
+      return null;
+    }
+
+    let nextURL;
+    try {
+      nextURL = new URL(location, currentURL);
+    } catch {
+      return null;
+    }
+
+    const nextHost = nextURL.hostname.toLowerCase();
+    if (!isSameSite(nextHost, rootHost)) {
+      log?.info(`[edge-routing-utils] ${currentURL} redirects off-domain to ${nextHost}; ignoring`);
+      return null;
+    }
+
+    currentURL = nextURL.toString();
+    currentHost = nextHost;
   }
 
-  let finalHost;
-  try {
-    finalHost = new URL(res.url).hostname.toLowerCase();
-  } catch {
-    return null;
-  }
-
-  // Only trust a landing host on the same domain (apex ↔ www), never an unrelated one.
-  const finalNoWww = finalHost.startsWith('www.') ? finalHost.slice(4) : finalHost;
-  if (finalNoWww !== rootHost) {
-    log?.info(`[edge-routing-utils] ${probeURL} landed off-domain at ${finalHost}; ignoring`);
-    return null;
-  }
-  log?.info(`[edge-routing-utils] ${probeURL} resolves to ${finalHost}`);
-  return finalHost;
+  log?.info(`[edge-routing-utils] ${probeURL} exceeded ${MAX_REDIRECT_HOPS} redirect hops; ignoring`);
+  return null;
 }
 
 /**
