@@ -5673,6 +5673,90 @@ describe('Suggestions Controller', () => {
       expect(context.log.warn).to.have.been.calledWithMatch(/not in 'ASO-EDS-Autofix-users' IMS group/);
     });
 
+    it('auto-fix suggestions exempts a crosswalk EDS site from the group gate (user-token source)', async () => {
+      site.getAuthoringType = sandbox.stub().returns('cs/crosswalk');
+      const mockTierClient = {
+        checkValidEntitlement: sandbox.stub().resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          siteEnrollment: { getId: () => 'enrollment-2' },
+        }),
+      };
+      const isImsGroupMemberStub = sandbox.stub().resolves(false);
+      const Controller = await esmock('../../src/controllers/suggestions.js', {
+        '@adobe/spacecat-shared-tier-client': { default: { createForSite: sandbox.stub().resolves(mockTierClient) } },
+        '../../src/support/ims-group.js': { isImsGroupMember: isImsGroupMemberStub },
+      });
+      const controller = Controller({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'ASO' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controller.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.not.equal(403);
+      expect(isImsGroupMemberStub).to.not.have.been.called;
+      expect(context.log.info).to.have.been.calledWithMatch(/user-token content source/);
+    });
+
+    it('auto-fix suggestions exempts a Dark Alley (documentauthoring) EDS site from the group gate', async () => {
+      site.getAuthoringType = sandbox.stub().returns('documentauthoring');
+      const mockTierClient = {
+        checkValidEntitlement: sandbox.stub().resolves({
+          entitlement: { getTier: () => 'PLG' },
+          siteEnrollment: { getId: () => 'enrollment-3' },
+        }),
+      };
+      const Controller = await esmock('../../src/controllers/suggestions.js', {
+        '@adobe/spacecat-shared-tier-client': { default: { createForSite: sandbox.stub().resolves(mockTierClient) } },
+        '../../src/support/ims-group.js': { isImsGroupMember: sandbox.stub().resolves(false) },
+      });
+      const controller = Controller({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'ASO' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controller.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.not.equal(403);
+    });
+
+    it('auto-fix suggestions exempts an EDS site with a markup content source from the group gate', async () => {
+      site.getHlxConfig = sandbox.stub().returns({ content: { source: { type: 'markup' } } });
+      const mockTierClient = {
+        checkValidEntitlement: sandbox.stub().resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          siteEnrollment: { getId: () => 'enrollment-4' },
+        }),
+      };
+      const Controller = await esmock('../../src/controllers/suggestions.js', {
+        '@adobe/spacecat-shared-tier-client': { default: { createForSite: sandbox.stub().resolves(mockTierClient) } },
+        '../../src/support/ims-group.js': { isImsGroupMember: sandbox.stub().resolves(false) },
+      });
+      const controller = Controller({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'ASO' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controller.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.not.equal(403);
+    });
+
     it('auto-fix suggestions fails closed (403) for a confirmed AEM Edge Freemium user when the group gate errors', async () => {
       const mockTierClient = {
         checkValidEntitlement: sandbox.stub().resolves({
