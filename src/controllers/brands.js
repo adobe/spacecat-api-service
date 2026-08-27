@@ -14,6 +14,7 @@
 
 import { randomUUID } from 'crypto';
 
+import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import BrandClient, { BrandGovernanceClient } from '@adobe/spacecat-shared-brand-client';
 import DrsClient from '@adobe/spacecat-shared-drs-client';
 import {
@@ -23,13 +24,13 @@ import {
   noContent,
   createResponse,
   forbidden,
-  internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   composeBaseURL,
   hasText,
   isNonEmptyObject,
   isValidUUID,
+  siteIdentityFromUrlString,
 } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode, getImsUserToken, resolveSemrushImsToken } from '../support/utils.js';
@@ -69,9 +70,13 @@ import { isFacsRebacResource } from '../routes/facs-capabilities.js';
 import { provisionBrandSubworkspace, provisionBrandSubworkspaceBare, emptyProvisionedWorkspace } from '../support/serenity/brand-provisioning.js';
 import { computeWriteDeadline } from '../support/serenity/intent-classification.js';
 import { ensureMarketSite } from '../support/serenity/site-linkage.js';
-import { upsertMappingRow, linkSiteToLiveRows } from '../support/serenity/mapping-rows.js';
+import {
+  upsertMappingRow, linkSiteToLiveRows, projectsForSite, relinkSiteForRows,
+} from '../support/serenity/mapping-rows.js';
+import { propagateSiteUrlToSemrush } from '../support/serenity/site-url-propagation.js';
 import { createSerenityTransport } from '../support/serenity/rest-transport.js';
 import { isSemrushTransportError, unwrapTransportCause } from '../support/serenity/errors.js';
+import { logUpstreamError } from '../support/serenity/upstream-log.js';
 import { syncBrandUrlsAcrossMarkets } from '../support/serenity/brand-urls.js';
 import { syncBrandAliasesAcrossMarkets } from '../support/serenity/brand-aliases.js';
 import { resolveProjects } from '../support/serenity/resolve-projects.js';
@@ -81,9 +86,9 @@ import {
   isSerenityUiActiveForOrg,
 } from '../support/serenity/serenity-active.js';
 import {
-  buildReservedDomains,
+  buildReservedIdentities,
   dropReservedCompetitors,
-  removedCompetitorDomains,
+  removedCompetitors,
   syncCompetitorBenchmarksAcrossMarkets,
 } from '../support/serenity/competitor-benchmarks.js';
 import {
@@ -116,17 +121,53 @@ const BRAND_GUIDANCE_MAX_LENGTH = 4000;
 const BRAND_GUIDANCE_FIELDS = ['brandContext', 'mentionSentimentGuidance'];
 
 /**
+ * The brand's primary URL as the create payload spells it: the first non-empty
+ * entry in `urls`, tolerating bare hostnames, missing schemes, and both payload
+ * shapes (a plain string or `{ value }`). One input for both derivations below,
+ * so the project's `domain` and the url it tracks can never describe two
+ * different urls. Null when no usable URL is present.
+ */
+function brandUrlFromPayload(brandData) {
+  const urls = Array.isArray(brandData?.urls) ? brandData.urls : [];
+  return urls
+    .map((u) => (typeof u === 'string' ? u : u?.value))
+    .find(hasText) ?? null;
+}
+
+/**
  * Derives the brand domain (hostname) from a brand-create payload's URLs, used as
- * the Semrush project `domain` when provisioning a Semrush-mode brand. Takes the
- * first non-empty URL (the primary), tolerating bare hostnames and missing
- * schemes. Returns null when no usable URL is present.
+ * the Semrush project `domain` when provisioning a Semrush-mode brand. Host-only
+ * on purpose: `domain` must be a bare FQDN — a path there is a hard 400 upstream,
+ * and the upstream folds it to the registrable domain regardless. Returns null
+ * when no usable URL is present.
  */
 function brandDomainFromPayload(brandData) {
-  const urls = Array.isArray(brandData?.urls) ? brandData.urls : [];
-  const first = urls
-    .map((u) => (typeof u === 'string' ? u : u?.value))
-    .find(hasText);
-  return hostnameFromUrlString(first);
+  return hostnameFromUrlString(brandUrlFromPayload(brandData));
+}
+
+/**
+ * The url the brand's initial market should TRACK — host plus path, from the same
+ * payload URL {@link brandDomainFromPayload} reduces to a host. Without it a brand
+ * created on `nba.com/kings` analyses `nba.com` until a data-service reconcile
+ * repairs it. Returns null when no usable URL is present.
+ */
+function brandPrimaryUrlFromPayload(brandData) {
+  return siteIdentityFromUrlString(brandUrlFromPayload(brandData));
+}
+
+/**
+ * Tenant ids for the structured upstream-error log line (SITES-49993). The
+ * legacy routes name the org param `organizationId`, the v2 routes
+ * `spaceCatId` — normalised onto one queryable field name.
+ * @param {object} [context]
+ * @returns {Record<string, unknown>}
+ */
+function reqCtxOf(context) {
+  const params = context?.params ?? {};
+  return {
+    spaceCatId: params.spaceCatId ?? params.organizationId,
+    brandId: params.brandId,
+  };
 }
 
 /**
@@ -286,7 +327,12 @@ function BrandsController(ctx, log, env) {
     return params;
   }
 
-  function createErrorResponse(error) {
+  /**
+   * @param {unknown} error
+   * @param {Record<string, unknown>} [reqCtx] - tenant ids for the structured
+   *   upstream-error log line (SITES-49993); see {@link reqCtxOf}.
+   */
+  function createErrorResponse(error, reqCtx = {}) {
     // A Semrush upstream error's message embeds the gateway URL (internal host +
     // workspace/project UUIDs); never echo it to the client (body or x-error
     // header). Return a generic message and keep the detail to the log. Mirrors
@@ -299,6 +345,10 @@ function BrandsController(ctx, log, env) {
     // flattening to the generic 502. See unwrapTransportCause (errors.js).
     const err = unwrapTransportCause(error);
     if (isSemrushTransportError(err)) {
+      // One structured, queryable line with the upstream status/body and the
+      // tenant ids — the line Logs Insights groups on. The per-handler
+      // log.error above each call site adds its handler-specific context.
+      logUpstreamError(log, 'Brands upstream error', err, reqCtx);
       const status = (err.status === 401 || err.status === 403) ? err.status : 502;
       const message = status === 502 ? 'Upstream request failed' : 'Upstream authorization failed';
       return createResponse({ message }, status, { [HEADER_ERROR]: message });
@@ -316,13 +366,29 @@ function BrandsController(ctx, log, env) {
       // client distinguish error cases without regex-matching the message text
       // (LLMO-6591; see the `uq_brand_name_per_org` TODO this same pattern
       // predates in elmo-ui's getBrandSaveErrorDescriptor).
+      // cleanupHeaderValue strips chars HTTP headers can't carry (CR/LF and
+      // non-ASCII that would otherwise throw ERR_INVALID_CHAR — caught via the
+      // it-postgres IT suite when this guard's own message used an em dash,
+      // serenity-docs#346). The JSON body keeps the raw message; only the
+      // header copy needs sanitizing.
       return createResponse(
         { message: appErr.message, ...(appErr.code ? { code: appErr.code } : {}) },
         appErr.status,
-        { [HEADER_ERROR]: appErr.message },
+        { [HEADER_ERROR]: cleanupHeaderValue(appErr.message || 'Error') },
       );
     }
-    return internalServerError(appErr.message);
+    // Same split as the typed-status branch above: internalServerError() would
+    // set the header AND the body from one value, so a non-ASCII character in
+    // a bare Error's message would strip from the body too — operators
+    // debugging a 500 lose it there for no reason (the raw error is still in
+    // the logs regardless). Build the response directly instead so only the
+    // header copy is sanitized.
+    const rawMessage = appErr.message || 'Internal server error';
+    return createResponse(
+      { message: rawMessage },
+      500,
+      { [HEADER_ERROR]: cleanupHeaderValue(rawMessage) },
+    );
   }
 
   function validateBrandGuidanceFields(brandData = {}) {
@@ -369,7 +435,7 @@ function BrandsController(ctx, log, env) {
       return createResponse(brands, 200);
     } catch (error) {
       log.error(`Error getting brands for organization: ${organizationId}`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -477,7 +543,7 @@ function BrandsController(ctx, log, env) {
       return createResponse(brandGuidelines, 200);
     } catch (error) {
       log.error(`Error getting brand guidelines for site: ${siteId}`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -546,7 +612,7 @@ function BrandsController(ctx, log, env) {
       return createResponse(result, 200);
     } catch (error) {
       log.error(`Error listing prompts for brand ${brandId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -600,7 +666,7 @@ function BrandsController(ctx, log, env) {
       return ok(prompt);
     } catch (error) {
       log.error(`Error getting prompt ${promptId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -693,10 +759,10 @@ function BrandsController(ctx, log, env) {
     } catch (error) {
       if (error?.status === 409) {
         log.warn(`Prompt unique-constraint conflict for brand ${brandId} (org ${spaceCatId}): ${error.message}`);
-        return createErrorResponse(error);
+        return createErrorResponse(error, reqCtxOf(context));
       }
       log.error(`Error creating prompts for brand ${brandId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -755,7 +821,7 @@ function BrandsController(ctx, log, env) {
       return ok(prompt);
     } catch (error) {
       log.error(`Error updating prompt ${promptId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -811,7 +877,7 @@ function BrandsController(ctx, log, env) {
       return noContent();
     } catch (error) {
       log.error(`Error deleting prompt ${promptId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -870,7 +936,7 @@ function BrandsController(ctx, log, env) {
       return createResponse(result, 200);
     } catch (error) {
       log.error(`Error bulk deleting prompts for brand ${brandId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -926,7 +992,7 @@ function BrandsController(ctx, log, env) {
       return createResponse({ results }, 200);
     } catch (error) {
       log.error('Error checking prompts existence', { brandId, error });
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -973,7 +1039,7 @@ function BrandsController(ctx, log, env) {
       return createResponse(stats, 200);
     } catch (error) {
       log.error('Error fetching prompt stats', { brandId, error });
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1022,7 +1088,7 @@ function BrandsController(ctx, log, env) {
       return ok(withSerenityState(brand, serenityScopes));
     } catch (error) {
       log.error(`Error getting brand ${brandId} for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1070,13 +1136,9 @@ function BrandsController(ctx, log, env) {
         return unavailable;
       }
 
-      // readOnly: true keeps this GET endpoint idempotent — the resolver's
-      // kill-switch remediation (which writes to feature_flags) only fires
-      // from explicit onboarding/admin write paths, never from a high-traffic
-      // resolver hit by BP refresh and the DRS scheduler.
-      const mode = await resolveLlmoOnboardingMode(spaceCatId, context, {
-        readOnly: true,
-      });
+      // resolveLlmoOnboardingMode is side-effect free — safe to call from this
+      // GET endpoint hit by BP refresh and the DRS scheduler.
+      const mode = await resolveLlmoOnboardingMode(spaceCatId, context);
       if (mode !== LLMO_ONBOARDING_MODE_V2) {
         return notFound('No v2 brand configured for this organization');
       }
@@ -1094,7 +1156,7 @@ function BrandsController(ctx, log, env) {
         `Error resolving brand for org ${spaceCatId} site ${siteId}:`,
         error,
       );
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1159,7 +1221,7 @@ function BrandsController(ctx, log, env) {
       return createResponse({ brands }, 200);
     } catch (error) {
       log.error(`Error listing brands for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1194,7 +1256,7 @@ function BrandsController(ctx, log, env) {
       return createResponse({ categories }, 200);
     } catch (error) {
       log.error(`Error listing categories for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1266,7 +1328,7 @@ function BrandsController(ctx, log, env) {
       } else {
         log.error(`Error creating category for organization ${spaceCatId}:`, error);
       }
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1325,7 +1387,7 @@ function BrandsController(ctx, log, env) {
       } else {
         log.error(`Error updating category ${categoryId} for organization ${spaceCatId}:`, error);
       }
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1375,7 +1437,7 @@ function BrandsController(ctx, log, env) {
       return noContent();
     } catch (error) {
       log.error(`Error deleting category ${categoryId} for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1413,7 +1475,7 @@ function BrandsController(ctx, log, env) {
       return createResponse({ topics }, 200);
     } catch (error) {
       log.error(`Error listing topics for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1469,7 +1531,7 @@ function BrandsController(ctx, log, env) {
       } else {
         log.error(`Error creating topic for organization ${spaceCatId}:`, error);
       }
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1518,7 +1580,7 @@ function BrandsController(ctx, log, env) {
       return ok(updated);
     } catch (error) {
       log.error(`Error updating topic ${topicId} for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1565,7 +1627,7 @@ function BrandsController(ctx, log, env) {
       return noContent();
     } catch (error) {
       log.error(`Error deleting topic ${topicId} for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -1636,6 +1698,7 @@ function BrandsController(ctx, log, env) {
       // The initial market's domain, resolved once during provisioning and reused
       // by the site-mirror hook below (avoids re-deriving from the payload).
       let provisionedBrandDomain = null;
+      let provisionedBrandPrimaryUrl = null;
       // The initial market's identity, captured for the mapping-row write below
       // (must happen AFTER the brand row exists — provisionBrandSubworkspace
       // runs before it does, see brand-provisioning.js's return doc).
@@ -1698,6 +1761,11 @@ function BrandsController(ctx, log, env) {
             return badRequest('A primary URL is required to provision a Semrush brand');
           }
           provisionedBrandDomain = brandDomain;
+          // The url the initial market's project should TRACK, from the same
+          // payload URL `brandDomain` reduces to a host. Null when the payload
+          // spells its primary URL in a form the identity rejects; the create
+          // handler then falls back to the host identity, as it did before.
+          provisionedBrandPrimaryUrl = brandPrimaryUrlFromPayload(brandData);
           // A prompt-generating project needs at least one AI model (LLM) to
           // track. The wizard collects them; reject a prompt-generating Semrush
           // create that omits them. With generatePrompts=false the project is
@@ -1739,6 +1807,7 @@ function BrandsController(ctx, log, env) {
             market,
             languageCode,
             brandDomain,
+            primaryUrl: provisionedBrandPrimaryUrl,
             modelIds,
             generateTopics: generatePrompts,
             brandAliases,
@@ -1778,11 +1847,14 @@ function BrandsController(ctx, log, env) {
       // stored competitor list either. Social/earned domains are not reserved.
       if (Array.isArray(brandData.competitors) && brandData.competitors.length > 0) {
         const primaryDomain = brandDomainFromPayload(brandData);
-        const reservedDomains = buildReservedDomains(
+        const reservedIdentities = buildReservedIdentities(
           primaryDomain ? [primaryDomain] : [],
           brandData.urls,
         );
-        const { kept, dropped } = dropReservedCompetitors(brandData.competitors, reservedDomains);
+        const { kept, dropped } = dropReservedCompetitors(
+          brandData.competitors,
+          reservedIdentities,
+        );
         if (dropped.length > 0) {
           log.info('brands: dropped self-referential competitor(s) on create', {
             dropped: dropped.map((c) => c?.url).filter(Boolean),
@@ -1820,8 +1892,12 @@ function BrandsController(ctx, log, env) {
       }
 
       // When a Semrush sub-workspace + initial market were provisioned, mirror that
-      // initial market as a SpaceCat Site (+ brand_sites link) keyed on the
-      // market's domain, so the Semrush project has a resolvable site entity.
+      // initial market as a SpaceCat Site (+ brand_sites link) keyed on the url the
+      // market TRACKS, so the Semrush project has a resolvable site entity naming
+      // the same url it analyses. Keyed on the host instead, a brand created on
+      // `nba.com/kings` would be recorded against the root `nba.com` Site — and
+      // that Site becomes `brands.site_id`, which sibling brands on one apex would
+      // then collide on.
       // INVARIANT: ensureMarketSite MUST NOT throw — it sits inside the try/catch
       // whose catch releases the just-provisioned workspace; a throw here would
       // tear down a live brand's workspace. ensureMarketSite is best-effort by
@@ -1834,8 +1910,10 @@ function BrandsController(ctx, log, env) {
         const linkedSiteId = await ensureMarketSite(context, {
           organizationId: spaceCatId,
           brandId: provisionedBrandId ?? undefined,
-          // The initial market's domain, resolved during provisioning above.
-          domain: provisionedBrandDomain ?? undefined,
+          // The initial market's tracked url, resolved during provisioning above;
+          // its host when the payload's spelling yielded no identity — the same
+          // value the create handler then tracked.
+          domain: provisionedBrandPrimaryUrl ?? provisionedBrandDomain ?? undefined,
           updatedBy,
           log,
         });
@@ -1865,7 +1943,7 @@ function BrandsController(ctx, log, env) {
         });
         await emptyProvisionedWorkspace(context, provisionedWorkspaceId, spaceCatId, log);
       }
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -2045,9 +2123,12 @@ function BrandsController(ctx, log, env) {
         const websiteUrls = updates.urls !== undefined ? updates.urls : (brandState?.urls || []);
         const brandOwnUrls = [brandState?.baseUrl, ...websiteUrls];
 
-        let reservedDomains;
+        let reservedIdentities;
         if (hasText(brandState?.semrushSubWorkspaceId)) {
           // Semrush brand: market/project domains come from the project listing.
+          // A project domain is a bare FQDN, so it reserves that apex exactly — a
+          // competitor on a sibling path of the same host is a different site and
+          // is kept.
           // List once and stash for the post-commit re-sync (see prefetchedProjects).
           // Best-effort for a migrating org: if the listing fails (e.g. user not
           // provisioned in Semrush), degrade to brand-URL-only reserved set and log —
@@ -2076,16 +2157,19 @@ function BrandsController(ctx, log, env) {
               throw guardError;
             }
           }
-          reservedDomains = buildReservedDomains(
+          reservedIdentities = buildReservedIdentities(
             (prefetchedProjects ?? []).map((p) => p?.domain),
             brandOwnUrls,
           );
         } else {
           // Flat-mode brand: no projects — reserve the primary + own website URLs.
-          reservedDomains = buildReservedDomains([], brandOwnUrls);
+          reservedIdentities = buildReservedIdentities([], brandOwnUrls);
         }
 
-        const { kept, dropped } = dropReservedCompetitors(updates.competitors, reservedDomains);
+        const { kept, dropped } = dropReservedCompetitors(
+          updates.competitors,
+          reservedIdentities,
+        );
         if (dropped.length > 0) {
           log.info('brands: dropped self-referential competitor(s) on update', {
             brandId,
@@ -2098,7 +2182,7 @@ function BrandsController(ctx, log, env) {
           // an empty list the caller didn't actually request.
           if (kept.length === 0) {
             return badRequest(
-              'All submitted competitors reference this brand\'s own domains and were '
+              'All submitted competitors reference this brand\'s own sites and were '
               + 'rejected; none were saved. Remove the self-referencing entries, or omit '
               + 'the competitors field to leave existing competitors unchanged.',
             );
@@ -2130,6 +2214,105 @@ function BrandsController(ctx, log, env) {
       // exception.
       const serenityScopes = await readSerenityFlagScopes(spaceCatId, postgrestClient);
 
+      // serenity-docs#349 (re-point): a user picks an EXISTING onboarded Site in the
+      // org to become this brand's primary site. This replaces the earlier free-text
+      // baseURL-rename flow — the frontend now sends `{ baseSiteId }` here rather than
+      // calling PATCH /sites with a new baseURL. Validation + Semrush propagation run
+      // BEFORE the row is persisted, so a rejected target or a Semrush failure fails
+      // the whole re-point rather than leaving SpaceCat ahead of Semrush.
+      // Hoisted out of the `hasText(updates.baseSiteId)` block below so the
+      // post-write verification (right before the `return ok(updated)`) can tell
+      // a genuine re-point request apart from a same-site no-op resubmit or a
+      // plain field edit that never touched baseSiteId at all.
+      let repointOldSiteId = null;
+      let repointRequested = false;
+      if (hasText(updates.baseSiteId)) {
+        const current = await getBrandById(spaceCatId, brandUuid, postgrestClient);
+        const oldSiteId = current?.baseSiteId || null;
+        repointOldSiteId = oldSiteId;
+        // Only act on an actual change; re-submitting the same site is a no-op that
+        // falls through to the normal update below.
+        if (current && updates.baseSiteId !== oldSiteId) {
+          repointRequested = true;
+          // Resolve the target by id ALONE — do NOT filter by org here. A missing or
+          // cross-org target must fall through to updateBrand, whose anchor guard raises
+          // the existing `brand_site_org_mismatch` 409 (brands-storage.js, serenity-docs#346);
+          // filtering by org here would mask that as a generic 404 and regress the contract
+          // (test/it/shared/tests/brands.js). We only layer re-point eligibility + Semrush
+          // propagation onto a target that actually belongs to THIS org.
+          const { data: targetSite, error: targetErr } = await postgrestClient
+            .from('sites')
+            .select('id, base_url, organization_id')
+            .eq('id', updates.baseSiteId)
+            .maybeSingle();
+          if (targetErr) {
+            throw new Error(`Failed to resolve target site: ${targetErr.message}`);
+          }
+
+          if (targetSite && targetSite.organization_id === spaceCatId) {
+            // Eligibility (matches the frontend picker's filter, backend is authority):
+            // the target may not already be the primary site of ANOTHER active brand.
+            // Pending brands don't block; the brand's own current site is the no-op above.
+            const owningBrand = await getBrandBySite(
+              spaceCatId,
+              updates.baseSiteId,
+              postgrestClient,
+              log,
+            );
+            if (owningBrand && owningBrand.id !== brandUuid) {
+              return createResponse({ code: 'siteUrlTaken' }, 409);
+            }
+
+            // Active + Semrush sub-workspace brand: the tracked projects follow the new
+            // site's URL. Read the mapping rows against the OLD site, propagate to Semrush
+            // FIRST (propagate-before-persist), then re-link the rows to the new site.
+            if (current.status === 'active' && hasText(current.semrushSubWorkspaceId)) {
+              const rows = await projectsForSite(context.dataAccess, brandUuid, oldSiteId);
+              try {
+                await propagateSiteUrlToSemrush({
+                  dataAccess: context.dataAccess,
+                  transport: createSerenityTransport({
+                    env: context.env,
+                    imsToken: await resolveSemrushImsToken(context, log, 'brands'),
+                  }),
+                  workspaceId: current.semrushSubWorkspaceId,
+                  brandId: brandUuid,
+                  siteId: oldSiteId,
+                  brandIdentity: { name: current.name, aliases: current.brandAliases },
+                  newBaseURL: targetSite.base_url,
+                  log,
+                  rows,
+                });
+              } catch (propagationError) {
+                const err = /** @type {{status?: number, message?: string, code?: string}} */ (
+                  unwrapTransportCause(propagationError)
+                );
+                log.error('updateBrand: Semrush URL propagation failed on primary-site re-point', {
+                  brandId,
+                  oldSiteId,
+                  newSiteId: updates.baseSiteId,
+                  status: err?.status,
+                  error: err?.message,
+                });
+                if (isSemrushTransportError(err)) {
+                  // Never echo an upstream message (embeds the gateway host + workspace/
+                  // project UUIDs) — mirrors the sites.js #349 error hygiene.
+                  return createResponse({ message: 'Failed to update the tracked URL in Semrush' }, 502);
+                }
+                const status = err?.status || 500;
+                // toQuotaExceededError() sets status=409, code='quotaExceeded' — passes through.
+                return createResponse({
+                  message: status === 500 ? 'Failed to update the tracked URL in Semrush' : err.message,
+                  ...(err?.code ? { code: err.code } : {}),
+                }, status);
+              }
+              // Semrush is now ahead of SpaceCat — safe to move the SpaceCat-side links.
+              await relinkSiteForRows(context.dataAccess, rows, updates.baseSiteId, log);
+            }
+          }
+        }
+      }
+
       const updatedRow = await updateBrand({
         organizationId: spaceCatId,
         brandId: brandUuid,
@@ -2141,6 +2324,34 @@ function BrandsController(ctx, log, env) {
       if (!updatedRow) {
         return notFound(`Brand not found: ${brandId}`);
       }
+
+      // serenity-docs#349 hardening: a re-point that was actually eligible (passed
+      // the siteUrlTaken/Semrush gates above and reached updateBrand) must land.
+      // Live e2e testing surfaced a silent-no-op shape where updateBrand/its
+      // final re-read reported success (200, no thrown error) yet the returned
+      // row still carried the OLD baseSiteId — most consistent with a stale read
+      // on the post-write re-fetch rather than anything in this repo's write-path
+      // logic (which this handler's own unit + IT coverage exercises directly and
+      // finds correct, including when the target is already one of the brand's
+      // OWN secondary siteIds). Rather than let that stale read silently masquerade
+      // as a successful re-point, treat the mismatch as a hard failure: log full
+      // context for on-call and surface a typed 500 the caller can retry, instead
+      // of a 200 that lies about what was persisted.
+      if (repointRequested && updatedRow.baseSiteId !== updates.baseSiteId) {
+        log.error('brands: re-point did not persist — updateBrand returned a row still '
+          + 'carrying the old baseSiteId (possible stale read on the post-write re-fetch)', {
+          brandId,
+          organizationId: spaceCatId,
+          oldSiteId: repointOldSiteId,
+          requestedSiteId: updates.baseSiteId,
+          returnedSiteId: updatedRow.baseSiteId,
+        });
+        return createResponse({
+          message: 'The primary site could not be verified as updated. Please retry.',
+          code: 'brand_repoint_not_persisted',
+        }, 500);
+      }
+
       const updated = withSerenityState(updatedRow, serenityScopes);
 
       if (beforeForWipeCheck) {
@@ -2218,7 +2429,7 @@ function BrandsController(ctx, log, env) {
             );
           }
           if (competitorsTouched) {
-            const removed = removedCompetitorDomains(oldCompetitors, updated.competitors);
+            const removed = removedCompetitors(oldCompetitors, updated.competitors);
             const competitorResult = await syncCompetitorBenchmarksAcrossMarkets(
               transport,
               updated.competitors,
@@ -2307,7 +2518,7 @@ function BrandsController(ctx, log, env) {
         emitBrandStaleWriteRejected(context, 'updateBrand');
       }
       log.error(`Error updating brand ${brandId} for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -2355,7 +2566,7 @@ function BrandsController(ctx, log, env) {
       return noContent();
     } catch (error) {
       log.error(`Error deleting brand ${brandId} for organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -2709,7 +2920,7 @@ function BrandsController(ctx, log, env) {
       } catch (alertError) {
         log.error(`Failed to post activation-failure alert for brand ${brandId}:`, alertError);
       }
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 
@@ -2773,7 +2984,7 @@ function BrandsController(ctx, log, env) {
       return ok(withSerenityState(updated, serenityScopes));
     } catch (error) {
       log.error(`Error transitioning status for brand ${brandId} in organization ${spaceCatId}:`, error);
-      return createErrorResponse(error);
+      return createErrorResponse(error, reqCtxOf(context));
     }
   };
 

@@ -999,6 +999,12 @@ SiteUpdate:
     name:
       description: The name of the site
       type: string
+    baseURL:
+      description: >-
+        The base URL of the site. Changing the URL of a site attached to a
+        Semrush-managed brand's own primary site propagates the change to
+        Semrush; a market-mirror site stays immutable — see PATCH /sites/{siteId}.
+      $ref: '#/URL'
     deliveryType:
       description: The type of the delivery this site is using
       $ref: '#/DeliveryType'
@@ -3932,14 +3938,6 @@ Brand:
       description: Read-only. The base URL of the primary site, resolved from baseSiteId.
       type: string
       readOnly: true
-    semrushWorkspaceId:
-      description: >-
-        Read-only. DEPRECATED — kept for backward compatibility only, mirrored
-        from semrushSubWorkspaceId (below). Prefer semrushSubWorkspaceId; this
-        field will be removed once every direct consumer has migrated.
-      type: [string, 'null']
-      readOnly: true
-      deprecated: true
     semrushSubWorkspaceId:
       description: >-
         Read-only. The brand's own Semrush sub-workspace id (dual-mode) — the
@@ -3971,13 +3969,13 @@ Brand:
       readOnly: true
     pendingSemrushProvisioning:
       description: >-
-        Read-only. Deferred Semrush provisioning data for a pending (draft)
-        brand: the primary URL + initial market chosen at "Save as pending"
-        before the brand's sub-workspace + project exist. Fed into activation;
-        each market that provisions is removed and the field is nulled once none
-        remain (failed markets stay for retry). Null for a non-pending brand (or
-        a draft with no provisioning data yet). primaryUrl may be null (saved as
-        pending before a URL was entered).
+        Read-only. DEPRECATED (SITES-49448): the deferred Semrush provisioning
+        staging blob for a pending (draft) brand — the primary URL + initial
+        market chosen at "Save as pending" before the brand's sub-workspace +
+        project existed. No longer read or written by activation (a pending
+        brand's primary URL is now a Site selection written to baseSiteId at
+        create time); this is a historical remnant of a legacy draft, or null.
+        The column is slated for removal once existing legacy drafts drain.
       type: [object, 'null']
       readOnly: true
       properties:
@@ -7769,9 +7767,18 @@ V2SemrushRejectedAlias:
       type: string
       description: ISO-3166 country code of that market.
       example: 'us'
+    name:
+      type: [string, 'null']
+      description: >-
+        Name of the benchmark the aliases were attached to (null when absent).
+        This is what identifies the benchmark: a project can hold several
+        benchmarks on one domain, told apart by their name.
+      example: 'Phoenix Suns'
     domain:
       type: [string, 'null']
-      description: Benchmark domain the aliases were attached to (null when absent).
+      description: >-
+        Domain of that benchmark (null when absent). Not an identifier on its
+        own - use `name` to tell sibling benchmarks on one domain apart.
       example: 'www.example.com'
     aliases:
       type: array
@@ -7783,17 +7790,15 @@ V2SemrushRejectedAlias:
 V2PendingSemrushProvisioning:
   type: [object, 'null']
   description: >-
-    Deferred Semrush provisioning data for a pending (draft) brand: the primary
-    URL + initial markets (each with its chosen AI models/LLMs) collected at
-    "Save as pending" before the brand's sub-workspace + project exist, plus
-    whether activation should generate topics/prompts. Activation provisions each
-    market and removes it from the blob, nulling the field once none remain
-    (failed markets stay for retry). markets may be empty: with a primaryUrl a
-    single US/EN fallback project is provisioned; with neither a primaryUrl nor a
-    market a sub-workspace-only brand is provisioned. On a brand response this is
-    read-only and null for a non-pending brand. On a PATCH it is honored only
-    while the brand is (and stays) pending — the draft Markets tab appends a
-    market / edits a market's LLMs — and ignored otherwise.
+    DEPRECATED (SITES-49448): the deferred Semrush provisioning staging blob
+    (primary URL + initial markets collected at "Save as pending" before a
+    sub-workspace/project existed). The brand and market management model
+    replaced everything it staged — a pending brand's primary URL is now a Site
+    selection written to baseSiteId at create time, and activation no longer
+    reads or writes this field. Read-only on a brand response (a historical
+    remnant of a legacy draft, or null); always ignored on a PATCH regardless of
+    the brand's status. The column is slated for removal once existing legacy
+    drafts drain.
   properties:
     primaryUrl:
       type: [string, 'null']
@@ -8117,9 +8122,8 @@ V2BrandUpdateInput:
       allOf:
         - $ref: '#/V2PendingSemrushProvisioning'
       description: >-
-        Deferred Semrush provisioning data. Honored only while the brand is (and
-        stays) pending — the draft Markets tab appends a market / edits a
-        market's LLMs; silently ignored on a non-pending brand.
+        DEPRECATED (SITES-49448): always ignored on a PATCH, regardless of the
+        brand's status — no supplied value is ever persisted.
     expectedUpdatedAt:
       type: string
       format: date-time
@@ -11891,9 +11895,8 @@ SerenityPrompt:
         different dimensions (a sub-category `human` and the `source` value
         `human`). Read a tag's dimension from `path[0].name`, never from its
         own name — bearing in mind that `path[0].name` is the root's UPSTREAM
-        name, which for the intent dimension is `$abv_tags$intent`, or the
-        pre-rename `intent` on a project the rename has not reached. Match both
-        spellings when keying on that dimension.
+        name, which for the intent dimension is `$abv_tags$intent` and for the
+        other four is the dimension key itself.
     tagIds:
       type: array
       items: { type: string }
@@ -11943,8 +11946,7 @@ SerenityPromptTag:
     normalizes that absence to `null`, so a tag whose `path` is `null` is a
     dimension root and its own `name` names its dimension upstream. Names are
     passed through exactly as upstream holds them, so the intent root reads
-    `$abv_tags$intent` — or the pre-rename `intent` on a project the rename has
-    not reached. The dimension is `intent` either way.
+    `$abv_tags$intent`. The dimension is `intent`.
   required: [id, name]
   properties:
     id:
@@ -12063,6 +12065,53 @@ SerenityCreatePromptsResponse:
         were written as drafts and the caller must publish separately
         (serenity-docs#32).
 
+SerenityPromptsJobAccepted:
+  type: object
+  description: |
+    202 body for a CSV-import create (`deferPublish: true`). The write runs
+    asynchronously on the job runner; poll `jobId` at
+    `GET .../serenity/prompts/jobs/{jobId}`.
+  required: [jobId, status]
+  properties:
+    jobId:
+      type: string
+      format: uuid
+    status:
+      type: string
+      description: The job's initial state (IN_PROGRESS at enqueue time).
+      enum: [IN_PROGRESS, COMPLETED, FAILED]
+
+SerenityPromptsJobStatus:
+  type: object
+  description: |
+    Poll response for an async `serenity-classify-prompts` job. Secret-free by
+    design — the job's internal metadata (promise token etc.) is never exposed.
+  required: [jobId, status]
+  properties:
+    jobId:
+      type: string
+      format: uuid
+    status:
+      type: string
+      enum: [IN_PROGRESS, COMPLETED, FAILED]
+    result:
+      description: >
+        The job result once COMPLETED (the same envelope the synchronous create
+        returns: created/skipped/failed/published, plus
+        pendingClassificationCount/requeuedJobId). Null while IN_PROGRESS or on
+        FAILED.
+      oneOf:
+        - { $ref: '#/SerenityCreatePromptsResponse' }
+        - { type: 'null' }
+    error:
+      description: The failure envelope once FAILED; null otherwise.
+      oneOf:
+        - type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+        - { type: 'null' }
+
 SerenityUpdatePromptRequest:
   type: object
   description: |
@@ -12167,10 +12216,22 @@ SerenityMarket:
       description: Upstream Semrush AIO project id for this slice (sub-workspace mode only).
     domain:
       description: |
-        The market's own domain (its primary URL host, e.g. "example.com").
-        Each market has its own primary URL/domain — the brand itself has none.
-        Additive, sub-workspace mode only. Surfaced so the market overview can
-        display it. Null when the upstream project carries no domain.
+        The registrable domain the market's upstream project is filed under
+        (e.g. "example.com"). Each market has its own domain — the brand itself
+        has none. It cannot carry a path, so for a market whose site is a
+        subdomain or a subpath it names the parent rather than the tracked site;
+        read `primaryUrl` for that. Additive, sub-workspace mode only. Null when
+        the upstream project carries no domain.
+      oneOf:
+        - type: string
+        - type: 'null'
+    primaryUrl:
+      description: |
+        The url the market's upstream project actually analyses (Semrush
+        `settings.ai.primary_url`) — host plus path, scheme-less, e.g.
+        "nba.com/lakers". This is the value the market overview displays, since
+        it is the only one that distinguishes markets sharing a domain. Additive,
+        sub-workspace mode only. Null when the upstream project carries none.
       oneOf:
         - type: string
         - type: 'null'
@@ -12246,10 +12307,10 @@ SerenityActivateRequest:
 
     A PENDING (draft) brand activates SUB-WORKSPACE-ONLY: it ensures the brand's
     own Semrush sub-workspace and flips the brand active, with NO project. The
-    wizard's approve sends an EMPTY body `{}`; any `markets`/`brandDomain` (or the
-    legacy `pending_semrush_provisioning` stash) are IGNORED for provisioning. The
-    brand is anchored by its primary site (`brands.site_id`, set at create), and
-    markets are added afterwards from the Markets tab.
+    wizard's approve sends an EMPTY body `{}`; any `markets`/`brandDomain` are
+    IGNORED for provisioning. The brand is anchored by its primary site
+    (`brands.site_id`, set at create), and markets are added afterwards from the
+    Markets tab.
 
     An ALREADY-ACTIVE brand (reactivation / onboarding API) provisions the markets
     supplied in the body: per market it creates-or-resumes a draft project and
@@ -12426,6 +12487,13 @@ SerenityCreateMarketRequest:
       minItems: 1
       items: { type: string }
       description: Brand-name variants the upstream should match in model answers.
+    primaryUrl:
+      type: [string, 'null']
+      description: |
+        Full tracked URL identity for the brand (may include subdomain/subpath,
+        e.g. www.nba.com/kings). Written to Semrush `settings.ai.primary_url` via
+        a best-effort PATCH before publish (serenity-docs#348). Optional — falls
+        back to `brandDomain` (host-only) when omitted.
 
 SerenityTag:
   type: object
@@ -12626,6 +12694,163 @@ SerenityBrandPresenceSentimentOverview:
             type: array
             description: Stubbed empty (parity with the legacy contract).
             items: { type: object }
+
+SerenityBrandPresenceSubredditRow:
+  type: object
+  description: Per-subreddit Reddit stats for one (subreddit, project).
+  required: [subreddit, subredditKey, mentions, prompts, responsesWithCitations, threads, visibility]
+  properties:
+    subreddit:
+      type: string
+      description: Subreddit display name (with the `r/` prefix).
+      example: 'r/Lovesac'
+    subredditKey:
+      type: string
+      description: Subreddit name without the `r/` prefix.
+      example: 'Lovesac'
+    link:
+      type: string
+      description: Subreddit link/handle as returned by the element.
+      example: 'r/Lovesac'
+    mentions:
+      type: integer
+      example: 4407
+    prompts:
+      type: integer
+      description: Number of prompts whose responses cited this subreddit.
+      example: 430
+    responsesWithCitations:
+      type: integer
+      example: 2603
+    threads:
+      type: integer
+      example: 1879
+    visibility:
+      type: number
+      format: float
+      description: Within-window visibility share for the subreddit (0..1).
+      example: 0.7477736282677392
+    projectId:
+      type: string
+      format: uuid
+      description: Semrush project the row belongs to.
+      example: 'cb4f6443-e01f-4075-a586-85511f136e31'
+
+SerenityBrandPresenceSubreddits:
+  type: object
+  description: |
+    Per-subreddit Reddit stats from the Semrush "Subreddits" element (faf56e29),
+    sorted by `mentions` descending (tie-broken by `subredditKey`) and paginated.
+    `totalCount` is the full pre-pagination row count. In workspace-wide mode (no
+    `projectId`) the same subreddit can appear once per project.
+  required: [subreddits, totalCount]
+  properties:
+    subreddits:
+      type: array
+      items:
+        $ref: '#/SerenityBrandPresenceSubredditRow'
+    totalCount:
+      type: integer
+      example: 107
+
+SerenityBrandPresenceRedditThreadRow:
+  type: object
+  description: A single Reddit thread ranked by response count.
+  required: [link, mentions, prompts, responses, subreddit, thread]
+  properties:
+    link:
+      type: string
+      description: Thread URL.
+      example: 'https://www.reddit.com/r/BuyItForLife/comments/1kqgvja/lovesac_sactional_is_it_worth_it'
+    mentions:
+      type: integer
+      example: 75
+    prompts:
+      type: integer
+      description: Number of prompts whose responses cited this thread.
+      example: 28
+    responses:
+      type: integer
+      description: Number of AI responses citing this thread. Endpoint's ranking metric ("citation count").
+      example: 62
+    subreddit:
+      type: string
+      description: Subreddit the thread belongs to (with the `r/` prefix).
+      example: 'r/BuyItForLife'
+    thread:
+      type: string
+      description: Thread title, as returned by the element.
+      example: 'LoveSac Sactional, is it worth it? : r/BuyItForLife - Reddit'
+    urlCbf:
+      type: string
+      description: Opaque Semrush custom-field-value key for the thread URL.
+      example: '59bfcb03-11df-44ff-867a-ac2b30c49578:eq:https_C0L_//www.reddit.com/r/BuyItForLife/comments/1kqgvja/lovesac_sactional_is_it_worth_it'
+
+SerenityBrandPresenceRedditThreads:
+  type: object
+  description: |
+    Top Reddit threads from the Semrush "Reddit Threads" element (5af96fd9), sorted by
+    `responses` descending (tie-broken by `urlCbf`) and paginated. `totalCount` is the
+    full pre-pagination row count.
+  required: [threads, totalCount]
+  properties:
+    threads:
+      type: array
+      items:
+        $ref: '#/SerenityBrandPresenceRedditThreadRow'
+    totalCount:
+      type: integer
+      example: 42
+
+SerenityBrandPresenceYoutubeVideoRow:
+  type: object
+  description: A single YouTube video ranked by citation count.
+  required: [channel, citations, link, prompts, video, views]
+  properties:
+    channel:
+      type: string
+      description: YouTube channel name. Empty string when the element has no channel data for this video.
+      example: 'Lovesac'
+    citations:
+      type: integer
+      description: Number of AI responses citing this video. Endpoint's ranking metric ("citation count").
+      example: 53
+    link:
+      type: string
+      description: Video URL.
+      example: 'https://www.youtube.com/watch?v=4ECf112-SSc'
+    prompts:
+      type: integer
+      description: Number of prompts whose responses cited this video.
+      example: 47
+    video:
+      type: string
+      description: Video title, as returned by the element.
+      example: 'Lovesac Product Guide - CitySac Overview'
+    views:
+      type: integer
+      description: View count, coerced to 0 when the element has no tracked view count for this video.
+      example: 106100
+    urlCbf:
+      type: string
+      description: Opaque Semrush custom-field-value key for the video URL.
+      example: '59bfcb03-11df-44ff-867a-ac2b30c49578:eq:https_C0L_//www.youtube.com/watch?v=4ECf112-SSc'
+
+SerenityBrandPresenceYoutubeVideos:
+  type: object
+  description: |
+    Top YouTube videos from the Semrush "YouTube Videos" element (05e624db), sorted by
+    `citations` descending (tie-broken by `urlCbf`) and paginated. `totalCount` is the
+    full pre-pagination row count.
+  required: [videos, totalCount]
+  properties:
+    videos:
+      type: array
+      items:
+        $ref: '#/SerenityBrandPresenceYoutubeVideoRow'
+    totalCount:
+      type: integer
+      example: 42
 
 SerenityBrandPresenceTopics:
   type: object
@@ -12833,10 +13058,8 @@ SerenityUrlInspectorFilterDimensions:
     page_intents:
       type: array
       description: >-
-        Distinct intent-prefixed tags. The prefix is the intent root's name on that
-        project — `$abv_tags$intent__`, or `intent__` on a project the rename has not
-        reached yet — and `id` is the original tag value, carrying whichever prefix
-        that project uses.
+        Distinct `$abv_tags$intent__`-prefixed tags. The prefix is the intent root's
+        upstream name, and `id` is the original tag value carrying that prefix.
       items: { $ref: '#/SerenityFilterDimensionItem' }
     origins:
       type: array
@@ -14058,22 +14281,28 @@ TicketCreateRequest:
       items:
         $ref: '#/TicketAttachment'
       maxItems: 10
-OnboardingNotificationResponse:
+OnboardingProvisioningResponse:
   type: object
   required:
-    - notified
+    - provisioned
     - workspaceId
+    - role
   properties:
-    notified:
+    provisioned:
       type: boolean
       example: true
     workspaceId:
-      type: [string, 'null']
-      description: The org-level Semrush workspace ID, or null if the org has none.
-      example: "ws-123"
-    reason:
       type: string
+      description: The Semrush workspace ID the caller was granted admin access to.
+      example: "ws-123"
+    role:
+      type: string
+      description: The role granted to the caller in the Semrush workspace.
+      example: "admin"
+    alreadyMember:
+      type: boolean
       description: >-
-        Present only when notified is false. Explains why no notification was
-        sent (e.g. a duplicate request arrived within the per-org cooldown window).
-      example: "recently notified"
+        Present and true when the caller was already a member of the
+        workspace (or its parent) before this call — Semrush's 409 response,
+        which is treated as success rather than an error.
+      example: true

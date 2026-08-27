@@ -33,6 +33,7 @@ import AccessControlUtil from '../support/access-control-util.js';
 import {
   grantSuggestionsForOpportunity,
   revokeExistingGrants,
+  revokeGrantsForOpportunity,
 } from '../support/grant-suggestions-handler.js';
 import { getIsSummitPlgEnabled } from '../support/utils.js';
 
@@ -69,7 +70,7 @@ function OpportunitiesController(ctx) {
    * @returns {Promise<Array>} Filtered (or unfiltered) opportunities
    */
   async function filterForSummitPlg(site, opportunities, requestContext) {
-    if (await getIsSummitPlgEnabled(site, ctx, requestContext)) {
+    if (await getIsSummitPlgEnabled(site, ctx, requestContext, accessControlUtil)) {
       return opportunities.filter(
         (oppty) => SUMMIT_PLG_ALLOWED_TYPES.includes(oppty.getType()),
       );
@@ -205,7 +206,7 @@ function OpportunitiesController(ctx) {
     if (!oppty || oppty.getSiteId() !== siteId) {
       return notFound('Opportunity not found');
     }
-    if (await getIsSummitPlgEnabled(site, ctx, context)) {
+    if (await getIsSummitPlgEnabled(site, ctx, context, accessControlUtil)) {
       try {
         await grantSuggestionsForOpportunity(dataAccess, site, oppty);
       /* c8 ignore next 3 */
@@ -375,6 +376,12 @@ function OpportunitiesController(ctx) {
     const opportunity = await Opportunity.findById(opportunityId);
     if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound('Opportunity not found');
+    }
+
+    try {
+      await revokeGrantsForOpportunity(dataAccess, opportunity);
+    } catch (revokeError) {
+      ctx.log?.warn?.(`Failed to revoke grants for opportunity ${opportunityId} on site ${siteId}`, revokeError?.message ?? revokeError);
     }
 
     try {

@@ -25,6 +25,7 @@ import { TOPICS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/topic/enums_p
 import {
   parseLimitOffset,
   resolveCountry,
+  resolveSearchType,
   engineToLlm,
   brandTarget,
   parseCompetitorDomainsList,
@@ -69,6 +70,7 @@ export function buildGapTopicsMetricFilterQl(sp) {
 
 export async function handleGapTopics(sp, clients) {
   const domain = sp.get('domain');
+  const searchType = resolveSearchType(domain);
   const competitorDomains = parseCompetitorDomainsList(sp);
   const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const country = resolveCountry(sp) || COUNTRY_ENUM.WORLDWIDE;
@@ -103,6 +105,7 @@ export async function handleGapTopics(sp, clients) {
         range: { limit, offset },
         dimension_filter_ql: dimensionFilterQl,
         metric_filter_ql: metricFilterResult.metricFilterQl,
+        search_type: searchType,
         ...(targetDate ? { target_date: targetDate } : {}),
       },
       PROTO_FROM_JSON,

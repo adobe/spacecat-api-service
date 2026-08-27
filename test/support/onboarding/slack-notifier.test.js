@@ -19,15 +19,15 @@ use(chaiAsPromised);
 
 const WEBHOOK_URL = 'https://hooks.slack.test/services/T000/B000/xxxx';
 
-describe('notifyOnboarding', () => {
+describe('notifyProvisioningFailure', () => {
   let sandbox;
   let fetchStub;
-  let notifyOnboarding;
+  let notifyProvisioningFailure;
 
   beforeEach(async () => {
     sandbox = sinon.createSandbox();
     fetchStub = sandbox.stub();
-    ({ notifyOnboarding } = await esmock('../../../src/support/onboarding/slack-notifier.js', {
+    ({ notifyProvisioningFailure } = await esmock('../../../src/support/onboarding/slack-notifier.js', {
       '@adobe/spacecat-shared-utils': { tracingFetch: fetchStub },
     }));
   });
@@ -43,7 +43,7 @@ describe('notifyOnboarding', () => {
   it('POSTs a JSON message to the configured webhook URL and resolves on 2xx', async () => {
     fetchStub.resolves({ ok: true, status: 200, text: async () => 'ok' });
 
-    await expect(notifyOnboarding({ SLACK_ONBOARDING_WEBHOOK_URL: WEBHOOK_URL }, payload))
+    await expect(notifyProvisioningFailure({ SLACK_ONBOARDING_WEBHOOK_URL: WEBHOOK_URL }, payload))
       .to.be.fulfilled;
 
     expect(fetchStub.calledOnce).to.equal(true);
@@ -56,10 +56,22 @@ describe('notifyOnboarding', () => {
     expect(body.text).to.contain('ws-123');
   });
 
+  it('includes the reason when provided', async () => {
+    fetchStub.resolves({ ok: true, status: 200, text: async () => 'ok' });
+
+    await notifyProvisioningFailure(
+      { SLACK_ONBOARDING_WEBHOOK_URL: WEBHOOK_URL },
+      { ...payload, reason: 'status 409: workspace-members request failed with status 409' },
+    );
+
+    const body = JSON.parse(fetchStub.firstCall.args[1].body);
+    expect(body.text).to.contain('status 409');
+  });
+
   it('includes the org id and marks workspace unavailable when workspaceId is null', async () => {
     fetchStub.resolves({ ok: true, status: 200, text: async () => 'ok' });
 
-    await notifyOnboarding(
+    await notifyProvisioningFailure(
       { SLACK_ONBOARDING_WEBHOOK_URL: WEBHOOK_URL },
       { ...payload, workspaceId: null },
     );
@@ -70,7 +82,7 @@ describe('notifyOnboarding', () => {
   });
 
   it('throws a 500 error when the webhook URL is not configured', async () => {
-    await expect(notifyOnboarding({}, payload))
+    await expect(notifyProvisioningFailure({}, payload))
       .to.be.rejectedWith(/not configured/i)
       .and.eventually.have.property('status', 500);
     expect(fetchStub.called).to.equal(false);
@@ -79,7 +91,7 @@ describe('notifyOnboarding', () => {
   it('throws a 502 error when the webhook responds non-2xx', async () => {
     fetchStub.resolves({ ok: false, status: 500, text: async () => 'boom' });
 
-    await expect(notifyOnboarding({ SLACK_ONBOARDING_WEBHOOK_URL: WEBHOOK_URL }, payload))
+    await expect(notifyProvisioningFailure({ SLACK_ONBOARDING_WEBHOOK_URL: WEBHOOK_URL }, payload))
       .to.be.rejected
       .and.eventually.have.property('status', 502);
   });
@@ -87,7 +99,7 @@ describe('notifyOnboarding', () => {
   it('throws a 502 error when the webhook call rejects (network failure)', async () => {
     fetchStub.rejects(new Error('ECONNREFUSED'));
 
-    await expect(notifyOnboarding({ SLACK_ONBOARDING_WEBHOOK_URL: WEBHOOK_URL }, payload))
+    await expect(notifyProvisioningFailure({ SLACK_ONBOARDING_WEBHOOK_URL: WEBHOOK_URL }, payload))
       .to.be.rejected
       .and.eventually.have.property('status', 502);
   });
@@ -97,7 +109,7 @@ describe('notifyOnboarding', () => {
 
     let thrown;
     try {
-      await notifyOnboarding({ SLACK_ONBOARDING_WEBHOOK_URL: WEBHOOK_URL }, payload);
+      await notifyProvisioningFailure({ SLACK_ONBOARDING_WEBHOOK_URL: WEBHOOK_URL }, payload);
     } catch (e) {
       thrown = e;
     }

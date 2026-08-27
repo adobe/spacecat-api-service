@@ -28,6 +28,7 @@ import { resolveBrandWorkspace } from '../support/serenity/workspace-resolver.js
 import { isSerenityActiveForBrand } from '../support/serenity/serenity-active.js';
 import { createSerenityTransport } from '../support/serenity/rest-transport.js';
 import { SerenityTransportError } from '../support/serenity/serenity-transport-error.js';
+import { logUpstreamError } from '../support/serenity/upstream-log.js';
 import { cachedOk } from '../support/cached-response.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { ErrorWithStatusCode, resolveSemrushImsToken } from '../support/utils.js';
@@ -111,14 +112,27 @@ function errorTokenForStatus(status) {
   }
 }
 
-function mapError(e, log) {
+/**
+ * Request-context ids for the structured upstream-error log line
+ * (SITES-49993). The workspace/element ids of the failed call ride on the
+ * transport error itself (attached in elements-transport.js); this adds the
+ * tenant ids only the route knows.
+ */
+function reqCtxOf(ctx) {
+  return {
+    spaceCatId: ctx?.params?.spaceCatId,
+    brandId: ctx?.params?.brandId,
+  };
+}
+
+function mapError(e, log, reqCtx = {}) {
   if (e instanceof ErrorWithStatusCode) {
     const status = Number.isInteger(e.status) ? e.status : 400;
     const errorToken = hasText(e.code) ? e.code : errorTokenForStatus(status);
     return createResponse({ error: errorToken, message: safeError(e.message) }, status);
   }
   if (e instanceof ElementsTransportError) {
-    log.error('Elements upstream error', e);
+    logUpstreamError(log, 'Elements upstream error', e, reqCtx);
     if (e.status === 401 || e.status === 403) {
       return createResponse(
         { error: errorTokenForStatus(e.status), message: 'Upstream authorization failed' },
@@ -131,10 +145,12 @@ function mapError(e, log) {
     // Only reachable from checkAccess: the User Manager resource-allowance probe. A 401/403 is
     // intercepted there and turned into `{ hasAccess: false }`, so anything reaching here is a
     // genuine upstream failure (5xx / 504 timeout) — surfaced as a 502, never as a false denial.
-    log.error('Serenity upstream error', e);
+    logUpstreamError(log, 'Serenity upstream error', e, reqCtx);
     return createResponse({ error: 'serenityUpstreamError', message: 'Upstream request failed' }, 502);
   }
-  log.error('Elements controller error', e);
+  // Not an upstream error: keep the Error as the second argument — the stack
+  // is the useful part here — and carry the tenant ids in the message.
+  log.error(`Elements controller error ${JSON.stringify(reqCtx)}`, e);
   return createResponse({ error: 'internalServerError', message: 'Internal server error' }, 500);
 }
 
@@ -624,7 +640,7 @@ export default function ElementsController(context, log, env) {
       );
       return ok(result);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
 
@@ -662,7 +678,7 @@ export default function ElementsController(context, log, env) {
       const result = await service.getWeeks(auth.workspaceId, query);
       return ok(result);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
 
@@ -713,7 +729,7 @@ export default function ElementsController(context, log, env) {
         throw e;
       }
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
 
@@ -749,7 +765,7 @@ export default function ElementsController(context, log, env) {
       });
       return ok(result);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
 
@@ -819,7 +835,205 @@ export default function ElementsController(context, log, env) {
       const result = await service.getCitedDomains(workspaceId, params);
       return ok(result);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
+    }
+  };
+  /* c8 ignore stop */
+
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/subreddits
+   * Returns per-subreddit Reddit stats (mentions, prompts, threads, visibility,
+   * responses-with-citations) from the Subreddits element (faf56e29). Single upstream
+   * call (the element aggregates workspace-wide; a supplied projectId scopes to one project).
+   */
+  /* c8 ignore start -- SITES-POC subreddits endpoint; unit tests intentionally deferred */
+  const listSubreddits = async (ctx) => {
+    try {
+      const auth = await authorizeOrg(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { workspaceId, brand } = auth;
+      const query = extractQuery(ctx);
+
+      // Date range is required + validated (mirrors cited-domains/sentiment-overview) —
+      // never silently default to a rolling window nor forward a malformed date to Semrush.
+      const startDate = query.startDate || query.start_date;
+      const endDate = query.endDate || query.end_date;
+      if (!hasText(startDate) || !hasText(endDate)) {
+        return badRequest('startDate and endDate are required (YYYY-MM-DD)');
+      }
+      if (!isYmdDate(startDate) || !isYmdDate(endDate)) {
+        return badRequest('startDate and endDate must be valid YYYY-MM-DD dates');
+      }
+      if (startDate > endDate) {
+        return badRequest('startDate must not be after endDate');
+      }
+      const MAX_RANGE_DAYS = 366;
+      const spanDays = (Date.parse(`${endDate}T00:00:00Z`)
+        - Date.parse(`${startDate}T00:00:00Z`)) / 86400000;
+      if (spanDays > MAX_RANGE_DAYS) {
+        return badRequest(`Date range must not exceed ${MAX_RANGE_DAYS} days`);
+      }
+
+      const service = await buildService(ctx);
+
+      // Project scoping: caller-supplied projectId(s) (CSV) scope to a single Semrush
+      // project (the service uses the first); absent → the element aggregates across all of
+      // the brand's markets. Any supplied id must belong to this brand.
+      const projectIds = extractProjectIds(query);
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
+      const ownershipError = checkProjectIdsOwnership(projectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
+
+      const params = {
+        projectIds,
+        model: query.model || query.platform,
+        startDate,
+        endDate,
+        page: query.page,
+        pageSize: query.pageSize,
+      };
+
+      const result = await service.getSubreddits(workspaceId, params);
+      return ok(result);
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx));
+    }
+  };
+  /* c8 ignore stop */
+
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/reddit-threads
+   * Returns top Reddit threads by response count (mentions, prompts, responses) from
+   * the Reddit Threads element (5af96fd9). Single upstream call (the element aggregates
+   * workspace-wide; a supplied projectId scopes to one project).
+   */
+  /* c8 ignore start -- SITES-POC reddit-threads endpoint; unit tests intentionally deferred */
+  const listRedditThreads = async (ctx) => {
+    try {
+      const auth = await authorizeOrg(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { workspaceId, brand } = auth;
+      const query = extractQuery(ctx);
+
+      // Date range is required + validated (mirrors subreddits/cited-domains) —
+      // never silently default to a rolling window nor forward a malformed date to Semrush.
+      const startDate = query.startDate || query.start_date;
+      const endDate = query.endDate || query.end_date;
+      if (!hasText(startDate) || !hasText(endDate)) {
+        return badRequest('startDate and endDate are required (YYYY-MM-DD)');
+      }
+      if (!isYmdDate(startDate) || !isYmdDate(endDate)) {
+        return badRequest('startDate and endDate must be valid YYYY-MM-DD dates');
+      }
+      if (startDate > endDate) {
+        return badRequest('startDate must not be after endDate');
+      }
+      const MAX_RANGE_DAYS = 366;
+      const spanDays = (Date.parse(`${endDate}T00:00:00Z`)
+        - Date.parse(`${startDate}T00:00:00Z`)) / 86400000;
+      if (spanDays > MAX_RANGE_DAYS) {
+        return badRequest(`Date range must not exceed ${MAX_RANGE_DAYS} days`);
+      }
+
+      const service = await buildService(ctx);
+
+      // Project scoping: caller-supplied projectId(s) (CSV) scope to a single Semrush
+      // project (the service uses the first); absent → the element aggregates across all of
+      // the brand's markets. Any supplied id must belong to this brand.
+      const projectIds = extractProjectIds(query);
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
+      const ownershipError = checkProjectIdsOwnership(projectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
+
+      const params = {
+        projectIds,
+        model: query.model || query.platform,
+        startDate,
+        endDate,
+        page: query.page,
+        pageSize: query.pageSize,
+      };
+
+      const result = await service.getRedditThreads(workspaceId, params);
+      return ok(result);
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx));
+    }
+  };
+  /* c8 ignore stop */
+
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/youtube-videos
+   * Returns top YouTube videos by citation count (channel, citations, prompts, views) from
+   * the YouTube Videos element (05e624db). Single upstream call (the element aggregates
+   * workspace-wide; a supplied projectId scopes to one project).
+   */
+  /* c8 ignore start -- SITES-POC youtube-videos endpoint; unit tests intentionally deferred */
+  const listYoutubeVideos = async (ctx) => {
+    try {
+      const auth = await authorizeOrg(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { workspaceId, brand } = auth;
+      const query = extractQuery(ctx);
+
+      // Date range is required + validated (mirrors reddit-threads/subreddits) —
+      // never silently default to a rolling window nor forward a malformed date to Semrush.
+      const startDate = query.startDate || query.start_date;
+      const endDate = query.endDate || query.end_date;
+      if (!hasText(startDate) || !hasText(endDate)) {
+        return badRequest('startDate and endDate are required (YYYY-MM-DD)');
+      }
+      if (!isYmdDate(startDate) || !isYmdDate(endDate)) {
+        return badRequest('startDate and endDate must be valid YYYY-MM-DD dates');
+      }
+      if (startDate > endDate) {
+        return badRequest('startDate must not be after endDate');
+      }
+      const MAX_RANGE_DAYS = 366;
+      const spanDays = (Date.parse(`${endDate}T00:00:00Z`)
+        - Date.parse(`${startDate}T00:00:00Z`)) / 86400000;
+      if (spanDays > MAX_RANGE_DAYS) {
+        return badRequest(`Date range must not exceed ${MAX_RANGE_DAYS} days`);
+      }
+
+      const service = await buildService(ctx);
+
+      // Project scoping: caller-supplied projectId(s) (CSV) scope to a single Semrush
+      // project (the service uses the first); absent → the element aggregates across all of
+      // the brand's markets. Any supplied id must belong to this brand.
+      const projectIds = extractProjectIds(query);
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
+      const ownershipError = checkProjectIdsOwnership(projectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
+
+      const params = {
+        projectIds,
+        model: query.model || query.platform,
+        startDate,
+        endDate,
+        page: query.page,
+        pageSize: query.pageSize,
+      };
+
+      const result = await service.getYoutubeVideos(workspaceId, params);
+      return ok(result);
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
   /* c8 ignore stop */
@@ -887,7 +1101,7 @@ export default function ElementsController(context, log, env) {
       const result = await service.getSentimentOverview(workspaceId, params);
       return cachedOk(result);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
   /* c8 ignore stop */
@@ -954,7 +1168,7 @@ export default function ElementsController(context, log, env) {
 
       return cachedOk({ topics, totalCount: topics.length });
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
   /* c8 ignore stop */
@@ -1044,7 +1258,7 @@ export default function ElementsController(context, log, env) {
         topicId: topic, prompts, totalCount, page, pageSize,
       });
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
   /* c8 ignore stop */
@@ -1136,7 +1350,7 @@ export default function ElementsController(context, log, env) {
       // with no server-side pagination (the element returns the full list in one call).
       return cachedOk({ prompts });
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
   /* c8 ignore stop */
@@ -1250,7 +1464,7 @@ export default function ElementsController(context, log, env) {
 
       return cachedOk({ urls, totalCount });
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
   /* c8 ignore stop */
@@ -1336,7 +1550,7 @@ export default function ElementsController(context, log, env) {
 
       return cachedOk(result);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
 
@@ -1446,7 +1660,7 @@ export default function ElementsController(context, log, env) {
       });
       return cachedOk(result);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
   /* c8 ignore stop */
@@ -1545,7 +1759,7 @@ export default function ElementsController(context, log, env) {
 
       return cachedOk(result);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
 
@@ -1628,7 +1842,7 @@ export default function ElementsController(context, log, env) {
 
       return cachedOk(result);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
 
@@ -1681,7 +1895,7 @@ export default function ElementsController(context, log, env) {
 
       return cachedOk({ totalPrompts });
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
 
@@ -1771,7 +1985,7 @@ export default function ElementsController(context, log, env) {
       });
       return cachedOk(result);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
   /* c8 ignore stop */
@@ -1864,7 +2078,7 @@ export default function ElementsController(context, log, env) {
       });
       return cachedOk(result);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
   /* c8 ignore stop */
@@ -1954,7 +2168,7 @@ export default function ElementsController(context, log, env) {
       });
       return cachedOk(result);
     } catch (e) {
-      return mapError(e, log);
+      return mapError(e, log, reqCtxOf(ctx));
     }
   };
   /* c8 ignore stop */
@@ -1965,6 +2179,9 @@ export default function ElementsController(context, log, env) {
     checkAccess,
     listPrompts,
     listCitedDomains,
+    listSubreddits,
+    listRedditThreads,
+    listYoutubeVideos,
     listSentimentOverview,
     listTopics,
     listTopicPrompts,

@@ -24,6 +24,7 @@ import {
 import {
   num,
   brandTarget,
+  resolveSearchType,
   parseLimitOffset,
   resolveCountry,
   resolveCountryForCitedSources,
@@ -232,7 +233,9 @@ function mapSourceDomainRowToCitedSource(d) {
 
 export async function citedPagesOwnedCountFromStatsByLlmForMonth(country, target, monthYm, llmEnum, clients) {
   const dateRange = statsByLLMDateRange(monthYm.year, monthYm.month, 1);
-  const raw = await clients.brandClient.statsByLLM({ country, target, dateRange });
+  const raw = await clients.brandClient.statsByLLM({
+    country, target, searchType: resolveSearchType(target.domain), dateRange,
+  });
   const mapped = mapStatsByLLM(raw, dateRange);
   const cp = mapped.citedPages;
   if (!cp || typeof cp !== 'object') { return null; }
@@ -288,13 +291,14 @@ function dedupeRawBrandPromptsForOpportunities(prompts) {
 
 async function fetchBrandPromptsPagesForOpportunities(country, domain, llm, maxPages, orderBy, clients) {
   const target = brandTarget(domain);
+  const searchType = resolveSearchType(domain);
   const order = { by: orderBy };
   async function pullPage(page, acc) {
     if (page >= maxPages) {
       return acc;
     }
     const raw = await clients.promptClient.prompts({
-      country, llm, target, order, range: { limit: 100, offset: page * 100 },
+      country, llm, target, searchType, order, range: { limit: 100, offset: page * 100 },
     }).catch(() => ({ prompts: [] }));
     const chunk = raw.prompts || [];
     const next = [...acc, ...chunk];
@@ -331,9 +335,12 @@ export async function handleBrandStats(sp, clients) {
   const endM = endMonth ? endMonth.month : now.getUTCMonth() + 1;
   const windowMonths = Math.min(Math.max(Number(sp.get('windowMonths')) || 4, 1), 6);
   const dateRange = statsByLLMDateRange(endYear, endM, windowMonths);
+  const searchType = resolveSearchType(domain);
   const statsSettled = await Promise.allSettled([
-    clients.brandClient.statsByLLM({ country, target, dateRange }),
-    clients.brandClient.statsByCountry({ target, llm: LLM_ENUM.ALL }),
+    clients.brandClient.statsByLLM({
+      country, target, searchType, dateRange,
+    }),
+    clients.brandClient.statsByCountry({ target, searchType, llm: LLM_ENUM.ALL }),
   ]);
   if (statsSettled[0].status !== 'fulfilled') {
     throw statsSettled[0].reason;
@@ -357,11 +364,16 @@ export async function handleBrandTopics(sp, clients) {
   const country = resolveCountry(sp);
   const { limit, offset } = parseLimitOffset(sp);
   const llm = engineToLlm(sp.get('engine')?.trim() || '');
+  const searchType = resolveSearchType(domain);
   const body = {
-    country, target: brandTarget(domain), order: { by: BRAND_TOPICS_ORDER_BY_ENUM.VISIBILITY }, range: { limit, offset },
+    country,
+    target: brandTarget(domain),
+    searchType,
+    order: { by: BRAND_TOPICS_ORDER_BY_ENUM.VISIBILITY },
+    range: { limit, offset },
   };
   if (llm) { body.llm = llm; }
-  const totalsBody = { country, target: brandTarget(domain) };
+  const totalsBody = { country, target: brandTarget(domain), searchType };
   if (llm) { totalsBody.llm = llm; }
   const topicsSettled = await Promise.allSettled([
     clients.topicClient.brandTopics(body),
@@ -403,14 +415,17 @@ export async function handleBrandPrompts(sp, clients) {
   }
   const { dimensionFilterQl } = topicFilter;
   const target = brandTarget(domain);
+  const searchType = resolveSearchType(domain);
   const order = { by: PROMPTS_REQUEST_ORDER_BY_ENUM.TOPIC_VOLUME };
 
   if (llmSingle) {
     const body = {
-      country, llm: llmSingle, target, range: { limit, offset }, order,
+      country, llm: llmSingle, target, searchType, range: { limit, offset }, order,
     };
     if (dimensionFilterQl) { body.dimensionFilterQl = dimensionFilterQl; }
-    const totalsReq = { country, llm: llmSingle, target };
+    const totalsReq = {
+      country, llm: llmSingle, target, searchType,
+    };
     if (dimensionFilterQl) { totalsReq.dimensionFilterQl = dimensionFilterQl; }
     const promptsPair = await Promise.allSettled([
       clients.promptClient.promptsTotals(totalsReq),
@@ -436,10 +451,10 @@ export async function handleBrandPrompts(sp, clients) {
 
   const perLlmFetch = Math.min(100, offset + limit);
   const baseList = {
-    country, target, order, range: { limit: perLlmFetch, offset: 0 },
+    country, target, searchType, order, range: { limit: perLlmFetch, offset: 0 },
   };
   if (dimensionFilterQl) { baseList.dimensionFilterQl = dimensionFilterQl; }
-  const baseTotals = { country, target };
+  const baseTotals = { country, target, searchType };
   if (dimensionFilterQl) { baseTotals.dimensionFilterQl = dimensionFilterQl; }
 
   const [totalsResults, listResults] = await Promise.all([
@@ -482,13 +497,17 @@ export async function handleBrandCitedPages(sp, clients) {
   const { limit, offset } = parseLimitOffset(sp);
   const llmEnum = optionalLlmFromQuery(sp) ?? LLM_ENUM.ALL;
   const target = brandTarget(domain);
+  const searchType = resolveSearchType(domain);
   const order = resolveGrpcSortOrder(sp, SOURCES_REQUEST_ORDER_BY_ENUM, SOURCES_REQUEST_ORDER_BY_ENUM.PROMPTS_COUNT, CITED_PAGES_SORT_KEYS);
   const monthYm = parseMonthYM(sp);
   const monthRaw = sp.get('month')?.trim();
   const listReq = {
-    country, llm: llmEnum, target, category: SOURCE_CATEGORY_ENUM.OWNED_BY_TARGET, order, range: { limit, offset },
+    country, llm: llmEnum, target, searchType, category: SOURCE_CATEGORY_ENUM.OWNED_BY_TARGET, order, range: { limit, offset },
   };
   if (monthYm && monthRaw) { listReq.targetDate = monthRaw; }
+  // Note: sourcesTotals (SourcesTotalsRequest) does not carry search_type in the
+  // SDK, so the totals fallback stays domain-scoped; the primary total path is
+  // citedPagesOwnedCountFromStatsByLlmForMonth, which is subdomain-scoped above.
   const totalsReq = { country, llm: llmEnum, target };
 
   async function fetchSourcesListBody() {
@@ -740,10 +759,12 @@ export async function handleBrandSourceOpportunities(sp, clients) {
   }
 
   const rangeLimit = Math.min(Math.max(1, limit), GAP_SOURCE_DOMAINS_MAX_RANGE_LIMIT);
+  const searchType = resolveSearchType(domain);
   const listBody = {
     country,
     llm,
     target: brandTarget(domain),
+    searchType,
     competitors,
     kind: kinds,
     order: resolveGrpcSortOrder(sp, DOMAINS_REQUEST_ORDER_BY_ENUM, DOMAINS_REQUEST_ORDER_BY_ENUM.ORGANIC_TRAFFIC, DOMAINS_SORT_KEYS),
@@ -751,7 +772,7 @@ export async function handleBrandSourceOpportunities(sp, clients) {
   };
   if (snapshotDate) { listBody.date = snapshotDate; }
   const totalsBody = {
-    country, llm, target: brandTarget(domain), competitors,
+    country, llm, target: brandTarget(domain), searchType, competitors,
   };
   if (snapshotDate) { totalsBody.date = snapshotDate; }
 
@@ -809,7 +830,7 @@ export async function handleBrandSourceOpportunities(sp, clients) {
 export async function handleBrandCompetitors(sp, clients) {
   const domain = sp.get('domain')?.trim();
   if (!domain) { return { status: 400, body: { error: 'missing_domain', message: 'domain is required' } }; }
-  const body = { target: brandTarget(domain) };
+  const body = { target: brandTarget(domain), searchType: resolveSearchType(domain) };
   const countRaw = sp.get('count');
   if (countRaw != null && String(countRaw).trim() !== '') {
     const c = Math.min(20, Math.max(1, num(countRaw)));

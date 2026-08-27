@@ -3203,9 +3203,10 @@ describe('Brands Controller', () => {
       expect(resolveLlmoOnboardingModeStub).to.have.been.calledOnce;
       const [orgArg, , optsArg] = resolveLlmoOnboardingModeStub.firstCall.args;
       expect(orgArg).to.equal(ORGANIZATION_ID);
-      // readOnly: true is load-bearing — without it the resolver could write
-      // to feature_flags from a GET (row-1 brandalf-revert side effect).
-      expect(optsArg).to.deep.equal({ readOnly: true });
+      // The resolver is side-effect free since LLMO-7108 removed the legacy-site
+      // cutoff (and with it the row-1 brandalf-revert write), so this GET no
+      // longer passes a readOnly option.
+      expect(optsArg).to.equal(undefined);
       expect(getBrandBySiteStub).to.have.been.calledOnce;
       expect(getBrandBySiteStub.firstCall.args[0]).to.equal(ORGANIZATION_ID);
       expect(getBrandBySiteStub.firstCall.args[1]).to.equal(SITE_ID);
@@ -5152,7 +5153,7 @@ describe('Brands Controller', () => {
         );
       });
 
-      it('mirrors the provisioned brand domain as a Site (+ brand_sites link) after the row is written', async () => {
+      it('mirrors the url the market TRACKS as a Site (+ brand_sites link) after the row is written', async () => {
         const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
         const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
         const ensureSiteStub = sinon.stub().resolves('site-x');
@@ -5176,8 +5177,38 @@ describe('Brands Controller', () => {
         expect(ensureSiteStub.calledAfter(upsertStub)).to.equal(true);
         const opts = ensureSiteStub.firstCall.args[1];
         expect(opts.organizationId).to.equal(ORGANIZATION_ID);
-        expect(opts.domain).to.equal('acme.com');
+        // The tracked url, not the host the project is filed under: the resolved
+        // Site becomes brands.site_id, so mirroring the host would record a brand
+        // analysing acme.com/path against the root acme.com Site — and sibling
+        // brands on one apex would then collide on brands_base_site_unique.
+        expect(opts.domain).to.equal('acme.com/path');
         expect(opts.brandId).to.equal(provisionStub.firstCall.args[1].brandId);
+      });
+
+      it('forwards the payload URL\'s full identity as the project\'s tracked url', async () => {
+        // `brandDomain` must be a bare FQDN (a path there is a hard 400 upstream,
+        // and the upstream folds it to the registrable domain regardless), so
+        // without a separate primaryUrl a brand created on acme.com/path analysed
+        // acme.com until a data-service reconcile repaired it (serenity-docs#348).
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub,
+          upsertBrand: sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' }),
+          ensureMarketSite: sinon.stub().resolves('site-x'),
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(201);
+        const params = provisionStub.firstCall.args[1];
+        expect(params.brandDomain).to.equal('acme.com');
+        expect(params.primaryUrl).to.equal('acme.com/path');
       });
 
       it('links the mirrored site onto the mapping row after ensureMarketSite resolves', async () => {
@@ -5328,6 +5359,43 @@ describe('Brands Controller', () => {
         expect(JSON.stringify(body)).to.not.contain('gw.internal');
         expect(response.headers.get('x-error') || '').to.not.contain('gw.internal');
         expect(upsertStub.called).to.equal(false);
+      });
+
+      // SITES-49993: while the client sees only the generic message,
+      // createErrorResponse logs ONE structured line — JSON in the message —
+      // with the upstream status/method/endpoint/body and the tenant ids, so
+      // Logs Insights can group Semrush failures by tenant and upstream reason.
+      it('logs one structured line with upstream status/body and tenant ids (SITES-49993)', async () => {
+        loggerStub.error.resetHistory();
+        const leakUrl = 'https://gw.internal/enterprise/workspaces/ws-9/projects/proj-abc/aio';
+        const provisionStub = sinon.stub().rejects(
+          new SerenityTransportError(502, `Semrush POST ${leakUrl} failed: 502`, { detail: 'pool exhausted' }, {
+            method: 'POST', endpoint: '/enterprise/workspaces/ws-9/projects/proj-abc/aio',
+          }),
+        );
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub,
+          upsertBrand: sinon.stub().resolves({ id: 'x' }),
+        });
+
+        await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        const call = loggerStub.error.getCalls().find(
+          (c) => typeof c.args[0] === 'string' && c.args[0].startsWith('Brands upstream error {'),
+        );
+        expect(call).to.exist;
+        const payload = JSON.parse(call.args[0].slice('Brands upstream error '.length));
+        expect(payload.status).to.equal(502);
+        expect(payload.method).to.equal('POST');
+        expect(payload.endpoint).to.equal('/enterprise/workspaces/ws-9/projects/proj-abc/aio');
+        expect(payload.spaceCatId).to.equal(ORGANIZATION_ID);
+        expect(payload.body).to.include('pool exhausted');
       });
 
       it('maps a 401 Semrush upstream error on provisioning to HTTP 401 + generic auth message', async () => {
@@ -6092,7 +6160,7 @@ describe('Brands Controller', () => {
         '../../src/support/prompts-storage.js': { resolveBrandUuid: sinon.stub().resolves(BRAND_UUID) },
         '../../src/support/serenity/rest-transport.js': { createSerenityTransport },
         '../../src/support/serenity/brand-urls.js': { syncBrandUrlsAcrossMarkets },
-        // removedCompetitorDomains is left REAL so the diff logic is exercised.
+        // removedCompetitors is left REAL so the diff logic is exercised.
         '../../src/support/serenity/competitor-benchmarks.js': { syncCompetitorBenchmarksAcrossMarkets },
         '../../src/support/serenity/brand-aliases.js': { syncBrandAliasesAcrossMarkets },
         '../../src/support/serenity/serenity-active.js': {
@@ -6106,6 +6174,239 @@ describe('Brands Controller', () => {
       const Mocked = await esmock('../../src/controllers/brands.js', overrides);
       return Mocked.default(context, loggerStub, mockEnv);
     }
+
+    describe('primary-site re-point (serenity-docs#349)', () => {
+      const OLD_SITE = '0b4dcf79-fe5f-410b-b11f-641f0bf56da3';
+      const NEW_SITE = 'b2222222-2222-4222-b222-222222222222';
+      const NEW_BASE_URL = 'https://new-site.com';
+
+      // A postgrestClient whose only real read is the target `sites` lookup — every
+      // brand read/write in the handler is stubbed out via the brands-storage mock.
+      function sitesPostgrest({
+        targetSite = { id: NEW_SITE, base_url: NEW_BASE_URL, organization_id: ORGANIZATION_ID },
+      } = {}) {
+        return {
+          from: sinon.stub().callsFake(() => ({
+            select: sinon.stub().returnsThis(),
+            eq: sinon.stub().returnsThis(),
+            maybeSingle: sinon.stub().resolves({ data: targetSite, error: null }),
+          })),
+        };
+      }
+
+      async function buildRepointController({
+        current,
+        updateBrand = sinon.stub().resolves({
+          ...current, baseSiteId: NEW_SITE, baseUrl: NEW_BASE_URL,
+        }),
+        getBrandBySite = sinon.stub().resolves(null),
+        propagateSiteUrlToSemrush = sinon.stub().resolves({ projectsUpdated: 1 }),
+        projectsForSite = sinon.stub().resolves([{ getSemrushProjectId: () => 'proj-1' }]),
+        relinkSiteForRows = sinon.stub().resolves(),
+      } = {}) {
+        const Mocked = await esmock('../../src/controllers/brands.js', {
+          '../../src/support/brands-storage.js': {
+            updateBrand,
+            getBrandById: sinon.stub().resolves(current),
+            getBrandBySite,
+            readSerenityFlagScopes: sinon.stub().resolves({ orgRow: null, brandRows: new Map() }),
+            getBrandCompetitors: sinon.stub().resolves([]),
+          },
+          '../../src/support/prompts-storage.js': { resolveBrandUuid: sinon.stub().resolves(BRAND_UUID) },
+          '../../src/support/serenity/site-url-propagation.js': { propagateSiteUrlToSemrush },
+          '../../src/support/serenity/mapping-rows.js': { projectsForSite, relinkSiteForRows },
+          '../../src/support/serenity/rest-transport.js': {
+            createSerenityTransport: sinon.stub().returns({ name: 't' }),
+          },
+          '../../src/support/utils.js': { resolveSemrushImsToken: sinon.stub().resolves('ims-tok') },
+        });
+        const stubs = {
+          updateBrand,
+          getBrandBySite,
+          propagateSiteUrlToSemrush,
+          projectsForSite,
+          relinkSiteForRows,
+        };
+        return { controller: Mocked.default(context, loggerStub, mockEnv), stubs };
+      }
+
+      function repointRequest(dataAccessOverride) {
+        return {
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: { baseSiteId: NEW_SITE },
+          dataAccess: { ...mockDataAccess, services: { postgrestClient: dataAccessOverride } },
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        };
+      }
+
+      it('re-points an active Semrush brand: propagates new URL, re-links rows, returns 200', async () => {
+        const current = {
+          id: BRAND_UUID,
+          name: 'Acme',
+          status: 'active',
+          baseSiteId: OLD_SITE,
+          semrushSubWorkspaceId: 'ws-9',
+          brandAliases: [{ name: 'Acme Inc', regions: [] }],
+        };
+        const { controller, stubs } = await buildRepointController({ current });
+
+        const response = await controller.updateBrandForOrg(repointRequest(sitesPostgrest()));
+
+        expect(response.status).to.equal(200);
+        expect(stubs.propagateSiteUrlToSemrush).to.have.been.calledOnce;
+        const propArgs = stubs.propagateSiteUrlToSemrush.firstCall.args[0];
+        expect(propArgs.newBaseURL).to.equal(NEW_BASE_URL);
+        expect(propArgs.workspaceId).to.equal('ws-9');
+        expect(propArgs.siteId).to.equal(OLD_SITE);
+        expect(propArgs.rows).to.have.length(1);
+        // Re-link runs only AFTER a successful Semrush propagation.
+        expect(stubs.relinkSiteForRows).to.have.been.calledOnceWith(
+          sinon.match.any,
+          sinon.match.array,
+          NEW_SITE,
+        );
+        expect(stubs.propagateSiteUrlToSemrush).to.have.been.calledBefore(stubs.relinkSiteForRows);
+      });
+
+      it('returns 409 siteUrlTaken when the target is another active brand\'s primary site', async () => {
+        const current = {
+          id: BRAND_UUID, name: 'Acme', status: 'active', baseSiteId: OLD_SITE, semrushSubWorkspaceId: 'ws-9',
+        };
+        const { controller, stubs } = await buildRepointController({
+          current,
+          getBrandBySite: sinon.stub().resolves({ id: 'other-brand-uuid' }),
+        });
+
+        const response = await controller.updateBrandForOrg(repointRequest(sitesPostgrest()));
+
+        expect(response.status).to.equal(409);
+        const body = await response.json();
+        expect(body.code).to.equal('siteUrlTaken');
+        expect(stubs.propagateSiteUrlToSemrush).to.not.have.been.called;
+        expect(stubs.updateBrand).to.not.have.been.called;
+      });
+
+      it('makes no Semrush calls when re-pointing a non-Semrush (flat-mode) brand', async () => {
+        const current = {
+          id: BRAND_UUID, name: 'Acme', status: 'active', baseSiteId: OLD_SITE, semrushSubWorkspaceId: null,
+        };
+        const { controller, stubs } = await buildRepointController({ current });
+
+        const response = await controller.updateBrandForOrg(repointRequest(sitesPostgrest()));
+
+        expect(response.status).to.equal(200);
+        expect(stubs.propagateSiteUrlToSemrush).to.not.have.been.called;
+        expect(stubs.relinkSiteForRows).to.not.have.been.called;
+        expect(stubs.updateBrand).to.have.been.calledOnce;
+      });
+
+      it('passes a quota 409 (code quotaExceeded) through and does not persist', async () => {
+        const current = {
+          id: BRAND_UUID, name: 'Acme', status: 'active', baseSiteId: OLD_SITE, semrushSubWorkspaceId: 'ws-9',
+        };
+        const quotaErr = Object.assign(new Error('quota'), { status: 409, code: 'quotaExceeded' });
+        const { controller, stubs } = await buildRepointController({
+          current,
+          propagateSiteUrlToSemrush: sinon.stub().rejects(quotaErr),
+        });
+
+        const response = await controller.updateBrandForOrg(repointRequest(sitesPostgrest()));
+
+        expect(response.status).to.equal(409);
+        const body = await response.json();
+        expect(body.code).to.equal('quotaExceeded');
+        expect(stubs.relinkSiteForRows).to.not.have.been.called;
+        expect(stubs.updateBrand).to.not.have.been.called;
+      });
+
+      it('maps a Semrush transport error to 502 without leaking upstream detail', async () => {
+        const current = {
+          id: BRAND_UUID, name: 'Acme', status: 'active', baseSiteId: OLD_SITE, semrushSubWorkspaceId: 'ws-9',
+        };
+        const transportErr = new SerenityTransportError(503, 'Semrush POST https://gw/internal failed: 503', {});
+        const { controller, stubs } = await buildRepointController({
+          current,
+          propagateSiteUrlToSemrush: sinon.stub().rejects(transportErr),
+        });
+
+        const response = await controller.updateBrandForOrg(repointRequest(sitesPostgrest()));
+
+        expect(response.status).to.equal(502);
+        const body = await response.json();
+        expect(body.message).to.equal('Failed to update the tracked URL in Semrush');
+        expect(body.message).to.not.contain('gw/internal');
+        expect(stubs.updateBrand).to.not.have.been.called;
+      });
+
+      it('does not intercept a cross-org / missing target: skips Semrush and defers to updateBrand (org-anchor guard owns brand_site_org_mismatch)', async () => {
+        // A target that is missing (null) or belongs to another org must NOT be handled by
+        // the re-point block — it falls through to updateBrand, whose anchor guard raises the
+        // pre-existing `brand_site_org_mismatch` 409 (brands-storage.js / serenity-docs#346).
+        // The controller must not short-circuit that with a bespoke 404, nor touch Semrush.
+        const current = {
+          id: BRAND_UUID, name: 'Acme', status: 'active', baseSiteId: OLD_SITE, semrushSubWorkspaceId: 'ws-9',
+        };
+        const { controller, stubs } = await buildRepointController({ current });
+
+        const response = await controller.updateBrandForOrg(
+          // Target exists but in a DIFFERENT org — the cross-org case the IT test pins to 409.
+          repointRequest(sitesPostgrest({
+            targetSite: { id: NEW_SITE, base_url: NEW_BASE_URL, organization_id: 'some-other-org' },
+          })),
+        );
+
+        // No Semrush side effects; the re-point block yielded to updateBrand.
+        expect(stubs.propagateSiteUrlToSemrush).to.not.have.been.called;
+        expect(stubs.relinkSiteForRows).to.not.have.been.called;
+        expect(stubs.updateBrand).to.have.been.calledOnce;
+        // updateBrand is stubbed to resolve here; the real 409 mapping is covered by the IT test.
+        expect(response.status).to.equal(200);
+      });
+
+      it('treats re-submitting the same baseSiteId as a no-op (no Semrush, still 200)', async () => {
+        const current = {
+          id: BRAND_UUID, name: 'Acme', status: 'active', baseSiteId: NEW_SITE, semrushSubWorkspaceId: 'ws-9',
+        };
+        const { controller, stubs } = await buildRepointController({ current });
+
+        const response = await controller.updateBrandForOrg(repointRequest(sitesPostgrest()));
+
+        expect(response.status).to.equal(200);
+        expect(stubs.propagateSiteUrlToSemrush).to.not.have.been.called;
+        expect(stubs.updateBrand).to.have.been.calledOnce;
+      });
+
+      it('does not disguise a stale post-write read as success: a re-point whose '
+        + 'updateBrand result still carries the OLD baseSiteId is surfaced as a hard '
+        + 'error, never a lying 200 (live e2e regression)', async () => {
+        // Live e2e testing on a real org found that a re-point onto a site already
+        // listed among the brand's own secondary siteIds came back 200 with the
+        // brand COMPLETELY unchanged (same baseSiteId, same updatedAt as the request's
+        // expectedUpdatedAt) — no error, no side effect. This reproduces that exact
+        // response shape by having updateBrand resolve a row that still carries the
+        // OLD baseSiteId (as it would if updateBrand's own post-write re-read served
+        // a stale snapshot) and asserts the controller now refuses to pass it through
+        // as a successful re-point.
+        const current = {
+          id: BRAND_UUID, name: 'Acme', status: 'active', baseSiteId: OLD_SITE, semrushSubWorkspaceId: null,
+        };
+        const staleUnchangedRow = {
+          ...current, baseSiteId: OLD_SITE, baseUrl: 'https://haha.com',
+        };
+        const { controller, stubs } = await buildRepointController({
+          current,
+          updateBrand: sinon.stub().resolves(staleUnchangedRow),
+        });
+
+        const response = await controller.updateBrandForOrg(repointRequest(sitesPostgrest()));
+
+        expect(response.status).to.equal(500);
+        const body = await response.json();
+        expect(body.code).to.equal('brand_repoint_not_persisted');
+        expect(stubs.updateBrand).to.have.been.calledOnce;
+      });
+    });
 
     it('re-syncs brand URLs across markets when a URL field changes on a sub-workspace brand', async () => {
       const updated = {
@@ -6731,11 +7032,13 @@ describe('Brands Controller', () => {
       // old competitors read BEFORE the update to compute removals.
       expect(getBrandCompetitorsStub).to.have.been.calledOnceWith(BRAND_UUID);
       expect(getBrandCompetitorsStub).to.have.been.calledBefore(updateBrandStub);
-      // sync gets the NEW competitor list, the removed domain, and the workspace.
+      // sync gets the NEW competitor list, the removed competitor, and the workspace.
+      // rival.com is NOT reported removed: the stored entry carried no name, so it
+      // keys on its domain, but its site is still tracked — that is a rename.
       expect(ciSyncStub).to.have.been.calledOnceWith(
         transport,
         updated.competitors,
-        ['gone.com'],
+        [{ name: 'gone.com', key: 'gone.com', domain: 'gone.com' }],
         'ws-9',
       );
     });
@@ -7196,6 +7499,64 @@ describe('Brands Controller', () => {
       } finally {
         logSpy.restore();
       }
+    });
+
+    it('strips a header-unsafe character from the X-Error header without altering the JSON body (serenity-docs#346)', async () => {
+      // A brand name is customer-controlled, and any 409/500 whose message
+      // echoes it (this guard, brand_status_demotion_not_allowed, ...) would
+      // previously crash createErrorResponse's X-Error header with a raw
+      // TypeError [ERR_INVALID_CHAR] instead of returning the intended
+      // status, if that message contained a character outside the header-safe
+      // range (printable ASCII + Latin-1, 0x20-0x7E/0x80-0xFF — plain accented
+      // characters like "é" are actually fine; an em dash is not). This is
+      // exactly what the it-postgres IT suite caught for an em dash in this
+      // guard's own message.
+      const err = new Error(
+        'Cannot anchor brand "Global — Direct" to site abc: that site does not belong to organization xyz.',
+      );
+      err.status = 409;
+      err.code = 'brand_site_org_mismatch';
+      const updateBrandStub = sinon.stub().rejects(err);
+
+      const controller = await buildUpdateController({ updateBrand: updateBrandStub });
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { baseSiteId: 'some-other-orgs-site' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(409);
+      const body = await response.json();
+      expect(body.code).to.equal('brand_site_org_mismatch');
+      expect(body.message).to.equal(err.message); // body keeps the full, unsanitized message
+      expect(response.headers.get('x-error')).to.equal(
+        'Cannot anchor brand "Global  Direct" to site abc: that site does not belong to organization xyz.',
+      );
+    });
+
+    it('sanitizes only the X-Error header on the untyped-error (500) fallback too, keeping the body raw', async () => {
+      // Same split as the 409 case above, on the OTHER branch of
+      // createErrorResponse: a bare Error with no .status (e.g. the
+      // anchorSiteError DB-failure path) must not have its body message
+      // sanitized just because the header copy needs to be.
+      const err = new Error('DB read failed — connection reset');
+      const updateBrandStub = sinon.stub().rejects(err);
+
+      const controller = await buildUpdateController({ updateBrand: updateBrandStub });
+      const response = await controller.updateBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { baseSiteId: 'some-other-orgs-site' },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+
+      expect(response.status).to.equal(500);
+      const body = await response.json();
+      expect(body.message).to.equal(err.message); // body keeps the full, unsanitized message
+      expect(response.headers.get('x-error')).to.equal('DB read failed  connection reset');
     });
 
     it('succeeds when expectedUpdatedAt matches the persisted row (LLMO-6591)', async () => {

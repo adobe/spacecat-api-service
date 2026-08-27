@@ -176,6 +176,7 @@ const routeFacsCapabilities = {
 
     // Admin-only reads
     'GET /organizations', // admin OR S2S readAll
+    'GET /organizations/by-product-code/:productCode', // admin OR S2S readAll
     'GET /sites', // admin OR S2S readAll
     'GET /sites.csv', // hasAdminReadAccess
     'GET /sites.xlsx', // hasAdminReadAccess
@@ -241,6 +242,14 @@ const routeFacsCapabilities = {
     'POST /consumers/:consumerId/revoke', // admin
     'POST /consumers/register', // admin
   ],
+
+  /**
+   * Products with FACS enforcement live (consumed by `facsWrapper` — see its
+   * `FACS_ONBOARDED_PRODUCTS` docs for the fail-closed semantics). Any product with
+   * routes below MUST be listed here, or those routes silently bypass FACS —
+   * enforced by `test/routes/facs-capabilities.test.js`. Add one when its routes go live.
+   */
+  FACS_ONBOARDED_PRODUCTS: ['LLMO', 'ASO'],
 
   PRODUCTS_ROUTES: {
   // LLMO — first product to enrol in FACS.
@@ -516,6 +525,7 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes': 'llmo/can_configure',
       'GET /sites/:siteId/llmo/cdn-onboard/akamai/config': 'llmo/can_configure',
       'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties': 'llmo/can_configure',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/versions': 'llmo/can_configure',
       'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan': 'llmo/can_configure',
       'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy': 'llmo/can_configure',
       'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate': 'llmo/can_configure',
@@ -761,6 +771,7 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit/:cursor': 'llmo/can_view',
       'GET /sites/:siteId/opportunities/by-status/:status': 'llmo/can_view',
       'GET /sites/:siteId/opportunities/top-paid': 'llmo/can_view',
+      'GET /sites/:siteId/edge-deployed-urls': 'llmo/can_view',
       'GET /sites/:siteId/page-citability/counts': 'llmo/can_view',
       'GET /sites/:siteId/reports': 'llmo/can_view',
       'GET /sites/:siteId/reports/:reportId': 'llmo/can_view',
@@ -865,6 +876,7 @@ const routeFacsCapabilities = {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'llmo/can_view',
       // Serenity proxy (Semrush AIO replacement) — reads under brand
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/jobs/:jobId': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'llmo/can_view',
@@ -878,6 +890,9 @@ const routeFacsCapabilities = {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/subreddits': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/reddit-threads': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/youtube-videos': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics/:topicId/prompts': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls': 'llmo/can_view',
@@ -988,6 +1003,7 @@ const routeFacsCapabilities = {
       // cdn / ims-org-access / contact-sales / consent-banner /
       // import-tools / scrape-tools)
       // ------------------------------------------------------------------
+      'PATCH /organizations/:organizationId': 'aso/can_configure',
       'PATCH /sites/:siteId': 'aso/can_configure',
       'PATCH /sites/:siteId/config/cdn-logs': 'aso/can_configure',
       'PATCH /sites/:siteId/config/scraper': 'aso/can_configure',
@@ -1072,6 +1088,7 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit/:cursor': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': 'aso/can_view',
+      'GET /sites/:siteId/edge-deployed-urls': 'aso/can_view',
       'GET /sites/:siteId/fixes': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': 'aso/can_view',
@@ -1316,7 +1333,7 @@ const routeFacsCapabilities = {
     'base64PageUrl', 'base64Url', 'baseURL', 'channel', 'cursor',
     'dataSource', 'deliveryType', 'endDate', 'eventType',
     'exportId', 'flagName', 'geo', 'handlerType', 'hookSecret', 'limit',
-    'metric', 'processingType', 'product', 'projectName',
+    'metric', 'processingType', 'product', 'productCode', 'projectName',
     'sheetType', 'source', 'startDate', 'status', 'tier', 'tokenType', 'type',
     'url', 'version', 'week',
     // Single-row id used by the state-layer management endpoints

@@ -45,6 +45,41 @@ const { imsClientWrapper } = /** @type {{ imsClientWrapper: Function }} */ (
   /** @type {unknown} */ (imsClientPkg)
 );
 
+// This worker is a second Lambda built from the api-service repo, and it needs the exact
+// same Vault secrets the synchronous serenity path already loads (IMS_PROMISE_SEMRUSH_*,
+// SEMRUSH_PROJECTS_BASE_URL, Postgres, AUTOFIX_CRYPT_*). Rather than provision a separate
+// AppRole + bootstrap secret for this function's own name (`serenity-job-runner`), reuse
+// api-service's existing Vault setup: `@adobe/spacecat-shared-vault-secrets` derives its
+// AWS Secrets Manager bootstrap path and its Vault data path from the function name by
+// default, but both are overridable. We point them at `api-service` so no vault_policies
+// change is needed — the Lambda role already reads `/mysticat/bootstrap/*` via a wildcard,
+// and api-service's env-scoped AppRole already grants read on `dx_mysticat/data/{env}/api-service`.
+//
+// AWS_ENV is a deploy-time Lambda env var (set per environment in the worker deploy scripts).
+// A wrong env fails closed rather than reading another environment's secrets: api-service's
+// AppRole is scoped to a single env, so requesting a different env's path is denied. We read
+// ONLY AWS_ENV (not the generic ENV, which CI runners and container runtimes set routinely and
+// would be an unsafe input to a Vault-path decision), and throw on absence rather than defaulting
+// to a working-looking path — so a misconfigured deploy surfaces this message in the cold-start
+// log instead of an opaque Vault 403.
+const VAULT_SERVICE = 'api-service';
+
+/**
+ * vaultSecrets options that make this worker reuse api-service's Vault identity (bootstrap
+ * secret + env-scoped data path) instead of a dedicated AppRole for its own function name.
+ * Exported for unit testing only — not a public contract.
+ */
+export const vaultOpts = {
+  bootstrapPath: `/mysticat/bootstrap/${VAULT_SERVICE}`,
+  name: (/** @type {{ env?: Record<string, string> }} */ ctx) => {
+    const env = ctx.env?.AWS_ENV;
+    if (!env) {
+      throw new Error('[serenity-job-runner] AWS_ENV must be set (see the worker deploy scripts) to resolve the Vault secrets path');
+    }
+    return `${env}/${VAULT_SERVICE}`;
+  },
+};
+
 /**
  * SQS-triggered entry point for the deferred user-context Semrush job runner
  * (serenity-docs#186). Deployed as a distinct Lambda function from the
@@ -150,5 +185,5 @@ export const main = wrap(run)
   .with(dataAccess)
   .with(sqs)
   .with(imsClientWrapper)
-  .with(vaultSecrets)
+  .with(vaultSecrets, vaultOpts)
   .with(helixStatus);

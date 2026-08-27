@@ -50,6 +50,8 @@ npm run docs:lint         # Validate OpenAPI specs
 npm run docs:serve        # Preview docs locally
 ```
 
+**`docs/index.html` non-determinism:** `docs:build` regenerates this file's styled-components CSS as inline hashed class names, and the hash assignment order is not stable across Redocly CLI/Node versions — an environment other than the canonical CI toolchain can produce a diff of tens of thousands of lines that is pure hash/markup churn, not a content change (verify by diffing for the actual OpenAPI content you touched, e.g. `grep` for the field/path name in old vs new). Don't commit a hash-noise diff from a non-canonical environment: either regenerate on the canonical CI toolchain, or note the exception in the PR description (spec files are the source of truth and are what reviewers should verify) and leave `docs/index.html` as committed on `main`.
+
 ### Deployment
 ```bash
 npm run build             # Build production bundle with Helix Deploy
@@ -279,7 +281,7 @@ return accepted('Audit queued successfully');
 
 **Files**:
 - `src/controllers/slack.js` - Main controller
-- `src/support/slack/commands/` - Command handlers (37 commands)
+- `src/support/slack/commands/` - Command handlers (36 commands)
 - `src/support/slack/actions/` - Action handlers (17 actions)
 
 Architecture:
@@ -470,6 +472,21 @@ shared/tests/sites.js → postgres/sites.test.js (uses Docker PostgreSQL + Postg
 - Test DTO transformations
 - Test error handling and validation
 
+### No raw NUL bytes in tracked source
+
+**Write `\0`, never a literal U+0000 byte.** `test/no-nul-bytes.test.js` scans every
+tracked regular blob and fails on a raw NUL, because a file containing one is
+classified as binary by whole-file scanners — `grep -r`, recursive `rg`, `file` — which
+then skip it. The skip is silent: a search still returns hits from other files, so an
+incomplete result set reads as complete, and it is easy to conclude a symbol has no
+definition, no other callers, or no test coverage in a file that was never read.
+
+Git does not surface this, which is why nothing in review or CI reacted to it before.
+Git sniffs only the first 8000 bytes for a NUL, so a byte past that window leaves
+`git grep` and `git diff` behaving normally — and renders the byte as whitespace in a
+diff, so it looks like an ordinary space. The guard test is that missing signal, and it
+covers every tracked file type, not just JS.
+
 ## Configuration Hierarchy
 
 1. **Global Configuration** (`Configuration` model) - System-wide settings, queue URLs
@@ -518,7 +535,7 @@ Most complex domain:
 ### Slack Commands
 **Location**: `src/support/slack/commands/`
 
-37 commands for operations:
+36 commands for operations:
 - Site management: `/add-site`, `/update-site`, `/remove-site`
 - Audit operations: `/run-audit`, `/run-audit-for-all-sites`
 - Organization setup: `/add-slack-channel`, `/configure-slack`

@@ -66,7 +66,10 @@ import {
 import AccessControlUtil, { X_PRODUCT_HEADER } from '../support/access-control-util.js';
 import { redactFeedbackContent } from '../support/feedback-redaction.js';
 import { CAP_FIX_ENTITY_CREATE, CAP_SUGGESTION_WRITE } from '../routes/capability-constants.js';
-import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
+import {
+  grantSuggestionsForOpportunity,
+  revokeGrantsForSuggestions,
+} from '../support/grant-suggestions-handler.js';
 import { postSlackMessage } from '../utils/slack/base.js';
 import { createAtomicStrategy, deleteAtomicStrategy } from '../support/atomic-strategy-helper.js';
 
@@ -426,7 +429,7 @@ function SuggestionsController(ctx, sqs, env) {
    * @returns {Promise<Array>} Filtered suggestion entities.
    */
   const filterByGrantStatus = async (site, suggestions, context) => {
-    if (!await getIsSummitPlgEnabled(site, ctx, context)) {
+    if (!await getIsSummitPlgEnabled(site, ctx, context, accessControlUtil)) {
       return suggestions;
     }
     try {
@@ -493,7 +496,7 @@ function SuggestionsController(ctx, sqs, env) {
         return notFound('Opportunity not found');
       }
     }
-    if (opportunity && await getIsSummitPlgEnabled(site, ctx, context)) {
+    if (opportunity && await getIsSummitPlgEnabled(site, ctx, context, accessControlUtil)) {
       try {
         await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
       /* c8 ignore next 3 */
@@ -783,7 +786,7 @@ function SuggestionsController(ctx, sqs, env) {
     if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound();
     }
-    if (await getIsSummitPlgEnabled(site, ctx, context)
+    if (await getIsSummitPlgEnabled(site, ctx, context, accessControlUtil)
       && !(await SuggestionGrant.isSuggestionGranted(suggestion.getId()))) {
       return notFound('Suggestion not found');
     }
@@ -1457,7 +1460,7 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     // Block auto-deploy on non-granted suggestions for summit-plg users
-    if (await getIsSummitPlgEnabled(site, ctx, context)) {
+    if (await getIsSummitPlgEnabled(site, ctx, context, accessControlUtil)) {
       const { notGrantedIds } = await SuggestionGrant.splitSuggestionsByGrantStatus(suggestionIds);
       if (notGrantedIds.length > 0) {
         const trialSuffix = isViewAsTrialRequest(context)
@@ -1728,6 +1731,12 @@ function SuggestionsController(ctx, sqs, env) {
 
     if (!suggestion || suggestion.getOpportunityId() !== opportunityId) {
       return notFound('Suggestion not found');
+    }
+
+    try {
+      await revokeGrantsForSuggestions(SuggestionGrant, [suggestionId]);
+    } catch (revokeError) {
+      context.log.warn(`Failed to revoke grants for suggestion ${suggestionId}`, revokeError?.message ?? revokeError);
     }
 
     try {
@@ -2436,6 +2445,94 @@ function SuggestionsController(ctx, sqs, env) {
     response.suggestions.sort((a, b) => a.index - b.index);
     context.log.info(`[edge-deploy] response: ${JSON.stringify(response)}`);
     return createResponse(response, 207);
+  };
+
+  /**
+   * Returns the URLs already deployed to the edge by the site's non-prerender ELMO
+   * ("Tokowaka") opportunities, as `[{ url, sources: [opportunityType] }]`.
+   *
+   * The ELMO Overview uses this to derive prerender / Content-Visibility gains: if a URL
+   * was edge-deployed by another Tokowaka opportunity, prerendering is effectively enabled
+   * for it. Previously the UI computed this by fanning out one `getSuggestions` call per
+   * opportunity (~N per site) and doing it twice; this endpoint collapses that to a single
+   * server-side read with a tiny payload.
+   *
+   * Implementation deliberately avoids a per-opportunity fan-out: it runs two queries —
+   * all of the site's opportunities, then all suggestions for the relevant ones via a
+   * single `opportunity_id IN (...)` filter. LaunchDarkly per-type gating stays client-side
+   * (the endpoint has no visibility into UI flags), which is why each entry carries its
+   * source opportunity `type`.
+   */
+  const getEdgeDeployedUrls = async (context) => {
+    const { siteId } = context.params;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
+    }
+
+    // 1. All opportunities for the site (single query, auto-paginated). Keep the stable
+    //    Tokowaka set: non-prerender AND tagged `isElmo` — the same filter the UI applied
+    //    before per-opportunity type gating (which remains client-side).
+    const opportunities = await Opportunity.allBySiteId(siteId);
+    const opptyTypeById = new Map();
+    for (const oppty of opportunities) {
+      if (oppty.getType() === 'prerender') {
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+      const tags = oppty.getTags() ?? [];
+      if (!tags.includes('isElmo')) {
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+      opptyTypeById.set(oppty.getId(), oppty.getType());
+    }
+
+    if (opptyTypeById.size === 0) {
+      return ok([]);
+    }
+
+    // 2. All suggestions across those opportunities in one query (no per-opportunity
+    //    fan-out) via an `opportunity_id IN (...)` filter; auto-paginated.
+    const suggestions = await Suggestion.all(
+      {},
+      { where: (attrs, op) => op.in(attrs.opportunityId, [...opptyTypeById.keys()]) },
+    );
+
+    // 3. Build [{ url, sources: [opportunityType] }] over edge-deployed suggestions,
+    //    deduping by raw url and aggregating the source opportunity types.
+    const byUrl = new Map();
+    for (const suggestion of suggestions) {
+      const data = suggestion.getData() ?? {};
+      if (!data.edgeDeployed || !hasText(data.url)) {
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+      const type = opptyTypeById.get(suggestion.getOpportunityId());
+      if (!type) {
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+      const existing = byUrl.get(data.url);
+      if (existing) {
+        if (!existing.sources.includes(type)) {
+          existing.sources.push(type);
+        }
+      } else {
+        byUrl.set(data.url, { url: data.url, sources: [type] });
+      }
+    }
+
+    return ok([...byUrl.values()]);
   };
 
   /**
@@ -3336,6 +3433,7 @@ function SuggestionsController(ctx, sqs, env) {
     autofixSuggestions,
     createSuggestions,
     deploySuggestionToEdge,
+    getEdgeDeployedUrls,
     listGeoExperiments,
     getGeoExperiment,
     getGeoExperimentResults,

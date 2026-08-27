@@ -41,6 +41,50 @@ export function hostnameFromUrlString(value) {
 }
 
 /**
+ * Normalizes the case of a URL's host component only, leaving scheme, path,
+ * query, and fragment exactly as submitted. Hostnames are case-insensitive
+ * (RFC 3986 / WHATWG URL spec), but paths are not — so this must not reuse
+ * `new URL(value).href` (which would also alter/re-encode the rest of the
+ * URL) or rely on `hostname` from a parsed `URL` object without re-inserting
+ * it into the original string. Returns the input unchanged if it doesn't
+ * parse as `scheme://host...`.
+ *
+ * @param {string} value - a URL string
+ * @returns {string} the same URL with only its host segment lowercased
+ */
+export function normalizeHostCase(value) {
+  if (!hasText(value)) {
+    return value;
+  }
+  const match = value.match(/^([a-zA-Z][a-zA-Z\d+\-.]*:\/\/)([^/?#]+)(.*)$/s);
+  if (!match) {
+    return value;
+  }
+  const [, scheme, host, rest] = match;
+  return `${scheme}${host.toLowerCase()}${rest}`;
+}
+
+/**
+ * Extracts the path of a URL — e.g. for logging a failed upstream call's
+ * `endpoint`, where the host adds nothing (it is fixed per environment) and
+ * the path is what identifies the operation. Returns undefined for a missing
+ * or unparseable URL.
+ *
+ * @param {string | undefined | null} url
+ * @returns {string | undefined}
+ */
+export function endpointOf(url) {
+  if (!url) {
+    return undefined;
+  }
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * True when `hostname` is a routable PUBLIC domain name — i.e. NOT a loopback,
  * link-local, private, single-label, IP-literal, or reserved-TLD host.
  *
