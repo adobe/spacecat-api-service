@@ -437,7 +437,7 @@ describe('Entitlements Controller', () => {
 
       const context = {
         params: { organizationId },
-        log: { error: sinon.stub() },
+        log: { info: sinon.stub(), error: sinon.stub() },
         authInfo: { getProfile: () => ({ email: 'user@example.com' }) },
       };
 
@@ -445,45 +445,55 @@ describe('Entitlements Controller', () => {
 
       expect(result.status).to.equal(403);
       const body = await result.json();
-      expect(body.message).to.equal('Only admins can create entitlements');
+      expect(body.message).to.equal('Insufficient permissions to create entitlements');
 
       // Restore the original behavior
       mockAccessControlUtil.hasAdminAccess.returns(true);
     });
 
-    it('grants an S2S consumer holding entitlement:create (Layer 2)', async () => {
+    it('grants an S2S consumer holding entitlement:create and audit-logs it (Layer 2)', async () => {
       // Non-admin so the S2S capability path (not the admin bypass) runs.
       mockAccessControlUtil.hasAdminAccess.returns(false);
-      mockAccessControlUtil.hasS2SCapability.resolves({ allowed: true });
+      mockAccessControlUtil.hasS2SCapability.resolves({
+        allowed: true, reason: 'granted', clientId: 'svc-ent', consumerId: 'consumer-ent-1',
+      });
 
       const context = {
         params: { organizationId },
         data: { productCode: 'LLMO' },
-        log: { error: sinon.stub() },
+        log: { info: sinon.stub(), error: sinon.stub() },
       };
 
       const result = await entitlementController.createEntitlement(context);
 
       expect(result.status).to.equal(201);
       expect(mockAccessControlUtil.hasS2SCapability).to.have.been.calledOnceWith('entitlement:create');
+      expect(context.log.info).to.have.been.calledWithMatch(
+        '[s2s] entitlement:create granted clientId=svc-ent consumerId=consumer-ent-1 reason=granted',
+      );
     });
 
-    it('denies an S2S consumer lacking entitlement:create (Layer 2)', async () => {
+    it('denies an S2S consumer lacking entitlement:create and audit-logs it (Layer 2)', async () => {
       mockAccessControlUtil.hasAdminAccess.returns(false);
-      mockAccessControlUtil.hasS2SCapability.resolves({ allowed: false });
+      mockAccessControlUtil.hasS2SCapability.resolves({
+        allowed: false, reason: 'missing-capability', clientId: 'svc-ent', consumerId: 'consumer-ent-1',
+      });
 
       const context = {
         params: { organizationId },
         data: { productCode: 'LLMO' },
-        log: { error: sinon.stub() },
+        log: { info: sinon.stub(), error: sinon.stub() },
       };
 
       const result = await entitlementController.createEntitlement(context);
 
       expect(result.status).to.equal(403);
       const body = await result.json();
-      expect(body.message).to.equal('Only admins can create entitlements');
+      expect(body.message).to.equal('Insufficient permissions to create entitlements');
       expect(TierClient.createForOrg).to.not.have.been.called;
+      expect(context.log.info).to.have.been.calledWithMatch(
+        '[s2s] entitlement:create denied clientId=svc-ent consumerId=consumer-ent-1 reason=missing-capability',
+      );
     });
 
     it('should return bad request for invalid organization ID', async () => {
@@ -908,7 +918,7 @@ describe('Entitlements Controller', () => {
       const context = {
         params: { siteId },
         data: { productCode: 'ASO' },
-        log: { error: sinon.stub() },
+        log: { info: sinon.stub(), error: sinon.stub() },
         authInfo: { getProfile: () => ({ email: 'user@example.com' }) },
       };
 
@@ -916,43 +926,48 @@ describe('Entitlements Controller', () => {
 
       expect(result.status).to.equal(403);
       const body = await result.json();
-      expect(body.message).to.equal('Only admins can ensure entitlements for a site');
+      expect(body.message).to.equal('Insufficient permissions to ensure entitlements for a site');
 
       // Restore default
       mockAccessControlUtil.hasAdminAccess.returns(true);
     });
 
-    it('grants an S2S consumer holding entitlement:create (Layer 2)', async () => {
+    it('grants an S2S consumer holding entitlement:create and audit-logs it (Layer 2)', async () => {
       mockAccessControlUtil.hasAdminAccess.returns(false);
-      mockAccessControlUtil.hasS2SCapability.resolves({ allowed: true });
+      mockAccessControlUtil.hasS2SCapability.resolves({
+        allowed: true, reason: 'granted', clientId: 'svc-ent', consumerId: 'consumer-ent-1',
+      });
 
       const context = {
         params: { siteId },
         data: { productCode: 'ASO' },
-        log: { error: sinon.stub() },
+        log: { info: sinon.stub(), error: sinon.stub() },
       };
 
       const result = await entitlementController.createSiteEntitlement(context);
 
       expect(result.status).to.equal(201);
       expect(mockAccessControlUtil.hasS2SCapability).to.have.been.calledOnceWith('entitlement:create');
+      expect(context.log.info).to.have.been.calledWithMatch(
+        '[s2s] entitlement:create granted clientId=svc-ent consumerId=consumer-ent-1 reason=granted',
+      );
     });
 
     it('denies an S2S consumer lacking entitlement:create (Layer 2)', async () => {
       mockAccessControlUtil.hasAdminAccess.returns(false);
-      mockAccessControlUtil.hasS2SCapability.resolves({ allowed: false });
+      mockAccessControlUtil.hasS2SCapability.resolves({ allowed: false, reason: 'not-active' });
 
       const context = {
         params: { siteId },
         data: { productCode: 'ASO' },
-        log: { error: sinon.stub() },
+        log: { info: sinon.stub(), error: sinon.stub() },
       };
 
       const result = await entitlementController.createSiteEntitlement(context);
 
       expect(result.status).to.equal(403);
       const body = await result.json();
-      expect(body.message).to.equal('Only admins can ensure entitlements for a site');
+      expect(body.message).to.equal('Insufficient permissions to ensure entitlements for a site');
       expect(TierClient.createForSite).to.not.have.been.called;
     });
 

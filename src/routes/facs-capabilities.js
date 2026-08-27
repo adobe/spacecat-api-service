@@ -155,8 +155,8 @@ const routeFacsCapabilities = {
     'POST /sites', // hasAdminAccess
     'DELETE /sites/:siteId', // restricted (always 403)
     'PATCH /sites/:siteId/:auditType', // hasAdminAccess (sites-audits-toggle)
-    'POST /sites/:siteId/site-enrollments', // authorizeEntitlementCreate (admin || S2S cap)
-    'POST /sites/:siteId/entitlements', // authorizeEntitlementCreate (admin || S2S cap)
+    'POST /sites/:siteId/site-enrollments', // hasEntitlementCreateAccess (admin || S2S cap)
+    'POST /sites/:siteId/entitlements', // hasEntitlementCreateAccess (admin || S2S cap)
     // Prompt-suggestion schedule (re-)provisioning — admin-or-S2S (dedicated
     // promptSuggestionSchedule:write capability); not a customer FACS surface.
     'POST /sites/:siteId/prompt-suggestion-schedules', // authorizeWrite (admin || S2S cap)
@@ -164,7 +164,7 @@ const routeFacsCapabilities = {
     'DELETE /projects/:projectId', // hasAdminAccess
     'POST /organizations', // hasAdminAccess
     'DELETE /organizations/:organizationId', // restricted (always 403)
-    'POST /organizations/:organizationId/entitlements', // authorizeEntitlementCreate (admin || S2S cap)
+    'POST /organizations/:organizationId/entitlements', // hasEntitlementCreateAccess (admin || S2S cap)
     'PATCH /organizations/:organizationId/entitlements', // hasS2SAdminAccess (S2S-admin only)
     'PUT /organizations/:organizationId/feature-flags/:product/:flagName', // hasAdminAccess
     'DELETE /organizations/:organizationId/feature-flags/:product/:flagName', // hasAdminAccess

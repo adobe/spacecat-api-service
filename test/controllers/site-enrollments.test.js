@@ -321,7 +321,7 @@ describe('Site Enrollment Controller', () => {
 
     const makeContext = () => ({
       params: { siteId },
-      log: { error: sandbox.stub() },
+      log: { info: sandbox.stub(), error: sandbox.stub() },
     });
 
     beforeEach(() => {
@@ -349,8 +349,10 @@ describe('Site Enrollment Controller', () => {
       expect(result.status).to.equal(403);
     });
 
-    it('grants an S2S consumer holding entitlement:create (Layer 2)', async () => {
-      const hasS2SCapability = sandbox.stub().resolves({ allowed: true });
+    it('grants an S2S consumer holding entitlement:create and audit-logs it (Layer 2)', async () => {
+      const hasS2SCapability = sandbox.stub().resolves({
+        allowed: true, reason: 'granted', clientId: 'svc-ent', consumerId: 'consumer-ent-1',
+      });
       AccessControlUtil.fromContext.returns({
         hasAccess: sandbox.stub().resolves(true),
         hasAdminAccess: sandbox.stub().returns(false),
@@ -358,10 +360,14 @@ describe('Site Enrollment Controller', () => {
       });
       const ctrl = SiteEnrollmentController({ dataAccess: mockDataAccess, attributes: {} });
 
-      const result = await ctrl.createPlgEnrollment(makeContext());
+      const context = makeContext();
+      const result = await ctrl.createPlgEnrollment(context);
 
       expect(result.status).to.equal(201);
       expect(hasS2SCapability).to.have.been.calledOnceWith('entitlement:create');
+      expect(context.log.info).to.have.been.calledWithMatch(
+        '[s2s] entitlement:create granted clientId=svc-ent consumerId=consumer-ent-1 reason=granted',
+      );
     });
 
     it('denies an S2S consumer lacking entitlement:create (Layer 2)', async () => {
@@ -376,7 +382,7 @@ describe('Site Enrollment Controller', () => {
 
       expect(result.status).to.equal(403);
       const body = await result.json();
-      expect(body.message).to.equal('Only admins can create site enrollments');
+      expect(body.message).to.equal('Insufficient permissions to create site enrollments');
       expect(TierClient.createForSite).to.not.have.been.called;
     });
 

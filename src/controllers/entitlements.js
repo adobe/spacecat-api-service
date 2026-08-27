@@ -97,13 +97,23 @@ function EntitlementsController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
-   * Whether the caller may create/ensure entitlements: a full admin, or an S2S consumer
-   * holding `entitlement:create` (enforced upstream by `s2sAuthWrapper`, re-checked here
-   * at Layer 2 via a fresh DB fetch). SITES-50526.
+   * Whether the caller may create/ensure entitlements: a full admin (bypass, no DB hit),
+   * or an S2S consumer holding `entitlement:create` (enforced upstream by `s2sAuthWrapper`,
+   * re-checked here at Layer 2 via a fresh DB fetch). The S2S decision is audit-logged once
+   * — this provisions billable state. SITES-50526.
+   * @param {object} log - Request logger.
    * @returns {Promise<boolean>}
    */
-  const hasEntitlementCreateAccess = async () => accessControlUtil.hasAdminAccess()
-    || (await accessControlUtil.hasS2SCapability(CAP_ENTITLEMENT_CREATE)).allowed;
+  const hasEntitlementCreateAccess = async (log) => {
+    if (accessControlUtil.hasAdminAccess()) {
+      return true;
+    }
+    const {
+      allowed, reason, clientId, consumerId,
+    } = await accessControlUtil.hasS2SCapability(CAP_ENTITLEMENT_CREATE);
+    log.info(`[s2s] entitlement:create ${allowed ? 'granted' : 'denied'} clientId=${clientId || 'n/a'} consumerId=${consumerId || 'n/a'} reason=${reason}`);
+    return allowed;
+  };
 
   /**
    * Resolves the acting identity for audit-trail logging. For most auth paths
@@ -157,8 +167,8 @@ function EntitlementsController(ctx) {
    * @returns {Promise<Response>} Created entitlement response.
    */
   const createEntitlement = async (context) => {
-    if (!await hasEntitlementCreateAccess()) {
-      return forbidden('Only admins can create entitlements');
+    if (!await hasEntitlementCreateAccess(context.log)) {
+      return forbidden('Insufficient permissions to create entitlements');
     }
     const { organizationId } = context.params;
     const {
@@ -215,8 +225,8 @@ function EntitlementsController(ctx) {
    * @returns {Promise<Response>} Created entitlement + site enrollment response.
    */
   const createSiteEntitlement = async (context) => {
-    if (!await hasEntitlementCreateAccess()) {
-      return forbidden('Only admins can ensure entitlements for a site');
+    if (!await hasEntitlementCreateAccess(context.log)) {
+      return forbidden('Insufficient permissions to ensure entitlements for a site');
     }
     const { siteId } = context.params;
     const {
