@@ -1404,7 +1404,10 @@ v2-serenity-brand-presence-sentiment-overview:
         required: false
         description: |
           Full `category__<label>` tag value (caller includes the `category__`
-          prefix), sent to Semrush as-is. `category` is accepted as an alias.
+          prefix), sent to Semrush as-is. `category` is accepted as an alias
+          query-param name; separately, both the current root-name spelling
+          and the bare `category` slug are recognized for the tag prefix
+          itself (tag-display-names.md §1 item 6).
         schema: { type: string }
     responses:
       '200':
@@ -2267,7 +2270,7 @@ v2-serenity-url-inspector-stats:
       - name: categoryId
         in: query
         required: false
-        description: Full `category__<label>` tag value (caller includes the prefix), sent as-is.
+        description: Full `category__<label>` tag value (caller includes the prefix), sent as-is. Both the current root-name spelling and the bare `category` slug are recognized for the prefix (tag-display-names.md §1 item 6).
         schema: { type: string }
       - name: category
         in: query
@@ -2384,7 +2387,7 @@ v2-serenity-url-inspector-prompts-count:
       - name: categoryId
         in: query
         required: false
-        description: Full `category__<label>` tag value (caller includes the prefix), sent as-is.
+        description: Full `category__<label>` tag value (caller includes the prefix), sent as-is. Both the current root-name spelling and the bare `category` slug are recognized for the prefix (tag-display-names.md §1 item 6).
         schema: { type: string }
       - name: category
         in: query
@@ -2534,7 +2537,7 @@ v2-serenity-url-inspector-url-prompts:
       - name: categoryId
         in: query
         required: false
-        description: Full `category__<label>` tag value (caller includes the prefix), sent as-is.
+        description: Full `category__<label>` tag value (caller includes the prefix), sent as-is. Both the current root-name spelling and the bare `category` slug are recognized for the prefix (tag-display-names.md §1 item 6).
         schema: { type: string }
       - name: category
         in: query
@@ -2796,7 +2799,7 @@ v2-serenity-kpi-headlines:
       - name: categoryId
         in: query
         required: false
-        description: Full `category__<label>` tag value (caller includes the prefix), sent as-is.
+        description: Full `category__<label>` tag value (caller includes the prefix), sent as-is. Both the current root-name spelling and the bare `category` slug are recognized for the prefix (tag-display-names.md §1 item 6).
         schema: { type: string }
       - name: category
         in: query
@@ -2934,7 +2937,7 @@ v2-serenity-source-visibility-headline:
       - name: categoryId
         in: query
         required: false
-        description: Full `category__<label>` tag value (caller includes the prefix), sent as-is.
+        description: Full `category__<label>` tag value (caller includes the prefix), sent as-is. Both the current root-name spelling and the bare `category` slug are recognized for the prefix (tag-display-names.md §1 item 6).
         schema: { type: string }
       - name: category
         in: query
