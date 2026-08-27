@@ -14,6 +14,7 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
+import esmock from 'esmock';
 
 import {
   indexLevelByName,
@@ -675,6 +676,88 @@ describe('serenity tag-tree', () => {
       const log = fakeLog();
       await ensureDimensionRoots({ listProjectTags, createProjectTags }, WS, PROJECT, log);
       expect(log.warn).to.not.have.been.calledWithMatch(/intent dimension is split/);
+    });
+  });
+
+  // The generalized display-rename split-root guardrail (tag-display-names.md §3
+  // step 4, §5 phase 1) is dormant today — ROOT_DISPLAY_NAME is an IDENTITY
+  // PLACEHOLDER, so `rootNameOfDimension(dimension) === dimension` for all three
+  // display-renaming dimensions and the loop body in `ensureDimensionRoots` never
+  // runs. Exercising it for real means mocking `rootNameOfDimension` to actually
+  // diverge, which is exactly what happens the moment serenity-docs#407 merges and
+  // the orchestrator swaps the placeholder values in — this pins that the guardrail
+  // will fire correctly on that day, not just today's no-op shape.
+  describe('ensureDimensionRoots — generalized display-rename split-root guardrail', () => {
+    it('warns when a slug root and its (post-freeze) display root exist as distinct tags', async () => {
+      const realPromptTags = await import('../../../src/support/serenity/prompt-tags.js');
+      const { ensureDimensionRoots: ensureDimensionRootsWithRename } = await esmock(
+        '../../../src/support/serenity/tag-tree.js',
+        {
+          '../../../src/support/serenity/prompt-tags.js': {
+            rootNameOfDimension: (dimension) => (
+              dimension === DIMENSION.CATEGORY ? 'Category' : realPromptTags.rootNameOfDimension(dimension)
+            ),
+          },
+        },
+      );
+      const listProjectTags = makeListProjectTagsStub({
+        '': [
+          { id: 'root-category-slug', name: 'category', children_count: 0 },
+          { id: 'root-category-display', name: 'Category', children_count: 0 },
+          { id: 'root-intent', name: INTENT_ROOT_NAME, children_count: 5 },
+          { id: 'root-origin', name: 'origin', children_count: 2 },
+          { id: 'root-type', name: 'type', children_count: 2 },
+          { id: 'root-source', name: 'source', children_count: 0 },
+        ],
+      });
+      const createProjectTags = sinon.stub();
+      const log = fakeLog();
+      const roots = await ensureDimensionRootsWithRename(
+        { listProjectTags, createProjectTags },
+        WS,
+        PROJECT,
+        log,
+      );
+      // Both spellings already existed — nothing to create.
+      expect(createProjectTags).to.not.have.been.called;
+      // The split is real (two different ids under the same dimension) and loud.
+      expect(log.warn).to.have.been.calledWithMatch(
+        /both the slug root "category" and its display root "Category" exist as distinct tags/,
+      );
+      // The canonical (display) spelling wins in the returned map.
+      expect(roots.get('category')).to.equal('root-category-display');
+    });
+
+    it('stays quiet when only the display spelling exists (the migrated, common case)', async () => {
+      const realPromptTags = await import('../../../src/support/serenity/prompt-tags.js');
+      const { ensureDimensionRoots: ensureDimensionRootsWithRename } = await esmock(
+        '../../../src/support/serenity/tag-tree.js',
+        {
+          '../../../src/support/serenity/prompt-tags.js': {
+            rootNameOfDimension: (dimension) => (
+              dimension === DIMENSION.CATEGORY ? 'Category' : realPromptTags.rootNameOfDimension(dimension)
+            ),
+          },
+        },
+      );
+      const listProjectTags = makeListProjectTagsStub({
+        '': [
+          { id: 'root-category-display', name: 'Category', children_count: 0 },
+          { id: 'root-intent', name: INTENT_ROOT_NAME, children_count: 5 },
+          { id: 'root-origin', name: 'origin', children_count: 2 },
+          { id: 'root-type', name: 'type', children_count: 2 },
+          { id: 'root-source', name: 'source', children_count: 0 },
+        ],
+      });
+      const createProjectTags = sinon.stub();
+      const log = fakeLog();
+      await ensureDimensionRootsWithRename(
+        { listProjectTags, createProjectTags },
+        WS,
+        PROJECT,
+        log,
+      );
+      expect(log.warn).to.not.have.been.calledWithMatch(/display-name migration may/);
     });
   });
 

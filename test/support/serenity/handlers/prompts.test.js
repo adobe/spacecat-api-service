@@ -2210,8 +2210,9 @@ describe('handlers/prompts.js — tag cache invalidation (Important #6)', () => 
     } = setupCtx;
 
     // Mutation: handleCreatePrompts pushes a new prompt → invalidate. The create
-    // path resolves the tag tree to stamp the derived `origin`, so the tree read
-    // must be stubbed for the create to succeed and reach the invalidation.
+    // path resolves the tag tree to stamp the derived `source` (tag-display-names.md
+    // §3 — `origin` no longer gets its own tag), so the tree read must be stubbed
+    // for the create to succeed and reach the invalidation.
     transport.listProjectTags = makeListProjectTagsStub();
     transport.createPromptsWithMetadata = sinon.stub().resolves({
       page: 1, total: 1, items: [{ id: 'sem-new', name: 'fresh' }],
@@ -3400,8 +3401,9 @@ describe('handlers/prompts.js — authorship metadata (LLMO-6289)', () => {
         }],
       }, fakeLog(), undefined, undefined, undefined, 'caller-42');
 
-      // The create also injects the derived origin (`human`), producing-system
-      // source (`config`), and the default intent (Informational) alongside the
+      // The create also injects the producing-system source (`config`, derived
+      // from origin=`human` — tag-display-names.md §3, `origin` no longer gets
+      // its own tag) and the default intent (Informational) alongside the
       // caller's tag; the metadata carries the stamped caller id (LLMO-6289).
       expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', [createItemMatch('hi', 'caller-42')], ['tag-1', TAG_IDS.sourceConfig, TAG_IDS.intentInformational]);
     });

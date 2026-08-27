@@ -228,9 +228,11 @@ export async function handleCreatePromptsSubworkspace(
     }
     const projectId = String(project.id);
     try {
-      // Unified layer: strip caller-supplied type/origin/intent, then inject the
-      // computed type + derived origin (origin-dimension.md §3) and the classified
-      // intent (serenity-docs#32). The injectors act on disjoint dimensions.
+      // Unified layer: strip caller-supplied type/source/intent, then inject the
+      // computed type + the derived `source` (tag-display-names.md §3 — `origin`
+      // no longer gets its own tag, so it is never stripped or injected here) and
+      // the classified intent (serenity-docs#32). The injectors act on disjoint
+      // dimensions.
       let typed = await injectComputedTags(projectId, input);
       typed = await injectComputedIntent(projectId, typed);
       // Intentional (not an inconsistency to fix): each item stamps its OWN

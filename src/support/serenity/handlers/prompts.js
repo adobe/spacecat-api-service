@@ -1183,10 +1183,11 @@ export async function handleCreatePrompts(
     }
     const projectId = project.getSemrushProjectId();
     try {
-      // Unified layer: strip caller-supplied type/origin/intent, then inject the
-      // computed type + derived origin (origin-dimension.md §3) and the
-      // classified intent (serenity-docs#32). The two injectors act on disjoint
-      // dimensions, so chaining composes cleanly.
+      // Unified layer: strip caller-supplied type/source/intent, then inject the
+      // computed type + the derived `source` (tag-display-names.md §3 — `origin`
+      // no longer gets its own tag, so it is never stripped or injected here) and
+      // the classified intent (serenity-docs#32). The two injectors act on
+      // disjoint dimensions, so chaining composes cleanly.
       let typed = await injectComputedTags(projectId, input);
       typed = await injectComputedIntent(projectId, typed);
       const semrushPromptId = await createOnePrompt(
