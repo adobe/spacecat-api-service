@@ -190,9 +190,17 @@ export async function asoOpportunityComposite(context, {
  * Apply the D4 opportunity-list ReBAC filter. The ASO resolver stashes the
  * caller's permitted opportunity types on `context.attributes.facsComposite` when
  * it defers a collection route; this narrows the fetched opportunities to those
- * types. No marker (non-FACS / admin / not deferred) or a WILDCARD (`'all'`,
- * site-wide) grant → the list is returned unchanged. An empty permitted set →
- * empty list.
+ * types. A WILDCARD (`'all'`, site-wide) grant → the list is returned unchanged.
+ * An empty permitted set → empty list.
+ *
+ * Fail-closed on a missing marker: when FACS governed this request (the wrapper
+ * deferred to the controller, setting `context.attributes.facs.enabled`) but no
+ * composite marker was produced — e.g. a future opportunity-collection route the
+ * resolver did not classify as a list route, or the wrapper's no-resolvable-
+ * resource defer — return NOTHING rather than the full list, so an uncovered
+ * route cannot leak cross-type opportunities. Non-FACS paths (admin, org-wide
+ * JWT, feature-flag off) never set `attributes.facs`, so they pass through
+ * unfiltered.
  *
  * @param {object} context - request context.
  * @param {object[]} opportunities - Opportunity models (expose `getType()`).
@@ -200,7 +208,10 @@ export async function asoOpportunityComposite(context, {
  */
 export function filterOpportunitiesByFacsComposite(context, opportunities) {
   const composite = context?.attributes?.facsComposite;
-  if (!composite || composite.values === WILDCARD) {
+  if (!composite) {
+    return context?.attributes?.facs?.enabled === true ? [] : opportunities;
+  }
+  if (composite.values === WILDCARD) {
     return opportunities;
   }
   const permitted = new Set(composite.values);

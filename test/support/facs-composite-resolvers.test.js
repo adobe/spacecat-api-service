@@ -212,6 +212,35 @@ describe('facs-composite-resolvers (asoOpportunityComposite)', () => {
     expect(res).to.be.false;
   });
 
+  it('propagates a state-layer read error (the wrapper treats a throw as deny)', async () => {
+    listStub.rejects(new Error('postgrest down'));
+    let threw;
+    try {
+      await mod.asoOpportunityComposite(context, {
+        ...baseArgs, routePattern: 'POST /sites/:siteId/reports', routeParams: { siteId: 'site-1' },
+      });
+    } catch (e) {
+      threw = e;
+    }
+    expect(threw).to.be.an('error').with.property('message', 'postgrest down');
+  });
+
+  it('propagates an Opportunity.findById error on the typed item path (fail-closed)', async () => {
+    listStub.resolves([{ composite_key_value_1: 'security', granted_capabilities: [CAP] }]);
+    oppFindById.rejects(new Error('opp lookup failed'));
+    let threw;
+    try {
+      await mod.asoOpportunityComposite(context, {
+        ...baseArgs,
+        routePattern: 'PATCH /sites/:siteId/opportunities/:opportunityId',
+        routeParams: { siteId: 'site-1', opportunityId: 'opp-1' },
+      });
+    } catch (e) {
+      threw = e;
+    }
+    expect(threw).to.be.an('error').with.property('message', 'opp lookup failed');
+  });
+
   it('exposes asoOpportunityComposite in the compositeResolvers registry', () => {
     expect(mod.compositeResolvers.asoOpportunityComposite).to.equal(mod.asoOpportunityComposite);
   });
@@ -220,9 +249,16 @@ describe('facs-composite-resolvers (asoOpportunityComposite)', () => {
 describe('filterOpportunitiesByFacsComposite (D4 list filter)', () => {
   const opp = (type) => ({ getType: () => type });
 
-  it('returns the list unchanged when no facsComposite marker is set', () => {
+  it('returns the list unchanged when no facsComposite marker is set (non-FACS path)', () => {
     const list = [opp('security'), opp('alt-text')];
     expect(filterOpportunitiesByFacsComposite({ attributes: {} }, list)).to.equal(list);
+  });
+
+  it('fails closed (empty) when FACS governs the request but no marker was produced', () => {
+    // Wrapper deferred (facs.enabled) but the composite resolver set no permitted
+    // values — e.g. an uncovered opportunity-collection route. Must not leak the list.
+    const ctx = { attributes: { facs: { enabled: true } } };
+    expect(filterOpportunitiesByFacsComposite(ctx, [opp('security')])).to.deep.equal([]);
   });
 
   it('returns the list unchanged for a WILDCARD (all) grant', () => {

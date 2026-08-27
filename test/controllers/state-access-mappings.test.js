@@ -603,6 +603,19 @@ describe('StateAccessMappingsController', () => {
       });
     });
 
+    it('trims whitespace from the composite-key value before storing (ASO)', async () => {
+      const createStub = sinon.stub().resolves({
+        created: [makeRow({ product: 'ASO', resource_type: 'site' })], skipped: [],
+      });
+      const { Controller } = await loadController({ createFacsAccessMappings: createStub });
+      const ctx = makeContext({ product: 'ASO', body: asoBody({ compositeKeyValue1: '  security  ' }) });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(201);
+      expect(createStub.firstCall.args[1]).to.include({
+        compositeKeyType1: 'opportunity', compositeKeyValue1: 'security',
+      });
+    });
+
     it('returns 400 when compositeKeyValue1 is provided empty (ASO)', async () => {
       const { Controller } = await loadController();
       const ctx = makeContext({ product: 'ASO', body: asoBody({ compositeKeyValue1: '' }) });
@@ -629,6 +642,19 @@ describe('StateAccessMappingsController', () => {
       expect(res.status).to.equal(400);
     });
 
+    it('accepts an explicit all/all composite key as a no-op for a no-slot product (LLMO round-trip)', async () => {
+      const createStub = sinon.stub().resolves({ created: [makeRow()], skipped: [] });
+      const { Controller } = await loadController({ createFacsAccessMappings: createStub });
+      const ctx = makeContext({
+        body: { ...validBody, compositeKeyType1: 'all', compositeKeyValue1: 'all' },
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(201);
+      expect(createStub.firstCall.args[1]).to.include({
+        compositeKeyType1: 'all', compositeKeyValue1: 'all',
+      });
+    });
+
     it('surfaces the composite-key qualifier in the created DTO (ASO)', async () => {
       const row = makeRow({
         product: 'ASO',
@@ -648,6 +674,20 @@ describe('StateAccessMappingsController', () => {
       const body = await res.json();
       expect(body.compositeKeyType1).to.equal('opportunity');
       expect(body.compositeKeyValue1).to.equal('security');
+    });
+
+    it('surfaces the all sentinel (not null) in the DTO when a row has no qualifier', async () => {
+      // Columns are NOT NULL DEFAULT 'all'; a row without the fields must round-trip
+      // as 'all'/'all', not null, so a GET-then-POST does not 400.
+      const { Controller } = await loadController({
+        createFacsAccessMappings: sinon.stub().resolves({ created: [makeRow()], skipped: [] }),
+      });
+      const ctx = makeContext({ body: validBody });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(201);
+      const body = await res.json();
+      expect(body.compositeKeyType1).to.equal('all');
+      expect(body.compositeKeyValue1).to.equal('all');
     });
 
     it('injects the baseline can_view when the request omits it', async () => {

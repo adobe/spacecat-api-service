@@ -105,7 +105,13 @@ function resolveCompositeKeys(product, compositeKeyType1, compositeKeyValue1) {
   const slots = routeFacsCapabilities
     .PRODUCTS_FACS_COMPOSITE_RESOURCE?.[product]?.compositeKeySlots ?? [];
   if (slots.length === 0) {
-    if (compositeKeyType1 !== undefined || compositeKeyValue1 !== undefined) {
+    // No-slot products carry the ('all','all') sentinel = "no scoping". Accept an
+    // explicit 'all'/'all' as a no-op so a DTO round-trip (GET a binding, then
+    // POST the same body back) does not 400; reject only a real (non-'all')
+    // qualifier, which genuinely isn't supported for this product.
+    const typeOk = compositeKeyType1 === undefined || compositeKeyType1 === 'all';
+    const valueOk = compositeKeyValue1 === undefined || compositeKeyValue1 === 'all';
+    if (!typeOk || !valueOk) {
       return { error: badRequest(`Product ${product} does not support composite keys`) };
     }
     return { compositeKeyType1: 'all', compositeKeyValue1: 'all' };
@@ -119,7 +125,9 @@ function resolveCompositeKeys(product, compositeKeyType1, compositeKeyValue1) {
   }
   return {
     compositeKeyType1: slot1Type,
-    compositeKeyValue1: hasText(compositeKeyValue1) ? compositeKeyValue1 : 'all',
+    // Trim so trailing/leading whitespace can't produce a stored qualifier that
+    // silently matches no live Opportunity.type (enforcement is exact-match).
+    compositeKeyValue1: hasText(compositeKeyValue1) ? compositeKeyValue1.trim() : 'all',
   };
 }
 
@@ -194,8 +202,10 @@ function toMappingDto(row) {
     subjectId: row.subject_id,
     resourceType: row.resource_type,
     resourceId: row.resource_id,
-    compositeKeyType1: row.composite_key_type_1 ?? null,
-    compositeKeyValue1: row.composite_key_value_1 ?? null,
+    // Columns are NOT NULL DEFAULT 'all'; surface the 'all' sentinel (not null)
+    // so the DTO round-trips cleanly back through create.
+    compositeKeyType1: row.composite_key_type_1 ?? 'all',
+    compositeKeyValue1: row.composite_key_value_1 ?? 'all',
     imsOrgId: row.ims_org_id,
     product: row.product,
     grantedCapabilities: row.granted_capabilities ?? [],
