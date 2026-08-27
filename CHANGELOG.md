@@ -1,3 +1,10 @@
+# [1.770.0](https://github.com/adobe/spacecat-api-service/compare/v1.769.0...v1.770.0) (2026-08-27)
+
+
+### Features
+
+* **auth:** ASO composite resource key — opportunity-type ReBAC scoping (WIP) ([#3085](https://github.com/adobe/spacecat-api-service/issues/3085)) ([0659935](https://github.com/adobe/spacecat-api-service/commit/0659935b4fed441fa56c7bfdd3131c3a6680b9da)), closes [adobe/mysticat-architecture#249](https://github.com/adobe/mysticat-architecture/issues/249) [#1883](https://github.com/adobe/spacecat-api-service/issues/1883) [#923](https://github.com/adobe/spacecat-api-service/issues/923) [#1883](https://github.com/adobe/spacecat-api-service/issues/1883)
+
 # [1.769.0](https://github.com/adobe/spacecat-api-service/compare/v1.768.0...v1.769.0) (2026-08-27)
 
 
