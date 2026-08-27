@@ -295,9 +295,12 @@ function validateCreateBody(body) {
  * Generates topics + prompts for (domain, country) via the AI-SEO service
  * (transport.getBrandTopics) and attaches them to the project. Keeps the top
  * `topicCap` topics by search volume (0 = keep all) and tags every prompt with
- * the standard closed-dimension values ({@link STANDARD_PROMPT_TAG_VALUES}, minus
- * its seeded `intent` default), the producing `source/semrush` value, plus a
- * branded / non-branded `type` value derived from `brandNames` (brand name +
+ * the standard closed-dimension values ({@link STANDARD_PROMPT_TAG_VALUES} —
+ * today just its seeded `intent` default, since the `origin` entry it used to
+ * carry is retired, tag-display-names.md §3 — minus that seeded `intent`
+ * default, which is classified per prompt below instead), the producing
+ * `source/semrush` value, plus a branded / non-branded `type` value derived
+ * from `brandNames` (brand name +
  * aliases) and a per-prompt server-classified `intent` value (serenity-docs#32,
  * replacing the seeded `Informational` default). Returns the topic/prompt counts.
  * A generation that yields nothing is a clean no-op (no upstream write).

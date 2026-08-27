@@ -176,9 +176,10 @@ export async function handleCreatePromptsSubworkspace(
   const deferPublish = validateDeferPublish(body);
 
   const projectsBySlice = await buildSliceProjectMap(transport, workspaceId, log);
-  // CREATE: user-authenticated write → derived `origin` is `human` and producing
-  // `source` is the constant `config` (see the flat-mode twin handleCreatePrompts,
-  // origin-dimension.md §3, source-dimension.md §1).
+  // CREATE: user-authenticated write → `originValue` = `human` feeds
+  // `deriveSource` (tag-display-names.md §3 — `origin` no longer gets its own
+  // tag) and producing `source` is the constant `config` (see the flat-mode
+  // twin handleCreatePrompts, source-dimension.md §1).
   const injectComputedTags = makePromptTagInjector(
     transport,
     workspaceId,

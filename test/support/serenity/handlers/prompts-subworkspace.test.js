@@ -254,7 +254,7 @@ describe('prompts-subworkspace handlers', () => {
       // Informational (Azure unconfigured, serenity-docs#32), alongside the caller's
       // tag (origin-dimension.md §3, source-dimension.md §1). The v3
       // metadata-carrying write stamps created_*/updated_* (LLMO-6289).
-      expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(WS, 'p-us-en', [createItemMatch('p', undefined)], ['tag-1', TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational]);
+      expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(WS, 'p-us-en', [createItemMatch('p', undefined)], ['tag-1', TAG_IDS.sourceConfig, TAG_IDS.intentInformational]);
       expect(transport.publishProject).to.have.been.calledOnceWith(WS, 'p-us-en');
       expect(result.published).to.equal(true);
     });
@@ -292,7 +292,7 @@ describe('prompts-subworkspace handlers', () => {
       // The create also injects the derived origin, producing-system source, and
       // default intent alongside the caller's tag; the metadata carries the resolved
       // caller id (LLMO-6289).
-      expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(WS, 'p-us-en', [createItemMatch('p', 'caller-42')], ['tag-1', TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational]);
+      expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(WS, 'p-us-en', [createItemMatch('p', 'caller-42')], ['tag-1', TAG_IDS.sourceConfig, TAG_IDS.intentInformational]);
     });
 
     // A tag NAME cannot address a nested tag, so a `tags` key is rejected
@@ -321,7 +321,7 @@ describe('prompts-subworkspace handlers', () => {
         }],
       }, log, classifyByBrandMention);
       expect(result.created[0].tagIds).to.deep.equal([
-        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.originHuman,
+        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded,
         TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
       ]);
       expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(
@@ -329,7 +329,7 @@ describe('prompts-subworkspace handlers', () => {
         'p-us-en',
         [createItemMatch('is Acme good?', undefined)],
         [
-          TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.originHuman,
+          TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded,
           TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
         ],
       );
