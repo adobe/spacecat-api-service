@@ -1,3 +1,10 @@
+# [1.771.0](https://github.com/adobe/spacecat-api-service/compare/v1.770.0...v1.771.0) (2026-08-27)
+
+
+### Features
+
+* **entitlements:** allow S2S consumers with entitlement:create to provision entitlements (SITES-50526) ([#3148](https://github.com/adobe/spacecat-api-service/issues/3148)) ([89256e6](https://github.com/adobe/spacecat-api-service/commit/89256e6e6cd1bc4c1e5142a914cb93ebafb306ae))
+
 # [1.770.0](https://github.com/adobe/spacecat-api-service/compare/v1.769.0...v1.770.0) (2026-08-27)
 
 
