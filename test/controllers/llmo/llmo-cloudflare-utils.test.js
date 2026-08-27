@@ -16,7 +16,6 @@ import {
   deriveWorkerName,
   hostInSiteDomain,
   registrableDomain,
-  replacePatternHost,
   routePatternHost,
   routePatternHostGlob,
   globsIntersect,
@@ -105,29 +104,6 @@ describe('llmo-cloudflare-utils', () => {
 
     it('strips scheme and path and lowercases', () => {
       expect(routePatternHostGlob('https://WWW.Example.com/a/*')).to.equal('www.example.com');
-    });
-  });
-
-  describe('replacePatternHost', () => {
-    it('replaces the host and preserves the path', () => {
-      expect(replacePatternHost('example.com/blog/*', 'www.example.com')).to.equal('www.example.com/blog/*');
-    });
-
-    it('replaces the host and preserves a bare "/*" path', () => {
-      expect(replacePatternHost('example.com/*', 'www.example.com')).to.equal('www.example.com/*');
-    });
-
-    it('preserves an explicit scheme', () => {
-      expect(replacePatternHost('https://example.com/a/b/*', 'www.example.com')).to.equal('https://www.example.com/a/b/*');
-    });
-
-    it('does not introduce a scheme that was not present', () => {
-      expect(replacePatternHost('example.com/*', 'www.example.com')).to.not.include('://');
-    });
-
-    it('does not synthesize a path when the pattern has none (host-only route)', () => {
-      expect(replacePatternHost('example.com', 'www.example.com')).to.equal('www.example.com');
-      expect(replacePatternHost('https://example.com', 'www.example.com')).to.equal('https://www.example.com');
     });
   });
 

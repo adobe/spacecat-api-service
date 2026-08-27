@@ -20,7 +20,7 @@ import AccessControlUtil from '../../support/access-control-util.js';
 import { hasSubpath, resolveCanonicalHost } from '../../support/edge-routing-utils.js';
 import { auditHostname } from './llmo-utils.js';
 import {
-  deriveWorkerName, hostInSiteDomain, registrableDomain, replacePatternHost, routePatternHost,
+  deriveWorkerName, hostInSiteDomain, registrableDomain, routePatternHost,
   routePatternHostGlob, routePatternsOverlap,
 } from './llmo-cloudflare-utils.js';
 
@@ -503,13 +503,9 @@ function LlmoCloudflareController(ctx) {
   /**
    * POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes
    * Body: { zoneId, pattern }
-   * The client supplies the route pattern (host + path), but when that pattern targets the site's
-   * ROOT host (its apex or the apex's www), the host is normalized server-side to the canonical
-   * serving host derived from the base URL (see resolveCanonicalHost — apex/www chosen by
-   * redirect/DNS follow), while the client-supplied path is preserved. This fixes the apex↔www
-   * mismatch (an apex-only site whose UI sent a www pattern is corrected to the apex, and vice
-   * versa) without touching specific-subdomain or wildcard patterns. Before creating it, verifies
-   * the pattern targets the site's domain and that no existing route in the zone already targets
+   * The client supplies the route pattern (host + path) verbatim once it passes the in-domain
+   * check — no server-side host derivation, so the client can confirm or correct the apex/www
+   * choice itself. Before creating it, verifies that no existing route in the zone already targets
    * the same host (compared by resolved host, not raw pattern string) so onboarding cannot silently
    * add a second/overlapping route on a host the customer already routes. `zoneId` is a Cloudflare
    * identifier (not a SpaceCat entity), so it is supplied in the body rather than the path.
@@ -549,25 +545,11 @@ function LlmoCloudflareController(ctx) {
 
     const siteId = site.getId();
 
-    // Host derivation only: when the client pattern targets the site's ROOT host (its apex or the
-    // apex's www), replace just the host with the canonical serving host derived from the base URL
-    // (apex/www chosen by redirect/DNS follow) while preserving the client-supplied path. This
-    // corrects an apex↔www mismatch — e.g. a www pattern for an apex-only site — without touching
-    // the path or specific-subdomain / wildcard patterns.
-    let pattern = clientPattern;
-    try {
-      const siteApex = registrableDomain(new URL(site.getBaseURL()).hostname);
-      const clientHost = routePatternHostGlob(clientPattern);
-      if (clientHost === siteApex || clientHost === `www.${siteApex}`) {
-        const canonicalHost = await resolveCanonicalHost(site.getBaseURL(), log);
-        pattern = replacePatternHost(clientPattern, canonicalHost);
-      }
-    } catch (e) {
-      log.error(auditLine(context, 'add-route', 'host-derivation-failed', {
-        severity: 'error', siteId, zoneId, error: e.message,
-      }));
-      return internalServerError('Could not derive route host from site base URL');
-    }
+    // Once the pattern passes the in-domain check above, use it exactly as the client submitted —
+    // no server-side host derivation. This preserves the client's ability to confirm/override the
+    // root host themselves (e.g. resubmitting `racq.com.au/*` after a suggested
+    // `www.racq.com.au/*`) rather than have it silently re-derived on every call.
+    const pattern = clientPattern;
 
     log.info(auditLine(context, 'add-route', 'started', {
       siteId, zoneId, scriptName, pattern,

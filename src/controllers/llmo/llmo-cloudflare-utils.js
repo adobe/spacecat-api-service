@@ -77,23 +77,6 @@ export const routePatternHostGlob = (pattern) => pattern
   .toLowerCase();
 
 /**
- * Replaces only the host portion of a Cloudflare route pattern.
- * Leaves the scheme (if any) and path (if any, or lack thereof) exactly as supplied.
- *
- * @param {string} pattern - The original route pattern (may have no path at all).
- * @param {string} newHost - The replacement host (no scheme, no path).
- * @returns {string} `pattern` with only its host replaced.
- */
-export const replacePatternHost = (pattern, newHost) => {
-  const schemeMatch = pattern.match(/^https?:\/\//i);
-  const scheme = schemeMatch ? schemeMatch[0] : '';
-  const rest = pattern.slice(scheme.length);
-  const slashIndex = rest.indexOf('/');
-  const pathPart = slashIndex === -1 ? '' : rest.slice(slashIndex);
-  return `${scheme}${newHost}${pathPart}`;
-};
-
-/**
  * Whether two strings containing `*` wildcards can match a common string — i.e. their match-sets
  * intersect. Each `*` matches zero or more of any character, matching Cloudflare's route-pattern
  * operator ("The only supported operator is the wildcard (*), which matches zero or more of any
