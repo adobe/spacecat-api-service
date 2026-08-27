@@ -22,6 +22,10 @@
  *
  * Ported (1:1) from the edge_optimize POC's rules_builder.py. Everything here is deterministic
  * and dependency-free so it can be unit-tested and previewed offline (no Akamai credentials).
+ *
+ * The routing rule is split into two tiers (Routing Edge + Routing Parent) keyed on the
+ * requestType CLIENT_REQ criterion, so the parent-tier re-evaluation cannot self-fail the
+ * api-key loop guard. See the two-tier notes in the akamai-byocdn docs.
  */
 
 // Edge-tier guard: the api-key header the "Routing Edge" rule injects. On the client-facing edge
