@@ -1454,12 +1454,12 @@ function SuggestionsController(ctx, sqs, env) {
               }, context.log);
               if (!isGroupMember) {
                 context.log.warn(`Auto-fix blocked for site ${siteId}: AEM Edge Freemium caller not in '${ASO_EDS_AUTOFIX_GROUP_NAME}' IMS group`);
-                return forbidden('unauthorized');
+                return forbidden(`Deploying auto-fixes on this Edge Delivery site requires membership of the '${ASO_EDS_AUTOFIX_GROUP_NAME}' IMS group`);
               }
               context.log.info(`Auto-fix allowed for site ${siteId}: AEM Edge Freemium caller in '${ASO_EDS_AUTOFIX_GROUP_NAME}' IMS group`);
             } catch (gateErr) {
               context.log.warn(`Auto-fix blocked for site ${siteId}: freemium authorization gate error: ${gateErr.message}`);
-              return forbidden('unauthorized');
+              return forbidden('Could not verify Edge Delivery auto-fix authorization; please try again');
             }
           }
         }

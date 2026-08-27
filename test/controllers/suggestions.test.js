@@ -5557,7 +5557,9 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(403);
       const body = await response.json();
-      expect(body.message).to.equal('unauthorized');
+      expect(body.message).to.match(
+        /requires membership of the 'ASO-EDS-Autofix-users' IMS group/,
+      );
       expect(context.log.warn).to.have.been.calledWithMatch(/Auto-fix blocked/);
     });
 
@@ -5585,7 +5587,9 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(403);
       const body = await response.json();
-      expect(body.message).to.equal('unauthorized');
+      expect(body.message).to.match(
+        /requires membership of the 'ASO-EDS-Autofix-users' IMS group/,
+      );
     });
 
     it('auto-fix suggestions allows through for AEM Edge PLG tier without active enrollment', async () => {
@@ -5669,7 +5673,9 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(403);
       const body = await response.json();
-      expect(body.message).to.equal('unauthorized');
+      expect(body.message).to.match(
+        /requires membership of the 'ASO-EDS-Autofix-users' IMS group/,
+      );
       expect(context.log.warn).to.have.been.calledWithMatch(/not in 'ASO-EDS-Autofix-users' IMS group/);
     });
 
@@ -5784,7 +5790,9 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(403);
       const body = await response.json();
-      expect(body.message).to.equal('unauthorized');
+      expect(body.message).to.match(
+        /Could not verify Edge Delivery auto-fix authorization/,
+      );
       expect(context.log.warn).to.have.been.calledWithMatch(/freemium authorization gate error/);
     });
 
