@@ -525,6 +525,7 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes': 'llmo/can_configure',
       'GET /sites/:siteId/llmo/cdn-onboard/akamai/config': 'llmo/can_configure',
       'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties': 'llmo/can_configure',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/versions': 'llmo/can_configure',
       'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan': 'llmo/can_configure',
       'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy': 'llmo/can_configure',
       'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate': 'llmo/can_configure',
