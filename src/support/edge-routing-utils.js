@@ -50,10 +50,9 @@ const PROBE_TIMEOUT_MS = 5000;
 const CDN_CALL_TIMEOUT_MS = 5000;
 
 /**
- * The registrable domain ("apex") of a hostname, resolved via the Public Suffix List (tldts), so
- * multi-part TLDs are handled correctly (e.g. "racq.com.au" -> "racq.com.au", "shop.example.co.uk"
- * -> "example.co.uk"). Returns null when the host has no registrable domain under the PSL (e.g.
- * "localhost" or an IP address).
+ * The registrable domain of a hostname via the Public Suffix List (tldts).
+ * Handles multi-part TLDs correctly (e.g. "racq.com.au" -> "racq.com.au").
+ * Returns null when there is no registrable domain (e.g. "localhost").
  */
 const registrableDomain = (host) => getDomain(host);
 
@@ -80,22 +79,19 @@ export function getHostnameWithoutWww(url, log) {
 }
 
 /**
- * Fetches `probeURL`, following its entire redirect chain, to find the host it actually serves
- * from. Never throws — a failure (network/timeout error, or a chain that lands outside the site's
- * domain) returns null and the caller falls back to the un-probed candidate.
+ * Fetches `probeURL`, following redirects, to find the host it actually serves from.
+ * Never throws: a failed probe or an off-domain landing host both return null.
  *
  * @param {string} probeURL - The URL to probe (must include scheme).
- * @param {string} rootHost - The site's apex hostname (lowercased). The chain's landing host must
- *   equal this or its www variant, otherwise it is treated as off-domain and ignored.
+ * @param {string} rootHost - The site's apex hostname (lowercased); the landing host must match
+ *   this or its www variant, or it's treated as off-domain.
  * @param {object} [log] - Logger.
  * @returns {Promise<string|null>} The final serving host, or null when undetermined.
  */
 async function followToServingHost(probeURL, rootHost, log) {
   let res;
   try {
-    // Use the same documented probe identity as probeSiteAndResolveDomain (below) rather than
-    // tracingFetch's default UA, so a WAF that treats product UAs differently behaves consistently
-    // across both probes in this module.
+    // Same probe UA as probeSiteAndResolveDomain below, for consistent WAF treatment.
     res = await fetch(probeURL, {
       method: 'GET',
       redirect: 'follow',
@@ -114,8 +110,7 @@ async function followToServingHost(probeURL, rootHost, log) {
     return null;
   }
 
-  // Only trust the landing host when it stays on the same registrable domain (apex ↔ www), never
-  // an unrelated host a redirect chain happened to end up on.
+  // Only trust a landing host on the same domain (apex ↔ www), never an unrelated one.
   const finalNoWww = finalHost.startsWith('www.') ? finalHost.slice(4) : finalHost;
   if (finalNoWww !== rootHost) {
     log?.info(`[edge-routing-utils] ${probeURL} landed off-domain at ${finalHost}; ignoring`);
@@ -126,21 +121,9 @@ async function followToServingHost(probeURL, rootHost, log) {
 }
 
 /**
- * Resolves the canonical origin host for a site's base URL: calculateForwardedHost's www
- * candidate, corrected for a Public-Suffix-List apex check and confirmed by following its
- * redirect chain.
- *
- * calculateForwardedHost appends "www." to a bare apex, leaving an existing www host or a real
- * subdomain unchanged — but its bare-apex check is a dot-count heuristic that misclassifies a
- * multi-part-TLD apex (e.g. "racq.com.au", 2 dots) as a subdomain and skips the www rewrite; that
- * one case is corrected here via the Public Suffix List (tldts), which resolves registrable
- * domains correctly regardless of TLD shape.
- *
- * For a bare apex, the resulting www candidate is then fetched with redirects followed to find
- * where it actually serves from — a www host that 301s to the apex (the gentingsingapore.com
- * onboarding failure) resolves to the apex, and vice versa. If that probe fails outright
- * (network/DNS error, timeout, blocked) or lands outside the site's domain, the candidate
- * calculateForwardedHost/the PSL check decided on is kept as-is.
+ * Resolves the canonical origin host: calculateForwardedHost's www candidate, corrected for
+ * compound TLDs via the PSL, then confirmed by following its redirect chain (falls back to the
+ * candidate itself if the probe fails or lands off-domain).
  *
  * @param {string} baseURL - Site base URL (must include scheme).
  * @param {object} log - Logger.

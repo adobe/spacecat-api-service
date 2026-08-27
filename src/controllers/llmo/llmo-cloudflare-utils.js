@@ -77,13 +77,10 @@ export const routePatternHostGlob = (pattern) => pattern
   .toLowerCase();
 
 /**
- * Replaces only the host portion of a Cloudflare route pattern, leaving its scheme (if any) and
- * path (if any) exactly as supplied. Cloudflare treats scheme-specific, scheme-less, root-only
- * (no path at all), and wildcard-path patterns differently, so this never introduces a scheme that
- * was not present, drops one that was, or synthesizes a "/*" path for a pattern that had none.
+ * Replaces only the host portion of a Cloudflare route pattern.
+ * Leaves the scheme (if any) and path (if any, or lack thereof) exactly as supplied.
  *
- * @param {string} pattern - The original route pattern (may include a leading scheme, may have no
- *   path at all). Assumed to have a non-wildcard host, per the caller's guard.
+ * @param {string} pattern - The original route pattern (may have no path at all).
  * @param {string} newHost - The replacement host (no scheme, no path).
  * @returns {string} `pattern` with only its host replaced.
  */
