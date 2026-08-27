@@ -1,3 +1,29 @@
+# [1.771.0](https://github.com/adobe/spacecat-api-service/compare/v1.770.0...v1.771.0) (2026-08-27)
+
+
+### Features
+
+* **entitlements:** allow S2S consumers with entitlement:create to provision entitlements (SITES-50526) ([#3148](https://github.com/adobe/spacecat-api-service/issues/3148)) ([89256e6](https://github.com/adobe/spacecat-api-service/commit/89256e6e6cd1bc4c1e5142a914cb93ebafb306ae))
+
+# [1.770.0](https://github.com/adobe/spacecat-api-service/compare/v1.769.0...v1.770.0) (2026-08-27)
+
+
+### Features
+
+* **auth:** ASO composite resource key — opportunity-type ReBAC scoping (WIP) ([#3085](https://github.com/adobe/spacecat-api-service/issues/3085)) ([0659935](https://github.com/adobe/spacecat-api-service/commit/0659935b4fed441fa56c7bfdd3131c3a6680b9da)), closes [adobe/mysticat-architecture#249](https://github.com/adobe/mysticat-architecture/issues/249) [#1883](https://github.com/adobe/spacecat-api-service/issues/1883) [#923](https://github.com/adobe/spacecat-api-service/issues/923) [#1883](https://github.com/adobe/spacecat-api-service/issues/1883)
+
+# [1.769.0](https://github.com/adobe/spacecat-api-service/compare/v1.768.0...v1.769.0) (2026-08-27)
+
+
+### Bug Fixes
+
+* honor prompt origin for S2S service callers on brand prompt create (LLMO-7204) ([#3145](https://github.com/adobe/spacecat-api-service/issues/3145)) ([074ecc3](https://github.com/adobe/spacecat-api-service/commit/074ecc3e3b30e70edb2cd93e81c236b09da17311))
+
+
+### Features
+
+* allow prerender-cache-cleanup via the run-global-import Slack command ([#3146](https://github.com/adobe/spacecat-api-service/issues/3146)) ([53f4801](https://github.com/adobe/spacecat-api-service/commit/53f4801c101a65c35f3b1be899be674c14686dc1))
+
 # [1.768.0](https://github.com/adobe/spacecat-api-service/compare/v1.767.1...v1.768.0) (2026-08-27)
 
 

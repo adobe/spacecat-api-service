@@ -31,6 +31,7 @@ import { EntitlementDto } from '../dto/entitlement.js';
 import { SiteEnrollmentDto } from '../dto/site-enrollment.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { ensurePromptSuggestionSchedules } from '../support/prompt-suggestion-schedules.js';
+import { CAP_ENTITLEMENT_CREATE } from '../routes/capability-constants.js';
 
 const VALID_PRODUCT_CODES = new Set(Object.values(EntitlementModel.PRODUCT_CODES));
 const FREE_TRIAL_TIER = EntitlementModel.TIERS.FREE_TRIAL;
@@ -96,6 +97,25 @@ function EntitlementsController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
+   * Whether the caller may create/ensure entitlements: a full admin (bypass, no DB hit),
+   * or an S2S consumer holding `entitlement:create` (enforced upstream by `s2sAuthWrapper`,
+   * re-checked here at Layer 2 via a fresh DB fetch). The S2S decision is audit-logged once
+   * — this provisions billable state. SITES-50526.
+   * @param {object} log - Request logger.
+   * @returns {Promise<boolean>}
+   */
+  const hasEntitlementCreateAccess = async (log) => {
+    if (accessControlUtil.hasAdminAccess()) {
+      return true;
+    }
+    const {
+      allowed, reason, clientId, consumerId,
+    } = await accessControlUtil.hasS2SCapability(CAP_ENTITLEMENT_CREATE);
+    log.info(`[s2s] entitlement:create ${allowed ? 'granted' : 'denied'} clientId=${clientId || 'n/a'} consumerId=${consumerId || 'n/a'} reason=${reason}`);
+    return allowed;
+  };
+
+  /**
    * Resolves the acting identity for audit-trail logging. For most auth paths
    * `profile.email` carries the IMS user GUID (see access-control-util.js);
    * falls back to the profile name and finally to 'system' when unauthenticated.
@@ -147,8 +167,8 @@ function EntitlementsController(ctx) {
    * @returns {Promise<Response>} Created entitlement response.
    */
   const createEntitlement = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can create entitlements');
+    if (!await hasEntitlementCreateAccess(context.log)) {
+      return forbidden('Insufficient permissions to create entitlements');
     }
     const { organizationId } = context.params;
     const {
@@ -190,10 +210,9 @@ function EntitlementsController(ctx) {
    * entitlement is created. The operation is idempotent — repeating the call
    * returns the same entitlement + enrollment without duplicating rows.
    *
-   * Admin-only. The route is intentionally absent from
-   * `routes/required-capabilities.js` and listed in `INTERNAL_ROUTES` so S2S
-   * consumers are denied by default (matches the parallel
-   * `POST /organizations/:organizationId/entitlements` admin-only contract).
+   * Admin-or-S2S: full admins pass, as do S2S consumers holding `entitlement:create`
+   * (see {@link hasEntitlementCreateAccess}). Matches the parallel
+   * `POST /organizations/:organizationId/entitlements` contract (SITES-50526).
    *
    * Distinct from `POST /sites/:siteId/site-enrollments`
    * (SiteEnrollmentsController.createPlgEnrollment), which is a narrower,
@@ -206,8 +225,8 @@ function EntitlementsController(ctx) {
    * @returns {Promise<Response>} Created entitlement + site enrollment response.
    */
   const createSiteEntitlement = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can ensure entitlements for a site');
+    if (!await hasEntitlementCreateAccess(context.log)) {
+      return forbidden('Insufficient permissions to ensure entitlements for a site');
     }
     const { siteId } = context.params;
     const {

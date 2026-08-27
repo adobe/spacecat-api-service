@@ -155,8 +155,8 @@ const routeFacsCapabilities = {
     'POST /sites', // hasAdminAccess
     'DELETE /sites/:siteId', // restricted (always 403)
     'PATCH /sites/:siteId/:auditType', // hasAdminAccess (sites-audits-toggle)
-    'POST /sites/:siteId/site-enrollments', // hasAdminAccess
-    'POST /sites/:siteId/entitlements', // hasAdminAccess
+    'POST /sites/:siteId/site-enrollments', // hasEntitlementCreateAccess (admin || S2S cap)
+    'POST /sites/:siteId/entitlements', // hasEntitlementCreateAccess (admin || S2S cap)
     // Prompt-suggestion schedule (re-)provisioning — admin-or-S2S (dedicated
     // promptSuggestionSchedule:write capability); not a customer FACS surface.
     'POST /sites/:siteId/prompt-suggestion-schedules', // authorizeWrite (admin || S2S cap)
@@ -164,8 +164,8 @@ const routeFacsCapabilities = {
     'DELETE /projects/:projectId', // hasAdminAccess
     'POST /organizations', // hasAdminAccess
     'DELETE /organizations/:organizationId', // restricted (always 403)
-    'POST /organizations/:organizationId/entitlements', // hasAdminAccess
-    'PATCH /organizations/:organizationId/entitlements', // hasAdminAccess
+    'POST /organizations/:organizationId/entitlements', // hasEntitlementCreateAccess (admin || S2S cap)
+    'PATCH /organizations/:organizationId/entitlements', // hasS2SAdminAccess (S2S-admin only)
     'PUT /organizations/:organizationId/feature-flags/:product/:flagName', // hasAdminAccess
     'DELETE /organizations/:organizationId/feature-flags/:product/:flagName', // hasAdminAccess
     'POST /plg/records', // hasAdminAccess
@@ -1282,6 +1282,35 @@ const routeFacsCapabilities = {
    */
   PRODUCTS_FACS_SECONDARY_RESOURCE: {
     LLMO: { resourceType: 'site', aliases: ['siteId'], resolver: 'llmoSiteToBrands' },
+  },
+
+  /**
+   * Per-product COMPOSITE primary resource (opt-in). When the PRIMARY resource resolves
+   * for a listed product, `facsWrapper` delegates the grant decision to the resolver named
+   * by `resolver` (registered in `compositeResolvers`, see
+   * `src/support/facs-composite-resolvers.js`) instead of the plain state-layer read — for a
+   * product whose primary resource is scoped by an extra qualifier.
+   *
+   * ASO: the `site` primary is scoped by an opportunity-type qualifier
+   * (`facs_access_mappings.composite_key_value_1`; 'all' = site-wide). `asoOpportunityComposite`
+   * enforces (site × opportunity-type): opportunity-item routes grant on 'all' OR the
+   * opportunity's own type; the opportunity list defers to the controller for result-filtering;
+   * every other ASO site route grants on any active site binding carrying the capability.
+   * See mysticat-architecture/platform/decisions/rebac-composite-resource-key.md.
+   */
+  PRODUCTS_FACS_COMPOSITE_RESOURCE: {
+    // `compositeKeySlots` is the DEFINITIVE, ordered list of composite scope
+    // dimensions a product owns. Index i maps 1:1 to DB columns
+    // composite_key_type_<i+1> / composite_key_value_<i+1>: slot 1 (ASO →
+    // 'opportunity') is fixed here, NOT client-chosen, so it can never be
+    // repurposed and a future slot 2 (a different entity) can't be cross-wired
+    // with it. The API anchors compositeKeyType<N> to these values on write.
+    // Products absent from this map accept no composite key (stored ('all','all')).
+    ASO: {
+      resourceType: 'site',
+      resolver: 'asoOpportunityComposite',
+      compositeKeySlots: ['opportunity'],
+    },
   },
 
   /**

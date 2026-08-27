@@ -6813,11 +6813,14 @@ V2PromptInput:
       default: human
       description: >-
         Who authored the prompt's text. SERVICE-PRINCIPAL-ONLY and read-only for
-        end users: a user-authenticated request (IMS/JWT) has this field IGNORED
+        end users: an end-user request (IMS/JWT session) has this field IGNORED
         (never rejected) and the value derived as `human`; only a service
-        principal (e.g. the generation pipeline) may assert it, validated against
-        the enum. It is never patched on update — it is fixed by the writer that
-        created the row (origin-dimension.md §3).
+        principal may assert it, validated against the enum. A service principal
+        is an S2S consumer/admin or a scoped/legacy API key — e.g. the DRS
+        generation pipeline, which posts `origin: ai`. Note an S2S caller
+        authenticates with a JWT, so the principal is resolved from the token's
+        S2S claims, not the auth type alone. It is never patched on update — it is
+        fixed by the writer that created the row (origin-dimension.md §3).
     intent:
       type: string
       description: >-
@@ -13932,6 +13935,23 @@ StateAccessMapping:
     resourceId:
       type: string
       example: '11111111-2222-4333-9444-555555555555'
+    compositeKeyType1:
+      type: string
+      description: |
+        Composite-key slot 1 *type* (DB `composite_key_type_1`) — the scope
+        dimension the binding is narrowed by. Product-anchored (ASO →
+        `opportunity`); `all` is the sentinel meaning no composite scoping. NOT
+        NULL server-side (defaults to `all`), so it is always present.
+      example: opportunity
+    compositeKeyValue1:
+      type: string
+      description: |
+        Composite-key slot 1 *value* (DB `composite_key_value_1`) paired with
+        `compositeKeyType1` (e.g. an opportunity type such as `security`). `all`
+        means every value in the dimension (site-wide). NOT NULL server-side
+        (defaults to `all`). Matched exactly and case-sensitively against the live
+        `Opportunity.type` at enforcement — send the exact type string.
+      example: security
     imsOrgId:
       type: string
       example: ABC123@AdobeOrg
@@ -13982,6 +14002,24 @@ StateAccessMappingCreateRequest:
     resourceId:
       type: string
       example: '11111111-2222-4333-9444-555555555555'
+    compositeKeyType1:
+      type: string
+      description: |
+        Optional composite-key slot 1 *type* (mirrors DB `composite_key_type_1`).
+        Anchored per product: when sent it MUST equal the product's slot-1
+        dimension (ASO → `opportunity`) or the request is rejected; omit to have it
+        filled from config. Products without composite scoping reject a non-`all`
+        value here (an explicit `all` is accepted as a no-op).
+      example: opportunity
+    compositeKeyValue1:
+      type: string
+      description: |
+        Composite-key slot 1 *value* (mirrors DB `composite_key_value_1`) paired
+        with `compositeKeyType1` (e.g. `security`). Omit — or send `all` — to scope
+        to every value in the dimension; defaults to `all` server-side. Trimmed on
+        write and matched exactly and case-sensitively against the live
+        `Opportunity.type` at enforcement — send the exact type string.
+      example: security
     grantedCapabilities:
       type: array
       minItems: 1
