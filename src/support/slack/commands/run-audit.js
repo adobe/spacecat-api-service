@@ -26,24 +26,11 @@ import {
   postSiteNotFoundMessage,
 } from '../../../utils/slack/base.js';
 
-import { triggerAuditForSite } from '../../utils.js';
+import { isOffsiteAuditType, triggerAuditForSite } from '../../utils.js';
 
 const PHRASES = ['run audit'];
 const LHS_MOBILE = 'lhs-mobile';
 const PRERENDER = 'prerender';
-
-// Offsite Opportunities audit types (LLMO-6973). Structured `audit_orchestration_start` /
-// `audit_orchestration_spacecat_request_dispatched` logging below is gated on this list so
-// every other audit type's existing behavior and log lines are left completely unchanged —
-// this command dispatches every audit type in the system through the same shared code path.
-const OFFSITE_AUDIT_TYPES = [
-  'offsite-brand-presence',
-  'cited-analysis',
-  'reddit-analysis',
-  'youtube-analysis',
-  'wikipedia-analysis',
-];
-const isOffsiteAuditType = (auditType) => OFFSITE_AUDIT_TYPES.includes(auditType);
 
 // Structured logging taxonomy constants (05-logging.md, "Structured logging taxonomy").
 // `domain` is a fixed marker on every line in this family. `audit` maps this command's
@@ -326,8 +313,12 @@ function RunAuditCommand(context) {
             );
             log.info(`${getQueuedOffsiteMessage(auditType)} domain=${OFFSITE_DOMAIN} audit=${toOffsiteAuditLogType(auditType)} event=audit_orchestration_spacecat_request_dispatched outcome=success peer=spacecat-audit-worker direction=outbound siteId=${site.getId()}`);
           } catch (error) {
+            // Own this failure fully here (structured log + user-facing reply) rather than
+            // re-throwing into the generic outer catch below, which would log a second,
+            // unstructured "Error running audit..." line for the same single SQS failure
+            // (catch-log-throw) and inflate error counts for on-call triage.
             log.error(`Failed to queue offsite analysis for site domain=${OFFSITE_DOMAIN} audit=${toOffsiteAuditLogType(auditType)} event=audit_orchestration_spacecat_request_dispatched outcome=failure peer=spacecat-audit-worker direction=outbound siteId=${site.getId()} reason=sqs_send_failed ${renderErrorField('errorName', error.name)} ${renderErrorField('errorMessage', error.message)}`);
-            throw error;
+            await postErrorMessage(say, error);
           }
         } else {
           await triggerAuditForSite(

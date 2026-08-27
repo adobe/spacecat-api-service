@@ -322,19 +322,17 @@ export const sendAuditMessages = async (
  * @param {Object} lambdaContext - The Lambda context object.
  * @return {Promise} - A promise representing the audit trigger operation.
  */
-// Offsite Opportunities audit types (LLMO-6973). Kept in sync with the identically-named
-// list in src/support/slack/commands/run-audit.js. Duplicated rather than imported to avoid
-// a shared-utils-style import cycle risk and to keep this shared framework module
-// (triggerAuditForSite/sendAuditMessage, used by every audit type in the system) free of any
-// dependency on a single Slack command's module.
-const OFFSITE_AUDIT_TYPES = [
+// Offsite Opportunities audit types (LLMO-6973). Single source of truth — imported by
+// src/support/slack/commands/run-audit.js, which already depends on this module for
+// triggerAuditForSite, so importing this predicate back into it introduces no new cycle.
+export const OFFSITE_AUDIT_TYPES = [
   'offsite-brand-presence',
   'cited-analysis',
   'reddit-analysis',
   'youtube-analysis',
   'wikipedia-analysis',
 ];
-const isOffsiteAuditType = (auditType) => OFFSITE_AUDIT_TYPES.includes(auditType);
+export const isOffsiteAuditType = (auditType) => OFFSITE_AUDIT_TYPES.includes(auditType);
 
 export const triggerAuditForSite = async (
   site,

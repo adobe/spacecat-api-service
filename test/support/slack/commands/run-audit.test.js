@@ -1386,7 +1386,7 @@ describe('RunAuditCommand', () => {
       );
     });
 
-    it('logs a structured failure line (additive to the existing log.error/say) when the SQS send fails for an offsite audit type', async () => {
+    it('logs a single structured failure line and replies, without re-throwing into the generic outer catch, when the SQS send fails for an offsite audit type', async () => {
       const site = { getId: () => '123' };
       dataAccessStub.Site.findByBaseURL.resolves(site);
       dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('youtube-analysis', ['LLMO']));
@@ -1400,11 +1400,13 @@ describe('RunAuditCommand', () => {
       expect(context.log.error).to.have.been.calledWith(
         'Failed to queue offsite analysis for site domain=offsite audit=youtube event=audit_orchestration_spacecat_request_dispatched outcome=failure peer=spacecat-audit-worker direction=outbound siteId=123 reason=sqs_send_failed errorName=SqsError errorMessage="SQS unavailable"',
       );
-      // Existing behavior preserved: the generic catch still logs and replies with the error.
-      expect(context.log.error).to.have.been.calledWith(
+      // The offsite dispatch failure is not re-thrown, so the generic outer catch's
+      // unstructured "Error running audit..." line must not also fire for the same failure
+      // (catch-log-throw would otherwise double-count this as two ERROR lines).
+      expect(context.log.error).to.not.have.been.calledWith(
         sinon.match(/Error running audit youtube-analysis for site/),
-        sendError,
       );
+      expect(context.log.error).to.have.been.calledOnce;
       expect(slackContext.say).to.have.been.calledWith(':nuclear-warning: Oops! Something went wrong: SQS unavailable');
     });
 
