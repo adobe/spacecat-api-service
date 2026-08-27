@@ -50,6 +50,10 @@ const PROBE_TIMEOUT_MS = 5000;
 const CDN_CALL_TIMEOUT_MS = 5000;
 const MAX_REDIRECT_HOPS = 3;
 
+// Combined product identity for the canonical-host probe. Some WAF-protected sites (e.g.
+// www.indiafirstlife.com) 400 the bare EDGE_OPTIMIZE_USER_AGENT but allow this combined one.
+const CANONICAL_HOST_PROBE_USER_AGENT = 'Spacecat/1.0 AdobeEdgeOptimize/1.0';
+
 // HTTP status codes that carry a Location header we follow when probing for the serving host.
 const REDIRECT_STATUSES = new Set([301, 302, 307, 308]);
 
@@ -108,12 +112,11 @@ async function followToServingHost(probeURL, rootHost, log) {
   for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop += 1) {
     let res;
     try {
-      // Same probe UA as probeSiteAndResolveDomain below, for consistent WAF treatment.
       // eslint-disable-next-line no-await-in-loop -- each hop depends on the previous Location
       res = await fetch(currentURL, {
         method: 'GET',
         redirect: 'manual',
-        headers: { 'User-Agent': EDGE_OPTIMIZE_USER_AGENT },
+        headers: { 'User-Agent': CANONICAL_HOST_PROBE_USER_AGENT },
         timeout: PROBE_TIMEOUT_MS,
       });
     } catch (e) {
