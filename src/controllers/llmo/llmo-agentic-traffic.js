@@ -20,6 +20,18 @@ import { generateIsoWeekRange, getWeekDateRange } from './llmo-brand-presence.js
 import { parseAgentTypes } from './llmo-agent-types.js';
 import { checkDateRange } from './traffic-date-range.js';
 import { cachedOk } from '../../support/cached-response.js';
+import {
+  rotationContext,
+  shouldRotate,
+  rotatingPostgrest,
+  computeWindow,
+} from './traffic-rotation.js';
+
+// Read-time rotation of the two frozen demo sites' agentic data lives entirely
+// in the wrapped PostgREST client injected by withAgenticTrafficAuth; handlers
+// call client.rpc(...) unaware of rotation. The one exception is /weeks, whose
+// window is a pure function of now() (not a client fetch) — it still reads this.
+const rotationCtx = (siteId) => rotationContext(siteId, 'agentic');
 
 // Site-scoped agentic traffic handlers. Queries mysticat-data-service via PostgREST.
 
@@ -421,7 +433,12 @@ async function withAgenticTrafficAuth(context, getSiteAndValidateAccess, handler
     return badRequest(error.message);
   }
 
-  return handlerFn(context, Site.postgrestService, siteId, siteContext);
+  // Demo sites read through a rotating client (frozen data → rolling window);
+  // every other site gets the real client unchanged (zero behavior change).
+  const client = shouldRotate(siteId, 'agentic')
+    ? rotatingPostgrest(Site.postgrestService, siteId, 'agentic')
+    : Site.postgrestService;
+  return handlerFn(context, client, siteId, siteContext);
 }
 
 /**
@@ -436,7 +453,8 @@ export function createAgenticTrafficKpisHandler(getSiteAndValidateAccess) {
       'kpis',
       async (ctx, client, siteId) => {
         const parsed = parseAgenticTrafficParams(ctx);
-        const { data, error } = await client.rpc('rpc_agentic_traffic_kpis', buildRpcParams(siteId, parsed));
+        const rpcParams = buildRpcParams(siteId, parsed);
+        const { data, error } = await client.rpc('rpc_agentic_traffic_kpis', rpcParams);
         if (error) {
           ctx.log.error(`Agentic traffic kpis PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic KPIs');
@@ -510,10 +528,8 @@ export function createAgenticTrafficByRegionHandler(getSiteAndValidateAccess) {
       'by-region',
       async (ctx, client, siteId) => {
         const parsed = parseAgenticTrafficParams(ctx);
-        const { data, error } = await client.rpc(
-          'rpc_agentic_traffic_by_region',
-          buildRpcParams(siteId, parsed),
-        );
+        const rpcParams = buildRpcParams(siteId, parsed);
+        const { data, error } = await client.rpc('rpc_agentic_traffic_by_region', rpcParams);
         if (error) {
           ctx.log.error(`Agentic traffic by-region PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic by region');
@@ -542,10 +558,7 @@ export function createAgenticTrafficByCategoryHandler(getSiteAndValidateAccess) 
         // by_category groups by category — no p_category_name parameter.
         const rpcParams = buildRpcParams(siteId, parsed);
         delete rpcParams.p_category_name;
-        const { data, error } = await client.rpc(
-          'rpc_agentic_traffic_by_category',
-          rpcParams,
-        );
+        const { data, error } = await client.rpc('rpc_agentic_traffic_by_category', rpcParams);
         if (error) {
           ctx.log.error(`Agentic traffic by-category PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic by category');
@@ -571,10 +584,8 @@ export function createAgenticTrafficByPageTypeHandler(getSiteAndValidateAccess) 
       'by-page-type',
       async (ctx, client, siteId) => {
         const parsed = parseAgenticTrafficParams(ctx);
-        const { data, error } = await client.rpc(
-          'rpc_agentic_traffic_by_page_type',
-          buildRpcParams(siteId, parsed),
-        );
+        const rpcParams = buildRpcParams(siteId, parsed);
+        const { data, error } = await client.rpc('rpc_agentic_traffic_by_page_type', rpcParams);
         if (error) {
           ctx.log.error(`Agentic traffic by-page-type PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic by page type');
@@ -600,10 +611,8 @@ export function createAgenticTrafficByStatusHandler(getSiteAndValidateAccess) {
       'by-status',
       async (ctx, client, siteId) => {
         const parsed = parseAgenticTrafficParams(ctx);
-        const { data, error } = await client.rpc(
-          'rpc_agentic_traffic_by_status',
-          buildRpcParams(siteId, parsed),
-        );
+        const rpcParams = buildRpcParams(siteId, parsed);
+        const { data, error } = await client.rpc('rpc_agentic_traffic_by_status', rpcParams);
         if (error) {
           ctx.log.error(`Agentic traffic by-status PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic by status');
@@ -1027,9 +1036,10 @@ export function createAgenticTrafficFilterDimensionsHandler(getSiteAndValidateAc
       'filter-dimensions',
       async (ctx, client, siteId) => {
         const parsed = parseAgenticTrafficParams(ctx);
+        const rpcParams = buildRpcParams(siteId, parsed);
         const { data, error } = await client.rpc(
           'rpc_agentic_traffic_distinct_filters',
-          buildRpcParams(siteId, parsed),
+          rpcParams,
         );
         if (error) {
           ctx.log.error(`Agentic traffic filter-dimensions PostgREST error: ${error.message}`);
@@ -1098,6 +1108,12 @@ export function createAgenticTrafficWeeksHandler(getSiteAndValidateAccess) {
       getSiteAndValidateAccess,
       'weeks',
       async (ctx, client, siteId) => {
+        const rot = rotationCtx(siteId);
+        if (rot.rotate) {
+          // Rolling window is a pure function of now() — keeps /weeks consistent
+          // with the relabeled trend without touching the frozen min/max dates.
+          return cachedOk({ weeks: computeWindow(rot.now).weeks });
+        }
         const [minResult, maxResult] = await Promise.all([
           client
             .from('agentic_traffic')

@@ -187,7 +187,7 @@ const SUB_WS = 'subworkspace-ws-777';
 
 function makeBrand(subworkspaceId) {
   return {
-    getSemrushWorkspaceId: () => subworkspaceId,
+    getSemrushSubWorkspaceId: () => subworkspaceId,
   };
 }
 

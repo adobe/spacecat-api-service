@@ -176,7 +176,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     clock.restore();
 
     const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Outcome: *DASHBOARD_READY*');
+    expect(output).to.include('have completed projections');
     expect(output).to.include('Dashboard-ready: *1/1*');
     expect(output).to.include('Missing raw projection: *0*');
     expect(output).to.include('Missing daily refresh: *0*');
@@ -210,7 +210,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     clock.restore();
 
     const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Outcome: *DASHBOARD_READY*');
+    expect(output).to.include('have completed projections');
     expect(output).to.include('Missing raw projection: *0*');
     expect(output).to.include('Missing daily refresh: *0*');
   });
@@ -229,7 +229,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     clock.restore();
 
     const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Outcome: *NO_DB_ROWS_FOR_DATE*');
+    expect(output).to.not.include('have completed projections');
     expect(output).to.include('Missing raw projection: *2*');
   });
 
@@ -381,7 +381,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     clock.restore();
 
     const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Outcome: *DASHBOARD_READY*');
+    expect(output).to.include('have completed projections');
     expect(output).to.not.include('Missing weekly refresh');
   });
 
@@ -500,7 +500,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     clock.restore();
 
     const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Outcome: *DASHBOARD_READY*');
+    expect(output).to.include('have completed projections');
     // daily query: 1 transient failure + 1 retry; then weekly + raw queries.
     expect(flaky.from.callCount).to.equal(4);
   });
@@ -580,7 +580,7 @@ describe('CheckAgenticTrafficDbStatusCommand', () => {
     const calls = postgrest.from.callCount;
     expect(calls).to.equal(6);
     const output = slackContext.say.args.flat().join('\n');
-    expect(output).to.include('Outcome: *DASHBOARD_READY*');
+    expect(output).to.include('have completed projections');
     expect(output).to.include('Dashboard-ready: *250/250*');
   });
 });

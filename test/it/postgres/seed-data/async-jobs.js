@@ -15,10 +15,17 @@
  *
  * JOB_1: A completed preflight job referencing SITE_1.
  *
+ * SERENITY_CLASSIFY_JOB: a COMPLETED serenity-classify-prompts job owned by
+ * BRAND_1 — exercises GET .../serenity/prompts/jobs/{jobId} (serenity-docs#33
+ * Layer 1). Its metadata carries `brandId` (the ownership guard the poll
+ * endpoint enforces) plus a `promiseToken` the poll response must NOT leak.
+ *
  * Note: AsyncJob only exists in v3 (PostgreSQL) — no DynamoDB equivalent.
  *
  * Format: snake_case (v3 / PostgreSQL / PostgREST)
  */
+export const SERENITY_CLASSIFY_JOB_ID = 'eeee3333-3333-4333-a333-333333333333';
+
 export const asyncJobs = [
   {
     id: 'eeee2222-2222-4222-a222-222222222222',
@@ -46,5 +53,30 @@ export const asyncJobs = [
     },
     started_at: '2025-01-20T10:00:00.000Z',
     ended_at: '2025-01-20T10:05:00.000Z',
+  },
+  {
+    id: SERENITY_CLASSIFY_JOB_ID,
+    status: 'COMPLETED',
+    result: {
+      created: [],
+      skipped: [],
+      failed: [],
+      published: true,
+      pendingClassificationCount: 0,
+      requeuedJobId: null,
+    },
+    metadata: {
+      mode: 'create',
+      authMode: 'subworkspace',
+      // BRAND_1_ID — the ownership guard on the poll endpoint compares this to the
+      // authorized brand and 404s a mismatch. Kept as a literal here so this seed
+      // file has no cross-import dependency on seed-ids.js.
+      brandId: 'ab111111-1111-4111-b111-111111111111',
+      jobType: 'serenity-classify-prompts',
+      // Must never appear in the poll response (secret-free contract).
+      promiseToken: { promise_token: 'do-not-leak' },
+    },
+    started_at: '2025-02-01T09:00:00.000Z',
+    ended_at: '2025-02-01T09:01:00.000Z',
   },
 ];

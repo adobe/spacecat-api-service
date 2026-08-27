@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        environment: [prod] # We can add dev here to run tests on both ci & v1 endpoints
+        environment: [prod, dev] # dev exercises the audit-policy S2S suite (SITES-48671)
 
     steps:
       - name: Checkout code
@@ -38,4 +38,6 @@ jobs:
           AEM_E2E_IMPORT_API_KEY_PROD: ${{ secrets.AEM_E2E_IMPORT_API_KEY_PROD }}
           AEM_E2E_IMPORT_API_KEY_DEV: ${{ secrets.AEM_E2E_IMPORT_API_KEY_DEV }}
           USER_API_KEY: ${{ secrets.USER_API_KEY }}
+          API_E2E_TESTS_CLIENT_ID_DEV: ${{ matrix.environment == 'dev' && secrets.API_E2E_TESTS_CLIENT_ID_DEV || '' }}
+          API_E2E_TESTS_CLIENT_SECRET_DEV: ${{ matrix.environment == 'dev' && secrets.API_E2E_TESTS_CLIENT_SECRET_DEV || '' }}
         run: npm run test-e2e

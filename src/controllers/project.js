@@ -29,6 +29,12 @@ import {
 import { ProjectDto } from '../dto/project.js';
 import { SiteDto } from '../dto/site.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { filterSitesForProductCode } from '../support/utils.js';
+import { listViewableResourceIds } from '../support/state-access-mapping-utils.js';
+import { requirePostgrestForFacsMappings } from '../support/postgrest-availability.js';
+import { isFacsRebacResource } from '../routes/facs-capabilities.js';
+
+const X_PRODUCT_HEADER = 'x-product';
 
 /**
  * Projects controller. Provides methods to create, read, update and delete projects.
@@ -51,7 +57,7 @@ function ProjectsController(ctx, env) {
     throw new Error('Environment object required');
   }
 
-  const { Project, Site } = dataAccess;
+  const { Project, Site, Organization } = dataAccess;
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
@@ -217,6 +223,11 @@ function ProjectsController(ctx, env) {
    */
   const getSitesByProjectId = async (context) => {
     const projectId = context.params?.projectId;
+    const { pathInfo } = context;
+    const productCode = pathInfo.headers[X_PRODUCT_HEADER];
+    if (!hasText(productCode)) {
+      return badRequest('Product code required');
+    }
 
     if (!isValidUUID(projectId)) {
       return badRequest('Project ID required');
@@ -231,9 +242,48 @@ function ProjectsController(ctx, env) {
       return forbidden('Only users belonging to the organization can view its project sites');
     }
 
+    const organization = await Organization.findById(project.getOrganizationId());
+    if (!organization) {
+      return notFound('Organization not found');
+    }
+
     const sites = await Site.allByProjectId(projectId);
 
-    return ok(sites.map((site) => SiteDto.toJSON(site)));
+    // Entitlement + enrollment filter (mirrors getSitesForOrganization): only surface
+    // sites the org has a valid entitlement for and is enrolled in for the requested
+    // product, and drop internal-tier entitlements for non-admin callers.
+    const filteredSites = await filterSitesForProductCode(
+      context,
+      organization,
+      sites,
+      productCode,
+      accessControlUtil,
+    );
+
+    // Cross-product bypass: only filter when the current product ReBAC-scopes
+    // `site` (ASO). Under LLMO, `site` is not a ReBAC resource, so skip the
+    // filter and return the project's full site list.
+    const facs = context.attributes?.facs;
+    const hasFACSCapability = facs?.enabled
+      && context.attributes?.authInfo?.hasFacsPermission?.(`${facs.product.toLowerCase()}/can_view`);
+    if (facs?.enabled && !hasFACSCapability && isFacsRebacResource(facs.product, 'site')) {
+      const unavailable = requirePostgrestForFacsMappings(context);
+      if (unavailable) {
+        return unavailable;
+      }
+      const viewable = await listViewableResourceIds(
+        context.dataAccess.services.postgrestClient,
+        {
+          imsOrgId: organization.getImsOrgId(),
+          product: facs.product,
+          resourceType: 'site',
+          subjectId: facs.subjectId,
+        },
+      );
+      return ok(filteredSites.filter((s) => viewable.has(s.getId())).map((s) => SiteDto.toJSON(s)));
+    }
+
+    return ok(filteredSites.map((site) => SiteDto.toJSON(site)));
   };
 
   /**

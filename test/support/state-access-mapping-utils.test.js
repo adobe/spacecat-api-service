@@ -19,9 +19,11 @@ import {
   listFacsAccessMappingAuditEvents,
   insertFacsAccessMappingAuditEvent,
   getFacsAccessMappingById,
+  getResourceImsOrgId,
   createFacsAccessMappings,
   revokeFacsAccessMappingById,
   updateFacsAccessMappingCapabilities,
+  listViewableResourceIds,
 } from '../../src/support/state-access-mapping-utils.js';
 
 /**
@@ -319,6 +321,40 @@ describe('state-access-mapping-utils helpers', () => {
       expect(client.fromCalls).to.have.length(0);
     });
 
+    it('defaults the composite-key qualifier columns to \'all\' when omitted', async () => {
+      const client = fakePostgrestClient({ insertResults: [{ data: [{ id: 'm1' }], error: null }] });
+      await createFacsAccessMappings(client, {
+        imsOrgId: 'org-1',
+        product: 'ASO',
+        resourceType: 'site',
+        resourceId: 'site-1',
+        grantedCapabilities: ['aso/can_edit'],
+        subjects: [{ type: 'user', id: 'A@AdobeID' }],
+      });
+      expect(client.insertArgs[0]).to.include({
+        composite_key_type_1: 'all',
+        composite_key_value_1: 'all',
+      });
+    });
+
+    it('inserts the provided composite-key qualifier columns', async () => {
+      const client = fakePostgrestClient({ insertResults: [{ data: [{ id: 'm1' }], error: null }] });
+      await createFacsAccessMappings(client, {
+        imsOrgId: 'org-1',
+        product: 'ASO',
+        resourceType: 'site',
+        resourceId: 'site-1',
+        grantedCapabilities: ['aso/can_edit'],
+        subjects: [{ type: 'user', id: 'A@AdobeID' }],
+        compositeKeyType1: 'opportunity',
+        compositeKeyValue1: 'security',
+      });
+      expect(client.insertArgs[0]).to.include({
+        composite_key_type_1: 'opportunity',
+        composite_key_value_1: 'security',
+      });
+    });
+
     it('returns immediately when subjects is not an array', async () => {
       const client = fakePostgrestClient();
       const out = await createFacsAccessMappings(client, {
@@ -539,6 +575,73 @@ describe('state-access-mapping-utils helpers', () => {
         throw new Error('expected to throw');
       } catch (e) {
         expect(e.message).to.equal('getFacsAccessMappingById failed: boom');
+      }
+    });
+  });
+
+  describe('getResourceImsOrgId', () => {
+    // Per-table fake: `.from(table).select().eq().limit()` resolves to the
+    // result queued for that table (sites/brands, then organizations).
+    function perTableClient(byTable) {
+      return {
+        from(table) {
+          const result = byTable[table] ?? { data: [], error: null };
+          const builder = {
+            select: () => builder,
+            eq: () => builder,
+            limit: () => Promise.resolve(result),
+          };
+          return builder;
+        },
+      };
+    }
+
+    it('resolves brand → organization_id → ims_org_id', async () => {
+      const client = perTableClient({
+        brands: { data: [{ organization_id: 'org-uuid-1' }], error: null },
+        organizations: { data: [{ ims_org_id: 'ABC@AdobeOrg' }], error: null },
+      });
+      const out = await getResourceImsOrgId(client, { resourceType: 'brand', resourceId: 'b1' });
+      expect(out).to.equal('ABC@AdobeOrg');
+    });
+
+    it('resolves site via the sites table', async () => {
+      const client = perTableClient({
+        sites: { data: [{ organization_id: 'org-uuid-2' }], error: null },
+        organizations: { data: [{ ims_org_id: 'DEF@AdobeOrg' }], error: null },
+      });
+      const out = await getResourceImsOrgId(client, { resourceType: 'site', resourceId: 's1' });
+      expect(out).to.equal('DEF@AdobeOrg');
+    });
+
+    it('returns null for an unknown resource type (not ReBAC-scoped)', async () => {
+      const client = perTableClient({});
+      const out = await getResourceImsOrgId(client, { resourceType: 'widget', resourceId: 'x' });
+      expect(out).to.equal(null);
+    });
+
+    it('returns null when the resource row is missing', async () => {
+      const client = perTableClient({ brands: { data: [], error: null } });
+      const out = await getResourceImsOrgId(client, { resourceType: 'brand', resourceId: 'nope' });
+      expect(out).to.equal(null);
+    });
+
+    it('returns null when the org has no ims_org_id', async () => {
+      const client = perTableClient({
+        brands: { data: [{ organization_id: 'org-uuid-3' }], error: null },
+        organizations: { data: [{ ims_org_id: null }], error: null },
+      });
+      const out = await getResourceImsOrgId(client, { resourceType: 'brand', resourceId: 'b1' });
+      expect(out).to.equal(null);
+    });
+
+    it('throws when the resource lookup errors', async () => {
+      const client = perTableClient({ brands: { data: null, error: { message: 'boom' } } });
+      try {
+        await getResourceImsOrgId(client, { resourceType: 'brand', resourceId: 'b1' });
+        throw new Error('expected to throw');
+      } catch (e) {
+        expect(e.message).to.contain('getResourceImsOrgId failed resolving brand: boom');
       }
     });
   });
@@ -860,6 +963,65 @@ describe('state-access-mapping-utils helpers', () => {
       } catch (e) {
         expect(e.message).to.equal('updateFacsAccessMappingCapabilities failed: permission denied');
       }
+    });
+  });
+
+  describe('listViewableResourceIds', () => {
+    it('returns resource_ids granted can_view, skipping rows without it', async () => {
+      const client = fakePostgrestClient({
+        readResult: {
+          data: [
+            { resource_id: 'r-view', granted_capabilities: ['llmo/can_configure', 'llmo/can_view'] },
+            { resource_id: 'r-noview', granted_capabilities: ['llmo/can_configure'] },
+            { resource_id: 'r-null', granted_capabilities: null },
+          ],
+          error: null,
+        },
+      });
+      const ids = await listViewableResourceIds(client, {
+        imsOrgId: 'ORG@AdobeOrg',
+        product: 'LLMO',
+        resourceType: 'brand',
+        subjectId: 'user@AdobeID',
+      });
+      expect(ids).to.be.instanceOf(Set);
+      expect([...ids]).to.deep.equal(['r-view']);
+      // user + org scopes => two reads.
+      expect(client.fromCalls).to.have.lengthOf(2);
+    });
+
+    it('queries only the org scope when subjectId is absent', async () => {
+      const client = fakePostgrestClient({
+        readResult: {
+          data: [{ resource_id: 'r-org', granted_capabilities: ['aso/can_view'] }],
+          error: null,
+        },
+      });
+      const ids = await listViewableResourceIds(client, {
+        imsOrgId: 'ORG@AdobeOrg',
+        product: 'ASO',
+        resourceType: 'site',
+      });
+      expect([...ids]).to.deep.equal(['r-org']);
+      // org scope only => a single read.
+      expect(client.fromCalls).to.have.lengthOf(1);
+    });
+
+    it('dedupes a resource granted via both org and user scope', async () => {
+      const client = fakePostgrestClient({
+        readResult: {
+          data: [{ resource_id: 'shared', granted_capabilities: ['llmo/can_view'] }],
+          error: null,
+        },
+      });
+      const ids = await listViewableResourceIds(client, {
+        imsOrgId: 'ORG@AdobeOrg',
+        product: 'LLMO',
+        resourceType: 'brand',
+        subjectId: 'user@AdobeID',
+      });
+      // Both scopes resolve to the same row; the Set collapses the duplicate.
+      expect([...ids]).to.deep.equal(['shared']);
     });
   });
 });

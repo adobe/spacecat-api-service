@@ -10,7 +10,10 @@
  * governing permissions and limitations under the License.
  */
 
-import { Suggestion as SuggestionModel } from '@adobe/spacecat-shared-data-access';
+import {
+  Opportunity as OpportunityModel,
+  Suggestion as SuggestionModel,
+} from '@adobe/spacecat-shared-data-access';
 import { getTokenGrantConfigByOpportunity } from '@adobe/spacecat-shared-utils';
 
 /**
@@ -143,6 +146,19 @@ const OPPORTUNITY_STRATEGIES = {
       return idA.localeCompare(idB);
     },
   },
+  // Decorative-image suggestions (data.recommendations[].isDecorative) are excluded
+  // from grant selection entirely, since they need no alt text fix and shouldn't
+  // consume one of the customer's limited PLG token slots. Remaining suggestions
+  // fall back to the default sort (rank ascending, then id ascending).
+  'alt-text': {
+    groupFn: (suggestions) => suggestions
+      .filter((s) => {
+        const data = typeof s?.getData === 'function' ? s.getData() : s?.data;
+        const recommendations = data?.recommendations ?? [];
+        return !recommendations.some((r) => r?.isDecorative === true);
+      })
+      .map((s) => createGroup([s])),
+  },
 };
 
 /**
@@ -209,6 +225,79 @@ async function revokeGrants(SuggestionGrant, grantIds) {
   if (failed.length > 0) {
     throw new Error(`Failed to revoke ${failed.length}/${grantIds.length} grants`);
   }
+}
+
+/**
+ * Revokes any active grants tied to the given suggestion IDs — used when suggestions are
+ * deleted (individually, or cascaded via an opportunity delete) so a removed suggestion
+ * doesn't leave an orphaned grant still counted against the site's token budget (SITES-50360).
+ *
+ * @param {Object} SuggestionGrant - SuggestionGrant collection.
+ * @param {string[]} suggestionIds - Suggestion IDs being deleted.
+ * @returns {Promise<void>}
+ */
+export async function revokeGrantsForSuggestions(SuggestionGrant, suggestionIds) {
+  if (!suggestionIds?.length) {
+    return;
+  }
+  const rows = await SuggestionGrant.findBySuggestionIds(suggestionIds);
+  const grantIds = [...new Set(rows.map((r) => r.grant_id))];
+  await revokeGrants(SuggestionGrant, grantIds);
+}
+
+/**
+ * Revokes grants for every suggestion under an opportunity — used before a cascading
+ * opportunity delete removes all its suggestions (SITES-50360).
+ *
+ * @param {Object} dataAccess - Data access collections.
+ * @param {Object} opportunity - Opportunity model (getId()).
+ * @returns {Promise<void>}
+ */
+export async function revokeGrantsForOpportunity(dataAccess, opportunity) {
+  const { Suggestion, SuggestionGrant } = dataAccess ?? {};
+  const opptyId = opportunity?.getId();
+
+  if (!Suggestion || !SuggestionGrant || !opptyId) {
+    return;
+  }
+
+  const suggestions = await Suggestion.allByOpportunityId(opptyId);
+  const suggestionIds = suggestions.map((s) => s.getId());
+  await revokeGrantsForSuggestions(SuggestionGrant, suggestionIds);
+}
+
+/**
+ * Revokes outstanding grants for an opportunity's suggestions that are still
+ * in NEW status (i.e. never applied/approved) — used when an opportunity
+ * moves to a terminal RESOLVED state so a superseding opportunity of the
+ * same type doesn't inherit stale, un-revoked grants (SITES-49175).
+ *
+ * Only NEW suggestions are considered, so grants tied to suggestions in any
+ * other status (APPROVED, FIXED, etc.) are left untouched.
+ *
+ * @param {Object} dataAccess - Data access collections.
+ * @param {Object} opportunity - Opportunity model (getId()).
+ * @returns {Promise<void>}
+ */
+export async function revokeExistingGrants(dataAccess, opportunity) {
+  const { Suggestion, SuggestionGrant } = dataAccess ?? {};
+  const opptyId = opportunity?.getId();
+
+  if (!Suggestion || !SuggestionGrant || !opptyId) {
+    return;
+  }
+
+  const newSuggestions = await Suggestion
+    .allByOpportunityIdAndStatus(opptyId, SuggestionModel.STATUSES.NEW);
+  const newSuggestionIds = newSuggestions.map((s) => s.getId());
+
+  if (!newSuggestionIds.length) {
+    return;
+  }
+
+  const splitResult = await SuggestionGrant.splitSuggestionsByGrantStatus(newSuggestionIds);
+  const { grantIds } = splitResult ?? {};
+  await revokeGrants(SuggestionGrant, grantIds);
 }
 
 const STALE_STATUSES = new Set([
@@ -339,10 +428,16 @@ async function fillRemainingCapacity(
  * with the new token. Then fills remaining capacity from NEW
  * ungranted suggestions.
  *
+ * Only grants suggestions for opportunities still in NEW status - an
+ * opportunity that has moved to a terminal/in-progress state (RESOLVED,
+ * IGNORED, IN_PROGRESS) should not consume the site's shared per-type
+ * token bucket, even if some of its suggestions are still individually
+ * in NEW status.
+ *
  * @param {Object} dataAccess - Data access collections.
  * @param {Object} site - Site model (getId()).
  * @param {Object} opportunity - Opportunity model
- *   (getId(), getType()).
+ *   (getId(), getType(), getStatus()).
  * @returns {Promise<void>}
  */
 export async function grantSuggestionsForOpportunity(dataAccess, site, opportunity) {
@@ -350,11 +445,12 @@ export async function grantSuggestionsForOpportunity(dataAccess, site, opportuni
   const siteId = site?.getId();
   const opptyId = opportunity?.getId();
   const oppType = opportunity?.getType();
+  const oppStatus = opportunity?.getStatus();
   const config = oppType ? getTokenGrantConfigByOpportunity(oppType) : null;
   const tokenType = config?.tokenType;
 
   if (!Suggestion || !SuggestionGrant || !Token || !siteId || !opptyId || !config
-    || !tokenType) { return; }
+    || !tokenType || oppStatus !== OpportunityModel.STATUSES.NEW) { return; }
 
   const newSuggestions = await Suggestion
     .allByOpportunityIdAndStatus(opptyId, SuggestionModel.STATUSES.NEW);

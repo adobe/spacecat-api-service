@@ -70,3 +70,37 @@ export function resolveLocation(market) {
     locationName: ENGLISH_REGION_NAMES.of(alpha2),
   };
 }
+
+// Reverse of the country `criterion_id = 2000 + ISO numeric` mapping, keyed by
+// the numeric code as a Number so leading-zero string forms ('004' vs 4) can't
+// cause a miss. Built once at module load from the same `iso-3166` table
+// `resolveLocation` reads forward, so the two directions can never drift.
+const NUMERIC_TO_ALPHA2 = Object.freeze(
+  Object.fromEntries(
+    Object.entries(iso31661Alpha2ToNumeric).map(([a2, num]) => [Number(num), a2]),
+  ),
+);
+
+/**
+ * Inverse of {@link resolveLocation}: resolves a country-level Google Ads Geo
+ * Target ID back to its ISO 3166-1 alpha-2 market code. Used to derive a prompt's
+ * market from its `geoTargetId` (the slice key carried on every prompt write) so
+ * brand aliases can be region-clamped per prompt — the manual create/edit paths
+ * receive a numeric `geoTargetId`, not the ISO-2 code the create-market path has.
+ *
+ * Only the country formula (`criterion_id = 2000 + ISO numeric`) is inverted;
+ * sub-national geo targets (cities/regions/postal codes) do NOT follow it and
+ * return null, matching {@link resolveLocation}'s forward coverage. Returns null
+ * on a non-country / unknown / malformed id; the caller degrades to name-only
+ * needles (region-less aliases still apply).
+ *
+ * @param {number} geoTargetId - a country-level Google Ads Geo Target ID.
+ * @returns {string|null} the ISO-2 market code, or null when not a known country id.
+ */
+export function marketForGeoTargetId(geoTargetId) {
+  const n = Number(geoTargetId);
+  if (!Number.isInteger(n) || n <= 2000) {
+    return null;
+  }
+  return NUMERIC_TO_ALPHA2[n - 2000] ?? null;
+}

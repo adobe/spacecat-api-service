@@ -156,8 +156,8 @@ async function resolveBrandSubworkspaceId(ctx, brandId) {
   }
 
   const brand = await Brand.findById(brandId);
-  const subworkspaceId = (brand && typeof brand.getSemrushWorkspaceId === 'function')
-    ? (brand.getSemrushWorkspaceId() ?? null)
+  const subworkspaceId = (brand && typeof brand.getSemrushSubWorkspaceId === 'function')
+    ? (brand.getSemrushSubWorkspaceId() ?? null)
     : null;
 
   brandCache.delete(brandId);

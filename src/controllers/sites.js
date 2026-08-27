@@ -20,6 +20,7 @@ import {
   notFound,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
+import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import {
   hasText,
   isBoolean,
@@ -27,13 +28,16 @@ import {
   isArray,
   getStoredMetrics,
   isValidUUID,
+  isValidUrl,
   deepEqual,
   isNonEmptyObject,
   canonicalizeUrl,
   composeBaseURL,
+  getBaseURLPathPrefix,
 } from '@adobe/spacecat-shared-utils';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
 import TierClient from '@adobe/spacecat-shared-tier-client';
@@ -42,8 +46,10 @@ import { SiteIdentityDto } from '../dto/site-identity.js';
 import { OrganizationDto } from '../dto/organization.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
+import { applyFieldProjection } from '../utils/field-projection.js';
 import {
-  wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled, CUSTOMER_VISIBLE_TIERS, isInternalOrg,
+  wwwUrlResolver, resolveWwwUrl, getAsoEntitlement, getAsoTier, CUSTOMER_VISIBLE_TIERS,
+  isInternalOrg, resolveSemrushImsToken,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { CAP_SITE_READ_ALL, CAP_SITE_CREATE } from '../routes/capability-constants.js';
@@ -57,17 +63,74 @@ import {
   resolveProductCode,
 } from '../support/tier-provisioning.js';
 import { getBrandBySite, isSemrushMarketMirrorSite } from '../support/brands-storage.js';
+import { normalizeHostCase } from '../support/url-utils.js';
+import { createSerenityTransport } from '../support/serenity/rest-transport.js';
+import { propagateSiteUrlToSemrush } from '../support/serenity/site-url-propagation.js';
+import { isSemrushTransportError, unwrapTransportCause } from '../support/serenity/errors.js';
+import { listViewableResourceIds } from '../support/state-access-mapping-utils.js';
+import { requirePostgrestForFacsMappings } from '../support/postgrest-availability.js';
+import { isFacsRebacResource } from '../routes/facs-capabilities.js';
+import { ASO_PRODUCT_CODE, STATUSES as PLG_STATUSES } from './plg/plg-onboarding/constants.js';
+import { guardProvisioningLlmoFields } from '../support/llmo-config-guards.js';
+
+const VALIDATION_ERROR_NAME = 'ValidationError';
 
 /**
- * Builds the standard resolve-site success payload.
+ * Builds the standard resolve-site success payload. Fetches the org's ASO entitlement at
+ * most once — both `isSummitPlgEnabled` and `asoTier` are derived from that single result
+ * (or from `asoEntitlement`, when the caller already fetched it) to avoid a duplicate
+ * Entitlement lookup.
+ * @param {object} org - Organization model instance.
+ * @param {object} site - Site model instance.
+ * @param {object} context - Request context.
+ * @param {object} [asoEntitlement] - The org's ASO entitlement, if the caller already fetched
+ *   it (i.e. the request's x-product header is ASO) — pass it to avoid a redundant lookup.
+ *   Omit (leave undefined) when the caller doesn't already have the ASO entitlement in hand;
+ *   it is then resolved with its own lookup. `null` is a valid value (no entitlement).
+ * @returns {Promise<object>} Resolve-site response payload.
  */
-async function buildResolveData(org, site, context) {
-  const isSummitPlgEnabled = await getIsSummitPlgEnabled(site, context);
+async function buildResolveData(org, site, context, asoEntitlement) {
+  const entitlement = asoEntitlement !== undefined
+    ? asoEntitlement
+    : await getAsoEntitlement(site.getOrganizationId(), context);
+  const isSummitPlgEnabled = entitlement?.getTier() === EntitlementModel.TIERS.PLG;
+  const asoTier = entitlement?.getTier() ?? null;
   return {
     organization: OrganizationDto.toJSON(org),
     site: SiteDto.toJSON(site),
     isSummitPlgEnabled,
+    asoTier,
   };
+}
+
+/**
+ * Recursively deep-merges `patch` into `base`, returning a new object.
+ *
+ * Merge semantics (used for PATCH of nested config like hlxConfig/deliveryConfig):
+ * - Omitted keys keep their existing value in `base`.
+ * - A `null` value deletes the key.
+ * - Plain objects are merged recursively; arrays and non-object values replace.
+ * - Dangerous keys (`__proto__`/`constructor`/`prototype`) are ignored to
+ *   prevent prototype pollution from an untrusted request body.
+ *
+ * @param {object} base - Existing value.
+ * @param {object} patch - Incoming partial patch.
+ * @returns {object} Merged result.
+ */
+function deepMerge(base, patch) {
+  const result = { ...(isObject(base) ? base : {}) };
+  for (const [key, value] of Object.entries(patch)) {
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+      // Ignore prototype-pollution vectors from the request body.
+    } else if (value === null) {
+      delete result[key];
+    } else if (isObject(value) && isObject(result[key])) {
+      result[key] = deepMerge(result[key], value);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
 }
 
 /**
@@ -116,7 +179,12 @@ export async function resolveOrgDefaultSite(org, productCode, context, ctx, acce
       return null;
     }
 
-    return buildResolveData(org, defaultSite, context);
+    return buildResolveData(
+      org,
+      defaultSite,
+      context,
+      productCode === ASO_PRODUCT_CODE ? entitlement : undefined,
+    );
   } catch (e) {
     log.warn(
       `[resolveSite] resolveOrgDefaultSite failed for org ${org.getId()} product ${productCode} — falling back`,
@@ -139,7 +207,17 @@ const MONTH_DAYS = 30;
 const TOTAL_METRICS = 'totalMetrics';
 const BRAND_PROFILE_AGENT_ID = 'brand-profile';
 const DEFAULT_LIMIT = 100;
+const SEARCH_DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 500;
+// Allowlisted `sort` fields for the GET /sites filtered/sorted mode.
+const SORT_FIELDS = new Set(['baseURL', 'updatedAt', 'createdAt', 'deliveryType', 'isLive']);
+// Default order for the filtered/sorted mode when the caller sends no `sort`.
+// Applied EXPLICITLY (as an orderBy both branches honor) rather than left to each
+// data-access method's own default: Site.all's all-index default is baseURL asc,
+// but Site.allByEnrollmentFiltered defaults to updatedAt desc and ignores the
+// `order` option entirely — so an implicit default would order the tier/productCode
+// branch differently from the baseUrlContains/deliveryType/isLive branch.
+const DEFAULT_SORT = { attribute: 'baseURL', direction: 'asc' };
 
 /**
  * Filters Ahrefs top pages by site base URL
@@ -299,6 +377,13 @@ const applyTopOrganicPagesFilter = async (metricsData, limit, options) => {
   return result;
 };
 
+// pageTypes[].pattern is later spliced, unescaped, into an Athena SQL string literal
+// (REGEXP_LIKE(column, '<pattern>')) by @adobe/spacecat-shared-athena-client. Trino/Presto
+// string literals have no backslash-escape mode, so a bare single quote is the only
+// character that can terminate the literal early and inject SQL - reject it outright
+// rather than trying to escape/re-quote a value we don't control the eventual sink for.
+const SQL_UNSAFE_PATTERN_CHAR = /'/;
+
 /**
  * Validates that pageTypes array contains valid regex patterns
  * @param {Array} pageTypes - Array of page type objects with name and pattern
@@ -316,6 +401,13 @@ const validatePageTypes = (pageTypes) => {
 
     if (!hasText(pageType.pattern)) {
       return { isValid: false, error: `pageTypes[${index}] must have a pattern` };
+    }
+
+    if (SQL_UNSAFE_PATTERN_CHAR.test(pageType.pattern)) {
+      return {
+        isValid: false,
+        error: `pageTypes[${index}] pattern must not contain a single quote character`,
+      };
     }
 
     try {
@@ -345,7 +437,7 @@ function SitesController(ctx, log, env) {
   }
 
   const {
-    Audit, Organization, Site,
+    Audit, Organization, PlgOnboarding, Site,
   } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
@@ -388,6 +480,12 @@ function SitesController(ctx, log, env) {
     if (productCodeError) {
       return badRequest(productCodeError);
     }
+    if (isArray(context.data?.pageTypes)) {
+      const validation = validatePageTypes(context.data.pageTypes);
+      if (!validation.isValid) {
+        return badRequest(validation.error);
+      }
+    }
     let site;
     let status;
     try {
@@ -427,9 +525,41 @@ function SitesController(ctx, log, env) {
   };
 
   /**
-   * Gets all sites with cursor-based pagination. Accessible to admin callers (legacy admin path)
-   * and to S2S consumers that hold the `site:readAll` capability - see
+   * Gets all sites with cursor-based pagination. Accessible to admin callers and to
+   * S2S consumers that hold the `site:readAll` capability - see
    * `docs/s2s/READALL_CAPABILITY_DESIGN.md`.
+   *
+   * When called without `limit`/`cursor`, returns the first page (limit defaults to
+   * 100, no cursor) as the `{ sites, pagination }` envelope - the same shape as an
+   * explicit paginated request.
+   *
+   * Filtered/sorted mode: triggered when ANY of `baseUrlContains`, `deliveryType`,
+   * `isLive`, `sort`, `tier`, `productCode` is present. Returns a non-cursor,
+   * offset-paginated response: `{ sites, pagination: { limit, offset, hasMore,
+   * baseUrlContains?, deliveryType?, isLive?, sort?, tier?, productCode? } }` - only the
+   * filters/sort actually applied are echoed back, so a client can confirm what was
+   * applied even if it hits an older deployment that ignores some of the params.
+   * `baseUrlContains` (3-256 chars after trim) performs a case-insensitive substring
+   * search on `baseURL`; LIKE wildcards in the input are escaped so callers cannot
+   * inject their own wildcards. `deliveryType` and `isLive` are exact-match filters;
+   * when more than one filter is present they compose with AND. `sort`
+   * (`<field>:<asc|desc>`, field one of `baseURL`/`updatedAt`/`createdAt`/
+   * `deliveryType`/`isLive`) sets the result order. `tier` (one of
+   * `EntitlementModel.TIERS`, incl. `PRE_ONBOARD` - not just `CUSTOMER_VISIBLE_TIERS`)
+   * and `productCode` (one of `EntitlementModel.PRODUCT_CODES`)
+   * filter to sites enrolled at that entitlement tier/product; when either is present the
+   * SAME where/orderBy/limit/cursor built for the branch is passed to
+   * `Site.allByEnrollmentFiltered` instead of `Site.all`. Unlike every other filter here,
+   * `tier`/`productCode` require FULL admin (`accessControlUtil.hasAdminAccess()`) -
+   * the same gate as the standalone `GET /sites/by-tier` endpoint
+   * (`getAllByEnrollmentAndTier`) - so a read-only admin or an S2S `site:readAll`
+   * caller gets 403 for either param, checked before their enum validation so the 403
+   * vs 400 outcome can't be used to probe valid values; the tier accepted-value set
+   * intentionally mirrors that sibling admin-only endpoint (both accept the full
+   * `EntitlementModel.TIERS`, since PRE_ONBOARD is a legitimate admin query here too).
+   * `cursor` is not supported
+   * together with any filter/sort (use `offset` instead) - accepting both would silently
+   * discard the cursor and mislead the client into thinking cursor pagination is active.
    * @returns {Promise<Response>} Paginated sites response
    */
   const getAll = async (context) => {
@@ -447,7 +577,202 @@ function SitesController(ctx, log, env) {
 
     const limitParam = context?.data?.limit;
     const cursor = context?.data?.cursor || null;
-    const paginated = hasText(limitParam) || hasText(cursor);
+
+    // Optional filtered/sorted mode: triggered when ANY of baseUrlContains, deliveryType,
+    // isLive, sort, tier, productCode is present. Runs after the authz check (so
+    // unauthorized callers still get 403) and before the cursor/legacy branches.
+    // Offset-paginated (not cursor-based).
+    const baseUrlContains = context?.data?.baseUrlContains;
+    const deliveryType = context?.data?.deliveryType;
+    const isLiveParam = context?.data?.isLive;
+    const sortParam = context?.data?.sort;
+    // AUTHZ NOTE: baseUrlContains/deliveryType/isLive/sort keep getAll's EXISTING
+    // broad authz (admin-read or S2S site:readAll, checked above). tier/productCode
+    // are more sensitive (entitlement/enrollment data) and require FULL admin — the
+    // SAME gate as the standalone GET /sites/by-tier endpoint
+    // (getAllByEnrollmentAndTier, ~:809) — enforced immediately below, before any
+    // tier/productCode validation, so a caller who fails this check can't use the
+    // enum 400 to probe which tier/productCode values are valid.
+    const tier = context?.data?.tier;
+    const productCode = context?.data?.productCode;
+    if ((hasText(tier) || hasText(productCode)) && !accessControlUtil.hasAdminAccess()) {
+      return forbidden('Filtering sites by tier or productCode requires admin access');
+    }
+
+    // Validate facets/sort up front (after authz, before branching) so invalid input is
+    // always rejected the same way, whether or not it's combined with other filters.
+    let isLiveBool;
+    if (hasText(isLiveParam)) {
+      if (isLiveParam !== 'true' && isLiveParam !== 'false') {
+        return badRequest('isLive must be "true" or "false"');
+      }
+      isLiveBool = isLiveParam === 'true';
+    }
+    if (hasText(deliveryType) && !Object.values(SiteModel.DELIVERY_TYPES).includes(deliveryType)) {
+      return badRequest(`Invalid deliveryType: ${deliveryType}`);
+    }
+    let orderBy = DEFAULT_SORT;
+    if (hasText(sortParam)) {
+      const sortParts = sortParam.split(':');
+      if (sortParts.length > 2) {
+        return badRequest('Invalid sort: expected "<field>" or "<field>:<direction>"');
+      }
+      const [sortField, sortDirection = 'asc'] = sortParts;
+      if (!SORT_FIELDS.has(sortField)) {
+        return badRequest(`Invalid sort field: ${sortField}`);
+      }
+      if (sortDirection !== 'asc' && sortDirection !== 'desc') {
+        return badRequest(`Invalid sort direction: ${sortDirection}`);
+      }
+      orderBy = { attribute: sortField, direction: sortDirection };
+    }
+    const validTiers = Object.values(EntitlementModel.TIERS);
+    if (hasText(tier) && !validTiers.includes(tier)) {
+      return badRequest(`Tier must be one of: ${validTiers.join(', ')}`);
+    }
+    const validProductCodes = Object.values(EntitlementModel.PRODUCT_CODES);
+    if (hasText(productCode) && !validProductCodes.includes(productCode)) {
+      return badRequest(`Invalid productCode: ${productCode}`);
+    }
+
+    const hasFilters = hasText(baseUrlContains) || hasText(deliveryType)
+      || hasText(isLiveParam) || hasText(sortParam) || hasText(tier) || hasText(productCode);
+    if (hasFilters && hasText(cursor)) {
+      // The public search path paginates via offset, not the client cursor;
+      // accepting both would silently discard the cursor and mislead the client
+      // into thinking cursor pagination is active. Reject the combination explicitly.
+      return badRequest('cursor is not supported with filters or sort; use offset');
+    }
+    if (hasFilters) {
+      // Trim once and reuse for validation, escaping, echo, and logging.
+      const trimmedQuery = hasText(baseUrlContains) ? baseUrlContains.trim() : null;
+      if (trimmedQuery !== null) {
+        if (trimmedQuery.length < 3) {
+          return badRequest('baseUrlContains must be at least 3 characters');
+        }
+        if (trimmedQuery.length > 256) {
+          return badRequest('baseUrlContains exceeds maximum length');
+        }
+      }
+
+      const parsedLimit = hasText(limitParam) ? parseInt(limitParam, 10) : SEARCH_DEFAULT_LIMIT;
+      if (!Number.isInteger(parsedLimit) || parsedLimit <= 0) {
+        return badRequest('limit must be a positive integer');
+      }
+      const effectiveLimit = Math.min(parsedLimit, MAX_LIMIT);
+
+      const offsetParam = context?.data?.offset;
+      const offset = hasText(offsetParam) ? parseInt(offsetParam, 10) : 0;
+      if (!Number.isInteger(offset) || offset < 0) {
+        return badRequest('offset must be a non-negative integer');
+      }
+
+      // Escape LIKE special chars so user input cannot inject its own wildcards.
+      const escaped = trimmedQuery !== null ? trimmedQuery.replace(/([\\%_])/g, '\\$1') : null;
+
+      // The data-access layer paginates by an offset-encoded cursor (postgrest.utils
+      // encodeCursor); it exposes no public `offset` option, so we build the same
+      // shape here. If a direct offset option is ever added upstream, switch to it.
+      const offsetCursor = Buffer.from(JSON.stringify({ offset }), 'utf-8').toString('base64');
+
+      // The data-access `where` builder passes (attrs, op): `attrs` maps model fields to
+      // DB columns, `op` carries the operators (NOT `s => s.ilike(...)`). Conditions
+      // compose with AND; a single condition is returned bare (not wrapped in `op.and`).
+      const hasWhereConditions = escaped !== null
+        || hasText(deliveryType) || isLiveBool !== undefined;
+      const where = (attr, op) => {
+        const conds = [];
+        if (escaped !== null) {
+          conds.push(op.ilike(attr.baseURL, `%${escaped}%`));
+        }
+        if (hasText(deliveryType)) {
+          conds.push(op.eq(attr.deliveryType, deliveryType));
+        }
+        if (isLiveBool !== undefined) {
+          conds.push(op.eq(attr.isLive, isLiveBool));
+        }
+        return conds.length === 1 ? conds[0] : op.and(...conds);
+      };
+
+      // Fetch one extra row to detect whether more results exist beyond the limit.
+      // orderBy is passed EXPLICITLY (never left to each method's implicit default)
+      // so the Site.all and Site.allByEnrollmentFiltered branches return the SAME
+      // order — see DEFAULT_SORT. allByEnrollmentFiltered ignores an `order` option,
+      // so a bare `order: 'asc'` here would silently not apply to the tier branch.
+      const allOpts = { limit: effectiveLimit + 1, cursor: offsetCursor, orderBy };
+      if (hasWhereConditions) {
+        allOpts.where = where;
+      }
+
+      // tier/productCode compose with the SAME where/orderBy/limit/cursor built above —
+      // they just swap which data-access method resolves the rows.
+      const useEnrollmentFilter = hasText(tier) || hasText(productCode);
+
+      let rows;
+      try {
+        rows = useEnrollmentFilter
+          ? await Site.allByEnrollmentFiltered(
+            {
+              tier: hasText(tier) ? tier : undefined,
+              productCode: hasText(productCode) ? productCode : undefined,
+            },
+            allOpts,
+          )
+          : await Site.all({}, allOpts);
+      } catch (e) {
+        // Re-throw so the framework still returns a 500 — the point here is a
+        // searchable, prefixed log line, not swallowing the error.
+        log.error(`[sites][filtered] query failed requestId=${requestId}`, e);
+        throw e;
+      }
+      let list;
+      if (Array.isArray(rows)) {
+        list = rows;
+      } else if (Array.isArray(rows?.data)) {
+        list = rows.data;
+      } else {
+        log.warn(`[sites][filtered] unexpected Site.all shape; returning empty requestId=${requestId}`);
+        list = [];
+      }
+      const hasMore = list.length > effectiveLimit;
+      const sites = list.slice(0, effectiveLimit).map((site) => SiteDto.toListJSON(site));
+
+      if (s2sResult.allowed) {
+        log.info(`[s2s-readall] GET /sites (filtered) granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_SITE_READ_ALL} count=${sites.length} requestId=${requestId}`);
+      }
+
+      // Unconditional observability for both admin and S2S paths. Never log the raw
+      // query value (URLs may be sensitive) — only its length and result counts.
+      log.info(`[sites][filtered] qlen=${trimmedQuery !== null ? trimmedQuery.length : 0} count=${sites.length} hasMore=${hasMore} requestId=${requestId}`);
+
+      const { list: projectedSites, error: fieldsError } = applyFieldProjection(
+        sites,
+        context?.data?.fields,
+      );
+      if (fieldsError) {
+        return badRequest(fieldsError);
+      }
+
+      // Echo only the filters/sort actually applied, so a client can confirm what was
+      // applied even if it hits an older deployment that ignores some of the params.
+      // An older deployment that ignores a param but still honors `limit` would return
+      // the offset envelope with unfiltered sites and no echo for that param — letting
+      // clients detect the version skew.
+      return ok({
+        sites: projectedSites,
+        pagination: {
+          limit: effectiveLimit,
+          offset,
+          hasMore,
+          ...(trimmedQuery !== null && { baseUrlContains: trimmedQuery }),
+          ...(hasText(deliveryType) && { deliveryType }),
+          ...(isLiveBool !== undefined && { isLive: isLiveBool }),
+          ...(hasText(sortParam) && { sort: `${orderBy.attribute}:${orderBy.direction}` }),
+          ...(hasText(tier) && { tier }),
+          ...(hasText(productCode) && { productCode }),
+        },
+      });
+    }
 
     if (cursor !== null) {
       if (typeof cursor !== 'string') {
@@ -458,58 +783,47 @@ function SitesController(ctx, log, env) {
       }
     }
 
+    // No limit/cursor defaults to the first page (DEFAULT_LIMIT, no cursor).
     let sites;
     let responseBody;
 
-    if (paginated) {
-      const parsedLimit = hasText(limitParam) ? parseInt(limitParam, 10) : DEFAULT_LIMIT;
-      if (!Number.isInteger(parsedLimit) || parsedLimit <= 0) {
-        return badRequest('limit must be a positive integer');
-      }
-      const effectiveLimit = Math.min(parsedLimit, MAX_LIMIT);
+    const parsedLimit = hasText(limitParam) ? parseInt(limitParam, 10) : DEFAULT_LIMIT;
+    if (!Number.isInteger(parsedLimit) || parsedLimit <= 0) {
+      return badRequest('limit must be a positive integer');
+    }
+    const effectiveLimit = Math.min(parsedLimit, MAX_LIMIT);
 
-      const results = await Site.all({}, { limit: effectiveLimit, cursor, returnCursor: true });
-      if (!Array.isArray(results?.data)) {
-        log.error(`[sites] Site.all returned unexpected shape with returnCursor=true; hasResults=${!!results}`);
-        sites = [];
-        responseBody = {
-          sites,
-          pagination: { limit: effectiveLimit, cursor: null, hasMore: false },
-        };
-      } else {
-        sites = results.data.map((site) => SiteDto.toListJSON(site));
-        responseBody = {
-          sites,
-          pagination: {
-            limit: effectiveLimit,
-            // `|| null` (not `??`) so an empty-string cursor normalizes to null,
-            // staying consistent with `hasMore: !!results.cursor` below.
-            cursor: results.cursor || null,
-            hasMore: !!results.cursor,
-          },
-        };
-      }
+    const results = await Site.all({}, { limit: effectiveLimit, cursor, returnCursor: true });
+    if (!Array.isArray(results?.data)) {
+      log.error(`[sites] Site.all returned unexpected shape with returnCursor=true; hasResults=${!!results}`);
+      sites = [];
+      responseBody = {
+        sites,
+        pagination: { limit: effectiveLimit, cursor: null, hasMore: false },
+      };
     } else {
-      // TODO: remove this legacy branch once Coralogix shows zero hits on
-      // [sites][legacy-shape] for 30 consecutive days.
-      // legacy: no limit/cursor params -> flat array for backwards comp.
-      // keep the default + friends-and-family exclusion on this path to stay
-      // under the 6MB Lambda response limit until consumers migrate to pagination.
-      log.info(`[sites][legacy-shape] GET /sites called without limit/cursor requestId=${requestId} clientId=${s2sResult.clientId || (isAdmin ? 'admin-bypass' : 'unknown-s2s')}`);
-      const excludedOrgIds = [
-        env.DEFAULT_ORGANIZATION_ID,
-        env.ORGANIZATION_ID_FRIENDS_FAMILY,
-      ];
-      const all = await Site.all({}, { fetchAllPages: true });
-      sites = all
-        .filter((site) => !excludedOrgIds.includes(site.getOrganizationId()))
-        .map((site) => SiteDto.toListJSON(site));
-      responseBody = sites;
+      sites = results.data.map((site) => SiteDto.toListJSON(site));
+      responseBody = {
+        sites,
+        pagination: {
+          limit: effectiveLimit,
+          // `|| null` (not `??`) so an empty-string cursor normalizes to null,
+          // staying consistent with `hasMore: !!results.cursor` below.
+          cursor: results.cursor || null,
+          hasMore: !!results.cursor,
+        },
+      };
     }
 
     if (s2sResult.allowed) {
       log.info(`[s2s-readall] GET /sites granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_SITE_READ_ALL} count=${sites.length} requestId=${requestId}`);
     }
+
+    const { list, error } = applyFieldProjection(sites, context?.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+    responseBody = { ...responseBody, sites: list };
 
     return ok(responseBody);
   };
@@ -531,7 +845,61 @@ function SitesController(ctx, log, env) {
 
     const sites = (await Site.allByDeliveryType(deliveryType))
       .map((site) => SiteDto.toJSON(site));
-    return ok(sites);
+    const { list, error } = applyFieldProjection(sites, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+    return ok(list);
+  };
+
+  /**
+   * Gets all sites enrolled at a given entitlement tier (e.g. 'PAID',
+   * 'FREE_TRIAL', 'PLG', 'PRE_ONBOARD'). Optionally narrows the result to a
+   * single product code via the `productCode` query parameter (e.g. 'LLMO').
+   *
+   * Accepts any Entitlement.TIERS value, not just CUSTOMER_VISIBLE_TIERS -
+   * this endpoint is already admin-gated below, so PRE_ONBOARD (internal-only,
+   * not customer-visible) is a legitimate admin query, e.g. to find sites
+   * still awaiting onboarding.
+   *
+   * Returns the full result set (no pagination) - acceptable for a
+   * bounded admin-only use case. Sites are ordered by ID. Supports the
+   * `fields` query parameter to project a subset of fields per site.
+   *
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Sites response.
+   */
+  const getAllByEnrollmentAndTier = async (context) => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can view all sites');
+    }
+    const tier = context.params?.tier;
+    const productCode = context.data?.productCode;
+
+    if (!hasText(tier)) {
+      return badRequest('Tier required');
+    }
+    const validTiers = Object.values(EntitlementModel.TIERS);
+    if (!validTiers.includes(tier)) {
+      return badRequest(`Tier must be one of: ${validTiers.join(', ')}`);
+    }
+    const validProductCodes = Object.values(EntitlementModel.PRODUCT_CODES);
+    if (productCode !== undefined && !validProductCodes.includes(productCode)) {
+      return badRequest(`productCode must be one of: ${validProductCodes.join(', ')}`);
+    }
+
+    const all = (await Site.allByEnrollmentAndTier(tier, productCode))
+      .sort((a, b) => a.getId().localeCompare(b.getId()));
+
+    const sites = all.map((site) => SiteDto.toJSON(site));
+    const { list, error } = applyFieldProjection(sites, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+
+    return ok({
+      sites: list,
+    });
   };
 
   /**
@@ -562,7 +930,11 @@ function SitesController(ctx, log, env) {
         const audit = await site.getLatestAuditByAuditType(auditType);
         return SiteDto.toJSON(site, audit);
       }));
-    return ok(result);
+    const { list, error } = applyFieldProjection(result, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+    return ok(list);
   };
 
   /**
@@ -827,43 +1199,68 @@ function SitesController(ctx, log, env) {
       return badRequest('Request body required');
     }
 
-    // A site's URL is immutable once it backs a Semrush-managed brand. That brand's
-    // tracked domain lives on its Semrush projects/markets, which have no
-    // domain-update path (the domain is set only at project-create time), so
-    // letting the SpaceCat site URL drift would desync the site from its Semrush
-    // projects. Only the URL is gated here — every other site field stays editable.
-    // The brand lookup runs only when a URL change is actually requested, so the
-    // common patch path (no baseURL) pays no extra query.
-    //
-    // TODO (~2026-07-07): Semrush is expected to support changing a project's
-    // primary URL — which is its main (own-brand, `main_brand: true`) benchmark
-    // domain, see ensureOwnBrandBenchmark in support/serenity/brand-urls.js — in
-    // ~2 weeks (heads-up received 2026-06-23). Once available, relax this guard to
-    // propagate the new URL to each market's main benchmark (and republish) instead
-    // of blocking the edit.
-    if (hasText(requestBody.baseURL) && requestBody.baseURL !== site.getBaseURL()) {
+    // Normalize a trailing slash ONCE, up front — so `https://x.com/` and `https://x.com`
+    // (or a subpath with/without one) compare, collide-check, propagate, and persist
+    // identically, matching how `createSite` normalizes its input before ever touching
+    // `Site.findByBaseURL`. Deliberately NOT reusing `composeBaseURL`/`canonicalizeUrl`
+    // here — both also strip `www.`, which this feature must NOT collapse (a Semrush
+    // project's identity treats `www.x.com` and `x.com` as distinct sites; see
+    // `siteIdentityFromUrlString`'s own "do NOT collapse www vs apex" contract). The host's
+    // case is normalized here too — hosts are case-insensitive (RFC 3986 / WHATWG URL), so
+    // `Site1.com` and `site1.com` must compare, collide-check, propagate, and persist as the
+    // same value — but the path is left untouched, since paths ARE case-sensitive.
+    const nextBaseURL = hasText(requestBody.baseURL)
+      ? normalizeHostCase(requestBody.baseURL.replace(/\/$/, ''))
+      : requestBody.baseURL;
+
+    // A site's URL backing a Semrush-managed brand can be changed, but only for the
+    // brand's OWN primary site — see serenity-docs#349. A registrable-domain change is
+    // allowed too: live-verified against adobe-hackathon.semrush.com (2026-08-18) that
+    // Semrush's project PATCH accepts and persists a changed `domain` (not just
+    // `primary_url`), and that a subsequent publish settles cleanly with no project
+    // recreation — the "would this lose history?" concern that originally motivated
+    // refusing cross-domain edits does not hold. propagateSiteUrlToSemrush keeps the
+    // project's `domain` in step with the new registrable domain in this case (see that
+    // module). A market-mirror site (linked via brand_sites, type='serenity') stays
+    // immutable: whether/how a mirror should follow a rename is a separate, open decision
+    // (issue #349 workstream 4) this change does not make. The brand lookup runs only when
+    // a URL change is actually requested, so the common patch path (no baseURL) pays no
+    // extra query.
+    if (hasText(nextBaseURL) && nextBaseURL !== site.getBaseURL()) {
+      if (!isValidUrl(nextBaseURL)) {
+        return badRequest('baseURL must be a valid URL');
+      }
+
+      const collidingSite = await Site.findByBaseURL(nextBaseURL);
+      if (collidingSite && collidingSite.getId() !== site.getId()) {
+        return createResponse({
+          message: 'A site with this baseURL already exists',
+          code: 'siteUrlTaken',
+        }, 409);
+      }
+
       const postgrestClient = context.dataAccess?.services?.postgrestClient;
       if (postgrestClient?.from) {
-        // Two ways a site can back a Semrush-managed brand, both immutable:
+        // Two ways a site can back a Semrush-managed brand:
         //  - the brand's OWN primary site (brands.site_id) — getBrandBySite, or
         //  - a Semrush market mirror linked via brand_sites (type='serenity'),
         //    which a serenity brand shell (no brands.site_id) reaches ONLY here.
         // The lookups can throw on a transient PostgREST error; map that to a 5xx
         // rather than letting it escape this catch-less handler as an opaque 500.
-        let attachedToSemrushBrand = false;
+        let attachedBrand = null;
+        let isMirror = false;
         try {
-          const attachedBrand = await getBrandBySite(
+          attachedBrand = await getBrandBySite(
             site.getOrganizationId(),
             site.getId(),
             postgrestClient,
             log,
           );
-          attachedToSemrushBrand = hasText(attachedBrand?.semrushWorkspaceId)
-            || await isSemrushMarketMirrorSite(
-              site.getOrganizationId(),
-              site.getId(),
-              postgrestClient,
-            );
+          isMirror = !attachedBrand && await isSemrushMarketMirrorSite(
+            site.getOrganizationId(),
+            site.getId(),
+            postgrestClient,
+          );
         } catch (lookupError) {
           log.error('updateSite: failed to resolve Semrush-brand attachment for URL-immutability guard', {
             siteId: site.getId(),
@@ -871,13 +1268,60 @@ function SitesController(ctx, log, env) {
           });
           return internalServerError('Could not verify whether this site URL is editable; please retry');
         }
-        if (attachedToSemrushBrand) {
+
+        // v1 scope: market-mirror sites stay immutable (see comment above).
+        if (isMirror) {
           return forbidden('Updating the URL of a site attached to a Semrush-managed brand is not allowed');
+        }
+
+        if (hasText(attachedBrand?.semrushSubWorkspaceId)) {
+          try {
+            await propagateSiteUrlToSemrush({
+              dataAccess: context.dataAccess,
+              transport: createSerenityTransport({
+                env: context.env,
+                imsToken: await resolveSemrushImsToken(context, log, 'sites'),
+              }),
+              workspaceId: attachedBrand.semrushSubWorkspaceId,
+              brandId: attachedBrand.id,
+              siteId: site.getId(),
+              brandIdentity: { name: attachedBrand.name, aliases: attachedBrand.brandAliases },
+              newBaseURL: nextBaseURL,
+              log,
+            });
+          } catch (propagationError) {
+            const err = unwrapTransportCause(propagationError);
+            log.error('updateSite: Semrush URL propagation failed', {
+              siteId: site.getId(),
+              brandId: attachedBrand.id,
+              status: err?.status,
+              error: err?.message,
+            });
+            if (isSemrushTransportError(err)) {
+              // Never echo an upstream message (it embeds the gateway host + workspace/
+              // project UUIDs) — mirrors the brands.js re-sync's error hygiene.
+              return createResponse({ message: 'Failed to update the tracked URL in Semrush' }, 502);
+            }
+            const status = err?.status || 500;
+            return createResponse({
+              message: status === 500 ? 'Failed to update the tracked URL in Semrush' : err.message,
+              ...(err?.code ? { code: err.code } : {}),
+            }, status);
+            // toQuotaExceededError() sets status=409, code='quotaExceeded' — passes through above.
+          }
+          // NOT persisted on failure: the Semrush call runs BEFORE site.save() below, so a
+          // thrown error here returns before `updates` is ever set for baseURL.
         }
       }
     }
 
     let updates = false;
+
+    if (hasText(nextBaseURL) && nextBaseURL !== site.getBaseURL()) {
+      site.setBaseURL(nextBaseURL);
+      updates = true;
+    }
+
     if (isBoolean(requestBody.isLive) && requestBody.isLive !== site.getIsLive()) {
       site.toggleLive();
       updates = true;
@@ -946,6 +1390,13 @@ function SitesController(ctx, log, env) {
           ...requestBody.config.llmo,
         };
       }
+      if (merged.llmo) {
+        merged.llmo = guardProvisioningLlmoFields(
+          merged.llmo,
+          existingConfig?.llmo,
+          accessControlUtil.hasAdminAccess(),
+        );
+      }
       // Reject malformed `llmo.detectedCdn` (array, stringified array, display name) before
       // persisting. `Config()` would otherwise swallow the schema error and store the raw value,
       // which then re-fails validation on every read.
@@ -968,7 +1419,17 @@ function SitesController(ctx, log, env) {
       if (auditTargetURLsResult?.normalized !== undefined) {
         merged.auditTargetURLs = auditTargetURLsResult.normalized;
       }
-      site.setConfig(merged);
+      try {
+        site.setConfig(merged);
+      } catch (error) {
+        if (error?.name === VALIDATION_ERROR_NAME) {
+          // cleanupHeaderValue strips chars HTTP headers can't carry (CR/LF and
+          // non-ASCII that would otherwise throw ERR_INVALID_CHAR); the Joi error
+          // message can echo back arbitrary request input.
+          return badRequest(cleanupHeaderValue(error.message || 'Invalid config').slice(0, 500));
+        }
+        throw error;
+      }
       updates = true;
     }
 
@@ -977,12 +1438,15 @@ function SitesController(ctx, log, env) {
       ? requestBody.authoringType
       : site.getAuthoringType();
 
+    // Deep-merge `deliveryConfig`/`hlxConfig` so a partial patch (e.g. hlxConfig with only
+    // rso+code) preserves omitted sub-keys like hlxConfig.content.source. An explicit `null`
+    // for a sub-key deletes it; omitting the field entirely keeps the existing value.
     const nextDeliveryConfig = isObject(requestBody.deliveryConfig)
-      ? requestBody.deliveryConfig
+      ? deepMerge(site.getDeliveryConfig(), requestBody.deliveryConfig)
       : site.getDeliveryConfig();
 
     const nextHlxConfig = isObject(requestBody.hlxConfig)
-      ? requestBody.hlxConfig
+      ? deepMerge(site.getHlxConfig(), requestBody.hlxConfig)
       : site.getHlxConfig();
 
     const authoringTypeChanged = nextAuthoringType !== site.getAuthoringType();
@@ -1203,15 +1667,22 @@ function SitesController(ctx, log, env) {
         ),
       ]);
 
+      // Locale-specific sites (e.g. https://example.com/de) have no RUM domain key
+      // of their own — `domain` resolves to the main domain. Narrow the RUM result
+      // to the locale subtree by its path prefix; null for whole-domain sites.
+      const pathPrefix = getBaseURLPathPrefix(site.getBaseURL());
+
       // Fetch current and previous RUM metrics in parallel
       const [current, previous] = await Promise.all([
         rumAPIClient.query(TOTAL_METRICS, {
           domain,
+          pathPrefix,
           startTime: thirtyDaysAgo.toISOString(),
           endTime: todayUTC.toISOString(),
         }),
         rumAPIClient.query(TOTAL_METRICS, {
           domain,
+          pathPrefix,
           startTime: sixtyDaysAgo.toISOString(),
           endTime: thirtyDaysAgo.toISOString(),
         }),
@@ -1598,7 +2069,9 @@ function SitesController(ctx, log, env) {
    * Tries siteId first, then checks either organizationId or imsOrg (mutually exclusive).
    *
    * On failure, returns HTTP 404 with a structured body:
-   *   { message, resolveStatus, details? }
+   *   { message, resolveStatus, details?, asoTier }
+   * `asoTier` is included on every response (success and failure) so the UI can gate
+   * behavior off the org's raw ASO entitlement tier even when resolution fails.
    * where `resolveStatus` is one of:
    *   - 'no_entitlement_for_product' — org has no entitlement for the requested x-product.
    *   - 'aso_pre_onboard' — entitlement tier is not in CUSTOMER_VISIBLE_TIERS (e.g. PRE_ONBOARD).
@@ -1616,7 +2089,16 @@ function SitesController(ctx, log, env) {
     } = context.data;
     const { pathInfo } = context;
     const X_PRODUCT_HEADER = 'x-product';
-    const productCode = pathInfo.headers[X_PRODUCT_HEADER];
+    let productCode = pathInfo.headers[X_PRODUCT_HEADER];
+    // Local-dev affordance (SKIP_AUTH only): the local UI harness may run a UI
+    // build that predates the x-product requirement on /sites-resolve and so omits
+    // the header. When auth is skipped (local only; SKIP_AUTH is never 'true' in a
+    // deployed env), default the product to ASO so the local UI ⇄ local api-service
+    // e2e can resolve a site. Prod keeps enforcing the header contract below.
+    if (!hasText(productCode) && env.SKIP_AUTH === 'true') {
+      productCode = ASO_PRODUCT_CODE;
+      log.info('[resolveSite] SKIP_AUTH local-dev: defaulting missing x-product to ASO');
+    }
     if (!hasText(productCode)) {
       return badRequest('Product code required in x-product header');
     }
@@ -1625,11 +2107,41 @@ function SitesController(ctx, log, env) {
       return badRequest('Either organizationId or imsOrg must be provided');
     }
 
-    const resolveFailure = (message, resolveStatus, details) => createResponse(
-      { message, resolveStatus, details },
+    const resolveFailure = (message, resolveStatus, details, asoTier = null) => createResponse(
+      {
+        message, resolveStatus, details, asoTier,
+      },
       404,
       { 'x-error': message },
     );
+
+    // Resolves the org's ASO tier for a failure response. Reuses the entitlement already
+    // fetched by the caller only when it's both the ASO entitlement (x-product: ASO) AND
+    // truthy — TierClient.getFirstEnrollment() nulls out `entitlement` whenever no site is
+    // enrolled, even when a real Entitlement row exists (unlike getAllEnrollment(), which
+    // keeps it), so a falsy entitlement here is not a reliable "no ASO entitlement" signal.
+    // Falls back to an independent lookup (unambiguous — queries Entitlement directly)
+    // whenever we can't trust the passed-in value, so asoTier is always populated correctly
+    // regardless of which product was resolved or which TierClient method fetched it.
+    const resolveAsoTier = async (orgId, entitlement) => (
+      productCode === ASO_PRODUCT_CODE && entitlement
+        ? entitlement.getTier()
+        : getAsoTier(orgId, context)
+    );
+
+    const isOrgWaitingForIpAllowlisting = async (org) => {
+      if (productCode !== ASO_PRODUCT_CODE) {
+        return false;
+      }
+      try {
+        const records = await PlgOnboarding.allByImsOrgId(org.getImsOrgId());
+        const waitingStatus = PLG_STATUSES.WAITING_FOR_IP_ALLOWLISTING;
+        return Array.isArray(records) && records.some((r) => r.getStatus() === waitingStatus);
+      } catch (e) {
+        log.warn('[resolveSite] PlgOnboarding lookup failed, treating as not waiting', e);
+        return false;
+      }
+    };
 
     // callerImsOrg identifies the *caller* (the org their AEC shell is currently in),
     // independent of which org's data is being requested via organizationId/imsOrg.
@@ -1650,12 +2162,103 @@ function SitesController(ctx, log, env) {
       }
     }
 
+    const facs = context.attributes?.facs;
+    // FACS federal grant: if the JWT carries <product>/can_view, the caller has an
+    // org-wide federal view capability — no state-layer filter needed.
+    const hasFACSCapability = facs?.enabled
+      && context.attributes?.authInfo?.hasFacsPermission?.(`${facs.product.toLowerCase()}/can_view`);
+    // Whether the per-site state-layer filter applies. Cross-product bypass:
+    // only filter when the current product ReBAC-scopes `site` (ASO). Under
+    // LLMO, `site` is not a ReBAC resource (LLMO scopes `brand`), so the state
+    // layer holds no per-site grants and filtering would wrongly hide sites.
+    const facsSiteFilterActive = facs?.enabled
+      && !hasFACSCapability
+      && isFacsRebacResource(facs.product, 'site');
+
     // Shared org-level tier + enrollment check used by both organizationId and imsOrg paths.
     // Captures: resolveFailure, callerIsInternal, callerImsOrg, accessControlUtil, context,
-    //           productCode, CUSTOMER_VISIBLE_TIERS, TierClient, getIsSummitPlgEnabled, log, ok,
-    //           OrganizationDto, SiteDto — all in the enclosing resolveSite scope.
+    //           productCode, CUSTOMER_VISIBLE_TIERS, TierClient, resolveAsoTier, log, ok,
+    //           OrganizationDto, SiteDto, facs, facsSiteFilterActive — all in enclosing scope.
     const resolveByOrg = async (org, failureDetails) => {
       const args = [org, productCode, context, ctx, accessControlUtil];
+
+      // FACS path: state-layer filter active — find first site the caller can actually view.
+      if (facsSiteFilterActive) {
+        const unavailable = requirePostgrestForFacsMappings(context);
+        if (unavailable) {
+          return unavailable;
+        }
+
+        const viewable = await listViewableResourceIds(
+          context.dataAccess.services.postgrestClient,
+          {
+            imsOrgId: org.getImsOrgId(),
+            product: facs.product,
+            resourceType: 'site',
+            subjectId: facs.subjectId,
+          },
+        );
+
+        // Check admin-configured default site first; only use it if the caller can view it.
+        const defaultData = await resolveOrgDefaultSite(...args);
+        if (defaultData && viewable.has(defaultData.site.id)) {
+          return ok({ data: defaultData });
+        }
+
+        // Scan all enrolled sites and return the first one the caller can view.
+        const tierClient = TierClient.createForOrg(context, org, productCode);
+        const { entitlement, enrollments } = await tierClient.getAllEnrollment();
+
+        if (!entitlement) {
+          return resolveFailure(
+            'No site found for the provided parameters',
+            callerIsInternal ? 'site_not_enrolled' : 'no_entitlement_for_product',
+            failureDetails,
+            await resolveAsoTier(org.getId(), entitlement),
+          );
+        }
+
+        if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
+          if (!callerIsInternal && !accessControlUtil.hasAdminAccess()) {
+            return resolveFailure(
+              'No site found for the provided parameters',
+              'aso_pre_onboard',
+              failureDetails,
+              await resolveAsoTier(org.getId(), entitlement),
+            );
+          }
+          log.info(`[resolveSite] Internal or admin caller (callerImsOrg=${callerImsOrg}): skipping tier check (tier=${entitlement.getTier()})`, failureDetails);
+        }
+
+        const firstViewableEnrollment = enrollments?.find((e) => viewable.has(e.getSiteId()));
+        if (!firstViewableEnrollment) {
+          return resolveFailure(
+            'No site found for the provided parameters',
+            'site_not_enrolled',
+            failureDetails,
+            await resolveAsoTier(org.getId(), entitlement),
+          );
+        }
+        const firstViewableSite = await Site.findById(firstViewableEnrollment.getSiteId());
+        if (!firstViewableSite) {
+          return resolveFailure(
+            'No site found for the provided parameters',
+            'site_not_enrolled',
+            failureDetails,
+            await resolveAsoTier(org.getId(), entitlement),
+          );
+        }
+        return ok({
+          data: await buildResolveData(
+            org,
+            firstViewableSite,
+            context,
+            productCode === ASO_PRODUCT_CODE ? entitlement : undefined,
+          ),
+        });
+      }
+
+      // Non-FACS path (admin / internal / JWT federal grant / LD-off): existing logic.
       const defaultData = await resolveOrgDefaultSite(...args);
       if (defaultData) {
         return ok({ data: defaultData });
@@ -1664,26 +2267,62 @@ function SitesController(ctx, log, env) {
       const tierClient = TierClient.createForOrg(context, org, productCode);
       const { entitlement, site: enrolledSite } = await tierClient.getFirstEnrollment();
 
+      // Internal caller viewing a customer with no customer-visible entitlement
+      // (none yet, or PRE_ONBOARD) who is mid-PLG-onboarding (WAITING_FOR_IP_ALLOWLISTING):
+      // preserve no_entitlement_for_product so PlgAppGate shows the IP allowlist dialog.
+      const hasCustomerVisibleEntitlement = entitlement
+        && CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier());
+      if (callerIsInternal && !hasCustomerVisibleEntitlement
+        && await isOrgWaitingForIpAllowlisting(org)) {
+        log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): WAITING_FOR_IP_ALLOWLISTING detected, preserving no_entitlement_for_product for org=${org.getId()}`);
+        return resolveFailure(
+          'No site found for the provided parameters',
+          'no_entitlement_for_product',
+          failureDetails,
+          await resolveAsoTier(org.getId(), entitlement),
+        );
+      }
+
       if (!entitlement) {
-        if (callerIsInternal) {
-          return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
-        }
-        return resolveFailure('No site found for the provided parameters', 'no_entitlement_for_product', failureDetails);
+        const resolveStatus = callerIsInternal ? 'site_not_enrolled' : 'no_entitlement_for_product';
+        return resolveFailure(
+          'No site found for the provided parameters',
+          resolveStatus,
+          failureDetails,
+          await resolveAsoTier(org.getId(), entitlement),
+        );
       }
 
       if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
         if (!callerIsInternal && !accessControlUtil.hasAdminAccess()) {
-          return resolveFailure('No site found for the provided parameters', 'aso_pre_onboard', failureDetails);
+          return resolveFailure(
+            'No site found for the provided parameters',
+            'aso_pre_onboard',
+            failureDetails,
+            await resolveAsoTier(org.getId(), entitlement),
+          );
         }
         log.info(`[resolveSite] Internal or admin caller (callerImsOrg=${callerImsOrg}): skipping tier check (tier=${entitlement.getTier()})`, failureDetails);
       }
 
       if (enrolledSite && (accessControlUtil.hasAdminAccess()
         || CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier()))) {
-        return ok({ data: await buildResolveData(org, enrolledSite, context) });
+        return ok({
+          data: await buildResolveData(
+            org,
+            enrolledSite,
+            context,
+            productCode === ASO_PRODUCT_CODE ? entitlement : undefined,
+          ),
+        });
       }
 
-      return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+      return resolveFailure(
+        'No site found for the provided parameters',
+        'site_not_enrolled',
+        failureDetails,
+        await resolveAsoTier(org.getId(), entitlement),
+      );
     };
 
     let organization;
@@ -1709,31 +2348,92 @@ function SitesController(ctx, log, env) {
               const failureDetails = { productCode, siteId, organizationId: orgId };
 
               // For internal/demo orgs (ASO_PLG_EXCLUDED_ORGS):
-              // - No entitlement: return site_not_enrolled (login fails anyway, no PLG wizard)
-              // - Non-customer tier (e.g. PRE_ONBOARD): skip tier check, let enrollment decide
+              // - No customer-visible entitlement (none, or PRE_ONBOARD) + WAITING:
+              //   return no_entitlement_for_product so PlgAppGate shows the IP allowlist dialog.
+              // - No entitlement + not WAITING: return site_not_enrolled
+              // - Non-customer tier + not WAITING: skip tier check, let enrollment decide
               //   (enrolled → 200 dashboard, not enrolled → site_not_enrolled)
               // - Customer tiers (FREE_TRIAL/PAID/PLG): unchanged — pass through to enrollment
               // Customer callers are completely unaffected by this block.
+              const hasCustomerVisibleEntitlement = entitlement
+                && CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier());
+              if (callerIsInternal && !hasCustomerVisibleEntitlement
+                && await isOrgWaitingForIpAllowlisting(organization)) {
+                log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): WAITING_FOR_IP_ALLOWLISTING detected, preserving no_entitlement_for_product for siteId=${siteId}`);
+                return resolveFailure(
+                  'No site found for the provided parameters',
+                  'no_entitlement_for_product',
+                  failureDetails,
+                  await resolveAsoTier(orgId, entitlement),
+                );
+              }
+
               if (!entitlement) {
+                const resolveStatus = callerIsInternal ? 'site_not_enrolled' : 'no_entitlement_for_product';
                 if (callerIsInternal) {
                   log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): remapping no_entitlement_for_product → site_not_enrolled for siteId=${siteId}`);
-                  return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
                 }
-                return resolveFailure('No site found for the provided parameters', 'no_entitlement_for_product', failureDetails);
+                return resolveFailure(
+                  'No site found for the provided parameters',
+                  resolveStatus,
+                  failureDetails,
+                  await resolveAsoTier(orgId, entitlement),
+                );
               }
 
               if (!CUSTOMER_VISIBLE_TIERS.includes(entitlement.getTier())) {
                 if (!callerIsInternal) {
-                  return resolveFailure('No site found for the provided parameters', 'aso_pre_onboard', failureDetails);
+                  return resolveFailure(
+                    'No site found for the provided parameters',
+                    'aso_pre_onboard',
+                    failureDetails,
+                    await resolveAsoTier(orgId, entitlement),
+                  );
                 }
                 log.info(`[resolveSite] Internal caller (callerImsOrg=${callerImsOrg}): skipping tier check (tier=${entitlement.getTier()}), letting enrollment decide for siteId=${siteId}`);
               }
 
               if (!enrollments?.length) {
-                return resolveFailure('No site found for the provided parameters', 'site_not_enrolled', failureDetails);
+                return resolveFailure(
+                  'No site found for the provided parameters',
+                  'site_not_enrolled',
+                  failureDetails,
+                  await resolveAsoTier(orgId, entitlement),
+                );
               }
 
-              return ok({ data: await buildResolveData(organization, site, context) });
+              if (facsSiteFilterActive) {
+                const unavailable = requirePostgrestForFacsMappings(context);
+                if (unavailable) {
+                  return unavailable;
+                }
+                const viewable = await listViewableResourceIds(
+                  context.dataAccess.services.postgrestClient,
+                  {
+                    imsOrgId: organization.getImsOrgId(),
+                    product: facs.product,
+                    resourceType: 'site',
+                    subjectId: facs.subjectId,
+                  },
+                );
+                if (!viewable.has(site.getId())) {
+                  return resolveFailure(
+                    'No site found for the provided parameters',
+                    'site_not_enrolled',
+                    failureDetails,
+                    await resolveAsoTier(orgId, entitlement),
+                  );
+                }
+              }
+
+              return ok({
+                data: await buildResolveData(
+                  organization,
+                  site,
+                  context,
+                  productCode === ASO_PRODUCT_CODE ? entitlement : undefined,
+                ),
+              });
             }
           }
         }
@@ -1765,7 +2465,10 @@ function SitesController(ctx, log, env) {
         }
       }
 
-      return notFound('No site found for the provided parameters');
+      // Reached only when `organization` resolved but accessControlUtil.hasAccess()
+      // denied the caller — asoTier intentionally stays null (the default) rather than
+      // resolving it for an org the caller isn't authorized to see any data about.
+      return resolveFailure('No site found for the provided parameters');
     } catch (error) {
       log.error(`Error resolving site: ${error.message}`);
       return badRequest('Failed to resolve site');
@@ -1838,6 +2541,7 @@ function SitesController(ctx, log, env) {
     getAuditForSite,
     getByBaseURL,
     getAllByDeliveryType,
+    getAllByEnrollmentAndTier,
     getByID,
     getIdentity,
     removeSite,

@@ -293,6 +293,34 @@ describe('AddOaeStageDomainCommand', () => {
       expect(mockProdSite.save).to.not.have.been.called;
     });
 
+    it('throws and reports error when stage domain does not match pathname scope of a subpath prod site', async () => {
+      mockProdSite.getBaseURL.returns('https://example.com/docs');
+      dataAccessStub.Site.findByBaseURL.callsFake((url) => Promise.resolve(
+        url === 'https://example.com/docs' ? mockProdSite : null,
+      ));
+
+      const command = AddOaeStageDomainCommand(context);
+      await command.handleExecution(['example.com/docs', 'staging.otherdomain.com'], slackContext);
+
+      expect(context.log.error).to.have.been.called;
+      expect(slackContext.say).to.have.been.calledWithMatch(/pathname scope/);
+    });
+
+    it('accepts stage domain that matches pathname scope of a subpath prod site', async () => {
+      mockProdSite.getBaseURL.returns('https://example.com/docs');
+      dataAccessStub.Site.findByBaseURL.callsFake((url) => Promise.resolve(
+        url === 'https://example.com/docs' ? mockProdSite : null,
+      ));
+      dataAccessStub.Site.create.resolves(mockStageSite);
+      tokowakaClientStub.fetchMetaconfig.resolves(null);
+      tokowakaClientStub.createMetaconfig.resolves({ apiKeys: ['key1'] });
+
+      const command = AddOaeStageDomainCommand(context);
+      await command.handleExecution(['example.com/docs', 'staging.otherdomain.com/docs'], slackContext);
+
+      expect(slackContext.say).to.have.been.calledWithMatch(/Successfully onboarded 1 stage domain/);
+    });
+
     it('allows stage domain with a different registered domain than prod (no base-domain check)', async () => {
       // staging.completely-different.io has a different registered domain from example.com —
       // the API would reject this, but the Slack command must allow it.

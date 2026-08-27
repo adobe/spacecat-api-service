@@ -15,8 +15,14 @@ import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
+import { ProjectEngineApiError } from '@adobe/spacecat-shared-project-engine-client';
 import { ErrorWithStatusCode } from '../../src/support/utils.js';
 import { brandPointerReloader } from '../../src/controllers/serenity.js';
+// The REAL transport error type: since LLMO-6386 the controller's mapError classifies via
+// errors.js (isSemrushTransportError), which recognises the real SerenityTransportError /
+// ProjectEngineApiError by `instanceof`. The mapError tests below must feed those real types
+// (a bare mock class would not be recognised → would wrongly fall through to the generic 500).
+import { SerenityTransportError as RealSerenityTransportError } from '../../src/support/serenity/serenity-transport-error.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -35,6 +41,35 @@ function fakeLog() {
   };
 }
 
+// Faithful re-implementation of support/utils.js#resolveSemrushImsToken, wired to
+// a controllable exchange stub. The controller now delegates the promise-token
+// decode/exchange to that shared helper, so exercising it here (rather than
+// stubbing the whole thing away) keeps this suite's fallback-path assertions
+// (IMS-type gate, hint message) exercising the REAL `fallback` the controller
+// passes in, while still allowing the promise-token exchange itself to be
+// controlled per-test. The authoritative unit tests for the decode/error-wrap
+// behavior itself live in test/support/utils.test.js.
+function makeResolveSemrushImsTokenStub(exchangeStub) {
+  return async (ctx, log, logLabel, fallback) => {
+    const promiseTokenHeader = ctx?.pathInfo?.headers?.['x-promise-token'];
+    if (promiseTokenHeader) {
+      let decoded = promiseTokenHeader;
+      try {
+        decoded = decodeURIComponent(promiseTokenHeader);
+      } catch {
+        // Bearer-style tokens may contain literal %; use as-is.
+      }
+      try {
+        return await exchangeStub(ctx, decoded);
+      } catch (e) {
+        log.error(`${logLabel}: promise token exchange failed`, { error: e?.message });
+        throw new ErrorWithStatusCode('Invalid or expired promise token', 401);
+      }
+    }
+    return fallback(ctx);
+  };
+}
+
 function makeBrandModel(overrides = {}) {
   return {
     getId: () => BRAND,
@@ -44,8 +79,8 @@ function makeBrandModel(overrides = {}) {
     // all-or-nothing path keys off this status (a non-pending brand is never
     // downgraded on a partial failure).
     getStatus: () => 'pending',
-    getSemrushWorkspaceId: () => 'subworkspace-ws-1',
-    setSemrushWorkspaceId: sinon.stub(),
+    getSemrushSubWorkspaceId: () => 'subworkspace-ws-1',
+    setSemrushSubWorkspaceId: sinon.stub(),
     setStatus: sinon.stub(),
     save: sinon.stub().resolves(),
     ...overrides,
@@ -60,11 +95,15 @@ function fakeContext({
   brandId = BRAND,
   brand = makeBrandModel(),
   env = {},
+  promiseToken = undefined,
 } = {}) {
   return {
     env,
     pathInfo: {
-      headers: bearer ? { authorization: `Bearer ${bearer}` } : {},
+      headers: {
+        ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+        ...(promiseToken ? { 'x-promise-token': promiseToken } : {}),
+      },
     },
     attributes: {
       authInfo: { getType: () => authType },
@@ -120,19 +159,33 @@ describe('SerenityController', () => {
     handleCreatePromptsSubworkspace: sinon.stub(),
     handleUpdatePromptSubworkspace: sinon.stub(),
     handleBulkDeletePromptsSubworkspace: sinon.stub(),
+    handleCreateTag: sinon.stub(),
+    handleCreateTagSubworkspace: sinon.stub(),
+    handleUpdateTag: sinon.stub(),
+    handleUpdateTagSubworkspace: sinon.stub(),
   };
   let decommissionStub;
   let ensureSubworkspaceStub;
   let clearBrandWorkspaceCacheStub;
   let resolveWorkspaceIdStub;
   let resolveBrandWorkspaceStub;
+  let isSerenityActiveStub;
   let createTransportStub;
   let resolveBrandUuidStub;
   let getBrandAliasesStub;
   let getBrandUrlSourcesStub;
   let getBrandCompetitorsStub;
+  let updateBrandStub;
   let accessControlHasAccessStub;
   let ensureMarketSiteStub;
+  let resolveSiteIdentityStub;
+  let unlinkMarketSiteIfOrphanedStub;
+  let getBrandBaseSiteIdStub;
+  let exchangePromiseTokenStub;
+  let linkSiteToLiveRowsStub;
+  let linkSiteToRowStub;
+  let tombstoneAllForBrandStub;
+  let createAndEnqueueJobStub;
   let MockTransportError;
   let SerenityController;
 
@@ -144,6 +197,10 @@ describe('SerenityController', () => {
     resolveBrandWorkspaceStub = sinon.stub().resolves({
       mode: 'flat', workspaceId: WORKSPACE, parentWorkspaceId: WORKSPACE,
     });
+    // Default: serenity active (org-wide LLMO/serenity flag ON) so every
+    // existing assertion that drives a brand-level route reaches its handler.
+    // The "serenity inactive" describe overrides this to false.
+    isSerenityActiveStub = sinon.stub().resolves(true);
     decommissionStub = sinon.stub().resolves();
     ensureSubworkspaceStub = sinon.stub().resolves(SUBWS);
     clearBrandWorkspaceCacheStub = sinon.stub();
@@ -153,16 +210,26 @@ describe('SerenityController', () => {
     getBrandUrlSourcesStub = sinon.stub()
       .resolves({ urls: [], socialAccounts: [], earnedContent: [] });
     getBrandCompetitorsStub = sinon.stub().resolves([]);
+    // Serenity activate persists the status flip + primary site via updateBrand
+    // (the Brand model has no site_id setter). Resolves by default; specific
+    // tests override it to reject (409 conflict / transient divergence).
+    updateBrandStub = sinon.stub().resolves({ getId: () => BRAND, getStatus: () => 'active' });
     accessControlHasAccessStub = sinon.stub().resolves(true);
     ensureMarketSiteStub = sinon.stub().resolves('site-uuid-1');
-    MockTransportError = class extends Error {
-      constructor(status, message, body) {
-        super(message);
-        this.name = 'SerenityTransportError';
-        this.status = status;
-        this.body = body;
-      }
-    };
+    resolveSiteIdentityStub = sinon.stub().resolves({ domain: 'resolved.example.com', primaryUrl: 'resolved.example.com' });
+    unlinkMarketSiteIfOrphanedStub = sinon.stub().resolves(true);
+    getBrandBaseSiteIdStub = sinon.stub().resolves(null);
+    exchangePromiseTokenStub = sinon.stub().resolves('exchanged-ims-token');
+    linkSiteToLiveRowsStub = sinon.stub().resolves();
+    linkSiteToRowStub = sinon.stub().resolves();
+    tombstoneAllForBrandStub = sinon.stub().resolves();
+    createAndEnqueueJobStub = sinon.stub().resolves({
+      getId: () => 'job-abc', getStatus: () => 'IN_PROGRESS',
+    });
+    // Alias the REAL SerenityTransportError so instances are recognised by errors.js's
+    // isSemrushTransportError (which mapError now delegates to). Same (status, message, body)
+    // constructor signature the tests already use.
+    MockTransportError = RealSerenityTransportError;
     const MockAccessControlUtil = {
       default: {
         fromContext: () => ({
@@ -212,9 +279,18 @@ describe('SerenityController', () => {
         handleUpdatePromptSubworkspace: handlers.handleUpdatePromptSubworkspace,
         handleBulkDeletePromptsSubworkspace: handlers.handleBulkDeletePromptsSubworkspace,
       },
+      '../../src/support/serenity/handlers/tags.js': {
+        handleCreateTag: handlers.handleCreateTag,
+        handleCreateTagSubworkspace: handlers.handleCreateTagSubworkspace,
+        handleUpdateTag: handlers.handleUpdateTag,
+        handleUpdateTagSubworkspace: handlers.handleUpdateTagSubworkspace,
+      },
       '../../src/support/serenity/workspace-lifecycle.js': {
         ensureSubworkspace: ensureSubworkspaceStub,
         decommissionBrandWorkspace: decommissionStub,
+      },
+      '../../src/support/serenity/serenity-active.js': {
+        isSerenityActiveForBrand: isSerenityActiveStub,
       },
       '../../src/support/access-control-util.js': MockAccessControlUtil,
       '../../src/support/prompts-storage.js': {
@@ -224,9 +300,29 @@ describe('SerenityController', () => {
         getBrandAliases: getBrandAliasesStub,
         getBrandUrlSources: getBrandUrlSourcesStub,
         getBrandCompetitors: getBrandCompetitorsStub,
+        updateBrand: updateBrandStub,
+        getBrandBaseSiteId: getBrandBaseSiteIdStub,
       },
       '../../src/support/serenity/site-linkage.js': {
         ensureMarketSite: ensureMarketSiteStub,
+        resolveSiteIdentity: resolveSiteIdentityStub,
+        unlinkMarketSiteIfOrphaned: unlinkMarketSiteIfOrphanedStub,
+      },
+      '../../src/support/utils.js': {
+        resolveSemrushImsToken: makeResolveSemrushImsTokenStub(
+          (...args) => exchangePromiseTokenStub(...args),
+        ),
+      },
+      '../../src/support/serenity/mapping-rows.js': {
+        linkSiteToLiveRows: linkSiteToLiveRowsStub,
+        linkSiteToRow: linkSiteToRowStub,
+        tombstoneAllForBrand: tombstoneAllForBrandStub,
+      },
+      '../../src/support/serenity/async-job-runner.js': {
+        createAndEnqueueJob: createAndEnqueueJobStub,
+      },
+      '../../src/support/serenity/handlers/classify-prompts-job.js': {
+        CLASSIFY_PROMPTS_JOB_TYPE: 'serenity-classify-prompts',
       },
     })).default;
   });
@@ -240,6 +336,26 @@ describe('SerenityController', () => {
 
     it('requires a log', () => {
       expect(() => SerenityController({ env: {} }, null, {})).to.throw('Log required');
+    });
+
+    // The warn-once latch is module-scoped, but `beforeEach` re-esmocks
+    // serenity.js fresh for every test, so each test gets its OWN latch — this
+    // test is self-contained, not order-dependent. The two constructions below
+    // share THIS test's module instance (first warns, second is already latched),
+    // and a future test that wants to see the warning gets a fresh module where it
+    // fires again. It reads the flag through the third `env` arg (context has no
+    // `env`), exercising the `context?.env || env` fallback branch — the
+    // context.env side is already covered by every other constructor here.
+    it('warns at most once when SERENITY_ALLOW_NON_IMS_AUTH is enabled', () => {
+      const log = fakeLog();
+      SerenityController({ region: 'x' }, log, { SERENITY_ALLOW_NON_IMS_AUTH: 'true' });
+      expect(log.warn).to.have.been.calledOnce;
+      expect(log.warn.firstCall.args[0]).to.match(/SERENITY_ALLOW_NON_IMS_AUTH is enabled/);
+
+      // A second construction with the flag still set does not warn again.
+      const log2 = fakeLog();
+      SerenityController({ env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true' } }, log2, {});
+      expect(log2.warn).to.not.have.been.called;
     });
   });
 
@@ -256,6 +372,127 @@ describe('SerenityController', () => {
       const ctx = fakeContext({ authType: 'jwt' });
       const response = await controller.listPrompts(ctx);
       expect(response.status).to.equal(401);
+    });
+
+    // Test-only escape hatch (SERENITY_ALLOW_NON_IMS_AUTH). The integration-test
+    // harness mints a non-IMS (JWT) token; with the flag set, the IMS-type gate
+    // is skipped so the handler runs (the Semrush mock ignores the forwarded
+    // bearer). The Authorization header is still required (asserted below).
+    it('lets a non-IMS caller through when SERENITY_ALLOW_NON_IMS_AUTH is set (reaches the handler, not 401)', async () => {
+      handlers.handleListPrompts.resolves({ items: [], total: 0 });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ authType: 'jwt', env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true' } });
+      const response = await controller.listPrompts(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleListPrompts).to.have.been.calledOnce;
+    });
+
+    it('still 401s a non-IMS caller with the flag set but NO Authorization header', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        authType: 'jwt', bearer: null, env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true' },
+      });
+      const response = await controller.listPrompts(ctx);
+      expect(response.status).to.equal(401);
+    });
+
+    // The escape hatch is hard-disabled in production (AWS_ENV or ENV === 'prod'),
+    // mirroring getImsUserTokenStrict — a non-IMS caller must never slip through
+    // even if SERENITY_ALLOW_NON_IMS_AUTH were somehow set in a prod env.
+    it('401s a non-IMS caller with the flag set when AWS_ENV is prod', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        authType: 'jwt', env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true', AWS_ENV: 'prod' },
+      });
+      const response = await controller.listPrompts(ctx);
+      expect(response.status).to.equal(401);
+    });
+
+    it('401s a non-IMS caller with the flag set when ENV is prod', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        authType: 'jwt', env: { SERENITY_ALLOW_NON_IMS_AUTH: 'true', ENV: 'prod' },
+      });
+      const response = await controller.listPrompts(ctx);
+      expect(response.status).to.equal(401);
+    });
+
+    describe('x-promise-token support', () => {
+      it('exchanges x-promise-token for an IMS token and forwards it upstream, bypassing the IMS-type gate', async () => {
+        handlers.handleListPrompts.resolves({ items: [], total: 0 });
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        // Authorization carries a spacecat JWT (not IMS) — would 401 via
+        // requireImsBearer alone, but the promise-token path never calls it.
+        const ctx = fakeContext({
+          authType: 'jwt',
+          bearer: 'spacecat-jwt-abc',
+          promiseToken: 'promise-token-xyz',
+        });
+        const response = await controller.listPrompts(ctx);
+        expect(response.status).to.equal(200);
+        expect(exchangePromiseTokenStub).to.have.been.calledOnceWithExactly(ctx, 'promise-token-xyz');
+        expect(createTransportStub).to.have.been.calledWithMatch({ imsToken: 'exchanged-ims-token' });
+      });
+
+      it('decodes a URI-encoded x-promise-token header before exchanging', async () => {
+        handlers.handleListPrompts.resolves({ items: [], total: 0 });
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const ctx = fakeContext({ promiseToken: 'promise%20token%20xyz' });
+        const response = await controller.listPrompts(ctx);
+        expect(response.status).to.equal(200);
+        expect(exchangePromiseTokenStub).to.have.been.calledOnceWithExactly(ctx, 'promise token xyz');
+      });
+
+      it('falls back to the raw header value when it is not valid percent-encoding', async () => {
+        handlers.handleListPrompts.resolves({ items: [], total: 0 });
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const ctx = fakeContext({ promiseToken: 'promise%zztoken' });
+        const response = await controller.listPrompts(ctx);
+        expect(response.status).to.equal(200);
+        expect(exchangePromiseTokenStub).to.have.been.calledOnceWithExactly(ctx, 'promise%zztoken');
+      });
+
+      it('401s with a generic message (no leaked exchange detail) when the promise token exchange fails', async () => {
+        exchangePromiseTokenStub.rejects(new Error('upstream IMS exchange failed: secret detail'));
+        const log = fakeLog();
+        const controller = SerenityController({ env: {} }, log, {});
+        const ctx = fakeContext({
+          authType: 'jwt', bearer: 'spacecat-jwt-abc', promiseToken: 'promise-token-xyz',
+        });
+        const response = await controller.listPrompts(ctx);
+        expect(response.status).to.equal(401);
+        const body = await readBody(response);
+        expect(body.message).to.equal('Invalid or expired promise token');
+        expect(log.error).to.have.been.calledWithMatch('serenity: promise token exchange failed');
+      });
+
+      it('falls back to the Authorization bearer when x-promise-token is absent (existing behavior unchanged)', async () => {
+        handlers.handleListPrompts.resolves({ items: [], total: 0 });
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const ctx = fakeContext({ bearer: 'ims-token-123' });
+        const response = await controller.listPrompts(ctx);
+        expect(response.status).to.equal(200);
+        expect(exchangePromiseTokenStub).to.not.have.been.called;
+        expect(createTransportStub).to.have.been.calledWithMatch({ imsToken: 'ims-token-123' });
+      });
+
+      it('still 401s a non-IMS caller with no x-promise-token (existing IMS-type gate unaffected)', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const ctx = fakeContext({ authType: 'jwt' });
+        const response = await controller.listPrompts(ctx);
+        expect(response.status).to.equal(401);
+        expect(exchangePromiseTokenStub).to.not.have.been.called;
+      });
+
+      it('hints at the x-promise-token header when a non-IMS caller sends none', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const ctx = fakeContext({ authType: 'jwt' });
+        const response = await controller.listPrompts(ctx);
+        expect(response.status).to.equal(401);
+        const body = await readBody(response);
+        expect(body.error).to.equal('promiseTokenRequired');
+        expect(body.message).to.match(/x-promise-token/);
+      });
     });
 
     it('400s when :brandId is not a UUID (the new guard)', async () => {
@@ -290,6 +527,41 @@ describe('SerenityController', () => {
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.listPrompts(fakeContext());
       expect(response.status).to.equal(404);
+    });
+
+    it('404s when serenity is not active for the BRAND, without resolving a workspace', async () => {
+      // The brand resolves LLMO/serenity OFF — its own override, or the org's row
+      // in the absence of one — so the serenity surface is inactive for it and the
+      // UI falls back to the normal backend. A sibling brand in the same org can
+      // resolve ON, which is what a migration wave looks like mid-flight.
+      isSerenityActiveStub.resolves(false);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listPrompts(fakeContext());
+      expect(response.status).to.equal(404);
+      const body = await readBody(response);
+      expect(body.message).to.match(/serenity is not active/i);
+      expect(resolveBrandWorkspaceStub).to.not.have.been.called;
+    });
+
+    it('gates on the RESOLVED brand uuid, not the org alone', async () => {
+      // The brand must be resolved first and its uuid passed to the predicate:
+      // gating on the org alone would give all of an org's brands one answer.
+      isSerenityActiveStub.resolves(false);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      await controller.listPrompts(fakeContext());
+      expect(resolveBrandUuidStub).to.have.been.calledOnce;
+      expect(isSerenityActiveStub).to.have.been.calledWith(sinon.match.any, ORG, BRAND);
+    });
+
+    it('reaches the handler when serenity is active for the brand and a workspace resolves', async () => {
+      // The happy-path composition: brand resolves ON (default stub) + a resolved
+      // workspace ⇒ the route is served.
+      handlers.handleListPrompts.resolves({ items: [], total: 0 });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listPrompts(fakeContext());
+      expect(response.status).to.equal(200);
+      expect(isSerenityActiveStub).to.have.been.calledOnce;
+      expect(handlers.handleListPrompts).to.have.been.calledOnce;
     });
   });
 
@@ -609,6 +881,27 @@ describe('SerenityController', () => {
       expect(JSON.stringify(body)).not.to.match(/leak/);
     });
 
+    // An upstream 409 (e.g. a prompt rename onto a sibling prompt's exact text
+    // — serenity-docs#63) is the caller's to act on, not an outage: it keeps
+    // its status and the `conflict` token instead of flattening into the
+    // generic 502. Message stays redacted like every transport-error branch.
+    it('upstream SerenityTransportError 409 propagates as 409 conflict with a redacted message', async () => {
+      handlers.handleUpdatePrompt.rejects(new MockTransportError(409, 'gateway-url-with-uuids', { secret: 'leak' }));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.updatePrompt(fakeContext({
+        params: { semrushPromptId: 'sem-1' },
+        data: {
+          geoTargetId: 2840, languageCode: 'en', text: 'x', tagIds: ['t1'],
+        },
+      }));
+      expect(response.status).to.equal(409);
+      const body = await readBody(response);
+      expect(body.error).to.equal('conflict');
+      expect(body.message).to.equal('Upstream rejected the request as a conflict');
+      expect(body.message).to.not.match(/gateway-url-with-uuids/);
+      expect(JSON.stringify(body)).not.to.match(/leak/);
+    });
+
     // mapError's final fallback: anything that isn't ErrorWithStatusCode and
     // isn't SerenityTransportError lands on the generic 500 path. No upstream
     // body, no status code leakage — the message is always the constant
@@ -624,6 +917,132 @@ describe('SerenityController', () => {
       expect(body.error).to.equal('internalServerError');
       expect(body.message).to.equal('Internal server error');
       expect(log.error).to.have.been.calledWithMatch('Serenity controller error');
+    });
+
+    // SITES-49993: when authorize() itself throws (before returning), the
+    // hoisted `auth` is still undefined — the fallback log line must still
+    // carry the route ids from params, with no brandUuid/workspaceId keys.
+    it('logs route ids on the fallback when authorize throws before resolving', async () => {
+      const boom = new Error('db down');
+      const log = fakeLog();
+      const controller = SerenityController({ env: {} }, log, {});
+      const ctx = fakeContext();
+      ctx.dataAccess.Organization.findById = sinon.stub().rejects(boom);
+      const response = await controller.listMarkets(ctx);
+      expect(response.status).to.equal(500);
+      const call = log.error.getCalls().find(
+        (c) => typeof c.args[0] === 'string' && c.args[0].startsWith('Serenity controller error {'),
+      );
+      expect(call).to.exist;
+      const payload = JSON.parse(call.args[0].slice('Serenity controller error '.length));
+      expect(payload.spaceCatId).to.equal(ORG);
+      expect(payload.brandId).to.equal(BRAND);
+      expect(payload).to.not.have.property('brandUuid');
+      expect(payload).to.not.have.property('workspaceId');
+      expect(call.args[1]).to.equal(boom);
+    });
+
+    // LLMO-6386: a Project Engine call now throws ProjectEngineApiError directly (adaptPE gone).
+    // mapError's widened branch must map it to the SAME HTTP envelope the old transport error
+    // produced, redacting the body/message. ProjectEngineApiError does NOT extend
+    // ErrorWithStatusCode, so it correctly reaches the widened branch.
+    it('upstream ProjectEngineApiError (HTTP status) maps to 502 without leaking provider detail', async () => {
+      handlers.handleListMarkets.rejects(new ProjectEngineApiError(503, 'GET', { secret: 'leak' }));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listMarkets(fakeContext());
+      expect(response.status).to.equal(502);
+      const body = await readBody(response);
+      expect(body.error).to.equal('serenityUpstreamError');
+      expect(body.message).to.equal('Upstream request failed');
+      expect(JSON.stringify(body)).not.to.match(/leak/);
+      // The raw "Project Engine ..." message must never reach the client.
+      expect(JSON.stringify(body)).not.to.match(/Project Engine/);
+    });
+
+    // SITES-49993: a Semrush upstream failure logs ONE structured line — the
+    // JSON payload embedded in the message carries the upstream status/method/
+    // body plus the tenant ids threaded from the route (ProjectEngineApiError
+    // itself carries no ids), so Logs Insights can group failures by tenant
+    // and upstream reason.
+    it('logs one structured line with upstream status/method/body and tenant ids (SITES-49993)', async () => {
+      handlers.handleListMarkets.rejects(
+        new ProjectEngineApiError(403, 'GET', { detail: 'workspace role missing' }),
+      );
+      const log = fakeLog();
+      const controller = SerenityController({ env: {} }, log, {});
+      await controller.listMarkets(fakeContext());
+      const call = log.error.getCalls().find(
+        (c) => typeof c.args[0] === 'string' && c.args[0].startsWith('Serenity upstream error {'),
+      );
+      expect(call).to.exist;
+      const payload = JSON.parse(call.args[0].slice('Serenity upstream error '.length));
+      expect(payload.status).to.equal(403);
+      expect(payload.method).to.equal('GET');
+      expect(payload.spaceCatId).to.equal(ORG);
+      expect(payload.brandId).to.equal(BRAND);
+      expect(payload.workspaceId).to.equal(WORKSPACE);
+      expect(payload.body).to.include('workspace role missing');
+    });
+
+    it('upstream ProjectEngineApiError 401 propagates as 401 authenticationRequired (redacted)', async () => {
+      handlers.handleListMarkets.rejects(new ProjectEngineApiError(401, 'GET', { secret: 'leak' }));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listMarkets(fakeContext());
+      expect(response.status).to.equal(401);
+      const body = await readBody(response);
+      expect(body.error).to.equal('authenticationRequired');
+      expect(body.message).to.equal('Upstream authorization failed');
+    });
+
+    it('upstream ProjectEngineApiError 409 propagates as 409 conflict (redacted)', async () => {
+      handlers.handleUpdatePrompt.rejects(new ProjectEngineApiError(409, 'POST', { secret: 'leak' }));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.updatePrompt(fakeContext({
+        params: { semrushPromptId: 'sem-1' },
+        data: {
+          geoTargetId: 2840, languageCode: 'en', text: 'x', tagIds: ['t1'],
+        },
+      }));
+      expect(response.status).to.equal(409);
+      const body = await readBody(response);
+      expect(body.error).to.equal('conflict');
+      expect(body.message).to.equal('Upstream rejected the request as a conflict');
+    });
+
+    // The behaviour-preservation crux (LLMO-6386): a no-HTTP-response Project Engine failure is a
+    // ProjectEngineApiError with status undefined wrapping the original throw as `.cause`. mapError
+    // must unwrap it so the auth-401 keeps mapping to 401 (NOT flattening to 502) and a timeout 504
+    // still maps to 502 — exactly what the retired adaptPE boundary produced.
+    it('unwraps a status-undefined ProjectEngineApiError to preserve the auth 401 (not 502)', async () => {
+      const authCause = new RealSerenityTransportError(401, 'Missing IMS bearer token');
+      handlers.handleListMarkets.rejects(new ProjectEngineApiError(undefined, 'POST', null, { cause: authCause }));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listMarkets(fakeContext());
+      expect(response.status).to.equal(401);
+      const body = await readBody(response);
+      expect(body.error).to.equal('authenticationRequired');
+      expect(body.message).to.equal('Upstream authorization failed');
+    });
+
+    it('maps a status-undefined ProjectEngineApiError wrapping a 504 timeout cause to 502', async () => {
+      const timeoutCause = new RealSerenityTransportError(504, 'Semrush request timed out');
+      handlers.handleListMarkets.rejects(new ProjectEngineApiError(undefined, 'GET', null, { cause: timeoutCause }));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listMarkets(fakeContext());
+      expect(response.status).to.equal(502);
+      const body = await readBody(response);
+      expect(body.error).to.equal('serenityUpstreamError');
+    });
+
+    it('maps a status-undefined ProjectEngineApiError wrapping a raw network cause to the generic 500', async () => {
+      const netCause = Object.assign(new Error('ECONNRESET'), { code: 'ECONNRESET' });
+      handlers.handleListMarkets.rejects(new ProjectEngineApiError(undefined, 'GET', null, { cause: netCause }));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.listMarkets(fakeContext());
+      expect(response.status).to.equal(500);
+      const body = await readBody(response);
+      expect(body.error).to.equal('internalServerError');
+      expect(body.message).to.equal('Internal server error');
     });
 
     it('listTags dispatches to handleListTags and wraps the result in ok()', async () => {
@@ -813,6 +1232,99 @@ describe('SerenityController', () => {
       expect(handlers.handleBulkDeletePrompts).to.have.been.calledOnce;
       expect(handlers.handleBulkDeletePromptsSubworkspace).to.not.have.been.called;
     });
+
+    // SITES-50099: the delete audit log needs a requester identity threaded
+    // through, resolved via resolveCallerId — the same mechanism createPrompts/
+    // updatePrompt already use, never the forwarded upstream bearer.
+    it('bulkDeletePrompts threads the resolved callerId into the flat handler options', async () => {
+      handlers.handleBulkDeletePrompts.resolves({ deleted: 0, failed: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      await controller.bulkDeletePrompts(fakeContext({
+        data: { prompts: [{ semrushPromptId: 'q1', geoTargetId: 2840, languageCode: 'en' }] },
+      }));
+      const options = handlers.handleBulkDeletePrompts.firstCall.args[6];
+      expect(options.callerId).to.equal('unknown');
+    });
+
+    it('createTag routes to the flat handler in flat mode and returns its status', async () => {
+      handlers.handleCreateTag.resolves({
+        status: 201,
+        body: {
+          brandId: BRAND, geoTargetId: 2840, languageCode: 'en', type: 'category', name: 'Footwear', tag: 'category:Footwear',
+        },
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      // No ctx.data → exercises the `ctx.data || {}` body-defaulting fallback.
+      const response = await controller.createTag(fakeContext());
+      expect(response.status).to.equal(201);
+      const body = await readBody(response);
+      expect(body.tag).to.equal('category:Footwear');
+      expect(handlers.handleCreateTag).to.have.been.calledOnce;
+      expect(handlers.handleCreateTag.firstCall.args[4]).to.deep.equal({});
+      expect(handlers.handleCreateTagSubworkspace).to.not.have.been.called;
+    });
+
+    it('createTag returns the authorize() error (403) and does not dispatch when the caller lacks org access', async () => {
+      accessControlHasAccessStub.resolves(false);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createTag(fakeContext({
+        data: {
+          type: 'category', name: 'Footwear', geoTargetId: 2840, languageCode: 'en',
+        },
+      }));
+      expect(response.status).to.equal(403);
+      expect(handlers.handleCreateTag).to.not.have.been.called;
+      expect(handlers.handleCreateTagSubworkspace).to.not.have.been.called;
+    });
+
+    it('createTag maps a handler 400 (bad body) through mapError', async () => {
+      handlers.handleCreateTag.rejects(new ErrorWithStatusCode('name is required', 400));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createTag(fakeContext({
+        data: { type: 'category', geoTargetId: 2840, languageCode: 'en' },
+      }));
+      expect(response.status).to.equal(400);
+      const body = await readBody(response);
+      expect(body.message).to.match(/name is required/);
+    });
+
+    it('updateTag requires the :tagId path param', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.updateTag(fakeContext({ params: {} }));
+      expect(response.status).to.equal(400);
+      expect(handlers.handleUpdateTag).to.not.have.been.called;
+    });
+
+    it('updateTag forwards tagId + body to the flat handler and returns its status', async () => {
+      handlers.handleUpdateTag.resolves({
+        status: 200,
+        body: {
+          brandId: BRAND, tagId: 'tag-1', tag: 'category:Footwear', parentId: 'root-1',
+        },
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.updateTag(fakeContext({
+        params: { tagId: 'tag-1' },
+        data: {
+          name: 'category:Footwear', parentId: 'root-1', geoTargetId: 2840, languageCode: 'en',
+        },
+      }));
+      expect(response.status).to.equal(200);
+      const body = await readBody(response);
+      expect(body).to.include({ tagId: 'tag-1', parentId: 'root-1' });
+      expect(handlers.handleUpdateTag).to.have.been.calledOnce;
+      expect(handlers.handleUpdateTag.firstCall.args[4]).to.equal('tag-1');
+      expect(handlers.handleUpdateTagSubworkspace).to.not.have.been.called;
+    });
+
+    it('updateTag returns the authorize error without throwing (auth.error short-circuit)', async () => {
+      accessControlHasAccessStub.resolves(false);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.updateTag(fakeContext({ params: { tagId: 'tag-1' } }));
+      expect(response.status).to.equal(403);
+      expect(handlers.handleUpdateTag).to.not.have.been.called;
+      expect(handlers.handleUpdateTagSubworkspace).to.not.have.been.called;
+    });
   });
 
   describe('controller surface', () => {
@@ -827,6 +1339,7 @@ describe('SerenityController', () => {
       expect(controller.createMarket).to.be.a('function');
       expect(controller.deleteMarket).to.be.a('function');
       expect(controller.listTags).to.be.a('function');
+      expect(controller.createTag).to.be.a('function');
       expect(controller.listModels).to.be.a('function');
       expect(controller.updateModels).to.be.a('function');
 
@@ -854,7 +1367,13 @@ describe('SerenityController', () => {
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.listMarkets(fakeContext());
       expect(response.status).to.equal(200);
-      expect(handlers.handleListMarketsSubworkspace).to.have.been.calledOnceWithExactly({ name: 'transport' }, BRAND, 'subworkspace-ws-1');
+      // transport, brandId, workspaceId, then dataAccess + log (siteId enrichment).
+      expect(handlers.handleListMarketsSubworkspace).to.have.been.calledOnce;
+      const listArgs = handlers.handleListMarketsSubworkspace.firstCall.args;
+      expect(listArgs[0]).to.deep.equal({ name: 'transport' });
+      expect(listArgs[1]).to.equal(BRAND);
+      expect(listArgs[2]).to.equal('subworkspace-ws-1');
+      expect(listArgs[3]).to.exist; // ctx.dataAccess passed for siteId enrichment
       expect(handlers.handleListMarkets).to.not.have.been.called;
     });
 
@@ -897,6 +1416,78 @@ describe('SerenityController', () => {
       expect(opts).to.include({ organizationId: ORG, brandId: BRAND, domain: 'x.com' });
     });
 
+    it('createMarket links the mirrored site onto THIS market\'s mapping row on 201', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({
+        status: 201,
+        body: {
+          brandId: BRAND, geoTargetId: 2840, languageCode: 'en', projectId: 'P-NEW',
+        },
+      });
+      ensureMarketSiteStub.resolves('site-uuid-1');
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'],
+        },
+      });
+      const response = await controller.createMarket(ctx);
+      expect(response.status).to.equal(201);
+      // Scoped to the row named by the new project id. A market created against
+      // its own url must not have that site spread across whichever sibling rows
+      // happen to be unlinked — site_id is the PER-MARKET source of truth for the
+      // url a project tracks (serenity-docs#356).
+      expect(linkSiteToRowStub).to.have.been.calledOnceWith(ctx.dataAccess, 'P-NEW', 'site-uuid-1');
+      expect(linkSiteToLiveRowsStub).to.not.have.been.called;
+    });
+
+    it('createMarket warns and links nothing when a 201 names no project', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({
+        status: 201,
+        body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' },
+      });
+      ensureMarketSiteStub.resolves('site-uuid-1');
+      const log = fakeLog();
+      const controller = SerenityController({ env: {} }, log, {});
+      const ctx = fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'],
+        },
+      });
+      const response = await controller.createMarket(ctx);
+      expect(response.status).to.equal(201);
+      // The row is keyed by project id, so without one there is nothing to bind
+      // to — the market keeps no site. Unreachable while the handler holds its
+      // contract, which is why it must not fail silently if that ever changes.
+      expect(linkSiteToRowStub).to.not.have.been.called;
+      expect(log.warn).to.have.been.calledWithMatch(/201 without a projectId/);
+    });
+
+    it('createMarket mirrors the brand host when the market carries no url of its own', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({
+        status: 201,
+        body: {
+          brandId: BRAND, geoTargetId: 2840, languageCode: 'en', projectId: 'P-NEW',
+        },
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createMarket(fakeContext({
+        data: {
+          market: 'us',
+          languageCode: 'en',
+          // The fallback arm: with no siteId, primaryUrl is derived from
+          // brandDomain and the two coincide. The arm where they diverge — a
+          // supplied siteId whose Site carries a subpath — is asserted by the
+          // `derives brandDomain from a supplied siteId` case below, which is
+          // the only way a market gets a url the brand host does not express.
+          brandDomain: 'nba.com',
+          brandNames: ['X'],
+        },
+      }));
+      expect(response.status).to.equal(201);
+      const opts = ensureMarketSiteStub.firstCall.args[1];
+      expect(opts.domain).to.equal('nba.com');
+    });
+
     it('createMarket does NOT mirror a Site when the upstream create did not return 201', async () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 409, body: { error: 'sliceExists' } });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
@@ -909,29 +1500,132 @@ describe('SerenityController', () => {
       expect(ensureMarketSiteStub).to.not.have.been.called;
     });
 
-    it('createMarket forwards the brand aliases so the project carries them', async () => {
+    it('createMarket 400s on a siteId the caller does not own, even alongside a brandDomain', async () => {
+      // The unguarded shape: with brandDomain present nothing used to read the
+      // Site, so a foreign UUID was recorded verbatim as the market's own — and
+      // that value decides what the project analyses. The org check runs on every
+      // supplied siteId now, before either mode dispatches.
+      resolveSiteIdentityStub.resolves(null);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        data: {
+          market: 'us',
+          languageCode: 'en',
+          brandDomain: 'x.com',
+          siteId: '00000000-0000-4000-8000-00000000f0f0',
+          brandNames: ['X'],
+        },
+      });
+      const response = await controller.createMarket(ctx);
+      expect(response.status).to.equal(400);
+      // The organization is what makes the check possible, so it must be passed.
+      expect(resolveSiteIdentityStub).to.have.been.calledWith(ctx.dataAccess, '00000000-0000-4000-8000-00000000f0f0', sinon.match.any, ORG);
+      expect(handlers.handleCreateMarketSubworkspace).to.not.have.been.called;
+    });
+
+    it('createMarket derives brandDomain from a supplied siteId and links THAT site (LLMO-6405)', async () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' } });
-      getBrandAliasesStub.resolves(['Acme Inc', 'ACME']);
+      resolveSiteIdentityStub.resolves({ domain: 'acme.com', primaryUrl: 'acme.com/markets' });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', siteId: 'site-onboarded', brandNames: ['X'],
+        },
+      });
+      const response = await controller.createMarket(ctx);
+      expect(response.status).to.equal(201);
+      expect(resolveSiteIdentityStub).to.have.been.calledOnceWith(ctx.dataAccess, 'site-onboarded');
+      // Handler receives the derived brandDomain.
+      const handlerBody = handlers.handleCreateMarketSubworkspace.firstCall.args[3];
+      expect(handlerBody.brandDomain).to.equal('acme.com');
+      // ...and the tracked url alongside it. The handler has no Site access, so if
+      // the controller does not pass this the subpath is lost for good and the
+      // project silently tracks the parent domain.
+      expect(handlerBody.primaryUrl).to.equal('acme.com/markets');
+      // ensureMarketSite links THAT site directly. `domain` carries the tracked
+      // url rather than the host — the Site must mirror what the market analyses,
+      // subpath included. It is moot on this path (a supplied siteId takes the
+      // fast path and skips domain resolution entirely) and load-bearing on the
+      // brandDomain-only path, so it is asserted here to pin the value the
+      // controller actually hands over.
+      const opts = ensureMarketSiteStub.firstCall.args[1];
+      expect(opts).to.include({ siteId: 'site-onboarded', domain: 'acme.com/markets' });
+    });
+
+    it('createMarket 400s when a supplied siteId does not resolve to a domain', async () => {
+      resolveSiteIdentityStub.resolves(null);
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.createMarket(fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', siteId: 'site-bad', brandNames: ['X'],
+        },
+      }));
+      expect(response.status).to.equal(400);
+      expect(handlers.handleCreateMarketSubworkspace).to.not.have.been.called;
+      expect(ensureMarketSiteStub).to.not.have.been.called;
+    });
+
+    it('createMarket does NOT resolve siteId when brandDomain is supplied (regression: unchanged)', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' } });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      await controller.createMarket(fakeContext({
         data: {
           market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'],
         },
       }));
+      expect(resolveSiteIdentityStub).to.not.have.been.called;
+      const opts = ensureMarketSiteStub.firstCall.args[1];
+      expect(opts.domain).to.equal('x.com');
+      expect(opts.siteId).to.equal(undefined); // no siteId supplied → link by domain only
+    });
+
+    it('createMarket forwards the brand aliases so the project carries them', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' } });
+      getBrandAliasesStub.resolves(['Acme Inc', 'ACME']);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'],
+        },
+      });
+      const response = await controller.createMarket(ctx);
       expect(response.status).to.equal(201);
       expect(getBrandAliasesStub).to.have.been.calledOnceWith(BRAND);
       // options object is the 8th arg (index 7). generatePrompts was not supplied,
-      // so topic generation defaults off (today's behavior is unchanged).
-      expect(handlers.handleCreateMarketSubworkspace.firstCall.args[7])
+      // so topic generation defaults off (today's behavior is unchanged). brandUuid
+      // is already a persisted row (loadBrand), so dataAccess is threaded through
+      // for the mapping-row upsert (mapping-rows.js).
+      // writeDeadline is a request-scoped epoch-ms deadline (dynamic) — asserted
+      // as a number, then dropped before the deep-equal.
+      const {
+        writeDeadline, brandCollection, ...marketOptions
+      } = handlers.handleCreateMarketSubworkspace.firstCall.args[7];
+      expect(writeDeadline).to.be.a('number');
+      // Threaded so ensureSubworkspace's claim filter can tell this brand's own
+      // interrupted create from a same-named sibling brand's sub-workspace.
+      expect(brandCollection).to.equal(ctx.dataAccess.Brand);
+      expect(marketOptions)
         .to.deep.equal({
+          // LLMO-6554: resolved via resolveDefaultModelIds — [] here because the test's
+          // transport stub doesn't implement the catalog/listing calls it reads from
+          // (both degrade to an empty best-effort default, never throwing).
+          modelIds: [],
           generateTopics: false,
           topicCap: 0,
-          standardTags: [],
-          projectTags: [],
           brandAliases: ['Acme Inc', 'ACME'],
           brandUrlSources: { urls: [], socialAccounts: [], earnedContent: [] },
           competitors: [],
+          env: {},
+          dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
+          // serenity-docs#72 §5: threaded through for the (opt-in) quota-rejection Slack alert.
+          orgId: ORG,
+          // Caller identity for the created_* stamp (LLMO-6289); the test context
+          // has no auth profile, so it resolves to the `unknown` sentinel.
+          callerId: 'unknown',
         });
+      // The org parent is threaded POSITIONALLY (arg index 2), not in the options bag —
+      // the same id given to ensureSubworkspace.
+      expect(handlers.handleCreateMarketSubworkspace.firstCall.args[2]).to.equal(WORKSPACE);
     });
 
     it('createMarket forwards the brand URL sources so the project carries them', async () => {
@@ -970,9 +1664,10 @@ describe('SerenityController', () => {
         .to.deep.equal(competitors);
     });
 
-    it('createMarket opts into topic generation (cap + standard tags) when generatePrompts is true', async () => {
-      // generatePrompts:true → genMarketTopics true → the true side of each
-      // ternary (topicCap, standardTags, projectTags) is forwarded.
+    it('createMarket opts into topic generation when generatePrompts is true', async () => {
+      // generatePrompts:true → genMarketTopics true → the true side of the
+      // topicCap ternary is forwarded. The tag taxonomy is no longer passed as
+      // an option: the handler provisions the dimension roots itself.
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' } });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.createMarket(fakeContext({
@@ -989,8 +1684,8 @@ describe('SerenityController', () => {
       expect(opts.generateTopics).to.equal(true);
       // Topic cap + tag lists are populated (non-empty) on the opt-in path.
       expect(opts.topicCap).to.be.a('number').and.to.be.greaterThan(0);
-      expect(opts.standardTags).to.be.an('array').and.to.have.length.greaterThan(0);
-      expect(opts.projectTags).to.be.an('array').and.to.have.length.greaterThan(0);
+      expect(opts).to.not.have.property('standardTags');
+      expect(opts).to.not.have.property('projectTags');
     });
 
     it('deleteMarket routes to the subworkspace handler in subworkspace mode', async () => {
@@ -999,6 +1694,40 @@ describe('SerenityController', () => {
       const response = await controller.deleteMarket(fakeContext({ params: { geoTargetId: '2840', languageCode: 'en' } }));
       expect(response.status).to.equal(204);
       expect(handlers.handleDeleteMarketSubworkspace).to.have.been.calledOnce;
+    });
+
+    it('deleteMarket unlinks the orphaned market site when the handler reports a deletedSiteId (LLMO-6405 R12)', async () => {
+      handlers.handleDeleteMarketSubworkspace.resolves({ status: 204, deletedSiteId: 'site-x' });
+      getBrandBaseSiteIdStub.resolves('primary-site'); // different from the deleted market site
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ params: { geoTargetId: '2840', languageCode: 'en' } });
+      const response = await controller.deleteMarket(ctx);
+      expect(response.status).to.equal(204);
+      expect(getBrandBaseSiteIdStub).to.have.been.calledOnceWith(ORG, BRAND);
+      expect(unlinkMarketSiteIfOrphanedStub).to.have.been.calledOnce;
+      const [passedCtx, args] = unlinkMarketSiteIfOrphanedStub.firstCall.args;
+      expect(passedCtx).to.equal(ctx);
+      expect(args).to.deep.equal({ brandId: BRAND, siteId: 'site-x', primarySiteId: 'primary-site' });
+    });
+
+    it('deleteMarket does NOT attempt an unlink when the handler reports no deletedSiteId', async () => {
+      handlers.handleDeleteMarketSubworkspace.resolves({ status: 204, deletedSiteId: null });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.deleteMarket(fakeContext({ params: { geoTargetId: '2840', languageCode: 'en' } }));
+      expect(response.status).to.equal(204);
+      expect(getBrandBaseSiteIdStub).to.not.have.been.called;
+      expect(unlinkMarketSiteIfOrphanedStub).to.not.have.been.called;
+    });
+
+    it('deleteMarket skips the unlink (fail-safe) when the primary-site lookup fails', async () => {
+      handlers.handleDeleteMarketSubworkspace.resolves({ status: 204, deletedSiteId: 'site-x' });
+      getBrandBaseSiteIdStub.rejects(new Error('db down'));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.deleteMarket(fakeContext({ params: { geoTargetId: '2840', languageCode: 'en' } }));
+      // Still a clean 204 (best-effort); the orphan link is left rather than risk
+      // removing the primary on an unknown primary-site.
+      expect(response.status).to.equal(204);
+      expect(unlinkMarketSiteIfOrphanedStub).to.not.have.been.called;
     });
 
     it('getMarket defaults the path slice to an empty object when ctx.params is absent post-auth', async () => {
@@ -1074,6 +1803,39 @@ describe('SerenityController', () => {
       expect(handlers.handleUpdatePrompt).to.not.have.been.called;
     });
 
+    it('createTag routes to the subworkspace handler in subworkspace mode', async () => {
+      handlers.handleCreateTagSubworkspace.resolves({
+        status: 201,
+        body: {
+          geoTargetId: 2840, languageCode: 'en', type: 'category', name: 'Footwear', tag: 'category:Footwear',
+        },
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      // No ctx.data → exercises the `ctx.data || {}` body-defaulting fallback.
+      const response = await controller.createTag(fakeContext());
+      expect(response.status).to.equal(201);
+      expect(handlers.handleCreateTagSubworkspace).to.have.been.calledOnce;
+      expect(handlers.handleCreateTagSubworkspace.firstCall.args[1]).to.equal('subworkspace-ws-1');
+      expect(handlers.handleCreateTagSubworkspace.firstCall.args[2]).to.deep.equal({});
+      expect(handlers.handleCreateTag).to.not.have.been.called;
+    });
+
+    it('updateTag routes to the subworkspace handler with the brand workspace + tagId', async () => {
+      handlers.handleUpdateTagSubworkspace.resolves({
+        status: 200,
+        body: {
+          geoTargetId: 2840, languageCode: 'en', tagId: 'tag-1', tag: 'category:Footwear', parentId: null,
+        },
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.updateTag(fakeContext({ params: { tagId: 'tag-1' } }));
+      expect(response.status).to.equal(200);
+      expect(handlers.handleUpdateTagSubworkspace).to.have.been.calledOnce;
+      expect(handlers.handleUpdateTagSubworkspace.firstCall.args[1]).to.equal('subworkspace-ws-1');
+      expect(handlers.handleUpdateTagSubworkspace.firstCall.args[2]).to.equal('tag-1');
+      expect(handlers.handleUpdateTag).to.not.have.been.called;
+    });
+
     it('bulkDeletePrompts routes to the subworkspace handler in subworkspace mode', async () => {
       handlers.handleBulkDeletePromptsSubworkspace.resolves({ deleted: 0, failed: [] });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
@@ -1081,6 +1843,14 @@ describe('SerenityController', () => {
       expect(response.status).to.equal(200);
       expect(handlers.handleBulkDeletePromptsSubworkspace).to.have.been.calledOnce;
       expect(handlers.handleBulkDeletePrompts).to.not.have.been.called;
+    });
+
+    it('bulkDeletePrompts threads the resolved callerId into the subworkspace handler options', async () => {
+      handlers.handleBulkDeletePromptsSubworkspace.resolves({ deleted: 0, failed: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      await controller.bulkDeletePrompts(fakeContext({ data: { prompts: [] } }));
+      const options = handlers.handleBulkDeletePromptsSubworkspace.firstCall.args[4];
+      expect(options.callerId).to.equal('unknown');
     });
 
     it('listTags routes to the subworkspace handler in subworkspace mode', async () => {
@@ -1158,30 +1928,55 @@ describe('SerenityController', () => {
       expect(decommissionStub).to.not.have.been.called;
     });
 
+    it('activate threads the Brand collection into ensureSubworkspace so the claim filter can run', async () => {
+      // Sub-workspace titles are bare brand names, so ensureSubworkspace needs the
+      // Brand collection to tell our own interrupted create from a same-named
+      // sibling brand's workspace. Without it the create path 500s on any
+      // same-title family candidate — so the wiring must be pinned, not assumed.
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      const brand = makeBrandModel({ getStatus: () => 'active' });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        brand,
+        data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }] },
+      });
+
+      await controller.activate(ctx);
+
+      expect(ensureSubworkspaceStub).to.have.been.calledOnce;
+      expect(ensureSubworkspaceStub.firstCall.args[6].brandCollection)
+        .to.equal(ctx.dataAccess.Brand);
+    });
+
     it('activate ensures the subworkspace ONCE for the batch and creates each market against it', async () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
-      const brand = makeBrandModel();
+      // Body-driven market provisioning runs ONLY for an already-active brand
+      // (reactivation); a pending brand activates sub-workspace-only (LLMO-6405).
+      const brand = makeBrandModel({ getStatus: () => 'active' });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.activate(fakeContext({
         brand,
         data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }, { market: 'de', languageCode: 'de' }] },
       }));
       expect(response.status).to.equal(200);
-      // ensured exactly once, sized to the real market count (2) — not per market.
+      // ensured exactly once for the whole batch — not per market.
       expect(ensureSubworkspaceStub).to.have.been.calledOnce;
-      expect(ensureSubworkspaceStub.firstCall.args[3]).to.equal(2);
       expect(handlers.handleCreateMarketSubworkspace).to.have.been.calledTwice;
       // each market create receives the pre-resolved workspace id (6th arg) so it
       // skips its own ensure.
       expect(handlers.handleCreateMarketSubworkspace.firstCall.args[5]).to.equal(SUBWS);
       expect(handlers.handleCreateMarketSubworkspace.secondCall.args[5]).to.equal(SUBWS);
-      expect(brand.setStatus).to.have.been.calledWith('active');
-      expect(brand.save).to.have.been.called;
+      // Status flip + primary site persist via updateBrand (the Brand model has no
+      // site_id setter). baseSiteId is the primary domain's mirror Site.
+      expect(updateBrandStub).to.have.been.calledOnce;
+      expect(updateBrandStub.firstCall.args[0].updates).to.include({
+        status: 'active', baseSiteId: 'site-uuid-1',
+      });
     });
 
     it('activate mirrors the brand domain as a Site once (not per market) when any market goes live', async () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
-      const brand = makeBrandModel();
+      const brand = makeBrandModel({ getStatus: () => 'active' });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.activate(fakeContext({
         brand,
@@ -1194,67 +1989,54 @@ describe('SerenityController', () => {
       expect(opts).to.include({ organizationId: ORG, brandId: BRAND, domain: 'x.com' });
     });
 
-    it('activate does NOT mirror a Site (or flip active) when no market goes live — stays pending with a 502', async () => {
-      handlers.handleCreateMarketSubworkspace.resolves({ status: 502, body: { error: 'serenityUpstreamError' } });
-      const brand = makeBrandModel();
+    it('activate resolves the organization from the route, not from the Brand entity', async () => {
+      // `brand.schema.js` deliberately does not map `organization_id`, so the real
+      // entity has no `getOrganizationId` at all — the fixture above fabricates one.
+      // A brand shaped like the real thing is what the deployed code actually sees:
+      // if the org is read off the entity, `ensureMarketSite` gets `undefined`,
+      // returns null through its one silent early return, and the activation
+      // answers 207 with the site link and `baseSiteId` never written — while
+      // every visible step reports success. (Only an already-active brand
+      // reaches this path: a pending brand activates sub-workspace-only and
+      // returns before it.)
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      const brand = makeBrandModel({ getStatus: () => 'active', getOrganizationId: undefined });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.activate(fakeContext({
         brand,
         data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }] },
       }));
-      // All-or-nothing: a market failed → no site mirror, brand stays pending, 502.
-      expect(response.status).to.equal(502);
-      const { status } = await readBody(response);
-      expect(status).to.equal('pending');
-      expect(ensureMarketSiteStub).to.not.have.been.called;
-      expect(brand.setStatus).to.not.have.been.called;
+      expect(response.status).to.equal(200);
+      expect(ensureMarketSiteStub.firstCall.args[1]).to.include({ organizationId: ORG });
     });
 
-    it('activate falls back to the stashed pending_semrush_provisioning when the body omits markets + brandDomain', async () => {
+    it('activate writes the status flip against the route organization on a brand with no org accessor', async () => {
+      // The same defect one line further on, where it was NOT optional-chained: a
+      // real Brand entity would throw a TypeError here rather than degrade.
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
-      const setPendingSemrushProvisioning = sinon.stub();
-      const brand = makeBrandModel({
-        getPendingSemrushProvisioning: () => ({
-          primaryUrl: 'https://acme.com/path',
-          markets: [{ market: 'us', languageCode: 'en' }],
-        }),
-        setPendingSemrushProvisioning,
-      });
+      ensureMarketSiteStub.resolves('primary-site-uuid');
+      const brand = makeBrandModel({ getStatus: () => 'active', getOrganizationId: undefined });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
-      // A pending (draft) brand activated from the wizard: body carries no
-      // markets and no brandDomain — both come from the stash.
       const response = await controller.activate(fakeContext({
         brand,
-        data: { brandNames: ['X'] },
+        data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }] },
       }));
       expect(response.status).to.equal(200);
-      expect(handlers.handleCreateMarketSubworkspace).to.have.been.calledOnce;
-      const createBody = handlers.handleCreateMarketSubworkspace.firstCall.args[3];
-      expect(createBody.market).to.equal('us');
-      expect(createBody.languageCode).to.equal('en');
-      // brandDomain derived from the stashed primary URL (hostname only).
-      expect(createBody.brandDomain).to.equal('acme.com');
-      // The site mirror is fed the same resolved domain (not the raw stash URL),
-      // so the activate path and the create path agree on the base URL.
-      expect(ensureMarketSiteStub).to.have.been.calledOnce;
-      expect(ensureMarketSiteStub.firstCall.args[1]).to.include({ domain: 'acme.com' });
-      // The draft staging data is cleared on success, atomically with the flip.
-      expect(setPendingSemrushProvisioning).to.have.been.calledWith(null);
-      expect(brand.setStatus).to.have.been.calledWith('active');
-      expect(brand.save).to.have.been.called;
+      expect(updateBrandStub.firstCall.args[0]).to.include({ organizationId: ORG });
     });
 
-    it('activate passes each stashed market\'s modelIds into the options arg (LLMs applied at activation)', async () => {
+    it('activate passes a body-supplied market\'s modelIds into the options arg (LLMs applied at activation)', async () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
-      const brand = makeBrandModel({
-        getPendingSemrushProvisioning: () => ({
-          primaryUrl: 'https://acme.com',
-          markets: [{ market: 'us', languageCode: 'en', modelIds: ['chatgpt', 'perplexity'] }],
-        }),
-        setPendingSemrushProvisioning: sinon.stub(),
-      });
+      const brand = makeBrandModel({ getStatus: () => 'active' });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
-      const response = await controller.activate(fakeContext({ brand, data: { brandNames: ['X'] } }));
+      const response = await controller.activate(fakeContext({
+        brand,
+        data: {
+          brandDomain: 'x.com',
+          brandNames: ['X'],
+          markets: [{ market: 'us', languageCode: 'en', modelIds: ['chatgpt', 'perplexity'] }],
+        },
+      }));
       expect(response.status).to.equal(200);
       // modelIds are read from the OPTIONS arg (index 7), NOT the body (index 3) —
       // handleCreateMarketSubworkspace destructures them from options.
@@ -1264,103 +2046,25 @@ describe('SerenityController', () => {
       expect(options.publishMode).to.equal('require');
     });
 
-    it('activate provisions a sub-workspace-only brand (200) when there is no primary URL, ignoring any stashed market', async () => {
-      // A draft saved before a primary URL was entered: a market may be stashed
-      // but there is no domain to provision a project against. Project creation is
-      // gated on a URL, so with none the brand activates sub-workspace-only — its
-      // sub-workspace IS the active anchor — and no project is created.
-      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
-      const setPendingSemrushProvisioning = sinon.stub();
-      const brand = makeBrandModel({
-        getPendingSemrushProvisioning: () => ({
-          markets: [{ market: 'us', languageCode: 'en' }],
-        }),
-        setPendingSemrushProvisioning,
-      });
+    it('activate does NOT mirror a Site (or downgrade) when no market goes live on an active brand — 207, stays active', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 502, body: { error: 'serenityUpstreamError' } });
+      const brand = makeBrandModel({ getStatus: () => 'active' });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.activate(fakeContext({
         brand,
-        data: { brandNames: ['X'] },
+        data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }] },
       }));
-      expect(response.status).to.equal(200);
-      const { status, markets } = await readBody(response);
+      // A market failed → allMarketsLive false → no site mirror. An already-active
+      // brand is never downgraded: 207 Multi-Status, stays active.
+      expect(response.status).to.equal(207);
+      const { status } = await readBody(response);
       expect(status).to.equal('active');
-      expect(markets).to.deep.equal([]);
-      // No project: the market loop never runs; only the sub-workspace is ensured.
-      expect(handlers.handleCreateMarketSubworkspace).to.not.have.been.called;
-      expect(ensureSubworkspaceStub).to.have.been.calledOnce;
-      expect(brand.setStatus).to.have.been.calledWith('active');
-      // The whole stash is cleared on a fully-successful activation.
-      expect(setPendingSemrushProvisioning).to.have.been.calledWith(null);
-    });
-
-    it('activate 400s when the stashed primary URL is unparseable and the body omits brandDomain', async () => {
-      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
-      const brand = makeBrandModel({
-        // An unparseable primaryUrl makes new URL() throw → hostnameFromUrlString
-        // returns null → no domain → 400 rather than a null propagating upstream.
-        getPendingSemrushProvisioning: () => ({
-          primaryUrl: 'https://[',
-          markets: [{ market: 'us', languageCode: 'en' }],
-        }),
-        setPendingSemrushProvisioning: sinon.stub(),
-      });
-      const controller = SerenityController({ env: {} }, fakeLog(), {});
-      const response = await controller.activate(fakeContext({
-        brand,
-        data: { brandNames: ['X'] },
-      }));
-      expect(response.status).to.equal(400);
-      expect(handlers.handleCreateMarketSubworkspace).to.not.have.been.called;
-    });
-
-    it('activate threads generateTopics + topicCap + tags when the stash opts into prompts', async () => {
-      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
-      const brand = makeBrandModel({
-        getPendingSemrushProvisioning: () => ({
-          primaryUrl: 'https://acme.com',
-          markets: [{ market: 'us', languageCode: 'en' }],
-          generatePrompts: true,
-        }),
-        setPendingSemrushProvisioning: sinon.stub(),
-      });
-      const controller = SerenityController({ env: {} }, fakeLog(), {});
-      const response = await controller.activate(fakeContext({ brand, data: { brandNames: ['X'] } }));
-      expect(response.status).to.equal(200);
-      const options = handlers.handleCreateMarketSubworkspace.firstCall.args[7];
-      expect(options.generateTopics).to.equal(true);
-      expect(options.topicCap).to.be.greaterThan(0);
-      expect(options.standardTags).to.not.be.empty;
-      expect(options.projectTags).to.not.be.empty;
-      // generatePrompts → real units → must publish.
-      expect(options.publishMode).to.equal('require');
-    });
-
-    it('activate lets generatePrompts in the body override a stash that opted out', async () => {
-      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
-      const brand = makeBrandModel({
-        getPendingSemrushProvisioning: () => ({
-          primaryUrl: 'https://acme.com',
-          markets: [{ market: 'us', languageCode: 'en' }],
-          generatePrompts: false,
-        }),
-        setPendingSemrushProvisioning: sinon.stub(),
-      });
-      const controller = SerenityController({ env: {} }, fakeLog(), {});
-      const response = await controller.activate(fakeContext({
-        brand,
-        data: { brandNames: ['X'], generatePrompts: true },
-      }));
-      expect(response.status).to.equal(200);
-      const opts = handlers.handleCreateMarketSubworkspace.firstCall.args[7];
-      expect(opts.generateTopics).to.equal(true);
+      expect(ensureMarketSiteStub).to.not.have.been.called;
+      expect(brand.setStatus).to.not.have.been.called;
     });
 
     it('activate 400s when generatePrompts is true but there is no primary URL (nothing to generate into)', async () => {
-      const brand = makeBrandModel({
-        getPendingSemrushProvisioning: () => ({ markets: [], generatePrompts: false }),
-        setPendingSemrushProvisioning: sinon.stub(),
-      });
+      const brand = makeBrandModel({ getStatus: () => 'active' });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.activate(fakeContext({
         brand,
@@ -1371,27 +2075,69 @@ describe('SerenityController', () => {
       expect(ensureSubworkspaceStub).to.not.have.been.called;
     });
 
-    it('activate sub-workspace-only stays pending (502) when the status save fails', async () => {
-      const setPendingSemrushProvisioning = sinon.stub();
-      const brand = makeBrandModel({
-        getPendingSemrushProvisioning: () => ({ markets: [], generatePrompts: false }),
-        setPendingSemrushProvisioning,
-        save: sinon.stub().rejects(new Error('db down')),
-      });
+    it('activate 400s a pending brand with no primary site instead of provisioning a doomed sub-workspace (SITES-49449)', async () => {
+      // getBrandBaseSiteIdStub defaults to resolves(null) — a legacy pre-LLMO-6405
+      // pending brand that never got a site_id. chk_active_brand_has_site_id now
+      // requires site_id unconditionally, so ensureSubworkspace must never run:
+      // a live sub-workspace would provision upstream and then the active-flip
+      // save would still fail with a raw DB constraint violation.
+      const brand = makeBrandModel({});
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.activate(fakeContext({ brand, data: { brandNames: ['X'] } }));
+      expect(response.status).to.equal(400);
+      expect(ensureSubworkspaceStub).to.not.have.been.called;
+      expect(brand.setStatus).to.not.have.been.called;
+      expect(brand.save).to.not.have.been.called;
+    });
+
+    it('activate of a pending brand with an empty body is sub-workspace-only (200, no project)', async () => {
+      // LLMO-6405: a pending brand activates to just its sub-workspace + a status
+      // flip. The wizard supplies no markets/URL; none are needed — no project is
+      // created.
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      // SITES-49449: chk_active_brand_has_site_id requires site_id unconditionally —
+      // the brand's primary site was set at create (LLMO-6405), verified upfront.
+      getBrandBaseSiteIdStub.resolves('primary-site');
+      const brand = makeBrandModel({});
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({ brand, data: { brandNames: ['X'] } }));
+      expect(response.status).to.equal(200);
+      const { status, markets } = await readBody(response);
+      expect(status).to.equal('active');
+      expect(markets).to.deep.equal([]);
+      // Sub-workspace ensured once; NO project, NO body-driven market path.
+      expect(ensureSubworkspaceStub).to.have.been.calledOnce;
+      // Sub-workspace-only → skips the settle poll (LLMO-6569).
+      expect(ensureSubworkspaceStub.firstCall.args[6]).to.have.property('createReadiness', 'skip');
+      expect(handlers.handleCreateMarketSubworkspace).to.not.have.been.called;
+      expect(updateBrandStub).to.not.have.been.called;
+      expect(brand.setStatus).to.have.been.calledWith('active');
+      expect(brand.save).to.have.been.calledOnce;
+    });
+
+    it('activate of a pending brand returns 502 (stays pending) when the sub-workspace flip fails to persist', async () => {
+      // Sub-workspace ensured upstream but the active-status save diverges → the
+      // brand stays pending; a retry converges (the sub-workspace 409s idempotently).
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      getBrandBaseSiteIdStub.resolves('primary-site');
+      const brand = makeBrandModel({ save: sinon.stub().rejects(new Error('db down')) });
+      const log = fakeLog();
+      const controller = SerenityController({ env: {} }, log, {});
+      const response = await controller.activate(fakeContext({ brand, data: { brandNames: ['X'] } }));
       expect(response.status).to.equal(502);
-      const { status, error } = await readBody(response);
+      const { status, error, markets } = await readBody(response);
       expect(status).to.equal('pending');
       expect(error).to.equal('serenityActivationIncomplete');
-      // The sub-workspace WAS ensured (upstream) even though the flip didn't persist.
+      expect(markets).to.deep.equal([]);
       expect(ensureSubworkspaceStub).to.have.been.calledOnce;
+      expect(handlers.handleCreateMarketSubworkspace).to.not.have.been.called;
+      // Distinct, greppable token so the orphaned status is alertable.
+      expect(log.error).to.have.been.calledWithMatch('SERENITY_ACTIVATE_SAVE_DIVERGENCE');
     });
 
     it('activate sub-workspace-only on an already-active brand returns 207 (not downgraded) when the save fails', async () => {
       const brand = makeBrandModel({
         getStatus: () => 'active',
-        getPendingSemrushProvisioning: () => null,
         save: sinon.stub().rejects(new Error('db down')),
       });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
@@ -1400,103 +2146,56 @@ describe('SerenityController', () => {
       const { status } = await readBody(response);
       expect(status).to.equal('active');
       expect(ensureSubworkspaceStub).to.have.been.calledOnce;
-    });
-
-    it('activate prefers body markets + brandDomain over the stash, and clears the stash when its market is provisioned', async () => {
-      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
-      const setPendingSemrushProvisioning = sinon.stub();
-      const brand = makeBrandModel({
-        getPendingSemrushProvisioning: () => ({
-          primaryUrl: 'https://stash.com',
-          markets: [{ market: 'us', languageCode: 'en' }],
-        }),
-        setPendingSemrushProvisioning,
-      });
-      const controller = SerenityController({ env: {} }, fakeLog(), {});
-      const response = await controller.activate(fakeContext({
-        brand,
-        data: { brandDomain: 'body.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }] },
-      }));
-      expect(response.status).to.equal(200);
-      expect(handlers.handleCreateMarketSubworkspace).to.have.been.calledOnce;
-      const createBody = handlers.handleCreateMarketSubworkspace.firstCall.args[3];
-      expect(createBody.market).to.equal('us');
-      expect(createBody.brandDomain).to.equal('body.com');
-      // The stash market (us/en) was provisioned → nothing remains → cleared.
-      expect(setPendingSemrushProvisioning).to.have.been.calledWith(null);
-    });
-
-    it('activate keeps the FULL stash and stays pending when any market fails (all-or-nothing, no partial trim)', async () => {
-      // Stash has two draft markets; the first provisions (201), the second
-      // throws. All-or-nothing: the brand does NOT flip active and the stash is
-      // NOT trimmed — the whole blob is kept intact so a retry re-runs the full
-      // batch (the live market 409s; the failed one retries).
-      handlers.handleCreateMarketSubworkspace
-        .onFirstCall().resolves({ status: 201, body: {} })
-        .onSecondCall().rejects(new ErrorWithStatusCode('upstream boom', 502));
-      const setPendingSemrushProvisioning = sinon.stub();
-      const brand = makeBrandModel({
-        getPendingSemrushProvisioning: () => ({
-          primaryUrl: 'https://acme.com',
-          markets: [{ market: 'us', languageCode: 'en' }, { market: 'de', languageCode: 'de' }],
-        }),
-        setPendingSemrushProvisioning,
-      });
-      const controller = SerenityController({ env: {} }, fakeLog(), {});
-      // Body omits markets → both come from the stash.
-      const response = await controller.activate(fakeContext({
-        brand,
-        data: { brandNames: ['X'] },
-      }));
-      // One live, one failed → activation incomplete → 502, brand stays pending.
-      expect(response.status).to.equal(502);
-      const { status } = await readBody(response);
-      expect(status).to.equal('pending');
-      // Stash untouched (no trim, no clear) and the brand never flips active.
-      expect(setPendingSemrushProvisioning).to.not.have.been.called;
-      expect(brand.setStatus).to.not.have.been.calledWith('active');
-    });
-
-    it('activate does NOT clear a stash on a brand that has none (no setPendingSemrushProvisioning call)', async () => {
-      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
-      const setPendingSemrushProvisioning = sinon.stub();
-      const brand = makeBrandModel({ setPendingSemrushProvisioning });
-      const controller = SerenityController({ env: {} }, fakeLog(), {});
-      const response = await controller.activate(fakeContext({
-        brand,
-        data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }] },
-      }));
-      expect(response.status).to.equal(200);
-      expect(setPendingSemrushProvisioning).to.not.have.been.called;
+      // Bare reactivation is sub-workspace-only → skips the settle poll (LLMO-6569).
+      expect(ensureSubworkspaceStub.firstCall.args[6]).to.have.property('createReadiness', 'skip');
     });
 
     it('activate reads the brand aliases once and applies them to every market', async () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
       getBrandAliasesStub.resolves(['Acme Inc']);
       const controller = SerenityController({ env: {} }, fakeLog(), {});
-      const response = await controller.activate(fakeContext({
-        brand: makeBrandModel(),
+      const ctx = fakeContext({
+        brand: makeBrandModel({ getStatus: () => 'active' }),
         data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }, { market: 'de', languageCode: 'de' }] },
-      }));
+      });
+      const response = await controller.activate(ctx);
       expect(response.status).to.equal(200);
       // Read once for the whole batch, not per market.
       expect(getBrandAliasesStub).to.have.been.calledOnceWith(BRAND);
       // Both market creates receive the same aliases in their options arg (index 7).
-      // No modelIds + no generatePrompts → empty units → best-effort publish.
+      // SITES-49206: no modelIds + no generatePrompts used to mean "empty units" → best-effort
+      // publish; Semrush no longer enforces AI limits, so this now still requires publish like
+      // every other market create. The loaded brand is already persisted, so dataAccess is
+      // threaded through for the mapping-row upsert (mapping-rows.js).
       const expectedOpts = {
         modelIds: [],
         generateTopics: false,
         topicCap: 0,
-        standardTags: [],
-        projectTags: [],
-        publishMode: 'best-effort',
+        publishMode: 'require',
         brandAliases: ['Acme Inc'],
         brandUrlSources: { urls: [], socialAccounts: [], earnedContent: [] },
         competitors: [],
+        env: {},
+        dataAccess: { BrandSemrushProject: ctx.dataAccess.BrandSemrushProject },
+        // serenity-docs#72 §5: threaded through for the (opt-in) quota-rejection Slack alert.
+        orgId: ORG,
+        // Caller id resolved once for the batch; no auth profile in the test
+        // context → the `unknown` sentinel (LLMO-6289).
+        callerId: 'unknown',
       };
       const { firstCall, secondCall } = handlers.handleCreateMarketSubworkspace;
-      expect(firstCall.args[7]).to.deep.equal(expectedOpts);
-      expect(secondCall.args[7]).to.deep.equal(expectedOpts);
+      // writeDeadline is computed ONCE at activate entry, so every market in the
+      // batch receives the SAME dynamic epoch-ms deadline — assert that, then
+      // drop it before comparing the rest of the options bag.
+      const { writeDeadline: dl1, ...opts1 } = firstCall.args[7];
+      const { writeDeadline: dl2, ...opts2 } = secondCall.args[7];
+      expect(dl1).to.be.a('number');
+      expect(dl2).to.equal(dl1);
+      expect(opts1).to.deep.equal(expectedOpts);
+      expect(opts2).to.deep.equal(expectedOpts);
+      // Org parent (JIT units pool) threaded positionally (arg index 2), not in the options bag.
+      expect(firstCall.args[2]).to.equal(WORKSPACE);
+      expect(secondCall.args[2]).to.equal(WORKSPACE);
     });
 
     it('activate reads the brand URL sources once and applies them to every market', async () => {
@@ -1505,7 +2204,7 @@ describe('SerenityController', () => {
       getBrandUrlSourcesStub.resolves(sources);
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.activate(fakeContext({
-        brand: makeBrandModel(),
+        brand: makeBrandModel({ getStatus: () => 'active' }),
         data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }, { market: 'de', languageCode: 'de' }] },
       }));
       expect(response.status).to.equal(200);
@@ -1521,7 +2220,7 @@ describe('SerenityController', () => {
       getBrandCompetitorsStub.resolves(competitors);
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.activate(fakeContext({
-        brand: makeBrandModel(),
+        brand: makeBrandModel({ getStatus: () => 'active' }),
         data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }, { market: 'de', languageCode: 'de' }] },
       }));
       expect(response.status).to.equal(200);
@@ -1537,6 +2236,7 @@ describe('SerenityController', () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.activate(fakeContext({
+        brand: makeBrandModel({ getStatus: () => 'active' }),
         data: { markets: [], brandDomain: 'x.com', brandNames: ['X'] },
       }));
       expect(response.status).to.equal(200);
@@ -1549,8 +2249,9 @@ describe('SerenityController', () => {
     it('activate 400s when the markets array exceeds the cap (and does not provision)', async () => {
       const markets = Array.from({ length: 51 }, (_, i) => ({ market: 'us', languageCode: `l${i}` }));
       const controller = SerenityController({ env: {} }, fakeLog(), {});
-      // A brandDomain routes to the project path where the cap is enforced.
+      // An active brand + a brandDomain routes to the project path where the cap is enforced.
       const response = await controller.activate(fakeContext({
+        brand: makeBrandModel({ getStatus: () => 'active' }),
         data: { markets, brandDomain: 'x.com', brandNames: ['X'] },
       }));
       expect(response.status).to.equal(400);
@@ -1558,15 +2259,15 @@ describe('SerenityController', () => {
       expect(handlers.handleCreateMarketSubworkspace).to.not.have.been.called;
     });
 
-    it('activate records a thrown market as failed without aborting the batch, but stays pending (all-or-nothing)', async () => {
+    it('activate records a thrown market as failed without aborting the batch, staying active (207) on reactivation', async () => {
       // Market 1 publishes (201, live upstream); market 2 throws. The batch must
-      // NOT abort - both markets are reported per-market. But all-or-nothing means
-      // a single failure keeps the brand pending and returns a 502 (the live
-      // market 409s on the next retry, which converges).
+      // NOT abort - both markets are reported per-market. A single failure means
+      // the reactivation is not fully successful, but an already-active brand is
+      // never downgraded: it stays active and returns 207 Multi-Status.
       handlers.handleCreateMarketSubworkspace
         .onFirstCall().resolves({ status: 201, body: {} })
         .onSecondCall().rejects(new ErrorWithStatusCode('upstream boom', 502));
-      const brand = makeBrandModel();
+      const brand = makeBrandModel({ getStatus: () => 'active' });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.activate(fakeContext({
         brand,
@@ -1576,23 +2277,23 @@ describe('SerenityController', () => {
           markets: [{ market: 'us', languageCode: 'en' }, { market: 'de', languageCode: 'de' }],
         },
       }));
-      // incomplete activation -> 502, brand stays pending.
-      expect(response.status).to.equal(502);
+      // incomplete reactivation -> 207, brand stays active.
+      expect(response.status).to.equal(207);
       const { status, markets } = await readBody(response);
-      expect(status).to.equal('pending');
+      expect(status).to.equal('active');
       // both markets reported; the throwing one becomes a 502 entry, no URL leak.
       expect(markets).to.have.length(2);
       expect(markets[0].status).to.equal(201);
       expect(markets[1].status).to.equal(502);
       expect(markets[1].body.message).to.equal('Market activation failed');
-      // Brand never flips active and is not re-saved on the failure path.
+      // Brand is neither re-flipped nor re-saved on the partial-failure path.
       expect(brand.setStatus).to.not.have.been.calledWith('active');
       expect(brand.save).to.not.have.been.called;
     });
 
     it('activate defaults a statusless throw to 502 in the per-market result', async () => {
       handlers.handleCreateMarketSubworkspace.rejects(new Error('no status'));
-      const brand = makeBrandModel();
+      const brand = makeBrandModel({ getStatus: () => 'active' });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.activate(fakeContext({
         brand,
@@ -1602,8 +2303,9 @@ describe('SerenityController', () => {
           markets: [{ market: 'us', languageCode: 'en' }],
         },
       }));
-      // every market failed (no 201) -> 502, brand stays pending.
-      expect(response.status).to.equal(502);
+      // every market failed (no 201) -> not fully succeeded -> 207, active brand
+      // is not downgraded. The per-market result defaults the statusless throw to 502.
+      expect(response.status).to.equal(207);
       const { markets } = await readBody(response);
       expect(markets[0].status).to.equal(502);
       expect(brand.setStatus).to.not.have.been.called;
@@ -1613,7 +2315,7 @@ describe('SerenityController', () => {
       handlers.handleCreateMarketSubworkspace
         .onFirstCall().resolves({ status: 201, body: {} })
         .onSecondCall().resolves({ status: 409, body: { error: 'sliceExists' } });
-      const brand = makeBrandModel();
+      const brand = makeBrandModel({ getStatus: () => 'active' });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.activate(fakeContext({
         brand,
@@ -1626,22 +2328,24 @@ describe('SerenityController', () => {
       expect(response.status).to.equal(200);
       const { markets } = await readBody(response);
       expect(markets.map((m) => m.status)).to.deep.equal([201, 409]);
-      expect(brand.setStatus).to.have.been.calledOnceWith('active');
+      expect(updateBrandStub).to.have.been.calledOnce;
+      expect(updateBrandStub.firstCall.args[0].updates.status).to.equal('active');
     });
 
-    it('activate returns 502 and stays pending when every market genuinely fails', async () => {
+    it('activate returns 207 and stays active when every market genuinely fails on reactivation', async () => {
       // A real failure status (502), NOT 409 - a 409 sliceExists means the market
       // is already live and counts as success (see the all-409 re-activate test).
+      // The reactivation is not fully successful, but an active brand is not downgraded.
       handlers.handleCreateMarketSubworkspace.resolves({ status: 502, body: {} });
-      const brand = makeBrandModel();
+      const brand = makeBrandModel({ getStatus: () => 'active' });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.activate(fakeContext({
         brand,
         data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }] },
       }));
-      expect(response.status).to.equal(502);
+      expect(response.status).to.equal(207);
       const { status } = await readBody(response);
-      expect(status).to.equal('pending');
+      expect(status).to.equal('active');
       expect(brand.setStatus).to.not.have.been.called;
     });
 
@@ -1650,7 +2354,7 @@ describe('SerenityController', () => {
       // returns 409 sliceExists. That is a COMPLETE success, not a partial one -
       // the brand is active and the HTTP status is 200, never 207/pending.
       handlers.handleCreateMarketSubworkspace.resolves({ status: 409, body: { error: 'sliceExists' } });
-      const brand = makeBrandModel();
+      const brand = makeBrandModel({ getStatus: () => 'active' });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.activate(fakeContext({
         brand,
@@ -1663,7 +2367,7 @@ describe('SerenityController', () => {
       expect(response.status).to.equal(200);
       const { status } = await readBody(response);
       expect(status).to.equal('active');
-      expect(brand.setStatus).to.have.been.calledWith('active');
+      expect(updateBrandStub.firstCall.args[0].updates.status).to.equal('active');
     });
 
     it('activate returns 200 for a full re-activate of an ALREADY-active brand (all markets 201, site linked)', async () => {
@@ -1687,31 +2391,76 @@ describe('SerenityController', () => {
       const { status } = await readBody(response);
       expect(status).to.equal('active');
       expect(ensureMarketSiteStub).to.have.been.called;
-      expect(brand.setStatus).to.have.been.calledWith('active');
-      expect(brand.save).to.have.been.called;
+      expect(updateBrandStub).to.have.been.calledOnce;
+      expect(updateBrandStub.firstCall.args[0].updates.status).to.equal('active');
     });
 
-    it('activate emits SERENITY_ACTIVATE_SAVE_DIVERGENCE and returns 502 (stays pending) when the status save fails', async () => {
-      // The markets are live + the site is linked upstream, but persisting the
-      // 'active' flip fails → the brand stays pending (divergence). The seam emits
-      // a distinct, alertable token and surfaces a 502 with the per-market results
-      // (not a bare 5xx via mapError that would discard them). A retry converges.
+    it('activate sets brands.site_id to the primary domain\'s Site and returns baseSiteId (200)', async () => {
+      // The core fix: an active Serenity brand is anchored by brands.site_id (the
+      // primary domain's mirror Site), populated via updateBrand — same contract as
+      // a non-Serenity brand — and echoed on the response.
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
-      const brand = makeBrandModel();
-      brand.save = sinon.stub().rejects(new Error('db down'));
+      ensureMarketSiteStub.resolves('primary-site-uuid');
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand: makeBrandModel({ getStatus: () => 'active' }),
+        data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }] },
+      }));
+      expect(response.status).to.equal(200);
+      const { status, baseSiteId } = await readBody(response);
+      expect(status).to.equal('active');
+      expect(baseSiteId).to.equal('primary-site-uuid');
+      // The site id written is the primary domain's mirror Site, in the same write
+      // that flips status.
+      expect(updateBrandStub.firstCall.args[0].updates).to.include({
+        status: 'active', baseSiteId: 'primary-site-uuid',
+      });
+    });
+
+    it('activate returns a terminal 409 (stays pending) when the primary site is already another brand\'s primary', async () => {
+      // brands_base_site_unique: the primary domain is already another active
+      // brand's primary site. Markets are live upstream, but the brand cannot
+      // activate on this domain — it stays pending and 409s (NOT the retryable
+      // divergence seam; a retry re-collides forever). The operator picks another URL.
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      ensureMarketSiteStub.resolves('taken-site-uuid');
+      const conflict = new Error('This site is already the primary URL for another brand');
+      conflict.status = 409;
+      updateBrandStub.rejects(conflict);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand: makeBrandModel({ getStatus: () => 'active' }),
+        data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }] },
+      }));
+      expect(response.status).to.equal(409);
+      const { status, error, message } = await readBody(response);
+      expect(status).to.equal('pending');
+      expect(error).to.equal('serenityActivationSiteConflict');
+      expect(message).to.equal('This site is already the primary URL for another brand');
+    });
+
+    it('activate emits SERENITY_ACTIVATE_SAVE_DIVERGENCE and returns 207 (stays active) when the status save fails', async () => {
+      // Reactivation of an active brand: markets live + site linked upstream, but
+      // re-persisting the 'active' flip fails transiently (divergence). The seam
+      // emits a distinct, alertable token; the already-active brand is not
+      // downgraded, so it returns 207 with the per-market results preserved.
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      const brand = makeBrandModel({ getStatus: () => 'active' });
+      // The active-flip write (updateBrand) fails transiently → divergence.
+      updateBrandStub.rejects(new Error('db down'));
       const log = fakeLog();
       const controller = SerenityController({ env: {} }, log, {});
       const response = await controller.activate(fakeContext({
         brand,
         data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }] },
       }));
-      // save diverged -> 502, brand stays pending, per-market results preserved.
-      expect(response.status).to.equal(502);
+      // save diverged -> 207, brand stays active, per-market results preserved.
+      expect(response.status).to.equal(207);
       const { status, markets } = await readBody(response);
-      expect(status).to.equal('pending');
+      expect(status).to.equal('active');
       expect(markets).to.have.length(1);
       expect(markets[0].status).to.equal(201);
-      // distinct, greppable token so the orphaned status is alertable.
+      // distinct, greppable token so the divergence is alertable.
       expect(log.error).to.have.been.calledWithMatch('SERENITY_ACTIVATE_SAVE_DIVERGENCE');
     });
 
@@ -1722,16 +2471,18 @@ describe('SerenityController', () => {
       // filter), not just freshly-created 201s.
       handlers.handleCreateMarketSubworkspace.resolves({ status: 409, body: { error: 'sliceExists' } });
       ensureMarketSiteStub.resolves('site-uuid-1');
-      const brand = makeBrandModel();
-      brand.save = sinon.stub().rejects(new Error('db down'));
+      const brand = makeBrandModel({ getStatus: () => 'active' });
+      // The active-flip write (updateBrand) fails transiently → divergence.
+      updateBrandStub.rejects(new Error('db down'));
       const log = fakeLog();
       const controller = SerenityController({ env: {} }, log, {});
       const response = await controller.activate(fakeContext({
         brand,
         data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }] },
       }));
-      // Every market live (via 409) + site linked, but the active-flip save fails.
-      expect(response.status).to.equal(502);
+      // Every market live (via 409) + site linked, but the active-flip save fails;
+      // active brand not downgraded → 207.
+      expect(response.status).to.equal(207);
       const divergenceCall = log.error.getCalls().find(
         (c) => typeof c.args[0] === 'string' && c.args[0].includes('SERENITY_ACTIVATE_SAVE_DIVERGENCE'),
       );
@@ -1740,34 +2491,29 @@ describe('SerenityController', () => {
       expect(divergenceCall.args[1].marketsLive).to.equal(1);
     });
 
-    it('activate stays pending with a 502 when every market is live but the brand_sites link fails', async () => {
-      // The brand_sites mirror (type='serenity') is a REQUIRED activation step:
-      // even with every market live, a failed site link keeps the brand pending so
-      // a retry re-establishes the link. ensureMarketSite returns null on failure.
+    it('activate returns 207 (stays active) when every market is live but the brand_sites link fails on reactivation', async () => {
+      // The brand_sites mirror (type='serenity') is a REQUIRED step for full
+      // success: even with every market live, a failed site link means the
+      // reactivation is not fully successful (updateBrand is skipped). An
+      // already-active brand is not downgraded → 207. ensureMarketSite returns
+      // null on failure.
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
       ensureMarketSiteStub.resolves(null);
-      const setPendingSemrushProvisioning = sinon.stub();
-      const brand = makeBrandModel({
-        getPendingSemrushProvisioning: () => ({
-          primaryUrl: 'https://acme.com',
-          markets: [{ market: 'us', languageCode: 'en' }],
-        }),
-        setPendingSemrushProvisioning,
-      });
+      const brand = makeBrandModel({ getStatus: () => 'active' });
       const log = fakeLog();
       const controller = SerenityController({ env: {} }, log, {});
-      const response = await controller.activate(fakeContext({ brand, data: { brandNames: ['X'] } }));
-      // Markets live but not linked → activation incomplete → 502, stays pending.
-      expect(response.status).to.equal(502);
+      const response = await controller.activate(fakeContext({
+        brand,
+        data: { brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }] },
+      }));
+      // Markets live but not linked → not fully succeeded → 207, stays active.
+      expect(response.status).to.equal(207);
       const { status } = await readBody(response);
-      expect(status).to.equal('pending');
+      expect(status).to.equal('active');
       expect(ensureMarketSiteStub).to.have.been.calledOnce;
-      // Never flips active; the stash is preserved (not cleared) for retry.
+      // Not fully succeeded → not re-flipped.
+      expect(updateBrandStub).to.not.have.been.called;
       expect(brand.setStatus).to.not.have.been.calledWith('active');
-      expect(setPendingSemrushProvisioning).to.not.have.been.called;
-      // Distinct, greppable token so the "live upstream but dark on our side"
-      // strand is alertable rather than hidden in a generic 502.
-      expect(log.error).to.have.been.calledWithMatch('SERENITY_ACTIVATE_LINK_INCOMPLETE');
     });
 
     it('activate does NOT downgrade an already-active brand on a partial failure (207, stays active)', async () => {
@@ -1795,7 +2541,7 @@ describe('SerenityController', () => {
     });
 
     it('deactivate decommissions the subworkspace, clears the pointer, and sets the brand pending', async () => {
-      const brand = makeBrandModel({ getSemrushWorkspaceId: () => 'subworkspace-ws-1' });
+      const brand = makeBrandModel({ getSemrushSubWorkspaceId: () => 'subworkspace-ws-1' });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.deactivate(fakeContext({ brand }));
       expect(response.status).to.equal(200);
@@ -1806,14 +2552,31 @@ describe('SerenityController', () => {
         WORKSPACE,
         { enforceLinkedGuard: false },
       );
-      // The pointer is cleared (disconnect) — never the workspace deleted.
-      expect(brand.setSemrushWorkspaceId).to.have.been.calledWith(null);
+      // The pointer is cleared (disconnect) — the workspace itself is never deleted.
+      expect(brand.setSemrushSubWorkspaceId).to.have.been.calledWith(null);
       expect(brand.setStatus).to.have.been.calledWith('pending');
       expect(brand.save).to.have.been.called;
     });
 
+    it('deactivate tombstones the brand\'s mapping rows after decommission', async () => {
+      const brand = makeBrandModel({ getSemrushSubWorkspaceId: () => 'subworkspace-ws-1' });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ brand });
+      const response = await controller.deactivate(ctx);
+      expect(response.status).to.equal(200);
+      expect(tombstoneAllForBrandStub).to.have.been.calledOnceWith(ctx.dataAccess, BRAND);
+    });
+
+    it('deactivate does NOT tombstone when the brand has no subworkspace (no-op decommission)', async () => {
+      const brand = makeBrandModel({ getSemrushSubWorkspaceId: () => null });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.deactivate(fakeContext({ brand }));
+      expect(response.status).to.equal(200);
+      expect(tombstoneAllForBrandStub).to.not.have.been.called;
+    });
+
     it('deactivate enables the linked-sub-workspace guard when the env flag is set', async () => {
-      const brand = makeBrandModel({ getSemrushWorkspaceId: () => 'subworkspace-ws-1' });
+      const brand = makeBrandModel({ getSemrushSubWorkspaceId: () => 'subworkspace-ws-1' });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.deactivate(fakeContext({
         brand,
@@ -1830,13 +2593,13 @@ describe('SerenityController', () => {
     });
 
     it('deactivate is a no-op decommission for a brand with no subworkspace', async () => {
-      const brand = makeBrandModel({ getSemrushWorkspaceId: () => null });
+      const brand = makeBrandModel({ getSemrushSubWorkspaceId: () => null });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.deactivate(fakeContext({ brand }));
       expect(response.status).to.equal(200);
       expect(decommissionStub).to.not.have.been.called;
       // Nothing to disconnect — the pointer is already null.
-      expect(brand.setSemrushWorkspaceId).to.not.have.been.called;
+      expect(brand.setSemrushSubWorkspaceId).to.not.have.been.called;
       expect(brand.setStatus).to.have.been.calledWith('pending');
     });
 
@@ -1844,14 +2607,14 @@ describe('SerenityController', () => {
       // The upstream is already emptied by decommission; a failed save must not
       // leave the resolver routing to the emptied sub-workspace for the TTL, and
       // the non-atomic seam must emit a distinct, alertable marker.
-      const brand = makeBrandModel({ getSemrushWorkspaceId: () => 'subworkspace-ws-1' });
+      const brand = makeBrandModel({ getSemrushSubWorkspaceId: () => 'subworkspace-ws-1' });
       brand.save = sinon.stub().rejects(new Error('db down'));
       const log = fakeLog();
       const controller = SerenityController({ env: {} }, log, {});
       const response = await controller.deactivate(fakeContext({ brand }));
       expect(response.status).to.equal(500);
       expect(decommissionStub).to.have.been.called;
-      expect(brand.setSemrushWorkspaceId).to.have.been.calledWith(null);
+      expect(brand.setSemrushSubWorkspaceId).to.have.been.calledWith(null);
       // cache was invalidated BEFORE the save threw.
       expect(clearBrandWorkspaceCacheStub).to.have.been.called;
       // distinct, greppable token so the orphaned state is alertable.
@@ -1862,7 +2625,7 @@ describe('SerenityController', () => {
       // No subworkspace → the decommission block is skipped, but the status save
       // still runs (and here fails). The divergence log's decommissionedWorkspaceId
       // must be null (the `: null` side of hasText(subworkspaceId) ? ... : null).
-      const brand = makeBrandModel({ getSemrushWorkspaceId: () => null });
+      const brand = makeBrandModel({ getSemrushSubWorkspaceId: () => null });
       brand.save = sinon.stub().rejects(new Error('db down'));
       const log = fakeLog();
       const controller = SerenityController({ env: {} }, log, {});
@@ -1881,12 +2644,12 @@ describe('SerenityController', () => {
       // decommission throws mid-flow (e.g. a non-404 delete error): the brand
       // must NOT be disconnected (pointer kept) and NOT set pending, so the
       // partial-failure state is recoverable rather than silently half-applied.
-      const brand = makeBrandModel({ getSemrushWorkspaceId: () => 'subworkspace-ws-1' });
+      const brand = makeBrandModel({ getSemrushSubWorkspaceId: () => 'subworkspace-ws-1' });
       decommissionStub.rejects(new ErrorWithStatusCode('upstream delete failed', 502));
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.deactivate(fakeContext({ brand }));
       expect(response.status).to.equal(502);
-      expect(brand.setSemrushWorkspaceId).to.not.have.been.called;
+      expect(brand.setSemrushSubWorkspaceId).to.not.have.been.called;
       expect(brand.setStatus).to.not.have.been.called;
       expect(brand.save).to.not.have.been.called;
     });
@@ -2007,6 +2770,224 @@ describe('SerenityController', () => {
       expect(handlers.handleCreatePromptsSubworkspace).not.to.have.been.called;
     });
 
+    // serenity-docs#33: CSV import routes to the async job runner instead of the
+    // synchronous classify/create/publish path. `deferPublish: true` is the exact
+    // flag CSV-chunking already sets (a UI multi-add never sets it), so routing
+    // is by source, not array length.
+    describe('CSV import async routing (serenity-docs#33)', () => {
+      it('enqueues a serenity-classify-prompts job and returns 202 when deferPublish is true (flat mode)', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const prompts = [{
+          text: 'What is your return policy?', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'],
+        }];
+        const response = await controller.createPrompts(fakeContext({
+          data: { deferPublish: true, prompts },
+        }));
+
+        expect(response.status).to.equal(202);
+        const body = await readBody(response);
+        expect(body).to.deep.equal({ jobId: 'job-abc', status: 'IN_PROGRESS' });
+        expect(createAndEnqueueJobStub).to.have.been.calledOnce;
+        const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
+        expect(enqueueArgs.jobType).to.equal('serenity-classify-prompts');
+        expect(enqueueArgs.metadata).to.deep.equal({
+          // callerId captured at enqueue time (LLMO-6289) — no auth profile on the
+          // test context, so it resolves to the `unknown` sentinel. The default
+          // resolveBrandWorkspaceStub is flat mode, so authMode is 'flat' and both
+          // workspace ids are the org parent WORKSPACE.
+          mode: 'create',
+          brandId: BRAND,
+          semrushWorkspaceId: WORKSPACE,
+          authMode: 'flat',
+          workspaceId: WORKSPACE,
+          parentWorkspaceId: WORKSPACE,
+          prompts,
+          callerId: 'unknown',
+        });
+        // The synchronous path never runs.
+        expect(handlers.handleCreatePrompts).to.not.have.been.called;
+      });
+
+      it('enqueues a serenity-classify-prompts job and returns 202 for subworkspace-mode CSV import, carrying authMode + parentWorkspaceId', async () => {
+        resolveBrandWorkspaceStub.resolves({
+          mode: 'subworkspace', workspaceId: SUBWS, parentWorkspaceId: WORKSPACE,
+        });
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const prompts = [{
+          text: 'What is your return policy?', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'],
+        }];
+        const response = await controller.createPrompts(fakeContext({
+          data: { deferPublish: true, prompts },
+        }));
+
+        expect(response.status).to.equal(202);
+        const body = await readBody(response);
+        expect(body).to.deep.equal({ jobId: 'job-abc', status: 'IN_PROGRESS' });
+        expect(createAndEnqueueJobStub).to.have.been.calledOnce;
+        const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
+        expect(enqueueArgs.jobType).to.equal('serenity-classify-prompts');
+        expect(enqueueArgs.metadata).to.deep.equal({
+          mode: 'create',
+          brandId: BRAND,
+          // In subworkspace mode `auth.workspaceId` IS the sub-workspace, and it is
+          // carried under both `semrushWorkspaceId` (backwards-compatible worker
+          // key) and the explicit `workspaceId`. `parentWorkspaceId` is the org
+          // parent; `authMode` selects the worker's subworkspace create branch.
+          semrushWorkspaceId: SUBWS,
+          authMode: 'subworkspace',
+          workspaceId: SUBWS,
+          parentWorkspaceId: WORKSPACE,
+          prompts,
+          callerId: 'unknown',
+        });
+        // Neither synchronous create handler runs.
+        expect(handlers.handleCreatePromptsSubworkspace).to.not.have.been.called;
+        expect(handlers.handleCreatePrompts).to.not.have.been.called;
+      });
+
+      it('stays synchronous (no enqueue) when deferPublish is absent, even for a large batch', async () => {
+        handlers.handleCreatePrompts.resolves({ created: 1, failed: [] });
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.createPrompts(fakeContext({
+          data: { prompts: [{ text: 'x', geoTargetId: 2840, languageCode: 'en' }] },
+        }));
+
+        expect(response.status).to.equal(200);
+        expect(createAndEnqueueJobStub).to.not.have.been.called;
+        expect(handlers.handleCreatePrompts).to.have.been.calledOnce;
+      });
+
+      it('stays synchronous for subworkspace-mode brands when deferPublish is absent', async () => {
+        resolveBrandWorkspaceStub.resolves({
+          mode: 'subworkspace', workspaceId: SUBWS, parentWorkspaceId: WORKSPACE,
+        });
+        handlers.handleCreatePromptsSubworkspace.resolves({ created: 1, failed: [] });
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.createPrompts(fakeContext({
+          data: { prompts: [{ text: 'x', geoTargetId: 2840, languageCode: 'en' }] },
+        }));
+
+        expect(response.status).to.equal(200);
+        expect(createAndEnqueueJobStub).to.not.have.been.called;
+        expect(handlers.handleCreatePromptsSubworkspace).to.have.been.calledOnce;
+      });
+
+      it('400s without enqueueing when deferPublish is true but prompts is empty', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.createPrompts(fakeContext({
+          data: { deferPublish: true, prompts: [] },
+        }));
+
+        expect(response.status).to.equal(400);
+        expect(createAndEnqueueJobStub).to.not.have.been.called;
+      });
+
+      it('400s without enqueueing when deferPublish is true and prompts exceeds the max item cap', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const tooMany = Array.from({ length: 501 }, (_, i) => ({
+          text: `p${i}`, geoTargetId: 2840, languageCode: 'en',
+        }));
+        const response = await controller.createPrompts(fakeContext({
+          data: { deferPublish: true, prompts: tooMany },
+        }));
+
+        expect(response.status).to.equal(400);
+        expect(createAndEnqueueJobStub).to.not.have.been.called;
+      });
+    });
+
+    describe('getPromptsJobStatus — async job polling (serenity-docs#33 Layer 1)', () => {
+      const JOB = '99999999-8888-7777-6666-555555555555';
+
+      function makeAsyncJob({
+        status = 'COMPLETED', result = null, error = null, brandId = BRAND,
+      } = {}) {
+        return {
+          getId: () => JOB,
+          getStatus: () => status,
+          getResult: () => result,
+          getError: () => error,
+          getMetadata: () => ({ brandId, promiseToken: { promise_token: 'secret' } }),
+        };
+      }
+
+      function ctxWithJob(job, { jobId = JOB } = {}) {
+        const ctx = fakeContext({ params: { jobId } });
+        ctx.dataAccess.AsyncJob = { findById: sinon.stub().resolves(job) };
+        return ctx;
+      }
+
+      it('returns 200 with the stable {jobId,status,result,error} contract for a COMPLETED job', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const result = { created: [{ semrushPromptId: 'p1' }], published: true };
+        const response = await controller.getPromptsJobStatus(
+          ctxWithJob(makeAsyncJob({ status: 'COMPLETED', result })),
+        );
+        expect(response.status).to.equal(200);
+        const body = await readBody(response);
+        expect(body).to.deep.equal({
+          jobId: JOB, status: 'COMPLETED', result, error: null,
+        });
+        // Secrets on the job metadata are never exposed.
+        expect(body).to.not.have.property('metadata');
+      });
+
+      it('surfaces the error envelope for a FAILED job', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const error = { code: 'NEEDS_REAUTH', message: 'Promise token exchange rejected' };
+        const response = await controller.getPromptsJobStatus(
+          ctxWithJob(makeAsyncJob({ status: 'FAILED', result: null, error })),
+        );
+        expect(response.status).to.equal(200);
+        const body = await readBody(response);
+        expect(body).to.deep.equal({
+          jobId: JOB, status: 'FAILED', result: null, error,
+        });
+      });
+
+      it('404s when the job does not exist', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.getPromptsJobStatus(ctxWithJob(null));
+        expect(response.status).to.equal(404);
+      });
+
+      it('404s (does not leak) when the job belongs to another brand', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.getPromptsJobStatus(
+          ctxWithJob(makeAsyncJob({ brandId: 'some-other-brand' })),
+        );
+        expect(response.status).to.equal(404);
+      });
+
+      it('400s on a non-UUID jobId', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.getPromptsJobStatus(
+          ctxWithJob(makeAsyncJob(), { jobId: 'not-a-uuid' }),
+        );
+        expect(response.status).to.equal(400);
+      });
+    });
+
+    it('builds a working type classifier from the brand name + aliases and passes it to the handler (serenity-docs#31)', async () => {
+      handlers.handleCreatePrompts.resolves({ created: 1, failed: [] });
+      // Brand name 'Test Brand' + a US-clamped alias 'Acme'.
+      getBrandAliasesStub.resolves([{ name: 'Acme', regions: ['us'] }]);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createPrompts(fakeContext({
+        data: { prompts: [{ text: 'x', geoTargetId: 2840, languageCode: 'en' }] },
+      }));
+      expect(response.status).to.equal(200);
+      expect(getBrandAliasesStub).to.have.been.calledOnce;
+      // The 7th positional arg to handleCreatePrompts is the classifier closure.
+      const classify = handlers.handleCreatePrompts.firstCall.args[6];
+      expect(classify).to.be.a('function');
+      // US market (geoTargetId 2840): brand name and the US alias both classify.
+      // The classifier yields a BARE `type` value; the dimension is the tag's root.
+      expect(classify('do you sell Test Brand shoes?', 2840)).to.equal('branded');
+      expect(classify('is Acme any good?', 2840)).to.equal('branded');
+      expect(classify('best running shoes?', 2840)).to.equal('non-branded');
+    });
+
     // Line 382: updatePrompt — `ctx?.params || {}` fallback. When ctx.params is
     // null the destructure yields `semrushPromptId = undefined`, which fails the
     // hasText check and throws a 400 before authorize() is reached. The `|| {}`
@@ -2107,16 +3088,16 @@ describe('SerenityController', () => {
     // activate — `ctx.data || {}` fallback and the `Array.isArray(body.markets)
     // ? ... : storedMarkets` else-branch when markets is not an array. With no
     // primary URL these route to the sub-workspace-only activation (200).
-    it('activate falls back to {} body when ctx.data is absent (sub-workspace-only → 200)', async () => {
+    it('activate falls back to {} body when ctx.data is absent (pending brand → sub-workspace-only 200)', async () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      getBrandBaseSiteIdStub.resolves('primary-site');
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const ctx = fakeContext();
       ctx.data = undefined;
       const response = await controller.activate(ctx);
+      // ctx.data undefined is handled as {} (no crash); a pending brand activates
+      // sub-workspace-only regardless of body → 200, no project created.
       expect(response.status).to.equal(200);
-      const { status, markets } = await readBody(response);
-      expect(status).to.equal('active');
-      expect(markets).to.deep.equal([]);
       expect(handlers.handleCreateMarketSubworkspace).to.not.have.been.called;
     });
 
@@ -2124,6 +3105,7 @@ describe('SerenityController', () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.activate(fakeContext({
+        brand: makeBrandModel({ getStatus: () => 'active' }),
         data: { markets: 'not-an-array', brandDomain: 'x.com', brandNames: ['X'] },
       }));
       expect(response.status).to.equal(200);
@@ -2142,7 +3124,7 @@ describe('SerenityController', () => {
       decommissionStub.resolves();
       const controllerEnv = { SERENITY_ENFORCE_LINKED_SUBWORKSPACE_GUARD: 'true' };
       const controller = SerenityController({ env: {} }, fakeLog(), controllerEnv);
-      const brand = makeBrandModel({ getSemrushWorkspaceId: () => 'sub-ws' });
+      const brand = makeBrandModel({ getSemrushSubWorkspaceId: () => 'sub-ws' });
       const ctx = fakeContext({ brand });
       delete ctx.env; // forces the || env fallback at line 907
       const response = await controller.deactivate(ctx);
@@ -2161,7 +3143,7 @@ describe('SerenityController', () => {
       decommissionStub.resolves();
       const saveError = new Error('DB connection lost');
       const brand = makeBrandModel({
-        getSemrushWorkspaceId: () => 'sub-ws',
+        getSemrushSubWorkspaceId: () => 'sub-ws',
         save: sinon.stub().rejects(saveError),
       });
       const log = fakeLog();
@@ -2238,7 +3220,7 @@ describe('SerenityController', () => {
 
     // Line 528: createMarket — `ctx.data || {}` in the subworkspace branch. The {}
     // fallback fires when ctx.data is absent in subworkspace mode.
-    it('createMarket passes {} body to subworkspace handler when ctx.data is absent', async () => {
+    it('createMarket passes an empty body with a derived primaryUrl when ctx.data is absent', async () => {
       resolveBrandWorkspaceStub.resolves({
         mode: 'subworkspace', workspaceId: 'sub-ws-1', parentWorkspaceId: WORKSPACE,
       });
@@ -2248,7 +3230,33 @@ describe('SerenityController', () => {
       ctx.data = undefined;
       const response = await controller.createMarket(ctx);
       expect(response.status).to.equal(200);
-      expect(handlers.handleCreateMarketSubworkspace.firstCall.args[3]).to.deep.equal({});
+      // `primaryUrl` is always set from the server-side derivation — null here,
+      // since there is no brandDomain to derive from. Always setting it is what
+      // stops a caller-supplied value from reaching Semrush unvalidated.
+      expect(handlers.handleCreateMarketSubworkspace.firstCall.args[3])
+        .to.deep.equal({ primaryUrl: null });
+    });
+
+    it('createMarket ignores a caller-supplied primaryUrl and derives its own', async () => {
+      resolveBrandWorkspaceStub.resolves({
+        mode: 'subworkspace', workspaceId: 'sub-ws-1', parentWorkspaceId: WORKSPACE,
+      });
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createMarket(fakeContext({
+        data: {
+          market: 'us',
+          languageCode: 'en',
+          brandDomain: 'acme.com',
+          brandNames: ['X'],
+          primaryUrl: 'evil.example.com/attacker-path',
+        },
+      }));
+      expect(response.status).to.equal(201);
+      // The field is not part of the create-market contract; a value on the request
+      // must never reach the Semrush project.
+      expect(handlers.handleCreateMarketSubworkspace.firstCall.args[3].primaryUrl)
+        .to.equal('acme.com');
     });
 
     // Line 370: createPrompts — `ctx.data || {}` in the flat-mode branch. The {}
@@ -2320,10 +3328,10 @@ describe('SerenityController', () => {
 });
 
 describe('brandPointerReloader', () => {
-  it('returns the brand current semrush_workspace_id when present', async () => {
+  it('returns the brand current semrush_sub_workspace_id when present', async () => {
     const ctx = {
       dataAccess: {
-        Brand: { findById: sinon.stub().resolves({ getSemrushWorkspaceId: () => 'ws-current' }) },
+        Brand: { findById: sinon.stub().resolves({ getSemrushSubWorkspaceId: () => 'ws-current' }) },
       },
     };
     expect(await brandPointerReloader(ctx, 'brand-1')()).to.equal('ws-current');
@@ -2332,7 +3340,7 @@ describe('brandPointerReloader', () => {
   it('returns null when the brand has no pointer', async () => {
     const ctx = {
       dataAccess: {
-        Brand: { findById: sinon.stub().resolves({ getSemrushWorkspaceId: () => null }) },
+        Brand: { findById: sinon.stub().resolves({ getSemrushSubWorkspaceId: () => null }) },
       },
     };
     expect(await brandPointerReloader(ctx, 'brand-1')()).to.equal(null);

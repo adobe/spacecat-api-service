@@ -21,10 +21,12 @@ import {
 } from '@quazar/ai-seo-ts/v2/topic/messages_pb.js';
 import {
   resolveCountry,
+  resolveSearchType,
   engineToLlm,
   brandTarget,
   parseCompetitorDomainsList,
   responseFromGrpcError,
+  exactSnapshotDate,
   PROTO_FROM_JSON,
   PROTO_TO_JSON,
 } from '../../../grpc-utils.js';
@@ -36,10 +38,11 @@ import {
 /* c8 ignore start */
 export async function handleGapTopicsTotals(sp, clients) {
   const domain = sp.get('domain');
+  const searchType = resolveSearchType(domain);
   const competitorDomains = parseCompetitorDomainsList(sp);
   const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const country = resolveCountry(sp) || COUNTRY_ENUM.WORLDWIDE;
-  const date = sp.get('date');
+  const targetDate = exactSnapshotDate(sp);
 
   const dimensionFilterQl = buildGapTopicsDimensionFilterQl(sp);
   const metricFilterResult = buildGapTopicsMetricFilterQl(sp);
@@ -58,7 +61,8 @@ export async function handleGapTopicsTotals(sp, clients) {
         competitors: competitorDomains.map(brandTarget),
         dimension_filter_ql: dimensionFilterQl,
         metric_filter_ql: metricFilterResult.metricFilterQl,
-        target_date: date,
+        search_type: searchType,
+        ...(targetDate ? { target_date: targetDate } : {}),
       },
       PROTO_FROM_JSON,
     );

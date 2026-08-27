@@ -12,10 +12,14 @@
 
 // @ts-check
 
-import { hasText } from '@adobe/spacecat-shared-utils';
+import { hasText, siteIdentityFromUrlString } from '@adobe/spacecat-shared-utils';
 
-import { SerenityTransportError } from './rest-transport.js';
+import { isSemrushTransportError, isMeteredQuota, toQuotaExceededError } from './errors.js';
+import { benchmarkAliases } from './aliases.js';
 import { resolveProjects } from './resolve-projects.js';
+import { primaryUrlOf } from './subworkspace-projects.js';
+
+/** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */
 
 /**
  * Brand-level URLs (the brand's own sites, social accounts, and earned-content
@@ -63,54 +67,11 @@ function toEntry(url, type) {
   return { url: value, type };
 }
 
-/**
- * Builds the `{ url, type }[]` to push to a single market's project from a
- * brand's URL sources (the V2 shape: `urls`, `socialAccounts`, `earnedContent`
- * — the same shape the create payload and a persisted brand both carry):
- *   - brand `urls` → type `website`, region-less (applied to every market);
- *   - `socialAccounts` → type `social`, filtered to the market's region;
- *   - `earnedContent` → type `earned`, filtered to the market's region.
- *
- * Only HTTPS URLs survive. The result is de-duplicated by URL (first-seen wins,
- * so a brand site listed both as a URL and a social account keeps its `website`
- * type) — brand URLs are unique per project upstream, so duplicates would be
- * skipped anyway; de-duping here keeps the `type` we send deterministic.
- *
- * @param {object} sources - { urls?, socialAccounts?, earnedContent? }.
- * @param {string} market - ISO-2 country code of the target project.
- * @returns {{url: string, type: string}[]}
- */
-export function collectBrandUrlEntries(sources, market) {
-  const urls = Array.isArray(sources?.urls) ? sources.urls : [];
-  const social = Array.isArray(sources?.socialAccounts) ? sources.socialAccounts : [];
-  const earned = Array.isArray(sources?.earnedContent) ? sources.earnedContent : [];
-
-  const candidates = [
-    // Brand URLs carry no region — always every market. Accept both the string
-    // and the { value } object shape the create payload may use.
-    ...urls.map((u) => toEntry(typeof u === 'string' ? u : u?.value, BRAND_URL_TYPE.WEBSITE)),
-    ...social
-      .filter((s) => regionApplies(s?.regions, market))
-      .map((s) => toEntry(s?.url, BRAND_URL_TYPE.SOCIAL)),
-    ...earned
-      .filter((e) => regionApplies(e?.regions, market))
-      .map((e) => toEntry(e?.url, BRAND_URL_TYPE.EARNED)),
-  ];
-
-  const seen = new Set();
-  return candidates.filter((e) => {
-    if (e === null || seen.has(e.url)) {
-      return false;
-    }
-    seen.add(e.url);
-    return true;
-  });
-}
-
 // Normalizes a benchmark/brand domain for identity comparison: lowercase host,
 // no scheme, no leading `www.`, no path. Null when unparseable. Used to match an
-// existing own-brand benchmark across runs (idempotent ensure) and shared by the
-// competitor-benchmark sync to match/dedupe competitors by domain.
+// existing own-brand benchmark across runs (idempotent ensure), to skip the
+// primary domain in the brand-URL set, and by the competitor-benchmark sync to
+// match/dedupe competitors by domain.
 export function normalizeBenchmarkDomain(value) {
   const raw = typeof value === 'string' ? value.trim() : '';
   if (!raw) {
@@ -122,6 +83,201 @@ export function normalizeBenchmarkDomain(value) {
   } catch {
     return null;
   }
+}
+
+/**
+ * Normalizes a URL or bare domain to the identity that distinguishes SITES on one
+ * host: lowercase host plus path, with `www.` folded away.
+ *
+ * This is {@link siteIdentityFromUrlString} with one adjustment. That primitive
+ * deliberately keeps `www.` and the apex apart, because for a tracked site they
+ * are distinct origins. For deciding whether a competitor IS one of the brand's
+ * own properties they are not: a brand listing `nba.com/kings` and a competitor
+ * spelled `www.nba.com/kings` name the same property, and the reservation must
+ * still catch it — which folding `www.` here preserves, since that is how the
+ * host-only comparison this replaces always behaved.
+ *
+ * The path is the part worth keeping: `nba.com/suns` and `nba.com/kings` are
+ * different sites, and reducing both to `nba.com` is what made a legitimate
+ * competitor look self-referential.
+ *
+ * @param {string|null|undefined} value - a full URL or a bare `host[/path]`.
+ * @returns {string|null} e.g. "nba.com/suns", or null when unparseable.
+ */
+export function siteIdentityFor(value) {
+  const identity = siteIdentityFromUrlString(typeof value === 'string' ? value.trim() : '');
+  return identity === null ? null : identity.replace(/^www\./, '');
+}
+
+// Whether a brand website URL is a string some market's benchmark already shows.
+// The skip below exists to stop the SAME string being listed twice, so it compares
+// whole urls rather than hosts. Two ways that happens, and both must be caught:
+//   - the url is a bare primary host — a benchmark on `nba.com` and a brand url of
+//     `https://nba.com` are one entry shown twice;
+//   - the url IS some market's tracked url — a main benchmark carries its project's
+//     `primary_url`, so a Lakers benchmark reading `nba.com/lakers` and a brand url
+//     of `https://nba.com/lakers` are likewise one entry shown twice.
+// A path that is NOT some market's tracked url is kept: it is a different page of
+// the same site, and the path is the part that says which brand it is. A url whose
+// host matches a primary but whose identity cannot be parsed counts as bare.
+function isBarePrimaryDomainUrl(url, primaries, primaryIdentities) {
+  const identity = siteIdentityFromUrlString(url);
+  if (identity !== null && primaryIdentities instanceof Set && primaryIdentities.has(identity)) {
+    return true;
+  }
+  const host = normalizeBenchmarkDomain(url);
+  if (host === null || !primaries.has(host)) {
+    return false;
+  }
+  return identity === null || !identity.includes('/');
+}
+
+/**
+ * The url a benchmark scores against, in site-identity form.
+ *
+ * `primary_url` and `domain` are ONE value upstream — writing either sets both —
+ * so whichever a listing carries answers. `root_domain` is that value's
+ * registrable form and only the last resort: reading it first would report a
+ * benchmark sitting on `us.kisqali.com` as being on `kisqali.com`, hiding a
+ * non-US market scored against US product information.
+ *
+ * Mirrors `benchmark_tracked_url` in mysticat-data-service
+ * (`scripts/serenity_migration/region_alignment.py`) — change both together.
+ *
+ * @param {object|null|undefined} benchmark - an `aio_benchmarks` entry.
+ * @returns {string|null} the tracked url, or null when it carries none.
+ */
+export function benchmarkTrackedUrl(benchmark) {
+  for (const candidate of [benchmark?.primary_url, benchmark?.domain, benchmark?.root_domain]) {
+    if (hasText(candidate)) {
+      const identity = siteIdentityFromUrlString(candidate);
+      if (identity !== null) {
+        return identity;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * The set of normalized hosts that are the primary domain of SOME market in the
+ * brand's sub-workspace — every one of them is skipped as a `website` brand URL
+ * (see {@link collectBrandUrlEntries}). Unparseable/empty values are dropped.
+ *
+ * @param {Array<string|null|undefined>} domains - raw project domains (plus, on
+ *   the create path, the domain of the market being created — it has no project
+ *   to read a domain from yet).
+ * @returns {Set<string>} normalized hosts (lowercase, no scheme/`www.`/path).
+ */
+export function primaryDomainSet(domains) {
+  return new Set(
+    (Array.isArray(domains) ? domains : [])
+      .map(normalizeBenchmarkDomain)
+      .filter((host) => host !== null),
+  );
+}
+
+/**
+ * The set of tracked urls (site identities) that some market in the brand's
+ * sub-workspace analyses — its `settings.ai.primary_url`, which its own-brand
+ * benchmark also carries. A `website` brand URL equal to one of these is skipped
+ * (see {@link collectBrandUrlEntries}). Unparseable/empty values are dropped.
+ *
+ * Kept apart from {@link primaryDomainSet} because the two answer different
+ * questions: a host set cannot tell `nba.com/lakers` from `nba.com/kings`, and
+ * those are different markets' tracked urls.
+ *
+ * @param {Array<string|null|undefined>} urls - raw tracked urls (plus, on the
+ *   create path, the url of the market being created — it has no project yet).
+ * @returns {Set<string>} site identities (scheme-less, path preserved).
+ */
+export function primaryIdentitySet(urls) {
+  return new Set(
+    (Array.isArray(urls) ? urls : [])
+      // Narrowed here rather than widening the shared helpers, both of which are
+      // typed for a real string (see the serenity CLAUDE.md `hasText` note).
+      .map((u) => (typeof u === 'string' && u.trim() ? siteIdentityFromUrlString(u) : null))
+      .filter((identity) => identity !== null),
+  );
+}
+
+/**
+ * Builds the `{ url, type }[]` to push to a single market's project from a
+ * brand's URL sources (the V2 shape: `urls`, `socialAccounts`, `earnedContent`
+ * — the same shape the create payload and a persisted brand both carry):
+ *   - brand `urls` → type `website`, region-less (applied to every market);
+ *   - `socialAccounts` → type `social`, filtered to the market's region;
+ *   - `earnedContent` → type `earned`, filtered to the market's region.
+ *
+ * Every market's primary domain is dropped from the `website` set
+ * (skip-primary-domain): a project's own-brand benchmark already carries its own
+ * domain (Semrush stores it scheme-less), and a `brand_urls` row must keep its
+ * `https://` scheme, so the two can never collapse — emitting it as a website URL
+ * just double-lists the domain in the UI (serenity-docs#25). The OTHER markets'
+ * primaries are skipped too: for a market-mirror brand, `chevrolet.ca` is CA-en's
+ * primary and must not surface as a US-en brand URL. Because the skip set is the
+ * same for every market, all markets end up with the same website entries. The
+ * match is by normalized host, so both `https://x.com` and `https://www.x.com`
+ * are skipped when a market's domain is `x.com`.
+ *
+ * A url carrying a PATH is skipped only when it IS some market's tracked url —
+ * the value that market's main benchmark carries as its `primary_url`. Any other
+ * path on a primary host is kept: `https://nba.com/kings/tickets` is a different
+ * page of the same site and says something the benchmark does not. Every OTHER
+ * website URL (a secondary site) is kept verbatim.
+ *
+ * Only HTTPS URLs survive (`brand_urls` rejects non-https with a 400, so a stored
+ * value is written verbatim — no scheme/`www.` normalization; Semrush stores it
+ * as-is). The result is de-duplicated by URL (first-seen wins, so a brand site
+ * listed both as a URL and a social account keeps its `website` type) — brand
+ * URLs are unique per project upstream, so duplicates would be skipped anyway;
+ * de-duping here keeps the `type` we send deterministic. Note the upstream does
+ * NOT collapse `www.`-vs-apex, so two distinct https URLs that differ only by
+ * `www.` are two separate rows (as the user entered them).
+ *
+ * @param {object} sources - { urls?, socialAccounts?, earnedContent? }.
+ * @param {string} market - ISO-2 country code of the target project.
+ * @param {Set<string>} [primaryDomains] - normalized hosts that are some market's
+ *   primary domain ({@link primaryDomainSet}); a path-free `website` URL whose
+ *   host is in the set is skipped. Omit to keep all.
+ * @param {Set<string>} [primaryIdentities] - tracked urls some market analyses
+ *   ({@link primaryIdentitySet}); a `website` URL equal to one is skipped whether
+ *   or not it carries a path. Omit to keep all.
+ * @returns {{url: string, type: string}[]}
+ */
+export function collectBrandUrlEntries(sources, market, primaryDomains, primaryIdentities) {
+  const urls = Array.isArray(sources?.urls) ? sources.urls : [];
+  const social = Array.isArray(sources?.socialAccounts) ? sources.socialAccounts : [];
+  const earned = Array.isArray(sources?.earnedContent) ? sources.earnedContent : [];
+  const primaries = primaryDomains instanceof Set ? primaryDomains : new Set();
+  const identities = primaryIdentities instanceof Set ? primaryIdentities : new Set();
+
+  const candidates = [
+    // Brand URLs carry no region — always every market. Accept both the string
+    // and the { value } object shape the create payload may use. Skip every
+    // market's primary domain (the benchmarks hold them — see fn docstring).
+    ...urls
+      .map((u) => toEntry(typeof u === 'string' ? u : u?.value, BRAND_URL_TYPE.WEBSITE))
+      .filter(Boolean)
+      .filter((e) => !isBarePrimaryDomainUrl(e.url, primaries, identities)),
+    ...social
+      .filter((s) => regionApplies(s?.regions, market))
+      .map((s) => toEntry(s?.url, BRAND_URL_TYPE.SOCIAL))
+      .filter(Boolean),
+    ...earned
+      .filter((e) => regionApplies(e?.regions, market))
+      .map((e) => toEntry(e?.url, BRAND_URL_TYPE.EARNED))
+      .filter(Boolean),
+  ];
+
+  const seen = new Set();
+  return candidates.filter((e) => {
+    if (seen.has(e.url)) {
+      return false;
+    }
+    seen.add(e.url);
+    return true;
+  });
 }
 
 /**
@@ -142,10 +298,18 @@ export function normalizeBenchmarkDomain(value) {
  * `null` only when there is no benchmark to reuse AND no usable domain to create
  * one with — callers then skip the URL attach (never a hard failure).
  *
- * @param {object} transport - Semrush transport (lists/creates benchmarks).
+ * A created benchmark carries the market's TRACKED url, not just its host.
+ * External parties read a benchmark's `primary_url` rather than the project's, and
+ * upstream `domain` and `primary_url` are one value — so a body sending only a
+ * host scores a subpath brand against its parent site from the moment it is
+ * provisioned.
+ *
+ * @param {SerenityTransport} transport
  * @param {string} workspaceId - the brand's sub-workspace id.
  * @param {string} projectId - the market/project to ensure the benchmark on.
- * @param {object} brand - { name, domain, aliases? } identity of the own brand.
+ * @param {object} brand - { name, domain, primaryUrl?, aliases? } identity of the
+ *   own brand; `primaryUrl` is the url the market tracks and falls back to
+ *   `domain`.
  * @param {object} [log] - optional logger ({ info?, warn? }).
  * @returns {Promise<string|null>} the resolved benchmark id, or null when none
  *   exists and none can be created (no usable brand domain).
@@ -167,12 +331,21 @@ export async function ensureOwnBrandBenchmark(transport, workspaceId, projectId,
   if (!hasText(brand?.name) || ownDomain === null) {
     return null;
   }
+  // Create is the one point where we choose an alias's spelling: upstream keeps
+  // whatever an alias was created with, so a later PUT cannot re-case it. Use the
+  // lowercase form Semrush's own resolution would have stored.
+  const aliases = benchmarkAliases(brand.name, brand.aliases);
+  // `domain` is required (a body without it is rejected) and `primary_url` is the
+  // same value in its full form — sending both leaves the benchmark tracking what
+  // the market tracks instead of its bare host.
+  const trackedUrl = siteIdentityFromUrlString(
+    hasText(brand?.primaryUrl) ? brand.primaryUrl : brand.domain,
+  );
   const body = [{
     brand_name: brand.name,
     domain: brand.domain,
-    ...(Array.isArray(brand.aliases) && brand.aliases.length
-      ? { brand_aliases: brand.aliases }
-      : {}),
+    ...(trackedUrl ? { primary_url: trackedUrl } : {}),
+    ...(aliases.length ? { brand_aliases: aliases } : {}),
   }];
   try {
     const created = await transport.createBenchmarks(workspaceId, projectId, body);
@@ -186,7 +359,7 @@ export async function ensureOwnBrandBenchmark(transport, workspaceId, projectId,
   } catch (e) {
     // 409 = the benchmark already exists (race / duplicate brand name). Fall
     // through to re-list + match rather than failing the URL attach.
-    if (!(e instanceof SerenityTransportError && e.status === 409)) {
+    if (!(isSemrushTransportError(e) && e.status === 409)) {
       throw e;
     }
   }
@@ -206,13 +379,13 @@ export async function ensureOwnBrandBenchmark(transport, workspaceId, projectId,
  * propagates; the upstream silently skips URLs already present, so a re-attach
  * is idempotent.
  *
- * @param {object} transport - Semrush transport (ensures the benchmark, creates URLs).
+ * @param {SerenityTransport} transport
  * @param {string} workspaceId - the brand's sub-workspace id.
  * @param {string} projectId - the market/project to attach the URLs to.
  * @param {Array<{url: string, type: string}>} entries - the brand-URL entries to
  *   push (a no-op when empty).
- * @param {object} brand - { name, domain, aliases? } of the project's own brand,
- *   used to find-or-create the benchmark the URLs attach to.
+ * @param {object} brand - { name, domain, primaryUrl?, aliases? } of the project's
+ *   own brand, used to find-or-create the benchmark the URLs attach to.
  * @param {object} [log] - optional logger ({ info?, warn? }).
  * @returns {Promise<{created: number, skipped?: boolean}>} count submitted
  *   (0 on no-op or when skipped for a missing benchmark).
@@ -235,6 +408,10 @@ export async function attachBrandUrlsToProject(
     });
     return { created: 0, skipped: true };
   }
+  // Entries are written verbatim (already https-filtered, and the brand's own
+  // primary domain was dropped upstream by collectBrandUrlEntries so it doesn't
+  // duplicate the benchmark — #25). The upstream stores the value as-is and
+  // silently skips URLs already present, so a re-attach is idempotent.
   await transport.createBrandUrls(workspaceId, projectId, benchmarkId, entries);
   log?.info?.('brand-urls: attached to project benchmark', {
     workspaceId, projectId, benchmarkId, count: entries.length,
@@ -242,20 +419,27 @@ export async function attachBrandUrlsToProject(
   return { created: entries.length };
 }
 
-// Best-effort republish after an edit-time change so the live view reflects it.
-// Swallows a quota 405 (publishing an empty-units child 405s as a disguised
-// quota rejection — same convention as the market-create path); any other
-// failure propagates so the edit hard-fails. Shared by the brand-URL and
-// CI-competitor edit re-syncs.
-export async function republishBestEffort(transport, workspaceId, projectId, log) {
+// Republish after an edit-time change so the live view reflects it. Shared by the brand-URL,
+// CI-competitor, and tag edit re-syncs.
+//
+// SITES-49206: this used to swallow a quota 405 (publishing an empty-units child 405s as a
+// disguised quota rejection) and leave the project a draft instead of failing the edit. Semrush
+// no longer enforces AI project/prompt limits for proxy-routed LLMO workspaces (confirmed live,
+// including a direct empty-units publish probe against a throwaway workspace, 2026-08-17) — a
+// quota 405 here would mean Semrush is enforcing again, which every OTHER publish call site in
+// this codebase already treats as a real, surfaced error (classify via `isMeteredQuota`, throw
+// `toQuotaExceededError()`) rather than something to tolerate silently. This function now matches
+// that convention instead of being the one place a live re-enforcement would go unnoticed.
+/** @param {SerenityTransport} transport */
+export async function republish(transport, workspaceId, projectId, log) {
   try {
     await transport.publishProject(workspaceId, projectId);
   } catch (e) {
-    if (e instanceof SerenityTransportError && e.status === 405) {
-      log?.warn?.('brand-urls: republish skipped — quota 405, project left as draft', {
+    if (isMeteredQuota(e)) {
+      log?.warn?.('republish: quota exceeded — Semrush is enforcing AI limits again (see ADR-009)', {
         workspaceId, projectId,
       });
-      return;
+      throw toQuotaExceededError();
     }
     throw e;
   }
@@ -274,11 +458,10 @@ export function marketOf(project) {
  * Re-syncs a brand's URL set onto every market/project in its sub-workspace
  * (the brand-edit path). For each project: builds the region-filtered desired
  * set, diffs it against the benchmark's live brand URLs, creates the additions,
- * deletes the removals, and republishes (best-effort) when anything changed.
- * Create/delete errors propagate so the edit hard-fails; a quota 405 on the
- * republish alone is tolerated.
+ * deletes the removals, and republishes when anything changed.
+ * Create/delete/republish errors propagate so the edit hard-fails.
  *
- * @param {object} transport - Semrush transport.
+ * @param {SerenityTransport} transport
  * @param {object} sources - the brand's URL sources ({ urls?, socialAccounts?,
  *   earnedContent? }), region-filtered per market by {@link collectBrandUrlEntries}.
  * @param {string} workspaceId - the brand's sub-workspace id.
@@ -300,6 +483,17 @@ export async function syncBrandUrlsAcrossMarkets(
   // syncs), else list here. The listing is stable across a brand-row write.
   const projects = await resolveProjects(transport, workspaceId, prefetchedProjects);
 
+  // Every market's primary domain, skipped as a website URL on EVERY market (not
+  // just its own): a market-mirror brand's `chevrolet.ca` is CA-en's primary and
+  // must not surface as a US-en brand URL. Built once — the set is the same for
+  // every market, so the website entries are identical across the fan-out.
+  const primaryDomains = primaryDomainSet(projects.map((p) => p?.domain));
+
+  // The same skip, keyed on what each market actually TRACKS: a main benchmark
+  // carries its project's primary_url, so once CA-en tracks `chevrolet.ca/trucks`
+  // a brand url of that string double-lists it on every market.
+  const primaryIdentities = primaryIdentitySet(projects.map((p) => primaryUrlOf(p)));
+
   let created = 0;
   let deleted = 0;
   let markets = 0;
@@ -314,7 +508,10 @@ export async function syncBrandUrlsAcrossMarkets(
     markets += 1;
 
     try {
-      const desired = collectBrandUrlEntries(sources, market);
+      // Entries are written/diffed verbatim (https-ful, with every market's
+      // primary domain dropped). `listBrandUrls` returns the same stored form, so
+      // the diff is stable across re-syncs — no www-vs-apex churn.
+      const desired = collectBrandUrlEntries(sources, market, primaryDomains, primaryIdentities);
       // Own-brand identity for the benchmark comes from the project itself: its
       // domain plus the brand_names (display name first, the rest are aliases).
       const ai = project?.settings?.ai || {};
@@ -322,6 +519,7 @@ export async function syncBrandUrlsAcrossMarkets(
       const brand = {
         name: hasText(ai.brand_name_display) ? ai.brand_name_display : brandNames[0],
         domain: project?.domain,
+        primaryUrl: primaryUrlOf(project),
         aliases: hasText(ai.brand_name_display) ? brandNames : brandNames.slice(1),
       };
       // eslint-disable-next-line no-await-in-loop
@@ -342,8 +540,20 @@ export async function syncBrandUrlsAcrossMarkets(
         // eslint-disable-next-line no-continue
         continue;
       }
+      // Invariant: a read must target the same view the writes act on. Creates and
+      // deletes act on the DRAFT (a publish then promotes it), so the draft — not
+      // the published view — is the state this sync converges on. Creates/deletes
+      // land before this sync's own republish runs, so the published view can
+      // legitimately lag the draft at read time. Reading published there would
+      // report an EMPTY existing set, so a URL the user removed would never be
+      // deleted (and every URL would be re-submitted on each sync).
       // eslint-disable-next-line no-await-in-loop
-      const existingResp = await transport.listBrandUrls(workspaceId, projectId, benchmarkId);
+      const existingResp = await transport.listBrandUrls(
+        workspaceId,
+        projectId,
+        benchmarkId,
+        { draft: true },
+      );
       const existing = Array.isArray(existingResp?.brand_urls) ? existingResp.brand_urls : [];
 
       const existingByUrl = new Map();
@@ -371,7 +581,7 @@ export async function syncBrandUrlsAcrossMarkets(
       }
       if (toCreate.length > 0 || toDelete.length > 0) {
         // eslint-disable-next-line no-await-in-loop
-        await republishBestEffort(transport, workspaceId, projectId, log);
+        await republish(transport, workspaceId, projectId, log);
       }
     } catch (e) {
       // A mid-fan-out failure must name WHICH market split so the brand-edit

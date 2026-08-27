@@ -29,10 +29,12 @@ import { TOPICS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/topic/enums_p
 import {
   parseLimitOffset,
   resolveCountry,
+  resolveSearchType,
   engineToLlm,
   brandTarget,
   parseCompetitorDomainsList,
   responseFromGrpcError,
+  exactSnapshotDate,
   PROTO_FROM_JSON,
   PROTO_TO_JSON,
 } from '../../../grpc-utils.js';
@@ -44,12 +46,13 @@ import {
 /* c8 ignore start */
 export async function handleGapTopicsExport(sp, clients) {
   const domain = sp.get('domain');
+  const searchType = resolveSearchType(domain);
   const competitorDomains = parseCompetitorDomainsList(sp);
   const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const country = resolveCountry(sp) || COUNTRY_ENUM.WORLDWIDE;
   const sortBy = sp.get('sortBy') || TOPICS_REQUEST_ORDER_BY_ENUM.TOTAL_COMPETITOR_MENTIONS;
   const sortDirection = sp.get('sortDirection') || ORDER_DIRECTION_ENUM.DESC;
-  const date = sp.get('date');
+  const targetDate = exactSnapshotDate(sp);
   const { limit, offset } = parseLimitOffset(sp);
 
   const gapKindsRaw = sp.get('gapKinds');
@@ -78,7 +81,8 @@ export async function handleGapTopicsExport(sp, clients) {
         range: { limit, offset },
         dimension_filter_ql: dimensionFilterQl,
         metric_filter_ql: metricFilterResult.metricFilterQl,
-        target_date: date,
+        search_type: searchType,
+        ...(targetDate ? { target_date: targetDate } : {}),
       },
       PROTO_FROM_JSON,
     );

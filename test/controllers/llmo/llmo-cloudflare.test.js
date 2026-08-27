@@ -14,6 +14,7 @@ import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
+import { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
 
 use(sinonChai);
 
@@ -39,6 +40,7 @@ describe('LlmoCloudflareController', () => {
   let mockCfClient;
   let mockTokowakaClient;
   let mockFetch;
+  let mockCalculateForwardedHost;
 
   before(async () => {
     // esmock is expensive, so wire it once. The mock factories deliberately read the mutable
@@ -52,6 +54,9 @@ describe('LlmoCloudflareController', () => {
         default: {
           createFrom: () => mockTokowakaClient,
         },
+        // Routed through a mutable stub (default: the real impl, set in beforeEach) so tests
+        // exercise the actual apex→www normalization but can also force a derivation failure.
+        calculateForwardedHost: (...args) => mockCalculateForwardedHost(...args),
       },
       '@adobe/spacecat-shared-utils': {
         hasText: (v) => typeof v === 'string' && v.trim().length > 0,
@@ -83,6 +88,9 @@ describe('LlmoCloudflareController', () => {
       fetchMetaconfig: sandbox.stub().resolves({ apiKeys: [LLMO_API_KEY] }),
     };
 
+    // Default to the real host-derivation helper; individual tests may override to force a throw.
+    mockCalculateForwardedHost = calculateForwardedHost;
+
     mockFetch = sandbox.stub().resolves({
       ok: true,
       status: 200,
@@ -98,6 +106,8 @@ describe('LlmoCloudflareController', () => {
     mockAccessControlUtil = {
       hasAccess: sandbox.stub().resolves(true),
       isLLMOAdministrator: sandbox.stub().returns(true),
+      hasLlmoCapabilityForSite: sandbox.stub().resolves(true),
+      llmoForbiddenMessage: (m) => m,
     };
 
     const mockSiteModel = {
@@ -106,6 +116,7 @@ describe('LlmoCloudflareController', () => {
 
     mockContext = {
       log: {
+        debug: sandbox.stub(),
         info: sandbox.stub(),
         warn: sandbox.stub(),
         error: sandbox.stub(),
@@ -153,9 +164,17 @@ describe('LlmoCloudflareController', () => {
     });
 
     it('returns 403 when user is not an LLMO administrator', async () => {
-      mockAccessControlUtil.isLLMOAdministrator.returns(false);
+      mockAccessControlUtil.hasLlmoCapabilityForSite.resolves(false);
       const res = await controller.getCloudflareConfig(mockContext);
       expect(res.status).to.equal(403);
+    });
+
+    it('returns 501 for a subpath site (CDN auto-routing not supported)', async () => {
+      mockSite.getBaseURL = () => 'https://www.example.com/blog';
+      const res = await controller.getCloudflareConfig(mockContext);
+      expect(res.status).to.equal(501);
+      const body = await res.json();
+      expect(body.message).to.include('not supported');
     });
 
     it('returns 500 when CLOUDFLARE_CLIENT_ID is not configured', async () => {
@@ -176,6 +195,16 @@ describe('LlmoCloudflareController', () => {
       expect(res.status).to.equal(200);
       const body = await res.json();
       expect(body).to.deep.equal(accounts);
+    });
+
+    it('emits a list-accounts audit line carrying caller and host (onboarding-started signal)', async () => {
+      mockCfClient.listAccounts.resolves([{ id: ACCOUNT_ID, name: 'Test Account' }]);
+
+      await controller.listAccounts(mockContext);
+      const logged = mockContext.log.info.getCalls().map((c) => c.args[0]).join('\n');
+      expect(logged).to.contain('[llmo-cf] action=list-accounts outcome=ok');
+      expect(logged).to.contain('count=1');
+      expect(logged).to.contain('caller=');
     });
 
     it('returns 400 when CF token is missing', async () => {
@@ -218,18 +247,75 @@ describe('LlmoCloudflareController', () => {
   // ── listZones ────────────────────────────────────────────────────────────
 
   describe('listZones', () => {
-    it('returns zones list', async () => {
-      const zones = [{ id: ZONE_ID, name: 'example.com' }];
+    beforeEach(() => {
+      mockContext.data = { accountId: ACCOUNT_ID };
+    });
+
+    it('passes the accountId to the client and returns the account-scoped zones', async () => {
+      const zones = [{ id: ZONE_ID, name: 'example.com', account: { id: ACCOUNT_ID } }];
       mockCfClient.listZones.resolves(zones);
 
       const res = await controller.listZones(mockContext);
       expect(res.status).to.equal(200);
+      expect(mockCfClient.listZones).to.have.been.calledWith({ accountId: ACCOUNT_ID });
       const body = await res.json();
       expect(body).to.deep.equal(zones);
     });
 
+    it('treats a null zone list as empty', async () => {
+      mockCfClient.listZones.resolves(null);
+      const res = await controller.listZones(mockContext);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body).to.deep.equal([]);
+    });
+
+    it('returns only zones whose registrable domain matches the site domain', async () => {
+      // Site base URL is https://www.example.com -> registrable domain example.com.
+      const match = { id: ZONE_ID, name: 'example.com' };
+      const subdomainZone = { id: 'z2', name: 'shop.example.com' }; // registrable = example.com
+      const otherTld = { id: 'z3', name: 'example.net' };
+      const unrelated = { id: 'z4', name: 'other.com' };
+      const noName = { id: 'z5' }; // exercises the hasText(zone.name) guard
+      mockCfClient.listZones.resolves([match, subdomainZone, otherTld, unrelated, noName]);
+
+      const res = await controller.listZones(mockContext);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body).to.deep.equal([match, subdomainZone]);
+    });
+
+    it('returns no zones when the site host has no registrable domain (PSL miss)', async () => {
+      mockSite.getBaseURL = () => 'http://localhost';
+      mockCfClient.listZones.resolves([{ id: ZONE_ID, name: 'example.com' }, { id: 'z2', name: 'localhost' }]);
+
+      const res = await controller.listZones(mockContext);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body).to.deep.equal([]);
+    });
+
     it('returns 400 when CF token is missing', async () => {
       mockContext.pathInfo.headers = {};
+      const res = await controller.listZones(mockContext);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when the request has no query data', async () => {
+      mockContext.data = undefined;
+      const res = await controller.listZones(mockContext);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when accountId is missing', async () => {
+      mockContext.data = {};
+      const res = await controller.listZones(mockContext);
+      expect(res.status).to.equal(400);
+      expect(mockCfClient.listZones).to.not.have.been.called;
+    });
+
+    it('returns 400 when accountId is not a 32-char hex id', async () => {
+      mockContext.data = { accountId: 'acc-123' };
       const res = await controller.listZones(mockContext);
       expect(res.status).to.equal(400);
     });
@@ -252,7 +338,9 @@ describe('LlmoCloudflareController', () => {
   describe('deployWorker', () => {
     beforeEach(() => {
       mockContext.params = { siteId: SITE_ID };
-      mockContext.data = { accountId: ACCOUNT_ID, targetHost: TARGET_HOST };
+      // targetHost is no longer client-supplied; it is derived from the site base URL
+      // (https://www.example.com → www.example.com === TARGET_HOST).
+      mockContext.data = { accountId: ACCOUNT_ID };
     });
 
     it('deploys worker script with a derived name and sets secret', async () => {
@@ -267,6 +355,7 @@ describe('LlmoCloudflareController', () => {
         DERIVED_SCRIPT_NAME,
         WORKER_SCRIPT_TEXT,
         [{ name: 'EDGE_OPTIMIZE_TARGET_HOST', type: 'plain_text', text: TARGET_HOST }],
+        { tags: ['adobe-llmo'] },
       );
       expect(mockCfClient.setWorkerSecret).to.have.been.calledWith(
         ACCOUNT_ID,
@@ -279,6 +368,86 @@ describe('LlmoCloudflareController', () => {
       expect(body).to.deep.equal({
         scriptName: DERIVED_SCRIPT_NAME, accountId: ACCOUNT_ID, targetHost: TARGET_HOST,
       });
+    });
+
+    it('tags the worker with the ownership tag and the sanitized caller IMS identity', async () => {
+      // profile.email is an IMS GUID (GUID@hexOrgId.e); '@' is not a Cloudflare-safe tag char and
+      // is sanitized to '_' so the deploy cannot be rejected for an invalid tag.
+      mockContext.attributes = {
+        authInfo: { getProfile: () => ({ email: 'CALLER-GUID@abc123.e' }) },
+      };
+      mockCfClient.deployWorkerScript.resolves({ id: 'deployment-1' });
+      mockCfClient.setWorkerSecret.resolves();
+
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(200);
+
+      const opts = mockCfClient.deployWorkerScript.getCall(0).args[4];
+      expect(opts).to.deep.equal({ tags: ['adobe-llmo', 'CALLER-GUID_abc123.e'] });
+    });
+
+    it('truncates an over-long caller identity tag to CF_TAG_MAX_LEN (80 chars)', async () => {
+      const longId = `${'a'.repeat(120)}@org.e`;
+      mockContext.attributes = { authInfo: { getProfile: () => ({ email: longId }) } };
+      mockCfClient.deployWorkerScript.resolves({ id: 'deployment-1' });
+      mockCfClient.setWorkerSecret.resolves();
+
+      await controller.deployWorker(mockContext);
+
+      const opts = mockCfClient.deployWorkerScript.getCall(0).args[4];
+      expect(opts.tags[0]).to.equal('adobe-llmo');
+      expect(opts.tags[1]).to.have.lengthOf(80);
+      expect(opts.tags[1]).to.equal('a'.repeat(80));
+    });
+
+    it('quotes audit-log values containing spaces so key=value parsing stays intact', async () => {
+      mockTokowakaClient.fetchMetaconfig.rejects(new Error('tokowaka is not reachable'));
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(502);
+      const logged = mockContext.log.error.getCalls().map((c) => c.args[0]).join('\n');
+      expect(logged).to.contain('error="tokowaka is not reachable"');
+    });
+
+    it('always tags with adobe-llmo first so any IMS user matches a worker another user deployed', async () => {
+      // With no resolvable caller identity, only the stable ownership tag is attached — this is
+      // the tag the client uses to recognize the worker on a later re-deploy by a different user.
+      mockCfClient.deployWorkerScript.resolves({ id: 'deployment-1' });
+      mockCfClient.setWorkerSecret.resolves();
+
+      await controller.deployWorker(mockContext);
+
+      const opts = mockCfClient.deployWorkerScript.getCall(0).args[4];
+      expect(opts.tags[0]).to.equal('adobe-llmo');
+      expect(opts.tags).to.deep.equal(['adobe-llmo']);
+    });
+
+    it('sanitizes Cloudflare-unsafe characters (commas, ampersands) out of the caller tag', async () => {
+      mockContext.attributes = {
+        authInfo: { getProfile: () => ({ email: 'a,b&c d:e' }) },
+      };
+      mockCfClient.deployWorkerScript.resolves({ id: 'deployment-1' });
+      mockCfClient.setWorkerSecret.resolves();
+
+      await controller.deployWorker(mockContext);
+
+      const opts = mockCfClient.deployWorkerScript.getCall(0).args[4];
+      expect(opts).to.deep.equal({ tags: ['adobe-llmo', 'a_b_c_d_e'] });
+    });
+
+    it('is idempotent (200, skips secret) when the client skips an already-tagged worker', async () => {
+      // The client returns null when a worker we own (matching tag) already exists.
+      mockCfClient.deployWorkerScript.resolves(null);
+
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body).to.deep.equal({
+        scriptName: DERIVED_SCRIPT_NAME,
+        accountId: ACCOUNT_ID,
+        targetHost: TARGET_HOST,
+        alreadyDeployed: true,
+      });
+      expect(mockCfClient.setWorkerSecret).to.not.have.been.called;
     });
 
     it('fetches the worker script from a pinned commit SHA with a timeout', async () => {
@@ -317,50 +486,55 @@ describe('LlmoCloudflareController', () => {
     });
 
     it('returns 400 when accountId is missing', async () => {
-      mockContext.data = { targetHost: TARGET_HOST };
+      mockContext.data = {};
       const res = await controller.deployWorker(mockContext);
       expect(res.status).to.equal(400);
     });
 
     it('returns 400 when accountId is not a 32-char hex id', async () => {
-      mockContext.data = { accountId: 'acc-123', targetHost: TARGET_HOST };
+      mockContext.data = { accountId: 'acc-123' };
       const res = await controller.deployWorker(mockContext);
       expect(res.status).to.equal(400);
     });
 
-    it('returns 400 when targetHost is missing', async () => {
-      mockContext.data = { accountId: ACCOUNT_ID };
-      const res = await controller.deployWorker(mockContext);
-      expect(res.status).to.equal(400);
-    });
-
-    it('returns 400 when targetHost is not a valid hostname', async () => {
-      mockContext.data = { accountId: ACCOUNT_ID, targetHost: 'not a host' };
-      const res = await controller.deployWorker(mockContext);
-      expect(res.status).to.equal(400);
-    });
-
-    it('returns 400 when targetHost does not belong to the site domain', async () => {
+    it('derives targetHost from the site base URL (apex → www) and ignores any client value', async () => {
+      mockSite.getBaseURL = () => 'https://example.com';
+      // A client-supplied targetHost must be ignored — the worker only ever forwards to the
+      // canonical host derived from the site's own base URL.
       mockContext.data = { accountId: ACCOUNT_ID, targetHost: 'evil.com' };
+      mockCfClient.deployWorkerScript.resolves();
+      mockCfClient.setWorkerSecret.resolves();
+
       const res = await controller.deployWorker(mockContext);
-      expect(res.status).to.equal(400);
+      expect(res.status).to.equal(200);
+
+      const binding = mockCfClient.deployWorkerScript.getCall(0).args[3];
+      expect(binding).to.deep.equal([
+        { name: 'EDGE_OPTIMIZE_TARGET_HOST', type: 'plain_text', text: 'www.example.com' },
+      ]);
+    });
+
+    it('preserves an existing subdomain host when deriving targetHost', async () => {
+      mockSite.getBaseURL = () => 'https://cdn.example.com';
+      mockCfClient.deployWorkerScript.resolves();
+      mockCfClient.setWorkerSecret.resolves();
+
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(200);
+
+      const binding = mockCfClient.deployWorkerScript.getCall(0).args[3];
+      expect(binding).to.deep.equal([
+        { name: 'EDGE_OPTIMIZE_TARGET_HOST', type: 'plain_text', text: 'cdn.example.com' },
+      ]);
+    });
+
+    it('returns 500 when the target host cannot be derived from the site base URL', async () => {
+      mockCalculateForwardedHost = () => {
+        throw new Error('cannot derive host');
+      };
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(500);
       expect(mockCfClient.deployWorkerScript).to.not.have.been.called;
-    });
-
-    it('accepts the canonical site host as targetHost', async () => {
-      mockContext.data = { accountId: ACCOUNT_ID, targetHost: 'example.com' };
-      mockCfClient.deployWorkerScript.resolves();
-      mockCfClient.setWorkerSecret.resolves();
-      const res = await controller.deployWorker(mockContext);
-      expect(res.status).to.equal(200);
-    });
-
-    it('accepts a subdomain of the site domain as targetHost', async () => {
-      mockContext.data = { accountId: ACCOUNT_ID, targetHost: 'cdn.example.com' };
-      mockCfClient.deployWorkerScript.resolves();
-      mockCfClient.setWorkerSecret.resolves();
-      const res = await controller.deployWorker(mockContext);
-      expect(res.status).to.equal(200);
     });
 
     it('returns 400 when CF token is missing', async () => {
@@ -402,6 +576,52 @@ describe('LlmoCloudflareController', () => {
       expect(mockCfClient.setWorkerSecret).to.not.have.been.called;
     });
 
+    it('returns 502 when the deploy rejection is not an Error instance (no message)', async () => {
+      mockCfClient.deployWorkerScript.rejects({ noMessage: true });
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(502);
+      expect(mockCfClient.setWorkerSecret).to.not.have.been.called;
+    });
+
+    it('includes the invocation id in audit logs when present', async () => {
+      mockContext.invocation = { id: 'req-abc-123' };
+      mockCfClient.deployWorkerScript.resolves({ id: 'deployment-1' });
+      mockCfClient.setWorkerSecret.resolves();
+
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(200);
+      const logged = mockContext.log.info.getCalls().map((c) => c.args[0]).join('\n');
+      expect(logged).to.contain('requestId=req-abc-123');
+    });
+
+    it('returns 409 when a worker with the derived name already exists', async () => {
+      mockCfClient.deployWorkerScript.rejects(
+        new Error(`Worker script '${DERIVED_SCRIPT_NAME}' already exists in account ${ACCOUNT_ID}. Set overwrite: true to replace it.`),
+      );
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(409);
+      const body = await res.json();
+      expect(body.scriptName).to.equal(DERIVED_SCRIPT_NAME);
+      expect(body.message).to.equal(
+        `A worker named '${DERIVED_SCRIPT_NAME}' already exists in this Cloudflare account`,
+      );
+      expect(mockCfClient.setWorkerSecret).to.not.have.been.called;
+    });
+
+    it('returns 409 when existence check fails with non-JSON worker script GET (legacy client)', async () => {
+      mockCfClient.deployWorkerScript.rejects(
+        new Error(`Cloudflare API returned a non-JSON response on /accounts/${ACCOUNT_ID}/workers/scripts/${DERIVED_SCRIPT_NAME}`),
+      );
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(409);
+      const body = await res.json();
+      expect(body.scriptName).to.equal(DERIVED_SCRIPT_NAME);
+      expect(body.message).to.equal(
+        `A worker named '${DERIVED_SCRIPT_NAME}' already exists in this Cloudflare account`,
+      );
+      expect(mockCfClient.setWorkerSecret).to.not.have.been.called;
+    });
+
     it('returns 502 with partial flag when secret set fails after deploy', async () => {
       mockCfClient.deployWorkerScript.resolves();
       mockCfClient.setWorkerSecret.rejects(new Error('Cloudflare API returned 500 on /secrets: boom'));
@@ -418,8 +638,8 @@ describe('LlmoCloudflareController', () => {
 
   describe('addRoute', () => {
     beforeEach(() => {
-      mockContext.params = { siteId: SITE_ID, zoneId: ZONE_ID };
-      mockContext.data = { pattern: 'example.com/*' };
+      mockContext.params = { siteId: SITE_ID };
+      mockContext.data = { zoneId: ZONE_ID, pattern: 'example.com/*' };
       mockCfClient.listRoutes.resolves([]);
     });
 
@@ -435,7 +655,7 @@ describe('LlmoCloudflareController', () => {
       expect(mockCfClient.addRoute).to.have.been.calledWith(ZONE_ID, 'example.com/*', DERIVED_SCRIPT_NAME);
     });
 
-    it('returns 409 and does not add when the pattern already exists', async () => {
+    it('returns 409 and does not add when another worker already routes the same host', async () => {
       const existing = { id: ROUTE_ID, pattern: 'example.com/*', script: 'other-worker' };
       // Include a null entry to exercise the route?.pattern guard.
       mockCfClient.listRoutes.resolves([null, existing]);
@@ -444,6 +664,92 @@ describe('LlmoCloudflareController', () => {
       expect(res.status).to.equal(409);
       const body = await res.json();
       expect(body.existingRoute).to.deep.equal(existing);
+      expect(body.conflictingRoutes).to.deep.equal([existing]);
+      expect(mockCfClient.addRoute).to.not.have.been.called;
+    });
+
+    it('returns 409 when a wildcard route to another worker covers the requested subdomain', async () => {
+      // Customer has *.example.com/* on another worker; onboarding mistakenly targets
+      // a.example.com/* — adding our worker there would collide, so it must fail with 409.
+      mockContext.data = { zoneId: ZONE_ID, pattern: 'a.example.com/*' };
+      const existing = { id: ROUTE_ID, pattern: '*.example.com/*', script: 'customer-worker' };
+      mockCfClient.listRoutes.resolves([existing]);
+
+      const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(409);
+      const body = await res.json();
+      expect(body.conflictingRoutes).to.deep.equal([existing]);
+      expect(mockCfClient.addRoute).to.not.have.been.called;
+    });
+
+    it('caps conflictingRoutes at 10 for a zone with many overlapping routes', async () => {
+      const many = Array.from({ length: 14 }, (_, i) => ({
+        id: `r${i}`, pattern: 'example.com/*', script: `worker-${i}`,
+      }));
+      mockCfClient.listRoutes.resolves(many);
+
+      const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(409);
+      const body = await res.json();
+      expect(body.conflictingRoutes).to.have.lengthOf(10);
+      expect(mockCfClient.addRoute).to.not.have.been.called;
+    });
+
+    it('returns 409 when a broad "*example.com/*" route (no dot) on another worker covers the host', async () => {
+      // *example.com/* matches the apex too (wildcard = zero-or-more chars), so onboarding
+      // example.com/* must be blocked.
+      mockContext.data = { zoneId: ZONE_ID, pattern: 'example.com/*' };
+      const existing = { id: ROUTE_ID, pattern: '*example.com/*', script: 'customer-worker' };
+      mockCfClient.listRoutes.resolves([existing]);
+
+      const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(409);
+      const body = await res.json();
+      expect(body.conflictingRoutes).to.deep.equal([existing]);
+      expect(mockCfClient.addRoute).to.not.have.been.called;
+    });
+
+    it('catches host conflicts across scheme/path variants (not just exact pattern strings)', async () => {
+      const existing = { id: ROUTE_ID, pattern: 'https://example.com/blog/*', script: 'other-worker' };
+      mockCfClient.listRoutes.resolves([existing]);
+
+      const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(409);
+      expect(mockCfClient.addRoute).to.not.have.been.called;
+    });
+
+    it('allows the route when an existing route on a different host points to another worker', async () => {
+      // A customer worker on a sibling subdomain must NOT block onboarding the apex host.
+      mockContext.data = { zoneId: ZONE_ID, pattern: 'example.com/*' };
+      const sibling = { id: ROUTE_ID, pattern: 'shop.example.com/*', script: 'other-worker' };
+      mockCfClient.listRoutes.resolves([sibling]);
+      const route = { id: 'r2', pattern: 'example.com/*', script: DERIVED_SCRIPT_NAME };
+      mockCfClient.addRoute.resolves(route);
+
+      const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(200);
+      expect(mockCfClient.addRoute).to.have.been.calledWith(ZONE_ID, 'example.com/*', DERIVED_SCRIPT_NAME);
+    });
+
+    it('does not block on an overlapping route that has no worker bound (disabled route)', async () => {
+      const disabled = { id: ROUTE_ID, pattern: 'example.com/*' }; // no script
+      mockCfClient.listRoutes.resolves([disabled]);
+      const route = { id: 'r2', pattern: 'example.com/*', script: DERIVED_SCRIPT_NAME };
+      mockCfClient.addRoute.resolves(route);
+
+      const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(200);
+      expect(mockCfClient.addRoute).to.have.been.called;
+    });
+
+    it('is idempotent (200, no add) when an overlapping route already points to our worker', async () => {
+      const own = { id: ROUTE_ID, pattern: 'example.com/*', script: DERIVED_SCRIPT_NAME };
+      mockCfClient.listRoutes.resolves([own]);
+
+      const res = await controller.addRoute(mockContext);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.alreadyRouted).to.be.true;
       expect(mockCfClient.addRoute).to.not.have.been.called;
     });
 
@@ -464,13 +770,13 @@ describe('LlmoCloudflareController', () => {
     });
 
     it('returns 400 when pattern is missing', async () => {
-      mockContext.data = {};
+      mockContext.data = { zoneId: ZONE_ID };
       const res = await controller.addRoute(mockContext);
       expect(res.status).to.equal(400);
     });
 
     it('returns 400 when the pattern does not target the site domain', async () => {
-      mockContext.data = { pattern: 'evil.com/*' };
+      mockContext.data = { zoneId: ZONE_ID, pattern: 'evil.com/*' };
       const res = await controller.addRoute(mockContext);
       expect(res.status).to.equal(400);
       expect(mockCfClient.listRoutes).to.not.have.been.called;
@@ -478,7 +784,7 @@ describe('LlmoCloudflareController', () => {
     });
 
     it('accepts a wildcard subdomain pattern within the site domain', async () => {
-      mockContext.data = { pattern: '*.example.com/*' };
+      mockContext.data = { zoneId: ZONE_ID, pattern: '*.example.com/*' };
       const route = { id: ROUTE_ID, pattern: '*.example.com/*', script: DERIVED_SCRIPT_NAME };
       mockCfClient.addRoute.resolves(route);
       const res = await controller.addRoute(mockContext);
@@ -500,13 +806,13 @@ describe('LlmoCloudflareController', () => {
     });
 
     it('returns 400 when zoneId is missing', async () => {
-      mockContext.params = { siteId: SITE_ID, zoneId: '' };
+      mockContext.data = { pattern: 'example.com/*' };
       const res = await controller.addRoute(mockContext);
       expect(res.status).to.equal(400);
     });
 
     it('returns 400 when zoneId is not a 32-char hex id', async () => {
-      mockContext.params = { siteId: SITE_ID, zoneId: 'zone-456' };
+      mockContext.data = { zoneId: 'zone-456', pattern: 'example.com/*' };
       const res = await controller.addRoute(mockContext);
       expect(res.status).to.equal(400);
     });

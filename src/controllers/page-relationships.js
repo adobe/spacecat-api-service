@@ -30,6 +30,8 @@ import {
   fetchRelationships,
   buildCheckPath,
 } from '../support/aem-content-api.js';
+import { getHeader } from '../support/http-headers.js';
+import { X_PROMISE_TOKEN_HEADER } from '../utils/constants.js';
 
 const MAX_PAGES = 50;
 const EMPTY_RELATIONSHIPS_RESPONSE = {
@@ -304,7 +306,22 @@ function PageRelationshipsController(ctx) {
 
     let imsToken;
     try {
-      const promiseTokenResponse = await getIMSPromiseToken(context);
+      // Prefer a caller-supplied promise token (forwarded by the ASO UI in the
+      // `x-promise-token` header) over minting one from the Authorization bearer.
+      // Since the UI switched to sending a session JWT in Authorization, minting
+      // via `getIMSPromiseToken` (which reads that header) fails IMS with 401.
+      // Mirrors the auto-fix handler in `suggestions.js` (`x-promise-token`
+      // header, falling back to `getIMSPromiseToken` for IMS-authenticated
+      // callers that don't supply one).
+      const headerToken = getHeader(context, X_PROMISE_TOKEN_HEADER);
+      let promiseTokenResponse;
+      if (hasText(headerToken)) {
+        log.info(`[page-relationships] using promise token from ${X_PROMISE_TOKEN_HEADER} header for site ${siteId}`);
+        promiseTokenResponse = { promise_token: headerToken };
+      } else {
+        log.info(`[page-relationships] no ${X_PROMISE_TOKEN_HEADER} header, minting promise token via IMS for site ${siteId}`);
+        promiseTokenResponse = await getIMSPromiseToken(context);
+      }
       imsToken = await exchangePromiseToken(context, promiseTokenResponse.promise_token);
     } catch (e) {
       if (e instanceof ErrorWithStatusCode) {

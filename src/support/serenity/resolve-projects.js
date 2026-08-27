@@ -12,6 +12,8 @@
 
 // @ts-check
 
+/** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */
+
 /**
  * Resolves the sub-workspace project listing shared by the brand-edit across-markets
  * syncs (URLs / aliases / competitor benchmarks). When the caller already fetched the
@@ -21,7 +23,7 @@
  * ("the sub-workspace has no projects — don't re-list"), whereas `null`/`undefined`
  * means "no prefetch supplied, list now".
  *
- * @param {object} transport - Semrush transport (must expose `listProjects`).
+ * @param {SerenityTransport} transport
  * @param {string} workspaceId - the brand's sub-workspace id.
  * @param {Array<object>|null} [prefetchedProjects=null] - a pre-fetched project listing
  *   to reuse, or null/undefined to list via `transport.listProjects`.

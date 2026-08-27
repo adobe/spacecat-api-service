@@ -53,6 +53,40 @@ function createMockSite({ id = 'site-1', baseURL = 'https://example.com', orgId 
   };
 }
 
+describe('isLlmoOpportunity', () => {
+  let isLlmoOpportunity;
+
+  before(async () => {
+    ({ isLlmoOpportunity } = await esmock(
+      '../../../../src/controllers/llmo/opportunities/llmo-opportunities-controller.js',
+      {
+        '../../../../src/support/access-control-util.js': {
+          default: { fromContext: () => ({ hasAccess: async () => true }) },
+        },
+        '../../../../src/support/brands-storage.js': {
+          getBrandById: async () => null,
+        },
+      },
+    ));
+  });
+
+  const opp = ({ tags, type = 'content' } = {}) => ({
+    getTags: () => tags,
+    getType: () => type,
+  });
+
+  it('treats null/undefined tags as empty without throwing', () => {
+    expect(isLlmoOpportunity(opp({ tags: null }))).to.equal(false);
+    expect(isLlmoOpportunity(opp({ tags: undefined }))).to.equal(false);
+    expect(isLlmoOpportunity(opp({ tags: null, type: 'prerender' }))).to.equal(true);
+  });
+
+  it('matches isElmo tag from array or Set', () => {
+    expect(isLlmoOpportunity(opp({ tags: ['isElmo'] }))).to.equal(true);
+    expect(isLlmoOpportunity(opp({ tags: new Set(['isElmo']) }))).to.equal(true);
+  });
+});
+
 describe('LlmoOpportunitiesController', () => {
   let sandbox;
   let LlmoOpportunitiesController;
@@ -265,6 +299,28 @@ describe('LlmoOpportunitiesController', () => {
       expect(body.total).to.equal(1);
     });
 
+    it('does not drop a site when an opportunity has null tags', async () => {
+      const site = createMockSite({ id: 'site-1' });
+      mockContext.dataAccess.Site.allByOrganizationId.resolves([site]);
+
+      const oppNullTags = {
+        ...createMockOpportunity({ id: 'o-null', type: 'meta-tags', status: 'NEW' }),
+        getTags: () => null,
+      };
+      const oppElmo = createMockOpportunity({ id: 'o-elmo', tags: ['isElmo'], status: 'NEW' });
+
+      mockContext.dataAccess.Opportunity.allBySiteId
+        .withArgs('site-1').resolves([oppNullTags, oppElmo]);
+
+      const controller = LlmoOpportunitiesController(mockContext);
+      const result = await controller.getOpportunityCount(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.total).to.equal(1);
+      expect(body.bySite[0].count).to.equal(1);
+    });
+
     it('returns 400 when organization has more than 40 sites', async () => {
       const sites = Array.from({ length: 41 }, (_, i) => createMockSite({ id: `site-${i}` }));
       mockContext.dataAccess.Site.allByOrganizationId.resolves(sites);
@@ -446,6 +502,33 @@ describe('LlmoOpportunitiesController', () => {
       const body = await result.json();
       expect(body.total).to.equal(0);
       expect(body.opportunities).to.deep.equal([]);
+    });
+
+    it('keeps sibling LLMO opportunities when one opportunity has null tags (brandId all)', async () => {
+      mockContext.params.brandId = 'all';
+      const site = createMockSite({ id: 'site-1', baseURL: 'https://halliburton.com' });
+      mockContext.dataAccess.Site.allByOrganizationId.resolves([site]);
+      mockContext.dataAccess.Site.findById.withArgs('site-1').resolves(site);
+
+      const oppNullTags = {
+        ...createMockOpportunity({ id: 'o-null', type: 'meta-tags', status: 'NEW' }),
+        getTags: () => null,
+      };
+      const oppElmo = createMockOpportunity({
+        id: 'o-elmo', tags: ['isElmo', 'Traffic acquisition'], type: 'meta-tags', status: 'NEW',
+      });
+
+      mockContext.dataAccess.Opportunity.allBySiteId.withArgs('site-1').resolves([
+        oppNullTags, oppElmo,
+      ]);
+
+      const controller = LlmoOpportunitiesController(mockContext);
+      const result = await controller.getBrandOpportunities(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.total).to.equal(1);
+      expect(body.opportunities[0].id).to.equal('o-elmo');
     });
 
     it('returns 404 when brand is not found', async () => {

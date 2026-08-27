@@ -1865,4 +1865,34 @@ describe('PlgOnboardingController - update', function () {
     expect(res.status).to.equal(500);
     expect(res.value).to.equal('Onboarding bypass failed. Please try again later.');
   });
+
+  it('BYPASS NON_PROD_DOMAIN: re-runs flow and returns 200', async () => {
+    const waitlistedRecord = createMockOnboarding({
+      status: 'WAITLISTED',
+      domain: 'qa.example.com',
+      waitlistReason: 'Domain qa.example.com appears to be a non-production domain (contains qa, stage, dev, author, or publish subdomain, or is an hlx/AEM delivery URL).',
+    });
+    const rerunRecord = createMockOnboarding({
+      status: 'ONBOARDED',
+      domain: 'qa.example.com',
+    });
+
+    mockDataAccess.PlgOnboarding.findById.resolves(waitlistedRecord);
+    // On bypass re-run: allByImsOrgId returns no conflicting records
+    mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([waitlistedRecord]);
+    // performAsoPlgOnboarding will call findByImsOrgIdAndDomain to look up the record
+    mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(rerunRecord);
+    mockDataAccess.Site.create.resolves(mockSite);
+
+    const res = await AdminAccessPlgController({ log: mockLog }).update({
+      dataAccess: mockDataAccess,
+      params: { onboardingId: TEST_ONBOARDING_ID },
+      data: { decision: 'BYPASSED', justification: 'Admin confirmed this is intentional' },
+      attributes: adminAuthAttributes,
+      env: mockEnv,
+      log: mockLog,
+    });
+
+    expect(res.status).to.equal(200);
+  });
 });

@@ -82,6 +82,8 @@ tags:
   - name: state-access-mappings
     description: |
       Hybrid permission model — state-layer access mappings + capability views.
+  - name: semrush-onboarding
+    description: Semrush onboarding notification operations
 
 paths:
   /audits/latest/{auditType}:
@@ -94,6 +96,8 @@ paths:
     $ref: './auth-api.yaml#/login'
   /configurations/latest:
     $ref: './configuration-api.yaml#/latest-configuration'
+  /configurations/versions:
+    $ref: './configuration-api.yaml#/configuration-versions'
   /configurations/latest/queues:
     $ref: './configuration-api.yaml#/configuration-queues'
   /configurations/latest/jobs/{jobType}:
@@ -122,6 +126,8 @@ paths:
     $ref: './webhooks-api.yaml#/github-webhook'
   /organizations:
     $ref: './organizations-api.yaml#/organizations'
+  /organizations/by-product-code/{productCode}:
+    $ref: './organizations-api.yaml#/organizations-by-product-code'
   /organizations/{organizationId}:
     $ref: './organization-api.yaml#/organization'
   /organizations/{organizationId}/brands:
@@ -130,6 +136,8 @@ paths:
     $ref: './brands-v2-api.yaml#/v2-brands-for-org'
   /v2/orgs/{spaceCatId}/brands/{brandId}:
     $ref: './brands-v2-api.yaml#/v2-brand-for-org'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/activate:
+    $ref: './brands-v2-api.yaml#/v2-brand-for-org-activate'
   /v2/orgs/{spaceCatId}/brands/{brandId}/status:
     $ref: './brands-v2-api.yaml#/v2-brand-status-for-org'
   /v2/orgs/{spaceCatId}/sites/{siteId}/brand:
@@ -154,12 +162,16 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-prompt-by-id'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/bulk-delete:
     $ref: './serenity-api.yaml#/v2-serenity-prompts-bulk-delete'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/jobs/{jobId}:
+    $ref: './serenity-api.yaml#/v2-serenity-prompts-job-by-id'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/markets:
     $ref: './serenity-api.yaml#/v2-serenity-markets'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/markets/{geoTargetId}/{languageCode}:
     $ref: './serenity-api.yaml#/v2-serenity-market-by-slice'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/tags:
     $ref: './serenity-api.yaml#/v2-serenity-tags'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/tags/{tagId}:
+    $ref: './serenity-api.yaml#/v2-serenity-tag-by-id'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/models:
     $ref: './serenity-api.yaml#/v2-serenity-models'
   /v2/orgs/{spaceCatId}/serenity/models:
@@ -170,6 +182,38 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-activate'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/deactivate:
     $ref: './serenity-api.yaml#/v2-serenity-deactivate'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/filter-dimensions:
+    $ref: './serenity-api.yaml#/v2-serenity-url-inspector-filter-dimensions'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/market-tracking-trends:
+    $ref: './serenity-api.yaml#/v2-serenity-market-tracking-trends'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/competitor-summary:
+    $ref: './serenity-api.yaml#/v2-serenity-competitor-summary'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/kpi-headlines:
+    $ref: './serenity-api.yaml#/v2-serenity-kpi-headlines'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/source-visibility-headline:
+    $ref: './serenity-api.yaml#/v2-serenity-source-visibility-headline'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/access:
+    $ref: './serenity-api.yaml#/v2-serenity-brand-presence-access'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/sentiment-overview:
+    $ref: './serenity-api.yaml#/v2-serenity-brand-presence-sentiment-overview'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/subreddits:
+    $ref: './serenity-api.yaml#/v2-serenity-brand-presence-subreddits'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/reddit-threads:
+    $ref: './serenity-api.yaml#/v2-serenity-brand-presence-reddit-threads'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/youtube-videos:
+    $ref: './serenity-api.yaml#/v2-serenity-brand-presence-youtube-videos'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/topics:
+    $ref: './serenity-api.yaml#/v2-serenity-brand-presence-topics'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/topics/{topicId}/prompts:
+    $ref: './serenity-api.yaml#/v2-serenity-brand-presence-topic-prompts'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/stats:
+    $ref: './serenity-api.yaml#/v2-serenity-brand-presence-stats'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/stats:
+    $ref: './serenity-api.yaml#/v2-serenity-url-inspector-stats'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/prompts/count:
+    $ref: './serenity-api.yaml#/v2-serenity-url-inspector-prompts-count'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/url-prompts:
+    $ref: './serenity-api.yaml#/v2-serenity-url-inspector-url-prompts'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/{organizationId}/entitlements:
@@ -189,6 +233,22 @@ paths:
     $ref: './organization-api.yaml#/organization-by-ims-org-id'
   /organizations/by-ims-org-id/{imsOrgId}/slack-config:
     $ref: './organization-api.yaml#/organization-slack-config-by-ims-org-id'
+  /organizations/{organizationId}/task-management/connections:
+    $ref: './task-management-api.yaml#/task-management-connections'
+  /organizations/{organizationId}/task-management/connections/{connectionId}:
+    $ref: './task-management-api.yaml#/task-management-connection-by-id'
+  /organizations/{organizationId}/task-management/connections/{connectionId}/projects:
+    $ref: './task-management-api.yaml#/task-management-connection-projects'
+  /organizations/{organizationId}/task-management/connections/{connectionId}/issue-types:
+    $ref: './task-management-api.yaml#/task-management-connection-issue-types'
+  /organizations/{organizationId}/task-management/tickets:
+    $ref: './task-management-api.yaml#/task-management-tickets'
+  /organizations/{organizationId}/task-management/{provider}/tickets:
+    $ref: './task-management-api.yaml#/task-management-create-ticket'
+  /organizations/{organizationId}/suggestions/{suggestionId}/ticket:
+    $ref: './task-management-api.yaml#/ticket-by-suggestion'
+  /organizations/{organizationId}/opportunities/{opportunityId}/tickets:
+    $ref: './task-management-api.yaml#/tickets-by-opportunity'
   /organizations/{organizationId}/projects:
     $ref: './organizations-api.yaml#/organization-projects'
   /organizations/{organizationId}/projects/{projectId}/sites:
@@ -237,6 +297,8 @@ paths:
     $ref: './sites-api.yaml#/sites-resolve'
   /sites/by-delivery-type/{deliveryType}:
     $ref: './sites-api.yaml#/sites-by-delivery-type'
+  /sites/by-tier/{tier}:
+    $ref: './sites-api.yaml#/sites-by-tier'
   /sites/by-base-url/{base64BaseUrl}:
     $ref: './site-api.yaml#/site-by-base-url'
   /sites/with-latest-audit/{auditType}:
@@ -259,6 +321,8 @@ paths:
     $ref: './audit-api.yaml#/latest-audit-for-site'
   /sites/{siteId}/bot-blocker:
     $ref: './bot-blocker-api.yaml#/bot-blocker'
+  /sites/{siteId}/entitlements:
+    $ref: './entitlements-api.yaml#/ensure-entitlement-for-site'
   /sites/{siteId}/{auditType}:
     $ref: './audit-api.yaml#/update-handler-type-config-for-site'
   /sites/{siteId}/brand-guidelines:
@@ -293,16 +357,26 @@ paths:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestion'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/{suggestionId}/fixes:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestion-fixes'
+  /sites/{siteId}/opportunities/{opportunityId}/suggestions/{suggestionId}/backoffice-reviews:
+    $ref: './site-opportunities.yaml#/site-opportunity-suggestion-backoffice-reviews'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/status:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions-status'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/auto-fix:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions-auto-fix'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/edge-deploy:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions-edge-deploy'
+  /sites/{siteId}/edge-deployed-urls:
+    $ref: './site-opportunities.yaml#/site-edge-deployed-urls'
   /sites/{siteId}/geo-experiments:
     $ref: './site-opportunities.yaml#/site-geo-experiments'
   /sites/{siteId}/geo-experiments/{geoExperimentId}:
     $ref: './site-opportunities.yaml#/site-geo-experiment'
+  /sites/{siteId}/geo-experiments/{geoExperimentId}/results:
+    $ref: './site-opportunities.yaml#/site-geo-experiment-results'
+  /sites/{siteId}/geo-experiments/{geoExperimentId}/trigger-impact-measurement:
+    $ref: './site-opportunities.yaml#/site-geo-experiment-trigger-impact-measurement'
+  /sites/{siteId}/geo-experiments/{geoExperimentId}/validate:
+    $ref: './site-opportunities.yaml#/site-geo-experiment-validate'
   /sites/{siteId}/site-enrollments:
     $ref: './site-enrollments-api.yaml#/site-enrollments-by-site'
   /sites/{siteId}/user-activities:
@@ -335,6 +409,24 @@ paths:
     $ref: './agentic-rules-api.yaml#/agentic-page-types-list'
   /sites/{siteId}/agentic-page-types/{name}:
     $ref: './agentic-rules-api.yaml#/agentic-page-types-one'
+  /sites/{siteId}/audit-policy:
+    $ref: './audit-policy-api.yaml#/audit-policy'
+  /sites/{siteId}/audit-policy/exclusions:
+    $ref: './audit-policy-api.yaml#/audit-policy-exclusions'
+  /sites/{siteId}/audit-policy/exclusions/delete:
+    $ref: './audit-policy-api.yaml#/audit-policy-exclusions-delete'
+  /sites/{siteId}/audit-policy/inclusions:
+    $ref: './audit-policy-api.yaml#/audit-policy-inclusions'
+  /sites/{siteId}/audit-policy/inclusions/delete:
+    $ref: './audit-policy-api.yaml#/audit-policy-inclusions-delete'
+  /sites/{siteId}/audit-policy/revisions:
+    $ref: './audit-policy-api.yaml#/audit-policy-revisions'
+  /sites/{siteId}/audit-scope/pages:
+    $ref: './audit-policy-api.yaml#/audit-scope-pages'
+  /sites/{siteId}/audit-scope/summary:
+    $ref: './audit-policy-api.yaml#/audit-scope-summary'
+  /sites/{siteId}/audit-scope/sections:
+    $ref: './audit-policy-api.yaml#/audit-scope-sections'
   /sites/{siteId}/traffic/paid:
     $ref: './site-paid.yaml#/site-traffic-paid-top-pages'
   /sites/{siteId}/traffic/paid/url-page-type:
@@ -471,6 +563,8 @@ paths:
     $ref: './site-metrics-api.yaml#/page-metrics-by-source'
   /sites/{siteId}/experiments:
     $ref: './experiments-api.yaml#/experiments'
+  /sites/{siteId}/fixes:
+    $ref: './site-opportunities.yaml#/site-fixes'
   /sites/{siteId}/opportunities/{opportunityId}/fixes:
     $ref: './site-opportunities.yaml#/site-opportunity-fixes'
   /sites/{siteId}/opportunities/{opportunityId}/fixes/by-status/{status}:
@@ -618,8 +712,12 @@ paths:
     $ref: './llmo-api.yaml#/llmo-onboard'
   /v2/orgs/{spaceCatId}/llmo/onboard-site:
     $ref: './llmo-api.yaml#/llmo-onboard-site'
+  /v2/orgs/{spaceCatId}/semrush-onboarding:
+    $ref: './onboarding-api.yaml#/trigger-onboarding'
   /sites/{siteId}/llmo/offboard:
     $ref: './llmo-api.yaml#/llmo-offboard'
+  /sites/{siteId}/prompt-suggestion-schedules:
+    $ref: './llmo-api.yaml#/llmo-prompt-suggestion-schedules'
   /sites/{siteId}/llmo/opportunities-reviewed:
     $ref: './llmo-api.yaml#/llmo-opportunities-reviewed'
   /sites/{siteId}/llmo/brand-claims:
@@ -632,6 +730,42 @@ paths:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-config'
   /sites/{siteId}/llmo/edge-optimize-config/stage:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-config-stage'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/bootstrap-url:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-bootstrap-url'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/connect:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-connect'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/distributions:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-distributions'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/prerequisites:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-prerequisites'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/origins:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-origins'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/behaviors:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-behaviors'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/create-origin:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-create-origin'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/create-function:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-create-function'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/apply-cache:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-apply-cache'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/create-lambda:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-create-lambda'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/lambda-status:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-lambda-status'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/apply-associations:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-apply-associations'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/verify:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-verify'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/deploy:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-deploy'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/plan:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-plan'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/permissions:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-permissions'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/log-delivery:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-log-delivery'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/log-rescan:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-log-rescan'
   /sites/{siteId}/llmo/edge-optimize-status:
     $ref: './llmo-api.yaml#/llmo-edge-optimize-status'
   /sites/{siteId}/llmo/probes/edge-optimize:
@@ -646,8 +780,24 @@ paths:
     $ref: './llmo-api.yaml#/site-llmo-cloudflare-zones'
   /sites/{siteId}/llmo/cdn-onboard/cloudflare/deploy:
     $ref: './llmo-api.yaml#/site-llmo-cloudflare-deploy'
-  /sites/{siteId}/llmo/cdn-onboard/cloudflare/zones/{zoneId}/routes:
-    $ref: './llmo-api.yaml#/site-llmo-cloudflare-zone-routes'
+  /sites/{siteId}/llmo/cdn-onboard/cloudflare/routes:
+    $ref: './llmo-api.yaml#/site-llmo-cloudflare-routes'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/config:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-config'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/properties:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-properties'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/versions:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-versions'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/plan:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-plan'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/deploy:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-deploy'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/deploy-status:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-deploy-status'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/activate:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-activate'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/activation-status:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-activation-status'
   /sites/{siteId}/llmo/strategy:
     $ref: './llmo-api.yaml#/llmo-strategy'
   /sites/{siteId}/reports:
@@ -716,6 +866,12 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-stats-by-llm'
   /llmo/ai-visibility/v1/brand/stats-by-country:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-stats-by-country'
+  /llmo/ai-visibility/v1/brand/competitors:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-competitors'
+  /llmo/ai-visibility/v1/brand/competitors-stats:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-competitors-stats'
+  /llmo/ai-visibility/v1/brand/top-brands:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-top-brands'
   /llmo/ai-visibility/v1/topic/brand-topics:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-brand-topics'
   /llmo/ai-visibility/v1/topic/brand-topics-export:
@@ -728,6 +884,14 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-gap-topics-export'
   /llmo/ai-visibility/v1/topic/gap-topics-totals:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-gap-topics-totals'
+  /llmo/ai-visibility/v1/topic/metrics-by-fts:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-metrics-by-fts'
+  /llmo/ai-visibility/v1/topic/topics-by-fts:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-topics-by-fts'
+  /llmo/ai-visibility/v1/topic/topics-by-fts-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-topics-by-fts-export'
+  /llmo/ai-visibility/v1/topic/topics-by-fts-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-topic-topics-by-fts-totals'
   /llmo/ai-visibility/v1/prompt/brand-prompts:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-brand-prompts'
   /llmo/ai-visibility/v1/prompt/brand-prompts-export:
@@ -738,6 +902,16 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-gap-prompts-export'
   /llmo/ai-visibility/v1/prompt/gap-prompts-totals:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-gap-prompts-totals'
+  /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompts-by-topic-ids'
+  /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompts-by-topic-ids-totals'
+  /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompts-by-topic-fts'
+  /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompts-by-topic-fts-export'
+  /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompts-by-topic-fts-totals'
   /llmo/ai-visibility/v1/prompt/prompt-response:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-prompt-response'
   /llmo/ai-visibility/v1/source/gap-source-domains:
@@ -746,6 +920,30 @@ paths:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-gap-source-domains-export'
   /llmo/ai-visibility/v1/source/gap-source-domains-totals:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-gap-source-domains-totals'
+  /llmo/ai-visibility/v1/source/cited-pages:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-cited-pages'
+  /llmo/ai-visibility/v1/source/cited-pages-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-cited-pages-export'
+  /llmo/ai-visibility/v1/source/cited-pages-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-cited-pages-totals'
+  /llmo/ai-visibility/v1/source/cited-sources:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-cited-sources'
+  /llmo/ai-visibility/v1/source/cited-sources-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-cited-sources-export'
+  /llmo/ai-visibility/v1/source/cited-sources-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-cited-sources-totals'
+  /llmo/ai-visibility/v1/source/source-domains-by-topic-fts:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-source-domains-by-topic-fts'
+  /llmo/ai-visibility/v1/source/source-domains-by-topic-fts-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-source-domains-by-topic-fts-export'
+  /llmo/ai-visibility/v1/source/source-domains-by-topic-fts-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-source-source-domains-by-topic-fts-totals'
+  /llmo/ai-visibility/v1/brand/brands-by-topic-fts:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-brands-by-topic-fts'
+  /llmo/ai-visibility/v1/brand/brands-by-topic-fts-export:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-brands-by-topic-fts-export'
+  /llmo/ai-visibility/v1/brand/brands-by-topic-fts-totals:
+    $ref: './ai-visibility-api.yaml#/ai-visibility-v1-brand-brands-by-topic-fts-totals'
   /llmo/ai-visibility/v1/prompt-research/prompts-export:
     $ref: './ai-visibility-api.yaml#/ai-visibility-v1-prompt-research-prompts-export'
   /llmo/ai-visibility/v1/prompt-research/brands-export:
@@ -767,6 +965,8 @@ paths:
     $ref: './state-access-mappings-api.yaml#/product-capabilities'
   /user/capabilities/{resourceId}:
     $ref: './state-access-mappings-api.yaml#/user-capabilities-by-resource'
+  /organizations/{organizationId}/permission/audit-logs:
+    $ref: './state-access-mappings-api.yaml#/permission-audit-logs'
 
 components:
   securitySchemes:
@@ -774,22 +974,27 @@ components:
       type: apiKey
       in: header
       name: x-api-key
-      description: 'DEPRECATED, use scoped_api_key or ims_key. (Used for read-only operations.)'
+      description: 'DEPRECATED, use scoped_api_key or session_token. (Used for read-only operations.)'
     scoped_api_key:
       type: apiKey
       in: header
       name: x-api-key
       description: 'For endpoints which authenticate with scoped API keys'
+    session_token:
+      type: apiKey
+      in: header
+      name: authorization
+      description: 'SpaceCat JWT session token obtained from POST /auth/login. Send it as `Authorization: Bearer <token>`. This is the standard authorization scheme for authenticated user/consumer requests.'
     ims_key:
       type: apiKey
       in: header
       name: authorization
-      description: 'Value must be a valid IMS user token which will be offline-validated.'
+      description: 'Raw IMS user token, offline-validated, sent as `Authorization: Bearer <token>`. Accepted ONLY on the /tools/api-keys endpoints, for IaaS-only orgs that cannot mint a JWT session token. Direct IMS-token authorization has been removed from every other endpoint — use session_token instead.'
     admin_key:
       type: apiKey
       in: header
       name: x-api-key
-      description: 'DEPRECATED, use scoped_api_key or ims_key. (Used for read and write operations.)'
+      description: 'DEPRECATED, use scoped_api_key or session_token. (Used for read and write operations.)'
     cookie_auth:
       type: apiKey
       in: cookie

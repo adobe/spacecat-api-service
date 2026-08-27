@@ -342,13 +342,8 @@ function CheckCdnLogsStatusCommand(context) {
       const partialCoverage = incomplete.filter((r) => r.presentCount > 0);
       const dailyOnlyMissing = incomplete.filter((r) => r.isDailyOnly);
       const hourlyMissing = incomplete.filter((r) => !r.isDailyOnly);
-      const outcome = incomplete.length === 0 && errors.length === 0
-        ? 'READY_FOR_DB_IMPORT'
-        : 'ACTION_REQUIRED';
-
       const lines = [
         `*CDN Logs Aggregate Status — ${dateStr}*`,
-        `Outcome: *${outcome}*`,
         `:white_check_mark: Complete: *${complete.length}*`,
         `:warning: Incomplete: *${incomplete.length}*`,
         `:x: Errors: *${errors.length}*`,

@@ -5548,6 +5548,54 @@ describe('llmo-brand-presence', () => {
       expect(body.totalCount).to.equal(1);
     });
 
+    it('enriches items with userIntent looked up by prompt_id', async () => {
+      // The chainable mock returns the same rows for both the executions query
+      // and the prompts intent lookup, so a row whose id === prompt_id and which
+      // carries `intent` exercises the getIntentsByPromptIds -> DTO join.
+      const rows = [
+        makeDetailRow({
+          prompt: 'q1', prompt_id: 'p1', id: 'p1', intent: 'Commercial',
+        }),
+      ];
+      mockContext.params.topicId = 'T';
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({
+        data: rows,
+        error: null,
+      });
+
+      const handler = createTopicPromptsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.items[0].userIntent).to.equal('Commercial');
+    });
+
+    it('bounds the intent lookup to the paginated page, not all rows', async () => {
+      // 5 distinct prompts, pageSize 2 → only the 2 returned prompt_ids should be
+      // looked up (proves enrichment runs after pagination, not over all rawRows).
+      const rows = [];
+      for (let i = 0; i < 5; i += 1) {
+        rows.push(makeDetailRow({
+          prompt: `q${i}`, prompt_id: `p${i}`, id: `p${i}`, intent: `intent${i}`,
+        }));
+      }
+      mockContext.params.topicId = 'T';
+      mockContext.data = { page: '0', pageSize: '2' };
+      const client = createChainableMock({ data: rows, error: null });
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createTopicPromptsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.items).to.have.lengthOf(2);
+      expect(body.items.map((i) => i.userIntent)).to.deep.equal(['intent0', 'intent1']);
+      // Only the intent lookup uses `.in('id', ...)`; assert it received just the
+      // page's prompt_ids, not all 5.
+      const inCall = client.in.getCalls().find((c) => c.args[0] === 'id');
+      expect(inCall.args[1]).to.deep.equal(['p0', 'p1']);
+    });
+
     it('returns empty items when no data', async () => {
       mockContext.params.topicId = 'None';
       mockContext.dataAccess.Site.postgrestService = createChainableMock({
@@ -6524,6 +6572,74 @@ describe('llmo-brand-presence', () => {
       ];
       expect(aggregateDetailSources(rows)).to.have.lengthOf(2);
     });
+
+    it('does not double-count citations from multiple rows sharing the same execution_id', () => {
+      // A single execution can produce more than one brand_presence_sources row for
+      // the same URL (e.g. one row per inline citation marker in the answer) —
+      // citationCount must reflect distinct executions, not raw row count.
+      const rows = [
+        {
+          url: 'https://a.com',
+          hostname: 'a.com',
+          content_type: 'web',
+          execution_date: '2026-03-02',
+          execution_id: 'exec-1',
+          prompt: 'q1',
+        },
+        {
+          url: 'https://a.com',
+          hostname: 'a.com',
+          content_type: 'web',
+          execution_date: '2026-03-02',
+          execution_id: 'exec-1',
+          prompt: 'q1',
+        },
+        {
+          url: 'https://a.com',
+          hostname: 'a.com',
+          content_type: 'web',
+          execution_date: '2026-03-02',
+          execution_id: 'exec-1',
+          prompt: 'q1',
+        },
+      ];
+      const [entry] = aggregateDetailSources(rows);
+      expect(entry.citationCount).to.equal(1);
+      expect(entry.prompts).to.deep.equal([{ prompt: 'q1', count: 1 }]);
+    });
+
+    it('counts citations once per distinct execution_id', () => {
+      const rows = [
+        {
+          url: 'https://a.com', hostname: 'a.com', content_type: 'web', execution_date: '2026-03-02', execution_id: 'exec-1', prompt: 'q1',
+        },
+        {
+          url: 'https://a.com', hostname: 'a.com', content_type: 'web', execution_date: '2026-03-09', execution_id: 'exec-2', prompt: 'q1',
+        },
+      ];
+      const [entry] = aggregateDetailSources(rows);
+      expect(entry.citationCount).to.equal(2);
+      expect(entry.prompts).to.deep.equal([{ prompt: 'q1', count: 2 }]);
+    });
+
+    it('counts each row independently when execution_id is missing', () => {
+      // Rows without an execution_id (not expected in practice) always count,
+      // since there's no id to dedupe against.
+      const rows = [
+        {
+          url: 'https://a.com', hostname: 'a.com', content_type: 'web', execution_date: '2026-03-02', prompt: 'q1',
+        },
+        {
+          url: 'https://a.com', hostname: 'a.com', content_type: 'web', execution_date: '2026-03-02', prompt: 'q1',
+        },
+        {
+          url: 'https://a.com', hostname: 'a.com', content_type: 'web', execution_date: '2026-03-02', execution_id: null, prompt: 'q1',
+        },
+      ];
+      const [entry] = aggregateDetailSources(rows);
+      expect(entry.citationCount).to.equal(3);
+      expect(entry.prompts).to.deep.equal([{ prompt: 'q1', count: 3 }]);
+    });
   });
 
   // ── createTopicDetailHandler ────────────────────────────────────────────────
@@ -6839,6 +6955,15 @@ describe('llmo-brand-presence', () => {
           url_id: 'u1',
           source_urls: { url: 'https://example.com', hostname: 'example.com' },
         },
+        // Same execution + same URL as a second brand_presence_sources row (e.g. the
+        // AI answer cited example.com twice) — must NOT double-count citationCount.
+        {
+          execution_id: 'exec-1',
+          execution_date: '2026-03-02',
+          content_type: 'web',
+          url_id: 'u1-dup',
+          source_urls: { url: 'https://example.com', hostname: 'example.com' },
+        },
         // null source_urls exercises the || {} fallback in flattenSourceRow
         {
           execution_id: 'exec-1',
@@ -6871,6 +6996,8 @@ describe('llmo-brand-presence', () => {
       expect(body.sources).to.have.lengthOf(2);
       const exampleSource = body.sources.find((s) => s.url === 'https://example.com');
       expect(exampleSource).to.exist;
+      // Only 1 execution (exec-1) exists for this topic, so citationCount must stay 1
+      // even though two brand_presence_sources rows reference it for that execution.
       expect(exampleSource.citationCount).to.equal(1);
     });
 

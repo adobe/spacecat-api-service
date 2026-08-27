@@ -12,7 +12,7 @@
 
 import { expect } from 'chai';
 
-import { resolveLocation } from '../../../src/support/serenity/locations.js';
+import { resolveLocation, marketForGeoTargetId } from '../../../src/support/serenity/locations.js';
 
 describe('serenity locations — resolveLocation', () => {
   it('maps an ISO alpha-2 code to geoTargetId (2000 + ISO numeric) + English name', () => {
@@ -43,5 +43,43 @@ describe('serenity locations — resolveLocation', () => {
   it('returns null for an unknown / unassigned country code', () => {
     expect(resolveLocation('ZZ')).to.equal(null);
     expect(resolveLocation('XX')).to.equal(null);
+  });
+});
+
+describe('serenity locations — marketForGeoTargetId (inverse)', () => {
+  it('maps a country geoTargetId back to its ISO alpha-2 code', () => {
+    expect(marketForGeoTargetId(2840)).to.equal('US');
+    expect(marketForGeoTargetId(2276)).to.equal('DE');
+    expect(marketForGeoTargetId(2250)).to.equal('FR');
+    expect(marketForGeoTargetId(2036)).to.equal('AU');
+  });
+
+  it('round-trips with resolveLocation for every resolvable market', () => {
+    for (const market of ['US', 'DE', 'FR', 'GB', 'JP', 'BR', 'IN']) {
+      const { geoTargetId } = resolveLocation(market);
+      expect(marketForGeoTargetId(geoTargetId)).to.equal(market);
+    }
+  });
+
+  it('handles a low ISO-numeric country whose numeric needs leading zeros (AF=004)', () => {
+    // Afghanistan: ISO numeric 004 → geoTargetId 2004. Number-keyed reverse map
+    // must not miss on the leading-zero string form.
+    const { geoTargetId } = resolveLocation('AF');
+    expect(geoTargetId).to.equal(2004);
+    expect(marketForGeoTargetId(2004)).to.equal('AF');
+  });
+
+  it('returns null for a non-country / sub-national / out-of-range id', () => {
+    expect(marketForGeoTargetId(1234)).to.equal(null); // region/metro band
+    expect(marketForGeoTargetId(2000)).to.equal(null); // 2000 itself is not a country
+    expect(marketForGeoTargetId(9999999)).to.equal(null);
+  });
+
+  it('returns null for a non-integer / missing / malformed id', () => {
+    expect(marketForGeoTargetId(undefined)).to.equal(null);
+    expect(marketForGeoTargetId(null)).to.equal(null);
+    expect(marketForGeoTargetId(NaN)).to.equal(null);
+    expect(marketForGeoTargetId(2840.5)).to.equal(null);
+    expect(marketForGeoTargetId('nope')).to.equal(null);
   });
 });

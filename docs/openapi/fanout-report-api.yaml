@@ -74,7 +74,7 @@ fanout-report:
         description: S3 storage is not configured for this environment.
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []
   post:
     tags:
@@ -132,5 +132,5 @@ fanout-report:
           be reached, or S3 storage is not configured for this environment.
     security:
       - api_key: []
-      - ims_key: []
+      - session_token: []
       - scoped_api_key: []

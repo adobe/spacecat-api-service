@@ -19,8 +19,12 @@ import {
 import TierClient from '@adobe/spacecat-shared-tier-client';
 
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
+import { resolveRouteCapability } from '@adobe/spacecat-shared-http-utils/src/auth/route-utils.js';
 import { UnauthorizedProductError } from './errors.js';
 import { CUSTOMER_VISIBLE_TIERS } from './utils.js';
+import { listBrandIdsForSite } from './brands-storage.js';
+import { listResourceIdsWithCapability } from './state-access-mapping-utils.js';
+import routeFacsCapabilities from '../routes/facs-capabilities.js';
 
 const ANONYMOUS_ENDPOINTS = [
   /^GET \/slack\/events$/,
@@ -193,6 +197,144 @@ export default class AccessControlUtil {
     return this.authInfo.isLLMOAdministrator() && !this._lastAccessWasDelegated;
   }
 
+  /**
+   * Whether the caller may perform an LLMO admin-equivalent action on a specific
+   * site under the hybrid FACS model. Two signals decide it:
+   *   - the `facs_enabled` JWT claim (minted at login, present on every path) —
+   *     is the caller's org FACS-enrolled?
+   *   - `context.attributes.facs.enabled` (the wrapper's defer marker, set only
+   *     when the wrapper could not resolve a ReBAC resource) — did the wrapper
+   *     hand enforcement to the controller?
+   *
+   * Resolution:
+   *   - Not FACS-enrolled → fall back to the legacy `isLLMOAdministrator()` claim
+   *     (dual-running: legacy stays authoritative until the org migrates).
+   *   - Enrolled AND not deferred → the wrapper already confirmed the route's
+   *     capability upstream (JWT short-circuit or state-layer admit) → allow.
+   *   - Enrolled AND deferred → the wrapper could not map the site to its LLMO
+   *     ReBAC `brand`, so authorize here: the caller must hold the route's
+   *     required capability via a state-layer grant on any brand linked to the
+   *     site. Fail closed if the state layer is unreachable.
+   *
+   * The required capability is NOT passed in — it is derived from the same
+   * `routeFacsCapabilities.PRODUCTS_ROUTES` map the wrapper enforced (via
+   * `resolveRouteCapability` on the current request), so the controller and the
+   * wrapper can never disagree and there is no hardcoded capability to drift.
+   *
+   * MUST only be called on FACS-governed routes (the wrapper runs ahead of the
+   * controller); on a non-governed route the "not deferred" branch would admit
+   * any enrolled caller.
+   *
+   * @param {object} site - Site model (exposes getId + getOrganizationId).
+   * @returns {Promise<boolean>}
+   */
+  async hasLlmoCapabilityForSite(site) {
+    const facsEnabled = this.authInfo.getProfile?.()?.facs_enabled === true;
+    if (!facsEnabled) {
+      return this.isLLMOAdministrator();
+    }
+
+    const facs = this.context.attributes?.facs;
+    if (!facs?.enabled) {
+      // Enrolled and the wrapper already confirmed the capability upstream.
+      return true;
+    }
+
+    // Derive the route's required capability from the same map the wrapper used.
+    const routeMap = routeFacsCapabilities.PRODUCTS_ROUTES?.[facs.product?.toUpperCase?.()];
+    const capability = routeMap ? resolveRouteCapability(this.context, routeMap) : null;
+    if (!capability) {
+      this.log?.warn?.('[acl] FACS deferred but no route capability resolved - denying');
+      return false;
+    }
+
+    // Deferred: resolve the site's brand(s) and check the state-layer grant.
+    const postgrestClient = this.context.dataAccess?.services?.postgrestClient;
+    if (!postgrestClient?.from) {
+      this.log?.warn?.('[acl] FACS deferred but postgrestClient unavailable - denying');
+      return false;
+    }
+
+    const orgId = site.getOrganizationId();
+    const org = await this.context.dataAccess.Organization.findById(orgId);
+    const imsOrgId = org?.getImsOrgId?.();
+    if (!hasText(imsOrgId)) {
+      return false;
+    }
+
+    const brandIds = await listBrandIdsForSite(orgId, site.getId(), postgrestClient);
+    if (brandIds.size === 0) {
+      return false;
+    }
+
+    const capable = await listResourceIdsWithCapability(postgrestClient, {
+      imsOrgId,
+      product: facs.product,
+      resourceType: 'brand',
+      subjectId: facs.subjectId,
+      capability,
+    });
+    for (const id of brandIds) {
+      if (capable.has(id)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Org-level counterpart of {@link hasLlmoCapabilityForSite} for FACS-governed
+   * routes with no site (e.g. `POST /llmo/onboard`). The wrapper enforces the
+   * route's capability upstream, so once enrolled the only question is whether
+   * it confirmed:
+   *   - not enrolled           → legacy `isLLMOAdministrator()`
+   *   - enrolled, not deferred  → wrapper confirmed the org-wide capability → allow
+   *   - enrolled, deferred      → wrapper could not confirm (caller lacks the
+   *     org-wide grant and there is no resource to bind against) → deny
+   *
+   * MUST only be called on FACS-governed routes (see {@link hasLlmoCapabilityForSite}).
+   *
+   * @returns {boolean}
+   */
+  hasLlmoAdminCapability() {
+    const facsEnabled = this.authInfo.getProfile?.()?.facs_enabled === true;
+    if (!facsEnabled) {
+      return this.isLLMOAdministrator();
+    }
+    return !this.context.attributes?.facs?.enabled;
+  }
+
+  /**
+   * Chooses the 403 message for an LLMO capability denial based on which layer
+   * rejected the caller, so the response is not misleading:
+   *   - org NOT FACS-enrolled → the legacy `isLLMOAdministrator()` claim denied;
+   *     keep the caller-supplied legacy wording ("Only LLMO administrators …").
+   *   - org FACS-enrolled → the denial came from the hybrid FACS/ReBAC layer
+   *     (the caller lacks the route's required capability on the resource), so
+   *     "administrator" is misleading — return a capability-oriented message
+   *     naming the capability derived from the same route map the wrapper used.
+   *
+   * Pair with {@link hasLlmoCapabilityForSite} / {@link hasLlmoAdminCapability}:
+   *   if (!await ac.hasLlmoCapabilityForSite(site)) {
+   *     return forbidden(ac.llmoForbiddenMessage('Only LLMO administrators can …'));
+   *   }
+   *
+   * @param {string} legacyMessage - wording used on the legacy (non-FACS) path.
+   * @returns {string}
+   */
+  llmoForbiddenMessage(legacyMessage) {
+    const facsEnabled = this.authInfo.getProfile?.()?.facs_enabled === true;
+    if (!facsEnabled) {
+      return legacyMessage;
+    }
+    const product = this.context.attributes?.facs?.product;
+    const routeMap = routeFacsCapabilities.PRODUCTS_ROUTES?.[product?.toUpperCase?.()];
+    const capability = routeMap ? resolveRouteCapability(this.context, routeMap) : null;
+    return capability
+      ? `Access denied: you do not hold the required '${capability}' permission for this resource`
+      : 'Access denied: you do not have the required LLMO permission for this resource';
+  }
+
   canManageImsOrgAccess() {
     if (!this.isAccessTypeIms() && !this.isAccessTypeJWT()) {
       return false;
@@ -243,30 +385,41 @@ export default class AccessControlUtil {
           lastSeenAt: new Date().toISOString(),
         });
       }
-    // Lazy one-time backfill of externalUserId for PAID-tier (Brandalf) users onboarded via
-    // invitation. These users are created without externalUserId; we record it here on the
-    // first authenticated request so the userDetails lookup can resolve their display name.
-    // NOTE: profile.email is an IMS user GUID (e.g. GUID@hexOrgId.e), not an RFC-5322 address.
-    // profile.trial_email is the human-readable email used as the DB row selector.
-    // Both claims refer to the same identity and are attested by IMS on the same token.
-    // findByEmailId runs on every non-FREE_TRIAL request (same as the FREE_TRIAL branch above),
-    // so this adds no new per-request overhead relative to existing behaviour.
+    // lastSeenAt refresh (plus a lazy one-time externalUserId backfill) for PAID/PLG-tier
+    // (Brandalf) trial users. Paying-customer trial users are looked up by externalUserId —
+    // unlike FREE_TRIAL users, email is not stored for them (@adobe/spacecat-shared-data-access
+    // 4.19.0 added the findByExternalUserId index for this). We fall back to the legacy
+    // emailId lookup (and backfill externalUserId from it) for PAID/PLG trial users created
+    // via the older email-invite flow, before that support existed.
+    // NOTE: profile.email is an IMS user GUID (e.g. GUID@hexOrgId.e), not an RFC-5322 address,
+    // and doubles as externalUserId. profile.trial_email is the human-readable email used as
+    // the legacy DB row selector. Both claims refer to the same identity and are attested by
+    // IMS on the same token.
     } else if (!this.authInfo?.isS2SConsumer?.()) {
       const profile = this.authInfo.getProfile?.();
-      if (profile?.email && profile?.trial_email) {
+      if (profile?.email) {
         try {
-          const trialUser = await this.TrialUser.findByEmailId(profile.trial_email);
-          if (trialUser && !trialUser.getExternalUserId()) {
-            trialUser.setExternalUserId(profile.email);
+          let trialUser = await this.TrialUser.findByExternalUserId(profile.email);
+
+          if (!trialUser && profile.trial_email) {
+            trialUser = await this.TrialUser.findByEmailId(profile.trial_email);
+            if (trialUser && !trialUser.getExternalUserId()) {
+              trialUser.setExternalUserId(profile.email);
+              this.log?.info('[AccessControl] Backfilled externalUserId for PAID-tier user', {
+                trialEmail: profile.trial_email,
+                organizationId: org.getId(),
+              });
+            }
+          }
+
+          if (trialUser) {
+            trialUser.setLastSeenAt(new Date().toISOString());
             await trialUser.save();
-            this.log?.info('[AccessControl] Backfilled externalUserId for PAID-tier user', {
-              trialEmail: profile.trial_email,
-              organizationId: org.getId(),
-            });
           }
         } catch (err) {
-          this.log?.warn('[AccessControl] externalUserId backfill failed; continuing', {
-            trialEmail: profile.trial_email,
+          this.log?.warn('[AccessControl] trial user update failed; continuing', {
+            externalUserId: profile.email,
+            ...(profile.trial_email && { trialEmail: profile.trial_email }),
             error: err.message,
           });
         }

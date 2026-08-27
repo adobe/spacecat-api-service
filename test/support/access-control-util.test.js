@@ -20,6 +20,7 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
+import esmock from 'esmock';
 import AccessControlUtil from '../../src/support/access-control-util.js';
 
 use(chaiAsPromised);
@@ -779,6 +780,7 @@ describe('Access Control Util', () => {
 
       mockTrialUser = {
         findByEmailId: sinon.stub(),
+        findByExternalUserId: sinon.stub(),
         create: sinon.stub(),
       };
 
@@ -1339,7 +1341,37 @@ describe('Access Control Util', () => {
     const TEST_IMS_GUID = '145D1F646365E9C70A495FC8@17481f256365e20f495cc2.e';
     const EXISTING_IMS_GUID = '1BB32091680634E20A495CA8@17481f256365e20f495cc2.e';
 
-    it('should backfill externalUserId for PAID-tier trial user that is missing it', async () => {
+    it('should find PAID-tier trial user by externalUserId and refresh lastSeenAt', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-paid',
+        getProductCode: () => 'llmo',
+        getTier: () => 'PAID',
+      };
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
+      mockAuthInfo.getProfile.returns({
+        email: TEST_IMS_GUID,
+        // no trial_email — paying-customer trial users don't store email
+      });
+
+      const existingUser = {
+        getExternalUserId: sinon.stub().returns(TEST_IMS_GUID),
+        setExternalUserId: sinon.stub(),
+        setLastSeenAt: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+      mockTrialUser.findByExternalUserId.resolves(existingUser);
+
+      await util.validateEntitlement(mockOrg, null, 'llmo');
+
+      expect(mockTrialUser.findByExternalUserId).to.have.been.calledWith(TEST_IMS_GUID);
+      expect(mockTrialUser.findByEmailId).to.not.have.been.called;
+      expect(existingUser.setExternalUserId).to.not.have.been.called;
+      expect(existingUser.setLastSeenAt).to.have.been.calledOnceWith(sinon.match.string);
+      expect(existingUser.save).to.have.been.calledOnce;
+    });
+
+    it('should fall back to legacy emailId lookup and backfill externalUserId when '
+      + 'PAID-tier trial user is not found by externalUserId', async () => {
       const entitlement = {
         getId: () => 'entitlement-paid',
         getProductCode: () => 'llmo',
@@ -1350,31 +1382,42 @@ describe('Access Control Util', () => {
         trial_email: 'trial@example.com',
         email: TEST_IMS_GUID,
       });
+      mockTrialUser.findByExternalUserId.resolves(null);
 
       const existingUser = {
         getExternalUserId: sinon.stub().returns(null),
         setExternalUserId: sinon.stub(),
+        setLastSeenAt: sinon.stub(),
         save: sinon.stub().resolves(),
       };
       mockTrialUser.findByEmailId.resolves(existingUser);
 
       await util.validateEntitlement(mockOrg, null, 'llmo');
 
+      expect(mockTrialUser.findByEmailId).to.have.been.calledWith('trial@example.com');
       expect(existingUser.setExternalUserId).to.have.been.calledWith(TEST_IMS_GUID);
+      expect(existingUser.setLastSeenAt).to.have.been.calledOnceWith(sinon.match.string);
       expect(existingUser.save).to.have.been.calledOnce;
     });
 
-    it('should not overwrite externalUserId for PAID-tier user that already has it set', async () => {
+    it('should not overwrite externalUserId for a legacy PAID-tier user that already has it '
+      + 'set, but still refreshes lastSeenAt', async () => {
       const entitlement = {
         getId: () => 'entitlement-paid',
         getProductCode: () => 'llmo',
         getTier: () => 'PAID',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
+      mockAuthInfo.getProfile.returns({
+        trial_email: 'trial@example.com',
+        email: TEST_IMS_GUID,
+      });
+      mockTrialUser.findByExternalUserId.resolves(null);
 
       const existingUser = {
         getExternalUserId: sinon.stub().returns(EXISTING_IMS_GUID),
         setExternalUserId: sinon.stub(),
+        setLastSeenAt: sinon.stub(),
         save: sinon.stub().resolves(),
       };
       mockTrialUser.findByEmailId.resolves(existingUser);
@@ -1382,10 +1425,11 @@ describe('Access Control Util', () => {
       await util.validateEntitlement(mockOrg, null, 'llmo');
 
       expect(existingUser.setExternalUserId).to.not.have.been.called;
-      expect(existingUser.save).to.not.have.been.called;
+      expect(existingUser.setLastSeenAt).to.have.been.calledOnceWith(sinon.match.string);
+      expect(existingUser.save).to.have.been.calledOnce;
     });
 
-    it('should skip externalUserId backfill for PAID-tier when profile has no email', async () => {
+    it('should skip trial user lookup for PAID-tier when profile has no email', async () => {
       const entitlement = {
         getId: () => 'entitlement-paid',
         getProductCode: () => 'llmo',
@@ -1393,32 +1437,30 @@ describe('Access Control Util', () => {
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
-      const existingUser = {
-        getExternalUserId: sinon.stub().returns(null),
-        setExternalUserId: sinon.stub(),
-        save: sinon.stub().resolves(),
-      };
-      mockTrialUser.findByEmailId.resolves(existingUser);
-
       mockAuthInfo.getProfile.returns({
         trial_email: 'trial@example.com',
-        // no email field — findByEmailId should not be called
+        // no email field — neither lookup should be called
       });
 
       await util.validateEntitlement(mockOrg, null, 'llmo');
 
+      expect(mockTrialUser.findByExternalUserId).to.not.have.been.called;
       expect(mockTrialUser.findByEmailId).to.not.have.been.called;
-      expect(existingUser.setExternalUserId).to.not.have.been.called;
-      expect(existingUser.save).to.not.have.been.called;
     });
 
-    it('should skip externalUserId backfill for PAID-tier when findByEmailId returns null', async () => {
+    it('should do nothing for PAID-tier when neither externalUserId nor legacy emailId '
+      + 'lookup finds a trial user', async () => {
       const entitlement = {
         getId: () => 'entitlement-paid',
         getProductCode: () => 'llmo',
         getTier: () => 'PAID',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
+      mockAuthInfo.getProfile.returns({
+        trial_email: 'trial@example.com',
+        email: TEST_IMS_GUID,
+      });
+      mockTrialUser.findByExternalUserId.resolves(null);
       mockTrialUser.findByEmailId.resolves(null);
 
       await util.validateEntitlement(mockOrg, null, 'llmo');
@@ -1426,7 +1468,7 @@ describe('Access Control Util', () => {
       expect(mockTrialUser.create).to.not.have.been.called;
     });
 
-    it('should not backfill externalUserId for PAID-tier when caller is S2S consumer', async () => {
+    it('should not look up a trial user for PAID-tier when caller is S2S consumer', async () => {
       const entitlement = {
         getId: () => 'entitlement-paid',
         getProductCode: () => 'llmo',
@@ -1442,31 +1484,38 @@ describe('Access Control Util', () => {
       const existingUser = {
         getExternalUserId: sinon.stub().returns(null),
         setExternalUserId: sinon.stub(),
+        setLastSeenAt: sinon.stub(),
         save: sinon.stub().resolves(),
       };
+      mockTrialUser.findByExternalUserId.resolves(existingUser);
       mockTrialUser.findByEmailId.resolves(existingUser);
 
       await util.validateEntitlement(mockOrg, null, 'llmo');
 
+      expect(mockTrialUser.findByExternalUserId).to.not.have.been.called;
       expect(mockTrialUser.findByEmailId).to.not.have.been.called;
       expect(existingUser.setExternalUserId).to.not.have.been.called;
       expect(existingUser.save).to.not.have.been.called;
     });
 
-    it('should not throw when PAID-tier backfill save fails', async () => {
+    it('should not throw when PAID-tier lastSeenAt save fails', async () => {
       const entitlement = {
         getId: () => 'entitlement-paid',
         getProductCode: () => 'llmo',
         getTier: () => 'PAID',
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
+      mockAuthInfo.getProfile.returns({
+        email: TEST_IMS_GUID,
+      });
 
       const existingUser = {
-        getExternalUserId: sinon.stub().returns(null),
+        getExternalUserId: sinon.stub().returns(TEST_IMS_GUID),
         setExternalUserId: sinon.stub(),
+        setLastSeenAt: sinon.stub(),
         save: sinon.stub().rejects(new Error('DDB throttle')),
       };
-      mockTrialUser.findByEmailId.resolves(existingUser);
+      mockTrialUser.findByExternalUserId.resolves(existingUser);
 
       await expect(util.validateEntitlement(mockOrg, null, 'llmo')).to.not.be.rejected;
     });
@@ -2254,6 +2303,177 @@ describe('Access Control Util', () => {
       expect(result).to.be.false;
       // _lastAccessWasDelegated was never set to true → JWT claim rules
       expect(util.isLLMOAdministrator()).to.be.true;
+    });
+  });
+
+  describe('hasLlmoCapabilityForSite', () => {
+    const site = { getId: () => 'site-1', getOrganizationId: () => 'org-uuid' };
+
+    function makeCtx({
+      profile = {}, facs, postgrest = true, suffix = '/sites/site-1/llmo/config', method = 'POST',
+    } = {}) {
+      return {
+        // Real FACS-governed route so the derived capability comes from the route
+        // map (POST /sites/:siteId/llmo/config → llmo/can_configure), not a hardcode.
+        pathInfo: { method, suffix, headers: { 'x-product': 'llmo' } },
+        attributes: {
+          authInfo: new AuthInfo().withType('jwt').withProfile(profile),
+          ...(facs ? { facs } : {}),
+        },
+        dataAccess: {
+          Entitlement: {},
+          TrialUser: {},
+          OrganizationIdentityProvider: {},
+          Organization: { findById: sinon.stub().resolves({ getImsOrgId: () => 'ABC@AdobeOrg' }) },
+          ...(postgrest ? { services: { postgrestClient: { from: () => ({}) } } } : {}),
+        },
+      };
+    }
+
+    let listBrandIdsForSite;
+    let listResourceIdsWithCapability;
+    let ACU;
+    beforeEach(async () => {
+      listBrandIdsForSite = sinon.stub();
+      listResourceIdsWithCapability = sinon.stub();
+      ({ default: ACU } = await esmock('../../src/support/access-control-util.js', {
+        '../../src/support/brands-storage.js': { listBrandIdsForSite },
+        '../../src/support/state-access-mapping-utils.js': { listResourceIdsWithCapability },
+      }));
+    });
+
+    it('not enrolled → falls back to legacy claim (admin → true)', async () => {
+      const util = ACU.fromContext(makeCtx({ profile: { is_llmo_administrator: true } }));
+      expect(await util.hasLlmoCapabilityForSite(site)).to.be.true;
+      expect(listBrandIdsForSite).to.not.have.been.called;
+    });
+
+    it('not enrolled → falls back to legacy claim (non-admin → false)', async () => {
+      const util = ACU.fromContext(makeCtx({ profile: { is_llmo_administrator: false } }));
+      expect(await util.hasLlmoCapabilityForSite(site)).to.be.false;
+    });
+
+    it('enrolled and NOT deferred → wrapper already confirmed the capability → allow', async () => {
+      // facs_enabled but no facs defer marker → JWT short-circuit / state admit upstream.
+      const util = ACU.fromContext(makeCtx({ profile: { facs_enabled: true } }));
+      expect(await util.hasLlmoCapabilityForSite(site)).to.be.true;
+      expect(listBrandIdsForSite).to.not.have.been.called;
+    });
+
+    it('enrolled and deferred → allows when a linked brand holds the capability', async () => {
+      listBrandIdsForSite.resolves(new Set(['brand-A', 'brand-B']));
+      listResourceIdsWithCapability.resolves(new Set(['brand-B']));
+      const util = ACU.fromContext(makeCtx({
+        profile: { facs_enabled: true },
+        facs: { enabled: true, product: 'LLMO', subjectId: 'u@AdobeID' },
+      }));
+      expect(await util.hasLlmoCapabilityForSite(site)).to.be.true;
+      expect(listResourceIdsWithCapability).to.have.been.calledWithMatch(sinon.match.any, {
+        product: 'LLMO', resourceType: 'brand', capability: 'llmo/can_configure',
+      });
+    });
+
+    it('enrolled and deferred → denies when no linked brand holds the capability', async () => {
+      listBrandIdsForSite.resolves(new Set(['brand-A']));
+      listResourceIdsWithCapability.resolves(new Set(['brand-Z']));
+      const util = ACU.fromContext(makeCtx({
+        profile: { facs_enabled: true },
+        facs: { enabled: true, product: 'LLMO', subjectId: 'u@AdobeID' },
+      }));
+      expect(await util.hasLlmoCapabilityForSite(site)).to.be.false;
+    });
+
+    it('enrolled and deferred → denies (fail closed) when postgrest is unavailable', async () => {
+      const util = ACU.fromContext(makeCtx({
+        profile: { facs_enabled: true },
+        facs: { enabled: true, product: 'LLMO', subjectId: 'u@AdobeID' },
+        postgrest: false,
+      }));
+      expect(await util.hasLlmoCapabilityForSite(site)).to.be.false;
+      expect(listBrandIdsForSite).to.not.have.been.called;
+    });
+
+    it('enrolled and deferred → denies when the site has no linked brands', async () => {
+      listBrandIdsForSite.resolves(new Set());
+      const util = ACU.fromContext(makeCtx({
+        profile: { facs_enabled: true },
+        facs: { enabled: true, product: 'LLMO', subjectId: 'u@AdobeID' },
+      }));
+      expect(await util.hasLlmoCapabilityForSite(site)).to.be.false;
+      expect(listResourceIdsWithCapability).to.not.have.been.called;
+    });
+
+    it('derives the capability from the route (edge-optimize → can_configure)', async () => {
+      listBrandIdsForSite.resolves(new Set(['brand-A']));
+      listResourceIdsWithCapability.resolves(new Set(['brand-A']));
+      const util = ACU.fromContext(makeCtx({
+        profile: { facs_enabled: true },
+        facs: { enabled: true, product: 'LLMO', subjectId: 'u@AdobeID' },
+        method: 'POST',
+        suffix: '/sites/site-1/llmo/edge-optimize-config',
+      }));
+      expect(await util.hasLlmoCapabilityForSite(site)).to.be.true;
+      expect(listResourceIdsWithCapability).to.have.been.calledWithMatch(sinon.match.any, {
+        capability: 'llmo/can_configure',
+      });
+    });
+
+    it('enrolled and deferred → denies (fail closed) when the route has no capability', async () => {
+      const util = ACU.fromContext(makeCtx({
+        profile: { facs_enabled: true },
+        facs: { enabled: true, product: 'LLMO', subjectId: 'u@AdobeID' },
+        method: 'GET',
+        suffix: '/not/a/facs/route',
+      }));
+      expect(await util.hasLlmoCapabilityForSite(site)).to.be.false;
+      expect(listBrandIdsForSite).to.not.have.been.called;
+    });
+  });
+
+  describe('llmoForbiddenMessage', () => {
+    function makeCtx({
+      profile = {}, facs, suffix = '/sites/site-1/llmo/config', method = 'POST',
+    } = {}) {
+      return {
+        pathInfo: { method, suffix, headers: { 'x-product': 'llmo' } },
+        attributes: {
+          authInfo: new AuthInfo().withType('jwt').withProfile(profile),
+          ...(facs ? { facs } : {}),
+        },
+        dataAccess: {
+          Entitlement: {}, TrialUser: {}, OrganizationIdentityProvider: {},
+        },
+      };
+    }
+
+    const LEGACY = 'Only LLMO administrators can update the LLMO config';
+
+    it('not FACS-enrolled → returns the legacy wording unchanged', () => {
+      const util = AccessControlUtil.fromContext(makeCtx({ profile: {} }));
+      expect(util.llmoForbiddenMessage(LEGACY)).to.equal(LEGACY);
+    });
+
+    it('FACS-enrolled → returns a capability-oriented message naming the route capability', () => {
+      // POST /sites/:siteId/llmo/config → llmo/can_configure
+      const util = AccessControlUtil.fromContext(makeCtx({
+        profile: { facs_enabled: true },
+        facs: { enabled: true, product: 'LLMO', subjectId: 'u@AdobeID' },
+      }));
+      const msg = util.llmoForbiddenMessage(LEGACY);
+      expect(msg).to.not.equal(LEGACY);
+      expect(msg).to.contain('llmo/can_configure');
+    });
+
+    it('FACS-enrolled but route capability unresolvable → generic LLMO permission message', () => {
+      const util = AccessControlUtil.fromContext(makeCtx({
+        profile: { facs_enabled: true },
+        facs: { enabled: true, product: 'LLMO', subjectId: 'u@AdobeID' },
+        method: 'GET',
+        suffix: '/not/a/facs/route',
+      }));
+      const msg = util.llmoForbiddenMessage(LEGACY);
+      expect(msg).to.not.equal(LEGACY);
+      expect(msg).to.contain('LLMO permission');
     });
   });
 });

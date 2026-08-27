@@ -16,6 +16,7 @@ import {
   forbidden,
 } from '@adobe/spacecat-shared-http-utils';
 import { OpportunitySummaryDto } from '../../dto/opportunity-summary.js';
+import { filterOpportunitiesByFacsComposite } from '../../support/facs-composite-resolvers.js';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { fetchPaidTrafficData } from './paid-traffic-data.js';
 import {
@@ -74,7 +75,13 @@ function TopPaidOpportunitiesController(ctx, env = {}) {
     ]);
 
     const allOpportunitiesUnfiltered = [...newOpportunities, ...inProgressOpportunities];
-    const categorizedOpportunitiesUnfiltered = categorizeOpportunities(allOpportunitiesUnfiltered);
+    // D4: narrow to the caller's ReBAC-permitted opportunity types (composite key)
+    // before categorization/matching so every downstream view is type-scoped.
+    const allOpportunities = filterOpportunitiesByFacsComposite(
+      context,
+      allOpportunitiesUnfiltered,
+    );
+    const categorizedOpportunitiesUnfiltered = categorizeOpportunities(allOpportunities);
     const supportedOpportunities = Array.from(categorizedOpportunitiesUnfiltered.values()).flat();
     const opportunityIds = supportedOpportunities.map((opportunity) => opportunity.id);
     const {

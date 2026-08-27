@@ -17,7 +17,9 @@ import {
   LLM_ENUM,
   TOPIC_INTENT_ENUM,
 } from '@quazar/ai-seo-ts/common/types_pb.js';
+import { SEARCH_TYPE_ENUM } from '@quazar/ai-seo-ts/v2/source/enums_pb.js';
 import { ConnectError, Code } from '@connectrpc/connect';
+import { parse as parseDomain } from 'tldts';
 
 export { COUNTRY_ENUM, LLM_ENUM, TOPIC_INTENT_ENUM };
 
@@ -74,6 +76,77 @@ export function settledValueOrElse(settled, fallback) {
  */
 export function settledFulfilledMap(settled, mapFn, fallback) {
   return settled.status === 'fulfilled' ? mapFn(settled.value) : fallback;
+}
+
+/**
+ * Normalizes a relation `date` into an ISO `YYYY-MM-DD` string. The gRPC relation
+ * value carries `date` as a protobuf Date message (`{ year, month, day }`, plus a
+ * `$typeName` tag), not a scalar — emitting it verbatim leaks that struct to callers.
+ * Passes an already-formatted string through unchanged; returns `null` when the date
+ * is absent or incomplete.
+ *
+ * @param {object|string|null|undefined} d
+ * @returns {string|null}
+ */
+export function toIsoDate(d) {
+  if (!d) { return null; }
+  if (typeof d === 'string') { return d; }
+  const { year, month, day } = d;
+  if (!year || !month || !day) { return null; }
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${year}-${pad(month)}-${pad(day)}`;
+}
+
+/**
+ * Single identity predicate, reused by both the relation-call guard and
+ * `attempted[i]`, so the two cannot drift. `attempted[i]` records whether we
+ * actually issued the per-prompt relation call: without it a skipped prompt
+ * (missing identity → Promise.resolve(null)) is indistinguishable from a
+ * relation call that fulfilled with a null value, which hides why a row has no
+ * full response.
+ *
+ * @param {object} p prompt proto
+ * @returns {boolean}
+ */
+export function hasRelationIdentity(p) {
+  return Boolean(p.promptHash && String(p.serpId ?? '') && p.topicId);
+}
+
+/**
+ * Per-item relation status so callers (e.g. claims_extraction) can tell a real
+ * full response from a degraded one. `error` was previously swallowed silently.
+ *
+ * @param {{ attempted: boolean, settled: { status: 'fulfilled'|'rejected' } }} params
+ * @returns {'skipped'|'error'|'ok'}
+ */
+export function relationStatusFor({ attempted, settled }) {
+  if (!attempted) { return 'skipped'; }
+  if (settled.status === 'rejected') { return 'error'; }
+  return 'ok';
+}
+
+/**
+ * Response provenance. Preserves the exact legacy `response` value (nullish-coalesce
+ * chain) while exposing whether it came from the full relation response or the
+ * brief excerpt. LLMO-6585: claims must never be extracted from an excerpt that is
+ * mistaken for the full answer, so the excerpt fallback is now explicit, not silent.
+ *
+ * @param {object|null|undefined} rel relation value (`relations[i]`), may be null
+ * @param {string|null|undefined} briefResponse the prompt's brief excerpt
+ * @returns {{ response: string, responseSource: 'full'|'excerpt'|'none', responseComplete: boolean }}
+ */
+export function deriveResponse(rel, briefResponse) {
+  const relResponse = rel?.response;
+  const excerpt = briefResponse ?? '';
+  const usedFullResponse = relResponse != null; // relation supplied a `response` field
+  const response = usedFullResponse ? relResponse : excerpt;
+  let responseSource;
+  if (usedFullResponse) { responseSource = 'full'; } else if (excerpt !== '') { responseSource = 'excerpt'; } else { responseSource = 'none'; }
+  return {
+    response,
+    responseSource,
+    responseComplete: responseSource === 'full' && response.length > 0,
+  };
 }
 
 export const GAP_SOURCE_DOMAINS_MAX_RANGE_LIMIT = 100;
@@ -183,6 +256,25 @@ export function num(v) {
 export function brandTarget(domain) {
   const d = domain.trim().toLowerCase();
   return { domain: d, name: d };
+}
+
+/**
+ * Resolve the Semrush `search_type` for a target domain. When the target carries a
+ * non-www subdomain (e.g. `quickbooks.intuit.com`) mentions/citations must be scoped
+ * to that subdomain; otherwise Semrush interprets the target as the registrable domain
+ * (`intuit.com`) and returns the parent-domain results. Apex domains and bare `www.`
+ * hosts resolve to DOMAIN. Uses tldts so multi-part TLDs (`.co.uk`, `.com.au`) are
+ * handled correctly. Unparseable input defaults to DOMAIN (preserving prior behaviour).
+ *
+ * @param {string|null|undefined} domain target domain/hostname (may include scheme or `www.`)
+ * @returns {number} SEARCH_TYPE_ENUM.SUBDOMAIN when a non-www subdomain is present, else DOMAIN
+ */
+export function resolveSearchType(domain) {
+  const parsed = parseDomain(String(domain ?? ''));
+  const subdomain = parsed?.subdomain || '';
+  return subdomain !== '' && subdomain !== 'www'
+    ? SEARCH_TYPE_ENUM.SUBDOMAIN
+    : SEARCH_TYPE_ENUM.DOMAIN;
 }
 
 export function parseLimitOffset(sp) {
@@ -432,6 +524,19 @@ export function parseMonthYM(sp) {
     return null;
   }
   return { year: Number(m[1]), month: Number(m[2]) };
+}
+
+/**
+ * Returns the `date` query param only when it is an exact `YYYY-MM-DD` snapshot date,
+ * otherwise `undefined`. A month-only `YYYY-MM` (the value the UI currently sends, since
+ * Competitor Research has no date filter) is intentionally dropped so the upstream service
+ * defaults to the latest available snapshot — mirroring `competitors/metrics`. Pinning a
+ * month-only `target_date` makes the gRPC TopicService return NotFound on the first day of a
+ * month, before that month has any data. See LLMO-5963.
+ */
+export function exactSnapshotDate(sp) {
+  const raw = sp.get('date')?.trim();
+  return raw && /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : undefined;
 }
 
 export function statsByLLMDateRange(endYear, endMonth, windowMonths) {

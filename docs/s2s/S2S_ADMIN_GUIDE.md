@@ -102,7 +102,11 @@ Headers:
 
 > ⚠️ **IMPORTANT**: Execute in **dev environment first**. Only proceed to **production** after consumer team confirms dev registration is working correctly.
 
-##### Step 2: Consumer Team Testing
+##### Step 2: Add requester in a slack group
+
+Add requester as owner in slack group `@s2s-consumer-owners` to send broadcast for any update on s2s side.
+
+##### Step 3: Consumer Team Testing
 
 - Consumer team validates access in dev environment
 - Tests all required API endpoints

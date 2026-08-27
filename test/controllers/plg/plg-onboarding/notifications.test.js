@@ -150,7 +150,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(message).to.include(TEST_ORG_ID);
       expect(message).to.include(TEST_SITE_ID);
       expect(message).to.not.include('ASO Link');
-      expect(message).to.include(`https://experience.adobe.com/#/@aem-sites-engineering/custom-apps/24749-EssDeveloperUI/#/sites/${TEST_SITE_ID}`);
+      expect(message).to.include(`https://experience-stage.adobe.com/#/@aem-sites-engineering/custom-apps/24749-EssDeveloperUI/#/sites/${TEST_SITE_ID}`);
     });
 
     it('posts notification with botBlocker type but no ipsToAllowlist', async () => {
@@ -287,7 +287,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(message).to.include(TEST_ORG_ID);
       expect(message).to.include(TEST_SITE_ID);
       expect(message).to.include(`https://experience.adobe.com/?organizationId=${TEST_ORG_ID}#/sites-optimizer/sites/${TEST_SITE_ID}`);
-      expect(message).to.include(`https://experience.adobe.com/#/@aem-sites-engineering/custom-apps/24749-EssDeveloperUI/#/sites/${TEST_SITE_ID}`);
+      expect(message).to.include(`https://experience-stage.adobe.com/#/@aem-sites-engineering/custom-apps/24749-EssDeveloperUI/#/sites/${TEST_SITE_ID}`);
     });
 
     it('uses custom EXPERIENCE_URL for ASO link when provided', async () => {
@@ -307,6 +307,25 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(message).to.include(`https://experience-stage.adobe.com/?organizationId=${TEST_ORG_ID}#/sites-optimizer/sites/${TEST_SITE_ID}`);
       expect(message).to.include(`https://experience-stage.adobe.com/#/@aem-sites-engineering/custom-apps/24749-EssDeveloperUI/#/sites/${TEST_SITE_ID}`);
       expect(message).to.not.include('https://experience.adobe.com/');
+    });
+
+    it('uses prod backoffice link when AWS_ENV is prod', async () => {
+      const onboarding = createMockOnboarding({
+        status: 'ONBOARDED',
+        organizationId: TEST_ORG_ID,
+        siteId: TEST_SITE_ID,
+      });
+
+      const ctx = buildSlackContext(onboarding);
+      ctx.env = { ...ctx.env, AWS_ENV: 'prod' };
+
+      await SlackControllerFactory({ log: mockLog }).onboard(ctx);
+
+      expect(postSlackMessageStub).to.have.been.called;
+      const [, message] = postSlackMessageStub.firstCall.args;
+      expect(message).to.include(`https://experience.adobe.com/#/@sitesinternal/custom-apps/245265-EssDeveloperUI/#/sites/${TEST_SITE_ID}`);
+      expect(message).to.not.include('aem-sites-engineering');
+      expect(message).to.not.include('24749-EssDeveloperUI');
     });
 
     it('posts notification with fast onboarded note via fast path (PRE_ONBOARDING + siteId)', async () => {

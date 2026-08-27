@@ -100,6 +100,9 @@ describe('Site Enrollment Controller', () => {
     const mockAccessControlUtilInstance = {
       hasAccess: sandbox.stub().resolves(true),
       hasAdminAccess: sandbox.stub().returns(true),
+      // Default: not an S2S consumer. Admin tests take the admin-bypass branch (this
+      // stub is never consulted); non-admin tests fall through to this denial.
+      hasS2SCapability: sandbox.stub().resolves({ allowed: false }),
     };
 
     // Stub AccessControlUtil.fromContext to return our mock instance
@@ -318,7 +321,7 @@ describe('Site Enrollment Controller', () => {
 
     const makeContext = () => ({
       params: { siteId },
-      log: { error: sandbox.stub() },
+      log: { info: sandbox.stub(), error: sandbox.stub() },
     });
 
     beforeEach(() => {
@@ -335,14 +338,52 @@ describe('Site Enrollment Controller', () => {
         .resolves(mockAsoEntitlement);
     });
 
-    it('returns 403 when caller is not admin', async () => {
+    it('returns 403 when caller is not admin and not an S2S consumer', async () => {
       AccessControlUtil.fromContext.returns({
         hasAccess: sandbox.stub().resolves(true),
         hasAdminAccess: sandbox.stub().returns(false),
+        hasS2SCapability: sandbox.stub().resolves({ allowed: false }),
       });
       const ctrl = SiteEnrollmentController({ dataAccess: mockDataAccess, attributes: {} });
       const result = await ctrl.createPlgEnrollment(makeContext());
       expect(result.status).to.equal(403);
+    });
+
+    it('grants an S2S consumer holding entitlement:create and audit-logs it (Layer 2)', async () => {
+      const hasS2SCapability = sandbox.stub().resolves({
+        allowed: true, reason: 'granted', clientId: 'svc-ent', consumerId: 'consumer-ent-1',
+      });
+      AccessControlUtil.fromContext.returns({
+        hasAccess: sandbox.stub().resolves(true),
+        hasAdminAccess: sandbox.stub().returns(false),
+        hasS2SCapability,
+      });
+      const ctrl = SiteEnrollmentController({ dataAccess: mockDataAccess, attributes: {} });
+
+      const context = makeContext();
+      const result = await ctrl.createPlgEnrollment(context);
+
+      expect(result.status).to.equal(201);
+      expect(hasS2SCapability).to.have.been.calledOnceWith('entitlement:create');
+      expect(context.log.info).to.have.been.calledWithMatch(
+        '[s2s] entitlement:create granted clientId=svc-ent consumerId=consumer-ent-1 reason=granted',
+      );
+    });
+
+    it('denies an S2S consumer lacking entitlement:create (Layer 2)', async () => {
+      AccessControlUtil.fromContext.returns({
+        hasAccess: sandbox.stub().resolves(true),
+        hasAdminAccess: sandbox.stub().returns(false),
+        hasS2SCapability: sandbox.stub().resolves({ allowed: false }),
+      });
+      const ctrl = SiteEnrollmentController({ dataAccess: mockDataAccess, attributes: {} });
+
+      const result = await ctrl.createPlgEnrollment(makeContext());
+
+      expect(result.status).to.equal(403);
+      const body = await result.json();
+      expect(body.message).to.equal('Insufficient permissions to create site enrollments');
+      expect(TierClient.createForSite).to.not.have.been.called;
     });
 
     it('returns 400 for invalid site ID', async () => {

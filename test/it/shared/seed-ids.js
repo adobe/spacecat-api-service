@@ -47,6 +47,57 @@ export const MARKET_SITE_1_BASE_URL = 'https://semrush-market.example.fr';
 
 export const BRAND_1_ID = 'ab111111-1111-4111-b111-111111111111'; // ORG_1, "Test Brand"
 
+// ── Brand Presence (topic-prompts intent enrichment) ──
+// A prompt row carrying an `intent`, plus a brand_presence_executions row that
+// references it, so the topic-prompts endpoint can be asserted to enrich
+// `userIntent` from the prompts table. See seed-data/prompts.js +
+// seed-data/brand-presence-executions.js.
+export const BP_PROMPT_1_ID = 'b9111111-1111-4111-b111-111111111111';
+export const BP_EXECUTION_1_ID = 'be111111-1111-4111-b111-111111111111';
+export const BP_TOPIC_1_NAME = 'IntentITTopic';
+export const BP_PROMPT_1_INTENT = 'informational';
+
+// Serenity Semrush vendor-mock seed alignment. BRAND_1 is in subworkspace mode
+// (brands.semrush_workspace_id set); pointing it at the workspace the Project
+// Engine / User Manager mocks seed (`MOCK_SEED=workspace-with-data` /
+// `parent-with-child`) lets the brand-level read endpoints return live seeded
+// data instead of only 404ing. The mock seeds one project under this workspace
+// with a model (gpt-4o), a prompt, and a benchmark/market.
+export const SERENITY_MOCK_WORKSPACE_ID = 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d';
+export const SERENITY_MOCK_PROJECT_ID = 'b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e';
+
+// Org-level parent workspace for ORG_1, so a subworkspace brand resolves a non-null
+// `parentWorkspaceId` — required on the sub-workspace create/bind path by
+// `ensureSubworkspace`/`assertNotParent` (the positional parent that outlived the allocator
+// removal, SITES-49206).
+//
+// DELIBERATELY ALIASES SERENITY_MOCK_PROJECT_ID (not a coincidence, not a new id) — the UM mock's
+// `createSubworkspace` handler 403s on any id that isn't a
+// pre-registered `workspace` entity, and the loaded boot seed (`parent-with-child`) has exactly
+// TWO: the one already claimed by SERENITY_MOCK_WORKSPACE_ID (BRAND_1's own sub-workspace — can't
+// double as its own org parent) and this one. A genuinely third, distinct workspace would need
+// either reseeding the mock's whole store (`__seed` replaces the RESET BASELINE store-wide — too
+// broad a blast radius to risk for this) or the mock's internal seed-construction factories, which
+// aren't available here: the `mock/*` subpath is an in-monorepo-only export (`files: ["src"]` in
+// the package's `package.json`), so api-service, an external npm consumer, can't reach it.
+// Referencing the SAME export (not a copy-pasted literal) keeps this a single source of truth
+// instead of a silent, unexplained coincidence — its role as a PE-mock project id elsewhere is
+// irrelevant to its use here as a pre-registered UM workspace entity.
+export const SERENITY_ORG_PARENT_WS_ID = SERENITY_MOCK_PROJECT_ID;
+
+// ── Enterprise (non-trial) org member ──
+// A plain ORG_1 member with no TrialUser row — the population the prompt-library
+// authorship columns resolve. Its identifiers mirror a real spacecat session JWT:
+// the id is an IMS GUID that appears as BOTH `sub` and `email` (the auth service
+// puts the user id, not the address, in `email`), while the real address is carried
+// only by `preferred_username` / `trial_email`. Deliberately NOT seeded into
+// trial-users.js — a TrialUser row would resolve it via the trial branch and the
+// self-resolution path under test would never be reached.
+export const ENTERPRISE_USER_ID = 'C0FFEE0011223344AABBCCDD@1122334455667788990011.e';
+export const ENTERPRISE_USER_EMAIL = 'enterprise-member@example.com';
+export const ENTERPRISE_USER_FIRST_NAME = 'Enterprise';
+export const ENTERPRISE_USER_LAST_NAME = 'Member';
+
 // ── FACS state-layer managers (hybrid-model §8.3) ──
 // The brandManager persona holds state-layer `llmo/can_manage_users` on
 // MANAGED_BRAND_ID only (seeded in facs-access-mappings.js). It has an EMPTY
@@ -75,6 +126,7 @@ export const AUDIT_4_AUDITED_AT = '2025-01-17T10:00:00.000Z'; // SITE_3 cwv (den
 export const OPPTY_1_ID = 'aa111111-1111-4111-b111-111111111111'; // SITE_1, code-suggestions, NEW
 export const OPPTY_2_ID = 'aa222222-2222-4222-a222-222222222222'; // SITE_1, broken-backlinks, RESOLVED
 export const OPPTY_3_ID = 'aa333333-3333-4333-b333-333333333333'; // SITE_3 (denied), code-suggestions, NEW
+export const OPPTY_4_ID = 'aa444444-4444-4444-a444-444444444444'; // SITE_1, structured-data, IN_PROGRESS — second oppty with a fix, for site-wide aggregation
 
 // ── Suggestions (all under OPPTY_1) ──
 
@@ -89,6 +141,7 @@ export const FIX_1_EXECUTED_AT = '2025-01-20T12:00:00.000Z'; // deterministic da
 export const FIX_1_CREATED_DATE = '2025-01-20'; // fixEntityCreatedDate derived from executedAt
 export const FIX_2_ID = 'cc222222-2222-4222-a222-222222222222'; // CODE_CHANGE, DEPLOYED
 export const FIX_3_ID = 'cc333333-3333-4333-b333-333333333333'; // CODE_CHANGE, DEPLOYED — no junction entry
+export const FIX_4_ID = 'cc444444-4444-4444-a444-444444444444'; // under OPPTY_4, CODE_CHANGE, FAILED
 
 // ── Experiments (under SITE_1) ──
 
@@ -151,8 +204,10 @@ export const CONSUMER_1_CLIENT_ID = '111111111111111111111111';
 export const CONSUMER_1_TECHNICAL_ACCOUNT_ID = '111111111111111111111111@techacct.adobe.com';
 export const CONSUMER_1_IMS_ORG_ID = ORG_1_IMS_ORG_ID;
 
-// CONSUMER_2 — ACTIVE S2S consumer holding site:readAll + organization:readAll.
-// Used to exercise the readAll capability path through GET /sites and /organizations.
+// CONSUMER_2 — ACTIVE S2S consumer holding site:readAll + organization:readAll +
+// trialUser:read + entitlement:create. Used to exercise the readAll capability path
+// through GET /sites and /organizations, and the entitlement:create grant path through
+// the entitlement/site-enrollment POST routes (SITES-50526).
 export const CONSUMER_2_ID = '11111111-1111-4111-b112-222222222222';
 export const CONSUMER_2_CLIENT_ID = '222222222222222222222222';
 export const CONSUMER_2_TECHNICAL_ACCOUNT_ID = '222222222222222222222222@techacct.adobe.com';
@@ -189,6 +244,15 @@ export const ORG_3_IMS_ORG_IDENT = 'GGGGGGGGHHHHHHHHIIIIIIII';
 export const SITE_4_ID = '44400000-4444-4444-b444-000000000444';
 export const SITE_4_BASE_URL = 'https://site4-delegate.example.com';
 
+// ── Activate-brand IT fixtures (ORG_3, PAID) ──
+// Two pending brands for the promote-path IT (test/it/shared/tests/
+// activate-brand-for-org.js), both tied to the existing ORG_3 site SITE_4 (reused
+// so the fixtures don't change the global site counts other ITs assert on): one
+// anchored brand that promotes to active, and one unanchored brand that resolves
+// to SITE_4 and hits the brands_base_site_unique 409.
+export const ACTIVATE_PENDING_BRAND_ID = 'ac000000-b000-4000-8000-000000000001';
+export const ACTIVATE_CONFLICT_BRAND_ID = 'ac000000-b000-4000-8000-000000000002';
+
 // ── ENTITLEMENT_3 (LLMO, PAID, ORG_3) ──
 
 export const ENTITLEMENT_3_ID = 'dd333333-3333-4333-b333-333333333333';
@@ -214,6 +278,7 @@ export const TRIAL_USER_2_EMAIL = 'test-delegate@example.com'; // matches delega
 
 export const NON_EXISTENT_ORG_ID = '99999999-9999-4999-b999-999999999999';
 export const NON_EXISTENT_SITE_ID = '88888888-8888-4888-a888-888888888888';
+export const NON_EXISTENT_BRAND_ID = 'ab999999-9999-4999-b999-999999999999';
 
 // ── LLMO onboarding mode resolution — dedicated test org/sites ──
 // TEMPORARY: remove with the legacy-customer check in resolveLlmoOnboardingMode
@@ -241,3 +306,15 @@ export const NON_EXISTENT_PROJECT_ID = 'ff999999-9999-4999-a999-999999999999';
 export const NON_EXISTENT_TOPIC_ID = 'a9999999-9999-4999-b999-999999999999';
 export const NON_EXISTENT_GUIDELINE_ID = 'b9999999-9999-4999-b999-999999999999';
 export const NON_EXISTENT_CONSUMER_ID = '99999999-9999-4999-b999-999999999998';
+
+// ── Task Management ──
+
+export const CONN_1_ID = 'ac111111-1111-4111-b111-111111111111'; // ORG_1, jira_cloud, active
+export const CONN_2_ID = 'ac222222-2222-4222-a222-222222222222'; // ORG_2, jira_cloud, active
+export const TICKET_1_ID = 'ad111111-1111-4111-b111-111111111111'; // ORG_1, linked to TASK_MGMT_SUGGESTION_ID
+export const TICKET_2_ID = 'ad222222-2222-4222-a222-222222222222'; // ORG_1, no suggestion link
+export const TICKET_SUGG_1_ID = 'ae111111-1111-4111-b111-111111111111'; // bridge: TICKET_1 ↔ TASK_MGMT_SUGGESTION_ID
+export const NON_EXISTENT_CONN_ID = 'ac999999-9999-4999-b999-999999999999';
+export const NON_EXISTENT_TICKET_ID = 'ad999999-9999-4999-b999-999999999999';
+// Logical suggestion ID — no FK (suggestions live in DynamoDB)
+export const TASK_MGMT_SUGGESTION_ID = 'af111111-1111-4111-b111-111111111111';

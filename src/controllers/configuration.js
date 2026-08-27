@@ -159,6 +159,60 @@ function ConfigurationController(ctx) {
     }
   };
 
+  /**
+   * Lists configuration versions (S3 object-version history), newest first.
+   * Removes the need for direct S3/AWS access to discover the VersionIds used by
+   * `GET /configurations/:version`, `POST /configurations/:version/restore`, and
+   * offline exports.
+   * @param {UniversalContext} context - Context of the request.
+   * @return {Promise<Response>} Paginated list of configuration versions.
+   */
+  const listVersions = async (context) => {
+    const denied = await authorizeConfigRead(context, 'GET /configurations/versions');
+    if (denied) {
+      return denied;
+    }
+
+    let searchParams;
+    try {
+      searchParams = new URL(context.request.url).searchParams;
+    } catch {
+      searchParams = new URLSearchParams();
+    }
+
+    const rawLimit = searchParams.get('limit');
+    const parsedLimit = Number.parseInt(rawLimit, 10);
+    // Default 25 (matches the OpenAPI contract), clamped to [1, 100].
+    const limit = Number.isInteger(parsedLimit)
+      ? Math.min(Math.max(parsedLimit, 1), 100)
+      : 25;
+
+    const keyMarker = searchParams.get('keyMarker') || undefined;
+    const versionIdMarker = searchParams.get('versionIdMarker') || undefined;
+
+    // Defense-in-depth: reject absurdly long pagination markers (endpoint is
+    // admin-gated, but the markers are opaque pass-throughs to S3).
+    const MAX_MARKER_LENGTH = 1024;
+    if ((keyMarker && keyMarker.length > MAX_MARKER_LENGTH)
+      || (versionIdMarker && versionIdMarker.length > MAX_MARKER_LENGTH)) {
+      return badRequest('keyMarker/versionIdMarker exceeds maximum length');
+    }
+
+    // Enrichment (updatedBy/updatedAt) is on by default; opt out with detail=false.
+    const detail = searchParams.get('detail') !== 'false';
+
+    // Conditional spread so we never hand an explicit `undefined` marker key to
+    // the data-access layer (keeps parity with a possible `'key' in opts` check).
+    const page = await Configuration.listVersions({
+      limit,
+      ...(keyMarker !== undefined ? { keyMarker } : {}),
+      ...(versionIdMarker !== undefined ? { versionIdMarker } : {}),
+      detail,
+    });
+
+    return ok(ConfigurationDto.versionsToJSON(page));
+  };
+
   const registerAudit = async (context) => {
     const denied = await authorizeConfigWrite(context, 'POST /configurations/audits', 'Only admins can register audits');
     if (denied) {
@@ -318,6 +372,90 @@ function ConfigurationController(ctx) {
   };
 
   /**
+   * Replaces enabled/disabled lists for a handler.
+   * This is a temporary API that replaces (not merges) the provided arrays.
+   *
+   * TEMPORARY API: This endpoint was created to clean up enabled and disabled lists
+   * by removing unnecessary site IDs. Unlike the existing updateHandler endpoint
+   * which merges arrays, this endpoint completely replaces the specified arrays.
+   * This API will be removed once the cleanup task is completed.
+   *
+   * @param {UniversalContext} context - Context of the request.
+   * @return {Promise<Response>} Updated configuration response.
+   */
+  const replaceHandlerEnabledDisabled = async (context) => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can update handler configuration');
+    }
+
+    const { handlerType } = context.params;
+    const { data } = context;
+
+    if (!hasText(handlerType)) {
+      return badRequest('Handler type is required');
+    }
+
+    if (!isNonEmptyObject(data)) {
+      return badRequest('Request body is required and cannot be empty');
+    }
+
+    // Validate that at least one of enabled or disabled is provided
+    const hasEnabled = data.enabled !== undefined;
+    const hasDisabled = data.disabled !== undefined;
+
+    if (!hasEnabled && !hasDisabled) {
+      return badRequest('At least one of enabled or disabled must be provided');
+    }
+
+    // Validate that at least one array is provided within enabled/disabled
+    // (empty arrays are allowed)
+    if (hasEnabled) {
+      const hasEnabledSites = data.enabled.sites !== undefined;
+      const hasEnabledOrgs = data.enabled.orgs !== undefined;
+      if (!hasEnabledSites && !hasEnabledOrgs) {
+        return badRequest('At least one of enabled.sites or enabled.orgs must be provided');
+      }
+      // Validate that if provided, they must be arrays
+      if (hasEnabledSites && !Array.isArray(data.enabled.sites)) {
+        return badRequest('enabled.sites must be an array');
+      }
+      if (hasEnabledOrgs && !Array.isArray(data.enabled.orgs)) {
+        return badRequest('enabled.orgs must be an array');
+      }
+    }
+
+    if (hasDisabled) {
+      const hasDisabledSites = data.disabled.sites !== undefined;
+      const hasDisabledOrgs = data.disabled.orgs !== undefined;
+      if (!hasDisabledSites && !hasDisabledOrgs) {
+        return badRequest('At least one of disabled.sites or disabled.orgs must be provided');
+      }
+      // Validate that if provided, they must be arrays
+      if (hasDisabledSites && !Array.isArray(data.disabled.sites)) {
+        return badRequest('disabled.sites must be an array');
+      }
+      if (hasDisabledOrgs && !Array.isArray(data.disabled.orgs)) {
+        return badRequest('disabled.orgs must be an array');
+      }
+    }
+
+    try {
+      const configuration = await Configuration.findLatest();
+      if (!configuration) {
+        return notFound('Configuration not found');
+      }
+
+      configuration.replaceHandlerEnabledDisabled(handlerType, data);
+      setUpdatedBy(configuration, context);
+      await configuration.save();
+
+      return ok(ConfigurationDto.toJSON(configuration));
+    } catch (error) {
+      return badRequest(error.message);
+    }
+  };
+
+  /**
    * Updates the entire configuration or specific sections.
    * Allows updating handlers, jobs, and/or queues in a single request.
    * @param {UniversalContext} context - Context of the request.
@@ -425,11 +563,13 @@ function ConfigurationController(ctx) {
   return {
     getByVersion,
     getLatest,
+    listVersions,
     registerAudit,
     unregisterAudit,
     updateQueues,
     updateJob,
     updateHandler,
+    replaceHandlerEnabledDisabled,
     updateConfiguration,
     restoreVersion,
   };

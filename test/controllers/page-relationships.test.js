@@ -377,6 +377,78 @@ describe('Page Relationships Controller', () => {
       expect(body.relationships['row-abs'].pageId).to.equal('pg-123');
     });
 
+    it('uses a caller-supplied x-promise-token header and skips minting via IMS', async () => {
+      // SITES-47960 — the ASO UI now sends a session JWT in Authorization (not an
+      // IMS bearer) and forwards the promise token it fetched in x-promise-token.
+      // The controller must consume that token directly (bypassing getIMSPromiseToken,
+      // which would 401 on the JWT) and exchange it for the IMS access token.
+      isAEMAuthoredSiteStub.returns(true);
+      requestContext.pathInfo.headers = {
+        authorization: 'Bearer session-jwt',
+        'x-promise-token': 'caller-promise-token',
+      };
+      resolvePageIdsStub.resolves([{ url: '/us/en/page1', pageId: 'pg-1' }]);
+      fetchRelationshipsStub.callsFake(async (authorURL, items) => ({
+        results: {
+          [items[0].key]: { pageId: items[0].pageId, upstream: { chain: [] } },
+        },
+        errors: {},
+      }));
+
+      const controller = PageRelationshipsController(controllerContext);
+      const response = await controller.search(requestContext);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(getIMSPromiseTokenStub).to.not.have.been.called;
+      expect(exchangePromiseTokenStub).to.have.been.calledOnceWithExactly(requestContext, 'caller-promise-token');
+      expect(resolvePageIdsStub.firstCall.args[3]).to.equal('test-ims-token');
+      expect(body.relationships).to.have.property('row-1');
+    });
+
+    it('falls back to minting an IMS promise token when no x-promise-token header is present', async () => {
+      // Backward compatibility: IMS-authenticated callers that do not supply a
+      // promise token still work via the getIMSPromiseToken fallback.
+      isAEMAuthoredSiteStub.returns(true);
+      resolvePageIdsStub.resolves([{ url: '/us/en/page1', pageId: 'pg-1' }]);
+      fetchRelationshipsStub.callsFake(async (authorURL, items) => ({
+        results: {
+          [items[0].key]: { pageId: items[0].pageId, upstream: { chain: [] } },
+        },
+        errors: {},
+      }));
+
+      const controller = PageRelationshipsController(controllerContext);
+      const response = await controller.search(requestContext);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(getIMSPromiseTokenStub).to.have.been.calledOnceWithExactly(requestContext);
+      expect(exchangePromiseTokenStub).to.have.been.calledOnceWithExactly(requestContext, 'test-promise-token');
+      expect(body.relationships).to.have.property('row-1');
+    });
+
+    it('returns 401 when the IMS token exchange fails for a caller-supplied promise token', async () => {
+      // SITES-47960 — a rejected/expired promise token must surface the exchange
+      // status (401), not crash. Mirrors the previous 401 path (test above) but
+      // driven through the x-promise-token branch.
+      isAEMAuthoredSiteStub.returns(true);
+      requestContext.pathInfo.headers = {
+        authorization: 'Bearer session-jwt',
+        'x-promise-token': 'expired-promise-token',
+      };
+      exchangePromiseTokenStub.rejects(new ErrorWithStatusCode('IMS getPromiseToken request failed with status: 401', 401));
+
+      const controller = PageRelationshipsController(controllerContext);
+      const response = await controller.search(requestContext);
+      const body = await response.json();
+
+      expect(response.status).to.equal(401);
+      expect(body.message).to.equal('IMS getPromiseToken request failed with status: 401');
+      expect(getIMSPromiseTokenStub).to.not.have.been.called;
+      expect(resolvePageIdsStub).to.not.have.been.called;
+    });
+
     it('maps upstream relationship payload to sourceType and minimal chain shape', async () => {
       isAEMAuthoredSiteStub.returns(true);
       requestContext.data = {

@@ -23,10 +23,10 @@ import {
   authWrapper,
   enrichPathInfo,
   ScopedApiKeyHandler,
-  AdobeImsHandler,
   JwtHandler,
   s2sAuthWrapper,
   readOnlyAdminWrapper,
+  facsWrapper,
 } from '@adobe/spacecat-shared-http-utils';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import AbstractHandler from '@adobe/spacecat-shared-http-utils/src/auth/handlers/abstract.js';
@@ -37,6 +37,7 @@ import {
 } from '@adobe/spacecat-shared-slack-client';
 import { hasText, isValidUUID, logWrapper } from '@adobe/spacecat-shared-utils';
 import { traceIdResponseWrapper } from './support/trace-id-response-wrapper.js';
+import { ensureFetchResponseWrapper } from './support/ensure-fetch-response-wrapper.js';
 
 import dataAccess from './support/data-access.js';
 import sqs from './support/sqs.js';
@@ -44,6 +45,7 @@ import getRouteHandlers from './routes/index.js';
 import matchPath, { sanitizePath } from './utils/route-utils.js';
 
 import AuditsController from './controllers/audits.js';
+import TaskManagementController from './controllers/task-management.js';
 import OrganizationsController from './controllers/organizations.js';
 import ProjectsController from './controllers/project.js';
 import SitesController from './controllers/sites.js';
@@ -78,8 +80,11 @@ import ScrapeJobController from './controllers/scrapeJob.js';
 import ReportsController from './controllers/reports.js';
 import LlmoController from './controllers/llmo/llmo.js';
 import LlmoCloudflareController from './controllers/llmo/llmo-cloudflare.js';
+import LlmoCloudFrontController from './controllers/llmo/llmo-cloudfront.js';
+import LlmoAkamaiController from './controllers/llmo/llmo-akamai.js';
 import LlmoMysticatController from './controllers/llmo/llmo-mysticat-controller.js';
 import LlmoOpportunitiesController from './controllers/llmo/opportunities/llmo-opportunities-controller.js';
+import PromptSuggestionSchedulesController from './controllers/llmo/prompt-suggestion-schedules.js';
 import FanoutReportController from './controllers/llmo/fanout-report.js';
 import UserActivitiesController from './controllers/user-activities.js';
 import SiteEnrollmentsController from './controllers/site-enrollments.js';
@@ -100,6 +105,9 @@ import FeatureFlagsController from './controllers/feature-flags.js';
 import AutofixChecksController from './controllers/autofix-checks.js';
 import DrsBpPgAuditController from './controllers/drs-bp-pg-audit.js';
 import routeRequiredCapabilities, { INTERNAL_ROUTES } from './routes/required-capabilities.js';
+import routeFacsCapabilities from './routes/facs-capabilities.js';
+import { secondaryResolvers } from './support/facs-secondary-resolvers.js';
+import { compositeResolvers } from './support/facs-composite-resolvers.js';
 import ContactSalesLeadsController from './controllers/contact-sales-leads.js';
 import PageRelationshipsController from './controllers/page-relationships.js';
 import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
@@ -108,8 +116,11 @@ import AiVisibilityController from './controllers/ai-visibility.js';
 import StateAccessMappingsController from './controllers/state-access-mappings.js';
 import AgenticCategoriesController from './controllers/agentic-categories.js';
 import AgenticPageTypesController from './controllers/agentic-page-types.js';
+import AuditPolicyController from './controllers/audit-policy.js';
 import SerenityController from './controllers/serenity.js';
+import ElementsController from './controllers/elements.js';
 import ProxyController from './controllers/proxy.js';
+import OnboardingController from './controllers/onboarding.js';
 import GitHubWebhookHmacHandler from './support/github-webhook-hmac-handler.js';
 import AsoOverlayKeyHandler from './support/aso-overlay-key-handler.js';
 import ApiKeyImsHandler from './support/api-key-ims-handler.js';
@@ -154,7 +165,7 @@ function localCORSWrapper(fn) {
       response.headers.set(
         'Access-Control-Allow-Headers',
         'Content-Type, Authorization, x-api-key, x-ims-org-id, x-client-type, x-import-api-key, '
-        + 'x-trigger-audits, x-requested-with, origin, accept, x-view-as-trial, x-product, x-promise-token',
+        + 'x-trigger-audits, x-requested-with, origin, accept, x-view-as-trial, x-view-full-experience, x-product, x-promise-token, x-promise-audience',
       );
       response.headers.set('Access-Control-Max-Age', '86400');
     }
@@ -217,7 +228,7 @@ async function run(request, context) {
   if (method === 'OPTIONS') {
     return noContent({
       'access-control-allow-methods': 'GET, HEAD, PATCH, POST, OPTIONS, DELETE',
-      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key, x-client-type, x-trigger-audits, x-view-as-trial, x-promise-token',
+      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key, x-client-type, x-trigger-audits, x-view-as-trial, x-view-full-experience, x-promise-token, x-promise-audience',
       'access-control-max-age': '86400',
       'access-control-allow-origin': '*',
     });
@@ -255,6 +266,8 @@ async function run(request, context) {
     const reportsController = ReportsController(context, log, context.env);
     const llmoController = LlmoController(context);
     const llmoCloudflareController = LlmoCloudflareController(context);
+    const llmoCloudFrontController = LlmoCloudFrontController(context);
+    const llmoAkamaiController = LlmoAkamaiController(context);
     const llmoMysticatController = LlmoMysticatController(context);
     const llmoOpportunitiesController = LlmoOpportunitiesController(context);
     const fanoutReportController = FanoutReportController(context);
@@ -285,8 +298,13 @@ async function run(request, context) {
     const stateAccessMappingsController = StateAccessMappingsController(context);
     const agenticCategoriesController = AgenticCategoriesController();
     const agenticPageTypesController = AgenticPageTypesController();
+    const auditPolicyController = AuditPolicyController();
     const serenityController = SerenityController(context, log, context.env);
+    const elementsController = ElementsController(context, log, context.env);
     const proxyController = ProxyController();
+    const taskManagementController = TaskManagementController(context);
+    const onboardingController = OnboardingController(context, log, context.env);
+    const promptSuggestionSchedulesController = PromptSuggestionSchedulesController(context);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -316,6 +334,8 @@ async function run(request, context) {
       fixesController,
       llmoController,
       llmoCloudflareController,
+      llmoCloudFrontController,
+      llmoAkamaiController,
       llmoMysticatController,
       llmoOpportunitiesController,
       userActivitiesController,
@@ -348,8 +368,13 @@ async function run(request, context) {
       agenticCategoriesController,
       agenticPageTypesController,
       serenityController,
+      elementsController,
       proxyController,
+      taskManagementController,
+      onboardingController,
       redirectsController,
+      auditPolicyController,
+      promptSuggestionSchedulesController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
@@ -382,8 +407,8 @@ async function run(request, context) {
       if (params.jobId && !isValidUUIDAnyVersion(params.jobId)) {
         return badRequest('Job Id is invalid. Please provide a valid UUID.');
       }
-      if (params.preflightId && !isValidUUID(params.preflightId)) {
-        return badRequest('Preflight Id is invalid. Please provide a valid UUID.');
+      if (params.connectionId && !isValidUUIDAnyVersion(params.connectionId)) {
+        return badRequest('Connection Id is invalid. Please provide a valid UUID.');
       }
       context.params = params;
       context.request = request;
@@ -408,13 +433,16 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 // 3. readOnlyAdminWrapper — enforces read-only access for read-only admin tokens (see
 //    adobe/spacecat-shared#1469); routes not present in routeCapabilities default to deny
 //    (fail-closed), so unmapped routes are blocked for read-only admins
+// 4. facsWrapper — innermost (runs last, just before the route handler): enforces the
+//    hybrid MAC/FACS permission model (JWT facs_permissions ∪ state-layer grants) for
+//    FACS-governed external callers; internal identities and non-enrolled orgs bypass
 //
 // authHandlers order contract:
 //  - SkipAuthHandler first: local-dev escape hatch (no-op in Lambda).
 //  - GitHubWebhookHmacHandler next: path-scoped to /webhooks/* and returns null
 //    for any other path, so non-webhook requests fall through cheaply. Must run
 //    BEFORE path-agnostic handlers so a webhook request does not reach JwtHandler
-//    / AdobeImsHandler and fail with a misleading 401 on a missing JWT.
+//    and fail with a misleading 401 on a missing JWT.
 //  - AsoOverlayKeyHandler: path-scoped to GET /config/.../redirects.txt; validates
 //    the inbound X-ASO-API-Key (the ASO dispatcher-overlay read path). Returns null
 //    for any other route. Same early-bail rationale as the webhook handler. Interim
@@ -422,13 +450,15 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 //  - JwtHandler: tried first for token-bearing requests (JWT path is the target
 //    end-state for all consumers). S2S consumers use s2sAuthWrapper; all new
 //    service integrations must onboard via S2S (SITES-34224).
-//  - ApiKeyImsHandler: route-scoped IMS handler (/tools/api-keys/*) for IaaS-only
-//    orgs that cannot acquire a JWT session token. Returns null for other paths,
-//    falling through to AdobeImsHandler. Once Auto-Fix (ASO-607) migrates and
-//    AdobeImsHandler is removed, this scoped handler keeps IaaS key management
-//    working without re-introducing a global IMS auth backdoor.
-//  - AdobeImsHandler: legacy global IMS path; kept for routes still on IMS auth
-//    (e.g. Auto-Fix). To be removed once all consumers are JWT-migrated.
+//  - ApiKeyImsHandler: the ONLY remaining IMS auth surface. Route-scoped to
+//    /tools/api-keys/* for IaaS-only orgs that cannot acquire a JWT session
+//    token (their org may carry neither ASO nor LLMO product context, both of
+//    which /auth/login requires). Returns null for every other path. The global
+//    AdobeImsHandler that formerly backed direct `Authorization: Bearer <IMS
+//    token>` on all routes has been removed — all consumers migrated to JWT
+//    session tokens (see the SpaceCat Authentication wiki / IMS-removal
+//    announcement). Keeping this scoped handler does not re-introduce a global
+//    IMS backdoor; it stays until IaaS callers move to JWT (ASO-607).
 //  - ScopedApiKeyHandler: scoped API-key auth for Import-as-a-Service.
 //  - RouteScopedLegacyApiKeyHandler: the only remaining legacy-key surface. Owns
 //    exactly two routes whose external callers cannot be onboarded as IMS S2S
@@ -445,12 +475,17 @@ const AUTH_HANDLERS = [
   AsoOverlayKeyHandler,
   JwtHandler,
   ApiKeyImsHandler,
-  AdobeImsHandler,
   ScopedApiKeyHandler,
   RouteScopedLegacyApiKeyHandler,
 ];
 
 const wrappedMain = wrap(run)
+  // Innermost: runs after auth wrappers have populated authInfo and after
+  // dataAccess/enrichPathInfo (applied on `main`), but before the route handler.
+  // Enforces the hybrid MAC/FACS model (JWT facs_permissions ∪ state-layer grants)
+  // for FACS-governed external callers; internal identities and non-enrolled orgs
+  // bypass. See routeFacsCapabilities for route → capability classification.
+  .with(facsWrapper, { routeFacsCapabilities, secondaryResolvers, compositeResolvers })
   .with(readOnlyAdminWrapper, {
     routeCapabilities: routeRequiredCapabilities,
     internalRoutes: INTERNAL_ROUTES,
@@ -472,4 +507,11 @@ export const main = wrappedMain
   .with(elevatedSlackClientWrapper, { slackTarget: WORKSPACE_EXTERNAL })
   .with(vaultSecrets)
   .with(compressResponse)
-  .with(helixStatus);
+  .with(helixStatus)
+  // OUTERMOST wrapper (runs LAST on the response path, just before helix-universal's
+  // AWS Lambda adapter serializes the response). Guarantees the response reaching
+  // `aws-adapter.js:254` — `splitHeaders(response.headers.raw(), ...)` — is an
+  // `@adobe/fetch` Response whose Headers has `.raw()`, not a native Web-Fetch-API
+  // Response whose Headers doesn't. See the wrapper's module-level docstring for
+  // the full backstory (SITES-48140 EMF-instrumentation bundling interaction).
+  .with(ensureFetchResponseWrapper);

@@ -12,7 +12,7 @@
 
 // @ts-check
 
-import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
+import { composeBaseURL, hasText, siteIdentityFromUrlString } from '@adobe/spacecat-shared-utils';
 import * as dataAccessModels from '@adobe/spacecat-shared-data-access';
 import { hostnameFromUrlString, isPublicHostname } from '../url-utils.js';
 
@@ -58,106 +58,78 @@ export const SERENITY_BRAND_SITE_TYPE = 'serenity';
  * already succeeded when this runs, so a site/link failure is logged and
  * swallowed (never thrown) rather than failing a market the user can see is live.
  *
+ * siteId fast path (LLMO-6405, Phase 2): when the caller already holds the
+ * SpaceCat Site identity for this market — because the market was created from
+ * an already-onboarded URL, so the client passed `siteId` — the domain →
+ * find-or-create resolution is skipped entirely and THAT site is linked
+ * directly. The same-org guard and the best-effort link write are preserved;
+ * only the domain normalization / SSRF / find-or-create steps are bypassed
+ * (the site already exists, so there is no base_url to validate here). When
+ * `siteId` is absent the behavior is byte-for-byte the domain path below.
+ *
  * @param {object} ctx - request context (ctx.dataAccess.Site + postgrestClient).
  * @param {object} [opts]
  * @param {string} [opts.organizationId] - the brand's organization UUID.
  * @param {string} [opts.brandId] - the brand UUID.
- * @param {string} [opts.domain] - the market/project domain or primary URL. Tolerates
+ * @param {string|null} [opts.domain] - the market/project domain or primary URL. Tolerates
  *   a bare hostname ("example.com") or a full URL ("https://example.com/x"); it is
  *   normalized to the hostname via hostnameFromUrlString (the single source of truth
  *   for brand -> Semrush project domain derivation) so all call sites resolve to the
- *   same base URL as the brand-create path.
+ *   same base URL as the brand-create path. Ignored when `siteId` is supplied.
+ * @param {string} [opts.siteId] - a known SpaceCat Site UUID to link directly
+ *   (skips the domain → Site find-or-create). Takes precedence over `domain`.
  * @param {string} [opts.updatedBy] - audit actor for the brand_sites row.
+ * @param {boolean} [opts.requireLink=true] - whether the `brand_sites` mirror
+ *   write must succeed for a non-null return. `true` (activate / brand-create):
+ *   the mirror is a REQUIRED step — a failed/absent mirror returns null (so the
+ *   caller can keep the brand pending). `false` (market-create, LLMO-6405): the
+ *   mirror is best-effort — return the resolved Site id even if the mirror write
+ *   didn't land, so the caller can still bind the market↔site on
+ *   `brand_to_semrush_projects` (the DTO's source of truth), which is independent
+ *   of the secondary raw-PostgREST mirror.
  * @param {object} [opts.log] - logger.
- * @returns {Promise<string|null>} the site id ONLY when the brand_sites link was
- *   established; null otherwise — bad input, data-access unavailable, cross-org,
- *   no postgrest client, or a failed link write (the site may exist in those
- *   cases, but a non-null return always means "linked").
+ * @returns {Promise<string|null>} the resolved market Site id, or null. With
+ *   `requireLink=true` a non-null return means the brand_sites link was
+ *   established; with `requireLink=false` it means the Site was ensured (found/
+ *   created) and belongs to the brand's org, regardless of the mirror write.
+ *   Always null on bad input, data-access unavailable, a cross-org site, or an
+ *   unresolvable domain.
  */
 export async function ensureMarketSite(ctx, {
   organizationId,
   brandId,
   domain,
+  siteId,
   updatedBy = 'serenity-market',
+  requireLink = true,
   log,
 } = {}) {
-  if (
-    !domain || !hasText(domain)
-    || !organizationId || !hasText(organizationId)
-    || !brandId || !hasText(brandId)
-  ) {
+  if (!organizationId || !hasText(organizationId) || !brandId || !hasText(brandId)) {
     return null;
   }
 
   const Site = ctx?.dataAccess?.Site;
   const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
-  if (!Site || typeof Site.findByBaseURL !== 'function') {
-    log?.warn?.('ensureMarketSite: Site data-access unavailable; skipping', { brandId, domain });
-    return null;
-  }
 
-  // Normalize to a bare hostname first: callers pass either a bare domain or a
-  // full URL, and composeBaseURL does not strip a path/scheme — so a URL with a
-  // path would resolve to the wrong base_url, miss the existing Site, and hit the
-  // global base_url uniqueness constraint on every retry. hostnameFromUrlString
-  // keeps this in lockstep with brandDomainFromPayload (the brand-create path).
-  const hostname = hostnameFromUrlString(domain);
-  if (!hostname || !hasText(hostname)) {
-    log?.warn?.('ensureMarketSite: domain did not resolve to a hostname; skipping', { brandId, domain });
-    return null;
-  }
-  // SSRF guard: a market domain becomes a Site base_url that downstream workers
-  // fetch, and Site.create only validates the scheme — so refuse internal/private
-  // hosts (localhost, loopback, link-local, RFC1918, *.internal, bare IPs) here,
-  // the single chokepoint shared by the brand-create / market-create / activate
-  // callers. Skip (return null) rather than throw — keeps the best-effort contract
-  // and, on the required activate path, leaves the brand pending (502) for a fix.
-  if (!isPublicHostname(hostname)) {
-    log?.warn?.('ensureMarketSite: domain is not a public hostname; refusing to mirror as a Site', { brandId, domain, hostname });
-    return null;
-  }
-  const baseURL = composeBaseURL(hostname);
-
-  try {
-    // Global base_url uniqueness means at most one Site per domain; findByBaseURL
-    // makes this idempotent across markets that happen to share a domain.
-    let site = await Site.findByBaseURL(baseURL);
-    if (!site) {
-      // OTHER delivery type: a Semrush-managed market site is not an AEM target.
-      site = await Site.create({
-        baseURL,
-        organizationId,
-        deliveryType: SiteModel.DELIVERY_TYPES.OTHER,
-      });
-    }
-    const siteId = site.getId();
-
-    // Only link a same-org site. A pre-existing site for this domain in another
-    // org cannot be duplicated (base_url is globally unique) and must not be
-    // cross-linked — this mirrors syncBrandSites, which matches sites by org.
-    if (site.getOrganizationId() !== organizationId) {
-      log?.warn?.('ensureMarketSite: existing site for domain belongs to another org; not linked', {
-        brandId, domain, siteId, siteOrg: site.getOrganizationId(), brandOrg: organizationId,
-      });
-      // Return null: the site exists but no brand_sites link was established, so a
-      // caller must not read this as a successful mirror.
-      return null;
-    }
-
+  // Shared brand_sites mirror write. Returns the linked site id on success, or
+  // null (no client / write error). Callers combine this with `requireLink` to
+  // decide the return (see the return sites below). Kept shared so the row shape
+  // and the 23514 alert-token handling stay identical across the siteId fast path
+  // and the domain path.
+  const writeBrandSiteLink = async (linkSiteId) => {
     if (!postgrestClient?.from) {
-      // Site ensured, but no client to write the brand_sites link → not linked.
+      // Site ensured/known, but no client to write the brand_sites link → not linked.
       log?.warn?.('ensureMarketSite: postgrest client unavailable; site ensured but not linked', {
-        brandId, siteId, domain,
+        brandId, siteId: linkSiteId, domain,
       });
       return null;
     }
-
     const { error } = await postgrestClient
       .from('brand_sites')
       .upsert({
         organization_id: organizationId,
         brand_id: brandId,
-        site_id: siteId,
+        site_id: linkSiteId,
         paths: ['/'],
         type: SERENITY_BRAND_SITE_TYPE,
         updated_by: updatedBy,
@@ -176,20 +148,315 @@ export async function ensureMarketSite(ctx, {
       // transient case.
       if (error.code === '23514') {
         log?.error?.('ensureMarketSite: SERENITY_MARKET_LINK_REJECTED — brand_sites link rejected by a CHECK constraint; is the brand_sites.type=serenity migration deployed in this env?', {
-          brandId, siteId, code: error.code, error: error.message,
+          brandId, siteId: linkSiteId, code: error.code, error: error.message,
         });
       } else {
         log?.warn?.('ensureMarketSite: brand_sites link upsert failed (non-fatal)', {
-          brandId, siteId, code: error.code, error: error.message,
+          brandId, siteId: linkSiteId, code: error.code, error: error.message,
         });
       }
       return null;
     }
-    return siteId;
+    return linkSiteId;
+  };
+
+  // ----- siteId fast path (LLMO-6405): link a known Site directly. -----
+  if (siteId && hasText(siteId)) {
+    if (!Site || typeof Site.findById !== 'function') {
+      log?.warn?.('ensureMarketSite: Site data-access unavailable; skipping', { brandId, siteId });
+      return null;
+    }
+    try {
+      const site = await Site.findById(siteId);
+      if (!site) {
+        log?.warn?.('ensureMarketSite: supplied siteId not found; skipping', { brandId, siteId });
+        return null;
+      }
+      // Same-org guard, identical to the domain path: never cross-link a Site
+      // that belongs to another org.
+      if (site.getOrganizationId() !== organizationId) {
+        log?.warn?.('ensureMarketSite: supplied site belongs to another org; not linked', {
+          brandId,
+          siteId,
+          siteOrg: site.getOrganizationId(),
+          brandOrg: organizationId,
+        });
+        return null;
+      }
+      const linked = await writeBrandSiteLink(site.getId());
+      // When requireLink is false (market-create, LLMO-6405), return the resolved
+      // site id EVEN IF the best-effort brand_sites mirror write didn't land — the
+      // caller binds the market↔site on brand_to_semrush_projects (the DTO's source
+      // of truth, via linkSiteToLiveRows on the data-access model), which must be
+      // recorded independent of the secondary raw-PostgREST mirror. When requireLink
+      // is true (activate / brand-create) the mirror is a required step, so a failed
+      // mirror still returns null (contract preserved).
+      return (linked || !requireLink) ? site.getId() : null;
+    } catch (e) {
+      log?.error?.('ensureMarketSite: failed to link supplied site (non-fatal)', {
+        brandId, siteId, error: e.message,
+      });
+      return null;
+    }
+  }
+
+  // ----- domain path (unchanged when siteId is absent). -----
+  if (!domain || !hasText(domain)) {
+    return null;
+  }
+  if (!Site || typeof Site.findByBaseURL !== 'function') {
+    log?.warn?.('ensureMarketSite: Site data-access unavailable; skipping', { brandId, domain });
+    return null;
+  }
+
+  // Two derivations from one input, for two different jobs. The bare hostname is
+  // what the SSRF guard below must see (it classifies hosts, and a path would
+  // never match its patterns). The full identity — host plus path — is what the
+  // Site lookup must use, because `base_url` is unique over the WHOLE url: prod
+  // holds 440 subpath sites, and `nba.com` coexists with `nba.com/kings`,
+  // `/knicks`, `/lakers` and `/timberwolves` as five distinct rows. Collapsing to
+  // the host here silently resolved every one of them to the root site.
+  const hostname = hostnameFromUrlString(domain);
+  if (!hostname || !hasText(hostname)) {
+    log?.warn?.('ensureMarketSite: domain did not resolve to a hostname; skipping', { brandId, domain });
+    return null;
+  }
+  const identity = siteIdentityFromUrlString(domain);
+  // SSRF guard: a market domain becomes a Site base_url that downstream workers
+  // fetch, and Site.create only validates the scheme — so refuse internal/private
+  // hosts (localhost, loopback, link-local, RFC1918, *.internal, bare IPs) here,
+  // the single chokepoint shared by the brand-create / market-create / activate
+  // callers. Skip (return null) rather than throw — keeps the best-effort contract
+  // and, on the required activate path, leaves the brand pending (502) for a fix.
+  if (!isPublicHostname(hostname)) {
+    log?.warn?.('ensureMarketSite: domain is not a public hostname; refusing to mirror as a Site', { brandId, domain, hostname });
+    return null;
+  }
+  // A resolved hostname does NOT imply a resolved identity. WHATWG collapses the
+  // slash run in `https:///foo.example.com/bar` and reads the first path segment
+  // as the host, so a leading-slash input yields a public hostname while the
+  // identity — which rejects a leading '/' — yields null. Composing from null
+  // throws, and this function's contract is best-effort/never-throw (brands.js:
+  // "a throw here would tear down a live brand's workspace"). The live route is
+  // activate-retry, where brandDomain validation is presence-only. Skip rather
+  // than fall back to the hostname: `/foo.example.com/bar` naming the site
+  // `foo.example.com` is the parser's artifact, not the caller's intent.
+  if (!identity || !hasText(identity)) {
+    log?.warn?.('ensureMarketSite: domain did not resolve to a site identity; skipping', { brandId, domain, hostname });
+    return null;
+  }
+  // Compose from the identity, not the raw input: composeBaseURL strips a trailing
+  // slash only at the domain root, so `nba.com/kings/` and `nba.com/kings` would
+  // otherwise compose to two different base URLs and resolve to two different
+  // Sites. The identity has already normalized that away.
+  //
+  // Host and path are composed separately because composeBaseURL is a hostname
+  // helper: it lowercases the WHOLE string, which would fold `acme.com/OMES` onto
+  // `/omes`. Paths are case-sensitive on most origins, so a lowercased base_url
+  // both misses an existing row spelled with capitals and gives downstream
+  // fetchers a URL the origin may 404. Running it on the host alone keeps every
+  // host-level normalization the rest of the system applies — port, trailing dot,
+  // `www.`, scheme — and leaves the path exactly as the identity produced it.
+  //
+  // No extra lookup for the previously-composed all-lowercase spelling: prod holds
+  // 3 sites whose path carries capitals and 6 on a `www.` host, and not one of
+  // them is a brand's primary site, a brand_sites link, or a market's site. So
+  // there is no row for such a lookup to find, only a round-trip on every create.
+  const [identityHost, ...identitySegments] = identity.split('/');
+  const identityPath = identitySegments.length > 0 ? `/${identitySegments.join('/')}` : '';
+  const baseURL = `${composeBaseURL(identityHost)}${identityPath}`;
+
+  try {
+    // base_url is unique over the whole url including its path, so a host may back
+    // several Sites (nba.com alongside nba.com/kings). findByBaseURL on the full
+    // identity is therefore both the correct lookup and what makes this idempotent
+    // for markets that share one host.
+    let site = await Site.findByBaseURL(baseURL);
+    // Only when the identity carries a path — a host-only base URL never has a
+    // meaningful trailing slash, composeBaseURL having already stripped it.
+    if (!site && identity && identity !== hostname) {
+      // Existing subpath Sites were stored with whatever trailing slash the
+      // onboarding URL happened to carry — 8 of 1,718 in dev end in one. The
+      // identity strips it, so a lookup by the stripped spelling alone would miss
+      // those rows and CREATE a near-duplicate Site differing only by that slash
+      // (the uniqueness constraint would not stop it). Try the stored spelling
+      // before creating anything; the create below still uses the normalized form
+      // so new rows converge on one spelling.
+      site = await Site.findByBaseURL(`${baseURL}/`);
+    }
+    if (!site) {
+      // OTHER delivery type: a Semrush-managed market site is not an AEM target.
+      site = await Site.create({
+        baseURL,
+        organizationId,
+        deliveryType: SiteModel.DELIVERY_TYPES.OTHER,
+      });
+    }
+    const resolvedSiteId = site.getId();
+
+    // Only link a same-org site. A pre-existing site for this domain in another
+    // org cannot be duplicated (base_url is globally unique) and must not be
+    // cross-linked — this mirrors syncBrandSites, which matches sites by org.
+    if (site.getOrganizationId() !== organizationId) {
+      log?.warn?.('ensureMarketSite: existing site for domain belongs to another org; not linked', {
+        brandId,
+        domain,
+        siteId: resolvedSiteId,
+        siteOrg: site.getOrganizationId(),
+        brandOrg: organizationId,
+      });
+      // Cross-org: the Site is not this brand's, so bind nothing.
+      return null;
+    }
+
+    // See the fast-path note: requireLink=false returns the resolved id even if
+    // the best-effort brand_sites mirror write failed (LLMO-6405).
+    const linked = await writeBrandSiteLink(resolvedSiteId);
+    return (linked || !requireLink) ? resolvedSiteId : null;
   } catch (e) {
     log?.error?.('ensureMarketSite: failed to ensure site for market domain (non-fatal)', {
       brandId, domain, error: e.message,
     });
     return null;
+  }
+}
+
+/**
+ * Resolves a SpaceCat Site UUID to BOTH URL-ish values a Semrush project tracks:
+ * the host-only `domain` (grouping key, `hostnameFromUrlString`) and the full
+ * `primaryUrl` "site identity" (`siteIdentityFromUrlString`, keeping any
+ * subdomain/subpath). The two are deliberately distinct — `domain` is
+ * eTLD+1-normalized upstream and rejects a path, while `primaryUrl` is the URL
+ * the brand actually owns (serenity-docs#348), written to
+ * `settings.ai.primary_url`. Sharing one Site fetch keeps them consistent.
+ *
+ * Returned together because they describe one site, and resolving them from two
+ * reads invites two answers: a project domained to one url while tracking another
+ * is worse than one that tracks its apex, because it looks deliberate. It also
+ * halves the Site lookups on the market-create path.
+ *
+ * `primaryUrl` is scheme-less on purpose: that is the form the upstream stores, so
+ * a value written from here compares equal to the one read back and drift
+ * detection does not report a difference that is not there.
+ *
+ * Best-effort: returns null (never throws) on missing input, unavailable
+ * data-access, an unknown site, a cross-org site, or a lookup failure.
+ *
+ * @param {object} dataAccess - `ctx.dataAccess` (reads `dataAccess.Site`).
+ * @param {string|null|undefined} siteId - the SpaceCat Site UUID to resolve.
+ * @param {object} [log] - logger.
+ * @param {string} [organizationId] - when given, the Site must belong to this
+ *   organization or nothing resolves. Omit only where the caller genuinely has
+ *   no organization to check against.
+ * @returns {Promise<{domain: string|null, primaryUrl: string|null}|null>} the
+ *   derived values, or null when the site cannot be resolved.
+ */
+export async function resolveSiteIdentity(dataAccess, siteId, log, organizationId) {
+  if (!siteId || !hasText(siteId)) {
+    return null;
+  }
+  const Site = dataAccess?.Site;
+  if (!Site || typeof Site.findById !== 'function') {
+    log?.warn?.('resolveSiteIdentity: Site data-access unavailable; cannot resolve site', { siteId });
+    return null;
+  }
+  try {
+    const site = await Site.findById(siteId);
+    if (!site) {
+      log?.warn?.('resolveSiteIdentity: site not found', { siteId });
+      return null;
+    }
+    // Same-org guard, when the caller can state the organization. A Site named by
+    // the request decides what the market's project analyses (its url reaches
+    // `settings.ai.primary_url` via brand_to_semrush_projects.site_id), so a Site
+    // belonging to another organization must not resolve — it would point one
+    // customer's project at another's site.
+    if (organizationId && hasText(organizationId) && site.getOrganizationId() !== organizationId) {
+      log?.warn?.('resolveSiteIdentity: site belongs to another organization; refusing to resolve', {
+        siteId, siteOrg: site.getOrganizationId(), brandOrg: organizationId,
+      });
+      return null;
+    }
+    const baseURL = site.getBaseURL();
+    return {
+      domain: hostnameFromUrlString(baseURL),
+      primaryUrl: siteIdentityFromUrlString(baseURL),
+    };
+  } catch (e) {
+    log?.warn?.('resolveSiteIdentity: lookup failed (non-fatal)', { siteId, error: e.message });
+    return null;
+  }
+}
+
+/**
+ * R12 (LLMO-6405): removes the brand_sites `type='serenity'` link for `siteId`
+ * when the DELETED market was the LAST live market on that site — so a site that
+ * no longer backs any market is not left orphaned in `brand_sites`. Reference-
+ * counts the brand's live mapping rows (`BrandSemrushProject.allByBrandId`,
+ * ignoring tombstones) and only unlinks when ZERO remaining live rows point at
+ * `siteId`. The brand's PRIMARY site (`primarySiteId`, i.e. `brands.site_id`) is
+ * NEVER unlinked — it backs the brand shell itself, not just a market.
+ *
+ * The Site entity is never deleted here; only the `brand_sites` row is removed.
+ * Best-effort by contract: the market delete has already succeeded upstream, so
+ * any failure here is logged under a greppable token and swallowed (never
+ * throws). No-op when `siteId` is absent/unknown.
+ *
+ * @param {object} ctx - request context (ctx.dataAccess.BrandSemrushProject + postgrestClient).
+ * @param {object} [opts]
+ * @param {string} [opts.brandId] - the brand UUID.
+ * @param {string} [opts.siteId] - the deleted market's linked Site UUID.
+ * @param {string|null} [opts.primarySiteId] - the brand's primary site (brands.site_id);
+ *   never unlinked. Null/absent means the brand has no primary site to protect.
+ * @param {object} [log] - logger.
+ * @returns {Promise<boolean>} true when a brand_sites row was removed; false otherwise.
+ */
+export async function unlinkMarketSiteIfOrphaned(ctx, opts, log) {
+  const { brandId, siteId, primarySiteId } = opts || {};
+  // No linked site on the deleted market → nothing to reference-count.
+  if (!siteId || !hasText(siteId) || !brandId || !hasText(brandId)) {
+    return false;
+  }
+  // Never unlink the brand's primary site — it anchors the brand, not a market.
+  if (primarySiteId && hasText(primarySiteId) && siteId === primarySiteId) {
+    return false;
+  }
+  const BrandSemrushProject = ctx?.dataAccess?.BrandSemrushProject;
+  const postgrestClient = ctx?.dataAccess?.services?.postgrestClient;
+  if (!BrandSemrushProject || typeof BrandSemrushProject.allByBrandId !== 'function'
+      || !postgrestClient?.from) {
+    return false;
+  }
+  try {
+    const rows = await BrandSemrushProject.allByBrandId(brandId);
+    // A live row still pointing at this site means another market shares it →
+    // keep the link.
+    const stillReferenced = (Array.isArray(rows) ? rows : []).some(
+      (row) => !row.getDeletedAt() && row.getSiteId() === siteId,
+    );
+    if (stillReferenced) {
+      return false;
+    }
+    const { error } = await postgrestClient
+      .from('brand_sites')
+      .delete()
+      .eq('brand_id', brandId)
+      .eq('site_id', siteId)
+      .eq('type', SERENITY_BRAND_SITE_TYPE);
+    if (error) {
+      log?.warn?.('unlinkMarketSiteIfOrphaned: SERENITY_MARKET_UNLINK_FAILED — brand_sites unlink failed (non-fatal)', {
+        brandId, siteId, error: error.message,
+      });
+      return false;
+    }
+    log?.info?.('unlinkMarketSiteIfOrphaned: removed orphaned brand_sites market link', {
+      brandId, siteId,
+    });
+    return true;
+  } catch (e) {
+    log?.error?.('unlinkMarketSiteIfOrphaned: SERENITY_MARKET_UNLINK_FAILED — unlink threw (non-fatal)', {
+      brandId, siteId, error: e.message,
+    });
+    return false;
   }
 }

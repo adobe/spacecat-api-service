@@ -62,15 +62,28 @@ const buildStubClient = ({ initialBuffer, exists = true }) => {
   };
 };
 
-const log = {
-  info: sinon.stub(),
-  warn: sinon.stub(),
-  error: sinon.stub(),
-  debug: sinon.stub(),
-};
+let sandbox;
+let log;
 
 describe('llmo-sheet-write', () => {
-  afterEach(() => sinon.restore());
+  beforeEach(() => {
+    sandbox = sinon.createSandbox();
+    log = {
+      info: sandbox.stub(),
+      warn: sandbox.stub(),
+      error: sandbox.stub(),
+      debug: sandbox.stub(),
+    };
+  });
+
+  afterEach(() => {
+    // sandbox.restore() releases the per-test log fakes. sinon.restore() stays
+    // for the ad hoc sinon.stub() calls the tests below make on the default
+    // sandbox: those are built per test and are not the cross-file hazard, so
+    // they are left as they are rather than migrated in this change.
+    sandbox.restore();
+    sinon.restore();
+  });
 
   describe('sharepointPathFor / publishPathFor', () => {
     it('builds SharePoint and publish paths with sheetType', () => {
@@ -323,7 +336,11 @@ describe('llmo-sheet-write', () => {
       sharepointPath: '/sites/elmo-ui-data/customer/strategic-recommendations/strategic-recommendations-template.xlsx',
       publishPath: 'customer/strategic-recommendations/strategic-recommendations-template.json',
     };
-    const baseEnv = { env: { ADMIN_HLX_API_KEY: 'k' }, log };
+    let baseEnv;
+
+    beforeEach(() => {
+      baseEnv = { env: { ADMIN_HLX_API_KEY: 'k' }, log };
+    });
 
     it('updates the matching row, uploads the new workbook, and republishes', async () => {
       const initialBuffer = await buildWorkbookBuffer(sheets());
@@ -633,7 +650,11 @@ describe('llmo-sheet-write', () => {
       sharepointPath: '/sites/elmo-ui-data/customer/strategic-recommendations/strategic-recommendations-template.xlsx',
       publishPath: 'customer/strategic-recommendations/strategic-recommendations-template.json',
     };
-    const baseEnv = { env: { ADMIN_HLX_API_KEY: 'k' }, log };
+    let baseEnv;
+
+    beforeEach(() => {
+      baseEnv = { env: { ADMIN_HLX_API_KEY: 'k' }, log };
+    });
 
     it('applies multiple updates across worksheets in a single round-trip', async () => {
       const initialBuffer = await buildWorkbookBuffer(sheets());

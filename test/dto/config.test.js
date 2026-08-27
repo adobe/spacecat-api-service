@@ -69,6 +69,7 @@ describe('ConfigDto', () => {
           tags: ['tag1'],
           customerIntent: [{ key: 'intent1' }],
           detectedCdn: 'aem-cs-fastly',
+          showWww: true,
           someInternalField: 'should-be-excluded',
         },
         edgeOptimizeConfig: { enabled: true, opted: 1, stagingDomains: [{ domain: 'stage.example.com', id: 'abc' }] },
@@ -90,6 +91,7 @@ describe('ConfigDto', () => {
           tags: ['tag1'],
           customerIntent: [{ key: 'intent1' }],
           detectedCdn: 'aem-cs-fastly',
+          showWww: true,
         },
         edgeOptimizeConfig: { enabled: true, opted: 1, stagingDomains: [{ domain: 'stage.example.com', id: 'abc' }] },
         slack: { channel: '#test', workspace: 'T123' },
@@ -124,6 +126,28 @@ describe('ConfigDto', () => {
       const result = ConfigDto.toListJSON({ some: 'config' });
       expect(result).to.deep.equal({
         llmo: { dataFolder: '/data', brand: 'Test', detectedCdn: 'other' },
+      });
+    });
+
+    it('includes showWww in toListJSON (LLMO-6673)', () => {
+      sinon.stub(Config, 'toDynamoItem').returns({
+        llmo: { dataFolder: '/data', brand: 'Test', showWww: true },
+      });
+
+      const result = ConfigDto.toListJSON({ some: 'config' });
+      expect(result).to.deep.equal({
+        llmo: { dataFolder: '/data', brand: 'Test', showWww: true },
+      });
+    });
+
+    it('omits showWww from toListJSON when falsy', () => {
+      sinon.stub(Config, 'toDynamoItem').returns({
+        llmo: { dataFolder: '/data', brand: 'Test', showWww: false },
+      });
+
+      const result = ConfigDto.toListJSON({ some: 'config' });
+      expect(result).to.deep.equal({
+        llmo: { dataFolder: '/data', brand: 'Test' },
       });
     });
 

@@ -17,6 +17,7 @@ import esmock from 'esmock';
 import { S3Client } from '@aws-sdk/client-s3';
 import { llmoConfig } from '@adobe/spacecat-shared-utils';
 import { CDN_TYPES as LOG_SOURCES } from '../../../src/controllers/llmo/llmo-utils.js';
+import { handleLlmoRationale } from '../../../src/controllers/llmo/llmo-rationale.js';
 import {
   EMPTY_SHEET_PAYLOAD,
   NOT_PROVISIONED_HEADER,
@@ -62,6 +63,10 @@ const createMockAccessControlUtil = (accessResult, hasAdminAccessResult = true, 
     hasAccess: async () => accessResult,
     hasAdminAccess: () => hasAdminAccessResult,
     isLLMOAdministrator: () => isLLMOAdministratorResult,
+    // FACS-hybrid gates mirror the legacy admin result so existing expectations hold.
+    hasLlmoCapabilityForSite: async () => isLLMOAdministratorResult,
+    llmoForbiddenMessage: (msg) => msg,
+    hasLlmoAdminCapability: () => isLLMOAdministratorResult,
     isOwnerOfSite: async () => isOwnerOfSiteResult,
   }),
 });
@@ -187,6 +192,7 @@ describe('LlmoController', () => {
         }
       },
       getEffectiveBaseURL: mockTokowakaGetEffectiveBaseURL,
+      // eslint-disable-next-line no-use-before-define
     },
   });
 
@@ -289,6 +295,9 @@ describe('LlmoController', () => {
               isLLMOAdministrator() {
                 return true;
               },
+              hasLlmoCapabilityForSite: async () => true,
+              llmoForbiddenMessage: (msg) => msg,
+              hasLlmoAdminCapability: () => true,
               async isOwnerOfSite() {
                 return true;
               },
@@ -407,6 +416,9 @@ describe('LlmoController', () => {
               },
               hasAdminAccess() { return true; },
               isLLMOAdministrator() { return true; },
+              hasLlmoCapabilityForSite: async () => true,
+              llmoForbiddenMessage: (msg) => msg,
+              hasLlmoAdminCapability: () => true,
               async isOwnerOfSite() { return true; },
             };
           },
@@ -448,6 +460,9 @@ describe('LlmoController', () => {
               async hasAccess() { throw new Error('emailId is required'); },
               hasAdminAccess() { return true; },
               isLLMOAdministrator() { return true; },
+              hasLlmoCapabilityForSite: async () => true,
+              llmoForbiddenMessage: (msg) => msg,
+              hasLlmoAdminCapability: () => true,
               async isOwnerOfSite() { return true; },
             };
           },
@@ -578,6 +593,7 @@ describe('LlmoController', () => {
       setConfig: sinon.stub(),
       save: sinon.stub().resolves(),
       getOrganization: sinon.stub().resolves(mockOrganization),
+      getOrganizationId: sinon.stub().returns(TEST_ORG_ID),
       getBaseURL: sinon.stub().returns('https://www.example.com'),
     };
 
@@ -2780,9 +2796,9 @@ describe('LlmoController', () => {
       },
     );
 
-    it('should return 403 when user is not LLMO administrator', async () => {
+    it('should return 403 when user is not an administrator', async () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
-        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, false, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
         '../../../src/support/cached-response.js': mockCachedResponse,
         ...getCommonMocks(),
@@ -2793,7 +2809,7 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(403);
       const responseBody = await result.json();
-      expect(responseBody.message).to.equal('Only LLMO administrators can update the CDN logs filter');
+      expect(responseBody.message).to.equal('Only administrators can update the CDN logs filter');
     });
 
     describe('patchLlmoCdnBucketConfig', () => {
@@ -2848,9 +2864,9 @@ describe('LlmoController', () => {
         },
       );
 
-      it('should return 403 when user is not LLMO administrator', async () => {
+      it('should return 403 when user is not an administrator', async () => {
         const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
-          '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+          '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, false, false),
           '@adobe/spacecat-shared-http-utils': mockHttpUtils,
           '../../../src/support/cached-response.js': mockCachedResponse,
           ...getCommonMocks(),
@@ -2861,7 +2877,7 @@ describe('LlmoController', () => {
 
         expect(result.status).to.equal(403);
         const responseBody = await result.json();
-        expect(responseBody.message).to.equal('Only LLMO administrators can update the CDN bucket config');
+        expect(responseBody.message).to.equal('Only administrators can update the CDN bucket config');
       });
     });
   });
@@ -2991,7 +3007,7 @@ describe('LlmoController', () => {
       expect(triggerBrandProfileAgentStub).to.have.been.calledOnce;
     });
 
-    it('should pass tempOnboarding when temp-onboarding is true', async () => {
+    it('should ignore a temp-onboarding body field (LLMO-7141: flag removed, registration always runs)', async () => {
       const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/controllers/llmo/llmo-onboarding.js': {
           validateSiteNotOnboarded: validateSiteNotOnboardedStub,
@@ -3034,7 +3050,9 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(200);
       expect(performLlmoOnboardingStub).to.have.been.calledOnce;
-      expect(performLlmoOnboardingStub.firstCall.args[0].tempOnboarding).to.equal(true);
+      // The temp-onboarding flag no longer exists — a caller still sending it must not
+      // be forwarded as tempOnboarding into performLlmoOnboarding.
+      expect(performLlmoOnboardingStub.firstCall.args[0]).to.not.have.property('tempOnboarding');
     });
 
     ['data', 'domain', 'brandName', 'authInfo', 'profile', 'tenants', 'tenant ID'].forEach((field) => {
@@ -4145,723 +4163,174 @@ describe('LlmoController', () => {
   });
 
   describe('getLlmoRationale', () => {
-    let mockS3Client;
-    let mockS3Response;
     let rationaleContext;
+    let postgrestRows;
+    let postgrestError;
+    let calls;
+
+    const makePostgrest = () => {
+      calls = {
+        from: [], select: [], eq: [], not: [], ilike: [], limit: [],
+      };
+      let chain;
+      const rec = (name) => (...a) => {
+        calls[name].push(a);
+        return chain;
+      };
+      chain = {
+        from: rec('from'),
+        select: rec('select'),
+        eq: rec('eq'),
+        not: rec('not'),
+        ilike: rec('ilike'),
+        limit: rec('limit'),
+        then: (resolve) => resolve({ data: postgrestRows, error: postgrestError }),
+      };
+      return chain;
+    };
 
     beforeEach(() => {
-      mockS3Response = {
-        Body: {
-          transformToString: sinon.stub(),
-        },
-      };
-
-      mockS3Client = {
-        send: sinon.stub(),
-      };
-
-      rationaleContext = {
-        ...mockContext,
-        params: {
-          siteId: TEST_SITE_ID,
-        },
-        env: {
-          ...mockEnv,
-          ENV: 'dev',
-        },
-        s3: {
-          s3Client: mockS3Client,
-          GetObjectCommand: function MockGetObjectCommand(params) {
-            this.params = params;
-          },
-        },
-      };
+      postgrestRows = [];
+      postgrestError = null;
+      mockDataAccess.Site.postgrestService = makePostgrest();
+      rationaleContext = { ...mockContext, params: { siteId: TEST_SITE_ID }, data: {} };
     });
 
-    it('should successfully retrieve and return filtered topics from S3', async () => {
-      const mockRationaleData = {
-        site_id: TEST_SITE_ID,
-        topics: [
-          {
-            topic: 'Convert PDF_Informational',
-            category: 'Acrobat',
-            region: 'BR',
-            origin: 'HUMAN',
-            popularity: 'Low',
-            volume: -10,
-            reasoning: 'Specific informational query with minimal organic searches.',
-            added_date: '2025-12-03T09:21:31.673898',
-          },
-          {
-            topic: 'Convert PDF_Informational',
-            category: 'Acrobat',
-            region: 'DE',
-            origin: 'HUMAN',
-            popularity: 'High',
-            volume: -30,
-            reasoning: 'Common task with wide applicability and core to business services.',
-            added_date: '2025-12-03T09:21:31.673921',
-          },
-          {
-            topic: 'Another Topic',
-            category: 'Other',
-            region: 'US',
-            origin: 'AI',
-            popularity: 'Medium',
-            volume: -20,
-            reasoning: 'Some other reasoning.',
-            added_date: '2025-12-03T09:21:31.673925',
-          },
-        ],
-      };
-
-      const contextWithFilters = {
-        ...rationaleContext,
-        data: {
-          topic: 'Convert PDF',
-        },
-      };
-
-      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
-      mockS3Client.send.resolves(mockS3Response);
-
-      const result = await controller.getLlmoRationale(contextWithFilters);
-
+    it('maps topic popularity rows from the topics table', async () => {
+      postgrestRows = [{
+        name: 'Convert PDF', popularity_volume: -30, popularity_reasoning: 'High intent.', updated_at: '2026-07-08T00:00:00Z',
+      }];
+      const result = await controller.getLlmoRationale({ ...rationaleContext, data: { topic: 'Convert PDF' } });
       expect(result.status).to.equal(200);
-      const responseBody = await result.json();
-
-      // Should return only the filtered topics array, not the full JSON
-      expect(responseBody).to.be.an('array');
-      expect(responseBody).to.have.length(2);
-      expect(responseBody[0].topic).to.equal('Convert PDF_Informational');
-      expect(responseBody[1].topic).to.equal('Convert PDF_Informational');
-
-      expect(mockS3Client.send).to.have.been.calledOnce;
-      const commandArg = mockS3Client.send.getCall(0).args[0];
-      expect(commandArg.params.Bucket).to.equal('spacecat-dev-mystique-assets');
-      expect(commandArg.params.Key).to.equal(`llm_cache/${TEST_SITE_ID}/prompts/topics_popularity_reasoning_cache.json`);
-
-      expect(mockLog.info).to.have.been.calledWith(
-        `Getting LLMO rationale for site ${TEST_SITE_ID} with filters - topic: Convert PDF, category: all, region: all, origin: all, popularity: all`,
-      );
+      expect(await result.json()).to.deep.equal([{
+        topic: 'Convert PDF', reasoning: 'High intent.', popularity: 'High', volume: -30, added_date: '2026-07-08T00:00:00Z',
+      }]);
     });
 
-    it('should return 400 when topic parameter is missing', async () => {
-      const contextWithoutTopic = {
-        ...rationaleContext,
-        data: {},
-      };
+    it('queries topics org-scoped, non-null reasoning, ILIKE on topic, bounded', async () => {
+      await controller.getLlmoRationale({ ...rationaleContext, data: { topic: 'Convert PDF' } });
+      expect(calls.from[0]).to.deep.equal(['topics']);
+      expect(calls.select[0][0]).to.equal('name,popularity_volume,popularity_reasoning,updated_at');
+      expect(calls.eq[0]).to.deep.equal(['organization_id', TEST_ORG_ID]);
+      expect(calls.not[0]).to.deep.equal(['popularity_reasoning', 'is', null]);
+      expect(calls.ilike[0]).to.deep.equal(['name', '%Convert PDF%']);
+      expect(calls.limit[0][0]).to.be.a('number').and.to.be.greaterThan(0);
+    });
 
-      const result = await controller.getLlmoRationale(contextWithoutTopic);
+    it('escapes LIKE metacharacters in the user-supplied topic', async () => {
+      await controller.getLlmoRationale({ ...rationaleContext, data: { topic: '50%_off\\deal' } });
+      // %, _ and \ must be backslash-escaped so they match literally
+      expect(calls.ilike[0]).to.deep.equal(['name', '%50\\%\\_off\\\\deal%']);
+    });
 
+    it('maps volume to popularity label (High/Medium/Low/N/A)', async () => {
+      postgrestRows = [
+        {
+          name: 'A', popularity_volume: -30, popularity_reasoning: 'r', updated_at: null,
+        },
+        {
+          name: 'B', popularity_volume: -20, popularity_reasoning: 'r', updated_at: null,
+        },
+        {
+          name: 'C', popularity_volume: -10, popularity_reasoning: 'r', updated_at: null,
+        },
+        {
+          name: 'D', popularity_volume: 0, popularity_reasoning: 'r', updated_at: null,
+        },
+      ];
+      const result = await controller.getLlmoRationale({ ...rationaleContext, data: { topic: 'x' } });
+      const body = await result.json();
+      expect(body.map((t) => t.popularity)).to.deep.equal(['High', 'Medium', 'Low', 'N/A']);
+    });
+
+    it('applies the optional popularity filter', async () => {
+      postgrestRows = [
+        {
+          name: 'A', popularity_volume: -30, popularity_reasoning: 'r1', updated_at: null,
+        },
+        {
+          name: 'B', popularity_volume: -10, popularity_reasoning: 'r2', updated_at: null,
+        },
+      ];
+      const result = await controller.getLlmoRationale({ ...rationaleContext, data: { topic: 'x', popularity: 'High' } });
+      const body = await result.json();
+      expect(body).to.have.length(1);
+      expect(body[0].popularity).to.equal('High');
+    });
+
+    it('returns an empty array when the query returns nothing', async () => {
+      postgrestRows = [];
+      const result = await controller.getLlmoRationale({ ...rationaleContext, data: { topic: 'nope' } });
+      expect(result.status).to.equal(200);
+      expect(await result.json()).to.be.an('array').with.length(0);
+    });
+
+    it('returns 400 when topic parameter is missing', async () => {
+      const result = await controller.getLlmoRationale({ ...rationaleContext, data: {} });
       expect(result.status).to.equal(400);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.equal('topic parameter is required');
+      expect((await result.json()).message).to.equal('topic parameter is required');
     });
 
-    it('should filter topics by topic (case-insensitive)', async () => {
-      const mockRationaleData = {
-        site_id: TEST_SITE_ID,
-        topics: [
-          {
-            topic: 'Convert PDF_Informational',
-            category: 'Acrobat',
-            region: 'BR',
-            origin: 'HUMAN',
-            popularity: 'Low',
-          },
-          {
-            topic: 'Edit PDF_Transactional',
-            category: 'Acrobat',
-            region: 'US',
-            origin: 'HUMAN',
-            popularity: 'High',
-          },
-          {
-            topic: 'Photo Editing',
-            category: 'Photoshop',
-            region: 'US',
-            origin: 'AI',
-            popularity: 'Medium',
-          },
-        ],
-      };
-
-      const contextWithFilters = {
-        ...rationaleContext,
-        data: {
-          topic: 'pdf', // lowercase should match both PDF topics
-        },
-      };
-
-      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
-      mockS3Client.send.resolves(mockS3Response);
-
-      const result = await controller.getLlmoRationale(contextWithFilters);
-
-      expect(result.status).to.equal(200);
-      const responseBody = await result.json();
-      expect(responseBody).to.have.length(2);
-      expect(responseBody[0].topic).to.equal('Convert PDF_Informational');
-      expect(responseBody[1].topic).to.equal('Edit PDF_Transactional');
-    });
-
-    it('should filter topics with optional category filter', async () => {
-      const mockRationaleData = {
-        site_id: TEST_SITE_ID,
-        topics: [
-          {
-            topic: 'Convert PDF_Informational',
-            category: 'Acrobat',
-            region: 'BR',
-            origin: 'HUMAN',
-            popularity: 'Low',
-          },
-          {
-            topic: 'Edit Photo',
-            category: 'Photoshop',
-            region: 'US',
-            origin: 'HUMAN',
-            popularity: 'High',
-          },
-          {
-            topic: 'Edit PDF_Transactional',
-            category: 'Acrobat',
-            region: 'US',
-            origin: 'AI',
-            popularity: 'Medium',
-          },
-        ],
-      };
-
-      const contextWithFilters = {
-        ...rationaleContext,
-        data: {
-          topic: 'edit',
-          category: 'acrobat', // should match only Edit PDF
-        },
-      };
-
-      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
-      mockS3Client.send.resolves(mockS3Response);
-
-      const result = await controller.getLlmoRationale(contextWithFilters);
-
-      expect(result.status).to.equal(200);
-      const responseBody = await result.json();
-      expect(responseBody).to.have.length(1);
-      expect(responseBody[0].topic).to.equal('Edit PDF_Transactional');
-      expect(responseBody[0].category).to.equal('Acrobat');
-    });
-
-    it('should filter topics with optional region filter', async () => {
-      const mockRationaleData = {
-        site_id: TEST_SITE_ID,
-        topics: [
-          {
-            topic: 'Convert PDF_Informational',
-            category: 'Acrobat',
-            region: 'BR',
-            origin: 'HUMAN',
-            popularity: 'Low',
-          },
-          {
-            topic: 'Convert PDF_Informational',
-            category: 'Acrobat',
-            region: 'DE',
-            origin: 'HUMAN',
-            popularity: 'High',
-          },
-        ],
-      };
-
-      const contextWithFilters = {
-        ...rationaleContext,
-        data: {
-          topic: 'Convert',
-          region: 'de', // lowercase should match DE
-        },
-      };
-
-      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
-      mockS3Client.send.resolves(mockS3Response);
-
-      const result = await controller.getLlmoRationale(contextWithFilters);
-
-      expect(result.status).to.equal(200);
-      const responseBody = await result.json();
-      expect(responseBody).to.have.length(1);
-      expect(responseBody[0].region).to.equal('DE');
-    });
-
-    it('should filter topics with optional origin filter', async () => {
-      const mockRationaleData = {
-        site_id: TEST_SITE_ID,
-        topics: [
-          {
-            topic: 'Convert PDF_Informational',
-            category: 'Acrobat',
-            region: 'BR',
-            origin: 'HUMAN',
-            popularity: 'Low',
-          },
-          {
-            topic: 'Edit PDF_Transactional',
-            category: 'Acrobat',
-            region: 'US',
-            origin: 'AI',
-            popularity: 'High',
-          },
-        ],
-      };
-
-      const contextWithFilters = {
-        ...rationaleContext,
-        data: {
-          topic: 'pdf',
-          origin: 'human', // should match only HUMAN origin
-        },
-      };
-
-      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
-      mockS3Client.send.resolves(mockS3Response);
-
-      const result = await controller.getLlmoRationale(contextWithFilters);
-
-      expect(result.status).to.equal(200);
-      const responseBody = await result.json();
-      expect(responseBody).to.have.length(1);
-      expect(responseBody[0].origin).to.equal('HUMAN');
-    });
-
-    it('should filter topics with optional popularity filter', async () => {
-      const mockRationaleData = {
-        site_id: TEST_SITE_ID,
-        topics: [
-          {
-            topic: 'Convert PDF_Informational',
-            category: 'Acrobat',
-            region: 'BR',
-            origin: 'HUMAN',
-            popularity: 'Low',
-          },
-          {
-            topic: 'Edit PDF_Transactional',
-            category: 'Acrobat',
-            region: 'DE',
-            origin: 'HUMAN',
-            popularity: 'High',
-          },
-        ],
-      };
-
-      const contextWithFilters = {
-        ...rationaleContext,
-        data: {
-          topic: 'pdf',
-          popularity: 'high', // should match only High popularity
-        },
-      };
-
-      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
-      mockS3Client.send.resolves(mockS3Response);
-
-      const result = await controller.getLlmoRationale(contextWithFilters);
-
-      expect(result.status).to.equal(200);
-      const responseBody = await result.json();
-      expect(responseBody).to.have.length(1);
-      expect(responseBody[0].popularity).to.equal('High');
-    });
-
-    it('should return empty array when no topics match filters', async () => {
-      const mockRationaleData = {
-        site_id: TEST_SITE_ID,
-        topics: [
-          {
-            topic: 'Convert PDF_Informational',
-            category: 'Acrobat',
-            region: 'BR',
-            origin: 'HUMAN',
-            popularity: 'Low',
-          },
-        ],
-      };
-
-      const contextWithFilters = {
-        ...rationaleContext,
-        data: {
-          topic: 'nonexistent topic',
-        },
-      };
-
-      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
-      mockS3Client.send.resolves(mockS3Response);
-
-      const result = await controller.getLlmoRationale(contextWithFilters);
-
-      expect(result.status).to.equal(200);
-      const responseBody = await result.json();
-      expect(responseBody).to.be.an('array');
-      expect(responseBody).to.have.length(0);
-    });
-
-    it('should handle missing topics array gracefully', async () => {
-      const mockRationaleData = {
-        site_id: TEST_SITE_ID,
-        // No topics array
-      };
-
-      const contextWithFilters = {
-        ...rationaleContext,
-        data: {
-          topic: 'any topic',
-        },
-      };
-
-      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
-      mockS3Client.send.resolves(mockS3Response);
-
-      const result = await controller.getLlmoRationale(contextWithFilters);
-
-      expect(result.status).to.equal(200);
-      const responseBody = await result.json();
-      expect(responseBody).to.be.an('array');
-      expect(responseBody).to.have.length(0);
-    });
-
-    it('should return 404 when S3 file does not exist (NoSuchKey)', async () => {
-      const noSuchKeyError = new Error('The specified key does not exist');
-      noSuchKeyError.name = 'NoSuchKey';
-      mockS3Client.send.rejects(noSuchKeyError);
-
-      const contextWithParams = {
-        ...rationaleContext,
-        data: {
-          topic: 'any topic',
-        },
-      };
-
-      const result = await controller.getLlmoRationale(contextWithParams);
-
-      expect(result.status).to.equal(404);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.equal(`Rationale file not found for site ${TEST_SITE_ID}`);
-
-      expect(mockLog.warn).to.have.been.calledWith(
-        `LLMO rationale file not found for site ${TEST_SITE_ID} at llm_cache/${TEST_SITE_ID}/prompts/topics_popularity_reasoning_cache.json`,
-      );
-    });
-
-    it('should return 400 when S3 bucket does not exist (NoSuchBucket)', async () => {
-      const noSuchBucketError = new Error('The specified bucket does not exist');
-      noSuchBucketError.name = 'NoSuchBucket';
-      mockS3Client.send.rejects(noSuchBucketError);
-
-      const contextWithParams = {
-        ...rationaleContext,
-        data: {
-          topic: 'any topic',
-        },
-      };
-
-      const result = await controller.getLlmoRationale(contextWithParams);
-
+    it('returns 400 when PostgREST is not configured', async () => {
+      delete mockDataAccess.Site.postgrestService;
+      const result = await controller.getLlmoRationale({ ...rationaleContext, data: { topic: 'x' } });
       expect(result.status).to.equal(400);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.equal('Storage bucket not found: spacecat-dev-mystique-assets');
-
-      expect(mockLog.error).to.have.been.calledWith('S3 bucket spacecat-dev-mystique-assets not found');
+      expect((await result.json()).message).to.contain('PostgreSQL data service is required');
     });
 
-    it('should return 400 when JSON parsing fails', async () => {
-      mockS3Response.Body.transformToString.resolves('invalid json content');
-      mockS3Client.send.resolves(mockS3Response);
-
-      const contextWithParams = {
-        ...rationaleContext,
-        data: {
-          topic: 'any topic',
-        },
-      };
-
-      const result = await controller.getLlmoRationale(contextWithParams);
-
+    it('returns 400 when the site has no organizationId', async () => {
+      mockSite.getOrganizationId.returns(undefined);
+      const result = await controller.getLlmoRationale({ ...rationaleContext, data: { topic: 'x' } });
       expect(result.status).to.equal(400);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.equal('Invalid JSON format in rationale file');
-
-      expect(mockLog.error).to.have.been.calledWith(
-        sinon.match(`Invalid JSON in rationale file for site ${TEST_SITE_ID}:`),
-      );
+      expect((await result.json()).message).to.contain('not associated with an organization');
     });
 
-    it('should return 400 for other S3 errors', async () => {
-      const genericS3Error = new Error('Access denied');
-      genericS3Error.name = 'AccessDenied';
-      mockS3Client.send.rejects(genericS3Error);
-
-      const contextWithParams = {
-        ...rationaleContext,
-        data: {
-          topic: 'any topic',
-        },
-      };
-
-      const result = await controller.getLlmoRationale(contextWithParams);
-
-      expect(result.status).to.equal(400);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.equal('Error retrieving rationale: Access denied');
-
-      expect(mockLog.error).to.have.been.calledWith(
-        `S3 error retrieving rationale for site ${TEST_SITE_ID}: Access denied`,
-      );
+    it('returns a generic 500 on a PostgREST error (no schema leak)', async () => {
+      postgrestError = { message: 'relation "topics" column "secret" does not exist' };
+      const result = await controller.getLlmoRationale({ ...rationaleContext, data: { topic: 'x' } });
+      expect(result.status).to.equal(500);
+      const msg = (await result.json()).message;
+      expect(msg).to.equal('Error retrieving rationale');
+      expect(msg).to.not.contain('secret');
     });
 
-    it('should return 400 when S3 is not configured', async () => {
-      const contextWithoutS3 = {
-        ...rationaleContext,
-        s3: null,
-        data: {
-          topic: 'any topic',
-        },
-      };
-
-      const result = await controller.getLlmoRationale(contextWithoutS3);
-
-      expect(result.status).to.equal(400);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.equal('S3 storage is not configured for this environment');
+    it('reuses the validated site (no second Site.findById)', async () => {
+      mockDataAccess.Site.findById.resetHistory();
+      await controller.getLlmoRationale({ ...rationaleContext, data: { topic: 'x' } });
+      // getSiteAndValidateLlmo resolves the site once; the handler must not look it up again.
+      expect(mockDataAccess.Site.findById.callCount).to.equal(1);
     });
 
-    it('should return 400 when S3 client is not configured', async () => {
-      const contextWithoutS3Client = {
-        ...rationaleContext,
-        s3: {
-          s3Client: null,
-        },
-        data: {
-          topic: 'any topic',
-        },
-      };
+    // Standalone handler tests exercise the site-fallback path (site arg omitted).
+    describe('handleLlmoRationale (standalone, no site arg)', () => {
+      it('falls back to Site.findById when no site is passed', async () => {
+        mockDataAccess.Site.postgrestService = makePostgrest();
+        postgrestRows = [{
+          name: 'Convert PDF', popularity_volume: -20, popularity_reasoning: 'r', updated_at: null,
+        }];
+        const result = await handleLlmoRationale({ ...rationaleContext, data: { topic: 'Convert PDF' } });
+        expect(result.status).to.equal(200);
+        expect(await result.json()).to.have.length(1);
+      });
 
-      const result = await controller.getLlmoRationale(contextWithoutS3Client);
-
-      expect(result.status).to.equal(400);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.equal('S3 storage is not configured for this environment');
-    });
-
-    it('should return 403 when LLMO access validation fails', async () => {
-      const controllerDenied = controllerWithAccessDenied(mockContext);
-      const contextWithParams = {
-        ...rationaleContext,
-        data: {
-          topic: 'any topic',
-        },
-      };
-      const result = await controllerDenied.getLlmoRationale(contextWithParams);
-
-      expect(result.status).to.equal(403);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.equal('Only users belonging to the organization can view its sites');
-    });
-
-    it('should return 400 when LLMO is not enabled for site', async () => {
-      mockConfig.getLlmoConfig.returns({});
-      const contextWithParams = {
-        ...rationaleContext,
-        data: { topic: 'any topic' },
-      };
-      const result = await controller.getLlmoRationale(contextWithParams);
-      expect(result.status).to.equal(400);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.include('LLM Optimizer is not enabled');
-    });
-
-    it('should return 404 when site is not found', async () => {
-      const contextWithInvalidSite = {
-        ...rationaleContext,
-        dataAccess: {
-          Site: {
-            findById: sinon.stub().resolves(null),
-          },
-        },
-        data: {
-          topic: 'any topic',
-        },
-      };
-
-      const result = await controller.getLlmoRationale(contextWithInvalidSite);
-
-      expect(result.status).to.equal(404);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.include('Site not found');
-    });
-
-    it('should handle empty JSON file correctly', async () => {
-      const emptyData = {};
-      const contextWithFilters = {
-        ...rationaleContext,
-        data: {
-          topic: 'any topic',
-        },
-      };
-
-      mockS3Response.Body.transformToString.resolves(JSON.stringify(emptyData));
-      mockS3Client.send.resolves(mockS3Response);
-
-      const result = await controller.getLlmoRationale(contextWithFilters);
-
-      expect(result.status).to.equal(200);
-      const responseBody = await result.json();
-      expect(responseBody).to.be.an('array');
-      expect(responseBody).to.have.length(0);
-    });
-
-    it('should handle complex nested JSON structure with proper topics array', async () => {
-      const complexData = {
-        site_id: TEST_SITE_ID,
-        topics: [
-          {
-            topic: 'Convert PDF',
-            category: 'Acrobat',
-            region: 'US',
-            origin: 'HUMAN',
-            popularity: 'High',
-            volume: -30,
-            reasoning: 'High demand topic.',
-            added_date: '2025-12-03T09:21:31.673898',
-          },
-          {
-            topic: 'Edit Photo',
-            category: 'Photoshop',
-            region: 'US',
-            origin: 'AI',
-            popularity: 'Medium',
-            volume: -20,
-            reasoning: 'Moderate demand topic.',
-            added_date: '2025-12-03T09:21:31.673921',
-          },
-        ],
-        metadata: {
-          last_updated: '2025-12-03T09:21:31.673925',
-          version: '2.0',
-        },
-      };
-
-      const contextWithFilters = {
-        ...rationaleContext,
-        data: {
-          topic: 'convert',
-        },
-      };
-
-      mockS3Response.Body.transformToString.resolves(JSON.stringify(complexData));
-      mockS3Client.send.resolves(mockS3Response);
-
-      const result = await controller.getLlmoRationale(contextWithFilters);
-
-      expect(result.status).to.equal(200);
-      const responseBody = await result.json();
-      expect(responseBody).to.be.an('array');
-      expect(responseBody).to.have.length(1);
-      expect(responseBody[0].topic).to.equal('Convert PDF');
-      expect(responseBody[0].volume).to.equal(-30);
-      expect(responseBody[0].reasoning).to.equal('High demand topic.');
-    });
-
-    it('should handle special characters in topic parameter', async () => {
-      const mockRationaleData = {
-        site_id: TEST_SITE_ID,
-        topics: [
-          {
-            topic: 'PDF & Document Processing',
-            category: 'Acrobat',
-            region: 'US',
-            origin: 'HUMAN',
-            popularity: 'High',
-          },
-          {
-            topic: 'Photo & Image Editing',
-            category: 'Photoshop',
-            region: 'US',
-            origin: 'AI',
-            popularity: 'Medium',
-          },
-          {
-            topic: 'Regular Document Tips',
-            category: 'General',
-            region: 'US',
-            origin: 'HUMAN',
-            popularity: 'Low',
-          },
-        ],
-      };
-
-      const contextWithSpecialChars = {
-        ...rationaleContext,
-        data: {
-          topic: 'PDF & Document', // Contains & character
-        },
-      };
-
-      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
-      mockS3Client.send.resolves(mockS3Response);
-
-      const result = await controller.getLlmoRationale(contextWithSpecialChars);
-
-      expect(result.status).to.equal(200);
-      const responseBody = await result.json();
-      expect(responseBody).to.have.length(1);
-      expect(responseBody[0].topic).to.equal('PDF & Document Processing');
-
-      // Verify that the log message handles special characters correctly
-      expect(mockLog.info).to.have.been.calledWith(
-        `Getting LLMO rationale for site ${TEST_SITE_ID} with filters - topic: PDF & Document, category: all, region: all, origin: all, popularity: all`,
-      );
-    });
-
-    it('should handle URL-encoded special characters in parameters', async () => {
-      const mockRationaleData = {
-        site_id: TEST_SITE_ID,
-        topics: [
-          {
-            topic: 'Search & Discovery Tools',
-            category: 'Technology',
-            region: 'US',
-            origin: 'HUMAN',
-            popularity: 'High',
-          },
-        ],
-      };
-
-      const contextWithEncodedChars = {
-        ...rationaleContext,
-        data: {
-          topic: 'Search & Discovery', // Would be %26 in URL, but should be decoded by framework
-        },
-      };
-
-      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
-      mockS3Client.send.resolves(mockS3Response);
-
-      const result = await controller.getLlmoRationale(contextWithEncodedChars);
-
-      expect(result.status).to.equal(200);
-      const responseBody = await result.json();
-      expect(responseBody).to.have.length(1);
-      expect(responseBody[0].topic).to.equal('Search & Discovery Tools');
+      it('returns 404 when the fallback lookup finds no site', async () => {
+        mockDataAccess.Site.postgrestService = makePostgrest();
+        mockDataAccess.Site.findById.resolves(null);
+        const result = await handleLlmoRationale({ ...rationaleContext, data: { topic: 'x' } });
+        expect(result.status).to.equal(404);
+      });
     });
   });
 
   describe('getBrandClaims', () => {
     let brandClaimsContext;
     let mockGetSignedUrl;
+    let mockS3Send;
 
     beforeEach(() => {
       mockGetSignedUrl = sinon.stub().resolves('https://s3.amazonaws.com/presigned-url');
+      // HeadObject resolves by default → the object exists.
+      mockS3Send = sinon.stub().resolves({});
 
       brandClaimsContext = {
         ...mockContext,
@@ -4873,7 +4342,7 @@ describe('LlmoController', () => {
           ENV: 'dev',
         },
         s3: {
-          s3Client: {},
+          s3Client: { send: mockS3Send },
           s3Bucket: 'test-bucket',
           getSignedUrl: mockGetSignedUrl,
           GetObjectCommand: function MockGetObjectCommand(params) {
@@ -4899,22 +4368,6 @@ describe('LlmoController', () => {
       expect(commandArg.params.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/data.json.gz`);
     });
 
-    it('should return presigned URL for specific model', async () => {
-      const context = {
-        ...brandClaimsContext,
-        data: { model: 'gpt-4.1' },
-      };
-
-      const result = await controller.getBrandClaims(context);
-
-      expect(result.status).to.equal(200);
-      const responseBody = await result.json();
-      expect(responseBody.model).to.equal('gpt-4.1');
-
-      const commandArg = mockGetSignedUrl.getCall(0).args[1];
-      expect(commandArg.params.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/gpt-4.1.json.gz`);
-    });
-
     it('should return 403 when LLMO access validation fails', async () => {
       const controllerDenied = controllerWithAccessDenied(mockContext);
       const result = await controllerDenied.getBrandClaims(brandClaimsContext);
@@ -4922,31 +4375,6 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(403);
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('Only users belonging to the organization can view its sites');
-    });
-
-    it('should return 400 when S3 is not configured', async () => {
-      const contextWithoutS3 = {
-        ...brandClaimsContext,
-        s3: null,
-      };
-
-      const result = await controller.getBrandClaims(contextWithoutS3);
-
-      expect(result.status).to.equal(400);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.equal('S3 storage is not configured for this environment');
-    });
-
-    it('should return 404 when S3 key not found', async () => {
-      const noSuchKeyError = new Error('The specified key does not exist');
-      noSuchKeyError.name = 'NoSuchKey';
-      mockGetSignedUrl.rejects(noSuchKeyError);
-
-      const result = await controller.getBrandClaims(brandClaimsContext);
-
-      expect(result.status).to.equal(404);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.equal(`Brand claims data not found for site ${TEST_SITE_ID}`);
     });
 
     it('should return 404 when site is not found', async () => {
@@ -5536,6 +4964,9 @@ describe('LlmoController', () => {
               hasAccess: hasAccessStub,
               hasAdminAccess: () => false,
               isLLMOAdministrator: () => false,
+              hasLlmoCapabilityForSite: async () => false,
+              llmoForbiddenMessage: (msg) => msg,
+              hasLlmoAdminCapability: () => false,
               isOwnerOfSite: isOwnerStub,
             }),
           },
@@ -6207,6 +5638,52 @@ describe('LlmoController', () => {
         expect((await result.json()).message).to.include('not available in stage');
       });
 
+      it('skips CDN routing and returns metaconfig when site baseURL has a non-root path (subpath site)', async () => {
+        mockSite.getBaseURL = sinon.stub().returns('https://example.com/docs');
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(result.status).to.equal(200);
+        expect(mockLog.info).to.have.been.calledWith(
+          sinon.match(/subpath sites not eligible for auto routing/),
+        );
+        expect(callCdnRoutingApiStub).to.not.have.been.called;
+        expect(detectCdnForDomainStub).to.not.have.been.called;
+      });
+
+      it('skips CDN routing when baseURL has a subpath, even with a root-level overrideBaseURL', async () => {
+        mockSite.getBaseURL = sinon.stub().returns('https://example.com/docs');
+        mockConfig.getFetchConfig = sinon.stub().returns({
+          overrideBaseURL: 'https://override.example.com',
+        });
+        mockSite.getConfig = sinon.stub().returns(mockConfig);
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(result.status).to.equal(200);
+        expect(mockLog.info).to.have.been.calledWith(
+          sinon.match(/subpath sites not eligible for auto routing/),
+        );
+        expect(callCdnRoutingApiStub).to.not.have.been.called;
+        expect(detectCdnForDomainStub).to.not.have.been.called;
+      });
+
+      it('skips CDN routing for a subpath site even when cdnType is provided', async () => {
+        mockSite.getBaseURL = sinon.stub().returns('https://example.com/docs');
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx({
+          data: { cdnType: LOG_SOURCES.AEM_CS_FASTLY, enabled: true },
+        }));
+        expect(result.status).to.equal(200);
+        expect(mockLog.info).to.have.been.calledWith(
+          sinon.match(/subpath sites not eligible for auto routing/),
+        );
+        expect(callCdnRoutingApiStub).to.not.have.been.called;
+        expect(detectCdnForDomainStub).to.not.have.been.called;
+      });
+
+      it('does not reject when site baseURL has a trailing slash only', async () => {
+        mockSite.getBaseURL = sinon.stub().returns('https://example.com/');
+        const result = await controller.createOrUpdateEdgeConfig(makeRoutingCtx());
+        expect(result.status).to.not.equal(400);
+        expect(callCdnRoutingApiStub).to.have.been.called;
+      });
+
       it('returns 500 when EDGE_OPTIMIZE_ROUTING_CONFIG is invalid JSON', async () => {
         const result = await controller.createOrUpdateEdgeConfig(
           makeRoutingCtx({ env: { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: 'not-json' } }),
@@ -6297,7 +5774,7 @@ describe('LlmoController', () => {
         expect(mockConfig.updateEdgeOptimizeConfig.firstCall.args[0]).to.not.have.property('enabled');
         expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
           mockEnv.IMPORT_WORKER_QUEUE_URL,
-          { type: 'optimize-at-edge-enabled-marking' },
+          { type: 'optimize-at-edge-enabled-marking', siteId: TEST_SITE_ID },
           undefined,
           { delaySeconds: 300 },
         );
@@ -6403,9 +5880,9 @@ describe('LlmoController', () => {
       });
     }); // end describe('CDN routing')
 
-    it('should call hasAccess before isLLMOAdministrator before isOwnerOfSite', async () => {
+    it('should call hasAccess before the FACS capability gate before isOwnerOfSite', async () => {
       const hasAccessStub = sinon.stub().resolves(true);
-      const isLLMOAdminStub = sinon.stub().returns(true);
+      const hasCapStub = sinon.stub().resolves(true);
       const isOwnerStub = sinon.stub().resolves(false);
 
       const OrderedController = await esmock('../../../src/controllers/llmo/llmo.js', {
@@ -6414,7 +5891,8 @@ describe('LlmoController', () => {
             fromContext: () => ({
               hasAccess: hasAccessStub,
               hasAdminAccess: () => false,
-              isLLMOAdministrator: isLLMOAdminStub,
+              hasLlmoCapabilityForSite: hasCapStub,
+              llmoForbiddenMessage: (msg) => msg,
               isOwnerOfSite: isOwnerStub,
             }),
           },
@@ -6427,8 +5905,8 @@ describe('LlmoController', () => {
         .createOrUpdateEdgeConfig(edgeConfigContext);
 
       expect(result.status).to.equal(403);
-      expect(hasAccessStub.calledBefore(isLLMOAdminStub), 'hasAccess must be called before isLLMOAdministrator').to.be.true;
-      expect(isLLMOAdminStub.calledBefore(isOwnerStub), 'isLLMOAdministrator must be called before isOwnerOfSite').to.be.true;
+      expect(hasAccessStub.calledBefore(hasCapStub), 'hasAccess must be called before the capability gate').to.be.true;
+      expect(hasCapStub.calledBefore(isOwnerStub), 'capability gate must be called before isOwnerOfSite').to.be.true;
     });
 
     it('should fire opt-in notification when site is newly opted', async () => {
@@ -7276,6 +6754,29 @@ describe('LlmoController', () => {
       expect(responseBody.message).to.include('same base domain');
     });
 
+    it('should return 400 when staging domain does not have same path as that of prod site', async () => {
+      mockSite.getBaseURL.returns('https://www.lovesac.com/docs');
+      stageConfigContext.data = { stagingDomains: ['staging.lovesac.com'] };
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('pathname scope');
+    });
+
+    it('should accept staging domain which has same path as that of prod site', async () => {
+      mockSite.getBaseURL.returns('https://www.lovesac.com/docs');
+      stageConfigContext.data = { stagingDomains: ['https://staging.lovesac.com/docs'] };
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.be.an('array').with.lengthOf(1);
+      expect(responseBody[0].domain).to.equal('https://staging.lovesac.com/docs');
+    });
+
     it('should return 403 when not LLMO administrator', async () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
@@ -7437,9 +6938,9 @@ describe('LlmoController', () => {
       expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.called;
     });
 
-    it('should call hasAccess before isLLMOAdministrator', async () => {
+    it('should call hasAccess before the FACS capability gate', async () => {
       const hasAccessStub = sinon.stub().resolves(true);
-      const isLLMOAdminStub = sinon.stub().returns(false);
+      const hasCapStub = sinon.stub().resolves(false);
 
       const OrderedController = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': {
@@ -7447,7 +6948,8 @@ describe('LlmoController', () => {
             fromContext: () => ({
               hasAccess: hasAccessStub,
               hasAdminAccess: () => false,
-              isLLMOAdministrator: isLLMOAdminStub,
+              hasLlmoCapabilityForSite: hasCapStub,
+              llmoForbiddenMessage: (msg) => msg,
               isOwnerOfSite: sinon.stub().resolves(true),
             }),
           },
@@ -7460,7 +6962,7 @@ describe('LlmoController', () => {
         .createOrUpdateStageEdgeConfig(stageConfigContext);
 
       expect(result.status).to.equal(403);
-      expect(hasAccessStub.calledBefore(isLLMOAdminStub), 'hasAccess must be called before isLLMOAdministrator').to.be.true;
+      expect(hasAccessStub.calledBefore(hasCapStub), 'hasAccess must be called before the capability gate').to.be.true;
     });
   });
 
@@ -8169,18 +7671,18 @@ describe('LlmoController', () => {
 
   describe('updateQueryIndex', () => {
     let updateQueryIndexController;
-    let appendRowsStub;
+    let reindexStub;
     let previewAndPublishStub;
 
     before(async () => {
-      appendRowsStub = sinon.stub().resolves();
+      reindexStub = sinon.stub().resolves();
       previewAndPublishStub = sinon.stub().resolves();
 
       const LlmoControllerForQueryIndex = await esmock(
         '../../../src/controllers/llmo/llmo.js',
         {
           '../../../src/controllers/llmo/llmo-onboarding.js': {
-            appendRowsToQueryIndex: (...args) => appendRowsStub(...args),
+            reindexQueryIndexPaths: (...args) => reindexStub(...args),
             previewAndPublishQueryIndex: (...args) => previewAndPublishStub(...args),
           },
           '@adobe/spacecat-shared-http-utils': mockHttpUtils,
@@ -8208,8 +7710,8 @@ describe('LlmoController', () => {
     });
 
     beforeEach(() => {
-      appendRowsStub.reset();
-      appendRowsStub.resolves();
+      reindexStub.reset();
+      reindexStub.resolves();
       previewAndPublishStub.reset();
       previewAndPublishStub.resolves();
       mockDataAccess.Site.findByBaseURL = sinon.stub().resolves(mockSite);
@@ -8225,9 +7727,9 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(200);
       const body = await result.json();
-      expect(body.message).to.include('updated, previewed, and published');
-      expect(body.entriesAdded).to.equal(2);
-      expect(appendRowsStub).to.have.been.calledOnce;
+      expect(body.message).to.include('reindexed, previewed, and published');
+      expect(body.entriesReindexed).to.equal(2);
+      expect(reindexStub).to.have.been.calledOnce;
       expect(previewAndPublishStub).to.have.been.calledOnce;
     });
 
@@ -8236,7 +7738,7 @@ describe('LlmoController', () => {
         '../../../src/controllers/llmo/llmo.js',
         {
           '../../../src/controllers/llmo/llmo-onboarding.js': {
-            appendRowsToQueryIndex: sinon.stub(),
+            reindexQueryIndexPaths: sinon.stub(),
             previewAndPublishQueryIndex: sinon.stub(),
           },
           '@adobe/spacecat-shared-http-utils': mockHttpUtils,
@@ -8310,6 +7812,60 @@ describe('LlmoController', () => {
       expect(body.message).to.equal('Each fileName must be a non-empty string');
     });
 
+    it('should return bad request when a fileName contains a ".." traversal segment', async () => {
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: ['../other-folder/secret'] },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Each fileName must be a relative path of alphanumerics, hyphens, underscores, dots, or slashes, with no ".." segments');
+      expect(reindexStub).to.not.have.been.called;
+    });
+
+    it('should return bad request when a fileName has a leading slash (absolute path)', async () => {
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: ['/etc/passwd'] },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Each fileName must be a relative path of alphanumerics, hyphens, underscores, dots, or slashes, with no ".." segments');
+      expect(reindexStub).to.not.have.been.called;
+    });
+
+    it('should accept a fileName with a legitimate subdirectory segment', async () => {
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: ['brand-presence/2026-w28-chatgpt'] },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(200);
+      expect(reindexStub).to.have.been.calledWith(TEST_FOLDER, ['brand-presence/2026-w28-chatgpt'], sinon.match.any, sinon.match.any);
+    });
+
+    it('should return bad request when fileNames exceeds the per-request cap', async () => {
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: Array.from({ length: 201 }, (_, i) => `file${i}`) },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('fileNames must not exceed 200 entries per request');
+      expect(reindexStub).to.not.have.been.called;
+    });
+
     it('should return not found when site does not exist', async () => {
       mockDataAccess.Site.findByBaseURL.resolves(null);
 
@@ -8338,8 +7894,8 @@ describe('LlmoController', () => {
       expect(body.message).to.include('dataFolder is missing');
     });
 
-    it('should return internal server error when appendRows throws', async () => {
-      appendRowsStub.rejects(new Error('SharePoint connection failed'));
+    it('should return internal server error when reindex throws', async () => {
+      reindexStub.rejects(new Error('Reindex failed: 500 Internal Server Error'));
       mockConfig.getLlmoConfig.returns({ dataFolder: TEST_FOLDER });
 
       const ctx = {
@@ -8351,7 +7907,7 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(500);
       const body = await result.json();
-      expect(body.message).to.include('SharePoint connection failed');
+      expect(body.message).to.include('Reindex failed: 500 Internal Server Error');
     });
 
     it('should return internal server error when previewAndPublish throws', async () => {

@@ -1,0 +1,157 @@
+/*
+ * Copyright 2026 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+
+/**
+ * Semrush Elements API element UUIDs.
+ * These are Semrush-assigned constants that never change regardless of workspace or org.
+ * Reference: https://wiki.corp.adobe.com/spaces/AEMSites/pages/3928196548/
+ */
+export const ELEMENT_IDS = Object.freeze({
+  // Filter Dimensions
+  BRANDS: 'b178ce4e-6471-4430-9a32-8228ce72b2e6',
+  MARKETS: '478968a7-8851-4daf-83f7-2e8fb6185ddc',
+  TOPICS: 'ba3b19c1-22d4-460a-8dc3-1ff05c360852',
+  CONTENT_TYPES: 'd1f9e6ec-9128-4b1b-b767-d86f93f54237',
+  // Superseded by a new element with the same semantics but a shape aligned to
+  // Mentions/Visibility/Citations (CBF_ws_brand + CBF_model + optional
+  // CBF_project OR-list, all wrapped in their own `or` blocks) — see
+  // brand-presence-stats-plan.md §2. Old value (row 4, filter-dimensions
+  // "Total Executions", top-level `project_id` param): a4defa1a-02f7-4443-b6ed-f2ca22b23402.
+  TOTAL_EXECUTIONS: '601590e0-a4a1-462a-96a7-5ddae8993140',
+  WEEKS: 'afa7458b-d34f-43d9-8cc5-e8794753551c',
+
+  // Aggregated Stats
+  // URL Inspector — Cited Domains ("Stats per Domain"). `table` envelope. Honors: date +
+  // `CBF_model` + `CBF_tags` (category) filters, and a top-level `project_id` (region/market).
+  // Brand scoping is via the request's sub-workspace, not a filter (`CBF_ws_brand` is a no-op).
+  CITED_DOMAINS: '98b91d00-9531-4120-b3b5-17cc27489fce',
+
+  // Subreddits — per-subreddit Reddit stats (`table`), one row per (subreddit, project):
+  // { subreddit, subreddit_key, link, mentions, prompts, responses_with_citations,
+  //   threads, visibility, project_id }. Honors date (`CBF_date__start`/`__end`) + `CBF_model`.
+  // Optional top-level `project_id` — omit → workspace-wide across ALL projects (verified
+  // live: omitted returns every project's rows; supplied scopes to that one). Brand scoping
+  // is via the request's sub-workspace, not a filter.
+  SUBREDDITS: 'faf56e29-ddda-4480-b639-586d526c9080',
+
+  // Reddit Threads — top Reddit threads by response count (`table`), one row per thread:
+  // { link, mentions, prompts, responses, subreddit, thread, url_cbf }. Honors date
+  // (`CBF_date__start`/`__end`) + `CBF_model`, plus a comparison window
+  // (`CBF_date__start_comparison`/`__end_comparison`) and `comparison_data_formatting: 'join'`
+  // — unlike Subreddits, this element's discovery payload carries comparison columns, and
+  // (not yet verified live) they are assumed load-bearing rather than dropped. Optional
+  // top-level `project_id` — mirrors Subreddits' optional scoping (unverified for this
+  // element; assumed workspace-wide when omitted). Brand scoping is via the request's
+  // sub-workspace, not a filter.
+  REDDIT_THREADS: '5af96fd9-4f62-44d3-96c6-5c0604330f6a',
+
+  // YouTube Videos — top YouTube videos by citation count (`table`), one row per video:
+  // { channel, citations, link, prompts, video, views, url_cbf }. Honors date
+  // (`CBF_date__start`/`__end`) + `CBF_model`, plus a comparison window
+  // (`CBF_date__start_comparison`/`__end_comparison`) and `comparison_data_formatting: 'join'`,
+  // same shape as Reddit Threads. Optional top-level `project_id` (also set in
+  // `filters.simple`) scopes to a single project; omitted → workspace-wide. Brand scoping
+  // is via the request's sub-workspace, not a filter. `views` may be `null` upstream (not
+  // every video has a tracked view count).
+  YOUTUBE_VIDEOS: '05e624db-0314-4f93-9337-1fae5148f057',
+
+  // URL Inspector — Owned URLs ("Your cited URLs" table). Two elements, both
+  // scoped by a top-level `project_id` (region/market) + date + `CBF_model`;
+  // neither honors a server-side content-type filter, so `domain_type='Owned'`
+  // is applied client-side (verified). Brand scoping is via the sub-workspace.
+  //  - STATS_PER_URL (`table`): one row per cited URL —
+  //    { source(=url), citations, prompts_with_citation, domain_type, avg_position,
+  //      project_id, url_cbf }. Shared with domain-urls.
+  //  - URL_TRENDS (`line`): weekly per-URL trend — one row per (url, week):
+  //    { legend(=url), project_id, x(=ISO week), y__mentions, y__positions }.
+  //    Verified: returns ALL URLs in ONE call when scoped by project only (no
+  //    per-URL filter needed — the wiki's "one call per URL" claim is wrong).
+  STATS_PER_URL: '9af5ed83-049b-493a-85d7-99c7d4deddba',
+  URL_TRENDS: 'afb2e5d3-3955-4e0d-aeb1-7e28cdecd9f9',
+
+  // URL Inspector — URL Prompts (details drill-down: the prompts that cited a
+  // specific URL). `table` envelope, one row per distinct prompt:
+  //   { prompt, source(=url), source_title, brand_mentioned, brands_string,
+  //     closest_date, url_cbf }.
+  // Scoped by `CBF_source` = the full URL string (placed in BOTH simple and
+  // advanced — unique to this element) + date (`CBF_date__start`/`__end`) +
+  // `CBF_model`. Brand scoping is via the sub-workspace (no CBF_brand filter).
+  // Does NOT return category/topic/region. Verified live 2026-07-29.
+  URL_PROMPTS: 'b4f1ead7-4aea-41ea-b1ce-311004715d63',
+
+  MENTIONS: 'e1a6811b-d0c9-4d6f-8a29-290a32db863f',
+  VISIBILITY: '2724878e-e0e9-4217-ad21-d6bcb7887a09',
+  CITATIONS_KPI: '588054fe-b987-40f6-9360-b5673738bdfa',
+  // Shared UUID: powers rows 9 (Aggregated Trends) and 11 (Market Tracking Trends).
+  // Service methods differentiate by payload.
+  TRENDS_MV: 'b5281393-ee98-4c38-9ed5-3437b0c450c3',
+  // Shared UUID: powers both rows 10 and 12 (Citation Trends).
+  TRENDS_CITATIONS: 'b81af644-a8db-462b-a001-ecc1eedc0552',
+  // Market Tracking Trends — Citations, the element behind the Brand Presence MFE's
+  // "Citations" tab. Distinct
+  // from TRENDS_CITATIONS (b81af644, the wiki's domain-level citation trend): this one
+  // is a `line` element returning one series per market participant, keyed by
+  // `legend` = brand/competitor NAME. Its primary numeric field is `y__mentions`, but
+  // in this element that value is the CITATION count (not mentions) — Semrush reuses
+  // the generic key. Scoped by `CBF_projects` (plural, unlike TRENDS_MV's `CBF_project`).
+  // Backs the competitor-comparison chart's Citations view (see market-tracking-trends).
+  MARKET_CITATIONS_TREND: '2e5a6f4e-f287-4951-a7e2-7e29981c86d8',
+  // Shared UUID: powers rows 13 (daily) and 14 (weekly) Sentiment.
+  SENTIMENT: 'f4153af8-6ce9-4058-8872-8a3cf11b9907',
+
+  // Sentiment Movers
+  SENTIMENT_MOVERS: 'ba62a018-03bc-40d8-8602-be24975dd4f0',
+
+  // Competitor Summary
+  COMPETITOR_SUMMARY: '6b0dc2ca-7c06-4c8d-b169-c49a2894eac8',
+
+  // Share of Voice
+  SOV_PER_TOPIC: 'e4d7dc35-856b-4a69-8a32-2cfc7d2ef2b0',
+  SOV_BRAND_TOPIC: '03e0dedd-ea2f-4e19-a0fa-d35cd9e3ee9f',
+
+  // Topics
+  TOPIC_SENTIMENTS: '324c9c6a-2f30-426c-9bce-d692b5a5e52b',
+  TOPIC_MV_PROMPTS: '0564b061-0985-4d1e-a3d9-0fc6f37b7ed9',
+  // Shared UUID: powers rows 21 (Citations+Source Count), 23 (AI Answers), 30 (Executions).
+  CITATIONS_SOURCES: '141adc88-830c-4801-a67d-f8a86d0a21f7',
+
+  // Prompts (filtered list + count). Returns a `table` of prompts — one row per
+  // prompt with `{ prompt, prompt_topic, primary_intent, volume }` — filtered by
+  // topic tag, AI model, and Semrush project(s). Backs the Prompts (count)
+  // endpoint that feeds the prompt healthcheck metrics (intent %, and — via a
+  // filtered count ratio — branded %).
+  PROMPTS: '406ba6e0-0de2-475e-80d9-42fab8616032',
+
+  // Topic Prompts
+  PROMPTS_BY_TOPIC: '78864493-90a7-449a-89ab-1ba3d09a712e',
+  SOURCES: '553cd819-d507-460d-a8ff-e34486bad3e1',
+  SOURCES_DATES: '404fb017-7e44-41ec-896f-7138f731da60',
+
+  // Prompt Details
+  PROMPT_AI_ANSWERS: '45d6251f-15cd-4b33-a7f6-de97925e900e',
+  PROMPT_SOURCES: '7db0df5c-6679-4495-8ea8-ef2dfd7e5251',
+  PROMPT_VISIBILITY: 'f5230e00-b14f-4a52-bf89-2952ef7fe39b',
+
+  // KPI Headlines (Overview-SR exact-parity cards, LLMO-6515 follow-up). Verified
+  // live against the Brand Presence MFE — each is a per-brand `kpiLineChart`
+  // element carrying a Semrush-computed `mainValue`/`secondaryValue` period
+  // comparison, distinct from the multi-brand weekly series `TRENDS_MV`/
+  // `MARKET_CITATIONS_TREND` already provide (see kpi-headlines.js).
+  KPI_SHARE_OF_VOICE: '69a4befb-268e-42ff-b949-fdb9609c8f52',
+  KPI_BRAND_VISIBILITY: '6db33cf0-f4bc-4ab9-8bd0-f10ac4623562',
+  // Scoped by CBF_brand_urls (the brand's own URL list from BRAND_URLS below),
+  // NOT CBF_ws_brand — source visibility is domain-cited, not brand-name-mentioned.
+  KPI_SOURCE_VISIBILITY: 'a6e7e811-4274-4f69-a2b3-35c5d639124d',
+  // Filter element: the brand's own URL list (main domain + tracked social
+  // profiles), scoped by CBF_brand. Feeds KPI_SOURCE_VISIBILITY's CBF_brand_urls.
+  BRAND_URLS: 'c8bea9ec-dca4-4121-9353-4189c0edd4b5',
+});

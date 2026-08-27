@@ -12,17 +12,48 @@
 
 // @ts-check
 
-import { hasText } from '@adobe/spacecat-shared-utils';
-import crypto from 'node:crypto';
+import { hasText, isValidUUID, siteIdentityFromUrlString } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from '../../utils.js';
-import { ERROR_CODES, isUpstreamGone } from '../errors.js';
-import { SerenityTransportError } from '../rest-transport.js';
+import {
+  ERROR_CODES, isMeteredQuota, isUpstreamGone, isSemrushTransportError, toQuotaExceededError,
+} from '../errors.js';
 import { normalizeLanguageCode, normalizeGeoTargetId } from '../validation.js';
 import { resolveLocation } from '../locations.js';
+import { resolveSiteIdentity } from '../site-linkage.js';
+import { createProvisionAndPublishProject, CreateNoProjectIdError } from '../project-provisioning.js';
+import { alertQuotaRejection } from '../quota-alerts.js';
+
+/** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
+/** @typedef {import('../rest-transport.js').ProjectCreateBody} ProjectCreateBody */
 
 const LANGUAGE_CACHE_TTL_MS = 60 * 60 * 1000;
 export const MAX_MODEL_IDS = 50;
+const MAX_PARENT_ID_QUERY_LEN = 200;
+
+/**
+ * Validates the `parentId` query param for the nested-tree tag read (`''` = roots,
+ * an upstream tag id = that tag's children). Mirrors handlers/tags.js's
+ * `parseParentId` create/PATCH-body validation for a consistent posture across
+ * every path that accepts a parentId, but keeps `''` as a meaningful value here
+ * (it is not omitted/absent — see {@link listProjectTagTree}).
+ *
+ * @param {string} raw - `String(query.parentId)`.
+ * @returns {string} the value, unchanged, once validated.
+ */
+export function validateParentIdQuery(raw) {
+  if (raw.length > MAX_PARENT_ID_QUERY_LEN) {
+    throw new ErrorWithStatusCode(
+      `parentId must not exceed ${MAX_PARENT_ID_QUERY_LEN} characters`,
+      400,
+    );
+  }
+  // eslint-disable-next-line no-control-regex
+  if (/[\s\u0000-\u001F\u007F]/.test(raw)) {
+    throw new ErrorWithStatusCode('parentId must not contain whitespace or control characters', 400);
+  }
+  return raw;
+}
 
 // Re-exported so existing importers (handlers/markets-subworkspace.js, tests)
 // keep resolving it from here; the implementation now lives in ../locations.js
@@ -55,6 +86,7 @@ function isoToEnglishName(languageTag) {
   return name && name.toLowerCase() !== primary ? name : null;
 }
 
+/** @param {SerenityTransport} transport */
 export async function resolveLanguageId(transport, languageTag, log) {
   const now = Date.now();
   if (languageCache.expiresAt <= now) {
@@ -96,6 +128,8 @@ export async function resolveLanguageId(transport, languageTag, log) {
  *
  * `transport` and `semrushWorkspaceId` are kept on the signature for the
  * controller's parity with the other handlers; they are unused here.
+ *
+ * @param {SerenityTransport} transport
  */
 // eslint-disable-next-line no-unused-vars
 export async function handleListMarkets(transport, dataAccess, brandId, semrushWorkspaceId) {
@@ -110,6 +144,9 @@ export async function handleListMarkets(transport, dataAccess, brandId, semrushW
       languageCode: row.getLanguageCode(),
       createdAt: row.getCreatedAt(),
       updatedAt: row.getUpdatedAt(),
+      // The market's SpaceCat Site identity (LLMO-6405 Phase 2). Nullable — a
+      // market predating the site-linkage backfill, or one never linked, has none.
+      siteId: row.getSiteId?.() ?? null,
     })),
   };
 }
@@ -164,6 +201,8 @@ export async function handleGetMarket(dataAccess, brandId, geoTargetId, language
     semrushProjectId: row.getSemrushProjectId(),
     createdAt: row.getCreatedAt(),
     updatedAt: row.getUpdatedAt(),
+    // The market's SpaceCat Site identity (LLMO-6405 Phase 2). Nullable.
+    siteId: row.getSiteId?.() ?? null,
   };
 }
 
@@ -183,8 +222,18 @@ function validateCreateBody(body) {
   if (normalizeLanguageCode(body?.languageCode) === null) {
     errors.push('languageCode must match ^[a-z]{2,3}(-[a-z]{2,4})?$');
   }
-  if (!hasText(body?.brandDomain)) {
-    errors.push('brandDomain is required');
+  // brandDomain OR siteId (LLMO-6405 Phase 2): a caller may supply the market's
+  // SpaceCat Site UUID instead of a raw domain — the controller derives both the
+  // domain and the tracked url from it (resolveSiteUrls). One of the two is required.
+  if (!hasText(body?.brandDomain) && !hasText(body?.siteId)) {
+    errors.push('brandDomain or siteId is required');
+  }
+  // Validated even though only the sub-workspace path resolves it: flat mode
+  // records it straight onto `brand_to_semrush_projects.site_id`, a uuid column,
+  // so a malformed value that gets this far surfaces as a write failure rather
+  // than as the bad request it is.
+  if (hasText(body?.siteId) && !isValidUUID(body.siteId)) {
+    errors.push('siteId must be a valid UUID');
   }
   if (!Array.isArray(body?.brandNames) || body.brandNames.length === 0
       || !body.brandNames.every(hasText)) {
@@ -194,14 +243,43 @@ function validateCreateBody(body) {
 }
 
 /**
- * Default market display name. Format: `<brandDisplayName>-<6-hex>`.
- * The random suffix prevents collisions in shared workspaces and
- * disambiguates re-create-after-delete.
+ * Default market display name. Format: `<REGION>-<language>` — uppercase ISO-2
+ * country code + the normalized language code (`US-en`, `CH-de`).
+ *
+ * LLMO-managed sub-workspaces are locked but still VISIBLE to the customer in
+ * the Semrush navigation, so a project's name has to read as the market it is.
+ * This is the same convention the Semrush migration writes (adobe/
+ * mysticat-data-service `scripts/serenity_migration/planner.py`), so a market
+ * added from the Markets tab is indistinguishable from a migrated one — and a
+ * later migration pass, which adopts a project by matching its exact name
+ * within the sub-workspace, adopts it instead of creating a duplicate beside it.
+ *
+ * The name carries no identity: a market is addressed by its
+ * (geoTargetId, languageCode) slice, which is unique per brand, so the whole
+ * set of names within a sub-workspace is collision-free.
+ *
+ * Both parts are required, and an empty one throws rather than yielding a
+ * half-formed `-en` / `US-` name: the result is customer-visible in the Semrush
+ * navigation, so there is no value in a degenerate name reaching a workspace.
+ * Every caller today validates the slice first (both create handlers 400 on an
+ * unparseable market or language before naming anything), so this guards the
+ * exported contract against a future caller that skips that gauntlet.
+ *
+ * @param {string} market - ISO-2 country code (any case).
+ * @param {string|null} languageCode - normalized BCP-47 language code.
+ * @returns {string}
+ * @throws {ErrorWithStatusCode} 400 when either part is missing/empty.
  */
-export function defaultMarketName(brandDisplayName) {
-  const base = hasText(brandDisplayName) ? String(brandDisplayName) : 'brand';
-  const suffix = crypto.randomBytes(3).toString('hex');
-  return `${base}-${suffix}`;
+export function defaultMarketName(market, languageCode) {
+  const region = String(market || '').toUpperCase();
+  const lang = String(languageCode || '').toLowerCase();
+  if (!hasText(region) || !hasText(lang)) {
+    throw new ErrorWithStatusCode(
+      'market and languageCode are both required to name a market',
+      400,
+    );
+  }
+  return `${region}-${lang}`;
 }
 
 /**
@@ -240,6 +318,7 @@ export function defaultMarketName(brandDisplayName) {
  *   ("handleCreateMarket: orphaned upstream project"); any orphan can
  *   be reconciled by an operator running `transport.deleteProject` (or
  *   via a one-off script reading the same log stream).
+ * @param {SerenityTransport} transport
  */
 export async function handleCreateMarket(
   transport,
@@ -300,77 +379,82 @@ export async function handleCreateMarket(
     };
   }
 
-  const name = hasText(body?.name) ? String(body.name) : defaultMarketName(body.brandDisplayName);
+  const name = hasText(body?.name)
+    ? String(body.name)
+    : defaultMarketName(body.market, languageCode);
 
+  // brandDomain OR siteId (LLMO-6405 Phase 2): when the caller supplied a Site
+  // UUID instead of a raw domain, derive the Semrush project domain from it. The
+  // flat handler holds full `dataAccess` (incl. Site), so it self-derives — the
+  // subworkspace handler cannot (narrowed dataAccess) and relies on the controller.
+  // A supplied-but-unresolvable siteId is a hard 400 (never silently proceeds).
+  // Both values come from ONE input — a caller-threaded url, a caller-supplied
+  // brandDomain, or the Site behind body.siteId — because a project domained to
+  // one url while tracking another is worse than one tracking its apex: it looks
+  // deliberate. `domain` stays host-only (a path there is a hard 400 upstream);
+  // `primaryUrl` keeps whatever subdomain or subpath the source carried.
+  let brandDomain;
+  let primaryUrl;
+  if (hasText(body.brandDomain)) {
+    brandDomain = body.brandDomain;
+    primaryUrl = siteIdentityFromUrlString(
+      hasText(body.primaryUrl) ? body.primaryUrl : body.brandDomain,
+    );
+  } else {
+    const identity = await resolveSiteIdentity(dataAccess, body.siteId, log);
+    brandDomain = identity?.domain ?? null;
+    primaryUrl = identity?.primaryUrl ?? null;
+  }
+  if (!hasText(brandDomain)) {
+    return {
+      status: 400,
+      body: {
+        error: 'invalidRequest',
+        message: 'brandDomain or a resolvable siteId is required',
+      },
+    };
+  }
+
+  /** @type {ProjectCreateBody} */
   const upstreamBody = {
     name,
     type: 'ai',
     brand_name_display: body.brandNames[0],
     brand_names: body.brandNames,
-    domain: body.brandDomain,
+    domain: brandDomain,
     country_code: body.market.toLowerCase(),
     location_id: location.geoTargetId,
     location_name: location.locationName,
     language_id: languageId,
   };
 
-  const createResp = await transport.createProject(semrushWorkspaceId, upstreamBody);
-  const semrushProjectId = String(createResp?.id || '');
-  if (!hasText(semrushProjectId)) {
-    return {
-      status: 502,
-      body: {
-        error: 'createNoProjectId',
-        message: 'Upstream createProject returned no id',
-      },
-    };
-  }
-
+  // create -> PATCH primary_url -> publish. The middle step is not optional for a
+  // brand whose site is a subdomain or a subpath: `domain` cannot carry a path and
+  // the upstream folds it to the registrable domain, so without the PATCH the
+  // project tracks the parent domain. See project-provisioning.js.
+  let semrushProjectId;
   try {
-    await transport.publishProject(semrushWorkspaceId, semrushProjectId);
-  } catch (e) {
-    // Best-effort upstream cleanup so the documented retry contract holds.
-    // Without this, every retry generates a fresh `defaultMarketName` (random
-    // hex suffix) and the upstream `createProject` body has no idempotency
-    // key — a retry after a `publishProject` failure would create a SECOND
-    // upstream project, not recover the first. The 409 gate only fires when
-    // a DB row exists; it never sees orphan upstream projects.
-    //
-    // Swallow the delete's own errors: the publishProject error is what we
-    // need to propagate to the caller, and we don't want a follow-on cleanup
-    // failure to mask it. Both outcomes are logged so an operator can still
-    // reconcile if cleanup itself fails.
-    let cleanedUp = false;
-    try {
-      await transport.deleteProject(semrushWorkspaceId, semrushProjectId);
-      cleanedUp = true;
-    } catch (cleanupErr) {
-      log?.error?.(
-        'handleCreateMarket: best-effort cleanup deleteProject failed; orphan upstream project remains',
-        {
-          brandId,
-          semrushWorkspaceId,
-          semrushProjectId,
-          geoTargetId: location.geoTargetId,
-          languageCode,
-          error: cleanupErr.message,
-        },
-      );
-    }
-    log?.error?.(
-      cleanedUp
-        ? 'handleCreateMarket: publish failed; upstream project cleaned up'
-        : 'handleCreateMarket: orphaned upstream project after publish failure',
+    semrushProjectId = await createProvisionAndPublishProject(
+      transport,
+      semrushWorkspaceId,
+      upstreamBody,
       {
-        brandId,
-        semrushWorkspaceId,
-        semrushProjectId,
-        geoTargetId: location.geoTargetId,
-        languageCode,
-        error: e.message,
-        cleanedUp,
+        primaryUrl,
+        log,
+        caller: 'handleCreateMarket',
+        logContext: { brandId, geoTargetId: location.geoTargetId, languageCode },
       },
     );
+  } catch (e) {
+    if (e instanceof CreateNoProjectIdError) {
+      return {
+        status: 502,
+        body: {
+          error: 'createNoProjectId',
+          message: 'Upstream createProject returned no id',
+        },
+      };
+    }
     throw e;
   }
 
@@ -380,6 +464,15 @@ export async function handleCreateMarket(
       semrushProjectId,
       geoTargetId: location.geoTargetId,
       languageCode,
+      // The market's own Site, when the caller named one — the per-market source
+      // of truth for the url this project tracks. It is the identity the project
+      // was just provisioned against (`resolveSiteIdentity` above derived both
+      // `brandDomain` and `primaryUrl` from it), so recording it here is what
+      // stops the market resolving to its brand's anchor by fallback later.
+      // A `brandDomain`-only create records none: flat mode resolves no Site from
+      // a raw domain, and inventing the brand's anchor would assert a per-market
+      // fact nobody stated.
+      ...(hasText(body.siteId) ? { siteId: body.siteId } : {}),
     });
   } catch (e) {
     log?.error?.(
@@ -431,6 +524,7 @@ export async function handleCreateMarket(
  * lookup returns 204. A pre-lock on the slice (advisory lock, conditional
  * delete) would tighten this further but is out of scope for the LLMO-5190
  * cut-over.
+ * @param {SerenityTransport} transport
  */
 export async function handleDeleteMarket(
   transport,
@@ -457,11 +551,16 @@ export async function handleDeleteMarket(
     languageCode,
   );
   if (!row) {
-    // Idempotent: missing slice is treated as success.
-    return { status: 204 };
+    // Idempotent: missing slice is treated as success. No site to clean up.
+    return { status: 204, deletedSiteId: null };
   }
 
   const semrushProjectId = row.getSemrushProjectId();
+  // Capture the deleted market's linked Site (LLMO-6405 R12) BEFORE the row is
+  // removed, so the controller can reference-count and unlink an orphaned
+  // brand_sites row afterwards. Flat mode does not link sites today, so this is
+  // typically null; surfaced anyway for a uniform delete contract.
+  const deletedSiteId = row.getSiteId?.() ?? null;
   try {
     await transport.deleteProject(semrushWorkspaceId, semrushProjectId);
   } catch (e) {
@@ -506,7 +605,7 @@ export async function handleDeleteMarket(
     );
   }
 
-  return { status: 204 };
+  return { status: 204, deletedSiteId };
 }
 
 // 60s TTL bounds cross-Lambda-container staleness (multiple warm containers
@@ -557,6 +656,13 @@ function evictTagCacheIfNeeded() {
  * how the slice resolves to a `projectId` (DB row vs live listing); the cache,
  * pagination, truncation guard, and sort are identical, so they live here once.
  * `logCtx` is spread into the truncation warning for diagnosability.
+ *
+ * LIVE-LAYER READ: tags are derived by paginating `transport.listPromptsByTags`,
+ * which reads the LIVE (published) prompt layer (no v1 draft variant exists — see
+ * docs/decisions/006-serenity-v1-v2-read-drift.md). A slice whose prompts are
+ * staged in an unpublished draft therefore yields an EMPTY tag set here until the
+ * project is published — that is correct, not a missing-data bug.
+ * @param {SerenityTransport} transport
  */
 export async function listTagsForProject(transport, semrushWorkspaceId, projectId, logCtx, log) {
   const cacheKey = tagCacheKey(semrushWorkspaceId, projectId);
@@ -635,18 +741,117 @@ export async function listTagsForProject(transport, semrushWorkspaceId, projectI
 }
 
 /**
+ * Read one LEVEL of a project's STANDALONE AIO tag tree (the `/aio/tags` surface),
+ * shaped for the nested Categories view. `parentId === ''` returns the ROOTS (each
+ * carrying `childrenCount`); a non-empty `parentId` returns that tag's CHILDREN
+ * (each carrying a `path[]` breadcrumb up to its root). Reads the DRAFT view so a
+ * just-created, still-unpublished category is visible — the live view hides it
+ * until the project is published (verified live 2026-07-01). Pages through the
+ * level bounded by a ceiling, mirroring the standalone-tag walk.
+ *
+ * Unlike {@link listTagsForProject} (prompt-derived, flat, cached), this reads the
+ * registered standalone tags keyed by their upstream ids — the ids the nested
+ * create + re-parent endpoints operate on — so it is NOT cached (a just-created or
+ * re-parented tag must show immediately).
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId - Semrush (sub-)workspace id.
+ * @param {string} projectId - AIO project id.
+ * @param {string} parentId - '' for roots, an upstream tag id for its children.
+ * @param {any} [log] - logger, used to surface a ceiling-hit truncation warning.
+ * @param {(item: { id: string, name: string }) => boolean} [stopWhen] - optional
+ *   early-exit predicate. When a fetched page contains a matching item, that
+ *   page's items are still collected in full but no further pages are
+ *   requested. Callers that only need to test membership (e.g. resolve-or-
+ *   create) pass this to avoid paginating the whole tree; omit it to collect
+ *   every item, as every pre-existing caller does.
+ * @returns {Promise<{ items: Array<{
+ *   id: string, name: string, parentId: string | null,
+ *   childrenCount: number, path: Array<{ id: string, name: string }> | null,
+ * }> }>}
+ */
+export async function listProjectTagTree(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  parentId,
+  log,
+  stopWhen,
+) {
+  const items = [];
+  const LIMIT = 100;
+  const PAGE_LIMIT = 50;
+  let page = 1;
+  while (page <= PAGE_LIMIT) {
+    // eslint-disable-next-line no-await-in-loop
+    const resp = await transport.listProjectTags(semrushWorkspaceId, projectId, {
+      parentId, page, limit: LIMIT, draft: true,
+    });
+    const batch = Array.isArray(resp?.items) ? resp.items : [];
+    let matched = false;
+    for (const t of batch) {
+      // AIOTag.id is required upstream; guard defensively and skip a malformed row.
+      if (t && typeof t.id === 'string' && t.id) {
+        const item = {
+          id: t.id,
+          name: typeof t.name === 'string' ? t.name : '',
+          parentId: typeof t.parent_id === 'string' && t.parent_id ? t.parent_id : null,
+          childrenCount: typeof t.children_count === 'number' ? t.children_count : 0,
+          path: Array.isArray(t.path)
+            ? t.path.map((p) => ({
+              id: typeof p?.id === 'string' ? p.id : '',
+              name: typeof p?.name === 'string' ? p.name : '',
+            }))
+            : null,
+        };
+        items.push(item);
+        if (stopWhen && stopWhen(item)) {
+          matched = true;
+        }
+      }
+    }
+    if (matched) {
+      break;
+    }
+    if (batch.length < LIMIT) {
+      break;
+    }
+    if (page === PAGE_LIMIT) {
+      // Ceiling reached with a still-full last page: at least one more page went
+      // unread, so this tag level may be truncated. A missing category in the UI
+      // is a real symptom, so log it rather than stop silently.
+      log?.warn?.('listProjectTagTree: page ceiling hit; tag level may be truncated', {
+        semrushWorkspaceId, projectId, parentId, pages: PAGE_LIMIT, limit: LIMIT,
+      });
+      break;
+    }
+    page += 1;
+  }
+  return { items };
+}
+
+/**
  * GET /serenity/tags?geoTargetId=&languageCode= — unique tag names across
  * the slice's prompts. Required filters; one slice → one upstream call set.
  * Short-TTL cache to keep dashboard polling cheap.
  *
- * TODO: the tag set is computed by paginating the project's prompts and
- * aggregating distinct tag names in JS. This is an O(N) approximation —
- * for a project with N prompts we do ceil(N/200) upstream calls. Capped
- * at 50 pages (10k prompts); beyond that the tag set is silently
+ * NESTED-TREE MODE: when the request carries a `parentId` query param (present,
+ * even empty), the read switches to the standalone AIO tag TREE instead of the
+ * prompt-derived list — `parentId=''` returns the root categories (each with
+ * `childrenCount`), a tag id returns that category's children (each with a
+ * `path[]` breadcrumb). This is the read the nested Categories view drills with,
+ * and the level the id-keyed create/re-parent endpoints operate on. Absent
+ * `parentId` preserves the legacy flat, prompt-derived behavior below.
+ *
+ * TODO: the (legacy) prompt-derived tag set is computed by paginating the
+ * project's prompts and aggregating distinct tag names in JS. This is an O(N)
+ * approximation — for a project with N prompts we do ceil(N/200) upstream calls.
+ * Capped at 50 pages (10k prompts); beyond that the tag set is silently
  * truncated and a `warn` log fires (see TAG_PAGE_LIMIT in
  * `listTagsForProject`). When/if Semrush exposes a dedicated tags endpoint
  * (`GET /v1/workspaces/{ws}/projects/{pid}/tags`), this whole loop
  * collapses to one upstream call and the truncation risk goes away.
+ * @param {SerenityTransport} transport
  */
 export async function handleListTags(
   transport,
@@ -673,10 +878,20 @@ export async function handleListTags(
   if (!row) {
     return { items: [] };
   }
+  const projectId = row.getSemrushProjectId();
+  if (query?.parentId !== undefined) {
+    return listProjectTagTree(
+      transport,
+      semrushWorkspaceId,
+      projectId,
+      validateParentIdQuery(String(query.parentId)),
+      log,
+    );
+  }
   return listTagsForProject(
     transport,
     semrushWorkspaceId,
-    row.getSemrushProjectId(),
+    projectId,
     { brandId, geoTargetId, languageCode },
     log,
   );
@@ -685,6 +900,7 @@ export async function handleListTags(
 const AI_MODELS_PAGE = 100;
 const MAX_AI_MODELS_PAGES = 5;
 
+/** @param {SerenityTransport} transport */
 async function fetchAllAiModels(transport, semrushWorkspaceId, projectId) {
   const all = [];
   let page = 1;
@@ -729,6 +945,7 @@ function assignmentToItem(it) {
  * handlers — the no-params path is workspace-independent, so both modes return
  * the identical catalog. Swallows only 404/405 (endpoint not available); auth
  * and server errors propagate.
+ * @param {SerenityTransport} transport
  */
 export async function listGlobalModelCatalog(transport) {
   let rawItems = [];
@@ -751,7 +968,7 @@ export async function listGlobalModelCatalog(transport) {
       page += 1;
     }
   } catch (e) {
-    if (e instanceof SerenityTransportError && (e.status === 404 || e.status === 405)) {
+    if (isSemrushTransportError(e) && (e.status === 404 || e.status === 405)) {
       rawItems = [];
     } else {
       throw e;
@@ -783,6 +1000,7 @@ export async function listGlobalModelCatalog(transport) {
  * how `resolveLanguageId` matches by English name). Tolerant of a 404/405 catalog
  * (returns an empty list) so a transient upstream gap degrades to "no filter"
  * rather than an error.
+ * @param {SerenityTransport} transport
  */
 export async function listLanguageCatalog(transport) {
   let rawItems = [];
@@ -790,7 +1008,7 @@ export async function listLanguageCatalog(transport) {
     const resp = await transport.listLanguages();
     rawItems = Array.isArray(resp?.items) ? resp.items : [];
   } catch (e) {
-    if (e instanceof SerenityTransportError && (e.status === 404 || e.status === 405)) {
+    if (isSemrushTransportError(e) && (e.status === 404 || e.status === 405)) {
       rawItems = [];
     } else {
       throw e;
@@ -807,6 +1025,7 @@ export async function listLanguageCatalog(transport) {
  * Models configured on one upstream project. Shared by the flat and subworkspace
  * slice-models handlers (the only difference upstream is which projectId the
  * slice resolved to).
+ * @param {SerenityTransport} transport
  */
 export async function listSliceModels(transport, semrushWorkspaceId, projectId) {
   const allItems = await fetchAllAiModels(transport, semrushWorkspaceId, projectId);
@@ -814,6 +1033,51 @@ export async function listSliceModels(transport, semrushWorkspaceId, projectId) 
   return { items };
 }
 
+/**
+ * Union of the models enabled across a set of projects. Fetches each project's
+ * assigned models (`listSliceModels`) in parallel and dedups by model `key`
+ * (falling back to `id`). Returns `{ items }` in the same shape as
+ * `listSliceModels`/`listGlobalModelCatalog`. An empty/blank project list yields
+ * an empty set — never the global catalog.
+ *
+ * @param {object} transport - Semrush transport.
+ * @param {string} semrushWorkspaceId - Semrush workspace id the projects live in.
+ * @param {Array<string>} projectIds - the Semrush project ids to union over.
+ * @returns {Promise<{ items: Array<{ id: string, key: string, name: (string|null),
+ *   icon: (string|null) }> }>}
+ */
+export async function listUnionModels(transport, semrushWorkspaceId, projectIds) {
+  const ids = [...new Set((projectIds ?? []).filter((id) => hasText(id)).map(String))];
+  if (ids.length === 0) {
+    return { items: [] };
+  }
+  const perProject = await Promise.all(
+    ids.map((projectId) => listSliceModels(transport, semrushWorkspaceId, projectId)
+      .catch((e) => {
+        // Tolerate a stale/deleted project (404/405) — skip it rather than
+        // 500 the whole union, matching the old global-catalog path. Auth and
+        // other errors still propagate.
+        if (isSemrushTransportError(e) && (e.status === 404 || e.status === 405)) {
+          return { items: [] };
+        }
+        throw e;
+      })),
+  );
+  const byKey = new Map();
+  for (const { items } of perProject) {
+    for (const m of items) {
+      if (m) {
+        const dedupKey = hasText(m.key) ? m.key : m.id;
+        if (!byKey.has(dedupKey)) {
+          byKey.set(dedupKey, m);
+        }
+      }
+    }
+  }
+  return { items: [...byKey.values()] };
+}
+
+/** @param {SerenityTransport} transport */
 export async function handleListModels(
   transport,
   dataAccess,
@@ -824,9 +1088,12 @@ export async function handleListModels(
   const geoTargetId = normalizeGeoTargetId(query?.geoTargetId);
   const languageCode = normalizeLanguageCode(query?.languageCode);
 
-  // No-params path: return global model catalog.
+  // No-params path: return the union of models enabled across all the brand's
+  // projects (not the global catalog — that lives on the org-scoped endpoint).
   if (geoTargetId === null && languageCode === null) {
-    return listGlobalModelCatalog(transport);
+    const rows = await dataAccess.BrandSemrushProject.allByBrandId(brandId);
+    const projectIds = (rows ?? []).map((r) => r.getSemrushProjectId());
+    return listUnionModels(transport, semrushWorkspaceId, projectIds);
   }
 
   // Partial params: both must be provided together.
@@ -860,6 +1127,22 @@ export async function handleListModels(
  * it false when the caller batches its own publish afterwards (brand-create
  * stages models + prompts and publishes once, best-effort) — otherwise this
  * inner publish runs on an unpublishable (e.g. unit-less) project and throws.
+ *
+ * `wrapPublish` (default identity — a plain call, byte-for-byte the pre-existing behavior) wraps
+ * the inner `publishProject` call. Retained as an injection seam for a future publish-retry
+ * wrapper (§10.3); no caller passes a non-identity wrapper today, so every publish is a plain call.
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string[]} modelIds
+ * @param {object} logCtx
+ * @param {any} log
+ * @param {object} [options]
+ * @param {boolean} [options.publish]
+ * @param {(fn: () => Promise<any>) => Promise<any>} [options.wrapPublish]
+ * @param {{ orgId?: string | null, brandId?: string | null, env?: object | null } | null}
+ *   [options.alertContext] - serenity-docs#72 §5: when supplied, fires the quota-rejection Slack
+ *   alert on a residual publish-leg rejection.
  */
 export async function syncModelsForProject(
   transport,
@@ -868,7 +1151,9 @@ export async function syncModelsForProject(
   modelIds,
   logCtx,
   log,
-  { publish = true } = {},
+  {
+    publish = true, wrapPublish = (fn) => fn(), alertContext = null,
+  } = {},
 ) {
   const ctx = logCtx || {};
   // Fetch current assignments: catalog-id → assignment-id mapping
@@ -886,7 +1171,8 @@ export async function syncModelsForProject(
   const toRemoveAssignmentIds = [...currentSet]
     .filter((id) => !desiredSet.has(id))
     .map((id) => currentMap.get(id))
-    .filter(Boolean);
+    // Explicit rather than `filter(Boolean)`, which does not narrow the element type.
+    .filter((id) => id !== undefined);
 
   // Short-circuit: nothing to do — return the already-fetched list as-is.
   if (toAdd.length === 0 && toRemoveAssignmentIds.length === 0) {
@@ -940,7 +1226,30 @@ export async function syncModelsForProject(
   // Only reached when something actually changed (the no-op path returned above).
   // Skipped when the caller batches its own publish (brand-create, see jsdoc).
   if (publish) {
-    await transport.publishProject(semrushWorkspaceId, projectId);
+    try {
+      await wrapPublish(() => transport.publishProject(semrushWorkspaceId, projectId));
+    } catch (e) {
+      // serenity-docs#72 §4.1: a model-set-change publish is a metered write too — a residual
+      // disguised-405 quota rejection (after wrapPublish's own retry, when wired) must surface as
+      // the stable 409 quotaExceeded token, never propagate raw into mapError's generic 502. This
+      // is the shared core for BOTH the flat and sub-workspace PUT /models callers.
+      if (isMeteredQuota(e)) {
+        log?.warn?.('handleUpdateModels: publish rejected — quota exceeded', {
+          ...ctx, semrushWorkspaceId, projectId,
+        });
+        if (alertContext) {
+          await alertQuotaRejection({
+            orgId: alertContext.orgId,
+            brandId: alertContext.brandId ?? ctx.brandId,
+            workspaceId: semrushWorkspaceId,
+            caseType: 'brandCarveExhausted',
+            dimension: 'prompts',
+          }, alertContext.env, log);
+        }
+        throw toQuotaExceededError();
+      }
+      throw e;
+    }
   }
 
   // Return the refreshed model list
@@ -972,6 +1281,22 @@ export async function syncModelsForProject(
  * internally for the DELETE batch and are never exposed to callers.
  *
  * Returns the final model list in the same shape as `handleListModels`.
+ *
+ * `publish` (default true — the standalone-endpoint contract) commits the
+ * model-set change to the live project. Set it false when the caller batches
+ * its own publish afterwards (LLMO-5492 publish-after-populate: finalize sets
+ * models with publish deferred, then publishes each project once) — the inner
+ * publish is forwarded to {@link syncModelsForProject}.
+ * @param {SerenityTransport} transport
+ * @param {any} dataAccess
+ * @param {string | undefined} brandId
+ * @param {string} semrushWorkspaceId
+ * @param {any} body
+ * @param {any} log
+ * @param {object} [options]
+ * @param {boolean} [options.publish] - see above.
+ * @param {string | null} [options.orgId] - serenity-docs#72 §5 alert payload only.
+ * @param {object | null} [options.env] - serenity-docs#72 §5 alert kill-switch/config only.
  */
 export async function handleUpdateModels(
   transport,
@@ -980,6 +1305,7 @@ export async function handleUpdateModels(
   semrushWorkspaceId,
   body,
   log,
+  { publish = true, orgId = null, env = null } = {},
 ) {
   const geoTargetId = normalizeGeoTargetId(Number(body?.geoTargetId));
   const languageCode = normalizeLanguageCode(body?.languageCode);
@@ -1018,5 +1344,6 @@ export async function handleUpdateModels(
     modelIds,
     { brandId, geoTargetId, languageCode },
     log,
+    { publish, alertContext: { orgId, brandId, env } },
   );
 }

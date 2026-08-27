@@ -401,6 +401,38 @@ export default function suggestionTests(getHttpClient, resetData) {
         expect(updated.skipDetail).to.equal('Fix was applied manually');
       });
 
+      it('user: rejects an illegal transition (OUTDATED -> FIXED) with 400 and keeps the stored status (SITES-49063)', async () => {
+        const http = getHttpClient();
+        // fresh suggestion (created as NEW) so this case is isolated from testSuggId
+        const created = await http.user.post(BASE, [
+          { type: 'CODE_CHANGE', rank: 61, data: { title: 'Illegal transition test' } },
+        ]);
+        expect(created.status).to.equal(207);
+        const { id } = created.body.suggestions[0].suggestion;
+
+        // NEW -> OUTDATED is a legal transition
+        const toOutdated = await http.user.patch(`${BASE}/status`, [
+          { id, status: 'OUTDATED' },
+        ]);
+        expectBatch207(toOutdated, 1, 'suggestions');
+        expect(toOutdated.body.suggestions[0].statusCode).to.equal(200);
+
+        // OUTDATED -> FIXED is illegal: per-item 400 inside a 207 batch, no write
+        const toFixed = await http.user.patch(`${BASE}/status`, [
+          { id, status: 'FIXED' },
+        ]);
+        expectBatch207(toFixed, 1, 'suggestions');
+        expect(toFixed.body.metadata.success).to.equal(0);
+        expect(toFixed.body.metadata.failed).to.equal(1);
+        expect(toFixed.body.suggestions[0].statusCode).to.equal(400);
+        expect(toFixed.body.suggestions[0].message).to.equal('Illegal status transition: OUTDATED -> FIXED');
+
+        // the stored row must retain OUTDATED (the guard prevented the write end-to-end)
+        const check = await http.user.get(`${BASE}/${id}`);
+        expect(check.status).to.equal(200);
+        expect(check.body.status).to.equal('OUTDATED');
+      });
+
       it('user: returns 403 for denied site', async () => {
         const http = getHttpClient();
         const res = await http.user.patch(`${DENIED_BASE}/status`, [

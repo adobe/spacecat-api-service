@@ -12,10 +12,17 @@
 > `decommissionBrandWorkspace`).
 >
 > **Hardening pass (post-review, gap audit):** five further safety/correctness
-> gaps were closed. (1) The sub-workspace **title now embeds the brand id**
-> (`"<name> [<uuid>]"`) so ambiguous-create recovery cannot adopt a *same-named*
-> brand's workspace; adoption additionally verifies the candidate is
-> **project-empty** before adopting. (2) `ensureSubworkspace` takes an optional
+> gaps were closed. (1) The sub-workspace **title is the brand's bare display
+> name**, which is *not* unique within an org, so ambiguous-create recovery does
+> not key on it alone: `findAdoptableFamilyMatch` **drops every candidate already
+> bound to a different brand** (`brands.semrush_sub_workspace_id`, a UNIQUE
+> column) before applying the match/ambiguity rules, and additionally verifies the
+> candidate is **project-empty** before adopting — together these keep a timed-out
+> create from adopting a *same-named* brand's workspace. Because a bare title can
+> resolve to a workspace this request did not create, `ensureSubworkspace` reports
+> a **freshly-created** workspace via `onWorkspaceCreated` and every failure-
+> compensation path releases only on that signal, never on a merely-adopted
+> workspace. (2) `ensureSubworkspace` takes an optional
 > `reloadPointer` and, on the create path, **re-reads the brand pointer before
 > persisting** — if a concurrent activation already won, it releases its own
 > freshly-created workspace's allocation and adopts the winner (residual race
@@ -30,6 +37,19 @@
 > `GET …/family` leaf-direction semantics are live-verified — an always-on guard
 > would falsely 409 every deactivate if `family(leaf)` returns siblings. The
 > parent-equality guard remains always-on.
+>
+> **Superseded by ADR-008 / ADR-009 (2026-08, SITES-49206):** the resource-carve design this plan
+> describes — `createChildWorkspace`'s mandatory non-zero `resources.ai` sizing,
+> `ensureChildWorkspace`'s create/re-grant sizing, and `decommissionBrandWorkspace`'s
+> `transferWorkspaceResources` release-to-parent step (below, and in the create/re-grant flow
+> above) — was **never shipped this way**.
+> [ADR-008](../decisions/008-no-subworkspace-resource-carve.md) decided a sub-workspace carries no AI
+> resource allocation of its own, and [ADR-009](../decisions/009-remove-dormant-jit-allocator.md)
+> removed the JIT allocator that would have implemented it. `transferWorkspaceResources` had no
+> production caller — only the manual `scripts/serenity-metered-405-canary.mjs` probe — and
+> [ADR-010](../decisions/010-durable-limits-recheck-retires-canary.md) has since deleted both the
+> method and the script entirely. Do not treat the mentions below as a live caller inventory, or as
+> proof either still exists, for `transferWorkspaceResources`.
 
 **Status:** Plan · 2026-06-15
 **Implements:** `adobe/serenity-docs` PR #12 → `docs/discovery/brand-semrush-provisioning-v2-phase1-sync.md` (cited as *design §N*) and `…-v2-phase1-implementation.md`.
@@ -144,7 +164,7 @@ Add thin wrappers (all under `API_PREFIX`, all via the existing `request()` help
 | `deleteWorkspace(wsId)` | DELETE `…/v1/workspaces/{id}` | **test cleanup only** — guard comment; production flows never call it |
 | `listProjects(wsId)` | GET `…/v1/workspaces/{id}/projects` | v1 **default view** (draft‑faithful) |
 | `getProject(wsId, projectId)` | GET `…/v1/workspaces/{id}/projects/{id}` | v1 by‑id read |
-| `getInitStatus(wsId, projectId)` | GET `…/v1/workspaces/{id}/projects/{id}/aio/init_status` | detail‑read enrichment only |
+| `getInitStatus(wsId, projectId)` | GET `…/v2/workspaces/{id}/projects/{id}/aio/init_status` | detail‑read enrichment only (moved v1→v2 in project-engine-client 1.2.0; v1 route removed — see ADR-006) |
 
 Extend **`errors.js`** with normative classification (design §6) and new `ERROR_CODES`:
 - `405` + `text/html` body on publish → **permanent allocation failure** (`allocationFailure`) — never retried as transient.

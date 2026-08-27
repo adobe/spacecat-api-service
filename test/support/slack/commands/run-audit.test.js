@@ -18,10 +18,10 @@ import esmock from 'esmock';
 
 use(sinonChai);
 
-// Mock TierClient at the top level
-const mockTierClient = {
-  createForSite: sinon.stub(),
-};
+// Mock TierClient at the top level. The object identity has to stay stable —
+// esmock injects this very reference into the module under test in the before()
+// hook below — so only the fake on it is replaced, fresh in each beforeEach.
+const mockTierClient = {};
 
 // Import RunAuditCommand with mocked TierClient
 let RunAuditCommand;
@@ -73,11 +73,10 @@ describe('RunAuditCommand', () => {
     };
     slackContext = { say: sinon.spy() };
 
-    // Reset and set default behavior for TierClient mock.
+    // Default behaviour for the TierClient mock.
     // The Slack run-audit handler checks `siteEnrollment` (matching the audit-worker's
     // downstream gate); `entitlement` is intentionally not consulted.
-    mockTierClient.createForSite.reset();
-    mockTierClient.createForSite.resolves({
+    mockTierClient.createForSite = sinon.stub().resolves({
       checkValidEntitlement: sinon.stub().resolves({ siteEnrollment: { id: 'enr-123' } }),
     });
   });
@@ -579,6 +578,22 @@ describe('RunAuditCommand', () => {
       expect(parsedData).to.deep.include({
         'date-start': '2025-09-07',
         source: 'google-ai-overviews',
+      });
+    });
+
+    it('forwards mode in audit data for non-prerender audit types (e.g. toc\'s mode:ai-only, LLMO-6167)', async () => {
+      const command = RunAuditCommand(context);
+
+      await command.handleExecution(['validsite.com', 'audit:geo-brand-presence', 'generatePrompts:true', 'mode:ai-only'], slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+      expect(sqsStub.sendMessage).called;
+
+      const sendMessageCall = sqsStub.sendMessage.firstCall;
+      const parsedData = JSON.parse(sendMessageCall.args[1].data);
+      expect(parsedData).to.deep.include({
+        generatePrompts: 'true',
+        mode: 'ai-only',
       });
     });
 

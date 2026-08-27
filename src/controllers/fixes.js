@@ -40,6 +40,7 @@ import { FixDto } from '../dto/fix.js';
 import { SuggestionDto } from '../dto/suggestion.js';
 import { isValidLocale } from '../utils/validations.js';
 import { resolveDocumentPath } from '../support/document-path-resolver.js';
+import { filterOpportunitiesByFacsComposite } from '../support/facs-composite-resolvers.js';
 import { getIMSPromiseToken, exchangePromiseToken } from '../support/utils.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
@@ -47,8 +48,21 @@ const VALIDATION_ERROR_NAME = 'ValidationError';
 // Only pass IMS-format IDs to the admin profile API. Rejects legacy or malformed
 // values that could have been stored before the server-side derivation fix, closing
 // the residual PII exfiltration path for pre-fix data.
-const IMS_ID_RE = /^[A-Za-z0-9]+@(AdobeID|AdobeOrg|Email|AdobeServices|[0-9a-fA-F]{24})$/;
+// The auth source (after `@`) is a named source (AdobeID/AdobeOrg/Email/AdobeServices)
+// or a hex org id that may carry a single-letter account-type suffix, e.g.
+// `...495fcd.e` for reference/trial orgs — plain emails and system markers stay rejected.
+// The hex run is bounded (16-40) to keep this security guard tight: it is the sole
+// gate preventing arbitrary stored values from reaching getImsAdminProfile.
+const IMS_ID_RE = /^[A-Za-z0-9]+@(AdobeID|AdobeOrg|Email|AdobeServices|[0-9a-fA-F]{16,40}(?:\.[a-z])?)$/;
 const IMS_ENRICH_BATCH_SIZE = 5;
+const DEFAULT_SITE_FIXES_LIMIT = 200;
+const MAX_SITE_FIXES_LIMIT = 1000;
+
+// Fix statuses that count as an already-live deployment for dedupe purposes.
+const ACTIVE_FIX_STATUSES = [
+  FixEntityModel.STATUSES.DEPLOYED,
+  FixEntityModel.STATUSES.PUBLISHED,
+];
 
 /**
  * @typedef {Object} DataAccess
@@ -204,6 +218,71 @@ export class FixesController {
   }
 
   /**
+   * Gets all fixes for a given site, across every opportunity, by fetching the site's
+   * opportunity IDs and filtering fixes on opportunityId IN (...). Optionally filtered
+   * by status (applied in-memory, since the underlying query only supports one filter
+   * condition at a time). The result set is capped by `limit` (default
+   * DEFAULT_SITE_FIXES_LIMIT, max MAX_SITE_FIXES_LIMIT) since the aggregation is
+   * multiplicative across a site's opportunities and fixes.
+   *
+   * @param {RequestContext} context - request context
+   * @returns {Promise<Response>} Array of fixes response.
+   */
+  async getAllForSite(context) {
+    const { siteId } = context.params;
+    const status = context.data?.status ?? null;
+    const locale = context.data?.locale ?? null;
+    const limitParam = context.data?.limit ?? null;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const res = await this.#checkAccess(siteId);
+    if (res) {
+      return res;
+    }
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
+
+    const validStatuses = Object.values(FixEntityModel.STATUSES);
+    if (hasText(status) && !validStatuses.includes(status)) {
+      return badRequest(`Invalid status value: ${status}. Valid: ${validStatuses.join(', ')}`);
+    }
+
+    const parsedLimit = hasText(limitParam) ? parseInt(limitParam, 10) : DEFAULT_SITE_FIXES_LIMIT;
+    if (!Number.isInteger(parsedLimit) || parsedLimit <= 0) {
+      return badRequest('limit must be a positive integer');
+    }
+    const effectiveLimit = Math.min(parsedLimit, MAX_SITE_FIXES_LIMIT);
+
+    // ReBAC composite scope (D4): when a FACS caller is scoped to specific
+    // opportunity types, narrow the site opportunities to those before deriving
+    // fixes, so a type-scoped caller cannot read other types' fixes. No-op for
+    // site-wide / non-FACS / admin callers.
+    const opportunities = filterOpportunitiesByFacsComposite(
+      context,
+      await this.#Opportunity.allBySiteId(siteId),
+    );
+    const opportunityIds = opportunities.map((o) => o.getId());
+
+    let fixEntities = opportunityIds.length > 0
+      ? await this.#FixEntity.allByOpportunityIds(opportunityIds)
+      : [];
+
+    if (hasText(status)) {
+      fixEntities = fixEntities.filter((fix) => fix.getStatus() === status);
+    }
+
+    fixEntities = fixEntities.slice(0, effectiveLimit);
+
+    await this.#enrichFixesWithUserNames(fixEntities);
+    return ok(fixEntities.map((fix) => FixDto.toJSON(fix, locale)));
+  }
+
+  /**
    * Gets all suggestions for a given site, opportunity and status.
    *
    * @param {RequestContext} context - request context
@@ -336,6 +415,13 @@ export class FixesController {
     const FixEntity = this.#FixEntity;
     const fixes = await Promise.all(context.data.map(async (fixData, index) => {
       try {
+        // Dedupe (SITES-48951): for the ASO-UI "mark as deployed" path, return the
+        // existing active fix instead of creating a duplicate. See #dedupeAsoFix.
+        const dedupedResult = await this.#dedupeAsoFix(opportunityId, fixData, index, log);
+        if (dedupedResult) {
+          return dedupedResult;
+        }
+
         const enrichedFixData = await FixesController.#enrichWithDocumentPath(
           fixData,
           enrichmentCtx,
@@ -383,6 +469,67 @@ export class FixesController {
   }
 
   /**
+   * Dedupe for the ASO-UI "mark as deployed" path (SITES-48951): a duplicate
+   * fix_entity is only ever created via origin 'aso'. If a target suggestion already
+   * has an active (DEPLOYED/PUBLISHED) fix in this opportunity — e.g. a Mystique apply
+   * fix that raced it — return that existing fix as a 200 result instead of creating a
+   * duplicate. Scoped to 'aso' so the Mystique SQS worker's create_fixes (origin
+   * 'spacecat', which relies on a 201) is untouched; preserves the manual-deploy case
+   * (no active fix => create). Returns the short-circuit result object, or null to
+   * proceed with creation.
+   *
+   * @returns {Promise<{index: number, fix: object, statusCode: number}|null>}
+   */
+  async #dedupeAsoFix(opportunityId, fixData, index, log) {
+    if (
+      fixData.origin !== FixEntityModel.ORIGINS.ASO
+      || !isArray(fixData.suggestionIds)
+      || fixData.suggestionIds.length === 0
+    ) {
+      return null;
+    }
+    // Group semantics: a V2 page-group apply creates ONE fix linked to every
+    // suggestion in the group, so any member resolving to an active fix means the
+    // whole group is already covered — echoing that fix for the batch is correct,
+    // not an orphaned member. (For the same reason the UI, #2154, skips the aso
+    // create for V2-direct groups entirely.) A hypothetical non-homogeneous group
+    // (an active fix for suggestion A but not B) would leave B PATCHed to FIXED by
+    // the UI with no backing fix of its own; if a future writer can produce that,
+    // tighten this to require every suggestionId to resolve to the same fix.
+    const existingFix = await this.#findExistingActiveFix(opportunityId, fixData.suggestionIds);
+    if (!existingFix) {
+      return null;
+    }
+    log.info(`[createFixes] active fix ${existingFix.getId()} already exists for suggestion(s) ${fixData.suggestionIds.join(', ')}; skipping duplicate create`);
+    return { index, fix: FixDto.toJSON(existingFix), statusCode: 200 };
+  }
+
+  /**
+   * Finds an existing active (DEPLOYED/PUBLISHED) fix in the given opportunity linked
+   * to any of the given suggestions, or null. The `opportunityId` filter keeps a
+   * caller from probing (and having echoed back) another tenant's fix by passing a
+   * foreign `suggestionId`, and matches the intent (duplicates are within-opportunity).
+   *
+   * @param {string} opportunityId
+   * @param {string[]} suggestionIds
+   * @returns {Promise<FixEntity|null>}
+   */
+  async #findExistingActiveFix(opportunityId, suggestionIds) {
+    for (const suggestionId of suggestionIds) {
+      // eslint-disable-next-line no-await-in-loop -- short-circuits on first active fix
+      const linkedFixes = await this.#Suggestion.getFixEntitiesBySuggestionId(suggestionId);
+      const activeFix = linkedFixes.find(
+        (fix) => ACTIVE_FIX_STATUSES.includes(fix.getStatus())
+          && fix.getOpportunityId() === opportunityId,
+      );
+      if (activeFix) {
+        return activeFix;
+      }
+    }
+    return null;
+  }
+
+  /**
    * Prepares context for documentPath enrichment by pre-fetching site and opportunity.
    * Only performs lookups when at least one fix in the batch is a manual fix (origin: 'aso')
    * that doesn't already have a documentPath.
@@ -391,7 +538,8 @@ export class FixesController {
    */
   async #prepareDocumentPathEnrichment(fixDataArray, siteId, opportunityId, log) {
     const needsEnrichment = fixDataArray.some(
-      (fixData) => fixData.origin === 'aso' && !fixData.changeDetails?.documentPath,
+      (fixData) => fixData.origin === FixEntityModel.ORIGINS.ASO
+        && !fixData.changeDetails?.documentPath,
     );
     if (!needsEnrichment) {
       return null;
@@ -406,7 +554,15 @@ export class FixesController {
       if (!site || !opportunity) {
         return null;
       }
-      const promiseTokenResponse = await getIMSPromiseToken(this.#ctx);
+      const headerToken = this.#ctx.pathInfo?.headers?.['x-promise-token'];
+      let promiseTokenResponse;
+      if (hasText(headerToken)) {
+        log.info('[document-path-enrichment] using promise token from x-promise-token header');
+        promiseTokenResponse = { promise_token: headerToken };
+      } else {
+        log.info('[document-path-enrichment] no x-promise-token header, creating promise token via IMS');
+        promiseTokenResponse = await getIMSPromiseToken(this.#ctx);
+      }
       const imsAccessToken = await exchangePromiseToken(
         this.#ctx,
         promiseTokenResponse.promise_token,

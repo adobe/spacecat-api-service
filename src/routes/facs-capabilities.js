@@ -139,23 +139,33 @@ const routeFacsCapabilities = {
     'GET /config/:service/redirects.txt',
     // LLMO onboarding — internal/manual provisioning flow, not a customer FACS surface.
     'POST /v2/orgs/:spaceCatId/llmo/onboard-site',
-    // LLMO Cloudflare onboarding — LLMO-admin manual provisioning, gated by
-    // isLLMOAdministrator() with a caller-supplied x-cloudflare-token; not a FACS surface.
-    'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config',
-    'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts',
-    'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
-    'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
-    'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/zones/:zoneId/routes',
+    // Semrush onboarding notification — org-membership gated only (hasAccess(org),
+    // no product capability check), fires a Slack webhook; not a product-scoped
+    // FACS surface today.
+    'POST /v2/orgs/:spaceCatId/semrush-onboarding',
+    // (LLMO "Optimize at Edge" CDN onboarding — cloudfront/cloudflare/akamai, all
+    // :siteId — moved to PRODUCTS_ROUTES.LLMO under llmo/can_configure; they are now
+    // FACS-governed customer site routes, enforced via the secondary resource param.)
     // Admin-only writes
+    // State-layer backend provisioning — admin-only (isAdmin() in the
+    // state-access-mappings controller). Full payload (imsOrgId, product,
+    // subject, resource, capabilities); nothing derived from authInfo. Not a
+    // customer FACS surface, so it bypasses facsWrapper entirely.
+    'POST /state/access-mappings/admin', // hasAdminAccess (adminCreateMapping)
     'POST /sites', // hasAdminAccess
     'DELETE /sites/:siteId', // restricted (always 403)
     'PATCH /sites/:siteId/:auditType', // hasAdminAccess (sites-audits-toggle)
-    'POST /sites/:siteId/site-enrollments', // hasAdminAccess
+    'POST /sites/:siteId/site-enrollments', // hasEntitlementCreateAccess (admin || S2S cap)
+    'POST /sites/:siteId/entitlements', // hasEntitlementCreateAccess (admin || S2S cap)
+    // Prompt-suggestion schedule (re-)provisioning — admin-or-S2S (dedicated
+    // promptSuggestionSchedule:write capability); not a customer FACS surface.
+    'POST /sites/:siteId/prompt-suggestion-schedules', // authorizeWrite (admin || S2S cap)
     'POST /projects', // hasAdminAccess
     'DELETE /projects/:projectId', // hasAdminAccess
     'POST /organizations', // hasAdminAccess
     'DELETE /organizations/:organizationId', // restricted (always 403)
-    'POST /organizations/:organizationId/entitlements', // hasAdminAccess
+    'POST /organizations/:organizationId/entitlements', // hasEntitlementCreateAccess (admin || S2S cap)
+    'PATCH /organizations/:organizationId/entitlements', // hasS2SAdminAccess (S2S-admin only)
     'PUT /organizations/:organizationId/feature-flags/:product/:flagName', // hasAdminAccess
     'DELETE /organizations/:organizationId/feature-flags/:product/:flagName', // hasAdminAccess
     'POST /plg/records', // hasAdminAccess
@@ -166,10 +176,12 @@ const routeFacsCapabilities = {
 
     // Admin-only reads
     'GET /organizations', // admin OR S2S readAll
+    'GET /organizations/by-product-code/:productCode', // admin OR S2S readAll
     'GET /sites', // admin OR S2S readAll
     'GET /sites.csv', // hasAdminReadAccess
     'GET /sites.xlsx', // hasAdminReadAccess
     'GET /sites/by-delivery-type/:deliveryType', // hasAdminReadAccess
+    'GET /sites/by-tier/:tier', // hasAdminAccess
     'GET /sites/with-latest-audit/:auditType', // hasAdminReadAccess
     'GET /projects', // hasAdminReadAccess
     'GET /audits/latest/:auditType', // hasAdminReadAccess
@@ -194,15 +206,27 @@ const routeFacsCapabilities = {
     // Monitoring / admin telemetry
     'GET /monitoring/drs-bp-pg-audit', // internal monitoring
 
+    // Task management (Jira OAuth 3LO) — org-scoped, JWT-authenticated; not a FACS surface in v1.
+    'GET /organizations/:organizationId/task-management/connections', // JWT session
+    'GET /organizations/:organizationId/task-management/connections/:connectionId', // JWT session
+    'GET /organizations/:organizationId/task-management/tickets', // JWT session
+    'GET /organizations/:organizationId/suggestions/:suggestionId/ticket', // JWT session
+    'GET /organizations/:organizationId/opportunities/:opportunityId/tickets', // JWT session
+    'POST /organizations/:organizationId/task-management/:provider/tickets', // JWT session
+    'GET /organizations/:organizationId/task-management/connections/:connectionId/projects', // JWT session
+    'GET /organizations/:organizationId/task-management/connections/:connectionId/issue-types', // JWT session
+
     // Ephemeral-run admin surface
     'POST /ephemeral-run/batch', // admin/internal
     'GET /ephemeral-run/batch/:batchId/status', // admin/internal
 
     // System configuration (Configuration model — admin-only)
+    'GET /configurations/versions', // admin
     'GET /configurations/:version', // admin
     'GET /configurations/latest', // admin
     'PATCH /configurations/latest', // admin
     'PATCH /configurations/latest/handlers/:handlerType', // admin
+    'PUT /configurations/latest/handlers/:handlerType/replace-enabled-disabled', // admin (TEMPORARY, see SITES-40312)
     'PATCH /configurations/latest/jobs/:jobType', // admin
     'PATCH /configurations/sites/audits', // admin
     'POST /configurations/:version/restore', // admin
@@ -218,6 +242,14 @@ const routeFacsCapabilities = {
     'POST /consumers/:consumerId/revoke', // admin
     'POST /consumers/register', // admin
   ],
+
+  /**
+   * Products with FACS enforcement live (consumed by `facsWrapper` — see its
+   * `FACS_ONBOARDED_PRODUCTS` docs for the fail-closed semantics). Any product with
+   * routes below MUST be listed here, or those routes silently bypass FACS —
+   * enforced by `test/routes/facs-capabilities.test.js`. Add one when its routes go live.
+   */
+  FACS_ONBOARDED_PRODUCTS: ['LLMO', 'ASO'],
 
   PRODUCTS_ROUTES: {
   // LLMO — first product to enrol in FACS.
@@ -271,16 +303,33 @@ const routeFacsCapabilities = {
       // Strategy / opportunity review (state changes against configured content)
       'PUT /sites/:siteId/llmo/strategy': 'llmo/can_configure',
       'PUT /sites/:siteId/llmo/opportunities-reviewed': 'llmo/can_configure',
+      // Audit Policy (SITES-47306) — the controller accepts either ASO or LLMO
+      // entitlement (hasProductAccess(ac, site, 'ASO') || (..., 'LLMO')), so
+      // these routes must exist here too or facsWrapper 403s LLMO-only callers
+      // before the controller's own entitlement check ever runs.
+      'POST /sites/:siteId/audit-policy/exclusions': 'llmo/can_configure',
+      'POST /sites/:siteId/audit-policy/exclusions/delete': 'llmo/can_configure',
+      'POST /sites/:siteId/audit-policy/inclusions': 'llmo/can_configure',
+      'POST /sites/:siteId/audit-policy/inclusions/delete': 'llmo/can_configure',
 
-      // ---- Deploy --------------------------------------------------------
-      // Edge-source optimization writes. Read-side endpoints stay under can_view.
-      'POST /sites/:siteId/llmo/edge-optimize-config': 'llmo/can_deploy',
-      'POST /sites/:siteId/llmo/edge-optimize-config/stage': 'llmo/can_deploy',
+      // ---- Configure -----------------------------------------------------
+      // Edge-optimize configuration writes (opt-in + CDN routing setup). These
+      // are site-configuration changes, not deploys of a specific fix, so they
+      // sit under can_configure. Read-side endpoints stay under can_view.
+      'POST /sites/:siteId/llmo/edge-optimize-config': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/edge-optimize-config/stage': 'llmo/can_configure',
 
       // ---- View (read-only) ----------------------------------------------
       // Top-level LLMO surfaces
       'GET /v2/regions': 'llmo/can_view',
       'GET /llmo/agentic-traffic/global': 'llmo/can_view',
+      // Audit Policy / Audit Scope (SITES-47306) — see the Configure-section
+      // comment above on why these are dual-registered with ASO.
+      'GET /sites/:siteId/audit-policy': 'llmo/can_view',
+      'GET /sites/:siteId/audit-policy/revisions': 'llmo/can_view',
+      'GET /sites/:siteId/audit-scope/pages': 'llmo/can_view',
+      'GET /sites/:siteId/audit-scope/summary': 'llmo/can_view',
+      'GET /sites/:siteId/audit-scope/sections': 'llmo/can_view',
       // Body-based queries that read sheet data (S2S: site:read).
       'POST /sites/:siteId/llmo/sheet-data/:dataSource': 'llmo/can_view',
       'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': 'llmo/can_view',
@@ -298,6 +347,9 @@ const routeFacsCapabilities = {
       'GET /llmo/ai-visibility/brands/competitors': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/brand/stats-by-country': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/brand/stats-by-llm': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/brand/competitors': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/brand/competitors-stats': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/brand/top-brands': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/meta/meta': 'llmo/can_view',
       'GET /llmo/ai-visibility/competitors/metrics': 'llmo/can_view',
       'GET /llmo/ai-visibility/meta': 'llmo/can_view',
@@ -318,12 +370,33 @@ const routeFacsCapabilities = {
       'GET /llmo/ai-visibility/v1/topic/brand-topics-totals': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/topic/gap-topics-export': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/topic/gap-topics-totals': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/topic/metrics-by-fts': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/topic/topics-by-fts': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/topic/topics-by-fts-export': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/topic/topics-by-fts-totals': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/prompt/brand-prompts-export': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/prompt/gap-prompts-export': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/prompt/gap-prompts-totals': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-export': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-fts-totals': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/prompt/prompts-by-topic-ids-totals': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/source/gap-source-domains': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/source/gap-source-domains-export': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/source/gap-source-domains-totals': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/source/cited-pages': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/source/cited-pages-export': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/source/cited-pages-totals': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/source/cited-sources': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/source/cited-sources-export': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/source/cited-sources-totals': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/source/source-domains-by-topic-fts': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/source/source-domains-by-topic-fts-export': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/source/source-domains-by-topic-fts-totals': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts-export': 'llmo/can_view',
+      'GET /llmo/ai-visibility/v1/brand/brands-by-topic-fts-totals': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/prompt-research/prompts-export': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/prompt-research/brands-export': 'llmo/can_view',
       'GET /llmo/ai-visibility/v1/prompt-research/source-domains-export': 'llmo/can_view',
@@ -380,6 +453,8 @@ const routeFacsCapabilities = {
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/domain-urls': 'llmo/can_view',
       'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/url-prompts': 'llmo/can_view',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/url-prompts': 'llmo/can_view',
+      'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/prompts-by-url': 'llmo/can_view',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/prompts-by-url': 'llmo/can_view',
       'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/filter-dimensions': 'llmo/can_view',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/filter-dimensions': 'llmo/can_view',
 
@@ -419,6 +494,43 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/agentic-page-types': 'llmo/can_configure',
       'PATCH /sites/:siteId/agentic-page-types/:name': 'llmo/can_configure',
       'DELETE /sites/:siteId/agentic-page-types/:name': 'llmo/can_configure',
+
+      // LLMO "Optimize at Edge" CDN onboarding (CloudFront / Cloudflare / Akamai).
+      // Moved out of INTERNAL_ROUTES: now customer-reachable under the ReBAC model —
+      // a caller with llmo/can_configure on the site's brand (FACS), or an LLMO admin
+      // (non-FACS fallback via hasLlmoCapabilityForSite). Site-scoped (:siteId), so
+      // facsWrapper enforces them through the secondary resource param (site → brands).
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/bootstrap-url': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/connect': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/distributions': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/prerequisites': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/origins': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/behaviors': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/create-origin': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/create-function': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/apply-cache': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/create-lambda': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/lambda-status': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/apply-associations': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/verify': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/deploy': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/plan': 'llmo/can_configure',
+      'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/permissions': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-delivery': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-rescan': 'llmo/can_configure',
+      'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config': 'llmo/can_configure',
+      'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts': 'llmo/can_configure',
+      'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes': 'llmo/can_configure',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/config': 'llmo/can_configure',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties': 'llmo/can_configure',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/versions': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate': 'llmo/can_configure',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/activation-status': 'llmo/can_configure',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/deploy-status': 'llmo/can_configure',
 
       // Referral traffic (site-scoped)
       'GET /sites/:siteId/referral-traffic/kpis': 'llmo/can_view',
@@ -520,6 +632,7 @@ const routeFacsCapabilities = {
       'PATCH /trial-users/email-preferences': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/status': 'llmo/can_configure',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/activate': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/categories/:categoryId': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/topics/:topicId': 'llmo/can_configure',
@@ -529,10 +642,13 @@ const routeFacsCapabilities = {
       'POST /organizations/:organizationId/trial-user-invite': 'llmo/can_configure',
       'POST /preflight/jobs': 'llmo/can_configure',
       'POST /sites/:siteId/graph': 'llmo/can_configure',
+      'POST /sites/:siteId/geo-experiments/:geoExperimentId/trigger-impact-measurement': 'llmo/can_configure',
+      'POST /sites/:siteId/geo-experiments/:geoExperimentId/validate': 'llmo/can_configure',
       'POST /sites/:siteId/ims-org-access': 'llmo/can_configure',
       'POST /sites/:siteId/opportunities': 'llmo/can_configure',
       'POST /sites/:siteId/opportunities/:opportunityId/fixes': 'llmo/can_configure',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions': 'llmo/can_configure',
+      'POST /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/backoffice-reviews': 'llmo/can_configure',
       'POST /sites/:siteId/reports': 'llmo/can_configure',
       'POST /sites/:siteId/sandbox/audit': 'llmo/can_configure',
       'POST /sites/:siteId/sentiment/guidelines': 'llmo/can_configure',
@@ -557,6 +673,8 @@ const routeFacsCapabilities = {
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:semrushPromptId': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'llmo/can_configure',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'llmo/can_configure',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'llmo/can_configure',
+      'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId': 'llmo/can_configure',
       'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate': 'llmo/can_configure',
@@ -565,8 +683,6 @@ const routeFacsCapabilities = {
       // LLMO sheet-data row patches
       'PATCH /sites/:siteId/llmo/data/:dataSource/row': 'llmo/can_configure',
       'PATCH /sites/:siteId/llmo/data/:sheetType/:dataSource/row': 'llmo/can_configure',
-      // Preflight job create (site-scoped)
-      'POST /sites/:siteId/preflights': 'llmo/can_configure',
       // POSTs that S2S confirms are :write (not body-based queries).
       'POST /llmo/agentic-traffic/global': 'llmo/can_configure',
       'POST /sites/:siteId/traffic/predominant-type': 'llmo/can_configure',
@@ -587,6 +703,7 @@ const routeFacsCapabilities = {
       'GET /state/access-mappings/history': 'llmo/can_manage_users',
       'POST /state/access-mappings': 'llmo/can_manage_users',
       'PATCH /state/access-mappings/:id': 'llmo/can_manage_users',
+      'DELETE /state/access-mappings/:id': 'llmo/can_manage_users',
       'GET /organizations/:organizationId/permission/audit-logs': 'llmo/can_manage_users',
       'GET /product/capabilities': 'llmo/can_view',
       'GET /user/capabilities/:resourceId': 'llmo/can_view',
@@ -627,8 +744,10 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/brand-profile': 'llmo/can_view',
       'GET /sites/:siteId/experiments': 'llmo/can_view',
       'GET /sites/:siteId/files': 'llmo/can_view',
+      'GET /sites/:siteId/fixes': 'llmo/can_view',
       'GET /sites/:siteId/geo-experiments': 'llmo/can_view',
       'GET /sites/:siteId/geo-experiments/:geoExperimentId': 'llmo/can_view',
+      'GET /sites/:siteId/geo-experiments/:geoExperimentId/results': 'llmo/can_view',
       'GET /sites/:siteId/ims-org-access': 'llmo/can_view',
       'GET /sites/:siteId/ims-org-access/:accessId': 'llmo/can_view',
       'GET /sites/:siteId/latest-audit/:auditType': 'llmo/can_view',
@@ -652,6 +771,7 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit/:cursor': 'llmo/can_view',
       'GET /sites/:siteId/opportunities/by-status/:status': 'llmo/can_view',
       'GET /sites/:siteId/opportunities/top-paid': 'llmo/can_view',
+      'GET /sites/:siteId/edge-deployed-urls': 'llmo/can_view',
       'GET /sites/:siteId/page-citability/counts': 'llmo/can_view',
       'GET /sites/:siteId/reports': 'llmo/can_view',
       'GET /sites/:siteId/reports/:reportId': 'llmo/can_view',
@@ -756,6 +876,7 @@ const routeFacsCapabilities = {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'llmo/can_view',
       // Serenity proxy (Semrush AIO replacement) — reads under brand
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/jobs/:jobId': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'llmo/can_view',
@@ -763,10 +884,30 @@ const routeFacsCapabilities = {
       // Org-level Serenity catalog reads (no brandId).
       'GET /v2/orgs/:spaceCatId/serenity/models': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/serenity/languages': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/filter-dimensions': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/access': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/subreddits': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/reddit-threads': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/youtube-videos': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics/:topicId/prompts': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/domain-urls': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/url-prompts': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/market-tracking-trends': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/stats': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/stats': 'llmo/can_view',
+      // eslint-disable-next-line max-len
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/prompts/count': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/competitor-summary': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/kpi-headlines': 'llmo/can_view',
+      // eslint-disable-next-line max-len
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/source-visibility-headline': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats': 'llmo/can_view',
-      // Preflight (site-scoped reads)
-      'GET /sites/:siteId/preflights': 'llmo/can_view',
-      'GET /sites/:siteId/preflights/:preflightId': 'llmo/can_view',
       // Site-level scraper config read
       'GET /sites/:siteId/config/scraper': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/categories': 'llmo/can_view',
@@ -829,6 +970,7 @@ const routeFacsCapabilities = {
       'DELETE /sites/:siteId/opportunities/:opportunityId': 'aso/can_edit',
       'PATCH /sites/:siteId/opportunities/:opportunityId/status': 'aso/can_edit',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions': 'aso/can_edit',
+      'POST /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/backoffice-reviews': 'aso/can_edit',
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status': 'aso/can_edit',
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'aso/can_edit',
       'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'aso/can_edit',
@@ -850,9 +992,10 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/url-store/delete': 'aso/can_edit',
       'PATCH /sites/:siteId/geo-experiments/:geoExperimentId': 'aso/can_edit',
       'DELETE /sites/:siteId/geo-experiments/:geoExperimentId': 'aso/can_edit',
+      'POST /sites/:siteId/geo-experiments/:geoExperimentId/trigger-impact-measurement': 'aso/can_edit',
+      'POST /sites/:siteId/geo-experiments/:geoExperimentId/validate': 'aso/can_edit',
       'POST /sites/:siteId/sandbox/audit': 'aso/can_edit',
       'POST /preflight/jobs': 'aso/can_edit',
-      'POST /sites/:siteId/preflights': 'aso/can_edit',
       'POST /sites/:siteId/brand-profile': 'aso/can_edit',
       'DELETE /sites/:siteId/suggestions/grants/:grantId': 'aso/can_edit',
 
@@ -860,6 +1003,7 @@ const routeFacsCapabilities = {
       // cdn / ims-org-access / contact-sales / consent-banner /
       // import-tools / scrape-tools)
       // ------------------------------------------------------------------
+      'PATCH /organizations/:organizationId': 'aso/can_configure',
       'PATCH /sites/:siteId': 'aso/can_configure',
       'PATCH /sites/:siteId/config/cdn-logs': 'aso/can_configure',
       'PATCH /sites/:siteId/config/scraper': 'aso/can_configure',
@@ -880,12 +1024,17 @@ const routeFacsCapabilities = {
       'PATCH /trial-users/email-preferences': 'aso/can_configure',
       'POST /sites/:siteId/traffic/predominant-type': 'aso/can_configure',
       'POST /sites/:siteId/traffic/predominant-type/:channel': 'aso/can_configure',
+      'POST /sites/:siteId/audit-policy/exclusions': 'aso/can_configure',
+      'POST /sites/:siteId/audit-policy/exclusions/delete': 'aso/can_configure',
+      'POST /sites/:siteId/audit-policy/inclusions': 'aso/can_configure',
+      'POST /sites/:siteId/audit-policy/inclusions/delete': 'aso/can_configure',
 
       // ---- Manage users (state-layer management endpoints) ---------------
       'GET /state/access-mappings': 'aso/can_manage_users',
       'GET /state/access-mappings/history': 'aso/can_manage_users',
       'POST /state/access-mappings': 'aso/can_manage_users',
       'PATCH /state/access-mappings/:id': 'aso/can_manage_users',
+      'DELETE /state/access-mappings/:id': 'aso/can_manage_users',
       'GET /organizations/:organizationId/permission/audit-logs': 'aso/can_manage_users',
 
       // ---- View (read-only) ----------------------------------------------
@@ -912,6 +1061,13 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/top-pages/:source/:geo': 'aso/can_view',
       'GET /sites/:siteId/user-activities': 'aso/can_view',
 
+      // Audit Policy / Audit Scope (SITES-47306)
+      'GET /sites/:siteId/audit-policy': 'aso/can_view',
+      'GET /sites/:siteId/audit-policy/revisions': 'aso/can_view',
+      'GET /sites/:siteId/audit-scope/pages': 'aso/can_view',
+      'GET /sites/:siteId/audit-scope/summary': 'aso/can_view',
+      'GET /sites/:siteId/audit-scope/sections': 'aso/can_view',
+
       // Audits
       'GET /sites/:siteId/audits': 'aso/can_view',
       'GET /sites/:siteId/audits/latest': 'aso/can_view',
@@ -932,6 +1088,8 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit/:cursor': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': 'aso/can_view',
+      'GET /sites/:siteId/edge-deployed-urls': 'aso/can_view',
+      'GET /sites/:siteId/fixes': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'aso/can_view',
@@ -955,11 +1113,10 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/url-store/by-audit/:auditType': 'aso/can_view',
       'GET /sites/:siteId/geo-experiments': 'aso/can_view',
       'GET /sites/:siteId/geo-experiments/:geoExperimentId': 'aso/can_view',
+      'GET /sites/:siteId/geo-experiments/:geoExperimentId/results': 'aso/can_view',
       'GET /sites/:siteId/ims-org-access': 'aso/can_view',
       'GET /sites/:siteId/ims-org-access/:accessId': 'aso/can_view',
       'POST /sites/:siteId/graph': 'aso/can_view',
-      'GET /sites/:siteId/preflights': 'aso/can_view',
-      'GET /sites/:siteId/preflights/:preflightId': 'aso/can_view',
       'GET /preflight/jobs/:jobId': 'aso/can_view',
       'GET /sites/detect/jobs/:jobId': 'aso/can_view',
 
@@ -1112,6 +1269,51 @@ const routeFacsCapabilities = {
   },
 
   /**
+   * Per-product SECONDARY resource param (opt-in), consumed by `facsWrapper`
+   * when a route resolves no PRIMARY resource. A route whose path declares the
+   * secondary alias delegates the grant/deny decision to the named resolver in
+   * `secondaryResolvers` (see `src/support/facs-secondary-resolvers.js`).
+   *
+   * LLMO: many site-scoped routes (`:siteId`) must be authorized against the
+   * site's BRANDS (LLMO's ReBAC resource is `brand`, not `site`). `siteId` stays
+   * the ASO primary anchor above and is not an LLMO primary alias; here it is
+   * LLMO's secondary, resolved cross-resource (site → brands) by `llmoSiteToBrands`.
+   * See mysticat-architecture/platform/decisions/facs-wrapper-secondary-resource-param.md.
+   */
+  PRODUCTS_FACS_SECONDARY_RESOURCE: {
+    LLMO: { resourceType: 'site', aliases: ['siteId'], resolver: 'llmoSiteToBrands' },
+  },
+
+  /**
+   * Per-product COMPOSITE primary resource (opt-in). When the PRIMARY resource resolves
+   * for a listed product, `facsWrapper` delegates the grant decision to the resolver named
+   * by `resolver` (registered in `compositeResolvers`, see
+   * `src/support/facs-composite-resolvers.js`) instead of the plain state-layer read — for a
+   * product whose primary resource is scoped by an extra qualifier.
+   *
+   * ASO: the `site` primary is scoped by an opportunity-type qualifier
+   * (`facs_access_mappings.composite_key_value_1`; 'all' = site-wide). `asoOpportunityComposite`
+   * enforces (site × opportunity-type): opportunity-item routes grant on 'all' OR the
+   * opportunity's own type; the opportunity list defers to the controller for result-filtering;
+   * every other ASO site route grants on any active site binding carrying the capability.
+   * See mysticat-architecture/platform/decisions/rebac-composite-resource-key.md.
+   */
+  PRODUCTS_FACS_COMPOSITE_RESOURCE: {
+    // `compositeKeySlots` is the DEFINITIVE, ordered list of composite scope
+    // dimensions a product owns. Index i maps 1:1 to DB columns
+    // composite_key_type_<i+1> / composite_key_value_<i+1>: slot 1 (ASO →
+    // 'opportunity') is fixed here, NOT client-chosen, so it can never be
+    // repurposed and a future slot 2 (a different entity) can't be cross-wired
+    // with it. The API anchors compositeKeyType<N> to these values on write.
+    // Products absent from this map accept no composite key (stored ('all','all')).
+    ASO: {
+      resourceType: 'site',
+      resolver: 'asoOpportunityComposite',
+      compositeKeySlots: ['opportunity'],
+    },
+  },
+
+  /**
    * Every `:param` from `src/routes/index.js` that no product currently
    * treats as a FACS resource. Together with the union of every product's
    * resource aliases above, this exhaustively classifies every `:param`
@@ -1135,6 +1337,9 @@ const routeFacsCapabilities = {
     // agentic-categories and agentic-page-types routes. It is a label, not
     // a standalone FACS resource.
     'name',
+    // Task-management connection and provider — sub-resource ids, not
+    // independently ReBAC-controlled.
+    'connectionId', 'provider',
     'fixId', 'geoExperimentId', 'guidelineId', 'intentKey',
     'jobId', 'jobType', 'onboardingId', 'opportunityId', 'plgOnboardingId',
     'promptId', 'questionKey', 'reportId', 'suggestionId', 'tokenId',
@@ -1146,24 +1351,19 @@ const routeFacsCapabilities = {
     // External / shared identifiers:
     'accessId', 'batchId', 'clientId', 'consumerId', 'contactSalesLeadId',
     'externalUserId', 'imsOrgId', 'grantId', 'userId',
-    // Cloudflare zone identifier (LLMO Cloudflare onboarding route-create endpoint) —
-    // an upstream Cloudflare ID, not a SpaceCat ReBAC entity.
-    'zoneId',
     // ASO dispatcher-overlay service name (GET /config/:service/redirects.txt) —
     // an X-ASO-API-Key-authenticated internal route, not a FACS resource.
     'service',
     // Serenity proxy params — identifiers from the upstream API (geo
-    // target / language / semrush prompt id), not SpaceCat resources. The
-    // enclosing :brandId is the FACS resource for these routes.
-    'semrushPromptId', 'geoTargetId', 'languageCode',
-    // Preflight job id — sub-resource of the enclosing :siteId.
-    'preflightId',
+    // target / language / semrush prompt id / aio tag id), not SpaceCat
+    // resources. The enclosing :brandId is the FACS resource for these routes.
+    'semrushPromptId', 'geoTargetId', 'languageCode', 'tagId',
     // Filter / pagination / format params (not entities):
     'base64PageUrl', 'base64Url', 'baseURL', 'channel', 'cursor',
     'dataSource', 'deliveryType', 'endDate', 'eventType',
     'exportId', 'flagName', 'geo', 'handlerType', 'hookSecret', 'limit',
-    'metric', 'processingType', 'product', 'projectName',
-    'sheetType', 'source', 'startDate', 'status', 'tokenType', 'type',
+    'metric', 'processingType', 'product', 'productCode', 'projectName',
+    'sheetType', 'source', 'startDate', 'status', 'tier', 'tokenType', 'type',
     'url', 'version', 'week',
     // Single-row id used by the state-layer management endpoints
     // (`/state/access-mappings/:id` — the binding row's own UUID, never a
@@ -1218,5 +1418,27 @@ export const PRODUCTS_CAPABILITIES = {
     'aso/can_manage_users',
   ],
 };
+
+/**
+ * Whether a product ReBAC-scopes a given resource type at the state layer.
+ *
+ * The collection-filter controllers (list-sites, list-brands, resolveSite,
+ * getSitesByProjectId) narrow their results to the resources a FACS-enrolled
+ * caller may view. That narrowing is only valid when the resource type is
+ * actually a ReBAC-enforced resource **for the current product** — LLMO scopes
+ * `brand` (not `site`), ASO scopes `site` (not `brand`). Applying a `site`
+ * filter under LLMO (or a `brand` filter under ASO) would query a state layer
+ * that holds no grants for that type and wrongly hide the whole collection.
+ * Callers use this to bypass the filter for cross-product resources.
+ *
+ * @param {string} product - Product code (any case), e.g. 'LLMO' / 'ASO'.
+ * @param {string} resourceType - ReBAC resource type, e.g. 'site' / 'brand'.
+ * @returns {boolean} true iff `resourceType` is ReBAC-scoped for `product`.
+ */
+export function isFacsRebacResource(product, resourceType) {
+  const aliases = routeFacsCapabilities
+    .PRODUCTS_FACS_RESOURCE_PARAM_ALIASES?.[product?.toUpperCase?.()];
+  return !!aliases && Object.prototype.hasOwnProperty.call(aliases, resourceType);
+}
 
 export default routeFacsCapabilities;

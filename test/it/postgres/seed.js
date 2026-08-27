@@ -12,6 +12,7 @@
 
 /* eslint-disable no-await-in-loop */
 import { execSync } from 'child_process';
+import { createHash } from 'crypto';
 
 import { POSTGREST_WRITER_JWT } from '../shared/postgrest-jwt.js';
 import { organizations } from './seed-data/organizations.js';
@@ -39,6 +40,12 @@ import { siteImsOrgAccesses } from './seed-data/site-ims-org-accesses.js';
 import { brands } from './seed-data/brands.js';
 import { brandSites } from './seed-data/brand-sites.js';
 import { projectionAudits } from './seed-data/projection-audits.js';
+import { featureFlags } from './seed-data/feature-flags.js';
+import { prompts } from './seed-data/prompts.js';
+import { brandPresenceExecutions } from './seed-data/brand-presence-executions.js';
+import { taskManagementConnections } from './seed-data/task-management-connections.js';
+import { tickets } from './seed-data/tickets.js';
+import { ticketSuggestions } from './seed-data/ticket-suggestions.js';
 
 const POSTGREST_PORT = process.env.IT_POSTGREST_PORT || '3300';
 const POSTGREST_URL = `http://localhost:${POSTGREST_PORT}`;
@@ -88,6 +95,9 @@ async function insertRows(table, rows, { asWriter = false } = {}) {
  * organizations with ON DELETE RESTRICT, so grants must be cleared before
  * deleting organizations. access_grant_logs and facs_access_mappings use TEXT
  * columns (no FK to organizations) but are cleared for test isolation.
+ * blackboard_fact has no FK to organizations/sites either (website_id is a
+ * plain varchar, mystique-owned) - it isn't touched by the organizations
+ * CASCADE, so it's cleared explicitly here too (see seedAuditScopePages below).
  */
 function clearData() {
   execSync(
@@ -100,10 +110,117 @@ function clearData() {
     + 'DELETE FROM consumers;'
     + 'DELETE FROM async_jobs;'
     + 'DELETE FROM projection_audit;'
+    + 'DELETE FROM blackboard_fact;'
     + 'DELETE FROM organizations;'
     + '"',
     { stdio: 'pipe', timeout: 10_000 },
   );
+}
+
+const REFERRAL_SOURCE_TABLES = {
+  optel: 'referral_traffic_optel',
+  cdn: 'referral_traffic_cdn',
+  adobe_analytics: 'referral_traffic_adobe_analytics',
+  ga4: 'referral_traffic_ga4',
+  cja: 'referral_traffic_cja',
+};
+
+/**
+ * Seeds referral-traffic source *presence* for the has-data IT.
+ *
+ * Clears all five `referral_traffic_*` tables, then inserts one minimal row per
+ * requested source so `GET /sites/:siteId/referral-traffic/has-data` reports
+ * exactly those sources (in the backend's resolution-priority order).
+ *
+ * Rows go into an on-demand far-future (2099) partition: the has-data lower
+ * bound accepts them, and a 2099 range can't collide with the image's real
+ * monthly partitions. Runs as the `postgres` superuser via psql to bypass
+ * PostgREST role grants + partition routing.
+ *
+ * Keep siteId/source inputs trusted constants only (canonical seed UUIDs and
+ * the whitelisted source-to-table map), never request-derived values.
+ *
+ * @param {string} siteId  Site the rows belong to (a canonical seed UUID).
+ * @param {Array<'optel'|'cdn'|'adobe_analytics'|'ga4'|'cja'>} sources Sources to
+ *   mark present; pass [] to clear all five (test cleanup).
+ */
+export function seedReferralPresence(siteId, sources = []) {
+  const statements = [
+    ...Object.values(REFERRAL_SOURCE_TABLES).map((t) => `DELETE FROM ${t};`),
+    ...sources.flatMap((source) => {
+      const table = REFERRAL_SOURCE_TABLES[source];
+      return [
+        `CREATE TABLE IF NOT EXISTS ${table}_itseed PARTITION OF ${table} FOR VALUES FROM ('2099-01-01') TO ('2099-02-01');`,
+        `INSERT INTO ${table} (site_id, traffic_date, url_path, pageviews) VALUES ('${siteId}', '2099-01-15', '/it-seed', 1);`,
+      ];
+    }),
+  ];
+  execSync(
+    `docker exec ${POSTGRES_CONTAINER} psql -U postgres -d ${POSTGRES_DB} -v ON_ERROR_STOP=1 -c "${statements.join(' ')}"`,
+    { stdio: 'pipe', timeout: 10_000 },
+  );
+}
+
+/**
+ * Seeds page_inventory rows for `siteId` via the real
+ * `wrpc_upsert_page_inventory_discovery_batch` RPC (the production write path -
+ * writer JWT - same call mysticat-data-service's own test_audit_scope_pages.py
+ * makes), then marks the requested subset "in scope" by inserting a matching
+ * `d_page_in_scope` blackboard_fact row per page (B4, SITES-46351).
+ *
+ * blackboard_fact has no PostgREST write grant for any role ("Facts written
+ * exclusively by Mystique" - see mysticat-data-service CLAUDE.md's PostgREST
+ * grant matrix), so those rows are inserted directly via psql as the `postgres`
+ * superuser, bypassing PostgREST entirely - the same approach seedReferralPresence
+ * above uses for a table PostgREST can't write to. page_id mirrors production's
+ * per-page fact key (`page-<md5(url)>`): mysticat-data-service's
+ * `coerce_scope_for_fact` always writes a page-scoped fact and refuses a NULL
+ * page_id, and a second active fact sharing a page_id would collide on
+ * `ix_blackboard_fact_unique_active`.
+ *
+ * Keep `siteId`/`pages` inputs trusted constants only (canonical seed UUIDs and
+ * fixed test URLs), never request-derived values - the blackboard_fact insert
+ * below is string-interpolated into a shell command.
+ *
+ * @param {string} siteId - Site the pages belong to (a canonical seed UUID).
+ * @param {Array<{ url: string, urlPath: string, inScope?: boolean }>} pages
+ */
+export async function seedAuditScopePages(siteId, pages) {
+  const res = await fetch(`${POSTGREST_URL}/rpc/wrpc_upsert_page_inventory_discovery_batch`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${POSTGREST_WRITER_JWT}`,
+    },
+    body: JSON.stringify({
+      p_site_id: siteId,
+      p_rows: pages.map((p) => ({ url: p.url, url_path: p.urlPath, last_modified: null })),
+      p_discovery_source: 'sitemap',
+      p_updated_by: 'it-seed',
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Failed to seed page_inventory: ${res.status} ${text}`);
+  }
+
+  const inScopeInserts = pages
+    .filter((p) => p.inScope)
+    .map((p) => {
+      const pageId = `page-${createHash('md5').update(p.url).digest('hex')}`;
+      // Escaped so the outer psql `-c "..."` shell argument (double-quoted) passes
+      // the literal JSON double-quotes through instead of terminating early.
+      const value = `{\\"url\\": \\"${p.url}\\"}`;
+      return 'INSERT INTO blackboard_fact '
+        + '(key, value, fact_type, confidence, source, website_id, page_id, is_global, version, is_obsolete) '
+        + `VALUES ('d_page_in_scope', '${value}'::jsonb, 'selection', 1.0, 'it-seed', '${siteId}', '${pageId}', false, 1, false);`;
+    });
+  if (inScopeInserts.length > 0) {
+    execSync(
+      `docker exec ${POSTGRES_CONTAINER} psql -U postgres -d ${POSTGRES_DB} -v ON_ERROR_STOP=1 -c "${inScopeInserts.join(' ')}"`,
+      { stdio: 'pipe', timeout: 10_000 },
+    );
+  }
 }
 
 /**
@@ -131,6 +248,10 @@ async function seed() {
     insertRows('projects', projects),
     insertRows('entitlements', entitlements),
     insertRows('trial_users', trialUsers),
+    // feature_flags grants INSERT to postgrest_writer only (SELECT to anon), so
+    // seed it with the writer JWT — same as the append-only audit tables.
+    insertRows('feature_flags', featureFlags, { asWriter: true }),
+    insertRows('task_management_connections', taskManagementConnections),
   ]);
 
   // Level 1b: depend on projects
@@ -159,10 +280,26 @@ async function seed() {
     insertRows('audit_urls', auditUrls),
     insertRows('sentiment_guidelines', sentimentGuidelines),
     insertRows('brand_sites', brandSites),
+    insertRows('tickets', tickets),
   ]);
 
-  // Level 4: depend on fix_entities + suggestions
-  await insertRows('fix_entity_suggestions', fixEntitySuggestions);
+  // Level 4: depend on fix_entities + suggestions + tickets
+  await Promise.all([
+    insertRows('fix_entity_suggestions', fixEntitySuggestions),
+    insertRows('ticket_suggestions', ticketSuggestions),
+  ]);
+}
+
+/**
+ * Optional per-test fixture: a prompt carrying an `intent` plus a
+ * brand_presence_executions row referencing it. NOT part of the baseline seed —
+ * other suites (e.g. categories-prompts) count prompts under ORG_1/BRAND_1 and
+ * assume an empty baseline, so this is seeded only by the topic-prompts IT after
+ * resetPostgres(). Cleared by the next suite's clearData (organizations CASCADE).
+ */
+export async function seedBrandPresenceIntentFixture() {
+  await insertRows('prompts', prompts); // FK: BPE.prompt_id → prompts.id
+  await insertRows('brand_presence_executions', brandPresenceExecutions);
 }
 
 /**

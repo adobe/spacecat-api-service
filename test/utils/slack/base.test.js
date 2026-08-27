@@ -123,6 +123,14 @@ describe('Base Slack Utils', () => {
       expect(extractURLFromSlackInput('get site https://personal.nedbank.co.za/borrow/personal-loans.plain.html/ extra acme.com/', false)).to.equal(`${expected}/`);
       expect(extractURLFromSlackInput('get site <https://personal.nedbank.co.za/borrow/personal-loans.plain.html/> extra acme.com/ <acme.com/> <http://acme.com|acme.com>', false)).to.equal(`${expected}/`);
     });
+
+    it('extractURLFromSlackInput preserves a wildcard base URL instead of truncating it', async () => {
+      const expected = 'https://example.com/en-ge/*';
+
+      expect(extractURLFromSlackInput('set imsorg https://example.com/en-ge/* 908936ED5D35CC220A495CD4@AdobeOrg')).to.equal(expected);
+      expect(extractURLFromSlackInput('set imsorg <https://example.com/en-ge/*> 908936ED5D35CC220A495CD4@AdobeOrg')).to.equal(expected);
+      expect(extractURLFromSlackInput('https://example.com/en-ge/*')).to.equal(expected);
+    });
   });
 
   describe('Messaging Functions', () => {

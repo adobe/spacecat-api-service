@@ -52,10 +52,10 @@ function buildClient() {
   };
 }
 
-function buildContext({ client }) {
+function buildContext({ client, data = {} }) {
   return {
     params: { siteId: SITE_ID },
-    data: {},
+    data,
     attributes: {
       authInfo: new AuthInfo().withType('jwt').withProfile({ user_id: 'u' }).withAuthenticated(true),
     },
@@ -75,6 +75,8 @@ function loadController(mockHasAccess = sinon.stub().resolves(true)) {
     hasAccess: mockHasAccess,
     hasAdminAccess: sinon.stub().returns(false),
     isLLMOAdministrator: sinon.stub().returns(true),
+    hasLlmoCapabilityForSite: async () => true,
+    llmoForbiddenMessage: (msg) => msg,
   });
   return AgenticPageTypesController();
 }
@@ -106,5 +108,14 @@ describe('AgenticPageTypesController', () => {
     expect(res.status).to.equal(403);
     // Auth must short-circuit before any DB query.
     expect(client.tablesQueried).to.have.length(0);
+  });
+
+  // Tripwire: the URL-validity guard lives in the shared factory, so it must
+  // apply to page-type rules too (LLMO-6014).
+  it('create returns 400 when a url is invalid', async () => {
+    const client = buildClient();
+    const controller = loadController();
+    const res = await controller.create(buildContext({ client, data: { name: 'x', urls: ['a sdf a;sdf a'] } }));
+    expect(res.status).to.equal(400);
   });
 });

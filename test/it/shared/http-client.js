@@ -68,12 +68,14 @@ function detectProduct(method, path) {
  *
  * @param {string} baseUrl - The dev server base URL (e.g., http://localhost:3002)
  * @param {{ admin: string, user: string, trialUser: string, llmoAdmin: string,
+ *   enterpriseUser: string,
  *   delegatedUser: string,
  *   delegatedUserTruncated: string, delegatedUserNoSource: string,
  *   readOnlyAdmin: string,
  *   s2sConsumerReadOnly: string, s2sConsumerReadAll: string,
  *   s2sConsumerUnknown: string }} tokens - JWT tokens
  * @returns {{ admin: object, user: object, trialUser: object, llmoAdmin: object,
+ *   enterpriseUser: object,
  *   delegatedUser: object,
  *   delegatedUserTruncated: object, delegatedUserNoSource: object,
  *   readOnlyAdmin: object,
@@ -136,11 +138,13 @@ export function createHttpClient(baseUrl, tokens) {
     user: makeMethods(tokens.user),
     trialUser: makeMethods(tokens.trialUser),
     llmoAdmin: makeMethods(tokens.llmoAdmin),
+    enterpriseUser: makeMethods(tokens.enterpriseUser),
     delegatedUser: makeMethods(tokens.delegatedUser),
     delegatedUserTruncated: makeMethods(tokens.delegatedUserTruncated),
     delegatedUserNoSource: makeMethods(tokens.delegatedUserNoSource),
     readOnlyAdmin: makeMethods(tokens.readOnlyAdmin),
     brandManager: makeMethods(tokens.brandManager),
+    facsManager: makeMethods(tokens.facsManager),
     s2sConsumerReadOnly: makeMethods(tokens.s2sConsumerReadOnly),
     s2sConsumerReadAll: makeMethods(tokens.s2sConsumerReadAll),
     s2sConsumerUnknown: makeMethods(tokens.s2sConsumerUnknown),

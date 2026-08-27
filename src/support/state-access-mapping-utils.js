@@ -84,13 +84,24 @@ function applySubjectFilter(query, { subjectType, subjectId }) {
   return q;
 }
 
-function applyResourceFilter(query, { resourceType, resourceId }) {
+function applyResourceFilter(query, {
+  resourceType, resourceId, compositeKeyType1, compositeKeyValue1,
+}) {
   let q = query;
   if (resourceType) {
     q = q.eq('resource_type', resourceType);
   }
   if (resourceId) {
     q = q.eq('resource_id', resourceId);
+  }
+  // Composite-key qualifier filters (opt-in) — only narrow when supplied, so
+  // qualifier-agnostic callers (listResourceIdsWithCapability, the sites/brands
+  // list filter) are unaffected. See rebac-composite-resource-key.md.
+  if (compositeKeyType1) {
+    q = q.eq('composite_key_type_1', compositeKeyType1);
+  }
+  if (compositeKeyValue1) {
+    q = q.eq('composite_key_value_1', compositeKeyValue1);
   }
   return q;
 }
@@ -142,6 +153,80 @@ export async function listFacsAccessMappings(postgrestClient, filters = {}) {
 }
 
 /**
+ * Builds the set of `resource_id`s on which the caller holds a specific
+ * `<product>/<capability>` for a product + resource type — the union of
+ * org-scoped and user-scoped active bindings whose `granted_capabilities`
+ * include `capability`. Resource-aware controllers authorize a write by
+ * intersecting the returned set with the resources a request touches;
+ * {@link listViewableResourceIds} is this with `can_view`.
+ *
+ * Org-scoped grants always apply; the user-scoped read runs only when a
+ * `subjectId` is known (a missing subjectId must NOT widen the query — without
+ * the `subject_id` filter PostgREST would return every user's bindings). Bounded
+ * by `MAX_LIST_LIMIT` per subject scope, mirroring the list endpoints.
+ *
+ * @param {object} postgrestClient
+ * @param {object} args
+ * @param {string} args.imsOrgId      - REQUIRED. Canonical caller org id.
+ * @param {string} args.product       - REQUIRED. Uppercase product code.
+ * @param {string} args.resourceType  - REQUIRED. e.g. 'site' | 'brand'.
+ * @param {string} args.capability    - REQUIRED. Fully-qualified `<product>/<cap>`.
+ * @param {string} [args.subjectId]   - Caller's canonical user id (JWT sub).
+ * @returns {Promise<Set<string>>} resource_ids on which the caller holds `capability`.
+ */
+export async function listResourceIdsWithCapability(postgrestClient, {
+  imsOrgId, product, resourceType, subjectId, capability,
+}) {
+  const subjectScopes = [{ subjectType: 'org', subjectId: imsOrgId }];
+  if (subjectId) {
+    subjectScopes.push({ subjectType: 'user', subjectId });
+  }
+  const pages = await Promise.all(subjectScopes.map((scope) => listFacsAccessMappings(
+    postgrestClient,
+    {
+      imsOrgId,
+      product,
+      resourceType,
+      subjectType: scope.subjectType,
+      subjectId: scope.subjectId,
+      limit: MAX_LIST_LIMIT,
+    },
+  )));
+  const ids = new Set();
+  for (const rows of pages) {
+    for (const row of rows) {
+      if ((row.granted_capabilities ?? []).includes(capability)) {
+        ids.add(row.resource_id);
+      }
+    }
+  }
+  return ids;
+}
+
+/**
+ * Builds the set of `resource_id`s the caller may **view** for a product +
+ * resource type — {@link listResourceIdsWithCapability} specialised to
+ * `<product>/can_view`. Used by ReBAC-filtered collection endpoints
+ * (list-sites, list-brands) to narrow results to the resources a
+ * resource-scoped caller can see.
+ *
+ * @param {object} postgrestClient
+ * @param {object} args
+ * @param {string} args.imsOrgId      - REQUIRED. Canonical caller org id.
+ * @param {string} args.product       - REQUIRED. Uppercase product code.
+ * @param {string} args.resourceType  - REQUIRED. e.g. 'site' | 'brand'.
+ * @param {string} [args.subjectId]   - Caller's canonical user id (JWT sub).
+ * @returns {Promise<Set<string>>} resource_ids the caller may view.
+ */
+export async function listViewableResourceIds(postgrestClient, {
+  imsOrgId, product, resourceType, subjectId,
+}) {
+  return listResourceIdsWithCapability(postgrestClient, {
+    imsOrgId, product, resourceType, subjectId, capability: `${product.toLowerCase()}/can_view`,
+  });
+}
+
+/**
  * Fetches a single **active** binding by primary key, scoped to the caller's
  * org + product. Used to authorize PATCH / DELETE before mutating: the caller's
  * management authority is evaluated against the row's `resource_id`
@@ -178,6 +263,56 @@ export async function getFacsAccessMappingById(postgrestClient, { id, imsOrgId, 
     throw new Error(`getFacsAccessMappingById failed: ${error.message}`);
   }
   return Array.isArray(data) ? (data[0] ?? null) : (data ?? null);
+}
+
+// Maps a state-layer resource type to the table that owns it. Both tables
+// carry `organization_id`; only these two resource types are ReBAC-scoped
+// (LLMO→brand, ASO→site), so anything else is unresolvable by design.
+const RESOURCE_TYPE_TABLE = { site: 'sites', brand: 'brands' };
+
+/**
+ * Resolves the canonical IMS org id that OWNS a ReBAC resource, by walking
+ * `<resourceTable>.organization_id` → `organizations.ims_org_id`. Used to
+ * confirm a resource belongs to the caller's org before an internal admin may
+ * author a binding for it (the mapping row itself is stamped with the caller's
+ * org, so without this an admin could grant on another org's resource).
+ *
+ * Fail-closed: returns `null` when the resource type is not ReBAC-scoped, the
+ * resource row is missing, it has no `organization_id`, or the org has no
+ * `ims_org_id`. Callers MUST treat `null` as "cannot confirm ownership".
+ *
+ * @param {object} postgrestClient
+ * @param {object} args
+ * @param {string} args.resourceType - 'site' | 'brand'.
+ * @param {string} args.resourceId   - The resource's primary key.
+ * @returns {Promise<string|null>} Canonical `ims_org_id`, or `null`.
+ */
+export async function getResourceImsOrgId(postgrestClient, { resourceType, resourceId }) {
+  const table = RESOURCE_TYPE_TABLE[resourceType];
+  if (!table || !resourceId) {
+    return null;
+  }
+  const { data: resourceRow, error: resourceErr } = await postgrestClient
+    .from(table)
+    .select('organization_id')
+    .eq('id', resourceId)
+    .limit(1);
+  if (resourceErr) {
+    throw new Error(`getResourceImsOrgId failed resolving ${resourceType}: ${resourceErr.message}`);
+  }
+  const orgId = (Array.isArray(resourceRow) ? resourceRow[0] : resourceRow)?.organization_id;
+  if (!orgId) {
+    return null;
+  }
+  const { data: orgRow, error: orgErr } = await postgrestClient
+    .from('organizations')
+    .select('ims_org_id')
+    .eq('id', orgId)
+    .limit(1);
+  if (orgErr) {
+    throw new Error(`getResourceImsOrgId failed resolving organization: ${orgErr.message}`);
+  }
+  return (Array.isArray(orgRow) ? orgRow[0] : orgRow)?.ims_org_id ?? null;
 }
 
 /**
@@ -419,6 +554,8 @@ export async function insertFacsAccessMappingAuditEvent(postgrestClient, event =
  * @param {string[]} args.grantedCapabilities  - REQUIRED, non-empty.
  * @param {Array<{ type: 'user'|'org', id: string }>} args.subjects
  * @param {string} [args.createdBy] - IMS user id of the grantor (audit).
+ * @param {string} [args.compositeKeyType1]  - Composite-key qualifier type (default 'all').
+ * @param {string} [args.compositeKeyValue1] - Composite-key qualifier value (default 'all').
  * @returns {Promise<{ created: object[], skipped: Array<{ subject: object, reason: string }> }>}
  */
 export async function createFacsAccessMappings(postgrestClient, {
@@ -429,6 +566,8 @@ export async function createFacsAccessMappings(postgrestClient, {
   grantedCapabilities,
   subjects,
   createdBy,
+  compositeKeyType1,
+  compositeKeyValue1,
 }) {
   if (!Array.isArray(subjects) || subjects.length === 0) {
     return { created: [], skipped: [] };
@@ -450,6 +589,10 @@ export async function createFacsAccessMappings(postgrestClient, {
     ims_org_id: imsOrgId,
     product,
     granted_capabilities: grantedCapabilities,
+    // Composite-key qualifier (opt-in). Omitted → 'all' (site-wide) — matches the
+    // column default and keeps existing callers backward-compatible.
+    composite_key_type_1: compositeKeyType1 ?? 'all',
+    composite_key_value_1: compositeKeyValue1 ?? 'all',
     created_by: createdBy ?? null,
     // On create, last-modified is the creation itself — stamp the creator so a
     // fresh row's `updated_by` reflects the actor. `updated_by` is NOT NULL;

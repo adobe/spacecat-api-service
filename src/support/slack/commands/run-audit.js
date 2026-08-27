@@ -334,10 +334,18 @@ function RunAuditCommand(context) {
         [baseURLInputArg] = positionalArgs;
         auditTypeInputArg = keywords.audit;
 
-        // Build audit data from remaining keywords (excluding 'audit' and 'mode')
+        // Build audit data from remaining keywords (excluding 'audit').
+        // 'mode' is also excluded here ONLY for prerender — prerender does its own
+        // suggestion selection/batching on the API side (see PRERENDER_MODES /
+        // buildEffectiveData below) and re-injects a normalized `mode` value itself.
+        // Other audit types (e.g. toc's mode:ai-only, LLMO-6167) have no API-side
+        // selection logic of their own — mode must pass through untouched so the
+        // audit-worker can act on it directly.
         const auditDataKeywords = { ...keywords };
         delete auditDataKeywords.audit;
-        delete auditDataKeywords.mode;
+        if (auditTypeInputArg === PRERENDER) {
+          delete auditDataKeywords.mode;
+        }
 
         auditDataInputArg = Object.keys(auditDataKeywords).length > 0
           ? JSON.stringify(auditDataKeywords)
