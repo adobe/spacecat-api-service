@@ -249,6 +249,78 @@ export default function entitlementTests(getHttpClient, resetData) {
       });
     });
 
+    // ── S2S entitlement:create capability path ──
+    // CONSUMER_2 (s2sConsumerReadAll) holds entitlement:create; CONSUMER_1
+    // (s2sConsumerReadOnly) does not. These assert the route is now reachable by an S2S
+    // consumer with the capability (SITES-50526) and still denied without it.
+    describe('POST /sites/:siteId/entitlements — S2S entitlement:create', () => {
+      before(() => resetData());
+
+      it('s2sConsumerReadAll: ensures enrollment (holds entitlement:create)', async () => {
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadAll.post(
+          `/sites/${SITE_2_ID}/entitlements`,
+          { productCode: 'ASO' },
+        );
+        expect(res.status).to.equal(201);
+        expectEntitlementDto(res.body.entitlement);
+        expectSiteEnrollmentDto(res.body.siteEnrollment);
+        // Reuses ORG_1's pre-seeded ASO entitlement (ENT_2), same as the admin path.
+        expect(res.body.entitlement.id).to.equal(ENTITLEMENT_2_ID);
+        expect(res.body.siteEnrollment.siteId).to.equal(SITE_2_ID);
+      });
+
+      it('s2sConsumerReadOnly: returns 403 (lacks entitlement:create)', async () => {
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadOnly.post(
+          `/sites/${SITE_2_ID}/entitlements`,
+          { productCode: 'ASO' },
+        );
+        expect(res.status).to.equal(403);
+      });
+    });
+
+    describe('POST /organizations/:organizationId/entitlements', () => {
+      // createEntitlement is admin-or-S2S (entitlement:create). ORG_1 has LLMO (ENT_1) and
+      // ASO (ENT_2) seeded; requesting ACO (absent) mints a fresh org entitlement.
+      before(() => resetData());
+
+      it('admin: creates an entitlement for the org', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.post(BASE, { productCode: 'ACO' });
+        expect(res.status).to.equal(201);
+        expectEntitlementDto(res.body);
+        expect(res.body.organizationId).to.equal(ORG_1_ID);
+        expect(res.body.productCode).to.equal('ACO');
+      });
+
+      it('s2sConsumerReadAll: creates an entitlement (holds entitlement:create)', async () => {
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadAll.post(BASE, { productCode: 'ACO' });
+        expect(res.status).to.equal(201);
+        expectEntitlementDto(res.body);
+        expect(res.body.productCode).to.equal('ACO');
+      });
+
+      it('s2sConsumerReadOnly: returns 403 (lacks entitlement:create)', async () => {
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadOnly.post(BASE, { productCode: 'ACO' });
+        expect(res.status).to.equal(403);
+      });
+
+      it('user: returns 403 (admin-or-S2S only)', async () => {
+        const http = getHttpClient();
+        const res = await http.user.post(BASE, { productCode: 'ACO' });
+        expect(res.status).to.equal(403);
+      });
+
+      it('returns 400 for invalid org UUID', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.post('/organizations/not-a-uuid/entitlements', { productCode: 'ACO' });
+        expect(res.status).to.equal(400);
+      });
+    });
+
     describe('PATCH /organizations/:organizationId/entitlements', () => {
       // ORG_1 has a seeded LLMO entitlement (ENT_1, tier FREE_TRIAL) and an ASO
       // entitlement (ENT_2, tier PAID). PATCH updates the tier of the existing

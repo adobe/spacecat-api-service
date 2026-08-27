@@ -13,6 +13,7 @@
 import {
   CAP_CONFIGURATION_READ,
   CAP_CONFIGURATION_WRITE,
+  CAP_ENTITLEMENT_CREATE,
   CAP_FIX_ENTITY_CREATE,
   CAP_ORG_READ_ALL,
   CAP_PROMPT_SUGGESTION_SCHEDULE_WRITE,
@@ -143,11 +144,11 @@ export const INTERNAL_ROUTES = [
   'GET /trial-users/email-preferences',
   'PATCH /trial-users/email-preferences',
 
-  // Entitlement upsert + PLG site enrollment - admin/manual provisioning only, not S2S
-  'POST /organizations/:organizationId/entitlements',
+  // Entitlement tier PATCH - S2S-admin-only (hasS2SAdminAccess), not a general S2S
+  // capability. The POST create/ensure + PLG site-enrollment routes moved to
+  // routeRequiredCapabilities under entitlement:create so the Mystique S2S consumer can
+  // provision entitlements on the unified onboarding path (SITES-50526).
   'PATCH /organizations/:organizationId/entitlements',
-  'POST /sites/:siteId/site-enrollments',
-  'POST /sites/:siteId/entitlements',
   // Feature flags write - admin only, mysticat-backed org config
   'PUT /organizations/:organizationId/feature-flags/:product/:flagName',
   'DELETE /organizations/:organizationId/feature-flags/:product/:flagName',
@@ -794,12 +795,20 @@ const routeRequiredCapabilities = {
 
   // Site Enrollments
   'GET /sites/:siteId/site-enrollments': 'siteEnrollment:read',
+  // PLG site-enrollment provisioning: admin-or-S2S under entitlement:create (it links a
+  // site to an existing org entitlement, part of the onboarding entitlement flow).
+  'POST /sites/:siteId/site-enrollments': CAP_ENTITLEMENT_CREATE,
 
   // Trial Users
   'GET /organizations/:organizationId/trial-users': CAP_TRIAL_USER_READ,
 
   // Entitlements
   'GET /organizations/:organizationId/entitlements': 'entitlement:read',
+  // Entitlement create/ensure: admin-or-S2S under entitlement:create so the Mystique S2S
+  // consumer can provision org- and site-level entitlements on the unified onboarding
+  // path (SITES-50526). The tier PATCH stays S2S-admin-only (see INTERNAL_ROUTES).
+  'POST /organizations/:organizationId/entitlements': CAP_ENTITLEMENT_CREATE,
+  'POST /sites/:siteId/entitlements': CAP_ENTITLEMENT_CREATE,
   'GET /organizations/:organizationId/feature-flags': 'organization:read',
 
   // Sandbox

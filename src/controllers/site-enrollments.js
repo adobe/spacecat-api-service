@@ -27,6 +27,7 @@ import TierClient from '@adobe/spacecat-shared-tier-client';
 
 import { SiteEnrollmentDto } from '../dto/site-enrollment.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { CAP_ENTITLEMENT_CREATE } from '../routes/capability-constants.js';
 
 const ASO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.ASO;
 const SUMMIT_PLG_HANDLER = 'summit-plg';
@@ -52,6 +53,35 @@ function SiteEnrollmentsController(ctx) {
   } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
+
+  /**
+   * Authorizes a site-enrollment create operation. Full admins pass via the admin bypass.
+   * Additionally, an S2S consumer holding `entitlement:create` is allowed — the capability
+   * is enforced at Layer 1 by `s2sAuthWrapper` and re-checked here at Layer 2 via a fresh
+   * DB fetch (`hasS2SCapability`), the same dual-layer pattern used by the configuration
+   * controller. Lets the Mystique S2S consumer enroll sites on the unified onboarding path
+   * (SITES-50526).
+   * @param {object} context - Request context.
+   * @param {string} route - Route label used in structured logs.
+   * @param {string} message - Forbidden message returned to the caller.
+   * @returns {Promise<Response|null>} A `forbidden` response when denied, else null.
+   */
+  const authorizeEntitlementCreate = async (context, route, message) => {
+    const { log } = context;
+    const requestId = context?.invocation?.id || 'unknown';
+    const isAdmin = accessControlUtil.hasAdminAccess();
+    const s2sResult = isAdmin
+      ? { allowed: false, reason: 'admin-bypass' }
+      : await accessControlUtil.hasS2SCapability(CAP_ENTITLEMENT_CREATE);
+    if (!isAdmin && !s2sResult.allowed) {
+      log.info(`[acl] Denied ${route} - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} requestId=${requestId}`);
+      return forbidden(message);
+    }
+    if (s2sResult.allowed) {
+      log.info(`[s2s] ${route} granted clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} capability=${CAP_ENTITLEMENT_CREATE} requestId=${requestId}`);
+    }
+    return null;
+  };
 
   /**
    * Gets site enrollments by site ID.
@@ -92,13 +122,19 @@ function SiteEnrollmentsController(ctx) {
    *   - The summit-plg handler is enabled for the site
    *   - The site's org has an existing ASO entitlement
    *   - The site is not already enrolled in that entitlement
-   * Admin only.
+   * Admin-or-S2S: full admins pass via the admin bypass; an S2S consumer holding
+   * `entitlement:create` is also allowed (see {@link authorizeEntitlementCreate}).
    * @param {object} context - Context of the request.
    * @returns {Promise<Response>} Created enrollment, or skipped response.
    */
   const createPlgEnrollment = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can create site enrollments');
+    const denied = await authorizeEntitlementCreate(
+      context,
+      'POST /sites/:siteId/site-enrollments',
+      'Only admins can create site enrollments',
+    );
+    if (denied) {
+      return denied;
     }
 
     const { siteId } = context.params;
