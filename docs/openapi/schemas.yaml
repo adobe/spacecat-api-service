@@ -6813,11 +6813,14 @@ V2PromptInput:
       default: human
       description: >-
         Who authored the prompt's text. SERVICE-PRINCIPAL-ONLY and read-only for
-        end users: a user-authenticated request (IMS/JWT) has this field IGNORED
+        end users: an end-user request (IMS/JWT session) has this field IGNORED
         (never rejected) and the value derived as `human`; only a service
-        principal (e.g. the generation pipeline) may assert it, validated against
-        the enum. It is never patched on update — it is fixed by the writer that
-        created the row (origin-dimension.md §3).
+        principal may assert it, validated against the enum. A service principal
+        is an S2S consumer/admin or a scoped/legacy API key — e.g. the DRS
+        generation pipeline, which posts `origin: ai`. Note an S2S caller
+        authenticates with a JWT, so the principal is resolved from the token's
+        S2S claims, not the auth type alone. It is never patched on update — it is
+        fixed by the writer that created the row (origin-dimension.md §3).
     intent:
       type: string
       description: >-
