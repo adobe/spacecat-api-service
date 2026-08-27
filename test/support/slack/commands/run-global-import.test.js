@@ -137,6 +137,26 @@ describe('RunGlobalImportCommand', () => {
     expect(triggerGlobalImportRunStub).not.to.have.been.called;
   });
 
+  it('accepts prerender-cache-cleanup as a valid global import type', async () => {
+    configStub.getJobs.returns([
+      { group: 'imports', type: 'prerender-cache-cleanup' },
+    ]);
+    const command = RunGlobalImportCommand(context);
+
+    await command.handleExecution(['prerender-cache-cleanup'], slackContext);
+
+    expect(triggerGlobalImportRunStub).to.have.been.calledOnceWith(
+      configStub,
+      'prerender-cache-cleanup',
+      slackContext,
+      context,
+      {
+        siteId: undefined, force: false, forcedBy: 'jdoe', validateOnly: false,
+      },
+    );
+    expect(slackContext.say.firstCall.args[0]).to.include('Triggered global import: *prerender-cache-cleanup*');
+  });
+
   it('triggers a bulk run (no site) and confirms without a site suffix', async () => {
     const command = RunGlobalImportCommand(context);
 
