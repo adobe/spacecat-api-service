@@ -38,21 +38,25 @@ const DEFAULT_ORIGIN = 'human';
  * §3). `origin` records who authored the prompt's text and is read-only wherever a
  * user can reach it:
  *
- *   - a USER-authenticated principal (IMS / JWT) always writes `human`; any
- *     `origin` in the body is IGNORED (never rejected — the derived value is
- *     authoritative, so the caller loses nothing);
- *   - a SERVICE principal (e.g. DRS via admin `x-api-key`) is believed: its body
- *     value is honoured, validated against {@link V2_PROMPT_ORIGINS}, defaulting
- *     to `human` only when absent or out-of-vocabulary. This is the DRS contract
- *     (`origin: 'ai'`); dropping it would relabel every generated prompt `human`
- *     on its next upsert (origin-dimension.md §3 consequence 1).
+ *   - a USER-authenticated principal (an end-user IMS / JWT session) always writes
+ *     `human`; any `origin` in the body is IGNORED (never rejected — the derived
+ *     value is authoritative, so the caller loses nothing);
+ *   - a SERVICE principal (an S2S consumer/admin, or a scoped/legacy API key) is
+ *     believed: its body value is honoured, validated against
+ *     {@link V2_PROMPT_ORIGINS}, defaulting to `human` only when absent or
+ *     out-of-vocabulary. This is the DRS contract (`origin: 'ai'`); dropping it
+ *     would relabel every generated prompt `human` on its next upsert
+ *     (origin-dimension.md §3 consequence 1). NOTE: an S2S caller authenticates
+ *     with a JWT, so `isUserPrincipal` CANNOT be decided by auth type alone — the
+ *     caller (`createPromptsByBrand`) consults the token's S2S claims first.
  *
  * This governs CREATE only — `origin` is never patched on update (it is fixed by
  * the writer that created the row), which the update path enforces by not writing
  * the column at all.
  *
  * @param {unknown} bodyOrigin - the caller-supplied `origin`, or undefined.
- * @param {boolean} isUserPrincipal - true for an IMS/JWT user request.
+ * @param {boolean} isUserPrincipal - false for a service principal (S2S
+ *   consumer/admin or scoped/legacy API key); true for an end-user IMS/JWT session.
  * @returns {string} the origin to store (`ai` or `human`).
  */
 export function deriveV2PromptOrigin(bodyOrigin, isUserPrincipal) {
