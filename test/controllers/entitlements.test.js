@@ -82,7 +82,7 @@ describe('Entitlements Controller', () => {
   const mockAccessControlUtil = {
     hasAccess: sandbox.stub().resolves(true),
     hasAdminAccess: sandbox.stub().returns(true),
-    hasS2SCapability: sandbox.stub().resolves({ allowed: false, reason: 'not-s2s' }),
+    hasS2SCapability: sandbox.stub().resolves({ allowed: false }),
   };
 
   let entitlementController;
@@ -97,7 +97,7 @@ describe('Entitlements Controller', () => {
       hasS2SAdminAccess: sandbox.stub().returns(true),
       // Default: not an S2S consumer. Admin tests take the admin-bypass branch (this
       // stub is never consulted); non-admin tests fall through to this denial.
-      hasS2SCapability: sandbox.stub().resolves({ allowed: false, reason: 'not-s2s' }),
+      hasS2SCapability: sandbox.stub().resolves({ allowed: false }),
     };
 
     // Stub AccessControlUtil.fromContext to return our mock instance
@@ -437,7 +437,7 @@ describe('Entitlements Controller', () => {
 
       const context = {
         params: { organizationId },
-        log: { info: sinon.stub(), error: sinon.stub() },
+        log: { error: sinon.stub() },
         authInfo: { getProfile: () => ({ email: 'user@example.com' }) },
       };
 
@@ -454,37 +454,28 @@ describe('Entitlements Controller', () => {
     it('grants an S2S consumer holding entitlement:create (Layer 2)', async () => {
       // Non-admin so the S2S capability path (not the admin bypass) runs.
       mockAccessControlUtil.hasAdminAccess.returns(false);
-      mockAccessControlUtil.hasS2SCapability.resolves({
-        allowed: true, reason: 'granted', clientId: 'svc-ent', consumerId: 'consumer-ent-1',
-      });
+      mockAccessControlUtil.hasS2SCapability.resolves({ allowed: true });
 
       const context = {
         params: { organizationId },
         data: { productCode: 'LLMO' },
-        log: { info: sinon.stub(), error: sinon.stub() },
-        invocation: { id: 'req-ent-1' },
+        log: { error: sinon.stub() },
       };
 
       const result = await entitlementController.createEntitlement(context);
 
       expect(result.status).to.equal(201);
       expect(mockAccessControlUtil.hasS2SCapability).to.have.been.calledOnceWith('entitlement:create');
-      expect(context.log.info).to.have.been.calledWithMatch(
-        '[s2s] POST /organizations/:organizationId/entitlements granted clientId=svc-ent consumerId=consumer-ent-1 capability=entitlement:create requestId=req-ent-1',
-      );
     });
 
     it('denies an S2S consumer lacking entitlement:create (Layer 2)', async () => {
       mockAccessControlUtil.hasAdminAccess.returns(false);
-      mockAccessControlUtil.hasS2SCapability.resolves({
-        allowed: false, reason: 'missing-capability', clientId: 'svc-ent', consumerId: 'consumer-ent-1',
-      });
+      mockAccessControlUtil.hasS2SCapability.resolves({ allowed: false });
 
       const context = {
         params: { organizationId },
         data: { productCode: 'LLMO' },
-        log: { info: sinon.stub(), error: sinon.stub() },
-        invocation: { id: 'req-ent-1' },
+        log: { error: sinon.stub() },
       };
 
       const result = await entitlementController.createEntitlement(context);
@@ -493,9 +484,6 @@ describe('Entitlements Controller', () => {
       const body = await result.json();
       expect(body.message).to.equal('Only admins can create entitlements');
       expect(TierClient.createForOrg).to.not.have.been.called;
-      expect(context.log.info).to.have.been.calledWithMatch(
-        '[acl] Denied POST /organizations/:organizationId/entitlements - reason=missing-capability clientId=svc-ent consumerId=consumer-ent-1 requestId=req-ent-1',
-      );
     });
 
     it('should return bad request for invalid organization ID', async () => {
@@ -920,7 +908,7 @@ describe('Entitlements Controller', () => {
       const context = {
         params: { siteId },
         data: { productCode: 'ASO' },
-        log: { info: sinon.stub(), error: sinon.stub() },
+        log: { error: sinon.stub() },
         authInfo: { getProfile: () => ({ email: 'user@example.com' }) },
       };
 
@@ -936,37 +924,28 @@ describe('Entitlements Controller', () => {
 
     it('grants an S2S consumer holding entitlement:create (Layer 2)', async () => {
       mockAccessControlUtil.hasAdminAccess.returns(false);
-      mockAccessControlUtil.hasS2SCapability.resolves({
-        allowed: true, reason: 'granted', clientId: 'svc-ent', consumerId: 'consumer-ent-1',
-      });
+      mockAccessControlUtil.hasS2SCapability.resolves({ allowed: true });
 
       const context = {
         params: { siteId },
         data: { productCode: 'ASO' },
-        log: { info: sinon.stub(), error: sinon.stub() },
-        invocation: { id: 'req-ent-site-1' },
+        log: { error: sinon.stub() },
       };
 
       const result = await entitlementController.createSiteEntitlement(context);
 
       expect(result.status).to.equal(201);
       expect(mockAccessControlUtil.hasS2SCapability).to.have.been.calledOnceWith('entitlement:create');
-      expect(context.log.info).to.have.been.calledWithMatch(
-        '[s2s] POST /sites/:siteId/entitlements granted clientId=svc-ent consumerId=consumer-ent-1 capability=entitlement:create requestId=req-ent-site-1',
-      );
     });
 
     it('denies an S2S consumer lacking entitlement:create (Layer 2)', async () => {
       mockAccessControlUtil.hasAdminAccess.returns(false);
-      mockAccessControlUtil.hasS2SCapability.resolves({
-        allowed: false, reason: 'not-active', clientId: 'svc-ent', consumerId: 'consumer-ent-1',
-      });
+      mockAccessControlUtil.hasS2SCapability.resolves({ allowed: false });
 
       const context = {
         params: { siteId },
         data: { productCode: 'ASO' },
-        log: { info: sinon.stub(), error: sinon.stub() },
-        invocation: { id: 'req-ent-site-1' },
+        log: { error: sinon.stub() },
       };
 
       const result = await entitlementController.createSiteEntitlement(context);
@@ -975,9 +954,6 @@ describe('Entitlements Controller', () => {
       const body = await result.json();
       expect(body.message).to.equal('Only admins can ensure entitlements for a site');
       expect(TierClient.createForSite).to.not.have.been.called;
-      expect(context.log.info).to.have.been.calledWithMatch(
-        '[acl] Denied POST /sites/:siteId/entitlements - reason=not-active clientId=svc-ent consumerId=consumer-ent-1 requestId=req-ent-site-1',
-      );
     });
 
     it('should return not found when site does not exist', async () => {

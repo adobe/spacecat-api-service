@@ -97,33 +97,13 @@ function EntitlementsController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
-   * Authorizes an entitlement create/ensure operation. Full admins pass via the admin
-   * bypass. Additionally, an S2S consumer holding `entitlement:create` is allowed — the
-   * capability is enforced at Layer 1 by `s2sAuthWrapper` and re-checked here at Layer 2
-   * via a fresh DB fetch (`hasS2SCapability`), the same dual-layer pattern used by the
-   * configuration controller. Lets the Mystique S2S consumer provision entitlements on
-   * the unified onboarding path (SITES-50526).
-   * @param {object} context - Request context.
-   * @param {string} route - Route label used in structured logs.
-   * @param {string} message - Forbidden message returned to the caller.
-   * @returns {Promise<Response|null>} A `forbidden` response when denied, else null.
+   * Whether the caller may create/ensure entitlements: a full admin, or an S2S consumer
+   * holding `entitlement:create` (enforced upstream by `s2sAuthWrapper`, re-checked here
+   * at Layer 2 via a fresh DB fetch). SITES-50526.
+   * @returns {Promise<boolean>}
    */
-  const authorizeEntitlementCreate = async (context, route, message) => {
-    const { log } = context;
-    const requestId = context?.invocation?.id || 'unknown';
-    const isAdmin = accessControlUtil.hasAdminAccess();
-    const s2sResult = isAdmin
-      ? { allowed: false, reason: 'admin-bypass' }
-      : await accessControlUtil.hasS2SCapability(CAP_ENTITLEMENT_CREATE);
-    if (!isAdmin && !s2sResult.allowed) {
-      log.info(`[acl] Denied ${route} - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} requestId=${requestId}`);
-      return forbidden(message);
-    }
-    if (s2sResult.allowed) {
-      log.info(`[s2s] ${route} granted clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} capability=${CAP_ENTITLEMENT_CREATE} requestId=${requestId}`);
-    }
-    return null;
-  };
+  const hasEntitlementCreateAccess = async () => accessControlUtil.hasAdminAccess()
+    || (await accessControlUtil.hasS2SCapability(CAP_ENTITLEMENT_CREATE)).allowed;
 
   /**
    * Resolves the acting identity for audit-trail logging. For most auth paths
@@ -177,13 +157,8 @@ function EntitlementsController(ctx) {
    * @returns {Promise<Response>} Created entitlement response.
    */
   const createEntitlement = async (context) => {
-    const denied = await authorizeEntitlementCreate(
-      context,
-      'POST /organizations/:organizationId/entitlements',
-      'Only admins can create entitlements',
-    );
-    if (denied) {
-      return denied;
+    if (!await hasEntitlementCreateAccess()) {
+      return forbidden('Only admins can create entitlements');
     }
     const { organizationId } = context.params;
     const {
@@ -225,10 +200,8 @@ function EntitlementsController(ctx) {
    * entitlement is created. The operation is idempotent — repeating the call
    * returns the same entitlement + enrollment without duplicating rows.
    *
-   * Admin-or-S2S: full admins pass via the admin bypass; an S2S consumer holding
-   * `entitlement:create` is also allowed (Layer 1 via `s2sAuthWrapper` +
-   * `routes/required-capabilities.js`, re-checked at Layer 2 by
-   * `authorizeEntitlementCreate`). Matches the parallel
+   * Admin-or-S2S: full admins pass, as do S2S consumers holding `entitlement:create`
+   * (see {@link hasEntitlementCreateAccess}). Matches the parallel
    * `POST /organizations/:organizationId/entitlements` contract (SITES-50526).
    *
    * Distinct from `POST /sites/:siteId/site-enrollments`
@@ -242,13 +215,8 @@ function EntitlementsController(ctx) {
    * @returns {Promise<Response>} Created entitlement + site enrollment response.
    */
   const createSiteEntitlement = async (context) => {
-    const denied = await authorizeEntitlementCreate(
-      context,
-      'POST /sites/:siteId/entitlements',
-      'Only admins can ensure entitlements for a site',
-    );
-    if (denied) {
-      return denied;
+    if (!await hasEntitlementCreateAccess()) {
+      return forbidden('Only admins can ensure entitlements for a site');
     }
     const { siteId } = context.params;
     const {
