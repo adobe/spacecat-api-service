@@ -1247,6 +1247,30 @@ describe('RunAuditCommand', () => {
       expect(context.log.info).to.not.have.been.calledWithMatch(/event=audit_orchestration_start/);
     });
 
+    it('falls back to the raw auditType for audit= when a new offsite type has no OFFSITE_AUDIT_LOG_TYPE mapping', async () => {
+      // A type that isOffsiteAuditType treats as offsite (so the structured-logging path
+      // runs) but that OFFSITE_AUDIT_LOG_TYPE has no entry for — simulating a new offsite
+      // audit type added to OFFSITE_AUDIT_TYPES without a matching entry here.
+      const RunAuditCommandWithUnmappedType = await esmock(
+        '../../../../src/support/slack/commands/run-audit.js',
+        {
+          '@adobe/spacecat-shared-tier-client': { default: mockTierClient },
+          '../../../../src/support/utils.js': {
+            isOffsiteAuditType: (auditType) => auditType === 'new-offsite-analysis',
+            triggerAuditForSite: sinon.stub().resolves(),
+          },
+        },
+      );
+      dataAccessStub.Site.findByBaseURL.resolves(null);
+
+      const command = RunAuditCommandWithUnmappedType(context);
+      await command.handleExecution(['unknownsite.com', 'audit:new-offsite-analysis'], slackContext);
+
+      expect(context.log.warn).to.have.been.calledWith(
+        'No site found with base URL domain=offsite audit=new-offsite-analysis event=audit_orchestration_start outcome=skip reason=site_not_found',
+      );
+    });
+
     it('logs a structured, dashboard-visible warning when the site is not found for an offsite audit type', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(null);
 
@@ -1412,6 +1436,26 @@ describe('RunAuditCommand', () => {
       );
       expect(context.log.error).to.have.been.calledOnce;
       expect(slackContext.say).to.have.been.calledWith(':nuclear-warning: Oops! Something went wrong: SQS unavailable');
+    });
+
+    it('swallows a broken Slack reply after the SQS send fails, without escaping to the generic outer catch', async () => {
+      const site = { getId: () => '123' };
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('youtube-analysis', ['LLMO']));
+      const sendError = new Error('SQS unavailable');
+      sendError.name = 'SqsError';
+      sqsStub.sendMessage.rejects(sendError);
+      slackContext.say = sinon.stub().rejects(new Error('Slack is down'));
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['validsite.com', 'audit:youtube-analysis'], slackContext);
+
+      expect(context.log.error).to.have.been.calledWith(
+        'Failed to queue offsite analysis for site domain=offsite audit=youtube event=audit_orchestration_spacecat_request_dispatched outcome=failure peer=spacecat-audit-worker direction=outbound siteId=123 reason=sqs_send_failed errorName=SqsError errorMessage="SQS unavailable"',
+      );
+      // A second, unstructured "Error running audit..." line from the outer catch would
+      // mean the broken Slack reply escaped the inner catch instead of being swallowed.
+      expect(context.log.error).to.have.been.calledOnce;
     });
 
     it('sanitizes and quotes an error field whose value contains whitespace, "=", or a double quote', async () => {

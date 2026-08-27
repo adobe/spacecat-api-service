@@ -44,7 +44,10 @@ const OFFSITE_AUDIT_LOG_TYPE = {
   'youtube-analysis': 'youtube',
   'wikipedia-analysis': 'wikipedia',
 };
-const toOffsiteAuditLogType = (auditType) => OFFSITE_AUDIT_LOG_TYPE[auditType];
+// Falls back to the raw auditType if a new offsite type is ever added to
+// OFFSITE_AUDIT_TYPES (utils.js) without a matching entry here, so a missing mapping
+// shows up as e.g. `audit=some-new-analysis` in the log line instead of `audit=undefined`.
+const toOffsiteAuditLogType = (auditType) => OFFSITE_AUDIT_LOG_TYPE[auditType] ?? auditType;
 
 /**
  * Builds the success message for `audit_orchestration_spacecat_request_dispatched`.
@@ -326,7 +329,14 @@ function RunAuditCommand(context) {
             // unstructured "Error running audit..." line for the same single SQS failure
             // (catch-log-throw) and inflate error counts for on-call triage.
             log.error(`Failed to queue offsite analysis for site domain=${OFFSITE_DOMAIN} audit=${toOffsiteAuditLogType(auditType)} event=audit_orchestration_spacecat_request_dispatched outcome=failure peer=spacecat-audit-worker direction=outbound siteId=${site.getId()} reason=sqs_send_failed ${renderErrorField('errorName', error.name)} ${renderErrorField('errorMessage', error.message)}`);
-            await postErrorMessage(say, error);
+            try {
+              await postErrorMessage(say, error);
+            } catch {
+              // The structured log line above already captured this failure; a broken
+              // Slack reply on top of it must not escape into the outer catch below,
+              // which would log a second, misleading, unstructured error line for the
+              // same single SQS failure and attempt yet another Slack reply.
+            }
           }
         } else {
           await triggerAuditForSite(
