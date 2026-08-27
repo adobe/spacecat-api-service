@@ -146,6 +146,9 @@ function LlmoDashboardsController(context) {
     const {
       name, description, visibility, controls, sections, sharedWith,
     } = ctx.data ?? {};
+    if (sharedWith !== undefined && existing.ownerId !== callerId) {
+      return forbidden('Only the owner can modify sharing settings');
+    }
     if (visibility !== undefined && !VISIBILITIES.includes(visibility)) {
       return badRequest(`visibility must be one of: ${VISIBILITIES.join(', ')}`);
     }
@@ -256,6 +259,9 @@ function LlmoDashboardsController(context) {
         ...(applyGlobalFilters !== undefined && { applyGlobalFilters }),
       },
     });
+    if (!result) {
+      return notFound('Dashboard was deleted concurrently');
+    }
     return createResponse(result.tile, 201);
   };
 
@@ -275,8 +281,23 @@ function LlmoDashboardsController(context) {
     if (!canEdit(existing, callerId)) {
       return forbidden('Only the owner or an editor can update tiles');
     }
+    const {
+      title, description, tileType, analysis, visualization, snapshot, layout,
+      localOverrides, applyGlobalFilters,
+    } = ctx.data ?? {};
+    const patch = {
+      ...(title !== undefined && { title }),
+      ...(description !== undefined && { description }),
+      ...(tileType !== undefined && { tileType }),
+      ...(analysis !== undefined && { analysis }),
+      ...(visualization !== undefined && { visualization }),
+      ...(snapshot !== undefined && { snapshot }),
+      ...(layout !== undefined && { layout }),
+      ...(localOverrides !== undefined && { localOverrides }),
+      ...(applyGlobalFilters !== undefined && { applyGlobalFilters }),
+    };
     const result = store.updateTile({
-      id: dashboardId, orgId: spaceCatId, brandId, tileId, patch: ctx.data ?? {},
+      id: dashboardId, orgId: spaceCatId, brandId, tileId, patch,
     });
     if (!result) {
       return notFound(`Tile not found: ${tileId}`);
