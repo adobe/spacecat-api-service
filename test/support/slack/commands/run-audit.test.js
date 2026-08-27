@@ -1247,15 +1247,16 @@ describe('RunAuditCommand', () => {
       expect(context.log.info).to.not.have.been.calledWithMatch(/event=audit_orchestration_start/);
     });
 
-    it('logs a structured, alertable error when the site is not found for an offsite audit type', async () => {
+    it('logs a structured, dashboard-visible warning when the site is not found for an offsite audit type', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(null);
 
       const command = RunAuditCommand(context);
       await command.handleExecution(['unknownsite.com', 'audit:cited-analysis'], slackContext);
 
-      expect(context.log.error).to.have.been.calledWith(
-        'No site found with base URL domain=offsite audit=cited event=audit_orchestration_start outcome=failure reason=site_not_found',
+      expect(context.log.warn).to.have.been.calledWith(
+        'No site found with base URL domain=offsite audit=cited event=audit_orchestration_start outcome=skip reason=site_not_found',
       );
+      expect(context.log.error).to.not.have.been.called;
       expect(slackContext.say).to.have.been.calledWith(":x: No site found with base URL 'https://unknownsite.com'.");
     });
 
@@ -1265,21 +1266,22 @@ describe('RunAuditCommand', () => {
       const command = RunAuditCommand(context);
       await command.handleExecution(['unknownsite.com', 'audit:wikipedia-analysis'], slackContext);
 
-      expect(context.log.error).to.have.been.calledWith(
-        'No site found with base URL domain=offsite audit=wikipedia event=audit_orchestration_start outcome=failure reason=site_not_found',
+      expect(context.log.warn).to.have.been.calledWith(
+        'No site found with base URL domain=offsite audit=wikipedia event=audit_orchestration_start outcome=skip reason=site_not_found',
       );
     });
 
-    it('does not log an error when the site is not found for a non-offsite audit type', async () => {
+    it('does not log a site-not-found line when the site is not found for a non-offsite audit type', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(null);
 
       const command = RunAuditCommand(context);
       await command.handleExecution(['unknownsite.com'], slackContext);
 
       expect(context.log.error).to.not.have.been.called;
+      expect(context.log.warn).to.not.have.been.calledWithMatch(/reason=site_not_found/);
     });
 
-    it('logs a structured error when an offsite audit type is not entitled', async () => {
+    it('logs a structured, dashboard-visible warning when an offsite audit type is not entitled', async () => {
       const site = { getId: () => '123' };
       dataAccessStub.Site.findByBaseURL.resolves(site);
       dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('cited-analysis', ['LLMO']));
@@ -1290,13 +1292,14 @@ describe('RunAuditCommand', () => {
       const command = RunAuditCommand(context);
       await command.handleExecution(['validsite.com', 'audit:cited-analysis'], slackContext);
 
-      expect(context.log.error).to.have.been.calledWith(
-        'Site not entitled for this audit type domain=offsite audit=cited event=audit_orchestration_start outcome=failure siteId=123 reason=not_entitled',
+      expect(context.log.warn).to.have.been.calledWith(
+        'Site not entitled for this audit type domain=offsite audit=cited event=audit_orchestration_start outcome=skip siteId=123 reason=not_entitled',
       );
+      expect(context.log.error).to.not.have.been.called;
       expect(sqsStub.sendMessage.called).to.be.false;
     });
 
-    it('does not log a not-entitled structured error for a non-offsite audit type', async () => {
+    it('does not log a not-entitled structured line for a non-offsite audit type', async () => {
       dataAccessStub.Site.findByBaseURL.resolves({ getId: () => '123' });
       dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('lhs-mobile', ['LLMO']));
       mockTierClient.createForSite.resolves({
@@ -1306,10 +1309,10 @@ describe('RunAuditCommand', () => {
       const command = RunAuditCommand(context);
       await command.handleExecution(['validsite.com'], slackContext);
 
-      expect(context.log.error).to.not.have.been.calledWithMatch(/reason=not_entitled/);
+      expect(context.log.warn).to.not.have.been.calledWithMatch(/reason=not_entitled/);
     });
 
-    it('logs a structured error when the handler is disabled for an offsite audit type', async () => {
+    it('logs a structured, dashboard-visible warning when the handler is disabled for an offsite audit type', async () => {
       const site = { getId: () => '123' };
       dataAccessStub.Site.findByBaseURL.resolves(site);
       dataAccessStub.Configuration.findLatest.resolves({
@@ -1321,13 +1324,14 @@ describe('RunAuditCommand', () => {
       const command = RunAuditCommand(context);
       await command.handleExecution(['validsite.com', 'audit:reddit-analysis'], slackContext);
 
-      expect(context.log.error).to.have.been.calledWith(
-        'Handler disabled for this site domain=offsite audit=reddit event=audit_orchestration_start outcome=failure siteId=123 reason=handler_disabled',
+      expect(context.log.warn).to.have.been.calledWith(
+        'Handler disabled for this site domain=offsite audit=reddit event=audit_orchestration_start outcome=skip siteId=123 reason=handler_disabled',
       );
+      expect(context.log.error).to.not.have.been.called;
       expect(sqsStub.sendMessage.called).to.be.false;
     });
 
-    it('does not log a handler-disabled structured error for a non-offsite audit type', async () => {
+    it('does not log a handler-disabled structured line for a non-offsite audit type', async () => {
       const site = { getId: () => '123' };
       dataAccessStub.Site.findByBaseURL.resolves(site);
       dataAccessStub.Configuration.findLatest.resolves({
@@ -1339,7 +1343,7 @@ describe('RunAuditCommand', () => {
       const command = RunAuditCommand(context);
       await command.handleExecution(['validsite.com'], slackContext);
 
-      expect(context.log.error).to.not.have.been.calledWithMatch(/reason=handler_disabled/);
+      expect(context.log.warn).to.not.have.been.calledWithMatch(/reason=handler_disabled/);
     });
 
     it('logs a structured success line on successful dispatch for offsite-brand-presence (matching jobs-dispatcher wording)', async () => {

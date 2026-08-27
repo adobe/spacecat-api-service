@@ -229,7 +229,11 @@ function RunAuditCommand(context) {
 
       if (!isNonEmptyObject(site)) {
         if (isOffsiteAuditType(auditType)) {
-          log.error(`No site found with base URL domain=${OFFSITE_DOMAIN} audit=${toOffsiteAuditLogType(auditType)} event=audit_orchestration_start outcome=failure reason=site_not_found`);
+          // Nothing was owed here — an operator's manual command hitting a site that doesn't
+          // exist is an expected business-logic outcome, not a system fault. `warn` keeps it
+          // visible for dashboards without paging; error stays reserved for outcome=failure
+          // (see the SQS dispatch failure below, which genuinely loses completed work).
+          log.warn(`No site found with base URL domain=${OFFSITE_DOMAIN} audit=${toOffsiteAuditLogType(auditType)} event=audit_orchestration_start outcome=skip reason=site_not_found`);
         }
         await postSiteNotFoundMessage(say, baseURL);
         return;
@@ -287,7 +291,9 @@ function RunAuditCommand(context) {
         // Block audit if site has no enrollment for any of the product codes
         if (!entitlementChecks.some((hasEnrollment) => hasEnrollment)) {
           if (isOffsiteAuditType(auditType)) {
-            log.error(`Site not entitled for this audit type domain=${OFFSITE_DOMAIN} audit=${toOffsiteAuditLogType(auditType)} event=audit_orchestration_start outcome=failure siteId=${site.getId()} reason=not_entitled`);
+            // Expected business-logic outcome (a site simply isn't entitled), not a system
+            // fault — see the site_not_found warn above for the same reasoning.
+            log.warn(`Site not entitled for this audit type domain=${OFFSITE_DOMAIN} audit=${toOffsiteAuditLogType(auditType)} event=audit_orchestration_start outcome=skip siteId=${site.getId()} reason=not_entitled`);
           }
           await say(`:x: Will not audit site '${baseURL}' because site is not entitled for this audit.`);
           return;
@@ -296,7 +302,9 @@ function RunAuditCommand(context) {
         // Block audit if the handler is explicitly disabled for this site (deny-list).
         if (configuration.isHandlerDisabledForSite(auditType, site)) {
           if (isOffsiteAuditType(auditType)) {
-            log.error(`Handler disabled for this site domain=${OFFSITE_DOMAIN} audit=${toOffsiteAuditLogType(auditType)} event=audit_orchestration_start outcome=failure siteId=${site.getId()} reason=handler_disabled`);
+            // Expected business-logic outcome (an admin explicitly disabled this handler for
+            // this site), not a system fault — see the site_not_found warn above.
+            log.warn(`Handler disabled for this site domain=${OFFSITE_DOMAIN} audit=${toOffsiteAuditLogType(auditType)} event=audit_orchestration_start outcome=skip siteId=${site.getId()} reason=handler_disabled`);
           }
           await say(`:x: Audit \`${auditType}\` is explicitly disabled for site \`${baseURL}\`. Re-enable it via the audit configuration before running on-demand.`);
           return;
@@ -445,10 +453,16 @@ function RunAuditCommand(context) {
       }
 
       if (isOffsiteAuditType(auditTypeInputArg)) {
+        // baseURLInputArg is raw Slack user input, not yet validated by
+        // extractURLFromSlackInput/isValidUrl below — sanitize it before it goes into this
+        // structured field, same as an error's name/message would be, so a crafted value
+        // (e.g. containing a space and its own key=value pairs) can't inject fake fields
+        // into this line. auditTypeInputArg needs no such treatment here: isOffsiteAuditType
+        // already gates it to a fixed whitelist.
         log.info(
           `run-audit: baseURL="${baseURLInputArg}", auditType="${auditTypeInputArg}", auditData="${auditDataInputArg}" `
           + `domain=${OFFSITE_DOMAIN} audit=${toOffsiteAuditLogType(auditTypeInputArg)} `
-          + `event=audit_orchestration_start outcome=start auditType=${auditTypeInputArg} baseURL=${baseURLInputArg}`,
+          + `event=audit_orchestration_start outcome=start auditType=${auditTypeInputArg} ${renderErrorField('baseURL', baseURLInputArg)}`,
         );
       } else {
         log.info(`run-audit: baseURL="${baseURLInputArg}", auditType="${auditTypeInputArg}", auditData="${auditDataInputArg}"`);
