@@ -27,7 +27,7 @@ const VALIDATE_ONLY_FLAG = '--validate-only';
 const GLOBAL_IMPORTS = [
   'stale-suggestions-cleanup',
   'optimize-at-edge-enabled-marking',
-  'prerender-cache-cleanup',
+  'prerender-object-storage-cleanup',
 ];
 
 /**

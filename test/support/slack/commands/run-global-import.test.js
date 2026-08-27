@@ -137,24 +137,24 @@ describe('RunGlobalImportCommand', () => {
     expect(triggerGlobalImportRunStub).not.to.have.been.called;
   });
 
-  it('accepts prerender-cache-cleanup as a valid global import type', async () => {
+  it('accepts prerender-object-storage-cleanup as a valid global import type', async () => {
     configStub.getJobs.returns([
-      { group: 'imports', type: 'prerender-cache-cleanup' },
+      { group: 'imports', type: 'prerender-object-storage-cleanup' },
     ]);
     const command = RunGlobalImportCommand(context);
 
-    await command.handleExecution(['prerender-cache-cleanup'], slackContext);
+    await command.handleExecution(['prerender-object-storage-cleanup'], slackContext);
 
     expect(triggerGlobalImportRunStub).to.have.been.calledOnceWith(
       configStub,
-      'prerender-cache-cleanup',
+      'prerender-object-storage-cleanup',
       slackContext,
       context,
       {
         siteId: undefined, force: false, forcedBy: 'jdoe', validateOnly: false,
       },
     );
-    expect(slackContext.say.firstCall.args[0]).to.include('Triggered global import: *prerender-cache-cleanup*');
+    expect(slackContext.say.firstCall.args[0]).to.include('Triggered global import: *prerender-object-storage-cleanup*');
   });
 
   it('triggers a bulk run (no site) and confirms without a site suffix', async () => {
