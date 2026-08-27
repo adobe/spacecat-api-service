@@ -236,6 +236,18 @@ export const TYPE_VALUE_DISPLAY = Object.freeze({
 });
 
 /**
+ * Backing map for {@link valueSlugOfDisplayName}'s `type` branch — built once
+ * from {@link TYPE_VALUE_DISPLAY}, mirroring {@link SOURCE_LABEL_INVERSE}'s
+ * pattern for `source` so the two server-owned display-form inverses stay
+ * structurally consistent as this generalizes to more dimensions.
+ *
+ * @type {Map<string, string>}
+ */
+const TYPE_VALUE_DISPLAY_INVERSE = new Map(
+  Object.entries(TYPE_VALUE_DISPLAY).map(([slug, displayName]) => [displayName, slug]),
+);
+
+/**
  * The CLOSED dimensions and their fixed child vocabularies. A caller may never
  * mint an arbitrary value under these; the values below are provisioned as the
  * root's children on every project. A caller may still "create" one of these
@@ -472,8 +484,7 @@ export function valueSlugOfDisplayName(dimension, displayName) {
     return displayToSlug(displayName);
   }
   if (dimension === DIMENSION.TYPE) {
-    return /** @type {(readonly [string, string])[]} */ (Object.entries(TYPE_VALUE_DISPLAY))
-      .find(([, display]) => display === displayName)?.[0];
+    return TYPE_VALUE_DISPLAY_INVERSE.get(displayName);
   }
   return undefined;
 }

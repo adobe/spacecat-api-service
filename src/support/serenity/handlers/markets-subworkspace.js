@@ -300,9 +300,9 @@ function validateCreateBody(body) {
  * carry is retired, tag-display-names.md §3 — minus that seeded `intent`
  * default, which is classified per prompt below instead), the producing
  * `source/semrush` value, plus a branded / non-branded `type` value derived
- * from `brandNames` (brand name +
- * aliases) and a per-prompt server-classified `intent` value (serenity-docs#32,
- * replacing the seeded `Informational` default). Returns the topic/prompt counts.
+ * from `brandNames` (brand name + aliases) and a per-prompt server-classified
+ * `intent` value (serenity-docs#32, replacing the seeded `Informational`
+ * default). Returns the topic/prompt counts.
  * A generation that yields nothing is a clean no-op (no upstream write).
  *
  * The generated topic name is NOT attached. Under the dimension-root model a
