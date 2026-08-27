@@ -11,6 +11,7 @@
  */
 
 import { promises as dns } from 'dns';
+import { getDomain } from 'tldts';
 import { isObject, isValidUrl, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
 import { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
 import { CDN_TYPES } from '../controllers/llmo/llmo-utils.js';
@@ -49,6 +50,14 @@ const PROBE_TIMEOUT_MS = 5000;
 const CDN_CALL_TIMEOUT_MS = 5000;
 
 /**
+ * The registrable domain ("apex") of a hostname, resolved via the Public Suffix List (tldts), so
+ * multi-part TLDs are handled correctly (e.g. "racq.com.au" -> "racq.com.au", "shop.example.co.uk"
+ * -> "example.co.uk"). Returns null when the host has no registrable domain under the PSL (e.g.
+ * "localhost" or an IP address).
+ */
+const registrableDomain = (host) => getDomain(host);
+
+/**
  * Strips the leading "www." from a URL's hostname.
  *
  * @param {string} url - The URL to parse (with or without scheme).
@@ -71,138 +80,93 @@ export function getHostnameWithoutWww(url, log) {
 }
 
 /**
- * Whether a hostname has any DNS record (CNAME, A, or AAAA) — i.e. it actually resolves.
- * Never throws: a failed lookup (NXDOMAIN, SERVFAIL, timeout, …) is treated as "does not resolve"
- * and returns false, mirroring the tolerant DNS handling used elsewhere in this module.
+ * Fetches `probeURL`, following its entire redirect chain, to find the host it actually serves
+ * from. Never throws — a failure (network/timeout error, or a chain that lands outside the site's
+ * domain) returns null and the caller falls back to the un-probed candidate.
  *
- * @param {string} host - Hostname to resolve (e.g. 'www.example.com').
+ * @param {string} probeURL - The URL to probe (must include scheme).
+ * @param {string} rootHost - The site's apex hostname (lowercased). The chain's landing host must
+ *   equal this or its www variant, otherwise it is treated as off-domain and ignored.
  * @param {object} [log] - Logger.
- * @returns {Promise<boolean>} True if any record type resolves, false otherwise.
+ * @returns {Promise<string|null>} The final serving host, or null when undetermined.
  */
-export async function hostResolves(host, log) {
-  const [cnames, ipv4, ipv6] = await Promise.all([
-    dns.resolveCname(host).catch(() => []),
-    dns.resolve4(host).catch(() => []),
-    dns.resolve6(host).catch(() => []),
-  ]);
-  const resolves = cnames.length > 0 || ipv4.length > 0 || ipv6.length > 0;
-  log?.info(`[edge-routing-utils] DNS check for ${host}: ${resolves ? 'resolves' : 'no records'}`);
-  return resolves;
-}
-
-// HTTP status codes that carry a Location header we follow when probing for the serving host.
-const REDIRECT_STATUSES = new Set([301, 302, 307, 308]);
-
-/**
- * Probes a bare-apex base URL once (without auto-following redirects) to discover where it
- * actually serves traffic, so we can prefer the host the origin points at over a synthesized www
- * host. Never throws — an undetermined result returns null and the caller falls back to DNS.
- *
- *  - 2xx: the apex serves directly → returns the apex host.
- *  - 3xx (301/302/307/308) to a host within the same registrable domain → returns that host (this
- *    is the redirect-follow: an apex that 301s to its www is resolved to www, and vice versa).
- *  - redirect off-domain, missing/invalid Location, other status, or network error → null.
- *
- * @param {string} baseURL - The apex base URL to probe (must include scheme).
- * @param {string} apexHost - The apex hostname (lowercased) the URL was built from.
- * @param {object} [log] - Logger.
- * @returns {Promise<string|null>} The serving host, or null when undetermined.
- */
-async function probeServingHost(baseURL, apexHost, log) {
+async function followToServingHost(probeURL, rootHost, log) {
   let res;
   try {
-    res = await fetch(baseURL, {
+    // Use the same documented probe identity as probeSiteAndResolveDomain (below) rather than
+    // tracingFetch's default UA, so a WAF that treats product UAs differently behaves consistently
+    // across both probes in this module.
+    res = await fetch(probeURL, {
       method: 'GET',
-      redirect: 'manual',
-      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      redirect: 'follow',
+      headers: { 'User-Agent': EDGE_OPTIMIZE_USER_AGENT },
+      timeout: PROBE_TIMEOUT_MS,
     });
   } catch (e) {
-    log?.info(`[edge-routing-utils] Canonical probe of ${baseURL} failed: ${e.message}`);
+    log?.info(`[edge-routing-utils] Canonical probe of ${probeURL} failed: ${e.message}`);
     return null;
   }
 
-  if (res.ok) {
-    log?.info(`[edge-routing-utils] Apex ${apexHost} serves directly (${res.status})`);
-    return apexHost;
-  }
-
-  if (!REDIRECT_STATUSES.has(res.status)) {
-    return null;
-  }
-
-  const location = res.headers.get('location');
-  if (!location) {
-    return null;
-  }
-
-  let redirectHost;
+  let finalHost;
   try {
-    redirectHost = new URL(location.startsWith('http') ? location : `https://${location}`)
-      .hostname.toLowerCase();
+    finalHost = new URL(res.url).hostname.toLowerCase();
   } catch {
     return null;
   }
 
-  // Only follow the redirect when it stays on the same registrable domain (apex ↔ www), never to an
-  // unrelated host. getHostnameWithoutWww strips the www. so apex and www compare equal.
-  const redirectNoWww = redirectHost.startsWith('www.') ? redirectHost.slice(4) : redirectHost;
-  if (redirectNoWww !== apexHost) {
-    log?.info(
-      `[edge-routing-utils] Apex ${apexHost} redirects off-domain to ${redirectHost}; ignoring`,
-    );
+  // Only trust the landing host when it stays on the same registrable domain (apex ↔ www), never
+  // an unrelated host a redirect chain happened to end up on.
+  const finalNoWww = finalHost.startsWith('www.') ? finalHost.slice(4) : finalHost;
+  if (finalNoWww !== rootHost) {
+    log?.info(`[edge-routing-utils] ${probeURL} landed off-domain at ${finalHost}; ignoring`);
     return null;
   }
-  log?.info(`[edge-routing-utils] Apex ${apexHost} redirects (${res.status}) to ${redirectHost}`);
-  return redirectHost;
+  log?.info(`[edge-routing-utils] ${probeURL} resolves to ${finalHost}`);
+  return finalHost;
 }
 
 /**
- * Resolves the canonical origin host for a site's base URL, layering DNS- and redirect-follow on
- * top of calculateForwardedHost.
+ * Resolves the canonical origin host for a site's base URL: calculateForwardedHost's www
+ * candidate, corrected for a Public-Suffix-List apex check and confirmed by following its
+ * redirect chain.
  *
- * calculateForwardedHost normalizes a bare apex (example.com) to its www host (www.example.com),
- * matching how audits/crawls resolve the origin. But some sites are served only from the apex and
- * have no working www — forcing www there points the worker at a host that does not serve (the
- * gentingsingapore.com onboarding failure). So when the www host was synthesized from a bare apex:
- *   1. redirect-follow — probe the apex: if it serves directly (2xx) use the apex, and if it 301s
- *      to a same-domain host use that host (an apex that redirects to www resolves to www);
- *   2. DNS-follow — if the probe is undetermined, use the www host only if it resolves in DNS;
- *   3. otherwise fall back to the apex.
- * Hosts that are already www or a subdomain are returned unchanged (calculateForwardedHost leaves
- * them as-is), so no probe or lookup is performed.
+ * calculateForwardedHost appends "www." to a bare apex, leaving an existing www host or a real
+ * subdomain unchanged — but its bare-apex check is a dot-count heuristic that misclassifies a
+ * multi-part-TLD apex (e.g. "racq.com.au", 2 dots) as a subdomain and skips the www rewrite; that
+ * one case is corrected here via the Public Suffix List (tldts), which resolves registrable
+ * domains correctly regardless of TLD shape.
+ *
+ * For a bare apex, the resulting www candidate is then fetched with redirects followed to find
+ * where it actually serves from — a www host that 301s to the apex (the gentingsingapore.com
+ * onboarding failure) resolves to the apex, and vice versa. If that probe fails outright
+ * (network/DNS error, timeout, blocked) or lands outside the site's domain, the candidate
+ * calculateForwardedHost/the PSL check decided on is kept as-is.
  *
  * @param {string} baseURL - Site base URL (must include scheme).
  * @param {object} log - Logger.
  * @returns {Promise<string>} The canonical origin host.
- * @throws {Error} If the base URL is unparseable (propagated from calculateForwardedHost).
+ * @throws {Error} If the base URL is unparseable.
  */
 export async function resolveCanonicalHost(baseURL, log) {
-  const candidate = calculateForwardedHost(baseURL, log);
   const originalHost = new URL(baseURL).hostname.toLowerCase();
 
-  // calculateForwardedHost only rewrites a bare apex into www.<apex>. When it returns the original
-  // host unchanged (already www, or a subdomain) the candidate is authoritative — skip all I/O.
-  if (candidate.toLowerCase() === originalHost) {
+  let candidate = calculateForwardedHost(baseURL, log).toLowerCase();
+  const isMisclassifiedCompoundTldApex = candidate === originalHost
+    && !originalHost.startsWith('www.')
+    && registrableDomain(originalHost) === originalHost;
+  if (isMisclassifiedCompoundTldApex) {
+    candidate = `www.${originalHost}`;
+  }
+
+  // Already www, or a real subdomain — nothing to probe.
+  if (candidate === originalHost) {
     return candidate;
   }
 
-  // candidate is a www host synthesized from the bare apex `originalHost`.
-  const served = await probeServingHost(baseURL, originalHost, log);
-  if (served) {
-    return served;
-  }
-
-  // Probe undetermined (network error, opaque status, off-domain redirect) — trust the synthesized
-  // www host only if it resolves in DNS, otherwise fall back to the apex.
-  if (await hostResolves(candidate, log)) {
-    return candidate;
-  }
-
-  log.info(
-    `[edge-routing-utils] Synthesized host ${candidate} does not serve or resolve; `
-    + `falling back to apex ${originalHost}`,
-  );
-  return originalHost;
+  const candidateURL = new URL(baseURL);
+  candidateURL.hostname = candidate;
+  const served = await followToServingHost(candidateURL.toString(), originalHost, log);
+  return served || candidate;
 }
 
 /**
@@ -239,7 +203,7 @@ export async function probeSiteAndResolveDomain(siteUrl, log) {
   const probeResponse = await fetch(siteUrl, {
     method: 'GET',
     headers: { 'User-Agent': EDGE_OPTIMIZE_USER_AGENT },
-    signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    timeout: PROBE_TIMEOUT_MS,
   });
 
   if (probeResponse.ok) {
@@ -325,7 +289,7 @@ export async function callCdnRoutingApi(
       Authorization: `Bearer ${spToken}`,
     },
     body: JSON.stringify(cdnBody),
-    signal: AbortSignal.timeout(CDN_CALL_TIMEOUT_MS),
+    timeout: CDN_CALL_TIMEOUT_MS,
   });
 
   if (!cdnResponse.ok) {

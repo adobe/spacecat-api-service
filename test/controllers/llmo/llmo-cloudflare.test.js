@@ -95,8 +95,9 @@ describe('LlmoCloudflareController', () => {
     };
 
     // Default to the real apex→www host-derivation (no DNS); individual tests may override to
-    // force a throw or a specific resolved host.
-    mockResolveCanonicalHost = (baseURL, l) => calculateForwardedHost(baseURL, l);
+    // force a throw or a specific resolved host. Async to match the real resolveCanonicalHost's
+    // contract (it is always awaited by callers).
+    mockResolveCanonicalHost = async (baseURL, l) => calculateForwardedHost(baseURL, l);
 
     mockFetch = sandbox.stub().resolves({
       ok: true,

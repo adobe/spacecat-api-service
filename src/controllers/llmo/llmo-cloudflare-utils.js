@@ -77,15 +77,23 @@ export const routePatternHostGlob = (pattern) => pattern
   .toLowerCase();
 
 /**
- * The path glob of a route pattern: everything from the first "/" after the host, scheme stripped,
- * defaulting to "/*" when the pattern carries no path (e.g. "example.com/blog/*" -> "/blog/*",
- * "https://example.com/*" -> "/*", "example.com" -> "/*"). Lets callers swap a route's host while
- * preserving the client-supplied path.
+ * Replaces only the host portion of a Cloudflare route pattern, leaving its scheme (if any) and
+ * path (if any) exactly as supplied. Cloudflare treats scheme-specific, scheme-less, root-only
+ * (no path at all), and wildcard-path patterns differently, so this never introduces a scheme that
+ * was not present, drops one that was, or synthesizes a "/*" path for a pattern that had none.
+ *
+ * @param {string} pattern - The original route pattern (may include a leading scheme, may have no
+ *   path at all). Assumed to have a non-wildcard host, per the caller's guard.
+ * @param {string} newHost - The replacement host (no scheme, no path).
+ * @returns {string} `pattern` with only its host replaced.
  */
-export const routePatternPath = (pattern) => {
-  const withoutScheme = pattern.replace(/^https?:\/\//i, '');
-  const slashIndex = withoutScheme.indexOf('/');
-  return slashIndex === -1 ? '/*' : withoutScheme.slice(slashIndex);
+export const replacePatternHost = (pattern, newHost) => {
+  const schemeMatch = pattern.match(/^https?:\/\//i);
+  const scheme = schemeMatch ? schemeMatch[0] : '';
+  const rest = pattern.slice(scheme.length);
+  const slashIndex = rest.indexOf('/');
+  const pathPart = slashIndex === -1 ? '' : rest.slice(slashIndex);
+  return `${scheme}${newHost}${pathPart}`;
 };
 
 /**

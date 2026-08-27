@@ -20,8 +20,8 @@ import AccessControlUtil from '../../support/access-control-util.js';
 import { hasSubpath, resolveCanonicalHost } from '../../support/edge-routing-utils.js';
 import { auditHostname } from './llmo-utils.js';
 import {
-  deriveWorkerName, hostInSiteDomain, registrableDomain, routePatternHost, routePatternHostGlob,
-  routePatternPath, routePatternsOverlap,
+  deriveWorkerName, hostInSiteDomain, registrableDomain, replacePatternHost, routePatternHost,
+  routePatternHostGlob, routePatternsOverlap,
 } from './llmo-cloudflare-utils.js';
 
 // Cap the conflicting-routes list returned in a 409 so a zone with many overlapping routes can't
@@ -560,7 +560,7 @@ function LlmoCloudflareController(ctx) {
       const clientHost = routePatternHostGlob(clientPattern);
       if (clientHost === siteApex || clientHost === `www.${siteApex}`) {
         const canonicalHost = await resolveCanonicalHost(site.getBaseURL(), log);
-        pattern = `${canonicalHost}${routePatternPath(clientPattern)}`;
+        pattern = replacePatternHost(clientPattern, canonicalHost);
       }
     } catch (e) {
       log.error(auditLine(context, 'add-route', 'host-derivation-failed', {
