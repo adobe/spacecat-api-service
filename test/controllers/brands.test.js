@@ -1018,10 +1018,12 @@ describe('Brands Controller', () => {
       expect(body).to.have.property('prompts');
     });
 
-    it('createPromptsByBrand honours a SERVICE principal\'s origin: ai (DRS contract, origin-dimension.md §3)', async () => {
-      // A non-ims/non-jwt principal (e.g. DRS via admin x-api-key) is believed:
-      // its asserted `origin` rides through to the store. Deleting or ignoring it
-      // would relabel every DRS-written prompt `human` on its next upsert.
+    it('createPromptsByBrand honours an S2S consumer\'s origin: ai (DRS contract, origin-dimension.md §3)', async () => {
+      // An S2S consumer (e.g. DRS) authenticates with a JWT — authType is `jwt`,
+      // identical to an end-user session — but is a SERVICE principal, identified
+      // by the token's `is_s2s_consumer` claim (authInfo.isS2SConsumer()). Its
+      // asserted `origin` rides through to the store; classifying it as a user by
+      // auth type alone would relabel every DRS-written prompt `human` on write.
       const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
       const insertStub = sandbox.stub()
         .returns({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) });
@@ -1047,7 +1049,14 @@ describe('Brands Controller', () => {
 
       const response = await brandsController.createPromptsByBrand({
         ...context,
-        attributes: { authInfo: { getType: () => 'apikey', profile: { email: 'drs@service' } } },
+        attributes: {
+          authInfo: {
+            getType: () => 'jwt',
+            isS2SConsumer: () => true,
+            isS2SAdmin: () => false,
+            profile: { email: 'drs@service' },
+          },
+        },
         params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
         data: [{ prompt: 'P', regions: ['us'], origin: 'ai' }],
         dataAccess: mockDataAccess,
@@ -1056,6 +1065,101 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(201);
       const inserted = insertStub.firstCall.args[0];
       expect(inserted[0].origin).to.equal('ai');
+    });
+
+    it('createPromptsByBrand honours an S2S admin\'s origin: ai (is_s2s_admin claim over a JWT)', async () => {
+      // An S2S admin also authenticates with a JWT (authType `jwt`) and is a
+      // SERVICE principal, identified by the `is_s2s_admin` claim
+      // (authInfo.isS2SAdmin()). Its asserted `origin` rides through to the store.
+      const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
+      const insertStub = sandbox.stub()
+        .returns({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) });
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        if (table === 'prompts') {
+          return {
+            select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+            insert: insertStub,
+            update: () => ({ eq: () => thenable({ error: null }) }),
+          };
+        }
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+        };
+        if (table === 'llmo_customer_config') {
+          chain.maybeSingle = sandbox.stub()
+            .resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        }
+        return chain;
+      });
+
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        attributes: {
+          authInfo: {
+            getType: () => 'jwt',
+            isS2SConsumer: () => false,
+            isS2SAdmin: () => true,
+            profile: { email: 'svc-admin@service' },
+          },
+        },
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: [{ prompt: 'P', regions: ['us'], origin: 'ai' }],
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(201);
+      const inserted = insertStub.firstCall.args[0];
+      expect(inserted[0].origin).to.equal('ai');
+    });
+
+    it('createPromptsByBrand coerces a plain end-user JWT\'s origin: ai to human (no S2S claim)', async () => {
+      // Regression for the S2S-vs-user fix: a real end-user session JWT also has
+      // authType `jwt`, but WITHOUT an `is_s2s_consumer`/`is_s2s_admin` claim it is
+      // a user principal and its body `origin` is ignored — proving the fix keys
+      // off the S2S claim, not merely off the auth type.
+      const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
+      const insertStub = sandbox.stub()
+        .returns({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) });
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        if (table === 'prompts') {
+          return {
+            select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+            insert: insertStub,
+            update: () => ({ eq: () => thenable({ error: null }) }),
+          };
+        }
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+        };
+        if (table === 'llmo_customer_config') {
+          chain.maybeSingle = sandbox.stub()
+            .resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        }
+        return chain;
+      });
+
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        attributes: {
+          authInfo: {
+            getType: () => 'jwt',
+            isS2SConsumer: () => false,
+            isS2SAdmin: () => false,
+            profile: { email: 'user@test.com' },
+          },
+        },
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: [{ prompt: 'P', regions: ['us'], origin: 'ai' }],
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(201);
+      const inserted = insertStub.firstCall.args[0];
+      expect(inserted[0].origin).to.equal('human');
     });
 
     it('createPromptsByBrand coerces a USER principal\'s origin: ai to human (body ignored, never rejected)', async () => {
