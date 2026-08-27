@@ -34,7 +34,7 @@ const MAX = 500;
  */
 async function fetchSiteBindings(postgrestClient, {
   imsOrgId, product, siteId, subjectId,
-}) {
+}, log) {
   const scopes = [{ subjectType: 'org', subjectId: imsOrgId }];
   if (hasText(subjectId)) {
     scopes.push({ subjectType: 'user', subjectId });
@@ -48,6 +48,22 @@ async function fetchSiteBindings(postgrestClient, {
     subjectId: scope.subjectId,
     limit: MAX,
   })));
+  // A page filled to the cap may have dropped overflow bindings, which fail-safe
+  // UNDER-grants (a real grant could be missed). It is implausible today given
+  // the low per-subject qualifier cardinality, but log loudly so a future
+  // high-cardinality dimension does not silently under-grant.
+  pages.forEach((page, i) => {
+    if (page.length >= MAX) {
+      log?.warn?.({
+        tag: 'facs-composite',
+        reason: 'bindings-cap-hit',
+        siteId,
+        product,
+        subjectType: scopes[i].subjectType,
+        cap: MAX,
+      }, 'FACS composite: site bindings hit the page cap; overflow ignored (possible under-grant)');
+    }
+  });
   return pages.flat();
 }
 
@@ -92,8 +108,12 @@ function permittedValues(bindings, capability) {
  * Keep this in sync with the controllers that call
  * `filterOpportunitiesByFacsComposite`; the resolver defers here and the
  * controller MUST narrow, else the collection leaks cross-type data.
+ *
+ * Exported so an exhaustive route test can enforce this coupling against the ASO
+ * route surface (catch a new opportunity-derived collection route that forgets
+ * to be classified here, before release).
  */
-function isOpportunityDerivedCollectionRoute(routePattern) {
+export function isOpportunityDerivedCollectionRoute(routePattern) {
   return typeof routePattern === 'string'
     && /^GET\s.*\/(opportunities(\/by-status\/[^/]+|\/top-paid)?|fixes|edge-deployed-urls)$/.test(routePattern);
 }
@@ -156,7 +176,7 @@ export async function asoOpportunityComposite(context, {
 
   const bindings = await fetchSiteBindings(postgrestClient, {
     imsOrgId: orgId, product, siteId, subjectId,
-  });
+  }, log);
 
   const opportunityId = routeParams?.opportunityId;
 

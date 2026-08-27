@@ -266,6 +266,28 @@ describe('facs-composite-resolvers (asoOpportunityComposite)', () => {
     expect(res).to.be.false;
   });
 
+  it('logs a cap-hit warning when a scope returns a full page (possible under-grant)', async () => {
+    // A page filled to the cap may have dropped overflow bindings (fail-safe
+    // under-grant); it must be detectable in logs, not silent.
+    listStub.resolves(Array.from({ length: 500 }, () => ({
+      composite_key_value_1: 'all', granted_capabilities: [CAP],
+    })));
+    await mod.asoOpportunityComposite(context, {
+      ...baseArgs, routePattern: 'POST /sites/:siteId/reports', routeParams: { siteId: 'site-1' },
+    });
+    expect(context.log.warn.calledWithMatch({
+      tag: 'facs-composite', reason: 'bindings-cap-hit',
+    })).to.be.true;
+  });
+
+  it('does not log a cap-hit warning for a normal (under-cap) result', async () => {
+    listStub.resolves([{ composite_key_value_1: 'all', granted_capabilities: [CAP] }]);
+    await mod.asoOpportunityComposite(context, {
+      ...baseArgs, routePattern: 'POST /sites/:siteId/reports', routeParams: { siteId: 'site-1' },
+    });
+    expect(context.log.warn.calledWithMatch({ reason: 'bindings-cap-hit' })).to.be.false;
+  });
+
   it('propagates a state-layer read error (the wrapper treats a throw as deny)', async () => {
     listStub.rejects(new Error('postgrest down'));
     let threw;
