@@ -1,3 +1,10 @@
+# [1.768.0](https://github.com/adobe/spacecat-api-service/compare/v1.767.1...v1.768.0) (2026-08-27)
+
+
+### Features
+
+* **llmo:** add Akamai versions endpoint and base-version selection for plan ([#2991](https://github.com/adobe/spacecat-api-service/issues/2991)) ([b66b0ad](https://github.com/adobe/spacecat-api-service/commit/b66b0ad7a0cbbc4acb5b96939eb2391241a8cb0d))
+
 ## [1.767.1](https://github.com/adobe/spacecat-api-service/compare/v1.767.0...v1.767.1) (2026-08-26)
 
 
