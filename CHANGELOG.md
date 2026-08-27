@@ -1,3 +1,53 @@
+# [1.768.0](https://github.com/adobe/spacecat-api-service/compare/v1.767.1...v1.768.0) (2026-08-27)
+
+
+### Features
+
+* **llmo:** add Akamai versions endpoint and base-version selection for plan ([#2991](https://github.com/adobe/spacecat-api-service/issues/2991)) ([b66b0ad](https://github.com/adobe/spacecat-api-service/commit/b66b0ad7a0cbbc4acb5b96939eb2391241a8cb0d))
+
+## [1.767.1](https://github.com/adobe/spacecat-api-service/compare/v1.767.0...v1.767.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* preserve site_id on upsertBrand when it already matches ([#3143](https://github.com/adobe/spacecat-api-service/issues/3143)) ([94eb595](https://github.com/adobe/spacecat-api-service/commit/94eb595147642ab711820723637be63684b7fdba))
+
+# [1.767.0](https://github.com/adobe/spacecat-api-service/compare/v1.766.0...v1.767.0) (2026-08-26)
+
+
+### Features
+
+* introduce top youtube cited videos from semrush brand presence data ([#3140](https://github.com/adobe/spacecat-api-service/issues/3140)) ([d3ea3ca](https://github.com/adobe/spacecat-api-service/commit/d3ea3ca14dcb899a1810d2a3b6b37263b987c01b))
+* **llmo-akamai:** two-tier CLIENT_REQ Optimize at Edge routing ([#3134](https://github.com/adobe/spacecat-api-service/issues/3134)) ([38d7a79](https://github.com/adobe/spacecat-api-service/commit/38d7a79ac434087f94e6210d9296233e8a613c2f))
+
+# [1.766.0](https://github.com/adobe/spacecat-api-service/compare/v1.765.0...v1.766.0) (2026-08-26)
+
+
+### Features
+
+* **serenity:** route subworkspace CSV imports through the async job runner ([#3138](https://github.com/adobe/spacecat-api-service/issues/3138)) ([184ca22](https://github.com/adobe/spacecat-api-service/commit/184ca2287f3c317ecdc4ccdf30db9682bfbc0beb)), closes [serenity-docs#186](https://github.com/serenity-docs/issues/186) [serenity-docs#33](https://github.com/serenity-docs/issues/33) [serenity-docs#33](https://github.com/serenity-docs/issues/33) [#2920](https://github.com/adobe/spacecat-api-service/issues/2920)
+
+# [1.765.0](https://github.com/adobe/spacecat-api-service/compare/v1.764.1...v1.765.0) (2026-08-26)
+
+
+### Features
+
+* serenity introduce top reddit threads endpoints ([#3139](https://github.com/adobe/spacecat-api-service/issues/3139)) ([4f42978](https://github.com/adobe/spacecat-api-service/commit/4f42978de8e932633791cfae20b2dde5e664d575))
+
+## [1.764.1](https://github.com/adobe/spacecat-api-service/compare/v1.764.0...v1.764.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* revoke suggestion grants when a suggestion is deleted ([#3136](https://github.com/adobe/spacecat-api-service/issues/3136)) ([4c1b8b9](https://github.com/adobe/spacecat-api-service/commit/4c1b8b9b2936607eabff6c422d3c9a77151d8a5e))
+
+# [1.764.0](https://github.com/adobe/spacecat-api-service/compare/v1.763.6...v1.764.0) (2026-08-26)
+
+
+### Features
+
+* **serenity:** add brand-presence subreddits element endpoint ([#3135](https://github.com/adobe/spacecat-api-service/issues/3135)) ([3e83a04](https://github.com/adobe/spacecat-api-service/commit/3e83a04f3ff528e3334ad781758a953d3901a382)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 ## [1.763.6](https://github.com/adobe/spacecat-api-service/compare/v1.763.5...v1.763.6) (2026-08-25)
 
 

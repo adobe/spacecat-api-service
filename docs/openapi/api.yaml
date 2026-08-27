@@ -162,6 +162,8 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-prompt-by-id'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/bulk-delete:
     $ref: './serenity-api.yaml#/v2-serenity-prompts-bulk-delete'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/jobs/{jobId}:
+    $ref: './serenity-api.yaml#/v2-serenity-prompts-job-by-id'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/markets:
     $ref: './serenity-api.yaml#/v2-serenity-markets'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/markets/{geoTargetId}/{languageCode}:
@@ -194,6 +196,12 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-brand-presence-access'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/sentiment-overview:
     $ref: './serenity-api.yaml#/v2-serenity-brand-presence-sentiment-overview'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/subreddits:
+    $ref: './serenity-api.yaml#/v2-serenity-brand-presence-subreddits'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/reddit-threads:
+    $ref: './serenity-api.yaml#/v2-serenity-brand-presence-reddit-threads'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/youtube-videos:
+    $ref: './serenity-api.yaml#/v2-serenity-brand-presence-youtube-videos'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/topics:
     $ref: './serenity-api.yaml#/v2-serenity-brand-presence-topics'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/topics/{topicId}/prompts:
@@ -778,6 +786,8 @@ paths:
     $ref: './llmo-api.yaml#/site-llmo-akamai-config'
   /sites/{siteId}/llmo/cdn-onboard/akamai/properties:
     $ref: './llmo-api.yaml#/site-llmo-akamai-properties'
+  /sites/{siteId}/llmo/cdn-onboard/akamai/versions:
+    $ref: './llmo-api.yaml#/site-llmo-akamai-versions'
   /sites/{siteId}/llmo/cdn-onboard/akamai/plan:
     $ref: './llmo-api.yaml#/site-llmo-akamai-plan'
   /sites/{siteId}/llmo/cdn-onboard/akamai/deploy:

@@ -564,16 +564,20 @@ function SerenityController(context, log, env) {
       if (auth.error) {
         return auth.error;
       }
-      // serenity-docs#33: CSV import is the ONLY bulk write path that routes to
-      // the async job runner — every other write path (single create, single
-      // edit, UI multi-add) stays synchronous. Routing is by SOURCE, not array
-      // length: `deferPublish` is the exact flag CSV-chunking already sets
-      // (see handleCreatePrompts' docstring) precisely because a UI multi-add
-      // never sets it, so a three-prompt UI add never pays queue+worker+publish
-      // latency. Flat-mode brands only for now — see this PR's report for why
-      // subworkspace-mode CSV import stays on the synchronous path.
+      // serenity-docs#33 (Layer 1, #2920): CSV import is the ONLY bulk write path
+      // that routes to the async job runner — every other write path (single
+      // create, single edit, UI multi-add) stays synchronous. Routing is by
+      // SOURCE, not array length: `deferPublish` is the exact flag CSV-chunking
+      // already sets (see handleCreatePrompts' docstring) precisely because a UI
+      // multi-add never sets it, so a three-prompt UI add never pays
+      // queue+worker+publish latency. BOTH modes enqueue: subworkspace is the only
+      // mode that exists in practice (flat brands are effectively extinct), so
+      // gating the async path on flat-only meant it never fired. The worker
+      // reconstructs the write from the metadata below — `authMode` picks the
+      // subworkspace-vs-flat create branch, `workspaceId`/`parentWorkspaceId` give
+      // it the sub-workspace and org parent it needs.
       const body = ctx.data || {};
-      if (auth.mode !== 'subworkspace' && validateDeferPublish(body)) {
+      if (validateDeferPublish(body)) {
         const prompts = Array.isArray(body.prompts) ? body.prompts : [];
         if (prompts.length === 0) {
           return createResponse(
@@ -592,7 +596,18 @@ function SerenityController(context, log, env) {
           metadata: {
             mode: 'create',
             brandId: auth.brandUuid,
+            // Backwards-compatible: the flat worker create path already reads
+            // `semrushWorkspaceId` as the workspace to write to — in subworkspace
+            // mode `auth.workspaceId` IS the sub-workspace, so the same key names
+            // the correct upstream target for both modes.
             semrushWorkspaceId: auth.workspaceId,
+            // Explicit reconstruction fields (this PR): `authMode` selects the
+            // worker's create branch; `workspaceId` is the sub-workspace the live
+            // project listing (buildSliceProjectMap) is enumerated from;
+            // `parentWorkspaceId` is the org parent, carried for completeness.
+            authMode: auth.mode,
+            workspaceId: auth.workspaceId,
+            parentWorkspaceId: auth.parentWorkspaceId,
             prompts,
             // Authorship (LLMO-6289): capture the caller id at enqueue time — from
             // the auth profile, never the forwarded upstream bearer — so the async
@@ -1905,9 +1920,68 @@ function SerenityController(context, log, env) {
     }
   };
 
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/jobs/:jobId —
+   * polls a serenity-classify-prompts async job (serenity-docs#33 Layer 1, the
+   * companion to createPrompts' 202 CSV-import path). No upstream Semrush call, so
+   * no IMS token is resolved here; access control reuses `authorize` (same
+   * org/brand access + serenity-active gate as every other serenity handler).
+   *
+   * Returns a STABLE, secret-free contract — exactly `{ jobId, status, result,
+   * error }`, camelCase, which the polling UI is built against. `status` is the
+   * AsyncJob state (IN_PROGRESS | COMPLETED | FAILED); `result` is
+   * `job.getResult()` (present when COMPLETED); `error` is `job.getError()`
+   * (present when FAILED, `{ code, message }`). The job's metadata (which carries
+   * the promise token and other internals) is NEVER returned.
+   *
+   * Ownership guard: a job whose metadata `brandId` does not match the addressed
+   * brand 404s exactly like a missing job — a caller must not be able to probe or
+   * read another brand's jobs by id.
+   */
+  const getPromptsJobStatus = async (ctx) => {
+    let auth;
+    try {
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { jobId } = ctx?.params || {};
+      if (!isValidUUID(jobId)) {
+        return createResponse(
+          { error: 'invalidRequest', message: 'jobId must be a UUID' },
+          400,
+        );
+      }
+      const AsyncJob = ctx?.dataAccess?.AsyncJob;
+      if (!AsyncJob || typeof AsyncJob.findById !== 'function') {
+        return internalServerError('AsyncJob data-access not available');
+      }
+      const job = await AsyncJob.findById(jobId);
+      // A job that does not exist AND a job that belongs to another brand answer
+      // the same 404: whether the id is unknown or simply not yours is not the
+      // caller's business (mirrors authorize's brand-not-found contract).
+      const jobBrandId = job?.getMetadata?.()?.brandId;
+      if (!job || jobBrandId !== auth.brandUuid) {
+        return notFound(`Job not found: ${jobId}`);
+      }
+      return createResponse(
+        {
+          jobId: job.getId(),
+          status: job.getStatus(),
+          result: job.getResult?.() ?? null,
+          error: job.getError?.() ?? null,
+        },
+        200,
+      );
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
   return {
     listPrompts,
     createPrompts,
+    getPromptsJobStatus,
     updatePrompt,
     bulkDeletePrompts,
     listMarkets,
