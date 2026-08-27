@@ -14491,6 +14491,13 @@ Tile:
       format: uuid
     title:
       type: string
+    description:
+      type: string
+      description: Optional subtitle shown beneath the tile title.
+    tileType:
+      type: string
+      enum: [brand-presence, agentic-traffic, referral-traffic, opportunities]
+      description: Domain the tile queries. Absent for legacy tiles (treated as brand-presence).
     analysis:
       allOf:
         - $ref: '#/Analysis'
@@ -14505,6 +14512,12 @@ Tile:
       type: array
       items:
         $ref: '#/AnalyticsFilter'
+    applyGlobalFilters:
+      type: boolean
+      description: >-
+        When false the tile ignores dashboard-level overrides (platform picker,
+        date preset) and runs with its own saved filters and date range.
+        Defaults to true when absent.
   required:
     - id
     - title
@@ -14513,10 +14526,19 @@ Tile:
 
 TileInput:
   type: object
-  description: Request body for POST .../dashboards/{dashboardId}/tiles.
+  description: >-
+    Request body for POST .../dashboards/{dashboardId}/tiles. For a governed
+    tile supply `analysis`, `visualization`, and `layout`; for a snapshot tile
+    supply `snapshot` and `layout`.
   properties:
     title:
       type: string
+    description:
+      type: string
+      description: Optional subtitle shown beneath the tile title.
+    tileType:
+      type: string
+      enum: [brand-presence, agentic-traffic, referral-traffic, opportunities]
     analysis:
       $ref: '#/Analysis'
     visualization:
@@ -14529,10 +14551,10 @@ TileInput:
       type: array
       items:
         $ref: '#/AnalyticsFilter'
+    applyGlobalFilters:
+      type: boolean
   required:
     - title
-    - analysis
-    - visualization
     - layout
 
 TileUpdateInput:
@@ -14543,6 +14565,11 @@ TileUpdateInput:
   properties:
     title:
       type: string
+    description:
+      type: string
+    tileType:
+      type: string
+      enum: [brand-presence, agentic-traffic, referral-traffic, opportunities]
     analysis:
       $ref: '#/Analysis'
     visualization:
@@ -14555,6 +14582,8 @@ TileUpdateInput:
       type: array
       items:
         $ref: '#/AnalyticsFilter'
+    applyGlobalFilters:
+      type: boolean
 
 DashboardVisibility:
   type: string

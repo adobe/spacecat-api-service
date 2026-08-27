@@ -231,17 +231,29 @@ function LlmoDashboardsController(context) {
       return forbidden('Only the owner or an editor can add tiles');
     }
     const {
-      title, analysis, visualization, layout,
+      title, description, tileType, analysis, visualization, snapshot, layout,
+      localOverrides, applyGlobalFilters,
     } = ctx.data ?? {};
-    if (!hasText(title) || !analysis || !visualization || !layout) {
-      return badRequest('title, analysis, visualization, and layout are required');
+    if (!hasText(title) || !layout) {
+      return badRequest('title and layout are required');
+    }
+    if (!snapshot && (!analysis || !visualization)) {
+      return badRequest('governed tiles require analysis and visualization; snapshot tiles require snapshot');
     }
     const result = store.addTile({
       id: dashboardId,
       orgId: spaceCatId,
       brandId,
       tile: {
-        title, analysis, visualization, layout, localOverrides: [],
+        title,
+        ...(description !== undefined && { description }),
+        ...(tileType !== undefined && { tileType }),
+        ...(analysis !== undefined && { analysis }),
+        ...(visualization !== undefined && { visualization }),
+        ...(snapshot !== undefined && { snapshot }),
+        layout,
+        localOverrides: localOverrides ?? [],
+        ...(applyGlobalFilters !== undefined && { applyGlobalFilters }),
       },
     });
     return createResponse(result.tile, 201);
