@@ -69,6 +69,38 @@ export function deriveV2PromptOrigin(bodyOrigin, isUserPrincipal) {
 }
 
 /**
+ * Classifies a request PRINCIPAL as a SERVICE principal (vs. an end user), for the
+ * purpose of the {@link deriveV2PromptOrigin} decision. A service principal is:
+ *
+ *   - an S2S consumer or admin — these authenticate with a JWT, so `getType()` is
+ *     `'jwt'`, indistinguishable BY TYPE from an end-user session; they are
+ *     identified only by the signature-validated `is_s2s_consumer` /
+ *     `is_s2s_admin` claim (surfaced as `isS2SConsumer()` / `isS2SAdmin()`), never
+ *     by caller-controlled body input; OR
+ *   - a non-jwt/ims auth type (a scoped/legacy API key).
+ *
+ * Fails SAFE to the least-privileged (USER) principal: an ABSENT or indeterminate
+ * auth type with no S2S signal, or a non-function `getType` / `isS2S*`, resolves to
+ * `false` (→ user) rather than throwing or silently gaining service privilege. This
+ * is why a future unwrapped caller (an internal queue consumer, re-ordered
+ * middleware) cannot slip into the service path.
+ *
+ * @param {*} authInfo - the request's AuthInfo (`context.attributes.authInfo`).
+ * @returns {boolean} true for a service principal (its body `origin` is honoured).
+ */
+export function isServicePrincipal(authInfo) {
+  const isS2SConsumer = typeof authInfo?.isS2SConsumer === 'function'
+    && !!authInfo.isS2SConsumer();
+  const isS2SAdmin = typeof authInfo?.isS2SAdmin === 'function'
+    && !!authInfo.isS2SAdmin();
+  if (isS2SConsumer || isS2SAdmin) {
+    return true;
+  }
+  const authType = typeof authInfo?.getType === 'function' ? authInfo.getType() : undefined;
+  return !!authType && authType !== 'jwt' && authType !== 'ims';
+}
+
+/**
  * Per-client cache of whether `prompts.intent` is selectable/writable. Keyed by
  * the PostgREST client so unit tests (fresh mock clients) never bleed state and
  * production detects once per client instance. Absent = unknown (try with

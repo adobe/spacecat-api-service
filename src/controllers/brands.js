@@ -51,6 +51,7 @@ import {
   resolveBrandUuid,
   findPromptsBlockingRegionRemoval,
   deriveV2PromptOrigin,
+  isServicePrincipal,
 } from '../support/prompts-storage.js';
 import {
   listBrands,
@@ -713,29 +714,17 @@ function BrandsController(ctx, log, env) {
       }
 
       // `origin` is derived from the request PRINCIPAL, never trusted from the
-      // body (origin-dimension.md §3): an end-user (IMS/JWT session) write is
-      // `human`, body ignored; a service principal is believed and its body
-      // `origin` honoured. Stamp it here so the store writes the derived value on
-      // insert; on update the stored origin is preserved (upsertPrompts) and never
-      // patched (updatePromptById).
+      // body (origin-dimension.md §3): an end-user write is `human`, body ignored;
+      // a service principal is believed and its body `origin` honoured. Stamp it
+      // here so the store writes the derived value on insert; on update the stored
+      // origin is preserved (upsertPrompts) and never patched (updatePromptById).
       //
-      // A service principal is one of: a non-jwt/ims auth type (scoped/legacy API
-      // key), OR — the case that matters in production — an S2S consumer/admin.
-      // The latter authenticates with a JWT, so its `authType` is `jwt`,
-      // indistinguishable BY TYPE from an end-user session. The x-api-key path DRS
-      // used to take was removed (SITES-34224); DRS now posts `origin: 'ai'` over
-      // an S2S JWT, so classifying by `authType` alone forced every generated
-      // prompt to `human`. Consult the token's own S2S claims
-      // (`isS2SConsumer()` / `isS2SAdmin()`) to recover the true principal —
-      // these are signature-validated JWT claims, not caller-controlled body input.
-      //
-      // Fail SAFE to the least-privileged (USER) principal: an ABSENT or
-      // indeterminate auth type with no S2S signal must NEVER fall through to the
-      // service path that honours a body-supplied `origin`. `authWrapper` blocks
-      // unauthenticated requests today, but a future unwrapped caller (an internal
-      // queue consumer, re-ordered middleware) must not silently gain service
-      // privilege — hence `!authType → user`, and a non-function `getType` /
-      // `isS2S*` resolves to falsy (→ user) rather than throwing.
+      // `isServicePrincipal` carries the classification (and its fail-safe rules):
+      // crucially, an S2S consumer/admin authenticates with a JWT — same
+      // `authType` as an end-user session — so it is recognised by its S2S claim,
+      // not its auth type. Classifying by auth type alone forced DRS's generated
+      // prompts (posted `origin: 'ai'` over an S2S JWT) to `human`, since the
+      // x-api-key service path DRS used to take was removed (SITES-34224).
       //
       // `source` (the producing system) has NO write surface (source-dimension.md
       // §1 item 6): a caller-supplied `source` is ignored, so a v2 create becomes
@@ -745,13 +734,7 @@ function BrandsController(ctx, log, env) {
       // it. `updatePromptById` likewise never patches source (producer is fixed at
       // creation).
       const { authInfo } = context.attributes ?? {};
-      const authType = typeof authInfo?.getType === 'function' ? authInfo.getType() : undefined;
-      const isS2SConsumer = typeof authInfo?.isS2SConsumer === 'function'
-        && !!authInfo.isS2SConsumer();
-      const isS2SAdmin = typeof authInfo?.isS2SAdmin === 'function'
-        && !!authInfo.isS2SAdmin();
-      const isUserPrincipal = !isS2SConsumer && !isS2SAdmin
-        && (!authType || authType === 'jwt' || authType === 'ims');
+      const isUserPrincipal = !isServicePrincipal(authInfo);
       const derivedPrompts = prompts.map(({ source: _, ...p }) => ({
         ...p,
         origin: deriveV2PromptOrigin(p?.origin, isUserPrincipal),

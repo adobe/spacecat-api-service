@@ -1053,7 +1053,55 @@ describe('Brands Controller', () => {
           authInfo: {
             getType: () => 'jwt',
             isS2SConsumer: () => true,
-            profile: { email: 'drs@service', is_s2s_consumer: true },
+            isS2SAdmin: () => false,
+            profile: { email: 'drs@service' },
+          },
+        },
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: [{ prompt: 'P', regions: ['us'], origin: 'ai' }],
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(201);
+      const inserted = insertStub.firstCall.args[0];
+      expect(inserted[0].origin).to.equal('ai');
+    });
+
+    it('createPromptsByBrand honours an S2S admin\'s origin: ai (is_s2s_admin claim over a JWT)', async () => {
+      // An S2S admin also authenticates with a JWT (authType `jwt`) and is a
+      // SERVICE principal, identified by the `is_s2s_admin` claim
+      // (authInfo.isS2SAdmin()). Its asserted `origin` rides through to the store.
+      const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
+      const insertStub = sandbox.stub()
+        .returns({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) });
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        if (table === 'prompts') {
+          return {
+            select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+            insert: insertStub,
+            update: () => ({ eq: () => thenable({ error: null }) }),
+          };
+        }
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+        };
+        if (table === 'llmo_customer_config') {
+          chain.maybeSingle = sandbox.stub()
+            .resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        }
+        return chain;
+      });
+
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        attributes: {
+          authInfo: {
+            getType: () => 'jwt',
+            isS2SConsumer: () => false,
+            isS2SAdmin: () => true,
+            profile: { email: 'svc-admin@service' },
           },
         },
         params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
@@ -1100,6 +1148,7 @@ describe('Brands Controller', () => {
           authInfo: {
             getType: () => 'jwt',
             isS2SConsumer: () => false,
+            isS2SAdmin: () => false,
             profile: { email: 'user@test.com' },
           },
         },
