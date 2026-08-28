@@ -108,8 +108,12 @@ function parseNumericOption(flag, raw, fallback, min) {
     return fallback;
   }
   const n = Number(raw);
-  if (Number.isNaN(n) || n < min) {
-    console.error(`ERROR: ${flag} must be a number >= ${min}, got "${raw}"`);
+  // Both callers use the result as a whole-unit count (a PostgREST page-size limit, or a
+  // millisecond sleep duration) — a fractional value like "2.7" has no defined meaning for
+  // either and could behave unpredictably downstream rather than erroring clearly, so reject it
+  // here instead of silently forwarding it.
+  if (Number.isNaN(n) || !Number.isInteger(n) || n < min) {
+    console.error(`ERROR: ${flag} must be an integer >= ${min}, got "${raw}"`);
     exit(1);
   }
   return n;
@@ -144,6 +148,12 @@ if (!env.DRS_API_URL || !env.DRS_API_KEY) {
 // Init
 // ---------------------------------------------------------------------------
 const log = console;
+// Unlike DRS_API_URL/DRS_API_KEY above, POSTGREST_API_KEY is deliberately NOT required: this
+// script only ever reads via PostgREST (Site enumeration, getBrandBySite) and createDataAccess
+// simply omits the apikey/Authorization headers when it's absent, falling back to the
+// unauthenticated postgrest_anon role — sufficient for read-only access, and the same pattern
+// the sibling scripts/serenity-job-runner-ops.mjs and scripts/serenity-retype-backfill.mjs
+// already use. DRS has no equivalent anonymous-read tier, which is why its key IS required.
 const dataAccess = createDataAccess({
   postgrestUrl: env.POSTGREST_URL,
   postgrestSchema: env.POSTGREST_SCHEMA,
@@ -178,6 +188,11 @@ const sleep = (ms) => new Promise((resolve) => {
  * @returns {Promise<Set<string>>}
  */
 async function fetchExistingProviderIds(siteId) {
+  // Intentional duplication: drsClient normalizes this same DRS_API_URL internally (trailing
+  // slashes stripped) but doesn't expose it via any public accessor, and reaching into its
+  // internal apiBaseUrl field would be relying on an undocumented implementation detail rather
+  // than the client's actual API surface. If the client's normalization logic ever changes,
+  // update this line to match rather than assuming it stays in sync automatically.
   const base = env.DRS_API_URL.replace(/\/+$/, '');
   const response = await fetch(`${base}/schedules?site_id=${siteId}`, {
     headers: { 'x-api-key': env.DRS_API_KEY },
