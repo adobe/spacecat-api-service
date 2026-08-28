@@ -18,6 +18,7 @@ import {
   notFound,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
+import { HeadObjectCommand } from '@aws-sdk/client-s3';
 import {
   hasText,
   isArray, isNonEmptyArray,
@@ -89,8 +90,9 @@ const GADS_GUIDANCE_REF_KEYS = [
   'site_pmax_ref',
 ];
 
-// Presigned CSV download URLs are valid for 7 days.
-const GADS_PRESIGN_TTL_SECONDS = 60 * 60 * 24 * 7;
+// Click-time presigned guidance-CSV download URLs are short-lived (1 hour): the
+// URL is minted on the download request, so it only needs to outlive the click.
+const GADS_GUIDANCE_CSV_TTL_SECONDS = 60 * 60;
 
 /**
  * Parses an `s3://bucket/key` URI into its bucket and key parts.
@@ -115,75 +117,6 @@ const parseS3Uri = (uri) => {
   }
   return { bucket, key };
 };
-
-/**
- * Presigns the CSV references carried by a `gads-placement-exclusions` suggestion.
- *
- * The browser cannot presign S3 keys, so for suggestions whose `data.guidance`
- * carries the `*_ref` objects ({@link GADS_GUIDANCE_REF_KEYS}), each present ref's
- * `s3://bucket/key` `uri` is presigned on-serve and exposed as a sibling `*_url`
- * (e.g. `guidance.account_auto_url`) alongside a single `guidance.expiresAt` (ISO
- * string). Everything else in `data` is left verbatim.
- *
- * No-op (returns the input unchanged) when: the suggestion carries no guidance
- * refs (any non-gads suggestion, or a projected view without `data.guidance`), S3
- * is not configured on the request, or none of the refs resolve to a well-formed
- * S3 URI. A missing/null ref simply yields no corresponding `*_url`.
- *
- * @param {object} s3 - S3 context wrapper (`s3Client`, `getSignedUrl`, `GetObjectCommand`).
- * @param {object} suggestionJson - A serialized suggestion (output of `SuggestionDto.toJSON`).
- * @param {object} [log] - Optional logger for presign failures.
- * @returns {Promise<object>} The suggestion, with presigned `*_url`s injected when applicable.
- */
-const presignGadsGuidanceRefs = async (s3, suggestionJson, log) => {
-  const guidance = suggestionJson?.data?.guidance;
-  if (!isNonEmptyObject(guidance)) {
-    return suggestionJson;
-  }
-
-  const { s3Client, getSignedUrl, GetObjectCommand } = s3 ?? {};
-  if (!s3Client || !getSignedUrl || !GetObjectCommand) {
-    return suggestionJson;
-  }
-
-  const additions = {};
-  await Promise.all(GADS_GUIDANCE_REF_KEYS.map(async (refKey) => {
-    const parsed = parseS3Uri(guidance[refKey]?.uri);
-    if (!parsed) {
-      return;
-    }
-    try {
-      const command = new GetObjectCommand({ Bucket: parsed.bucket, Key: parsed.key });
-      const url = await getSignedUrl(s3Client, command, { expiresIn: GADS_PRESIGN_TTL_SECONDS });
-      additions[refKey.replace(/_ref$/, '_url')] = url;
-    } catch (err) {
-      log?.warn?.(`Failed to presign gads guidance ref ${refKey} for suggestion ${suggestionJson?.id}: ${err.message}`);
-    }
-  }));
-
-  if (Object.keys(additions).length === 0) {
-    return suggestionJson;
-  }
-  additions.expiresAt = new Date(Date.now() + GADS_PRESIGN_TTL_SECONDS * 1000).toISOString();
-  return {
-    ...suggestionJson,
-    data: {
-      ...suggestionJson.data,
-      guidance: { ...guidance, ...additions },
-    },
-  };
-};
-
-/**
- * Presigns the gads guidance refs for a list of serialized suggestions.
- * @param {object} s3 - S3 context wrapper.
- * @param {object[]} suggestions - Serialized suggestions.
- * @param {object} [log] - Optional logger.
- * @returns {Promise<object[]>} The suggestions, each presigned where applicable.
- */
-const presignGadsGuidanceRefsForList = (s3, suggestions, log) => Promise.all(
-  suggestions.map((suggestion) => presignGadsGuidanceRefs(s3, suggestion, log)),
-);
 
 // Allowed state_transition values on a backoffice review (SITES-43974). Validated
 // so the Learning Agent corpus never receives arbitrary free-text transitions.
@@ -622,13 +555,9 @@ function SuggestionsController(ctx, sqs, env) {
       );
     }
     const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
-    const serialized = grantedEntities.map(
+    const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
-    // Presign the gads-placement-exclusions guidance CSV refs on-serve (no-op for
-    // other opportunity types / absent refs). Done before field projection so a
-    // client selecting `data` still receives the presigned `*_url`s.
-    const suggestions = await presignGadsGuidanceRefsForList(ctx.s3, serialized, ctx.log);
     const { list, error } = applyFieldProjection(suggestions, context.data?.fields);
     if (error) {
       return badRequest(error);
@@ -696,13 +625,9 @@ function SuggestionsController(ctx, sqs, env) {
       }
     }
     const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
-    const serialized = grantedEntities.map(
+    const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
-    // Presign the gads-placement-exclusions guidance CSV refs on-serve (no-op for
-    // other opportunity types / absent refs). Done before field projection so a
-    // client selecting `data` still receives the presigned `*_url`s.
-    const suggestions = await presignGadsGuidanceRefsForList(ctx.s3, serialized, ctx.log);
 
     const { list, error } = applyFieldProjection(suggestions, context.data?.fields);
     if (error) {
@@ -767,13 +692,9 @@ function SuggestionsController(ctx, sqs, env) {
       }
     }
     const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
-    const serialized = grantedEntities.map(
+    const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
-    // Presign the gads-placement-exclusions guidance CSV refs on-serve (no-op for
-    // other opportunity types / absent refs). Done before field projection so a
-    // client selecting `data` still receives the presigned `*_url`s.
-    const suggestions = await presignGadsGuidanceRefsForList(ctx.s3, serialized, ctx.log);
     const { list, error } = applyFieldProjection(suggestions, context.data?.fields);
     if (error) {
       return badRequest(error);
@@ -841,13 +762,9 @@ function SuggestionsController(ctx, sqs, env) {
       }
     }
     const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
-    const serialized = grantedEntities.map(
+    const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
-    // Presign the gads-placement-exclusions guidance CSV refs on-serve (no-op for
-    // other opportunity types / absent refs). Done before field projection so a
-    // client selecting `data` still receives the presigned `*_url`s.
-    const suggestions = await presignGadsGuidanceRefsForList(ctx.s3, serialized, ctx.log);
     const { list, error } = applyFieldProjection(suggestions, context.data?.fields);
     if (error) {
       return badRequest(error);
@@ -917,13 +834,7 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Suggestion not found');
     }
 
-    // Presign the gads-placement-exclusions guidance CSV refs on-serve
-    // (no-op for other opportunity types / absent refs).
-    const json = await presignGadsGuidanceRefs(
-      ctx.s3,
-      SuggestionDto.toJSON(suggestion, view, opportunity, locale),
-      ctx.log,
-    );
+    const json = SuggestionDto.toJSON(suggestion, view, opportunity, locale);
 
     // ?include=reviews composes human-review feedback_event rows at read time
     // (no inline mirror on the suggestion). ?include=reviews,patches additionally
@@ -938,6 +849,102 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     return ok(json);
+  };
+
+  /**
+   * Returns a short-lived presigned download URL for one of a
+   * `gads-placement-exclusions` suggestion's guidance CSV references.
+   *
+   * The browser cannot presign S3 keys, so the URL is minted on the download
+   * request (mirroring `llmo/brand-claims.js`): the CSV's `s3://` uri is resolved
+   * from the suggestion's stored `data.guidance[refKey]`, the bucket is pinned
+   * server-side to `S3_MYSTIQUE_BUCKET` so a caller-tampered `uri` cannot turn
+   * this into a cross-bucket read (confused-deputy guard), existence is verified,
+   * and a 1-hour `GetObject` URL is signed. Minting per click needs no long TTL.
+   *
+   * @param {object} context of the request.
+   * @returns {Promise<Response>} `{ presignedUrl, expiresAt }`, or an error response.
+   */
+  const getPresignedGuidanceCsvUrl = async (context) => {
+    const siteId = context.params?.siteId;
+    const opptyId = context.params?.opportunityId || undefined;
+    const suggestionId = context.params?.suggestionId || undefined;
+    const refKey = context.params?.refKey;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(opptyId)) {
+      return badRequest('Opportunity ID required');
+    }
+    if (!isValidUUID(suggestionId)) {
+      return badRequest('Suggestion ID required');
+    }
+    if (!GADS_GUIDANCE_REF_KEYS.includes(refKey)) {
+      return badRequest('Invalid guidance CSV reference');
+    }
+
+    const { s3 } = ctx;
+    const mystiqueBucket = env?.S3_MYSTIQUE_BUCKET;
+    if (!s3?.s3Client || !s3.getSignedUrl || !s3.GetObjectCommand || !hasText(mystiqueBucket)) {
+      return badRequest('S3 storage is not configured for this environment');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not belong to the organization');
+    }
+
+    const suggestion = await Suggestion.findById(suggestionId);
+    if (!suggestion || suggestion.getOpportunityId() !== opptyId) {
+      return notFound('Suggestion not found');
+    }
+    const opportunity = await suggestion.getOpportunity();
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      return notFound();
+    }
+    if (await getIsSummitPlgEnabled(site, ctx, context, accessControlUtil)
+      && !(await SuggestionGrant.isSuggestionGranted(suggestion.getId()))) {
+      return notFound('Suggestion not found');
+    }
+
+    const parsed = parseS3Uri(suggestion.getData()?.guidance?.[refKey]?.uri);
+    if (!parsed) {
+      return notFound('Guidance CSV not available');
+    }
+    // `data` is caller-writable (PATCH/POST persist it verbatim), so the ref's
+    // bucket is never trusted: only objects in the pinned mystique-assets bucket
+    // are signable. A mismatch is a tampering/misconfiguration signal — warn.
+    if (parsed.bucket !== mystiqueBucket) {
+      ctx.log?.warn?.(`Refusing to presign guidance CSV for suggestion ${suggestionId}: ref ${refKey} names bucket ${parsed.bucket}, expected ${mystiqueBucket}`);
+      return notFound('Guidance CSV not available');
+    }
+
+    try {
+      // Presigning never verifies existence; HeadObject yields a clean 404 when
+      // the object is missing (e.g. a ref written ahead of its CSV).
+      await s3.s3Client.send(new HeadObjectCommand({ Bucket: mystiqueBucket, Key: parsed.key }));
+      const command = new s3.GetObjectCommand({ Bucket: mystiqueBucket, Key: parsed.key });
+      const presignedUrl = await s3.getSignedUrl(
+        s3.s3Client,
+        command,
+        { expiresIn: GADS_GUIDANCE_CSV_TTL_SECONDS },
+      );
+      return ok({
+        presignedUrl,
+        expiresAt: new Date(Date.now() + GADS_GUIDANCE_CSV_TTL_SECONDS * 1000).toISOString(),
+      });
+    } catch (err) {
+      if (err.name === 'NotFound' || err.$metadata?.httpStatusCode === 404) {
+        ctx.log?.warn?.(`Guidance CSV object missing for suggestion ${suggestionId} ref ${refKey}: ${parsed.key}`);
+        return notFound('Guidance CSV not available');
+      }
+      ctx.log?.error?.(`Failed to presign guidance CSV for suggestion ${suggestionId} ref ${refKey}: ${err.message}`);
+      return badRequest(`Error retrieving guidance CSV: ${err.message}`);
+    }
   };
 
   /**
@@ -3586,6 +3593,7 @@ function SuggestionsController(ctx, sqs, env) {
     getAllForOpportunity,
     getAllForOpportunityPaged,
     getByID,
+    getPresignedGuidanceCsvUrl,
     getByStatus,
     getByStatusPaged,
     getSuggestionFixes,

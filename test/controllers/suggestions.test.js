@@ -179,6 +179,7 @@ describe('Suggestions Controller', () => {
     'previewSuggestions',
     'fetchFromEdge',
     'getByID',
+    'getPresignedGuidanceCsvUrl',
     'getByStatus',
     'getByStatusPaged',
     'getSuggestionFixes',
@@ -560,11 +561,11 @@ describe('Suggestions Controller', () => {
     expect(() => SuggestionsController({ dataAccess: { Opportunity: {}, Suggestion: '' } })).to.throw('Data access required');
   });
 
-  describe('presign gads-placement-exclusions guidance CSV refs on-serve', () => {
+  describe('getPresignedGuidanceCsvUrl (click-time gads guidance CSV presign)', () => {
     const MYSTIQUE_BUCKET = 'spacecat-dev-mystique-assets';
 
-    // Minimal fake for @aws-sdk GetObjectCommand: records the { Bucket, Key } it was
-    // constructed with under `.input`, mirroring the real command shape.
+    // Minimal fake for the s3 wrapper's GetObjectCommand: records the { Bucket, Key }
+    // it was constructed with under `.input`, mirroring the real command shape.
     function FakeGetObjectCommand(params) {
       this.input = params;
     }
@@ -572,13 +573,13 @@ describe('Suggestions Controller', () => {
     let getSignedUrl;
     let presignLog;
 
-    const buildS3 = () => ({
-      s3Client: { send: sandbox.stub() },
+    const buildS3 = (send) => ({
+      s3Client: { send: send || sandbox.stub().resolves({}) },
       getSignedUrl,
       GetObjectCommand: FakeGetObjectCommand,
     });
 
-    const buildController = (s3) => SuggestionsController({
+    const buildController = (s3, envOverrides = {}) => SuggestionsController({
       dataAccess: mockSuggestionDataAccess,
       pathInfo: { headers: { 'x-product': 'llmo' } },
       s3,
@@ -587,6 +588,8 @@ describe('Suggestions Controller', () => {
     }, mockSqs, {
       AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
       LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+      S3_MYSTIQUE_BUCKET: MYSTIQUE_BUCKET,
+      ...envOverrides,
     });
 
     const gadsSuggestion = (guidance) => ({
@@ -601,16 +604,7 @@ describe('Suggestions Controller', () => {
       updatedAt: new Date(),
     });
 
-    // Wire every read path (list, paged, by-status, by-id) to return `suggData`.
     const returnSuggestion = (suggData) => {
-      mockSuggestion.allByOpportunityId.callsFake((opptyId, options) => {
-        const entities = [mockSuggestionEntity(suggData)];
-        return Promise.resolve(options ? { data: entities, cursor: undefined } : entities);
-      });
-      mockSuggestion.allByOpportunityIdAndStatus.callsFake((opptyId, status, options) => {
-        const entities = [mockSuggestionEntity(suggData)];
-        return Promise.resolve(options ? { data: entities, cursor: undefined } : entities);
-      });
       mockSuggestion.findById.callsFake((id) => Promise.resolve(
         id === suggData.id ? mockSuggestionEntity(suggData) : null,
       ));
@@ -623,7 +617,16 @@ describe('Suggestions Controller', () => {
       site_pmax_ref: { uri: `s3://${MYSTIQUE_BUCKET}/gads/site/pmax.csv`, row_count: 2, byte_size: 20 },
     });
 
-    const listParams = () => ({ params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID }, ...context });
+    const csvParams = (refKey = 'account_auto_ref', overrides = {}) => ({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+        refKey,
+        ...overrides,
+      },
+      ...context,
+    });
 
     beforeEach(() => {
       getSignedUrl = sandbox.stub().callsFake((client, command, opts) => Promise.resolve(
@@ -632,182 +635,165 @@ describe('Suggestions Controller', () => {
       presignLog = { info: sandbox.stub(), warn: sandbox.stub(), error: sandbox.stub() };
     });
 
-    it('injects a presigned *_url for each present ref plus a single expiresAt (getAllForOpportunity)', async () => {
+    it('returns a presigned URL + expiresAt for a valid ref (pinned bucket, parsed key, 1h TTL)', async () => {
+      returnSuggestion(gadsSuggestion(fullGuidance()));
+      const s3 = buildS3();
+
+      const response = await buildController(s3).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+
+      expect(body.presignedUrl).to.equal(`https://signed.example/${MYSTIQUE_BUCKET}/gads/acct/auto.csv?exp=3600`);
+      expect(body.expiresAt).to.be.a('string');
+      expect(Number.isNaN(new Date(body.expiresAt).getTime())).to.equal(false);
+
+      // presign pins the server bucket (not the caller's uri) + parsed key + 1h TTL
+      expect(getSignedUrl.callCount).to.equal(1);
+      expect(getSignedUrl.firstCall.args[1].input).to.deep.equal({ Bucket: MYSTIQUE_BUCKET, Key: 'gads/acct/auto.csv' });
+      expect(getSignedUrl.firstCall.args[2]).to.deep.equal({ expiresIn: 3600 });
+
+      // existence verified against the pinned bucket before signing
+      expect(s3.s3Client.send.callCount).to.equal(1);
+      expect(s3.s3Client.send.firstCall.args[0].input).to.deep.equal({ Bucket: MYSTIQUE_BUCKET, Key: 'gads/acct/auto.csv' });
+    });
+
+    it('presigns the specific requested ref only', async () => {
       returnSuggestion(gadsSuggestion(fullGuidance()));
 
-      const response = await buildController(buildS3()).getAllForOpportunity(listParams());
+      const response = await buildController(buildS3()).getPresignedGuidanceCsvUrl(csvParams('site_pmax_ref'));
       expect(response.status).to.equal(200);
-      const [suggestion] = await response.json();
-      const { guidance } = suggestion.data;
+      const body = await response.json();
+      expect(body.presignedUrl).to.equal(`https://signed.example/${MYSTIQUE_BUCKET}/gads/site/pmax.csv?exp=3600`);
+      expect(getSignedUrl.callCount).to.equal(1);
+    });
 
-      expect(guidance.account_auto_url).to.equal(`https://signed.example/${MYSTIQUE_BUCKET}/gads/acct/auto.csv?exp=604800`);
-      expect(guidance.account_pmax_url).to.equal(`https://signed.example/${MYSTIQUE_BUCKET}/gads/acct/pmax.csv?exp=604800`);
-      expect(guidance.site_auto_url).to.equal(`https://signed.example/${MYSTIQUE_BUCKET}/gads/site/auto.csv?exp=604800`);
-      expect(guidance.site_pmax_url).to.equal(`https://signed.example/${MYSTIQUE_BUCKET}/gads/site/pmax.csv?exp=604800`);
+    it('refuses (404) and warns when the ref names a foreign bucket (confused-deputy guard)', async () => {
+      returnSuggestion(gadsSuggestion({
+        account_auto_ref: { uri: 's3://attacker-bucket/secrets/data.csv' },
+      }));
 
-      // one shared, valid ISO expiry
-      expect(guidance.expiresAt).to.be.a('string');
-      expect(Number.isNaN(new Date(guidance.expiresAt).getTime())).to.equal(false);
+      const response = await buildController(buildS3()).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(404);
+      expect(getSignedUrl.called).to.equal(false);
+      expect(presignLog.warn.calledOnce).to.equal(true);
+      expect(presignLog.warn.firstCall.args[0]).to.match(/attacker-bucket/);
+    });
 
-      // original refs preserved verbatim
-      expect(guidance.account_auto_ref).to.deep.equal(
-        { uri: `s3://${MYSTIQUE_BUCKET}/gads/acct/auto.csv`, row_count: 10, byte_size: 100 },
+    it('returns 404 when the ref is absent, its uri is null, or the uri is not s3://', async () => {
+      returnSuggestion(gadsSuggestion({ site_auto_ref: { uri: `s3://${MYSTIQUE_BUCKET}/x.csv` } }));
+      let response = await buildController(buildS3()).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(404);
+
+      returnSuggestion(gadsSuggestion({ account_auto_ref: { uri: null } }));
+      response = await buildController(buildS3()).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(404);
+
+      returnSuggestion(gadsSuggestion({ account_auto_ref: { uri: 'https://cdn.example/not-s3.csv' } }));
+      response = await buildController(buildS3()).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(404);
+
+      expect(getSignedUrl.called).to.equal(false);
+    });
+
+    it('returns 400 for an unknown refKey', async () => {
+      returnSuggestion(gadsSuggestion(fullGuidance()));
+      const response = await buildController(buildS3()).getPresignedGuidanceCsvUrl(csvParams('evil_ref'));
+      expect(response.status).to.equal(400);
+      expect(getSignedUrl.called).to.equal(false);
+    });
+
+    it('returns 400 when S3 is not configured on the request', async () => {
+      returnSuggestion(gadsSuggestion(fullGuidance()));
+      const response = await buildController(undefined).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(400);
+      expect(getSignedUrl.called).to.equal(false);
+    });
+
+    it('returns 400 when S3_MYSTIQUE_BUCKET is not configured', async () => {
+      returnSuggestion(gadsSuggestion(fullGuidance()));
+      const response = await buildController(buildS3(), { S3_MYSTIQUE_BUCKET: undefined })
+        .getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(400);
+      expect(getSignedUrl.called).to.equal(false);
+    });
+
+    it('returns 404 and warns when the object does not exist (HeadObject 404)', async () => {
+      returnSuggestion(gadsSuggestion(fullGuidance()));
+      const notFoundErr = Object.assign(new Error('missing'), { name: 'NotFound' });
+      const s3 = buildS3(sandbox.stub().rejects(notFoundErr));
+
+      const response = await buildController(s3).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(404);
+      expect(getSignedUrl.called).to.equal(false);
+      expect(presignLog.warn.calledOnce).to.equal(true);
+    });
+
+    it('returns 404 when HeadObject reports a 404 via $metadata', async () => {
+      returnSuggestion(gadsSuggestion(fullGuidance()));
+      const metaErr = Object.assign(new Error('missing'), { $metadata: { httpStatusCode: 404 } });
+      const s3 = buildS3(sandbox.stub().rejects(metaErr));
+
+      const response = await buildController(s3).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(404);
+      expect(getSignedUrl.called).to.equal(false);
+    });
+
+    it('returns 400 and logs on a non-404 S3 error', async () => {
+      returnSuggestion(gadsSuggestion(fullGuidance()));
+      const s3 = buildS3(sandbox.stub().rejects(new Error('kaboom')));
+
+      const response = await buildController(s3).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(400);
+      expect(presignLog.error.calledOnce).to.equal(true);
+    });
+
+    it('returns forbidden when the caller lacks access to the site', async () => {
+      returnSuggestion(gadsSuggestion(fullGuidance()));
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
+
+      const response = await buildController(buildS3()).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(403);
+      expect(getSignedUrl.called).to.equal(false);
+    });
+
+    it('returns 404 when the site is not found', async () => {
+      returnSuggestion(gadsSuggestion(fullGuidance()));
+      const response = await buildController(buildS3()).getPresignedGuidanceCsvUrl(
+        csvParams('account_auto_ref', { siteId: SITE_ID_NOT_FOUND }),
       );
-
-      // presign invoked once per ref with the bucket/key parsed from the s3:// uri
-      expect(getSignedUrl.callCount).to.equal(4);
-      const calledFor = getSignedUrl.getCalls().map((c) => ({
-        Bucket: c.args[1].input.Bucket,
-        Key: c.args[1].input.Key,
-        expiresIn: c.args[2].expiresIn,
-      }));
-      expect(calledFor).to.deep.include({ Bucket: MYSTIQUE_BUCKET, Key: 'gads/acct/auto.csv', expiresIn: 604800 });
-      expect(calledFor).to.deep.include({ Bucket: MYSTIQUE_BUCKET, Key: 'gads/site/pmax.csv', expiresIn: 604800 });
+      expect(response.status).to.equal(404);
     });
 
-    it('leaves a non-gads suggestion (no guidance refs) untouched', async () => {
-      // default allByOpportunityId returns suggs[0], which has no data.guidance
-      const response = await buildController(buildS3()).getAllForOpportunity(listParams());
-      expect(response.status).to.equal(200);
-      const [suggestion] = await response.json();
+    it('returns 404 when the suggestion is missing or belongs to another opportunity', async () => {
+      mockSuggestion.findById.resolves(null);
+      let response = await buildController(buildS3()).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(404);
 
-      expect(suggestion.data).to.not.have.property('guidance');
-      expect(suggestion.data).to.not.have.property('account_auto_url');
+      const sugg = gadsSuggestion(fullGuidance());
+      sugg.opportunityId = OPPORTUNITY_ID_NOT_FOUND;
+      returnSuggestion(sugg);
+      response = await buildController(buildS3()).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(404);
       expect(getSignedUrl.called).to.equal(false);
     });
 
-    it('is a no-op when S3 is not configured on the request', async () => {
-      returnSuggestion(gadsSuggestion(fullGuidance()));
-
-      const response = await buildController(undefined).getAllForOpportunity(listParams());
-      expect(response.status).to.equal(200);
-      const [suggestion] = await response.json();
-      const { guidance } = suggestion.data;
-
-      expect(guidance).to.not.have.property('account_auto_url');
-      expect(guidance).to.not.have.property('expiresAt');
-      // refs still present, verbatim
-      expect(guidance.account_auto_ref.uri).to.equal(`s3://${MYSTIQUE_BUCKET}/gads/acct/auto.csv`);
+    it('returns 404 when the opportunity does not belong to the site', async () => {
+      mockSuggestion.findById.resolves({
+        getId: () => SUGGESTION_IDS[0],
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getOpportunity: async () => ({ getSiteId: () => SITE_ID_NOT_FOUND }),
+        getData: () => ({ guidance: fullGuidance() }),
+      });
+      const response = await buildController(buildS3()).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(404);
       expect(getSignedUrl.called).to.equal(false);
     });
 
-    it('presigns only present refs — a missing/null ref or non-s3 uri yields no *_url', async () => {
-      returnSuggestion(gadsSuggestion({
-        account_auto_ref: { uri: `s3://${MYSTIQUE_BUCKET}/gads/acct/auto.csv` }, // valid
-        account_pmax_ref: null, // missing ref object
-        site_auto_ref: { uri: null }, // null uri
-        site_pmax_ref: { uri: 'https://cdn.example/not-s3.csv' }, // non-s3 scheme
-      }));
-
-      const response = await buildController(buildS3()).getAllForOpportunity(listParams());
-      expect(response.status).to.equal(200);
-      const [suggestion] = await response.json();
-      const { guidance } = suggestion.data;
-
-      expect(guidance.account_auto_url).to.equal(`https://signed.example/${MYSTIQUE_BUCKET}/gads/acct/auto.csv?exp=604800`);
-      expect(guidance).to.not.have.property('account_pmax_url');
-      expect(guidance).to.not.have.property('site_auto_url');
-      expect(guidance).to.not.have.property('site_pmax_url');
-      expect(guidance.expiresAt).to.be.a('string');
-      expect(getSignedUrl.callCount).to.equal(1);
-    });
-
-    it('skips malformed s3 uris (no key, no slash) and presigns the well-formed one', async () => {
-      returnSuggestion(gadsSuggestion({
-        account_auto_ref: { uri: 's3://bucket-no-slash' }, // no key separator
-        account_pmax_ref: { uri: `s3://${MYSTIQUE_BUCKET}/` }, // empty key
-        site_auto_ref: { uri: 's3:///leading-slash-key' }, // empty bucket segment
-        site_pmax_ref: { uri: `s3://${MYSTIQUE_BUCKET}/gads/site/pmax.csv` }, // valid
-      }));
-
-      const response = await buildController(buildS3()).getAllForOpportunity(listParams());
-      expect(response.status).to.equal(200);
-      const [suggestion] = await response.json();
-      const { guidance } = suggestion.data;
-
-      expect(guidance).to.not.have.property('account_auto_url');
-      expect(guidance).to.not.have.property('account_pmax_url');
-      expect(guidance).to.not.have.property('site_auto_url');
-      expect(guidance.site_pmax_url).to.equal(`https://signed.example/${MYSTIQUE_BUCKET}/gads/site/pmax.csv?exp=604800`);
-      expect(getSignedUrl.callCount).to.equal(1);
-    });
-
-    it('logs a warning and injects no *_url when presigning fails', async () => {
-      getSignedUrl = sandbox.stub().rejects(new Error('presign boom'));
-      returnSuggestion(gadsSuggestion(fullGuidance()));
-
-      const response = await buildController(buildS3()).getAllForOpportunity(listParams());
-      expect(response.status).to.equal(200);
-      const [suggestion] = await response.json();
-      const { guidance } = suggestion.data;
-
-      expect(guidance).to.not.have.property('account_auto_url');
-      expect(guidance).to.not.have.property('expiresAt');
-      expect(presignLog.warn.callCount).to.equal(4);
-    });
-
-    it('presigns refs for getAllForOpportunityPaged', async () => {
-      returnSuggestion(gadsSuggestion(fullGuidance()));
-
-      const response = await buildController(buildS3()).getAllForOpportunityPaged({
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, limit: 10 },
-        ...context,
-      });
-      expect(response.status).to.equal(200);
-      const { suggestions } = await response.json();
-      expect(suggestions[0].data.guidance.account_auto_url).to.match(/^https:\/\/signed\.example\//);
-      expect(suggestions[0].data.guidance.expiresAt).to.be.a('string');
-    });
-
-    it('presigns refs for getByStatus', async () => {
-      returnSuggestion(gadsSuggestion(fullGuidance()));
-
-      const response = await buildController(buildS3()).getByStatus({
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, status: 'NEW' },
-        ...context,
-      });
-      expect(response.status).to.equal(200);
-      const [suggestion] = await response.json();
-      expect(suggestion.data.guidance.site_pmax_url).to.match(/^https:\/\/signed\.example\//);
-    });
-
-    it('presigns refs for getByStatusPaged', async () => {
-      returnSuggestion(gadsSuggestion(fullGuidance()));
-
-      const response = await buildController(buildS3()).getByStatusPaged({
-        params: {
-          siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, status: 'NEW', limit: 10,
-        },
-        ...context,
-      });
-      expect(response.status).to.equal(200);
-      const { suggestions } = await response.json();
-      expect(suggestions[0].data.guidance.account_pmax_url).to.match(/^https:\/\/signed\.example\//);
-    });
-
-    it('presigns refs for getByID', async () => {
-      returnSuggestion(gadsSuggestion(fullGuidance()));
-
-      const response = await buildController(buildS3()).getByID({
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
-        ...context,
-      });
-      expect(response.status).to.equal(200);
-      const suggestion = await response.json();
-      expect(suggestion.data.guidance.account_auto_url).to.match(/^https:\/\/signed\.example\//);
-      expect(suggestion.data.guidance.expiresAt).to.be.a('string');
-      expect(getSignedUrl.callCount).to.equal(4);
-    });
-
-    it('leaves a non-gads suggestion untouched for getByID', async () => {
-      // suggs[0] has no data.guidance
-      const response = await buildController(buildS3()).getByID({
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
-        ...context,
-      });
-      expect(response.status).to.equal(200);
-      const suggestion = await response.json();
-      expect(suggestion.data).to.not.have.property('guidance');
+    it('returns 400 for an invalid siteId / opportunityId / suggestionId', async () => {
+      const c = buildController(buildS3());
+      expect((await c.getPresignedGuidanceCsvUrl(csvParams('account_auto_ref', { siteId: 'nope' }))).status).to.equal(400);
+      expect((await c.getPresignedGuidanceCsvUrl(csvParams('account_auto_ref', { opportunityId: 'nope' }))).status).to.equal(400);
+      expect((await c.getPresignedGuidanceCsvUrl(csvParams('account_auto_ref', { suggestionId: 'nope' }))).status).to.equal(400);
       expect(getSignedUrl.called).to.equal(false);
     });
   });
