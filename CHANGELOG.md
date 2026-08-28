@@ -1,3 +1,10 @@
+# [1.775.0](https://github.com/adobe/spacecat-api-service/compare/v1.774.0...v1.775.0) (2026-08-28)
+
+
+### Features
+
+* Semrush onboarding improve log message and slack message for failing calls ([#3151](https://github.com/adobe/spacecat-api-service/issues/3151)) ([5f11971](https://github.com/adobe/spacecat-api-service/commit/5f1197158a59a9faaf7af51fc1020ced2d681ae2))
+
 # [1.774.0](https://github.com/adobe/spacecat-api-service/compare/v1.773.0...v1.774.0) (2026-08-28)
 
 
