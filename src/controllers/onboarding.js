@@ -102,10 +102,13 @@ export default function OnboardingController(context, log, env) {
       // (e.g. { error: "adobe_auth_failed", message: "rpc error: ... ims token
       // expired ...", reason: "INVALID_OR_EXPIRED_TOKEN" }) — none are guaranteed
       // on every failure, so append only the ones present rather than assuming
-      // the shape.
+      // the shape. Semrush controls these strings, so strip line breaks (which
+      // would otherwise split the structured log line / let mrkdwn injection
+      // ride into the Slack alert) and cap length before interpolating.
+      const sanitizeUpstreamValue = (value) => String(value).replace(/[\r\n]+/g, ' ').slice(0, 500);
       const upstreamFields = ['error', 'message', 'reason']
         .filter((field) => hasText(e.body?.[field]))
-        .map((field) => `upstream${field[0].toUpperCase()}${field.slice(1)}="${e.body[field]}"`);
+        .map((field) => `upstream${field[0].toUpperCase()}${field.slice(1)}="${sanitizeUpstreamValue(e.body[field])}"`);
       const upstreamSuffix = upstreamFields.length ? ` ${upstreamFields.join(' ')}` : '';
 
       log.error(`[onboarding] workspace provisioning failed for org=${spaceCatId} status=${status}: ${e.message}${upstreamSuffix}`);

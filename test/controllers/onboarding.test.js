@@ -185,6 +185,30 @@ describe('OnboardingController', () => {
     }
   });
 
+  it('strips line breaks and caps length in upstream fields before logging/alerting', async () => {
+    const err = Object.assign(new Error('workspace-members request failed with status 400'), {
+      status: 400,
+      body: {
+        message: `line one\nline two\r\nline three${'x'.repeat(600)}`,
+      },
+    });
+    provisionStub.rejects(err);
+    const ctx = buildContext();
+    const controller = OnboardingController(ctx, ctx.log, ctx.env);
+    await controller.triggerOnboarding(ctx);
+
+    const logLine = ctx.log.error.firstCall.args[0];
+    const { reason } = notifyStub.firstCall.args[1];
+
+    expect(logLine).to.not.contain('\n');
+    expect(logLine).to.not.contain('\r');
+    expect(reason).to.not.contain('\n');
+    expect(reason).to.not.contain('\r');
+
+    const upstreamMessageMatch = logLine.match(/upstreamMessage="([^"]*)"/);
+    expect(upstreamMessageMatch[1].length).to.equal(500);
+  });
+
   it('treats a 409 (already a member) as success: 200 with alreadyMember, and sends no Slack alert', async () => {
     const err = Object.assign(new Error('workspace-members request failed with status 409'), {
       status: 409,
