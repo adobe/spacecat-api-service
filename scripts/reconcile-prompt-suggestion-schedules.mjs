@@ -61,8 +61,9 @@
  *                         Only reconcile these site(s) (comma-separated). Useful to verify a
  *                         single site before a fleet-wide --execute run.
  *   --page-size N         Site.allByEnrollmentFiltered page size (default 200).
- *   --rate-limit-ms N     Sleep between sites, to keep the DRS GET/POST rate bounded on a large
- *                         fleet (default 100).
+ *   --rate-limit-ms N     Sleep between sites, to keep the per-site DRS GET rate bounded on a
+ *                         large fleet (default 100). Does NOT throttle the up-to-3 sequential
+ *                         per-pipeline POSTs --execute makes within a single reconciled site.
  *
  * Exit status:
  *   0  No unexpected failure (a site with no active brand, or already fully provisioned, is not
@@ -151,12 +152,14 @@ const dataAccess = createDataAccess({
 const { postgrestClient } = dataAccess.services;
 const drsClient = DrsClient.createFrom({ env, log });
 if (!drsClient.isConfigured()) {
-  // registerPromptSuggestionSchedule silently no-ops (returns null, logs at DEBUG) when the
-  // client considers itself unconfigured — without this gate, a malformed DRS_API_URL/KEY would
-  // make an --execute run report "0 failures, 0 created" for the whole fleet, indistinguishable
-  // from a genuinely fully-provisioned one. Delegate to the client's own canonical check rather
-  // than re-deriving it from the raw env vars above, so this can't drift if isConfigured()'s
-  // definition ever changes.
+  // Redundant with the env-var presence check above today (isConfigured() reduces to the same
+  // non-empty-string test on the same two values) — kept as an explicit gate anyway so this
+  // can't silently regress: registerPromptSuggestionSchedule no-ops (returns null, logs at
+  // DEBUG only, never throws) when the client considers itself unconfigured, so if either
+  // check's definition ever drifts apart, an --execute run could report "0 failures, 0
+  // created" for the whole fleet, indistinguishable from a genuinely fully-provisioned one.
+  // Delegates to the client's own canonical check rather than re-deriving it, precisely so
+  // the two can't drift apart.
   console.error('ERROR: DRS client not configured (check DRS_API_URL/DRS_API_KEY)');
   exit(1);
 }
