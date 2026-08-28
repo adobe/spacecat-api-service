@@ -13,7 +13,75 @@
 import { expect } from 'chai';
 import sinon from 'sinon';
 import esmock from 'esmock';
-import * as store from '../../../src/support/dashboards/in-memory-dashboard-store.js';
+
+/**
+ * Minimal in-memory S3 fake for testing the S3 dashboard store.
+ * Uses plain constructor functions (not ES6 classes) to stay within max-classes-per-file.
+ */
+// eslint-disable-next-line prefer-arrow-callback
+function makeFakeS3() {
+  const objects = new Map();
+
+  /* eslint-disable func-names */
+  function GetObjectCommand(params) {
+    this.type = 'GET';
+    this.params = params;
+  }
+  function PutObjectCommand(params) {
+    this.type = 'PUT';
+    this.params = params;
+  }
+  function DeleteObjectCommand(params) {
+    this.type = 'DELETE';
+    this.params = params;
+  }
+  function ListObjectsV2Command(params) {
+    this.type = 'LIST';
+    this.params = params;
+  }
+  /* eslint-enable func-names */
+
+  const s3Client = {
+    async send(cmd) {
+      const { type, params } = cmd;
+      if (type === 'PUT') {
+        objects.set(params.Key, params.Body);
+        return {};
+      }
+      if (type === 'DELETE') {
+        objects.delete(params.Key);
+        return {};
+      }
+      if (type === 'GET') {
+        const body = objects.get(params.Key);
+        if (body === undefined) {
+          const err = new Error('NoSuchKey');
+          err.name = 'NoSuchKey';
+          throw err;
+        }
+        return { Body: { transformToString: async () => body } };
+      }
+      if (type === 'LIST') {
+        const prefix = params.Prefix ?? '';
+        const keys = [...objects.keys()].filter((k) => k.startsWith(prefix));
+        return {
+          Contents: keys.map((Key) => ({ Key })),
+          IsTruncated: false,
+          NextContinuationToken: undefined,
+        };
+      }
+      throw new Error(`Unknown S3 command type: ${type}`);
+    },
+  };
+
+  return {
+    s3Client,
+    GetObjectCommand,
+    PutObjectCommand,
+    DeleteObjectCommand,
+    ListObjectsV2Command,
+  };
+}
 
 describe('LlmoDashboardsController', () => {
   let sandbox;
@@ -28,7 +96,6 @@ describe('LlmoDashboardsController', () => {
 
   beforeEach(async () => {
     sandbox = sinon.createSandbox();
-    store.resetStore();
     mockOrganization = { getId: sandbox.stub().returns('org-123') };
 
     LlmoDashboardsController = (await esmock('../../../src/controllers/llmo/llmo-dashboards.js', {
@@ -48,6 +115,8 @@ describe('LlmoDashboardsController', () => {
         authInfo: { getProfile: () => ({ email: 'owner@example.com' }) },
       },
       data: {},
+      s3: makeFakeS3(),
+      env: { S3_DASHBOARDS_BUCKET: 'test-bucket' },
     };
   });
 

@@ -16,17 +16,18 @@ import {
 import { hasText } from '@adobe/spacecat-shared-utils';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { DashboardDto } from '../../dto/dashboard.js';
-import * as store from '../../support/dashboards/in-memory-dashboard-store.js';
+import * as store from '../../support/dashboards/s3-dashboard-store.js';
 
 const VISIBILITIES = ['private', 'org'];
 
 /**
- * Controller for ABV custom-dashboard CRUD + star/search
- * (`.../dashboards/*`). v1 persists via `in-memory-dashboard-store.js` — see that
- * module's header for why (no migrations for an unproven feature) and how to swap it
- * for a real persisted entity later without changing this controller's contract.
+ * Controller for ABV custom-dashboard CRUD + star/search (`.../dashboards/*`).
+ * Dashboards are persisted as JSON objects in S3 under dashboards/{orgId}/{id}.json,
+ * accessed via `context.s3` (injected by `s3ClientWrapper`) and `S3_DASHBOARDS_BUCKET`.
  */
 function LlmoDashboardsController(context) {
+  const { s3 } = context;
+  const bucket = context.env?.S3_DASHBOARDS_BUCKET;
   const accessControlUtil = AccessControlUtil.fromContext(context);
   const hasLlmoOrganizationAccess = (organization) => accessControlUtil
     .hasAccess(organization, '', 'LLMO');
@@ -61,7 +62,7 @@ function LlmoDashboardsController(context) {
   };
 
   /** A caller may see a dashboard when they own it, it's org-visible, or they're on the
-   * share list — the same rule `in-memory-dashboard-store.js#listDashboards` applies for
+   * share list — the same rule `s3-dashboard-store.js#listDashboards` applies for
    * listing, restated here for single-dashboard reads. */
   const canView = (dashboard, callerId) => dashboard.ownerId === callerId
     || dashboard.visibility === 'org'
@@ -80,10 +81,10 @@ function LlmoDashboardsController(context) {
       return forbidden('Unable to resolve caller identity');
     }
     const callerDisplayName = getCallerDisplayName(ctx);
-    const { spaceCatId, brandId } = ctx.params;
+    const { spaceCatId } = ctx.params;
     const { filter, search } = ctx.data ?? {};
-    const dashboards = store.listDashboards({
-      orgId: spaceCatId, brandId, ownerId: callerId, filter, search,
+    const dashboards = await store.listDashboards(s3, bucket, {
+      orgId: spaceCatId, ownerId: callerId, filter, search,
     });
     return ok({
       dashboards: dashboards.map((d) => DashboardDto.toJSON(d, callerId, callerDisplayName)),
@@ -96,8 +97,8 @@ function LlmoDashboardsController(context) {
       return error;
     }
     const callerId = getCallerId(ctx);
-    const { spaceCatId, brandId, dashboardId } = ctx.params;
-    const dashboard = store.getDashboard({ id: dashboardId, orgId: spaceCatId, brandId });
+    const { spaceCatId, dashboardId } = ctx.params;
+    const dashboard = await store.getDashboard(s3, bucket, { id: dashboardId, orgId: spaceCatId });
     if (!dashboard || !canView(dashboard, callerId)) {
       return notFound(`Dashboard not found: ${dashboardId}`);
     }
@@ -123,7 +124,7 @@ function LlmoDashboardsController(context) {
     if (visibility !== undefined && !VISIBILITIES.includes(visibility)) {
       return badRequest(`visibility must be one of: ${VISIBILITIES.join(', ')}`);
     }
-    const dashboard = store.createDashboard({
+    const dashboard = await store.createDashboard(s3, bucket, {
       orgId: spaceCatId, brandId, ownerId: callerId, name, description, visibility, controls,
     });
     return createResponse(DashboardDto.toJSON(dashboard, callerId, getCallerDisplayName(ctx)), 201);
@@ -135,8 +136,8 @@ function LlmoDashboardsController(context) {
       return error;
     }
     const callerId = getCallerId(ctx);
-    const { spaceCatId, brandId, dashboardId } = ctx.params;
-    const existing = store.getDashboard({ id: dashboardId, orgId: spaceCatId, brandId });
+    const { spaceCatId, dashboardId } = ctx.params;
+    const existing = await store.getDashboard(s3, bucket, { id: dashboardId, orgId: spaceCatId });
     if (!existing || !canView(existing, callerId)) {
       return notFound(`Dashboard not found: ${dashboardId}`);
     }
@@ -160,8 +161,8 @@ function LlmoDashboardsController(context) {
       ...(sections !== undefined && { sections }),
       ...(sharedWith !== undefined && { sharedWith }),
     };
-    const updated = store.updateDashboard({
-      id: dashboardId, orgId: spaceCatId, brandId, patch,
+    const updated = await store.updateDashboard(s3, bucket, {
+      id: dashboardId, orgId: spaceCatId, patch,
     });
     return ok(DashboardDto.toJSON(updated, callerId, getCallerDisplayName(ctx)));
   };
@@ -172,15 +173,15 @@ function LlmoDashboardsController(context) {
       return error;
     }
     const callerId = getCallerId(ctx);
-    const { spaceCatId, brandId, dashboardId } = ctx.params;
-    const existing = store.getDashboard({ id: dashboardId, orgId: spaceCatId, brandId });
+    const { spaceCatId, dashboardId } = ctx.params;
+    const existing = await store.getDashboard(s3, bucket, { id: dashboardId, orgId: spaceCatId });
     if (!existing || !canView(existing, callerId)) {
       return notFound(`Dashboard not found: ${dashboardId}`);
     }
     if (existing.ownerId !== callerId) {
       return forbidden('Only the owner can delete this dashboard');
     }
-    store.deleteDashboard({ id: dashboardId, orgId: spaceCatId, brandId });
+    await store.deleteDashboard(s3, bucket, { id: dashboardId, orgId: spaceCatId });
     return createResponse({}, 204);
   };
 
@@ -190,14 +191,14 @@ function LlmoDashboardsController(context) {
       return error;
     }
     const callerId = getCallerId(ctx);
-    const { spaceCatId, brandId, dashboardId } = ctx.params;
-    const existing = store.getDashboard({ id: dashboardId, orgId: spaceCatId, brandId });
+    const { spaceCatId, dashboardId } = ctx.params;
+    const existing = await store.getDashboard(s3, bucket, { id: dashboardId, orgId: spaceCatId });
     if (!existing || !canView(existing, callerId)) {
       return notFound(`Dashboard not found: ${dashboardId}`);
     }
     const { name } = ctx.data ?? {};
-    const copy = store.duplicateDashboard({
-      id: dashboardId, orgId: spaceCatId, brandId, ownerId: callerId, name,
+    const copy = await store.duplicateDashboard(s3, bucket, {
+      id: dashboardId, orgId: spaceCatId, ownerId: callerId, name,
     });
     return createResponse(DashboardDto.toJSON(copy, callerId, getCallerDisplayName(ctx)), 201);
   };
@@ -208,13 +209,13 @@ function LlmoDashboardsController(context) {
       return error;
     }
     const callerId = getCallerId(ctx);
-    const { spaceCatId, brandId, dashboardId } = ctx.params;
-    const existing = store.getDashboard({ id: dashboardId, orgId: spaceCatId, brandId });
+    const { spaceCatId, dashboardId } = ctx.params;
+    const existing = await store.getDashboard(s3, bucket, { id: dashboardId, orgId: spaceCatId });
     if (!existing || !canView(existing, callerId)) {
       return notFound(`Dashboard not found: ${dashboardId}`);
     }
-    const updated = store.setStarred({
-      id: dashboardId, orgId: spaceCatId, brandId, userId: callerId, starred,
+    const updated = await store.setStarred(s3, bucket, {
+      id: dashboardId, orgId: spaceCatId, userId: callerId, starred,
     });
     return ok(DashboardDto.toJSON(updated, callerId, getCallerDisplayName(ctx)));
   };
@@ -225,8 +226,8 @@ function LlmoDashboardsController(context) {
       return error;
     }
     const callerId = getCallerId(ctx);
-    const { spaceCatId, brandId, dashboardId } = ctx.params;
-    const existing = store.getDashboard({ id: dashboardId, orgId: spaceCatId, brandId });
+    const { spaceCatId, dashboardId } = ctx.params;
+    const existing = await store.getDashboard(s3, bucket, { id: dashboardId, orgId: spaceCatId });
     if (!existing || !canView(existing, callerId)) {
       return notFound(`Dashboard not found: ${dashboardId}`);
     }
@@ -243,10 +244,9 @@ function LlmoDashboardsController(context) {
     if (!snapshot && (!analysis || !visualization)) {
       return badRequest('governed tiles require analysis and visualization; snapshot tiles require snapshot');
     }
-    const result = store.addTile({
+    const result = await store.addTile(s3, bucket, {
       id: dashboardId,
       orgId: spaceCatId,
-      brandId,
       tile: {
         title,
         ...(description !== undefined && { description }),
@@ -272,9 +272,9 @@ function LlmoDashboardsController(context) {
     }
     const callerId = getCallerId(ctx);
     const {
-      spaceCatId, brandId, dashboardId, tileId,
+      spaceCatId, dashboardId, tileId,
     } = ctx.params;
-    const existing = store.getDashboard({ id: dashboardId, orgId: spaceCatId, brandId });
+    const existing = await store.getDashboard(s3, bucket, { id: dashboardId, orgId: spaceCatId });
     if (!existing || !canView(existing, callerId)) {
       return notFound(`Dashboard not found: ${dashboardId}`);
     }
@@ -296,8 +296,8 @@ function LlmoDashboardsController(context) {
       ...(localOverrides !== undefined && { localOverrides }),
       ...(applyGlobalFilters !== undefined && { applyGlobalFilters }),
     };
-    const result = store.updateTile({
-      id: dashboardId, orgId: spaceCatId, brandId, tileId, patch,
+    const result = await store.updateTile(s3, bucket, {
+      id: dashboardId, orgId: spaceCatId, tileId, patch,
     });
     if (!result) {
       return notFound(`Tile not found: ${tileId}`);
@@ -312,17 +312,17 @@ function LlmoDashboardsController(context) {
     }
     const callerId = getCallerId(ctx);
     const {
-      spaceCatId, brandId, dashboardId, tileId,
+      spaceCatId, dashboardId, tileId,
     } = ctx.params;
-    const existing = store.getDashboard({ id: dashboardId, orgId: spaceCatId, brandId });
+    const existing = await store.getDashboard(s3, bucket, { id: dashboardId, orgId: spaceCatId });
     if (!existing || !canView(existing, callerId)) {
       return notFound(`Dashboard not found: ${dashboardId}`);
     }
     if (!canEdit(existing, callerId)) {
       return forbidden('Only the owner or an editor can remove tiles');
     }
-    const updated = store.removeTile({
-      id: dashboardId, orgId: spaceCatId, brandId, tileId,
+    const updated = await store.removeTile(s3, bucket, {
+      id: dashboardId, orgId: spaceCatId, tileId,
     });
     if (!updated) {
       return notFound(`Tile not found: ${tileId}`);
