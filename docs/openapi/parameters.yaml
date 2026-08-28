@@ -33,6 +33,27 @@ deliveryType:
   required: true
   schema:
     $ref: './schemas.yaml#/DeliveryType'
+tier:
+  name: tier
+  description: >-
+    Entitlement tier to filter by. Includes PRE_ONBOARD (internal-only, not
+    customer-visible) since GET /sites/by-tier/{tier} is admin-only.
+  in: path
+  required: true
+  schema:
+    type: string
+    enum:
+      - PAID
+      - FREE_TRIAL
+      - PLG
+      - PRE_ONBOARD
+productCodeQuery:
+  name: productCode
+  description: Optional product code to further filter the result (e.g. LLMO)
+  in: query
+  required: false
+  schema:
+    type: string
 base64BaseUrl:
   name: base64BaseUrl
   description: Base64-encoded base URL

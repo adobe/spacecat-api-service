@@ -18,6 +18,11 @@
   headers:
     X-Error:
       $ref: './headers.yaml#/xError'
+'400-no-tier':
+  description: Bad request. Tier is required or invalid.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
 '400-no-organization-id':
   description: Bad request. Organization ID is required.
   headers:

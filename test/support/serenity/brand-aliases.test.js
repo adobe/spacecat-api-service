@@ -91,11 +91,17 @@ describe('brand-aliases helpers', () => {
         brand_name_display: 'Brand',
         brand_names: ['Brand', 'Acme', 'Acme Inc'],
       });
+      // Every name the project tracks, lowercased — the same set as brand_names
+      // above. One spelling per alias, which is the only spelling we get to choose
+      // (a later PUT cannot re-case an alias upstream already stores).
       expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, 'p-us', 'own', {
         brand_name: 'Brand',
         domain: 'brand.com',
-        brand_aliases: ['Acme', 'Acme Inc'],
+        primary_url: 'brand.com',
+        brand_aliases: ['brand', 'acme', 'acme inc'],
       });
+      // The benchmark diff reads the DRAFT view — writes act on the draft.
+      expect(transport.listBenchmarks).to.have.been.calledWith(WS, 'p-us', { draft: true });
       expect(transport.publishProject).to.have.been.calledOnceWith(WS, 'p-us');
       expect(result).to.deep.equal({
         markets: 1, projectsUpdated: 1, benchmarksUpdated: 1, rejected: [],
@@ -147,23 +153,29 @@ describe('brand-aliases helpers', () => {
 
       const result = await syncBrandAliasesAcrossMarkets(transport, aliases, 'Brand', WS, undefined);
 
-      // Desired US aliases is empty → brand_names already [Brand] → no PATCH/PUT.
+      // Desired US aliases is empty → brand_names already [Brand] → no PATCH. The
+      // benchmark still gets the lowercase form of its own name, and nothing else:
+      // the DE-only alias is clamped out of the US market.
       expect(transport.updateProject).to.not.have.been.called;
-      expect(transport.updateBenchmark).to.not.have.been.called;
+      expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, 'p-us', 'own', {
+        brand_name: 'Brand', domain: 'brand.com', primary_url: 'brand.com', brand_aliases: ['brand'],
+      });
       expect(result.projectsUpdated).to.equal(0);
-      expect(result.benchmarksUpdated).to.equal(0);
+      expect(result.benchmarksUpdated).to.equal(1);
     });
 
     it('is a no-op when neither brand_names nor benchmark aliases drift', async () => {
       const transport = makeTransport(
         [projectWith('p-us', 'us', { brandNames: ['Brand', 'Acme'] })],
         {
+          // Already carries every alias the sync wants (spelling is upstream's to
+          // keep), so there is nothing to add.
           'p-us': [{
-            id: 'own', main_brand: true, domain: 'brand.com', brand_aliases: ['Acme'],
+            id: 'own', main_brand: true, domain: 'brand.com', brand_aliases: ['Acme', 'brand'],
           }],
         },
       );
-      const aliases = [{ name: 'acme', regions: [] }]; // same set (case-insensitive)
+      const aliases = [{ name: 'Acme', regions: [] }];
 
       const result = await syncBrandAliasesAcrossMarkets(transport, aliases, 'Brand', WS, undefined);
 
@@ -187,7 +199,11 @@ describe('brand-aliases helpers', () => {
       // After the PUT, the re-read surfaces the rejected alias.
       transport.listBenchmarks.onSecondCall().resolves({
         aio_benchmarks: [{
-          id: 'own', main_brand: true, domain: 'brand.com', rejected_brand_aliases: ['bogus'],
+          id: 'own',
+          main_brand: true,
+          domain: 'brand.com',
+          brand_name: 'Brand',
+          rejected_brand_aliases: ['bogus'],
         }],
       });
       const aliases = [{ name: 'Acme', regions: [] }, { name: 'bogus', regions: [] }];
@@ -196,7 +212,7 @@ describe('brand-aliases helpers', () => {
 
       expect(result.rejected).to.deep.equal([
         {
-          projectId: 'p-us', market: 'us', domain: 'brand.com', aliases: ['bogus'],
+          projectId: 'p-us', market: 'us', name: 'Brand', domain: 'brand.com', aliases: ['bogus'],
         },
       ]);
     });
@@ -242,24 +258,123 @@ describe('brand-aliases helpers', () => {
       });
     });
 
-    it('clears benchmark aliases (and skips the rejected re-read) when the desired set is empty', async () => {
+    it('removes the alias this edit dropped, and keeps the derived form, when the desired set is empty', async () => {
       const transport = makeTransport(
         [projectWith('p-us', 'us', { brandNames: ['Brand', 'Old'] })],
         {
           'p-us': [{
-            id: 'own', main_brand: true, domain: 'brand.com', brand_aliases: ['Old'],
+            id: 'own', main_brand: true, domain: 'brand.com', brand_aliases: ['Old', 'old'],
           }],
         },
       );
 
-      const result = await syncBrandAliasesAcrossMarkets(transport, [], 'Brand', WS, undefined);
+      // 'Old' was the brand's alias before this edit and is gone from it now, so it
+      // (and the lowercase form derived from it) leaves the benchmark too.
+      const result = await syncBrandAliasesAcrossMarkets(
+        transport,
+        [],
+        'Brand',
+        WS,
+        undefined,
+        null,
+        [{ name: 'Old', regions: [] }],
+      );
 
       expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, 'p-us', 'own', {
-        brand_name: 'Brand', domain: 'brand.com', brand_aliases: [],
+        brand_name: 'Brand', domain: 'brand.com', primary_url: 'brand.com', brand_aliases: ['brand'],
       });
-      // desired aliases empty → no rejected re-read (listBenchmarks called once).
-      expect(transport.listBenchmarks).to.have.been.calledOnce;
       expect(result.benchmarksUpdated).to.equal(1);
+    });
+
+    it('carries the values Semrush added forward instead of replacing them', async () => {
+      const transport = makeTransport(
+        [projectWith('p-us', 'us', { brandNames: ['Brand', 'Bass Pro'] })],
+        {
+          'p-us': [{
+            id: 'own',
+            main_brand: true,
+            domain: 'brand.com',
+            // 'bass pro shops' is Semrush's enrichment — a value we cannot derive.
+            brand_aliases: ['Bass Pro', 'brand', 'bass pro shops'],
+          }],
+        },
+      );
+
+      const result = await syncBrandAliasesAcrossMarkets(
+        transport,
+        [{ name: 'Bass Pro', regions: [] }, { name: 'Outdoor World', regions: [] }],
+        'Brand',
+        WS,
+        undefined,
+      );
+
+      expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, 'p-us', 'own', {
+        brand_name: 'Brand',
+        domain: 'brand.com',
+        primary_url: 'brand.com',
+        brand_aliases: ['Bass Pro', 'brand', 'bass pro shops', 'outdoor world'],
+      });
+      expect(result.benchmarksUpdated).to.equal(1);
+    });
+
+    it('drops an alias a competitor benchmark in the same project already owns', async () => {
+      // Upstream enforces alias uniqueness across every benchmark in the project,
+      // case-insensitively, and refuses a duplicate with a 409 that fails the whole
+      // write. So an alias owned elsewhere is never offered.
+      const transport = makeTransport(
+        [projectWith('p-us', 'us', { brandNames: ['Brand', 'Acme'] })],
+        {
+          'p-us': [
+            {
+              id: 'own', main_brand: true, domain: 'brand.com', brand_aliases: ['brand'],
+            },
+            {
+              id: 'rival', main_brand: false, domain: 'rival.com', brand_name: 'ACME',
+            },
+          ],
+        },
+      );
+
+      const result = await syncBrandAliasesAcrossMarkets(
+        transport,
+        [{ name: 'Acme', regions: [] }],
+        'Brand',
+        WS,
+        undefined,
+      );
+
+      // 'acme' belongs to the rival benchmark's name, so it is left out and the
+      // benchmark needs no write at all.
+      expect(transport.updateBenchmark).to.not.have.been.called;
+      expect(result.benchmarksUpdated).to.equal(0);
+    });
+
+    it('does not re-offer an alias Semrush has already rejected', async () => {
+      const transport = makeTransport(
+        [projectWith('p-us', 'us', { brandNames: ['Chevrolet Canada'] })],
+        {
+          'p-us': [{
+            id: 'own',
+            main_brand: true,
+            domain: 'brand.com',
+            brand_aliases: ['Chevrolet Canada'],
+            // Semrush refused the lowercase form; re-sending it every sync would
+            // rewrite and republish the project for nothing.
+            rejected_brand_aliases: ['chevrolet canada'],
+          }],
+        },
+      );
+
+      const result = await syncBrandAliasesAcrossMarkets(
+        transport,
+        [{ name: 'Chevrolet Canada', regions: [] }],
+        'Chevrolet Canada',
+        WS,
+        undefined,
+      );
+
+      expect(transport.updateBenchmark).to.not.have.been.called;
+      expect(result.benchmarksUpdated).to.equal(0);
     });
 
     it('keeps the benchmark own brand_name + domain when present', async () => {
@@ -274,10 +389,41 @@ describe('brand-aliases helpers', () => {
 
       await syncBrandAliasesAcrossMarkets(transport, [{ name: 'Acme', regions: [] }], 'Brand', WS, undefined);
 
+      // Both names are covered: the display name the project tracks, and the
+      // benchmark's own name, which upstream folds against and differs here.
       expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, 'p-us', 'own', {
         brand_name: 'Existing Brand',
         domain: 'existing.com',
-        brand_aliases: ['Acme'],
+        primary_url: 'existing.com',
+        brand_aliases: ['brand', 'acme', 'existing brand'],
+      });
+    });
+
+    it('keeps a benchmark on its subpath url when only an alias changes', async () => {
+      // domain and primary_url are ONE value upstream: a body carrying a host-only
+      // domain resets a benchmark that tracks a subpath, re-scoping the brand to
+      // its parent site as a side effect of renaming an alias.
+      const transport = makeTransport(
+        [projectWith('p-us', 'us', { domain: 'nba.com', brandNames: ['Brand'] })],
+        {
+          'p-us': [{
+            id: 'own',
+            main_brand: true,
+            brand_name: 'Brand',
+            domain: 'nba.com/lakers',
+            root_domain: 'nba.com',
+            brand_aliases: [],
+          }],
+        },
+      );
+
+      await syncBrandAliasesAcrossMarkets(transport, [{ name: 'Acme', regions: [] }], 'Brand', WS, undefined);
+
+      expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, 'p-us', 'own', {
+        brand_name: 'Brand',
+        domain: 'nba.com/lakers',
+        primary_url: 'nba.com/lakers',
+        brand_aliases: ['brand', 'acme'],
       });
     });
 
@@ -292,7 +438,8 @@ describe('brand-aliases helpers', () => {
       expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, 'p-us', 'own', {
         brand_name: 'Brand',
         domain: 'brand.com',
-        brand_aliases: ['Acme'],
+        primary_url: 'brand.com',
+        brand_aliases: ['brand', 'acme'],
       });
     });
 
@@ -358,7 +505,8 @@ describe('brand-aliases helpers', () => {
       expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, 'p-us', 'own', {
         brand_name: 'Brand',
         domain: 'brand.com',
-        brand_aliases: ['Acme'],
+        primary_url: 'brand.com',
+        brand_aliases: ['brand', 'acme'],
       });
       expect(transport.publishProject).to.have.been.calledOnceWith(WS, 'p-us');
       expect(result).to.deep.equal({
@@ -459,10 +607,11 @@ describe('brand-aliases helpers', () => {
         undefined,
       );
 
+      // brand_name is '' → no name spelling to add, so only the alias itself.
       expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, 'p-us', 'own', {
         brand_name: '',
         domain: undefined,
-        brand_aliases: ['Acme'],
+        brand_aliases: ['acme'],
       });
     });
 

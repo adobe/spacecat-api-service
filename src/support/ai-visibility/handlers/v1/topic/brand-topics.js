@@ -27,6 +27,7 @@ import {
 import {
   parseLimitOffset,
   resolveCountry,
+  resolveSearchType,
   engineToLlm,
   responseFromGrpcError,
   buildRangeExpr,
@@ -90,6 +91,7 @@ export function buildBrandTopicsMetricFilterQl(sp) {
 
 export async function handleBrandTopics(sp, clients) {
   const domain = sp.get('domain');
+  const searchType = resolveSearchType(domain);
   const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const country = resolveCountry(sp) || COUNTRY_ENUM.WORLDWIDE;
   const sortBy = sp.get('sortBy') || BRAND_TOPICS_ORDER_BY_ENUM.VISIBILITY;
@@ -126,6 +128,7 @@ export async function handleBrandTopics(sp, clients) {
         dimension_filter_ql: dimensionFilterQl,
         metric_filter_ql: metricFilterQl,
         target_date: date,
+        search_type: searchType,
       },
       PROTO_FROM_JSON,
     );

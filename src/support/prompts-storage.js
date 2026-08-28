@@ -18,6 +18,7 @@ import { classifyIntents } from './intent-classifier.js';
 import { throwOnPgConstraintViolation } from './errors.js';
 import { assertPermittedSource } from './prompt-sources.js';
 import { INTENT_VALUES, normalizeIntent } from './intent.js';
+import { canonicalizeSource, foldSourceValue } from './serenity/prompt-tags.js';
 
 // Re-exported for backward compatibility — `normalizeIntent`/`INTENT_VALUES` now
 // live in `./intent.js` so the LLM intent classifier can reuse them without an
@@ -37,21 +38,25 @@ const DEFAULT_ORIGIN = 'human';
  * §3). `origin` records who authored the prompt's text and is read-only wherever a
  * user can reach it:
  *
- *   - a USER-authenticated principal (IMS / JWT) always writes `human`; any
- *     `origin` in the body is IGNORED (never rejected — the derived value is
- *     authoritative, so the caller loses nothing);
- *   - a SERVICE principal (e.g. DRS via admin `x-api-key`) is believed: its body
- *     value is honoured, validated against {@link V2_PROMPT_ORIGINS}, defaulting
- *     to `human` only when absent or out-of-vocabulary. This is the DRS contract
- *     (`origin: 'ai'`); dropping it would relabel every generated prompt `human`
- *     on its next upsert (origin-dimension.md §3 consequence 1).
+ *   - a USER-authenticated principal (an end-user IMS / JWT session) always writes
+ *     `human`; any `origin` in the body is IGNORED (never rejected — the derived
+ *     value is authoritative, so the caller loses nothing);
+ *   - a SERVICE principal (an S2S consumer/admin, or a scoped/legacy API key) is
+ *     believed: its body value is honoured, validated against
+ *     {@link V2_PROMPT_ORIGINS}, defaulting to `human` only when absent or
+ *     out-of-vocabulary. This is the DRS contract (`origin: 'ai'`); dropping it
+ *     would relabel every generated prompt `human` on its next upsert
+ *     (origin-dimension.md §3 consequence 1). NOTE: an S2S caller authenticates
+ *     with a JWT, so `isUserPrincipal` CANNOT be decided by auth type alone — the
+ *     caller (`createPromptsByBrand`) consults the token's S2S claims first.
  *
  * This governs CREATE only — `origin` is never patched on update (it is fixed by
  * the writer that created the row), which the update path enforces by not writing
  * the column at all.
  *
  * @param {unknown} bodyOrigin - the caller-supplied `origin`, or undefined.
- * @param {boolean} isUserPrincipal - true for an IMS/JWT user request.
+ * @param {boolean} isUserPrincipal - false for a service principal (S2S
+ *   consumer/admin or scoped/legacy API key); true for an end-user IMS/JWT session.
  * @returns {string} the origin to store (`ai` or `human`).
  */
 export function deriveV2PromptOrigin(bodyOrigin, isUserPrincipal) {
@@ -61,6 +66,38 @@ export function deriveV2PromptOrigin(bodyOrigin, isUserPrincipal) {
   return V2_PROMPT_ORIGINS.includes(/** @type {string} */ (bodyOrigin))
     ? /** @type {string} */ (bodyOrigin)
     : DEFAULT_ORIGIN;
+}
+
+/**
+ * Classifies a request PRINCIPAL as a SERVICE principal (vs. an end user), for the
+ * purpose of the {@link deriveV2PromptOrigin} decision. A service principal is:
+ *
+ *   - an S2S consumer or admin — these authenticate with a JWT, so `getType()` is
+ *     `'jwt'`, indistinguishable BY TYPE from an end-user session; they are
+ *     identified only by the signature-validated `is_s2s_consumer` /
+ *     `is_s2s_admin` claim (surfaced as `isS2SConsumer()` / `isS2SAdmin()`), never
+ *     by caller-controlled body input; OR
+ *   - a non-jwt/ims auth type (a scoped/legacy API key).
+ *
+ * Fails SAFE to the least-privileged (USER) principal: an ABSENT or indeterminate
+ * auth type with no S2S signal, or a non-function `getType` / `isS2S*`, resolves to
+ * `false` (→ user) rather than throwing or silently gaining service privilege. This
+ * is why a future unwrapped caller (an internal queue consumer, re-ordered
+ * middleware) cannot slip into the service path.
+ *
+ * @param {*} authInfo - the request's AuthInfo (`context.attributes.authInfo`).
+ * @returns {boolean} true for a service principal (its body `origin` is honoured).
+ */
+export function isServicePrincipal(authInfo) {
+  const isS2SConsumer = typeof authInfo?.isS2SConsumer === 'function'
+    && !!authInfo.isS2SConsumer();
+  const isS2SAdmin = typeof authInfo?.isS2SAdmin === 'function'
+    && !!authInfo.isS2SAdmin();
+  if (isS2SConsumer || isS2SAdmin) {
+    return true;
+  }
+  const authType = typeof authInfo?.getType === 'function' ? authInfo.getType() : undefined;
+  return !!authType && authType !== 'jwt' && authType !== 'ims';
 }
 
 /**
@@ -427,6 +464,11 @@ const SORT_COLUMN_MAP = {
   origin: 'origin',
   status: 'status',
   updatedAt: 'updated_at',
+  // Sort on the `source_canonical` generated column (WP-S4:
+  // `GENERATED ALWAYS AS (lower(replace(source,'_','-'))) STORED`, btree-indexed),
+  // so the two drift spellings of a producer order together and the label — which
+  // lives in elmo, never on the server — plays no part (source-dimension.md §3.1).
+  source: 'source_canonical',
 };
 
 function mapRowToPrompt(row) {
@@ -455,7 +497,13 @@ function mapRowToPrompt(row) {
     // fail-loud choice over a fabricated `human`; unlike `source`/`status`, whose
     // fallbacks are cosmetic, an origin fallback is a correctness hazard.
     origin: row.origin,
-    source: row.source || 'config',
+    // Second derivation boundary (source-dimension.md §3.1): the v2 read surface
+    // returns the CANONICAL slug, so elmo's badge — which keys on the API's value —
+    // resolves (`agentic_traffic` → `agentic-traffic`). A value that fails the guard
+    // (empty, `:`, over-long, root-shadowing) returns the RAW string rather than
+    // null: the grid must still show the operator what is stored. `?? 'config'` only
+    // guards a nullish column (in-memory/test rows); the DB column is NOT NULL.
+    source: canonicalizeSource(row.source) ?? row.source ?? 'config',
     intent: row.intent ?? null,
     createdAt: row.created_at,
     createdBy: row.created_by,
@@ -502,9 +550,11 @@ function mapRowToPrompt(row) {
  * topic name, category name
  * @param {string} [params.region] - Filter by region (array containment)
  * @param {string} [params.origin] - Filter by origin (ai, human)
- * @param {string} [params.source] - Filter by source (e.g. gsc, semrush, base_url, config)
+ * @param {string} [params.source] - Filter by source, matched on the
+ * `source_canonical` generated column: `citation-attempt` also matches rows
+ * stored as `citation_attempt` (drift spellings fold together, case-insensitive).
  * @param {string} [params.sort] - Sort column (topic, prompt, category, origin,
- * status, updatedAt)
+ * source, status, updatedAt)
  * @param {string} [params.order] - Sort direction (asc, desc). Default desc
  * @param {number} [params.limit] - Page size (default 100, max 5000)
  * @param {number} [params.page] - Page number, 1-based (default 1)
@@ -633,7 +683,13 @@ export async function listPrompts({
     }
 
     if (hasText(source)) {
-      baseQuery = baseQuery.eq('source', source);
+      // Match on the `source_canonical` generated column (WP-S4) — the DB
+      // canonicalizes `lower(replace(source,'_','-'))` at write time, so a single
+      // equality on the folded incoming value catches every drift spelling AND is
+      // case-insensitive (`citation-attempt` finds rows stored `citation_attempt`
+      // or `Citation_Attempt`). Fold the query-param value with the same transform
+      // (`foldSourceValue` — the single definition) so the two sides align.
+      baseQuery = baseQuery.eq('source_canonical', foldSourceValue(source));
     }
 
     if (hasText(region)) {
@@ -804,15 +860,32 @@ export async function upsertPrompts({
       const cols = includeIntent
         ? 'id,prompt_id,text,regions,status,source,intent'
         : 'id,prompt_id,text,regions,status,source';
-      let q = postgrestClient
+      const baseQuery = () => postgrestClient
         .from('prompts')
         .select(cols)
         .eq('organization_id', organizationId)
         .eq('brand_id', brandUuid);
-      if (incomingIds.length > 0) {
-        q = q.in('prompt_id', incomingIds);
+      if (incomingIds.length === 0) {
+        return baseQuery();
       }
-      return q;
+      // Chunk the `prompt_id=in.(...)` filter the same way getIntentsByPromptIds
+      // does (INTENT_LOOKUP_CHUNK_SIZE) — PostgREST caps any single response at
+      // 1000 rows, so an unchunked IN-list over a brand with >1000 matching
+      // existing prompts silently drops the excess. Those dropped rows then look
+      // "new" below and get misrouted to INSERT, colliding with
+      // uq_prompt_text_region_source_per_brand (confirmed live, 2026-08-24: a
+      // 1000-id batch against a brand with ~1200 existing prompts came back
+      // missing ~200 of them, and the resulting INSERT 409'd).
+      return Promise.all(
+        chunkArray(incomingIds, INTENT_LOOKUP_CHUNK_SIZE)
+          .map((batch) => baseQuery().in('prompt_id', batch)),
+      ).then((results) => {
+        const firstError = results.find((r) => r.error)?.error || null;
+        if (firstError) {
+          return { data: null, error: firstError };
+        }
+        return { data: results.flatMap((r) => r.data || []), error: null };
+      });
     }),
     buildLookupMaps(organizationId, postgrestClient),
   ]);
@@ -1103,6 +1176,9 @@ export async function updatePromptById({
   }
 
   const patch = { updated_by: updatedBy };
+  // `source` is deliberately NOT patchable (source-dimension.md §1 item 6): a
+  // prompt's producer is fixed at creation, and the dimension has no write surface.
+  // A caller-supplied `updates.source` is ignored rather than written.
   if (updates.prompt !== undefined) {
     patch.text = updates.prompt;
   }

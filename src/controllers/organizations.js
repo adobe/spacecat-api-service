@@ -151,6 +151,76 @@ function OrganizationsController(ctx, env) {
   };
 
   /**
+   * Gets all organizations that have at least one site onboarded (enrolled) for the given
+   * product code (e.g. 'LLMO'). "Onboarded" means a SiteEnrollment row links one of the
+   * organization's sites to an entitlement of that product - the same signal used by
+   * `getSitesForOrganization` / `filterSitesForProductCode`. Only orgs with a real enrollment
+   * are returned, so an org that merely holds an entitlement but has onboarded no site is
+   * excluded. Same access model as `getAll`: admin-read callers, or S2S consumers holding
+   * `organization:readAll` - see `docs/s2s/READALL_CAPABILITY_DESIGN.md`.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Array of organizations response.
+   */
+  const getByProductCode = async (context) => {
+    const { log } = ctx;
+    const requestId = context?.invocation?.id || 'unknown';
+    // Read-only admin and full admin both bypass the S2S capability check;
+    // S2S consumers must hold organization:readAll. See READALL_CAPABILITY_DESIGN.md.
+    const isAdmin = accessControlUtil.hasAdminReadAccess();
+    const s2sResult = isAdmin
+      ? { allowed: false, reason: 'admin-bypass' }
+      : await accessControlUtil.hasS2SCapability(CAP_ORG_READ_ALL);
+    if (!isAdmin && !s2sResult.allowed) {
+      log.info(`[acl] Denied GET /organizations/by-product-code - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} requestId=${requestId}`);
+      return forbidden('Forbidden: admin access or organization:readAll capability required');
+    }
+
+    const productCode = context.params?.productCode?.toUpperCase();
+    const validProductCodes = Object.values(EntitlementModel.PRODUCT_CODES);
+    if (!hasText(productCode) || !validProductCodes.includes(productCode)) {
+      return badRequest(`Invalid product code. Allowed values: ${validProductCodes.join(', ')}`);
+    }
+
+    // Collect the DISTINCT organization IDs that own at least one site enrolled (onboarded)
+    // for this product. Page through Site.allByEnrollmentFiltered - a single
+    // sites -> site_enrollments!inner -> entitlements!inner query per page, range-paginated -
+    // rather than SiteEnrollment.allSiteIdsByProductCode, which is unpaginated and would
+    // silently truncate at the PostgREST row cap as enrollments grow.
+    const PAGE_SIZE = 1000;
+    const orgIds = new Set();
+    let cursor;
+    do {
+      // eslint-disable-next-line no-await-in-loop
+      const { data: sites, cursor: nextCursor } = await Site.allByEnrollmentFiltered(
+        { productCode },
+        { limit: PAGE_SIZE, cursor, returnCursor: true },
+      );
+      sites.forEach((site) => {
+        const orgId = site.getOrganizationId();
+        if (hasText(orgId)) {
+          orgIds.add(orgId);
+        }
+      });
+      cursor = nextCursor;
+    } while (cursor);
+
+    if (orgIds.size === 0) {
+      return ok([]);
+    }
+
+    const { data: organizations } = await Organization.batchGetByKeys(
+      [...orgIds].map((organizationId) => ({ organizationId })),
+    );
+    const result = organizations.map((organization) => OrganizationDto.toJSON(organization));
+
+    if (s2sResult.allowed) {
+      log.info(`[s2s-readall] GET /organizations/by-product-code/${productCode} granted clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId} capability=${CAP_ORG_READ_ALL} count=${result.length} requestId=${requestId}`);
+    }
+
+    return ok(result);
+  };
+
+  /**
    * Gets an organization by ID.
    * @param {object} context - Context of the request.
    * @returns {Promise<object>} Organization.
@@ -468,9 +538,6 @@ function OrganizationsController(ctx, env) {
 
     if (isObject(requestBody.config)) {
       if (isObject(requestBody.config.defaults)) {
-        if (!accessControlUtil.hasAdminAccess()) {
-          return forbidden('Only admins can update config.defaults');
-        }
         const VALID_PRODUCT_CODES = new Set(Object.values(EntitlementModel.PRODUCT_CODES));
         for (const [productCode, entry] of Object.entries(requestBody.config.defaults)) {
           if (!VALID_PRODUCT_CODES.has(productCode)) {
@@ -624,6 +691,7 @@ function OrganizationsController(ctx, env) {
   return {
     createOrganization,
     getAll,
+    getByProductCode,
     getByID,
     getByImsOrgID,
     getSlackConfigByImsOrgID,

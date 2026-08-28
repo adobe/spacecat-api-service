@@ -29,20 +29,21 @@ import {
   mapLimit,
   publishAffected,
   reconcilePublishErrors,
+  resolveSort,
+  buildUpdateMetadata,
   DEFAULT_PAGE_LIMIT,
   MAX_PAGE_LIMIT,
   MAX_TAG_IDS,
   BULK_CREATE_CONCURRENCY,
   BULK_PROMPTS_MAX_ITEMS,
+  deleteProjectBatches,
 } from './prompts.js';
-import { ORIGIN_VALUE } from '../prompt-tags.js';
+import { ORIGIN_VALUE, PROXY_CREATE_SOURCE_VALUE } from '../prompt-tags.js';
 import { resolveProject, buildSliceProjectMap, sliceKey } from '../subworkspace-projects.js';
 import { redactUpstreamMessage } from '../rest-transport.js';
-import { createHeadroomGuard } from '../dynamic-allocation-active.js';
 import { classifyPromptIntents } from '../intent-classification.js';
 import { alertQuotaRejection } from '../quota-alerts.js';
 
-/** @typedef {import('../resource-manager.js').Blocks} Blocks */
 /** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
 
 /**
@@ -89,6 +90,9 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
   const tagIds = Array.isArray(query?.tagIds)
     ? query.tagIds.slice(0, MAX_TAG_IDS).map(String).filter(Boolean)
     : [];
+  // sort/order (LLMO-6289): validated against the metadata allow-list and
+  // forwarded upstream — kept in lockstep with the flat-mode twin.
+  const { sort, order } = resolveSort(query);
 
   const project = await resolveProject(transport, workspaceId, geoTargetId, languageCode, log);
   if (!project) {
@@ -107,6 +111,8 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
     page,
     limit,
     search,
+    // Omit sort/order keys when unsorted (lockstep with twin file prompts.js).
+    ...(sort ? { sort, order } : {}),
   });
   const items = Array.isArray(resp?.items) ? resp.items : [];
   let total;
@@ -138,10 +144,8 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
  *   classification; ALSO used directly to fire the quota-rejection Slack alert (serenity-docs#72
  *   §5). Optional — omitted, alerting is a no-op.
  * @param {number} writeDeadline - shared request-write deadline for intent classification.
+ * @param {string} callerId - resolved caller id (LLMO-6289) stamped as the created/updated author.
  * @param {object} [options]
- * @param {boolean} [options.dynamicAllocation]
- * @param {string} [options.parentWorkspaceId]
- * @param {Partial<Blocks>} [options.ceiling] - per-brand AI ceiling (LLMO-6190 flag-flip gate).
  * @param {string | null} [options.orgId] - serenity-docs#72 §5 alert payload only.
  * @param {string | null} [options.brandId] - serenity-docs#72 §5 alert payload only.
  */
@@ -153,10 +157,8 @@ export async function handleCreatePromptsSubworkspace(
   classifyPromptType,
   env,
   writeDeadline,
+  callerId,
   {
-    dynamicAllocation = false,
-    parentWorkspaceId = '',
-    ceiling = /** @type {Partial<Blocks> | undefined} */ (undefined),
     orgId = null,
     brandId = null,
   } = {},
@@ -174,14 +176,16 @@ export async function handleCreatePromptsSubworkspace(
   const deferPublish = validateDeferPublish(body);
 
   const projectsBySlice = await buildSliceProjectMap(transport, workspaceId, log);
-  // CREATE: user-authenticated write → derived `origin` is `human` (see the
-  // flat-mode twin handleCreatePrompts and origin-dimension.md §3).
+  // CREATE: user-authenticated write → `originValue` = `human` feeds
+  // `deriveSource` (tag-display-names.md §3 — `origin` no longer gets its own
+  // tag) and producing `source` is the constant `config` (see the flat-mode
+  // twin handleCreatePrompts, source-dimension.md §1).
   const injectComputedTags = makePromptTagInjector(
     transport,
     workspaceId,
     classifyPromptType,
     log,
-    { originValue: ORIGIN_VALUE.HUMAN },
+    { originValue: ORIGIN_VALUE.HUMAN, sourceValue: PROXY_CREATE_SOURCE_VALUE },
   );
   // Unified layer (serenity-docs#32): batch-classify every distinct text ONCE
   // under the shared request deadline, then thread the resolved map into each
@@ -202,27 +206,6 @@ export async function handleCreatePromptsSubworkspace(
     },
   );
   const injectComputedIntent = makeIntentInjector(transport, workspaceId, intentByText, log);
-
-  // PROMPT metering seam (Rainer, live-verified LLMO-6190): the metered write is
-  // `createPromptsByIds` (inside `createOnePrompt` below), NOT publish — a disguised-quota 405
-  // fires there, before any publish, if `used + drafted + batch > total`. Front headroom BEFORE
-  // this loop, sized on the whole incoming batch (`inputs.length` — a safe upper bound; some
-  // inputs may still skip on validation/missing-project, so this can over-provision slightly, never
-  // under). No-op when the flag is OFF.
-  const headroom = createHeadroomGuard(
-    transport,
-    {
-      enabled: dynamicAllocation,
-      subWorkspaceId: workspaceId,
-      parentWorkspaceId,
-      ceiling,
-      env,
-      orgId,
-      brandId,
-    },
-    log,
-  );
-  await headroom.ensure({ prompts: inputs.length }, { includeDrafted: true });
 
   const results = await mapLimit(inputs, BULK_CREATE_CONCURRENCY, async (raw) => {
     const { value: input, reason } = normalizePromptInput(raw);
@@ -245,19 +228,26 @@ export async function handleCreatePromptsSubworkspace(
     }
     const projectId = String(project.id);
     try {
-      // Unified layer: strip caller-supplied type/origin/intent, then inject the
-      // computed type + derived origin (origin-dimension.md §3) and the classified
-      // intent (serenity-docs#32). The injectors act on disjoint dimensions.
+      // Unified layer: strip caller-supplied type/source/intent, then inject the
+      // computed type + the derived `source` (tag-display-names.md §3 — `origin`
+      // no longer gets its own tag, so it is never stripped or injected here) and
+      // the classified intent (serenity-docs#32). The injectors act on disjoint
+      // dimensions.
       let typed = await injectComputedTags(projectId, input);
       typed = await injectComputedIntent(projectId, typed);
-      // LLMO-6190 follow-up: the metered write itself can still 405 as a disguised metered-quota
-      // rejection despite the pre-loop sizing above (the live-verified ~9s gateway
-      // write-enforcement lag after a JIT top-up) — route it through `headroom.retryOnQuota` (a
-      // no-op passthrough when the flag is OFF) so each item recovers independently; `mapLimit`'s
-      // own per-item try/catch below still isolates a surviving failure to this one item.
-      const semrushPromptId = await headroom.retryOnQuota(
-        () => createOnePrompt(transport, workspaceId, projectId, typed),
-        { callSite: 'createOnePrompt' },
+      // Intentional (not an inconsistency to fix): each item stamps its OWN
+      // creation instant here — `buildCreateMetadata` runs per prompt inside
+      // `createOnePrompt`, so a bulk batch gets slightly staggered `created_at`
+      // values, each the true moment that item was written. This differs from
+      // `generateAndAttachPrompts` (markets-subworkspace.js), which shares ONE
+      // metadata object (a single batch instant) across its whole group. Both
+      // are defensible; per-item precision is preferred on the direct create path.
+      const semrushPromptId = await createOnePrompt(
+        transport,
+        workspaceId,
+        projectId,
+        typed,
+        callerId,
       );
       return {
         created: {
@@ -326,16 +316,15 @@ export async function handleCreatePromptsSubworkspace(
     };
   }
 
-  // Route each project's publish through the headroom guard's retryOnQuota (LLMO-6190 item 4):
-  // a disguised metered-405 gets ONE bounded top-up+retry per project before being recorded as a
-  // failure. No-op passthrough when the flag is OFF (the guard's retryOnQuota is a plain call).
+  // Publish each affected project. A disguised metered-405 on publish is classified and surfaced by
+  // publishAffected / reconcilePublishErrors below (serenity-docs#72 §4.1) — see the alertContext.
   const alertContext = { orgId, brandId, env };
   const publishErrors = await publishAffected(
     transport,
     workspaceId,
     affectedProjectIds,
     log,
-    (fn) => headroom.retryOnQuota(fn, { callSite: 'publishAffected' }),
+    undefined,
     alertContext,
   );
   // serenity-docs#72 §4.1 atomicity: a quota-rejected publish rolls back (deletes) the prompts
@@ -364,10 +353,12 @@ export async function handleCreatePromptsSubworkspace(
  * PATCH /serenity/prompts/:semrushPromptId (subworkspace) — in-place edit.
  * Resolves the slice's project from the live listing, then edits the prompt IN
  * PLACE exactly like the flat-mode twin (see handleUpdatePrompt's contract):
- * `rename` first (the one op that can refuse — upstream 404 → promptNotFound,
- * 409 text collision → thrown for the controller's `conflict` mapping), then
- * the replace-mode batch tag write. The prompt id is preserved end to end and
- * echoed unchanged in the response; nothing is deleted on this path.
+ * the combined v3 `PATCH .../{id}` first (text `name` + `updated_*` metadata
+ * stamp in one request — the one op that can refuse: upstream 404 →
+ * promptNotFound, 409 text collision → thrown for the controller's `conflict`
+ * mapping), then the replace-mode batch tag write (v2, metadata-free). The
+ * prompt id is preserved end to end and echoed unchanged in the response;
+ * nothing is deleted on this path.
  * @param {SerenityTransport} transport
  */
 export async function handleUpdatePromptSubworkspace(
@@ -379,6 +370,7 @@ export async function handleUpdatePromptSubworkspace(
   classifyPromptType,
   env,
   writeDeadline,
+  callerId,
 ) {
   const parsedBody = parseUpdatePromptBody(body);
   if (!parsedBody.ok) {
@@ -429,7 +421,13 @@ export async function handleUpdatePromptSubworkspace(
   typed = await injectComputedIntent(projectId, typed);
 
   try {
-    await transport.renamePrompt(workspaceId, projectId, semrushPromptId, nextText);
+    // Combined v3 write: text (`name`) + `updated_*` stamp in one request
+    // (replaces the v2 `rename`). Same refusal contract — 404 → promptNotFound,
+    // 409 (sibling text collision) → thrown for the controller's `conflict`.
+    await transport.patchPrompt(workspaceId, projectId, semrushPromptId, {
+      name: nextText,
+      metadata: buildUpdateMetadata(callerId),
+    });
   } catch (e) {
     if (isUpstreamGone(e)) {
       return {
@@ -458,7 +456,7 @@ export async function handleUpdatePromptSubworkspace(
     // The rename above already landed: the prompt's text has moved while its
     // tags are stale. Record the partial mutation before propagating, so the
     // generic upstream error the caller sees is attributable on-call.
-    log?.warn?.('updatePromptTagsByIds failed after a successful rename — text updated, tags stale', {
+    log?.warn?.('updatePromptTagsByIds failed after a successful text/metadata PATCH — text updated, tags stale', {
       semrushPromptId, projectId, error: e.message,
     });
     throw e;
@@ -489,16 +487,20 @@ export async function handleUpdatePromptSubworkspace(
  * @param {any} body
  * @param {any} log
  * @param {object} [options]
- * @param {string | null} [options.orgId] - serenity-docs#72 §5 alert payload only.
- * @param {string | null} [options.brandId] - serenity-docs#72 §5 alert payload only.
+ * @param {string | null} [options.orgId] - also the audit log's organizationId.
+ * @param {string | null} [options.brandId] - also stamped on the audit log line.
  * @param {object | null} [options.env] - serenity-docs#72 §5 alert kill-switch/config only.
+ * @param {string} [options.callerId] - resolved requester id (see resolveCallerId),
+ *   stamped on every audit log line this call emits (SITES-50099).
  */
 export async function handleBulkDeletePromptsSubworkspace(
   transport,
   workspaceId,
   body,
   log,
-  { orgId = null, brandId = null, env = null } = {},
+  {
+    orgId = null, brandId = null, env = null, callerId = 'unknown',
+  } = {},
 ) {
   const targets = Array.isArray(body?.prompts) ? body.prompts : [];
   if (targets.length === 0) {
@@ -547,31 +549,12 @@ export async function handleBulkDeletePromptsSubworkspace(
     bucket.targets.push({ semrushPromptId: sid, geoTargetId, languageCode });
   });
 
-  let deleted = 0;
-  const projectsToPublish = new Set();
-  await Promise.all(Array.from(byProject.entries()).map(async ([pid, bucket]) => {
-    try {
-      await transport.deletePromptsByIds(workspaceId, pid, bucket.ids);
-      deleted += bucket.ids.length;
-      projectsToPublish.add(pid);
-    } catch (e) {
-      if (isUpstreamGone(e)) {
-        deleted += bucket.ids.length;
-        projectsToPublish.add(pid);
-        log?.info?.('bulk-delete (subworkspace): upstream already-deleted (404 treated as success)', { ids: bucket.ids });
-        return;
-      }
-      bucket.targets.forEach((t) => {
-        failed.push({
-          semrushPromptId: t.semrushPromptId,
-          geoTargetId: t.geoTargetId,
-          languageCode: t.languageCode,
-          status: e.status || 500,
-          message: redactUpstreamMessage(e),
-        });
-      });
-    }
-  }));
+  const {
+    deleted, failed: deleteFailures, projectsToPublish,
+  } = await deleteProjectBatches(transport, workspaceId, byProject, log, {
+    orgId, brandId, callerId,
+  });
+  failed.push(...deleteFailures);
 
   for (const pid of projectsToPublish) {
     invalidateTagCacheForProject(workspaceId, pid);

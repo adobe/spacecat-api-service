@@ -35,6 +35,23 @@ import {
 import { upsertFeatureFlag } from '../../support/feature-flags-storage.js';
 import { detectCdnForDomain } from '../../support/cdn-detection.js';
 import { upsertBrand } from '../../support/brands-storage.js';
+import {
+  PROMPT_SUGGESTION_PIPELINES,
+  registerPromptSuggestionSchedule,
+  ensurePromptSuggestionSchedules,
+  isPayingLlmoSite,
+} from '../../support/prompt-suggestion-schedules.js';
+
+// The tier-gated prompt-suggestion schedule helpers moved to a reusable support
+// module so the POST /sites/:siteId/prompt-suggestion-schedules endpoint and a
+// future reconciler can share them. Re-exported here so importers/tests that
+// referenced them from this controller keep working.
+export {
+  PROMPT_SUGGESTION_PIPELINES,
+  registerPromptSuggestionSchedule,
+  ensurePromptSuggestionSchedules,
+  isPayingLlmoSite,
+};
 
 // LLMO Constants
 const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
@@ -189,213 +206,6 @@ export async function triggerBrandalfOnboardingJob({
   log.info(`Started DRS Brandalf flow: job=${drsJob.job_id}`);
   say(`:label: Started DRS Brandalf job: ${drsJob.job_id}`);
   return drsJob;
-}
-
-// Cadence labels accepted by DRS `createSchedule` for the recurring
-// "prompt suggestion" pipelines (the `SCHEDULE_CADENCES` enum in the drs-client).
-// DRS derives the concrete cron expression server-side from the label
-// (frequency:'cron', with per-site hour jitter for twice_monthly) — we never send
-// raw cron, so a misconfigured/leaked caller cannot schedule a fleet-wide Fargate
-// storm; an unknown value is rejected server-side.
-//   'twice_monthly' → 1st & 15th (honest label; not a true 14-day interval)
-//   'quarterly'     → 1st of Jan/Apr/Jul/Oct
-// Kept as local literals (matching SCHEDULE_CADENCES values) so this module loads
-// against the currently-installed client; can be swapped for the imported
-// SCHEDULE_CADENCES const once drs-client 1.14.0 is installed.
-// See local/drs-prompt-suggestions-schedules-onboarding-plan.md ("Cadence expression").
-const DRS_CADENCE_TWICE_MONTHLY = 'twice_monthly';
-const DRS_CADENCE_QUARTERLY = 'quarterly';
-
-// The recurring "prompt suggestion" pipelines registered for every newly
-// onboarded v2 site. Each providerId+cadence pair is declared exactly once here
-// and iterated by registerPromptSuggestionSchedules, so adding a pipeline is a
-// one-line change and no per-provider code can drift out of sync.
-//
-// NOTE on `prompt_generation_agentic_traffic` ("citation attempts"): "Citation
-// Attempt" is the renamed *output* of the agentic-traffic pipeline — there is no
-// standalone citation-attempt provider — so this id will NOT grep from the word
-// "citation". DRS's per-provider Fargate whitelist (`AT_FARGATE_WHITELIST`) is
-// the real enablement gate; leave agentic-traffic un-whitelisted in an env until
-// its Postgres-format migration is confirmed healthy (plan Phase 0.2) so the
-// best-effort first run cannot automate a known-failing pipeline.
-export const PROMPT_SUGGESTION_PIPELINES = [
-  { name: 'SEMrush prompts', providerId: 'prompt_generation_semrush', cadence: DRS_CADENCE_TWICE_MONTHLY },
-  { name: 'citation attempts', providerId: 'prompt_generation_agentic_traffic', cadence: DRS_CADENCE_TWICE_MONTHLY },
-  { name: 'synthetic personas', providerId: 'prompt_generation_synthetic_personas', cadence: DRS_CADENCE_QUARTERLY },
-];
-
-/**
- * Reports whether a site is on the paying (PAID) LLMO tier, which decides the
- * prompt-suggestion behavior at onboarding: PAID → a recurring schedule;
- * anything else (FREE_TRIAL, or an entitlement that cannot be read) → a single
- * on-demand run.
- *
- * Fails safe to trial: if the current LLMO entitlement is absent or the lookup
- * throws, this returns `false` (and logs a WARN) rather than assuming PAID, so a
- * site whose paying status is unknown never gets a recurring, fleet-wide Fargate
- * schedule.
- *
- * @param {object} site - The SpaceCat site model.
- * @param {object} context - The request context (passed to TierClient).
- * @returns {Promise<boolean>} True only when the current LLMO tier is PAID.
- */
-export async function isPayingLlmoSite(site, context) {
-  const { log } = context;
-  try {
-    const tierClient = await TierClient.createForSite(context, site, LLMO_PRODUCT_CODE);
-    const { entitlement } = await tierClient.checkValidEntitlement();
-    if (!entitlement) {
-      log.warn(`Could not determine LLMO tier for site ${site.getId()} `
-        + '(no entitlement found); defaulting to one-time (trial) prompt-suggestion runs');
-      return false;
-    }
-    return entitlement.getTier() === EntitlementModel.TIERS.PAID;
-  } catch (error) {
-    log.warn(`Failed to read LLMO tier for site ${site.getId()}; `
-      + `defaulting to one-time (trial) prompt-suggestion runs: ${error.message}`);
-    return false;
-  }
-}
-
-/**
- * Runs one prompt-suggestion provider for a newly onboarded site, tier-gated.
- * Shared body for {@link registerPromptSuggestionSchedules}.
- *
- * - **Paying (`isPaying === true`)**: registers a recurring DRS schedule
- *   (`createSchedule`) with an immediate first run.
- * - **Trial / non-paying (any other value)**: submits a single on-demand run
- *   (`submitJob`) with NO recurring schedule. These three providers are
- *   on-demand-capable, so a one-shot job is valid and gives a trial site its
- *   first suggestions without committing recurring Fargate load.
- *
- * Split error semantics (see the V2 caller): the immediate first run is
- * best-effort — if it produces nothing (e.g. brand/base-prompt data not present
- * yet) the next scheduled run (paying) self-heals. A `createSchedule` (schedule
- * REGISTRATION) failure is NOT best-effort: the site would never get a recurring
- * schedule and nothing self-heals, so it propagates to the caller which logs it
- * at ERROR. This helper therefore does not swallow the failure itself. The
- * one-shot `submitJob` failure is handled the same way (propagated, logged by the
- * caller) so both paths share one per-pipeline try/catch.
- *
- * NOTE: `createSchedule` derives the tenant-isolation key from `siteId`
- * server-side and REJECTS any caller-supplied imsOrgId, so we deliberately do not
- * thread imsOrgId/orgId into it.
- *
- * @param {object} params
- * @param {object} params.drsClient - Configured DRS client.
- * @param {string} params.providerId - DRS provider id to schedule/run.
- * @param {string} params.cadence - One of DRS_CADENCE_* labels (paying path only).
- * @param {string} params.siteId - SpaceCat site UUID.
- * @param {boolean} params.isPaying - True → recurring schedule; else one-shot run.
- * @param {object} params.log - Logger.
- * @param {Function} [params.say] - Optional Slack say callback.
- * @returns {Promise<object|null>} The createSchedule/submitJob result, or null when
- *   DRS is not configured.
- */
-export async function registerPromptSuggestionSchedule({
-  drsClient, providerId, cadence, siteId, isPaying, log, say = () => {},
-}) {
-  if (!drsClient.isConfigured()) {
-    log.debug(`DRS client not configured, skipping ${providerId} schedule for site ${siteId}`);
-    return null;
-  }
-
-  // Trial / non-paying (or indeterminate tier): run the pipeline ONCE via an
-  // on-demand submitJob, with no recurring schedule.
-  if (!isPaying) {
-    const job = await drsClient.submitJob({
-      provider_id: providerId,
-      source: 'onboarding',
-      priority: 'HIGH',
-      parameters: { siteId },
-    });
-    log.info(`Submitted one-time DRS ${providerId} run (trial site) `
-      + `job=${job?.job_id ?? 'unknown'} for site ${siteId}`);
-    say(`:zap: Submitted one-time DRS ${providerId} run (trial site) for site ${siteId}`);
-    return job;
-  }
-
-  // Paying (PAID): register the recurring schedule with an immediate first run.
-  // Default enable_brand_presence off (plan Phase 0.4): these prompt-suggestion
-  // pipelines must not push unexpected load into the brand-presence pipeline / SNS
-  // allowlist unless a site is explicitly BP-enabled. `providerIds` is an array
-  // (the job_config.provider_ids envelope) even for a single-provider pipeline.
-  const result = await drsClient.createSchedule({
-    siteId,
-    providerIds: [providerId],
-    cadence,
-    description: `${providerId} prompt-suggestion schedule (onboarding)`,
-    enableBrandPresence: false,
-    triggerImmediately: true,
-  });
-
-  log.info(`Registered DRS ${providerId} schedule ${result?.scheduleId ?? 'unknown'} `
-    + `(cadence=${cadence}) for site ${siteId}${result?.alreadyExisted ? ' (already existed)' : ''}`);
-  say(`:calendar_spiral: Registered DRS ${providerId} schedule for site ${siteId}`);
-  return result;
-}
-
-/**
- * Runs every prompt-suggestion pipeline (see {@link PROMPT_SUGGESTION_PIPELINES})
- * for a newly onboarded v2 site, tier-gated: paying sites get a recurring
- * schedule (immediate first run), trial/non-paying sites get a single on-demand
- * run per pipeline (no recurring schedule). See {@link registerPromptSuggestionSchedule}.
- *
- * Error ownership is single-layer: each pipeline is wrapped in its own try/catch
- * that owns the failure (logs at ERROR + emits an operator Slack signal) and
- * never rethrows, so one pipeline's failure (schedule REGISTRATION on the paying
- * path, or the one-shot submit on the trial path) neither aborts onboarding nor
- * masks the other pipelines. Because no callback rejects, the pipelines run under
- * `Promise.all` (not `allSettled`).
- *
- * @param {object} params
- * @param {object} params.drsClient - Configured DRS client.
- * @param {string} params.siteId - SpaceCat site UUID.
- * @param {boolean} params.isPaying - True → recurring schedules; else one-shot runs.
- * @param {object} params.log - Logger.
- * @param {Function} [params.say] - Optional Slack say callback.
- * @returns {Promise<void>}
- */
-export async function registerPromptSuggestionSchedules({
-  drsClient, siteId, isPaying, log, say = () => {},
-}) {
-  // Short-circuit once for an unconfigured client instead of letting each
-  // per-pipeline registerPromptSuggestionSchedule log "not configured" N times.
-  if (!drsClient.isConfigured()) {
-    log.debug(`DRS client not configured, skipping prompt-suggestion schedules for site ${siteId}`);
-    return { completed: true };
-  }
-
-  await Promise.all(
-    PROMPT_SUGGESTION_PIPELINES.map(async ({ name, providerId, cadence }) => {
-      try {
-        await registerPromptSuggestionSchedule({
-          drsClient, providerId, cadence, siteId, isPaying, log, say,
-        });
-      } catch (scheduleError) {
-        // Pipeline REGISTRATION/SUBMIT failure (distinct from the best-effort
-        // immediate run): on the paying path the site would never get a recurring
-        // schedule and nothing self-heals; on the trial path the one-shot run
-        // never fires. Either way, surface it loudly with full context. Onboarding
-        // still succeeds, mirroring the brand-activation side-effect handling in
-        // brands.js (activateBrand). `status` is the upstream HTTP status when the
-        // DRS client attaches one, else 'unknown'.
-        const status = scheduleError.status ?? 'unknown';
-        // Wording tracks the branch: paying → createSchedule (recurring schedule),
-        // trial/non-paying → submitJob (one-shot run). "schedule" alone would
-        // misdescribe the trial-path failure.
-        const mode = isPaying ? 'schedule' : 'one-shot run';
-        log.error(`Failed to run/register DRS ${name} prompt-suggestion (${mode}) `
-          + `provider_id=${providerId} site_id=${siteId} status=${status}: ${scheduleError.message}`);
-        say(`:warning: Failed to run/register DRS ${name} prompt-suggestion (${mode}) `
-          + `for site ${siteId} (will need manual trigger)`);
-      }
-    }),
-  );
-
-  // Sentinel so the caller can distinguish "finished" from a settleWithin timeout
-  // (which resolves to the fallback, not this object).
-  return { completed: true };
 }
 
 // submitOnboardingPromptGenerationJob removed — prompt generation is now
@@ -1074,9 +884,16 @@ export async function updateIndexConfig(dataFolder, context, say = () => {}) {
   });
   const content = Buffer.from(file.content, 'base64').toString('utf-8');
 
-  if (content.includes(dataFolder)) {
-    log.warn(`Helix query yaml already contains string ${dataFolder}. Skipping update.`);
-    await say(`Helix query yaml already contains string ${dataFolder}. Skipping GitHub update.`);
+  // Match dataFolder as an actual YAML key, not a substring of one (LLMO-6320) —
+  // see the "substring of an existing key" test below for the failure this prevents.
+  // ^\s*<folder>: (with the m flag) matches any line, so it would also match a nested
+  // key under a different section -- helix-query.yaml is a flat list of top-level
+  // definitions today, so that case can't occur; revisit if that ever changes.
+  const escapedDataFolder = dataFolder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const indexKeyPattern = new RegExp(`^\\s*${escapedDataFolder}:`, 'm');
+  if (indexKeyPattern.test(content)) {
+    log.warn(`Helix query yaml already has an index definition for ${dataFolder}. Skipping update.`);
+    await say(`Helix query yaml already has an index definition for ${dataFolder}. Skipping GitHub update.`);
     return;
   }
 
@@ -1691,9 +1508,9 @@ export async function activateBrandAndGeneratePrompts({
       // otherwise stall onboarding. On timeout we stop waiting — createSchedule is
       // idempotent, the durable outcome is the server-side schedule row (paying)
       // or a submitted job (trial), and per-pipeline ERROR logging inside
-      // registerPromptSuggestionSchedules stays deterministic.
+      // ensurePromptSuggestionSchedules stays deterministic.
       const scheduleResult = await settleWithin(
-        registerPromptSuggestionSchedules({
+        ensurePromptSuggestionSchedules({
           drsClient,
           siteId: site.getId(),
           isPaying,
@@ -1770,8 +1587,6 @@ export async function activateBrandAndGeneratePrompts({
  * @param {string} params.brandName - The brand name
  * @param {string} params.imsOrgId - The IMS Organization ID
  * @param {string} [params.deliveryType] - The delivery type for site creation
- * @param {boolean} [params.tempOnboarding] - When true, skips updating helix-query.yaml in GitHub.
- *   HTTP clients set this via the `temp-onboarding` body field.
  * @param {string} [params.region] - Optional ISO 3166-1 alpha-2 region code forwarded to V1 DRS
  *   prompt generation. Omitted → DRS client default ('US') applies.
  * @param {boolean} [params.siteOnly=false] - Site-only onboarding (LLMO-5606). When true, stands
@@ -1785,7 +1600,7 @@ export async function activateBrandAndGeneratePrompts({
 export async function performLlmoOnboarding(params, context, say = () => {}) {
   const {
     domain, baseURL: providedBaseURL, brandName, imsOrgId, deliveryType,
-    tempOnboarding, region, siteOnly = false,
+    region, siteOnly = false,
   } = params;
   const { env, log } = context;
 
@@ -1801,12 +1616,11 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     // Create or find organization
     const organization = await createOrFindOrganization(imsOrgId, context, say);
 
-    // Create site BEFORE resolving the onboarding mode. createOrFindSite may
-    // re-parent an existing site into the destination org; resolveLlmoOnboardingMode
-    // reads Site.allByOrganizationId, so the re-parent has to be persisted first
-    // (createOrFindSite saves the site in that branch). Otherwise a legacy
-    // pre-cutoff site moved into a brand-new org would be misclassified as v2
-    // and instantly create the mixed state LLMO-4176 was filed to prevent.
+    // Create the site before resolving the onboarding mode so downstream steps
+    // (entitlement, config, audits) have it. createOrFindSite may re-parent an
+    // existing site into the destination org and persists that immediately.
+    // (This ordering historically also fed resolveLlmoOnboardingMode's
+    // legacy-site cutoff check, which was removed in LLMO-7108.)
     site = await createOrFindSite(baseURL, organization.getId(), context, deliveryType);
 
     const onboardingMode = await resolveLlmoOnboardingMode(organization.getId(), context);
@@ -1825,13 +1639,11 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       log.warn(`Failed to enqueue ${LLMO_ONBOARDING_PUBLISH_TRIGGER} for site ${site.getId()}: ${error.message}`);
     }
 
-    // Update helix-query.yaml in project-elmo-ui-data (skip for temporary onboarding)
-    if (tempOnboarding) {
-      log.info(`Skipping helix-query.yaml update (temp-onboarding) for data folder ${dataFolder}`);
-      await say(`:information_source: Skipping helix-query.yaml update (temp-onboarding) for ${dataFolder}`);
-    } else {
-      await updateIndexConfig(dataFolder, context, say);
-    }
+    // Update helix-query.yaml in project-elmo-ui-data. This registration must always run
+    // during onboarding (LLMO-7141): the former temp-onboarding skip was a workaround for a
+    // since-fixed (same-day) Helix bulk-indexing capacity issue, and skipping registration was
+    // the root cause of the LLMO-6320 bug class (sites silently going dark in dashboards).
+    await updateIndexConfig(dataFolder, context, say);
 
     // Site-only onboarding (LLMO-5606) omits llmo-customer-analysis entirely — it
     // belongs to the prompt-gen/brand path (Piece 2) which site-only skips, and it
@@ -2034,71 +1846,130 @@ export async function performLlmoOffboarding(site, config, context) {
   };
 }
 
-export async function appendRowsToQueryIndex(dataFolder, fileNames, env, log) {
-  const sharepointClient = await createSharePointClient(env);
-  const redirects = sharepointClient.getRedirects();
+// Shared by every project-elmo-ui-data Admin API caller below. Other admin.hlx.page
+// callers in this file (startBulkStatusJob, pollJobStatus, bulkUnpublishPaths) build
+// their own headers (they also need Content-Type) and aren't touched here to keep this
+// change scoped to LLMO-6320; consolidating all of them is a reasonable follow-up.
+const HLX_ADMIN_ORG = 'adobe';
+const HLX_ADMIN_SITE = 'project-elmo-ui-data';
+const HLX_ADMIN_REF = 'main';
+const HLX_ADMIN_BASE_URL = 'https://admin.hlx.page';
 
-  const now = Math.floor(Date.now() / 1000);
-  const rows = fileNames.map((fileName) => {
-    const name = fileName.endsWith('.json') ? fileName : `${fileName}.json`;
-    return [
-      `/${dataFolder}/${name}`,
-      now,
-      now,
-    ];
-  });
+// '/'-separated relative path (e.g. 'brand-presence/2026-w28-chatgpt', or a
+// dataFolder like 'dev/test-com'). Each segment must start with a word character,
+// so '.' and '..' can never match as a whole segment -- this is what rules out
+// '..' traversal and a leading '/' anchor, entirely within the regex.
+const SAFE_RELATIVE_FILE_PATH_RE = /^[\w][\w.-]*(\/[\w][\w.-]*)*$/;
+export const isSafeRelativeFilePath = (value) => typeof value === 'string'
+  && SAFE_RELATIVE_FILE_PATH_RE.test(value);
 
-  log.info(`Appending ${rows.length} rows to query-index.xlsx in ${dataFolder}`);
-  await redirects.appendRowsToSheet(`/${dataFolder}/query-index.xlsx`, rows);
-  log.info(`Successfully appended rows to query-index.xlsx in ${dataFolder}`);
+function buildHlxAdminUrl(action, filePath) {
+  return `${HLX_ADMIN_BASE_URL}/${action}/${HLX_ADMIN_ORG}/${HLX_ADMIN_SITE}/${HLX_ADMIN_REF}/${filePath}`;
 }
 
-export async function previewAndPublishQueryIndex(dataFolder, env, log) {
-  const org = 'adobe';
-  const site = 'project-elmo-ui-data';
-  const ref = 'main';
-  const baseUrl = 'https://admin.hlx.page';
-  const filePath = `${dataFolder}/query-index.json`;
-
+function getHlxAuthHeaders(env) {
   if (!env.HLX_ONBOARDING_TOKEN) {
     throw new Error('HLX_ONBOARDING_TOKEN is not set');
   }
+  return { Cookie: `auth_token=${env.HLX_ONBOARDING_TOKEN}` };
+}
 
-  const headers = {
-    Cookie: `auth_token=${env.HLX_ONBOARDING_TOKEN}`,
-  };
+async function readHlxErrorBody(response) {
+  try {
+    return await response.text();
+  } catch {
+    return '';
+  }
+}
 
+/**
+ * Reindexes a set of already-published files via the Helix Admin API.
+ *
+ * This replaces the previous approach of appending rows directly to
+ * query-index.xlsx via helix-content-sdk's appendRowsToSheet: on a warm Lambda
+ * that client caches the resolved sheet (worksheets[0]) across invocations, so it
+ * can append rows into the wrong sheet of a different workbook (the served
+ * `helix-default` sheet instead of `raw_index`), corrupting the workbook's array
+ * formula (observed twice on heritage-sg, LLMO-6320). The Admin API reindex
+ * endpoint reads the already-published file directly and has no such state.
+ * @param {string} dataFolder - The data folder name
+ * @param {Array<string>} fileNames - File names (with or without .json) to reindex
+ * @param {object} env - Environment variables
+ * @param {object} log - Logger instance
+ * @returns {Promise<void>}
+ */
+export async function reindexQueryIndexPaths(dataFolder, fileNames, env, log) {
+  // Defense-in-depth: dataFolder is database-sourced and admin-controlled today
+  // (the only caller, updateQueryIndex, validates fileNames but trusts the site's
+  // stored dataFolder), but this guards the URL-building itself in case a future
+  // caller lets a less-privileged input reach this parameter.
+  if (!isSafeRelativeFilePath(dataFolder)) {
+    throw new Error(`Invalid dataFolder: ${dataFolder}`);
+  }
+
+  const headers = getHlxAuthHeaders(env);
+
+  log.info(`Reindexing ${fileNames.length} path(s) in ${dataFolder}`);
+
+  // Sequential by design: this is an admin-only, low-QPS path (LLMO administrators
+  // only), and one request at a time avoids bursting the Admin API.
+  let reindexedCount = 0;
+  for (const fileName of fileNames) {
+    const name = fileName.endsWith('.json') ? fileName : `${fileName}.json`;
+    const filePath = `${dataFolder}/${name}`;
+    const reindexUrl = buildHlxAdminUrl('index', filePath);
+
+    let response;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      response = await fetch(reindexUrl, { method: 'POST', headers, timeout: 30000 });
+    } catch (error) {
+      log.error(`Reindex failed for ${filePath} after reindexing ${reindexedCount}/${fileNames.length}: ${error.message}`);
+      throw new Error(`Reindex failed for ${filePath}: ${error.message}`);
+    }
+    if (!response.ok) {
+      const errorCode = response.headers?.get('x-error-code') || '';
+      const errorMsg = response.headers?.get('x-error') || '';
+      // eslint-disable-next-line no-await-in-loop
+      const bodyText = await readHlxErrorBody(response);
+      log.error(`Reindex failed for ${filePath} after reindexing ${reindexedCount}/${fileNames.length}: ${response.status} ${response.statusText} | x-error-code: ${errorCode} | x-error: ${errorMsg} | body: ${bodyText}`);
+      throw new Error(`Reindex failed for ${filePath}: ${response.status} ${response.statusText}`);
+    }
+    reindexedCount += 1;
+  }
+
+  log.info(`Successfully reindexed ${fileNames.length} path(s) in ${dataFolder}`);
+}
+
+export async function previewAndPublishQueryIndex(dataFolder, env, log) {
+  // Defense-in-depth -- see the matching check in reindexQueryIndexPaths.
+  if (!isSafeRelativeFilePath(dataFolder)) {
+    throw new Error(`Invalid dataFolder: ${dataFolder}`);
+  }
+
+  const filePath = `${dataFolder}/query-index.json`;
+  const headers = getHlxAuthHeaders(env);
   const fetchOptions = { method: 'POST', headers, timeout: 30000 };
 
-  const previewUrl = `${baseUrl}/preview/${org}/${site}/${ref}/${filePath}`;
+  const previewUrl = buildHlxAdminUrl('preview', filePath);
   log.info(`Previewing query-index at ${previewUrl}`);
   const previewResponse = await fetch(previewUrl, fetchOptions);
   if (!previewResponse.ok) {
     const errorCode = previewResponse.headers?.get('x-error-code') || '';
     const errorMsg = previewResponse.headers?.get('x-error') || '';
-    let bodyText = '';
-    try {
-      bodyText = await previewResponse.text();
-    } catch {
-      /* noop */
-    }
+    const bodyText = await readHlxErrorBody(previewResponse);
     log.error(`Preview failed: ${previewResponse.status} ${previewResponse.statusText} | x-error-code: ${errorCode} | x-error: ${errorMsg} | body: ${bodyText}`);
     throw new Error(`Preview failed: ${previewResponse.status} ${previewResponse.statusText}`);
   }
   log.info('Preview of query-index succeeded');
 
-  const publishUrl = `${baseUrl}/live/${org}/${site}/${ref}/${filePath}`;
+  const publishUrl = buildHlxAdminUrl('live', filePath);
   log.info(`Publishing query-index at ${publishUrl}`);
   const publishResponse = await fetch(publishUrl, fetchOptions);
   if (!publishResponse.ok) {
     const errorCode = publishResponse.headers?.get('x-error-code') || '';
     const errorMsg = publishResponse.headers?.get('x-error') || '';
-    let bodyText = '';
-    try {
-      bodyText = await publishResponse.text();
-    } catch {
-      /* noop */
-    }
+    const bodyText = await readHlxErrorBody(publishResponse);
     log.error(`Publish failed: ${publishResponse.status} ${publishResponse.statusText} | x-error-code: ${errorCode} | x-error: ${errorMsg} | body: ${bodyText}`);
     throw new Error(`Publish failed: ${publishResponse.status} ${publishResponse.statusText}`);
   }

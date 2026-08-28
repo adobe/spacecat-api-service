@@ -84,17 +84,22 @@ v2-prompts-by-brand:
       schema:
         type: string
       description: >-
-        Filter by prompt source (exact match), e.g. `gsc`, `semrush`,
-        `base_url`, `config`. Free-form string — sources are open-ended and
-        added by upstream producers (e.g. DRS) without API changes, so no enum
-        is enforced.
+        Filter by prompt source (the producing system), e.g. `gsc`, `semrush`,
+        `base-url`, `config`. Matched on the canonical form, so `citation-attempt`
+        also finds rows stored as `citation_attempt` (drift spellings fold
+        together, case-insensitive). Free-form string — sources are open-ended and
+        added by upstream producers (e.g. DRS) without API changes, so no enum is
+        enforced.
     - name: sort
       in: query
       required: false
       schema:
         type: string
-        enum: [topic, prompt, category, origin, status, updatedAt]
-      description: Sort column. Default is updatedAt descending
+        enum: [topic, prompt, category, origin, source, status, updatedAt]
+      description: >-
+        Sort column. Default is updatedAt descending. `source` sorts on the
+        canonical form, so a producer's drift spellings (`citation_attempt` /
+        `citation-attempt`) order together.
     - name: order
       in: query
       required: false
@@ -112,7 +117,7 @@ v2-prompts-by-brand:
       Upsert uniqueness: match by id or by (text, regions).
     operationId: listPromptsByBrand
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - api_key: [ ]
     responses:
       '200':
@@ -140,7 +145,7 @@ v2-prompts-by-brand:
       (counted as skipped, not returned in the response).
     operationId: createPromptsByBrand
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - api_key: [ ]
     requestBody:
       required: true
@@ -235,7 +240,7 @@ v2-prompts-by-brand-and-id:
     summary: Get a single prompt
     operationId: getPromptByBrandAndId
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - api_key: [ ]
     responses:
       '200':
@@ -261,7 +266,7 @@ v2-prompts-by-brand-and-id:
       leaving the stored value untouched.
     operationId: updatePromptByBrandAndId
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - api_key: [ ]
     requestBody:
       content:
@@ -288,7 +293,7 @@ v2-prompts-by-brand-and-id:
     description: Sets status to 'deleted'.
     operationId: deletePromptByBrandAndId
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - api_key: [ ]
     responses:
       '204':
@@ -325,7 +330,7 @@ v2-prompts-by-brand-bulk-delete:
       See ADR-001 for details.
     operationId: bulkDeletePromptsByBrand
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - api_key: [ ]
     requestBody:
       required: true
@@ -376,7 +381,7 @@ v2-prompts-by-brand-check:
       Region values are normalized to lowercase 2-char codes before comparison.
     operationId: checkPromptsByBrand
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - api_key: [ ]
     requestBody:
       required: true

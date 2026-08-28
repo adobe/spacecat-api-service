@@ -36,7 +36,7 @@ const PARENT_WS = 'bb0f4e1c-8bb1-402e-88f2-f68618ea7397';
 // Strict mode: rest-transport now requires SEMRUSH_PROJECTS_BASE_URL to be
 // supplied via env (Vault-backed in dev/stage/prod). Tests inject a
 // deterministic value so the URL-based assertions below stay stable.
-const TEST_ENV = { SEMRUSH_PROJECTS_BASE_URL: 'https://adobe-hackathon.semrush.com' };
+const TEST_ENV = { SEMRUSH_PROJECTS_BASE_URL: 'https://www.semrush.com' };
 
 // All transport methods now route through the typed Semrush clients (Project
 // Engine + User Manager, both openapi-fetch), which call the injected fetch with
@@ -130,7 +130,7 @@ describe('Semrush REST transport', () => {
       await transport.publishProject(WORKSPACE_ID, PROJECT_ID);
 
       const call = await callOf(fetchStub);
-      expect(call.url).to.match(/^https:\/\/adobe-hackathon\.semrush\.com\//);
+      expect(call.url).to.match(/^https:\/\/www\.semrush\.com\//);
     });
 
     it('throws if SEMRUSH_PROJECTS_BASE_URL is missing (no source default)', () => {
@@ -720,7 +720,20 @@ describe('Semrush REST transport', () => {
       expect(body.limit).to.equal(200);
     });
 
-    it('does not forward sort_field / sort_dir — Semrush rejects them on this endpoint', async () => {
+    it('opts into metadata via the include_metadata QUERY parameter on every call', async () => {
+      fetchStub.resolves(fetchOk({ items: [] }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.listPromptsByTags(WORKSPACE_ID, PROJECT_ID, { page: 1 });
+
+      const call = await callOf(fetchStub);
+      // Upstream reads the flag off the query string only: in the body it is
+      // ignored with a 200 and every item comes back without its `metadata` key.
+      expect(new URL(call.url).searchParams.get('include_metadata')).to.equal('true');
+      expect(JSON.parse(call.body)).to.not.have.property('include_metadata');
+    });
+
+    it('does not forward caller-supplied sort_field / sort_dir — only `sort` maps to them', async () => {
       fetchStub.resolves(fetchOk({ items: [] }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
@@ -735,6 +748,37 @@ describe('Semrush REST transport', () => {
       expect(body).to.not.have.property('sort_field');
       expect(body).to.not.have.property('sort_dir');
       expect(body.search).to.equal('photoshop');
+    });
+
+    it('maps sort/order onto the sort_field/sort_dir wire keys (LLMO-6289)', async () => {
+      fetchStub.resolves(fetchOk({ items: [] }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.listPromptsByTags(WORKSPACE_ID, PROJECT_ID, {
+        sort: 'metadata.updated_at',
+        order: 'desc',
+      });
+
+      const call = await callOf(fetchStub);
+      const body = JSON.parse(call.body);
+      expect(body.sort_field).to.equal('metadata.updated_at');
+      expect(body.sort_dir).to.equal('desc');
+      // `sort` / `order` are this transport's own param names, never wire keys —
+      // upstream ignores them silently, so sending them sorts nothing.
+      expect(body).to.not.have.property('sort');
+      expect(body).to.not.have.property('order');
+    });
+
+    it('omits both sort keys entirely when no sort is requested', async () => {
+      fetchStub.resolves(fetchOk({ items: [] }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.listPromptsByTags(WORKSPACE_ID, PROJECT_ID, { page: 1 });
+
+      const call = await callOf(fetchStub);
+      const body = JSON.parse(call.body);
+      expect(body).to.not.have.property('sort_field');
+      expect(body).to.not.have.property('sort_dir');
     });
   });
 
@@ -1001,6 +1045,27 @@ describe('Semrush REST transport', () => {
     });
   });
 
+  describe('getProjectStatus', () => {
+    // LLMO-5492 / AC3 — the publish-completion read. Uses the draft view
+    // (draft=true) so a never-published project's `publish_status` is echoed
+    // faithfully (the live view empties a never-published draft, serenity-docs #12 §10).
+    it('GETs /v1/workspaces/{ws}/projects/{pid} with draft=true and no body', async () => {
+      fetchStub.resolves(fetchOk({ id: PROJECT_ID, publish_status: 'live' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const out = await transport.getProjectStatus(WORKSPACE_ID, PROJECT_ID);
+
+      const call = await callOf(fetchStub);
+      expect(call.method).to.equal('GET');
+      expect(call.url).to.match(
+        new RegExp(`/v1/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}\\?`),
+      );
+      expect(call.url).to.include('draft=true');
+      expect(call.body).to.equal(undefined);
+      expect(out.publish_status).to.equal('live');
+    });
+  });
+
   describe('listAiModels', () => {
     it('GETs /v1/.../ai_models with page=1&limit=100 by default', async () => {
       fetchStub.resolves(fetchOk({ items: [] }));
@@ -1076,7 +1141,7 @@ describe('Semrush REST transport', () => {
       const call = await callOf(fetchStub);
       expect(call.method).to.equal('DELETE');
       expect(call.url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}`,
+        `https://www.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}`,
       );
       expect(call.body).to.equal(undefined);
     });
@@ -1108,7 +1173,7 @@ describe('Semrush REST transport', () => {
       // V2: identical schema to v1, drop-in (createBenchmarks precedent). The
       // sibling list/delete ai_models routes have no v2 variant and stay on v1.
       expect(call.url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v2/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/ai_models`,
+        `https://www.semrush.com/enterprise/projects/api/v2/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/ai_models`,
       );
       expect(JSON.parse(call.body)).to.deep.equal({ model_id: 'cat-gpt-4o' });
       expect(result.id).to.equal('new-assignment-uuid');
@@ -1125,7 +1190,7 @@ describe('Semrush REST transport', () => {
       const call = await callOf(fetchStub);
       expect(call.method).to.equal('DELETE');
       expect(call.url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/ai_models`,
+        `https://www.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/ai_models`,
       );
       expect(JSON.parse(call.body)).to.deep.equal({ ids: ['assign-1', 'assign-2'] });
     });
@@ -1141,7 +1206,7 @@ describe('Semrush REST transport', () => {
       const call = await callOf(fetchStub);
       expect(call.method).to.equal('GET');
       expect(call.url).to.equal(
-        'https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/ai_models?page=1&limit=100',
+        'https://www.semrush.com/enterprise/projects/api/v1/ai_models?page=1&limit=100',
       );
       expect(result.items[0].id).to.equal('cat-gpt');
     });
@@ -1158,7 +1223,7 @@ describe('Semrush REST transport', () => {
       const call = await callOf(fetchStub);
       expect(call.method).to.equal('POST');
       expect(call.url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v2/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/aio/tags`,
+        `https://www.semrush.com/enterprise/projects/api/v2/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/aio/tags`,
       );
       expect(JSON.parse(call.body)).to.deep.equal({ names });
     });
@@ -1226,7 +1291,7 @@ describe('Semrush REST transport', () => {
       const call = await callOf(fetchStub);
       expect(call.method).to.equal('PATCH');
       expect(call.url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v2/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/aio/tags/tag-1`,
+        `https://www.semrush.com/enterprise/projects/api/v2/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/aio/tags/tag-1`,
       );
       expect(JSON.parse(call.body)).to.deep.equal({ name: 'category:Renamed', parent_id: 'parent-1' });
       expect(result).to.deep.equal({ id: 'tag-1', name: 'category:Renamed', parent_id: 'parent-1' });
@@ -1295,7 +1360,7 @@ describe('Semrush REST transport', () => {
       const call = await callOf(fetchStub);
       expect(call.method).to.equal('GET');
       expect(call.url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/brand-topics?domain=example.com&country=US`,
+        `https://www.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/brand-topics?domain=example.com&country=US`,
       );
       expect(result[0].topic).to.equal('Running');
     });
@@ -1312,7 +1377,7 @@ describe('Semrush REST transport', () => {
       const call = await callOf(fetchStub);
       expect(call.method).to.equal('POST');
       expect(call.url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/users/api/v2/workspaces/${PARENT_WS}/child`,
+        `https://www.semrush.com/enterprise/users/api/v2/workspaces/${PARENT_WS}/child`,
       );
       // `resources` is REQUIRED by createWorkspaceV2Form; `{}` is the schema-valid "no
       // allocation" body. Omitting the key is contract-violating even though live tolerates it.
@@ -1332,7 +1397,7 @@ describe('Semrush REST transport', () => {
       const call = await callOf(fetchStub);
       expect(call.method).to.equal('GET');
       expect(call.url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/users/api/v1/workspaces/${WORKSPACE_ID}/status`,
+        `https://www.semrush.com/enterprise/users/api/v1/workspaces/${WORKSPACE_ID}/status`,
       );
       expect(result.status).to.equal('created');
     });
@@ -1350,7 +1415,7 @@ describe('Semrush REST transport', () => {
       const call = await callOf(fetchStub);
       expect(call.method).to.equal('GET');
       expect(call.url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/users/api/v1/workspaces/${WORKSPACE_ID}/resources`,
+        `https://www.semrush.com/enterprise/users/api/v1/workspaces/${WORKSPACE_ID}/resources`,
       );
       expect(result.product_resources.ai.resources.projects.total).to.equal(13);
     });
@@ -1366,28 +1431,9 @@ describe('Semrush REST transport', () => {
       const call = await callOf(fetchStub);
       expect(call.method).to.equal('GET');
       expect(call.url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/users/api/v1/workspaces/${PARENT_WS}/family`,
+        `https://www.semrush.com/enterprise/users/api/v1/workspaces/${PARENT_WS}/family`,
       );
       expect(result.items[0].id).to.equal('subworkspace-ws-1');
-    });
-  });
-
-  describe('transferWorkspaceResources', () => {
-    it('POSTs the payload wrapped under `resources` to /v2/workspaces/{ws}/resources/transfer', async () => {
-      fetchStub.resolves(fetchOk(null));
-      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
-
-      const payload = { ai: { projects: 3, prompts: 1500 } };
-      await transport.transferWorkspaceResources(WORKSPACE_ID, payload);
-
-      const call = await callOf(fetchStub);
-      expect(call.method).to.equal('POST');
-      // V2: same aiProductResources `ai` shape proven live via createSubworkspace,
-      // wrapped under `resources` (WorkspaceResourcesTransferV2Form).
-      expect(call.url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/users/api/v2/workspaces/${WORKSPACE_ID}/resources/transfer`,
-      );
-      expect(JSON.parse(call.body)).to.deep.equal({ resources: payload });
     });
   });
 
@@ -1403,7 +1449,7 @@ describe('Semrush REST transport', () => {
       const call = await callOf(fetchStub);
       expect(call.method).to.equal('DELETE');
       expect(call.url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/users/api/v1/workspaces/${WORKSPACE_ID}`,
+        `https://www.semrush.com/enterprise/users/api/v1/workspaces/${WORKSPACE_ID}`,
       );
       expect(call.body).to.equal(undefined);
     });
@@ -1440,7 +1486,7 @@ describe('Semrush REST transport', () => {
       const call = await callOf(fetchStub);
       expect(call.method).to.equal('GET');
       expect(call.url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/projects?type=ai`,
+        `https://www.semrush.com/enterprise/projects/api/v1/workspaces/${WORKSPACE_ID}/projects?type=ai`,
       );
       expect(result.items[0].id).to.equal(PROJECT_ID);
     });
@@ -1458,7 +1504,7 @@ describe('Semrush REST transport', () => {
       // v2 (not v1): project-engine-client 1.2.0 moved init_status to /v2 and
       // dropped the /v1 route.
       expect(call.url).to.equal(
-        `https://adobe-hackathon.semrush.com/enterprise/projects/api/v2/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/aio/init_status`,
+        `https://www.semrush.com/enterprise/projects/api/v2/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/aio/init_status`,
       );
       expect(result.initialized).to.equal(false);
     });
@@ -1489,10 +1535,33 @@ describe('Semrush REST transport', () => {
         expect(err).to.be.instanceOf(SerenityTransportError);
         expect(err.status).to.equal(503);
         expect(err.body).to.deep.equal({ code: 'unavailable' });
+        // SITES-49993: structured request descriptor for the upstream-error log.
+        expect(err.method).to.equal('GET');
         expect(fetchStub.callCount).to.equal(3);
       } finally {
         clock.restore();
       }
+    });
+
+    // SITES-49993: unwrap attaches the upstream URL path as `endpoint` so the
+    // controller's log line carries it as a queryable field. A hand-built
+    // Response has an empty `url`, so pin one via defineProperty.
+    it('attaches the upstream URL path as endpoint on SerenityTransportError (SITES-49993)', async () => {
+      const resp = fetchFail(422, { code: 'bad_request' });
+      Object.defineProperty(resp, 'url', {
+        value: `https://www.semrush.com/enterprise/users/api/v1/workspaces/${WORKSPACE_ID}/status`,
+      });
+      fetchStub.resolves(resp);
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+      let err;
+      try {
+        await transport.getWorkspaceStatus(WORKSPACE_ID);
+      } catch (e) {
+        err = e;
+      }
+      expect(err).to.be.instanceOf(SerenityTransportError);
+      expect(err.method).to.equal('GET');
+      expect(err.endpoint).to.equal(`/enterprise/users/api/v1/workspaces/${WORKSPACE_ID}/status`);
     });
 
     it('falls back to raw text when the upstream body is not JSON (after exhausting GET retries)', async () => {

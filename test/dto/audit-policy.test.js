@@ -11,7 +11,9 @@
  */
 
 import { expect } from 'chai';
-import { AuditPolicyDto, AuditPolicyRevisionDto } from '../../src/dto/audit-policy.js';
+import {
+  AuditPolicyDto, AuditPolicyRevisionDto, AuditScopePageDto,
+} from '../../src/dto/audit-policy.js';
 
 const SITE_ID = '7b2e3f9c-0000-4000-8000-000000000001';
 
@@ -130,6 +132,64 @@ describe('AuditPolicyDto', () => {
     });
   });
 
+  it('revision toJSON uses resolvedUpdatedBy over the raw column when supplied', () => {
+    const row = {
+      version: 4,
+      budget: 4000,
+      strategy_name: 'tiered',
+      exclusion_globs: [],
+      manual_urls: [],
+      scope_config: {},
+      lifecycle_overrides: {},
+      updated_by: 'A1B2C3D4E5F6@AdobeOrg',
+      reason: 'r',
+      note: null,
+      effective_at: null,
+      superseded_at: null,
+    };
+    const dto = AuditPolicyRevisionDto.toJSON(row, 'Jane Doe');
+    expect(dto.updatedBy).to.equal('Jane Doe');
+  });
+
+  it('revision toJSON ignores a non-string 2nd arg (e.g. the array index from list.map) and keeps the raw column', () => {
+    const row = {
+      version: 4,
+      budget: 4000,
+      strategy_name: 'tiered',
+      exclusion_globs: [],
+      manual_urls: [],
+      scope_config: {},
+      lifecycle_overrides: {},
+      updated_by: 'u@x.com',
+      reason: 'r',
+      note: null,
+      effective_at: null,
+      superseded_at: null,
+    };
+    // Simulates [row].map(AuditPolicyRevisionDto.toJSON) passing (row, index).
+    const dto = AuditPolicyRevisionDto.toJSON(row, 3);
+    expect(dto.updatedBy).to.equal('u@x.com');
+  });
+
+  it('revision toJSON falls back to the raw updated_by column when no resolution is supplied', () => {
+    const row = {
+      version: 4,
+      budget: 4000,
+      strategy_name: 'tiered',
+      exclusion_globs: [],
+      manual_urls: [],
+      scope_config: {},
+      lifecycle_overrides: {},
+      updated_by: 'u@x.com',
+      reason: 'r',
+      note: null,
+      effective_at: null,
+      superseded_at: null,
+    };
+    const dto = AuditPolicyRevisionDto.toJSON(row);
+    expect(dto.updatedBy).to.equal('u@x.com');
+  });
+
   it('revision toJSON normalizes raw Postgres timestamptz text to Z-suffixed ISO8601', () => {
     const row = {
       version: 4,
@@ -148,5 +208,38 @@ describe('AuditPolicyDto', () => {
     const dto = AuditPolicyRevisionDto.toJSON(row);
     expect(dto.effectiveAt).to.equal('2026-01-01T00:00:00.123Z');
     expect(dto.supersededAt).to.equal(null);
+  });
+
+  it('scope page toJSON maps snake_case row to camelCase', () => {
+    const row = {
+      site_id: SITE_ID,
+      url: 'https://x/a',
+      url_path: '/a',
+      discovery_source: ['sitemap'],
+      last_modified: '2026-01-01T00:00:00Z',
+      lifecycle_state: 'active',
+    };
+    const dto = AuditScopePageDto.toJSON(row);
+    expect(dto).to.deep.equal({
+      url: 'https://x/a',
+      urlPath: '/a',
+      discoverySource: ['sitemap'],
+      lastModified: '2026-01-01T00:00:00.000Z',
+      lifecycleState: 'active',
+    });
+    expect(dto).to.not.have.any.keys('site_id', 'url_path', 'discovery_source', 'last_modified', 'lifecycle_state');
+  });
+
+  it('scope page toJSON normalizes raw Postgres timestamptz text to Z-suffixed ISO8601', () => {
+    const row = {
+      site_id: SITE_ID,
+      url: 'https://x/a',
+      url_path: '/a',
+      discovery_source: ['manual'],
+      last_modified: '2026-01-01T00:00:00.123456+00:00',
+      lifecycle_state: 'active',
+    };
+    const dto = AuditScopePageDto.toJSON(row);
+    expect(dto.lastModified).to.equal('2026-01-01T00:00:00.123Z');
   });
 });

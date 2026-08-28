@@ -30,6 +30,7 @@ import {
 } from './prompts.js';
 import { ORIGIN_VALUE } from '../prompt-tags.js';
 import { resolveIntentValueInjection } from '../tag-tree.js';
+import { buildSliceProjectMap, sliceKey } from '../subworkspace-projects.js';
 
 /** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
 
@@ -56,11 +57,17 @@ const MAX_REQUEUE_DEPTH = 5;
  * and cheap (serenity-docs#31), so the worker just re-derives it rather than
  * threading it through job metadata.
  *
+ * Exported so the one-off re-classification sweep
+ * (`scripts/serenity-retype-backfill.mjs`) classifies through the SAME closure the
+ * write paths use, rather than reassembling needles itself. A second assembly is
+ * how the four-way classifier divergence started; the sweep exists precisely to
+ * correct that class of drift, so it must not introduce a fifth.
+ *
  * @param {object} dataAccess - `context.dataAccess`.
  * @param {string} brandId - SpaceCat brand uuid.
  * @returns {Promise<(text: string, geoTargetId: number) => string>}
  */
-async function buildPromptTypeClassifier(dataAccess, brandId) {
+export async function buildPromptTypeClassifier(dataAccess, brandId) {
   const brand = await dataAccess.Brand.findById(brandId);
   const brandName = brand?.getName?.() || '';
   const brandAliases = await getBrandAliases(brandId, dataAccess.services.postgrestClient);
@@ -111,6 +118,7 @@ async function requeuePending(context, job, semrushWorkspaceId, items) {
   const newJob = await createAndEnqueueJob(context, {
     jobType: CLASSIFY_PROMPTS_JOB_TYPE,
     promiseToken: currentMetadata.promiseToken,
+    promisePair: currentMetadata.promisePair,
     metadata: {
       mode: 'reclassify', semrushWorkspaceId, items, requeueDepth: currentDepth + 1,
     },
@@ -132,20 +140,48 @@ async function requeuePending(context, job, semrushWorkspaceId, items) {
  * @param {SerenityTransport} transport - Serenity transport built from the exchanged
  *   access token.
  * @param {object} metadata - the job's metadata (`brandId`, `semrushWorkspaceId`,
- *   `prompts`).
+ *   `prompts`, and — for a subworkspace-mode CSV import — `authMode`,
+ *   `workspaceId`, `parentWorkspaceId`).
  * @returns {Promise<object>} the job result.
  */
 async function createAndClassify(context, job, transport, metadata) {
   const {
     dataAccess, env, log,
   } = context;
-  const { brandId, semrushWorkspaceId } = metadata;
+  // Authorship (LLMO-6289): the caller id captured at enqueue time in the create
+  // controller, carried through the async job so classified-on-create prompts are
+  // stamped with the human/service that submitted them, not the job runner.
+  const {
+    brandId, semrushWorkspaceId, callerId = 'unknown', authMode,
+  } = metadata;
   const inputs = Array.isArray(metadata.prompts) ? metadata.prompts : [];
 
-  const projects = await dataAccess.BrandSemrushProject.allByBrandId(brandId);
-  const projectsBySlice = new Map();
-  for (const p of projects || []) {
-    projectsBySlice.set(`${p.getGeoTargetId()}:${p.getLanguageCode()}`, p);
+  // Slice→project resolution is the ONLY create-path difference between the two
+  // modes (mirrors the sync twins handleCreatePrompts vs
+  // handleCreatePromptsSubworkspace): flat mode reads the BrandSemrushProject DB
+  // mapping, subworkspace resolves projects from ONE live listing of the
+  // sub-workspace (buildSliceProjectMap). Everything downstream — the classifier,
+  // tag/intent injectors, per-slice create + publish-once fan-out, the pending
+  // self-requeue — is the shared, project-id-keyed logic below.
+  const isSubworkspace = authMode === 'subworkspace';
+  /** @type {(geoTargetId: number, languageCode: string) => string | null} */
+  let resolveProjectIdForSlice;
+  if (isSubworkspace) {
+    const projectsBySlice = await buildSliceProjectMap(transport, semrushWorkspaceId, log);
+    resolveProjectIdForSlice = (geoTargetId, languageCode) => {
+      const project = projectsBySlice.get(sliceKey(geoTargetId, languageCode));
+      return project ? String(project.id) : null;
+    };
+  } else {
+    const projects = await dataAccess.BrandSemrushProject.allByBrandId(brandId);
+    const projectsBySlice = new Map();
+    for (const p of projects || []) {
+      projectsBySlice.set(`${p.getGeoTargetId()}:${p.getLanguageCode()}`, p);
+    }
+    resolveProjectIdForSlice = (geoTargetId, languageCode) => {
+      const project = projectsBySlice.get(`${geoTargetId}:${languageCode}`);
+      return project ? project.getSemrushProjectId() : null;
+    };
   }
 
   const classifyPromptType = await buildPromptTypeClassifier(dataAccess, brandId);
@@ -170,8 +206,8 @@ async function createAndClassify(context, job, transport, metadata) {
     if (!input) {
       return { skipped: { text: String(raw?.text || ''), reason: /** @type {string} */ (reason) } };
     }
-    const project = projectsBySlice.get(`${input.geoTargetId}:${input.languageCode}`);
-    if (!project) {
+    const projectId = resolveProjectIdForSlice(input.geoTargetId, input.languageCode);
+    if (!projectId) {
       return {
         skipped: {
           text: input.text,
@@ -179,7 +215,6 @@ async function createAndClassify(context, job, transport, metadata) {
         },
       };
     }
-    const projectId = project.getSemrushProjectId();
     try {
       let typed = await injectComputedTags(projectId, input);
       typed = await injectComputedIntent(projectId, typed);
@@ -188,6 +223,7 @@ async function createAndClassify(context, job, transport, metadata) {
         semrushWorkspaceId,
         projectId,
         typed,
+        callerId,
       );
       const intentPending = intentByText.get(input.text) === null;
       return {
@@ -278,7 +314,8 @@ async function createAndClassify(context, job, transport, metadata) {
  * @param {SerenityTransport} transport
  * @param {object} metadata - `{ semrushWorkspaceId, items: [{ projectId,
  *   promptId, text, tagIds }] }` — `tagIds` is the FULL desired tag set minus
- *   `intent` (caller tags + server type/origin), matching the edit handlers'
+ *   `intent` (caller tags + server type/source; `origin` no longer gets its
+ *   own tag, tag-display-names.md §3), matching the edit handlers'
  *   "recompute the whole set, then replace" contract.
  * @returns {Promise<object>} the job result.
  */

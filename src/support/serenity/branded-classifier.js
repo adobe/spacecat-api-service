@@ -38,6 +38,17 @@ import { collectAliasNames } from './brand-aliases.js';
  * final token, `-s` and (after a sibilant) `-es`, and strips the possessive
  * clitic `'s` from BOTH sides before matching. `Ace` therefore still does not
  * match `surface` or `spaces`, but does match `Aces`.
+ *
+ * "Whole word" cannot mean "flanked by spaces", because Japanese, Chinese, Thai,
+ * Lao, Khmer and Burmese do not put spaces between words: `auのSIMロック解除` is a
+ * single space-delimited token, so a space-flanked test can never match the brand
+ * inside it and every prompt in such a market classifies `non-branded`. Each
+ * character of those scripts is therefore given its own token during
+ * normalization, which restores a boundary on both sides of a needle embedded in
+ * running CJK text and lets a CJK-native brand name (`楽天`) match as a contiguous
+ * character run. Korean and Vietnamese are deliberately NOT in that set — both
+ * delimit words with spaces, so `삼성` must keep matching `삼성 전자` and not
+ * `삼성전자`.
  */
 
 // Latin letters that carry a diacritic/ligature but have NO canonical NFD
@@ -71,15 +82,49 @@ const POSSESSIVE_RE = /['’]s(?=[^\p{L}\p{N}]|$)/gu;
 const SIBILANT_RE = /(?:[sxz]|ch|sh)$/;
 
 /**
+ * Kana voicing marks (dakuten `゙` / handakuten `゚`, both combining and spacing
+ * forms, plus their half-width variants) and the prolonged sound mark `ー`.
+ * Unicode gives all of these `Diacritic=Yes`, but in Japanese they are phonemic,
+ * not decoration: stripping them merges distinct kana and silently corrupts the
+ * text on both sides of the match. NFD decomposes `パ` to `ハ` + `゚` and `ゾ` to
+ * `ソ` + `゙`, so a blanket `\p{Diacritic}` strip turns `パナソニック` into
+ * `ハナソニック` and `ソニー` into `ソニ` — which would make the needle `ソニー`
+ * (Sony) match `パナソニック` (Panasonic). Excluded from the strip so the
+ * distinction survives.
+ */
+const KANA_PHONEMIC_MARKS = '\\u3099\\u309A\\u309B\\u309C\\u30FC\\uFF9E\\uFF9F';
+const DIACRITIC_RE = new RegExp(`(?![${KANA_PHONEMIC_MARKS}])\\p{Diacritic}`, 'gu');
+
+/**
+ * Scripts that do not delimit words with spaces, matched by Script_Extensions so
+ * characters shared between kana (notably the prolonged sound mark) are included.
+ * Every character of these scripts becomes its own token during normalization —
+ * see the file header for why a space-flanked "whole word" test is otherwise
+ * unsatisfiable in them. Hangul and Latin-script Vietnamese are excluded on
+ * purpose: those languages DO use word spaces, so they keep whole-word semantics.
+ */
+const SPACELESS_SCRIPT_RE = /[\p{scx=Han}\p{scx=Hiragana}\p{scx=Katakana}\p{scx=Thai}\p{scx=Lao}\p{scx=Khmer}\p{scx=Myanmar}]/gu;
+
+/**
  * Normalizes one side of the match (needle OR haystack) into a canonical,
  * space-delimited token stream:
- *   - fold diacritics (NFD decomposition, strip combining marks) so `café` ≈ `cafe`;
+ *   - fold diacritics (NFD decomposition, strip combining marks) so `café` ≈ `cafe`,
+ *     keeping the kana marks in {@link KANA_PHONEMIC_MARKS}, which are
+ *     `Diacritic=Yes` but distinguish one kana from another;
+ *   - re-compose (NFC) so a kept combining mark rejoins its base character. This
+ *     has to happen BEFORE the punctuation collapse below: a lone combining mark
+ *     is category `Mn`, which is neither `\p{L}` nor `\p{N}`, so the collapse
+ *     would otherwise turn it into a token gap and destroy the very kana the
+ *     strip just preserved;
  *   - lower-case (case-insensitive match);
  *   - fold the non-decomposing accented/ligature letters (`ø→o`, `æ→ae`, `ß→ss`,
  *     …) that the NFD strip leaves intact, so `Ørsted` ≈ `Orsted`;
  *   - drop the possessive clitic `'s`, so `Kellogg's` ≡ `Kellogg`;
  *   - replace every run of non-alphanumeric characters (Unicode letters/numbers)
  *     with a single space, so punctuation/whitespace collapses to token gaps;
+ *   - split every space-less-script character into its own token
+ *     ({@link SPACELESS_SCRIPT_RE}), then collapse the runs of spaces that
+ *     produces;
  *   - trim.
  * Both sides go through this, so word-boundary matching reduces to a padded
  * substring test (see {@link classifyBrandedTag}). Applying the identical
@@ -92,11 +137,14 @@ const SIBILANT_RE = /(?:[sxz]|ch|sh)$/;
 export function normalizeMatch(value) {
   return String(value ?? '')
     .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
+    .replace(DIACRITIC_RE, '')
+    .normalize('NFC')
     .toLowerCase()
     .replace(NON_DECOMPOSING_RE, (ch) => NON_DECOMPOSING_FOLDS[ch])
     .replace(POSSESSIVE_RE, '')
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .replace(SPACELESS_SCRIPT_RE, (ch) => ` ${ch} `)
+    .replace(/\s+/gu, ' ')
     .trim();
 }
 

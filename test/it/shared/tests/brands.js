@@ -14,8 +14,10 @@ import { expect } from 'chai';
 import {
   ORG_1_ID,
   BRAND_1_ID,
+  SITE_1_ID,
   SITE_2_ID,
   SITE_2_BASE_URL,
+  SITE_3_ID, // belongs to ORG_2, not ORG_1 (seed-data/sites.js) — used for cross-org tests
   MARKET_SITE_1_ID,
   MARKET_SITE_1_BASE_URL,
 } from '../seed-ids.js';
@@ -34,6 +36,9 @@ export default function brandsTests(getHttpClient, resetData) {
           brandContext: '  Context for claims extraction  ',
           mentionSentimentGuidance: '  Sentiment guidance text  ',
           region: ['US'],
+          // SITES-49202: active brands now require a base site (site_id); a
+          // URL-less create must be pending (matches the flat-mode idiom below).
+          status: 'pending',
         },
       );
       expect(createRes.status).to.equal(201);
@@ -102,6 +107,8 @@ export default function brandsTests(getHttpClient, resetData) {
       // the data layer without triggering the upstream Semrush re-sync.
       const createRes = await http.admin.post(`/v2/orgs/${ORG_1_ID}/brands`, {
         name: 'Aliases Roundtrip Brand',
+        // SITES-49202: URL-less create must be pending (active now needs site_id).
+        status: 'pending',
         region: ['us', 'de'],
         brandAliases: [
           { name: 'Acme', regions: [] },
@@ -234,6 +241,160 @@ export default function brandsTests(getHttpClient, resetData) {
       });
       expect(reuse.status).to.equal(200);
       expect(reuse.body.baseSiteId).to.equal(SITE_2_ID);
+    });
+  });
+
+  describe('Brands v2 rejects a cross-org baseSiteId (serenity-docs#346)', () => {
+    before(() => resetData());
+
+    it('rejects a fresh create anchored to another org\'s site', async () => {
+      const http = getHttpClient();
+
+      // SITE_3_ID belongs to ORG_2 (seed-data/sites.js) — anchoring an ORG_1
+      // brand to it is exactly the org-ID mismatch signature the investigation
+      // traced (a brand silently pointing at a different org's site).
+      //
+      // status: 'pending' defers ALL Semrush provisioning (see createBrandForOrg),
+      // so this stays a plain flat-mode create regardless of ORG_1's serenity
+      // rollout flag — the guard fires on the baseSiteId anchor check itself,
+      // independent of that unrelated machinery.
+      const res = await http.admin.post(`/v2/orgs/${ORG_1_ID}/brands`, {
+        name: 'Cross-Org Anchor Attempt', region: ['US'], status: 'pending', baseSiteId: SITE_3_ID,
+      });
+
+      expect(res.status).to.equal(409);
+      expect(res.body.code).to.equal('brand_site_org_mismatch');
+    });
+
+    it('rejects setting an existing pending brand\'s baseSiteId to another org\'s site', async () => {
+      const http = getHttpClient();
+
+      const create = await http.admin.post(`/v2/orgs/${ORG_1_ID}/brands`, {
+        name: 'Pending Brand For Cross-Org Attempt', region: ['US'], status: 'pending',
+      });
+      expect(create.status).to.equal(201);
+      const { id: brandId } = create.body;
+
+      const res = await http.admin.patch(`/v2/orgs/${ORG_1_ID}/brands/${brandId}`, {
+        baseSiteId: SITE_3_ID,
+      });
+
+      expect(res.status).to.equal(409);
+      expect(res.body.code).to.equal('brand_site_org_mismatch');
+
+      // The brand must be untouched — no partial write.
+      const getRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/brands/${brandId}`);
+      expect(getRes.body.baseSiteId == null).to.equal(true);
+    });
+  });
+
+  describe('Brands v2 delete frees the name for reuse (LLMO-6978)', () => {
+    before(() => resetData());
+
+    it('renames a deleted brand to {name}_deleted so the name can be recreated, indexing repeats', async () => {
+      const http = getHttpClient();
+      const NAME = 'Reusable Name Brand';
+
+      // 1. Create a brand, then soft-delete it. Deleting must free the name by
+      //    renaming the row to `${NAME}_deleted` (uq_brand_name_per_org spans
+      //    deleted rows, so keeping the original name would block recreation).
+      const createA = await http.admin.post(`/v2/orgs/${ORG_1_ID}/brands`, {
+        name: NAME, region: ['US'], status: 'pending',
+      });
+      expect(createA.status).to.equal(201);
+      const brandAId = createA.body.id;
+
+      const deleteA = await http.admin.delete(`/v2/orgs/${ORG_1_ID}/brands/${brandAId}`);
+      expect(deleteA.status).to.equal(204);
+
+      // 2. Recreating a brand with the ORIGINAL name now succeeds (previously
+      //    rejected by uq_brand_name_per_org) and yields a NEW brand id.
+      const createB = await http.admin.post(`/v2/orgs/${ORG_1_ID}/brands`, {
+        name: NAME, region: ['US'], status: 'pending',
+      });
+      expect(createB.status).to.equal(201);
+      expect(createB.body.id).to.not.equal(brandAId);
+      const brandBId = createB.body.id;
+
+      // 3. Deleting the second same-named brand collides with the first deleted
+      //    `${NAME}_deleted`, so it must take the `_deleted2` index (exercises the
+      //    23505 retry path against the real per-org unique constraint).
+      const deleteB = await http.admin.delete(`/v2/orgs/${ORG_1_ID}/brands/${brandBId}`);
+      expect(deleteB.status).to.equal(204);
+
+      // 4. The name is still free — a third create with the same name succeeds.
+      const createC = await http.admin.post(`/v2/orgs/${ORG_1_ID}/brands`, {
+        name: NAME, region: ['US'], status: 'pending',
+      });
+      expect(createC.status).to.equal(201);
+      expect(createC.body.id).to.not.equal(brandAId);
+      expect(createC.body.id).to.not.equal(brandBId);
+
+      // 5. The two deleted rows carry the indexed `_deleted` names; the live list
+      //    (which excludes deleted brands) shows exactly one brand with the name.
+      const deletedList = await http.admin.get(`/v2/orgs/${ORG_1_ID}/brands?status=deleted`);
+      expect(deletedList.status).to.equal(200);
+      const deletedNames = deletedList.body.brands
+        .filter((b) => b.name === `${NAME}_deleted` || b.name === `${NAME}_deleted2`)
+        .map((b) => b.name)
+        .sort();
+      expect(deletedNames).to.deep.equal([`${NAME}_deleted`, `${NAME}_deleted2`]);
+
+      const liveList = await http.admin.get(`/v2/orgs/${ORG_1_ID}/brands`);
+      expect(liveList.status).to.equal(200);
+      const liveWithName = liveList.body.brands.filter((b) => b.name === NAME);
+      expect(liveWithName).to.have.lengthOf(1);
+      expect(liveWithName[0].id).to.equal(createC.body.id);
+    });
+  });
+
+  describe('Brands v2 primary-site re-point (serenity-docs#349)', () => {
+    // Per-test reset: test 1 moves BRAND_1 off SITE_1, which test 2 relies on
+    // still being BRAND_1's active primary.
+    beforeEach(() => resetData());
+
+    it('re-points an ACTIVE brand to a different free site (was immutable pre-#349)', async () => {
+      const http = getHttpClient();
+
+      // BRAND_1 is seeded ACTIVE, anchored to SITE_1. It carries only the legacy
+      // semrush_workspace_id (NOT a sub-workspace pointer), so this is a flat-mode
+      // re-point — no Semrush propagation, provable in the pure-PostgreSQL suite.
+      const before = await http.admin.get(`/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}`);
+      expect(before.status).to.equal(200);
+      expect(before.body.status).to.equal('active');
+      expect(before.body.baseSiteId).to.equal(SITE_1_ID);
+
+      // SITE_2 is a free ORG_1 site (no active brand's primary). Re-point onto it.
+      const repoint = await http.admin.patch(`/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}`, {
+        baseSiteId: SITE_2_ID,
+      });
+      expect(repoint.status).to.equal(200);
+      expect(repoint.body.baseSiteId).to.equal(SITE_2_ID);
+      expect(repoint.body.baseUrl).to.equal(SITE_2_BASE_URL);
+      expect(repoint.body.status).to.equal('active');
+    });
+
+    it('rejects re-pointing to a site already owned by another ACTIVE brand with 409 siteUrlTaken', async () => {
+      const http = getHttpClient();
+
+      // A fresh pending brand in ORG_1 that tries to claim SITE_1 — still the
+      // seeded ACTIVE BRAND_1's primary — must be refused with the typed code the
+      // frontend maps to a specific message.
+      const create = await http.admin.post(`/v2/orgs/${ORG_1_ID}/brands`, {
+        name: 'Wants An Active Brand Site', region: ['US'], status: 'pending',
+      });
+      expect(create.status).to.equal(201);
+      const { id: brandId } = create.body;
+
+      const res = await http.admin.patch(`/v2/orgs/${ORG_1_ID}/brands/${brandId}`, {
+        baseSiteId: SITE_1_ID,
+      });
+      expect(res.status).to.equal(409);
+      expect(res.body.code).to.equal('siteUrlTaken');
+
+      // No partial write — the brand keeps its (absent) anchor.
+      const getRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/brands/${brandId}`);
+      expect(getRes.body.baseSiteId == null).to.equal(true);
     });
   });
 }

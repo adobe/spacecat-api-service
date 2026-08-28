@@ -22,8 +22,8 @@
  * from an application PR to wire that alarm, so this module is the code-only path available here.
  *
  * Global kill-switch (`SERENITY_QUOTA_ALERTS_ENABLED`, default OFF) mirrors the existing
- * `SERENITY_*` env-flag pattern (dynamic-allocation-active.js, rest-transport.js) — adding this
- * capability is not the same as turning it on; ops configure the channel/token and flip it.
+ * `SERENITY_*` env-flag pattern (rest-transport.js) — adding this capability is not the same as
+ * turning it on; ops configure the channel/token and flip it.
  *
  * Dedup (§5: "repeated attempts by the same org+brand+case within a window collapse into one
  * alert with an attempt counter"): an in-memory, module-scoped Map, keyed by
@@ -31,13 +31,15 @@
  * later one in the same window is silently tallied (no re-post) — "a customer clicking retry
  * five times is one sales signal, not five pages." This is warm-Lambda-container-scoped state
  * (no DynamoDB/persistent store), the same shape as this codebase's existing per-container caches
- * (markets.js's language cache, resource-lock.js's in-process lock) — sufficient for collapsing a
+ * (markets.js's language cache) — sufficient for collapsing a
  * rapid retry burst, not a cross-invocation guarantee.
  */
 
 import { postSlackMessage } from '../../utils/slack/base.js';
 
-/** @typedef {'brandCarveExhausted'|'orgPoolExhausted'|'brandAiLimit'} QuotaCase */
+// `orgPoolExhausted` / `brandAiLimit` were produced only by the removed allocator (SITES-49206);
+// every producer at head passes `brandCarveExhausted`.
+/** @typedef {'brandCarveExhausted'} QuotaCase */
 
 export const DEDUP_WINDOW_MS = 15 * 60 * 1000;
 
@@ -65,7 +67,7 @@ function evictExpired(now) {
   }
 }
 
-/** Test-only reset — mirrors `clearLanguageCache` / `clearResourceLocks` in this module family. */
+/** Test-only reset — mirrors `clearLanguageCache` in this module family. */
 export function clearQuotaAlertDedup() {
   seen.clear();
 }
@@ -241,64 +243,5 @@ export async function alertRollbackFailure({
     await postSlackMessage(channelId, message, token);
   } catch (e) {
     log?.warn?.('SERENITY_QUOTA_ALERT: failed to post rollback-failure alert', { key, error: e?.message });
-  }
-}
-
-/**
- * Early-warning alert (§5, in addition to the hard-exhaustion alert above): fires when the org
- * pool's free capacity drops below a configurable fraction — "so the account team can be engaged
- * *before* the customer hits the wall." Consumes the SAME advisory pool-free read
- * `ensureAiHeadroom` already performs on every top-up (`recordPoolFreeRatio`'s call site);
- * see resource-manager.js.
- *
- * @param {object} p
- * @param {string | null | undefined} [p.orgId]
- * @param {string} p.parentWorkspaceId
- * @param {'projects'|'prompts'} p.dimension
- * @param {number} p.free
- * @param {number} p.total
- * @param {object} env
- * @param {object} [log]
- * @returns {Promise<void>}
- */
-export async function alertPoolFreeThreshold({
-  orgId, parentWorkspaceId, dimension, free, total,
-}, env, log) {
-  if (!isEnabled(env)) {
-    return;
-  }
-  const thresholdFraction = Number(env?.SERENITY_POOL_FREE_ALERT_THRESHOLD ?? 0.1);
-  if (!(total > 0) || free / total >= thresholdFraction) {
-    return;
-  }
-  const key = dedupeKey({
-    orgId: orgId || parentWorkspaceId, brandId: 'org-pool', caseType: 'poolFreeThreshold', dimension,
-  });
-  const now = Date.now();
-  const entry = seen.get(key);
-  if (entry && now - entry.firstAt < DEDUP_WINDOW_MS) {
-    entry.count += 1;
-    return;
-  }
-  evictExpired(now);
-  seen.set(key, { count: 1, firstAt: now });
-
-  const channelId = env?.SERENITY_QUOTA_ALERTS_SLACK_CHANNEL_ID;
-  const token = env?.SLACK_BOT_TOKEN;
-  if (!channelId || !token) {
-    log?.warn?.('SERENITY_QUOTA_ALERT: channel/token not configured — skipping pool-free threshold post', { key });
-    return;
-  }
-  try {
-    const pct = Math.round((free / total) * 100);
-    const message = [
-      ':warning: *Serenity org pool free capacity below threshold*',
-      `• Parent workspace: \`${parentWorkspaceId}\`  Dimension: \`${dimension}\``,
-      `• free: \`${free}\` / total: \`${total}\` (${pct}%, threshold ${Math.round(thresholdFraction * 100)}%)`,
-      `• ${new Date().toISOString()}`,
-    ].join('\n');
-    await postSlackMessage(channelId, message, token);
-  } catch (e) {
-    log?.warn?.('SERENITY_QUOTA_ALERT: failed to post pool-free threshold alert', { key, error: e?.message });
   }
 }

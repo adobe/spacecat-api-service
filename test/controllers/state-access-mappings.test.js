@@ -529,6 +529,167 @@ describe('StateAccessMappingsController', () => {
       expect(body.updatedAt).to.equal('2026-01-01T00:00:00Z');
     });
 
+    it('defaults the composite-key qualifier to \'all\' for a product with no composite dimension (LLMO)', async () => {
+      const createStub = sinon.stub().resolves({ created: [makeRow()], skipped: [] });
+      const { Controller } = await loadController({ createFacsAccessMappings: createStub });
+      const ctx = makeContext({ body: validBody });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(201);
+      expect(createStub.firstCall.args[1]).to.include({
+        compositeKeyType1: 'all', compositeKeyValue1: 'all',
+      });
+    });
+
+    it('defaults the composite-key TYPE to the product dimension for ASO (opportunity/all)', async () => {
+      const createStub = sinon.stub().resolves({
+        created: [makeRow({ product: 'ASO', resource_type: 'site' })], skipped: [],
+      });
+      const { Controller } = await loadController({ createFacsAccessMappings: createStub });
+      const ctx = makeContext({
+        product: 'ASO',
+        body: {
+          subjectType: 'user',
+          subjectId: 'someone@AdobeID',
+          resourceType: 'site',
+          resourceId: VALID_UUID_RES,
+          grantedCapabilities: ['aso/can_view'],
+        },
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(201);
+      // ASO scopes by opportunity type: a plain create defaults to ('opportunity','all'),
+      // aligning with the #923 backfill so it dedups against existing rows.
+      expect(createStub.firstCall.args[1]).to.include({
+        compositeKeyType1: 'opportunity', compositeKeyValue1: 'all',
+      });
+    });
+
+    // Composite key is ASO-scoped: builds a valid ASO/site create body.
+    const asoBody = (overrides = {}) => ({
+      subjectType: 'user',
+      subjectId: 'someone@AdobeID',
+      resourceType: 'site',
+      resourceId: VALID_UUID_RES,
+      grantedCapabilities: ['aso/can_view'],
+      ...overrides,
+    });
+
+    it('passes the composite-key value through when provided (ASO)', async () => {
+      const createStub = sinon.stub().resolves({
+        created: [makeRow({ product: 'ASO', resource_type: 'site' })], skipped: [],
+      });
+      const { Controller } = await loadController({ createFacsAccessMappings: createStub });
+      const ctx = makeContext({
+        product: 'ASO',
+        body: asoBody({ compositeKeyType1: 'opportunity', compositeKeyValue1: 'security' }),
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(201);
+      expect(createStub.firstCall.args[1]).to.include({
+        compositeKeyType1: 'opportunity', compositeKeyValue1: 'security',
+      });
+    });
+
+    it('anchors compositeKeyType1 from config even when the value alone is sent (ASO)', async () => {
+      const createStub = sinon.stub().resolves({
+        created: [makeRow({ product: 'ASO', resource_type: 'site' })], skipped: [],
+      });
+      const { Controller } = await loadController({ createFacsAccessMappings: createStub });
+      const ctx = makeContext({ product: 'ASO', body: asoBody({ compositeKeyValue1: 'security' }) });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(201);
+      expect(createStub.firstCall.args[1]).to.include({
+        compositeKeyType1: 'opportunity', compositeKeyValue1: 'security',
+      });
+    });
+
+    it('trims whitespace from the composite-key value before storing (ASO)', async () => {
+      const createStub = sinon.stub().resolves({
+        created: [makeRow({ product: 'ASO', resource_type: 'site' })], skipped: [],
+      });
+      const { Controller } = await loadController({ createFacsAccessMappings: createStub });
+      const ctx = makeContext({ product: 'ASO', body: asoBody({ compositeKeyValue1: '  security  ' }) });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(201);
+      expect(createStub.firstCall.args[1]).to.include({
+        compositeKeyType1: 'opportunity', compositeKeyValue1: 'security',
+      });
+    });
+
+    it('returns 400 when compositeKeyValue1 is provided empty (ASO)', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ product: 'ASO', body: asoBody({ compositeKeyValue1: '' }) });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('rejects a compositeKeyType1 that does not match the product slot (ASO)', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({
+        product: 'ASO',
+        body: asoBody({ compositeKeyType1: 'brand', compositeKeyValue1: 'security' }),
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('rejects a composite key for a product with no composite slots (LLMO)', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({
+        body: { ...validBody, compositeKeyType1: 'opportunity', compositeKeyValue1: 'security' },
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('accepts an explicit all/all composite key as a no-op for a no-slot product (LLMO round-trip)', async () => {
+      const createStub = sinon.stub().resolves({ created: [makeRow()], skipped: [] });
+      const { Controller } = await loadController({ createFacsAccessMappings: createStub });
+      const ctx = makeContext({
+        body: { ...validBody, compositeKeyType1: 'all', compositeKeyValue1: 'all' },
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(201);
+      expect(createStub.firstCall.args[1]).to.include({
+        compositeKeyType1: 'all', compositeKeyValue1: 'all',
+      });
+    });
+
+    it('surfaces the composite-key qualifier in the created DTO (ASO)', async () => {
+      const row = makeRow({
+        product: 'ASO',
+        resource_type: 'site',
+        composite_key_type_1: 'opportunity',
+        composite_key_value_1: 'security',
+      });
+      const { Controller } = await loadController({
+        createFacsAccessMappings: sinon.stub().resolves({ created: [row], skipped: [] }),
+      });
+      const ctx = makeContext({
+        product: 'ASO',
+        body: asoBody({ compositeKeyType1: 'opportunity', compositeKeyValue1: 'security' }),
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(201);
+      const body = await res.json();
+      expect(body.compositeKeyType1).to.equal('opportunity');
+      expect(body.compositeKeyValue1).to.equal('security');
+    });
+
+    it('surfaces the all sentinel (not null) in the DTO when a row has no qualifier', async () => {
+      // Columns are NOT NULL DEFAULT 'all'; a row without the fields must round-trip
+      // as 'all'/'all', not null, so a GET-then-POST does not 400.
+      const { Controller } = await loadController({
+        createFacsAccessMappings: sinon.stub().resolves({ created: [makeRow()], skipped: [] }),
+      });
+      const ctx = makeContext({ body: validBody });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(201);
+      const body = await res.json();
+      expect(body.compositeKeyType1).to.equal('all');
+      expect(body.compositeKeyValue1).to.equal('all');
+    });
+
     it('injects the baseline can_view when the request omits it', async () => {
       const created = makeRow();
       const createStub = sinon.stub().resolves({ created: [created], skipped: [] });
@@ -634,6 +795,37 @@ describe('StateAccessMappingsController', () => {
         .to.have.members(['llmo/can_configure', 'llmo/can_view']);
     });
 
+    it('re-looks-up the duplicate scoped by the composite qualifier on upsert (ASO)', async () => {
+      const existing = makeRow({
+        id: 'pre-existing-id',
+        product: 'ASO',
+        resource_type: 'site',
+        composite_key_type_1: 'opportunity',
+        composite_key_value_1: 'security',
+      });
+      const listStub = sinon.stub().resolves([existing]);
+      const { Controller } = await loadController({
+        createFacsAccessMappings: sinon.stub().resolves({
+          created: [],
+          skipped: [{ subject: { type: 'user', id: 'someone@AdobeID' }, reason: 'duplicate' }],
+        }),
+        listFacsAccessMappings: listStub,
+        updateFacsAccessMappingCapabilities: sinon.stub().resolves(existing),
+      });
+      const ctx = makeContext({
+        product: 'ASO',
+        body: asoBody({ compositeKeyType1: 'opportunity', compositeKeyValue1: 'security' }),
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(200);
+      // The conflict re-lookup MUST be scoped by the qualifier, else the upsert
+      // could overwrite a different-qualifier binding for the same subject+resource.
+      expect(listStub.calledOnce).to.be.true;
+      expect(listStub.firstCall.args[1]).to.include({
+        compositeKeyType1: 'opportunity', compositeKeyValue1: 'security',
+      });
+    });
+
     it('audits an update_capabilities (allow) event on upsert', async () => {
       const existing = makeRow({ id: 'pre-existing-id' });
       const { Controller, stubs } = await loadController({
@@ -699,6 +891,315 @@ describe('StateAccessMappingsController', () => {
       });
       const ctx = makeContext({ body: validBody });
       const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(500);
+    });
+  });
+
+  describe('POST /state/access-mappings/admin (adminCreateMapping)', () => {
+    // A trial customer's org — deliberately DIFFERENT from the caller's tenant
+    // (CALLER_ORG_BARE) so tests prove the org is taken from the payload, not
+    // from authInfo.
+    const TRIAL_ORG = 'TRIAL-ORG-777@AdobeOrg';
+    const adminBody = {
+      imsOrgId: TRIAL_ORG,
+      product: 'LLMO',
+      subjectType: 'user',
+      subjectId: 'trial-user@AdobeID',
+      resourceType: 'brand',
+      resourceId: VALID_UUID_RES,
+      grantedCapabilities: ['llmo/can_view'],
+    };
+    // Row the create helper returns — stamped with the payload org/product.
+    const adminRow = () => makeRow({
+      subject_id: 'trial-user@AdobeID', ims_org_id: TRIAL_ORG,
+    });
+
+    it('returns 403 when the caller is not an admin', async () => {
+      const { Controller, stubs } = await loadController();
+      const ctx = makeContext({ isAdmin: false, body: adminBody });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(403);
+      // Denied before any DB work.
+      expect(stubs.createFacsAccessMappings.called).to.be.false;
+    });
+
+    it('returns 503 when postgrest is unavailable', async () => {
+      const { Controller } = await loadController({
+        requirePostgrestForFacsMappings: () => ({ status: 503 }),
+      });
+      const ctx = makeContext({ isAdmin: true, body: adminBody });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(503);
+    });
+
+    it('returns 400 when body is missing', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ isAdmin: true, body: null });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when product is missing', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ isAdmin: true, body: { ...adminBody, product: undefined } });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when product is unknown', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ isAdmin: true, body: { ...adminBody, product: 'BOGUS' } });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when imsOrgId is missing', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ isAdmin: true, body: { ...adminBody, imsOrgId: '' } });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 for invalid subjectType', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ isAdmin: true, body: { ...adminBody, subjectType: 'group' } });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when subjectId is missing', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ isAdmin: true, body: { ...adminBody, subjectId: '' } });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when user subjectId is not canonical', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ isAdmin: true, body: { ...adminBody, subjectId: 'noatsign' } });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it("returns 400 when an 'org' subjectId differs from the payload imsOrgId", async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({
+        isAdmin: true,
+        body: {
+          ...adminBody, subjectType: 'org', subjectId: 'OTHER@AdobeOrg',
+        },
+      });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it("accepts an 'org' subjectId equal to the payload imsOrgId (201)", async () => {
+      const row = makeRow({ subject_type: 'org', subject_id: TRIAL_ORG, ims_org_id: TRIAL_ORG });
+      const { Controller } = await loadController({
+        createFacsAccessMappings: sinon.stub().resolves({ created: [row], skipped: [] }),
+      });
+      const ctx = makeContext({
+        isAdmin: true,
+        body: {
+          ...adminBody, subjectType: 'org', subjectId: TRIAL_ORG,
+        },
+      });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(201);
+    });
+
+    it('threads the composite qualifier into the admin create (ASO)', async () => {
+      const createStub = sinon.stub().resolves({
+        created: [makeRow({ product: 'ASO', resource_type: 'site' })], skipped: [],
+      });
+      const { Controller } = await loadController({ createFacsAccessMappings: createStub });
+      const ctx = makeContext({
+        isAdmin: true,
+        body: {
+          ...adminBody,
+          product: 'ASO',
+          resourceType: 'site',
+          grantedCapabilities: ['aso/can_view'],
+          compositeKeyType1: 'opportunity',
+          compositeKeyValue1: 'security',
+        },
+      });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(201);
+      expect(createStub.firstCall.args[1]).to.include({
+        compositeKeyType1: 'opportunity', compositeKeyValue1: 'security',
+      });
+    });
+
+    it('rejects a composite qualifier for a no-slot product on admin create (LLMO)', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({
+        isAdmin: true,
+        body: { ...adminBody, compositeKeyType1: 'opportunity', compositeKeyValue1: 'security' },
+      });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it("normalizes a bare 'org' subjectId so a bare imsOrgId + bare subjectId match (201)", async () => {
+      const createStub = sinon.stub().resolves({
+        created: [makeRow({ subject_type: 'org', subject_id: 'BARE-ORG@AdobeOrg', ims_org_id: 'BARE-ORG@AdobeOrg' })],
+        skipped: [],
+      });
+      const { Controller } = await loadController({ createFacsAccessMappings: createStub });
+      const ctx = makeContext({
+        isAdmin: true,
+        body: {
+          ...adminBody, imsOrgId: 'BARE-ORG', subjectType: 'org', subjectId: 'BARE-ORG',
+        },
+      });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(201);
+      // Both values are normalized to the canonical form before compare + persist.
+      expect(createStub.firstCall.args[1].imsOrgId).to.equal('BARE-ORG@AdobeOrg');
+      expect(createStub.firstCall.args[1].subjects).to.deep.equal([
+        { type: 'org', id: 'BARE-ORG@AdobeOrg' },
+      ]);
+    });
+
+    it('returns 400 for a resourceType not valid for the product', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ isAdmin: true, body: { ...adminBody, resourceType: 'site' } });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when resourceId is empty', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ isAdmin: true, body: { ...adminBody, resourceId: '' } });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when resourceId is not a valid UUID', async () => {
+      const { Controller, stubs } = await loadController();
+      const ctx = makeContext({ isAdmin: true, body: { ...adminBody, resourceId: 'not-a-uuid' } });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(400);
+      // Denied before any write — no dangling reference is persisted.
+      expect(stubs.createFacsAccessMappings.called).to.be.false;
+    });
+
+    it('returns 400 when grantedCapabilities is empty', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ isAdmin: true, body: { ...adminBody, grantedCapabilities: [] } });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when a granted capability is outside the payload product catalog', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({
+        isAdmin: true, body: { ...adminBody, grantedCapabilities: ['aso/can_view'] },
+      });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('creates the binding from the PAYLOAD org + product, not from authInfo/x-product', async () => {
+      const createStub = sinon.stub().resolves({ created: [adminRow()], skipped: [] });
+      const { Controller, stubs } = await loadController({ createFacsAccessMappings: createStub });
+      // Caller tenant is CALLER_ORG_BARE and the x-product header says ASO —
+      // both MUST be ignored in favour of the payload's TRIAL_ORG / LLMO.
+      const ctx = makeContext({
+        isAdmin: true,
+        product: 'ASO',
+        imsOrgId: CALLER_ORG_BARE,
+        body: adminBody,
+      });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(201);
+      const args = createStub.firstCall.args[1];
+      expect(args.imsOrgId).to.equal(TRIAL_ORG);
+      expect(args.product).to.equal('LLMO');
+      // No manager/authority evaluation and no admin same-org resource check.
+      expect(stubs.listFacsAccessMappings.called).to.be.false;
+      expect(stubs.getResourceImsOrgId.called).to.be.false;
+    });
+
+    it('normalizes a bare payload imsOrgId to the canonical form', async () => {
+      const createStub = sinon.stub().resolves({ created: [adminRow()], skipped: [] });
+      const { Controller } = await loadController({ createFacsAccessMappings: createStub });
+      const ctx = makeContext({
+        isAdmin: true, body: { ...adminBody, imsOrgId: 'BARE-TRIAL-ORG' },
+      });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(201);
+      expect(createStub.firstCall.args[1].imsOrgId).to.equal('BARE-TRIAL-ORG@AdobeOrg');
+    });
+
+    it('injects the baseline can_view when the request omits it', async () => {
+      const createStub = sinon.stub().resolves({ created: [adminRow()], skipped: [] });
+      const { Controller } = await loadController({ createFacsAccessMappings: createStub });
+      const ctx = makeContext({
+        isAdmin: true, body: { ...adminBody, grantedCapabilities: ['llmo/can_configure'] },
+      });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(201);
+      expect(createStub.firstCall.args[1].grantedCapabilities)
+        .to.have.members(['llmo/can_configure', 'llmo/can_view']);
+    });
+
+    it('lets an admin grant can_manage_users (no FACS-layer gate on this surface)', async () => {
+      const createStub = sinon.stub().resolves({ created: [adminRow()], skipped: [] });
+      const { Controller } = await loadController({ createFacsAccessMappings: createStub });
+      const ctx = makeContext({
+        isAdmin: true,
+        facsPermissions: [],
+        body: { ...adminBody, grantedCapabilities: ['llmo/can_manage_users'] },
+      });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(201);
+      expect(createStub.firstCall.args[1].grantedCapabilities)
+        .to.include('llmo/can_manage_users');
+    });
+
+    it('emits a create audit event stamped with the payload org + caller actor', async () => {
+      const { Controller, stubs } = await loadController({
+        createFacsAccessMappings: sinon.stub().resolves({ created: [adminRow()], skipped: [] }),
+      });
+      const ctx = makeContext({ isAdmin: true, body: adminBody });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(201);
+      const event = stubs.insertFacsAccessMappingAuditEvent.firstCall.args[1];
+      expect(event).to.include({
+        imsOrgId: TRIAL_ORG,
+        product: 'LLMO',
+        operation: 'create',
+        outcome: 'allow',
+      });
+      // Actor is the real admin caller (audit trail only).
+      expect(event.actorId).to.equal(CALLER_USER);
+    });
+
+    it('upserts on an active duplicate: overwrites capabilities and returns 200', async () => {
+      const existing = makeRow({ id: 'pre-existing-id', ims_org_id: TRIAL_ORG });
+      const updateStub = sinon.stub().resolves(existing);
+      const { Controller } = await loadController({
+        createFacsAccessMappings: sinon.stub().resolves({
+          created: [],
+          skipped: [{ subject: { type: 'user', id: 'trial-user@AdobeID' }, reason: 'duplicate' }],
+        }),
+        listFacsAccessMappings: sinon.stub().resolves([existing]),
+        updateFacsAccessMappingCapabilities: updateStub,
+      });
+      const ctx = makeContext({ isAdmin: true, body: adminBody });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
+      expect(res.status).to.equal(200);
+      expect(updateStub.firstCall.args[1].imsOrgId).to.equal(TRIAL_ORG);
+    });
+
+    it('returns 500 when the helper throws', async () => {
+      const { Controller } = await loadController({
+        createFacsAccessMappings: sinon.stub().rejects(new Error('boom')),
+      });
+      const ctx = makeContext({ isAdmin: true, body: adminBody });
+      const res = await Controller(ctx).adminCreateMapping(ctx);
       expect(res.status).to.equal(500);
     });
   });

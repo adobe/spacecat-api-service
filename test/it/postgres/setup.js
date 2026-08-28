@@ -154,9 +154,14 @@ export async function resetSemrushMocks() {
 
 /**
  * Sets a workspace's finite AI resources on the User Manager mock via its `POST /__quota` control
- * route (makes it metered). Each dim is a bare `total` or `{ used, drafted, total }`. Used by the
- * dynamic-allocation flag-ON IT to put BRAND_1's sub-workspace into a metered state so the JIT
- * guard reads real `/resources` over the wire. TLS verification is already off process-wide.
+ * route (makes it metered). Each dim is a bare `total` or `{ used, drafted, total }`.
+ *
+ * Retained control-route seam, deliberately still wired: the dynamic-allocation flag-ON IT that
+ * used to consume this was removed with the allocator (SITES-49206), so no IT calls it today. It
+ * stays exported — and threaded through `mockControls` in serenity.test.js — because the
+ * spacecat-shared §10.5 metered-write change (and the §10 metered-405 canary) will re-meter a
+ * sub-workspace through this same route; dropping it now would only have to be re-added there.
+ * TLS verification is already off process-wide.
  *
  * @param {string} workspaceId - the workspace to meter
  * @param {{ projects?: number|object, prompts?: number|object }} dims - per-dimension resources
@@ -174,16 +179,79 @@ export async function setUmMockQuota(workspaceId, dims) {
 }
 
 /**
- * Reads the User Manager mock's full store snapshot (`GET /__dump`) — to assert mock-side state
- * (e.g. a workspace's resource `total` did/didn't change) after a flag-ON request.
+ * Reads one vendor mock's full store snapshot from its `GET /__dump` control route. Each mock is
+ * dumped on its own — unlike reset/readiness, which act on both at once (`MOCK_RESET_PATHS` /
+ * `MOCK_DUMP_PATHS`), a test only ever inspects the mock it wrote through.
+ *
+ * @param {string} mockBase - the mock's API base URL
+ * @param {string} label - short mock name, for the failure message
  * @returns {Promise<any>}
  */
-export async function dumpUmMock() {
-  const res = await fetch(`${UM_MOCK_BASE}/__dump`);
+async function dumpMock(mockBase, label) {
+  const res = await fetch(`${mockBase}/__dump`);
   if (!res.ok) {
-    throw new Error(`UM mock __dump failed (${res.status})`);
+    throw new Error(`${label} mock __dump failed (${res.status})`);
   }
   return res.json();
+}
+
+/**
+ * Reads the User Manager mock's full store snapshot — to assert mock-side state (e.g. a
+ * workspace's resource `total` did/didn't change) after a request.
+ *
+ * Like `setUmMockQuota` above, this has no shared-test consumer today: the flag-ON block that read
+ * it went with the allocator removal (SITES-49206). Kept and still threaded through `mockControls`
+ * (serenity.test.js) as the UM-side counterpart of the consumed `dumpPeMock`, for the
+ * spacecat-shared §10.5 metered-write assertions.
+ * @returns {Promise<any>}
+ */
+export const dumpUmMock = () => dumpMock(UM_MOCK_BASE, 'UM');
+
+/**
+ * Reads the Project Engine mock's full store snapshot — the store as the vendor actually holds it,
+ * keyed by collection (`prompts:{workspaceId}:{projectId}`, `tags:...`, ...).
+ *
+ * This is the ONLY way to assert what a write actually PERSISTED upstream, independently of what
+ * the service's own read path chooses to ask for: the `by_tags` list gates `metadata` behind an
+ * `include_metadata=true` query param, so a consumer that does not opt in reads back no metadata
+ * at all even for a fully stamped prompt. Asserting authorship stamping through the list read
+ * would therefore conflate "the write did not stamp" with "the read did not ask" — the dump
+ * separates them.
+ *
+ * @returns {Promise<any>}
+ */
+export const dumpPeMock = () => dumpMock(PE_MOCK_BASE, 'PE');
+
+/**
+ * Replaces a benchmark on the Project Engine mock through the vendor's own update route, the way
+ * Semrush's brand resolution would have — the mock has no control route for this, and none should
+ * be added: the point is to leave the benchmark in a state only the vendor can produce.
+ *
+ * A benchmark carries alias values Semrush added itself (`gm` on General Motors, the misspelling
+ * `pixlar` on pixlr). We hold no row for those, so nothing in our own derivation can reconstruct
+ * one — which is exactly what makes them the test subject for a merge-over-live write. Seeding one
+ * here and asserting it is still present after an unrelated brand edit is the only way to prove the
+ * write merged rather than replaced.
+ *
+ * Full-replace semantics, mirroring the vendor: `brand_aliases` is the complete list, and `domain`
+ * is required.
+ *
+ * @param {string} workspaceId - the sub-workspace holding the project
+ * @param {string} projectId - the project holding the benchmark
+ * @param {string} benchmarkId - the benchmark to replace
+ * @param {{brand_name: string, domain: string, brand_aliases: string[]}} body - the new state
+ * @returns {Promise<void>}
+ */
+export async function putPeBenchmark(workspaceId, projectId, benchmarkId, body) {
+  const url = `${PE_MOCK_BASE}/v1/workspaces/${workspaceId}/projects/${projectId}/ai_models/benchmarks/${benchmarkId}`;
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', authorization: 'Bearer it-seed' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw new Error(`PE mock benchmark PUT failed (${res.status}) for ${benchmarkId}`);
+  }
 }
 
 /**

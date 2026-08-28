@@ -67,11 +67,12 @@ export const SERENITY_MOCK_WORKSPACE_ID = 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d'
 export const SERENITY_MOCK_PROJECT_ID = 'b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e';
 
 // Org-level parent workspace for ORG_1, so a subworkspace brand resolves a non-null
-// `parentWorkspaceId` — the condition the dynamic-allocation JIT guard needs to engage, and the
-// workspace whose `/resources` the allocator reads as the advisory pool gauge when a top-up fires.
+// `parentWorkspaceId` — required on the sub-workspace create/bind path by
+// `ensureSubworkspace`/`assertNotParent` (the positional parent that outlived the allocator
+// removal, SITES-49206).
 //
 // DELIBERATELY ALIASES SERENITY_MOCK_PROJECT_ID (not a coincidence, not a new id) — the UM mock's
-// `GET .../resources` / `createSubworkspace` handlers both 403 on any id that isn't a
+// `createSubworkspace` handler 403s on any id that isn't a
 // pre-registered `workspace` entity, and the loaded boot seed (`parent-with-child`) has exactly
 // TWO: the one already claimed by SERENITY_MOCK_WORKSPACE_ID (BRAND_1's own sub-workspace — can't
 // double as its own org parent) and this one. A genuinely third, distinct workspace would need
@@ -81,8 +82,21 @@ export const SERENITY_MOCK_PROJECT_ID = 'b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e';
 // the package's `package.json`), so api-service, an external npm consumer, can't reach it.
 // Referencing the SAME export (not a copy-pasted literal) keeps this a single source of truth
 // instead of a silent, unexplained coincidence — its role as a PE-mock project id elsewhere is
-// irrelevant to its use here as a UM workspace id metered via `__quota`.
+// irrelevant to its use here as a pre-registered UM workspace entity.
 export const SERENITY_ORG_PARENT_WS_ID = SERENITY_MOCK_PROJECT_ID;
+
+// ── Enterprise (non-trial) org member ──
+// A plain ORG_1 member with no TrialUser row — the population the prompt-library
+// authorship columns resolve. Its identifiers mirror a real spacecat session JWT:
+// the id is an IMS GUID that appears as BOTH `sub` and `email` (the auth service
+// puts the user id, not the address, in `email`), while the real address is carried
+// only by `preferred_username` / `trial_email`. Deliberately NOT seeded into
+// trial-users.js — a TrialUser row would resolve it via the trial branch and the
+// self-resolution path under test would never be reached.
+export const ENTERPRISE_USER_ID = 'C0FFEE0011223344AABBCCDD@1122334455667788990011.e';
+export const ENTERPRISE_USER_EMAIL = 'enterprise-member@example.com';
+export const ENTERPRISE_USER_FIRST_NAME = 'Enterprise';
+export const ENTERPRISE_USER_LAST_NAME = 'Member';
 
 // ── FACS state-layer managers (hybrid-model §8.3) ──
 // The brandManager persona holds state-layer `llmo/can_manage_users` on
@@ -190,8 +204,10 @@ export const CONSUMER_1_CLIENT_ID = '111111111111111111111111';
 export const CONSUMER_1_TECHNICAL_ACCOUNT_ID = '111111111111111111111111@techacct.adobe.com';
 export const CONSUMER_1_IMS_ORG_ID = ORG_1_IMS_ORG_ID;
 
-// CONSUMER_2 — ACTIVE S2S consumer holding site:readAll + organization:readAll.
-// Used to exercise the readAll capability path through GET /sites and /organizations.
+// CONSUMER_2 — ACTIVE S2S consumer holding site:readAll + organization:readAll +
+// trialUser:read + entitlement:create. Used to exercise the readAll capability path
+// through GET /sites and /organizations, and the entitlement:create grant path through
+// the entitlement/site-enrollment POST routes (SITES-50526).
 export const CONSUMER_2_ID = '11111111-1111-4111-b112-222222222222';
 export const CONSUMER_2_CLIENT_ID = '222222222222222222222222';
 export const CONSUMER_2_TECHNICAL_ACCOUNT_ID = '222222222222222222222222@techacct.adobe.com';
@@ -262,6 +278,7 @@ export const TRIAL_USER_2_EMAIL = 'test-delegate@example.com'; // matches delega
 
 export const NON_EXISTENT_ORG_ID = '99999999-9999-4999-b999-999999999999';
 export const NON_EXISTENT_SITE_ID = '88888888-8888-4888-a888-888888888888';
+export const NON_EXISTENT_BRAND_ID = 'ab999999-9999-4999-b999-999999999999';
 
 // ── LLMO onboarding mode resolution — dedicated test org/sites ──
 // TEMPORARY: remove with the legacy-customer check in resolveLlmoOnboardingMode

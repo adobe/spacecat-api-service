@@ -17,6 +17,7 @@ import {
   computeAuditCompletion,
 } from '@adobe/spacecat-shared-utils';
 import { extractURLFromSlackInput, loadProfileConfig } from '../../../utils/slack/base.js';
+import { buildScrapingSection } from './onboard-status-scraping.js';
 import BaseCommand from './base.js';
 
 const PHRASES = ['onboard status'];
@@ -162,6 +163,15 @@ Example:
           return `${getOpportunityTitle(oppType)} ${statusIcon}`;
         }),
       );
+
+      // Section: Scraping (stats + data-source status). Best-effort — a scrape-client
+      // failure returns null and the command still renders opportunity statuses below.
+      const scrapingSection = await buildScrapingSection(siteUrl, lastStartTime, context);
+      if (scrapingSection) {
+        await say(scrapingSection.statsMessage);
+        await say(`*Data Sources for site ${siteUrl}*`);
+        await say(scrapingSection.dataSourceLine);
+      }
 
       // Section: Opportunity Statuses
       await say(`*Opportunity Statuses for site ${siteUrl}*`);

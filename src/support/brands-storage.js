@@ -13,6 +13,11 @@
 import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
 
 import { SERENITY_BRAND_SITE_TYPE } from './serenity/site-linkage.js';
+import { readFeatureFlagScopes, resolveFlagRowForBrand } from './feature-flags-storage.js';
+import {
+  SERENITY_FEATURE_FLAG_NAME,
+  SERENITY_FEATURE_FLAG_PRODUCT,
+} from './serenity/serenity-active.js';
 
 /**
  * PostgREST select string — joins all normalized child tables.
@@ -27,6 +32,13 @@ const BRAND_SELECT = [
   'brand_sites(site_id, paths, type, sites(base_url))',
   'brand_urls(url)',
 ].join(', ');
+
+// LLMO-6978: on delete a brand is renamed to `{name}_deleted` to free its
+// original name for reuse (see deleteBrand). A same-named deleted brand already
+// present bumps the suffix to `_deleted2`, `_deleted3`, ... Each colliding
+// rename costs one round-trip, so this caps a pathological loop (a customer
+// deleting the same name hundreds of times) rather than any expected volume.
+const MAX_DELETED_NAME_ATTEMPTS = 100;
 
 // Re-landed from Igor Grubic's #2504 (LLMO-5183): map the data-layer
 // chk_active_brand_has_site_id CheckViolation to a typed 400 (covers the race
@@ -59,76 +71,6 @@ function normalizeNullableText(value, fieldName) {
 }
 
 /**
- * Normalizes the deferred Semrush provisioning data of a pending (draft) brand
- * into the shape persisted in `brands.pending_semrush_provisioning` (a JSONB object
- * `{ primaryUrl?, markets: [{ market, languageCode, modelIds? }], generatePrompts? }`).
- * These are the primary URL + initial markets (each with its chosen AI models/LLMs)
- * plus whether activation should generate topics/prompts — all collected by the
- * add-brand wizard before a sub-workspace/project exist; activation reads them
- * back to provision the real Semrush projects, then clears the column.
- * The canonical shape is the `PendingSemrushProvisioning` type exported by
- * `@adobe/spacecat-shared-data-access` (shared with project-elmo-ui).
- *
- * Returns `undefined` when the caller did not supply the field (leave the column
- * untouched), `null` when explicitly cleared or nothing useful remains, or the
- * cleaned object otherwise.
- *
- * @param {unknown} value - `{ primaryUrl?, markets }`, null, or undefined.
- * @returns {{primaryUrl: (string|null), markets: Array<{market: string,
- *   languageCode: string, modelIds?: string[]}>}|null|undefined}
- */
-function normalizePendingSemrushProvisioning(value) {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (value === null) {
-    return null;
-  }
-  if (typeof value !== 'object' || Array.isArray(value)) {
-    const error = new Error('pendingSemrushProvisioning must be an object or null');
-    error.status = 400;
-    throw error;
-  }
-  const markets = (Array.isArray(value.markets) ? value.markets : [])
-    .map((m) => {
-      const market = {
-        market: typeof m?.market === 'string' ? m.market.trim() : '',
-        languageCode: typeof m?.languageCode === 'string' ? m.languageCode.trim() : '',
-      };
-      // Per-market AI models (LLMs) chosen for this market; applied to the
-      // project at activation. Keep only non-empty strings; omit the key
-      // entirely when none remain so a cleared selection doesn't persist `[]`.
-      const modelIds = (Array.isArray(m?.modelIds) ? m.modelIds : [])
-        .map((id) => (typeof id === 'string' ? id.trim() : ''))
-        .filter(hasText);
-      if (modelIds.length > 0) {
-        market.modelIds = modelIds;
-      }
-      return market;
-    })
-    .filter((m) => hasText(m.market) && hasText(m.languageCode));
-  const primaryUrl = typeof value.primaryUrl === 'string' && hasText(value.primaryUrl)
-    ? value.primaryUrl.trim()
-    : null;
-  // Whether activation should generate topics/prompts for the provisioned
-  // project(s). Only meaningful as an explicit boolean; absent means "legacy
-  // stash, leave generation off" and is omitted so the column stays minimal.
-  const hasGeneratePrompts = typeof value.generatePrompts === 'boolean';
-  // Nothing worth persisting → treat as cleared. An explicit generatePrompts
-  // flag IS worth persisting on its own: a bare no-prompt draft (no URL, no
-  // market) still needs the stash so activation knows to provision a
-  // sub-workspace-only brand rather than treating it as a non-Semrush brand.
-  if (markets.length === 0 && !hasText(primaryUrl) && !hasGeneratePrompts) {
-    return null;
-  }
-  const result = { primaryUrl, markets };
-  if (hasGeneratePrompts) {
-    result.generatePrompts = value.generatePrompts;
-  }
-  return result;
-}
-
-/**
  * Splits a full URL string into its base URL and path.
  * e.g. "https://example.com/products" -> { base: "https://example.com", path: "/products" }
  * A root path "/" is treated as no path (empty string).
@@ -145,6 +87,79 @@ function parseUrlParts(urlString) {
 }
 
 /**
+ * Reads the organization's `LLMO/serenity` rows — its own and every brand's
+ * override — in one query, for {@link withSerenityState}.
+ *
+ * One query serves a whole response: a 16-brand list resolves from a single read,
+ * not sixteen. Read fresh rather than through `serenity-active.js`'s cache: that
+ * cache exists to keep request-time gates off the DB, whereas this value is
+ * payload the UI renders, and a brand shown as active seconds after its wave
+ * released it is worth one indexed read.
+ *
+ * Consequence, accepted deliberately: for up to one cache TTL after a flip this
+ * payload and the request-time gates can disagree, in whichever direction the flip
+ * went. A brand released mid-TTL reports `serenityActive: true` while a gate on a
+ * not-yet-expired entry still refuses it; a brand rolled back reports `false` while
+ * a gate still admits it. The window is bounded by `BRAND_CACHE_TTL_MS`, the gates
+ * are the authority and fail closed, and no write is half-applied by it, so the
+ * alternative (routing this read through the gate cache, which is keyed on a
+ * request context rather than a PostgREST client) is not worth the coupling.
+ *
+ * A failure propagates: the rows live in the same database as the brand read that
+ * just succeeded, so an error here is a real fault, not a reason to report every
+ * brand as inactive. On a write path, resolve BEFORE the write, so that fault
+ * cannot turn an edit that already committed into a 500.
+ *
+ * @param {string} organizationId - SpaceCat organization UUID.
+ * @param {object} postgrestClient - PostgREST client.
+ * @returns {Promise<{orgRow: object|null, brandRows: Map<string, object>}>}
+ */
+export async function readSerenityFlagScopes(organizationId, postgrestClient) {
+  return readFeatureFlagScopes({
+    organizationId,
+    product: SERENITY_FEATURE_FLAG_PRODUCT,
+    flagName: SERENITY_FEATURE_FLAG_NAME,
+    postgrestClient,
+  });
+}
+
+/**
+ * Adds the derived per-brand serenity fields to a brand payload: whether the
+ * Semrush-backed experience is live for THIS brand, and when it went live.
+ *
+ * Resolved from the brand's own override row falling back to the organization's,
+ * so no consumer re-implements the resolution rule — project-elmo-ui reads
+ * `serenityActive` to decide whether a brand is on the Semrush read path and
+ * whether its classic-UI editors are locked, and an organization mid-migration
+ * has both answers among its brands.
+ *
+ * Applied by the handlers that return a brand payload rather than inside the
+ * readers, so that the internal reads which never surface these fields — the
+ * brand-claims Slack commands, the elements authorizers, site attach, the
+ * opportunities controller, and the edit handler's own pre-write guards — neither
+ * pay for the flag query nor inherit its failure mode.
+ *
+ * @param {object} brand - Brand in V2 config shape, from {@link mapDbBrandToV2}.
+ * @param {{orgRow: object|null, brandRows: Map<string, object>}} scopes - From
+ *   {@link readSerenityFlagScopes}.
+ * @returns {object} The brand, with the two derived fields set.
+ */
+export function withSerenityState(brand, scopes) {
+  const row = resolveFlagRowForBrand(scopes, brand.id);
+  const serenityActive = row?.flag_value === true;
+  return {
+    ...brand,
+    // Independent of `semrushSubWorkspaceId`, which is set when the brand is
+    // provisioned — a brand can be bound for waves before it is released.
+    serenityActive,
+    // The resolved row's `updated_at`, the same timestamp operator tooling reads
+    // as the migration date — the column is NOT NULL, so an active brand always
+    // has one. Null while inactive, since nothing has gone live.
+    serenityActivatedAt: serenityActive ? row.updated_at : null,
+  };
+}
+
+/**
  * Maps a DB brand row (with all joined child tables) to the V2 config shape
  * the UI expects.
  *
@@ -153,6 +168,12 @@ function parseUrlParts(urlString) {
  * URL's base resolves to a site row in the org — and `siteId` for onboarded
  * entries. Legacy brands with no `brand_urls` rows fall back to the
  * `brand_sites` expansion, where every entry is by definition onboarded.
+ *
+ * The derived per-brand serenity fields are NOT set here — a handler returning
+ * this payload to a client adds them with {@link withSerenityState}.
+ *
+ * @param {object} row - DB brand row with joined child tables.
+ * @returns {object} Brand in V2 config shape.
  */
 function mapDbBrandToV2(row) {
   // The set of base URLs the brand explicitly lists as its own (brand_urls).
@@ -241,13 +262,6 @@ function mapDbBrandToV2(row) {
     name: row.name,
     baseSiteId: row.base_site?.id || row.site_id || null,
     baseUrl: row.base_site?.base_url || null,
-    // DEPRECATED (serenity-docs brand-semrush-mapping-maintenance.md §10
-    // rename, write-of-record cutover): read-only BC mirror of
-    // semrushSubWorkspaceId below, maintained by the mysticat-data-service
-    // brands_sync_semrush_workspace_id trigger. Kept for any consumer still
-    // reading this field directly; new/updated consumers should read
-    // semrushSubWorkspaceId instead.
-    semrushWorkspaceId: row.semrush_workspace_id || null,
     // Read-only: the brand's own Semrush sub-workspace (dual-mode) — the
     // write-of-record column. Null for brands still in flat mode (no
     // sub-workspace minted yet). Consumers use it to scope per-brand Semrush
@@ -319,6 +333,57 @@ async function replaceChildRows(table, brandId, rows, onConflict, postgrestClien
     .upsert(rows, { onConflict });
   if (insertError) {
     throw new Error(`Failed to sync ${table}: ${insertError.message}`);
+  }
+}
+
+/**
+ * Verifies a candidate primary site (`baseSiteId`) belongs to the same org as the
+ * brand being anchored to it, before that site_id is ever persisted.
+ *
+ * serenity-docs#346: `brand.organization_id != site.organization_id` is exactly the
+ * org-ID mismatch pattern the investigation traced (Tata Capital, BMW, Toyota, ...) —
+ * a brand silently anchored to a *different* org's site. Both upsertBrand (fresh
+ * create / first anchor) and updateBrand (first set, or pending re-point) must call
+ * this before writing site_id; the immutable-once-set branches in each are
+ * unaffected, since they already refuse to change an existing active site_id.
+ *
+ * @param {object} postgrestClient - PostgREST client
+ * @param {string} siteId - Candidate `brands.site_id`
+ * @param {string} organizationId - SpaceCat organization UUID the brand belongs to
+ * @param {string} brandLabel - Whatever identifies the brand in the caller's context,
+ *   for the error message only — upsertBrand passes the brand name (not yet
+ *   persisted, so no id exists yet); updateBrand passes the fetched brand's
+ *   name when its existing-row read found one, else falls back to brandId.
+ * @throws {Error} status 409, code 'brand_site_org_mismatch', if the site does not
+ *   belong to organizationId (including if it doesn't exist at all)
+ */
+async function assertSiteBelongsToOrg(postgrestClient, siteId, organizationId, brandLabel) {
+  const { data: anchorSite, error: anchorSiteError } = await postgrestClient
+    .from('sites')
+    .select('id')
+    .eq('id', siteId)
+    .eq('organization_id', organizationId)
+    .maybeSingle();
+  if (anchorSiteError) {
+    throw new Error(
+      `Failed to verify primary site org for brand "${brandLabel}": ${anchorSiteError.message}`,
+    );
+  }
+  if (!anchorSite) {
+    // Plain ASCII (no em dash) to match this file's other thrown, client-facing
+    // messages: an em dash here previously crashed createErrorResponse's
+    // X-Error header (@adobe/fetch rejects non-Latin1 header content with a
+    // raw TypeError, surfacing as a 500 instead of this 409 — caught by the
+    // it-postgres IT suite, not the mocked unit tests). createErrorResponse
+    // now sanitizes the header regardless (serenity-docs#346), but this stays
+    // ASCII too rather than leaning on that alone.
+    const err = new Error(
+      `Cannot anchor brand "${brandLabel}" to site ${siteId}: that site `
+      + `does not exist, or does not belong to organization ${organizationId}.`,
+    );
+    err.status = 409;
+    err.code = 'brand_site_org_mismatch';
+    throw err;
   }
 }
 
@@ -462,9 +527,19 @@ async function syncBrandUrls(organizationId, brandId, urls, postgrestClient, upd
 
 /**
  * Syncs social accounts for a brand to the brand_social_accounts table.
+ *
+ * `socialAccounts` being `undefined` (the field was omitted) or `null`
+ * (explicitly nulled, e.g. by a JSON.stringify round-trip of an unset field)
+ * means the caller never touched this collection — skip the sync
+ * entirely rather than let `replaceChildRows` wipe existing rows (LLMO-6591).
+ * A caller that DOES want to clear the collection sends `[]` explicitly, which
+ * still reaches `replaceChildRows` and deletes as before.
  */
 // eslint-disable-next-line max-len
 async function syncSocialAccounts(brandId, organizationId, socialAccounts, postgrestClient, updatedBy) {
+  if (socialAccounts === undefined || socialAccounts === null) {
+    return;
+  }
   const rows = (socialAccounts || [])
     .filter((s) => hasText(s?.url))
     .map((s) => ({
@@ -479,9 +554,15 @@ async function syncSocialAccounts(brandId, organizationId, socialAccounts, postg
 
 /**
  * Syncs earned content sources for a brand to the brand_earned_sources table.
+ *
+ * `earnedContent` being `undefined` or `null` means the caller never touched
+ * this collection — skip the sync entirely (LLMO-6591; see syncSocialAccounts).
  */
 // eslint-disable-next-line max-len
 async function syncEarnedSources(brandId, organizationId, earnedContent, postgrestClient, updatedBy) {
+  if (earnedContent === undefined || earnedContent === null) {
+    return;
+  }
   const rows = (earnedContent || [])
     .filter((e) => hasText(e?.url) && hasText(e?.name))
     .map((e) => ({
@@ -497,8 +578,14 @@ async function syncEarnedSources(brandId, organizationId, earnedContent, postgre
 
 /**
  * Syncs aliases for a brand to the brand_aliases table.
+ *
+ * `brandAliases` being `undefined` or `null` means the caller never touched
+ * this collection — skip the sync entirely (LLMO-6591; see syncSocialAccounts).
  */
 async function syncAliases(brandId, organizationId, brandAliases, postgrestClient, updatedBy) {
+  if (brandAliases === undefined || brandAliases === null) {
+    return;
+  }
   const seen = new Set();
   const rows = (brandAliases || [])
     .map((a) => ({ alias: typeof a === 'string' ? a : a?.name, regions: a?.regions || [] }))
@@ -515,8 +602,14 @@ async function syncAliases(brandId, organizationId, brandAliases, postgrestClien
 
 /**
  * Syncs competitors for a brand to the competitors table.
+ *
+ * `competitors` being `undefined` or `null` means the caller never touched
+ * this collection — skip the sync entirely (LLMO-6591; see syncSocialAccounts).
  */
 async function syncCompetitors(brandId, organizationId, competitors, postgrestClient, updatedBy) {
+  if (competitors === undefined || competitors === null) {
+    return;
+  }
   const seen = new Set();
   const rows = (competitors || [])
     .map((c) => ({
@@ -841,15 +934,16 @@ export async function getBrandBySite(organizationId, siteId, postgrestClient, lo
 /**
  * Sets the brand-scoped `brand_claims_enabled` scheduling gate (LLMO-5741),
  * keyed on the brand UUID (the PK), so operators can enable/disable Brand Claims
- * for a brand directly. Returns the updated `{ id, name }` or null when no brand
- * matches the id.
+ * for a brand directly. Returns the updated `{ id, name, site_id }` or null when
+ * no brand matches the id. `site_id` (the brand's primary site) lets callers keep
+ * the per-site `brand-claims` audit toggle in lock-step with this flag.
  *
  * @param {Object} params
  * @param {string} params.brandId - Brand UUID.
  * @param {boolean} params.enabled - Target flag value.
  * @param {Object} params.postgrestClient - PostgREST client.
  * @param {string} [params.updatedBy] - Audit actor.
- * @returns {Promise<{id: string, name: string}|null>}
+ * @returns {Promise<{id: string, name: string, site_id: string|null}|null>}
  */
 export async function setBrandClaimsEnabled({
   brandId,
@@ -874,7 +968,7 @@ export async function setBrandClaimsEnabled({
     // Do not flip the flag on a soft-deleted brand (matches the .neq guard used
     // across brands-storage); a deleted brand returns no row -> null.
     .neq('status', 'deleted')
-    .select('id, name')
+    .select('id, name, site_id')
     .maybeSingle();
 
   if (error) {
@@ -968,6 +1062,55 @@ export async function listBrandIdsForSite(organizationId, siteId, postgrestClien
 }
 
 /**
+ * Inverse of {@link listBrandIdsForSite}: given a set of brand ids, resolve
+ * every site within the org linked to at least one of them — the union of the
+ * brands' OWN primary sites (`brands.site_id`) and any `brand_sites` links.
+ *
+ * Used by ReBAC-filtered collection endpoints (list-sites, list-projects) under
+ * a `brand`-scoped product (LLMO) to narrow the org's sites to those the caller
+ * may view, by first resolving the caller's viewable brands then mapping those
+ * brands back to sites. Two org-scoped reads regardless of collection size —
+ * scales with the (small) set of viewable brands, never a per-site N+1.
+ *
+ * @param {string} organizationId - SpaceCat organization UUID
+ * @param {Set<string>|string[]} brandIds - brand ids the caller may view
+ * @param {object} postgrestClient - PostgREST client
+ * @returns {Promise<Set<string>>} site ids linked to any of `brandIds` (empty when none)
+ */
+export async function listSiteIdsForBrands(organizationId, brandIds, postgrestClient) {
+  const ids = [...(brandIds ?? [])].filter(hasText);
+  if (!postgrestClient?.from || !hasText(organizationId) || ids.length === 0) {
+    return new Set();
+  }
+
+  const [ownRes, linkedRes] = await Promise.all([
+    postgrestClient
+      .from('brands')
+      .select('site_id')
+      .eq('organization_id', organizationId)
+      .eq('status', 'active')
+      .in('id', ids),
+    postgrestClient
+      .from('brand_sites')
+      .select('site_id')
+      .eq('organization_id', organizationId)
+      .in('brand_id', ids),
+  ]);
+
+  if (ownRes.error) {
+    throw new Error(`Failed to resolve sites for brands: ${ownRes.error.message}`);
+  }
+  if (linkedRes.error) {
+    throw new Error(`Failed to resolve brand-site links for brands: ${linkedRes.error.message}`);
+  }
+
+  const siteIds = new Set();
+  (ownRes.data || []).forEach((row) => hasText(row.site_id) && siteIds.add(row.site_id));
+  (linkedRes.data || []).forEach((row) => hasText(row.site_id) && siteIds.add(row.site_id));
+  return siteIds;
+}
+
+/**
  * Creates or updates a brand in the normalized brands table,
  * including all nested child tables (aliases, competitors, social, earned, sites).
  *
@@ -1031,14 +1174,12 @@ export async function upsertBrand({
     throw new Error(`Failed to look up existing brand "${brand.name}": ${existingError.message}`);
   }
 
-  // An active brand must be anchored by either a SpaceCat base site OR a Semrush
-  // sub-workspace (serenity dual-mode): a Semrush brand has no SpaceCat site, but
-  // its sub-workspace (semrush_sub_workspace_id, set on the serenity-first create
-  // path) is a valid anchor — mirrors the relaxed chk_active_brand_has_site_id
-  // DB constraint. Respect persisted site_id on the update path.
-  const hasAnchor = hasText(brand.baseSiteId)
-    || hasText(existing?.site_id)
-    || hasText(semrushSubWorkspaceId);
+  // An active brand must be anchored by a SpaceCat base site (chk_active_brand_has_site_id,
+  // SITES-49449). A Semrush sub-workspace brand is NOT exempt from this — the
+  // brand/market management model (LLMO-6405) makes site_id mandatory on every
+  // create path, subworkspace mode or not, so semrush_sub_workspace_id is no
+  // longer a substitute anchor. Respect persisted site_id on the update path.
+  const hasAnchor = hasText(brand.baseSiteId) || hasText(existing?.site_id);
   const status = (!hasAnchor && (brand.status || 'active') === 'active')
     ? 'pending'
     : (brand.status || 'active');
@@ -1094,17 +1235,6 @@ export async function upsertBrand({
     row.mention_sentiment_guidance = mentionSentimentGuidance;
   }
 
-  // Deferred Semrush provisioning data for a pending (draft) brand: the primary
-  // URL + desired (market, languageCode) the wizard collected before a
-  // sub-workspace / project exist. Persisted as JSONB so activation can
-  // provision it later, then cleared. Undefined leaves the column untouched.
-  const pendingSemrushProvisioning = normalizePendingSemrushProvisioning(
-    brand.pendingSemrushProvisioning,
-  );
-  if (pendingSemrushProvisioning !== undefined) {
-    row.pending_semrush_provisioning = pendingSemrushProvisioning;
-  }
-
   // baseSiteId is immutable once persisted (mirrors updateBrand). Only set it
   // when the brand has no site_id yet — re-onboarding/re-upserting an existing
   // brand by name must NOT re-point its primary site (LLMO-5556: this silently
@@ -1121,18 +1251,43 @@ export async function upsertBrand({
   // (which left Semrush brands' site_id NULL) is removed; a genuine collision with
   // another brand's primary site still surfaces as the brands_base_site_unique 409
   // handled below.
-  if (existing === null) {
+  // serenity-docs#346: a brand's primary site must belong to the same org as the
+  // brand itself — anchoring to another org's site is exactly the org-ID mismatch
+  // pattern the investigation traced (Tata Capital, BMW, Toyota, ...). Verify on
+  // both paths that assign a *new* anchor (fresh create, or first anchor for a
+  // previously Semrush-only brand); the immutable-once-set branch below is
+  // unaffected since it already refuses to change an existing site_id.
+  const wantsNewAnchor = hasText(brand.baseSiteId)
+    && (existing === null || !hasText(existing.site_id));
+  if (wantsNewAnchor) {
+    await assertSiteBelongsToOrg(postgrestClient, brand.baseSiteId, organizationId, brand.name);
+  }
+
+  if (existing === null || !hasText(existing.site_id)) {
+    // Fresh create, or first anchor for a previously unanchored brand: assign
+    // whatever baseSiteId the caller supplied (or leave unset if they didn't).
     row.site_id = hasText(brand.baseSiteId) ? brand.baseSiteId : null;
-  } else if (hasText(brand.baseSiteId) && !hasText(existing.site_id)) {
-    row.site_id = brand.baseSiteId;
-  } else if (
-    hasText(brand.baseSiteId)
-    && hasText(existing.site_id)
-    && existing.site_id !== brand.baseSiteId
-  ) {
-    log.warn(`upsertBrand: ignoring baseSiteId change for brand "${brand.name}" `
-      + `(org ${organizationId}) — primary site is immutable `
-      + `(existing=${existing.site_id}, attempted=${brand.baseSiteId})`);
+  } else {
+    // Already anchored (existing.site_id is set) — site_id is immutable once
+    // persisted, so this call never changes it. But it MUST still be carried
+    // forward into `row` explicitly: this upsert always goes through
+    // `.upsert(row, { onConflict: 'organization_id,name' })`, and a column
+    // absent from that payload is not preserved on the resulting UPDATE — it
+    // ends up unset on the written row. Before this fix, re-submitting the
+    // brand's OWN already-correct baseSiteId (the common case: any caller
+    // that reads a brand back and re-upserts it verbatim) omitted site_id
+    // from every one of the three prior branches, silently clearing an
+    // already-anchored brand's site_id and tripping
+    // chk_active_brand_has_site_id — a 400 on a request that never intended
+    // to touch the anchor at all. Found via a brandalf migration script
+    // re-upserting already-onboarded brands (Grainger, Druva, Interface, ABB,
+    // Arkose Labs all hit this identically).
+    if (hasText(brand.baseSiteId) && brand.baseSiteId !== existing.site_id) {
+      log.warn(`upsertBrand: ignoring baseSiteId change for brand "${brand.name}" `
+        + `(org ${organizationId}) — primary site is immutable `
+        + `(existing=${existing.site_id}, attempted=${brand.baseSiteId})`);
+    }
+    row.site_id = existing.site_id;
   }
 
   const { data: upserted, error } = await postgrestClient
@@ -1227,12 +1382,13 @@ export async function updateBrand({
   const wantsClearBaseSite = updates.baseSiteId === null;
   const needsExistingFetch = hasText(updates.baseSiteId)
     || wantsClearBaseSite
-    || updates.status !== undefined;
+    || updates.status !== undefined
+    || updates.expectedUpdatedAt !== undefined;
   let existing = null;
   if (needsExistingFetch) {
     const { data: current, error: currentError } = await postgrestClient
       .from('brands')
-      .select('site_id, status')
+      .select('name, site_id, status, updated_at')
       .eq('id', brandId)
       .maybeSingle();
     // Fail closed: a swallowed read error leaves `current` null, so the guard
@@ -1245,25 +1401,65 @@ export async function updateBrand({
     existing = current;
   }
 
-  // baseSiteId mutation rules (LLMO-5870):
+  // LLMO-6591: optimistic concurrency. A caller that read the brand and echoes
+  // that read's `updatedAt` back on save is telling us what it thinks the
+  // current state is; if the row moved since then (another tab/request wrote
+  // in between), a routine save must not blindly overwrite fields — including
+  // collections it never touched but whose stale, empty local copy would
+  // otherwise wipe real data on the very next PATCH. Opt-in and backward
+  // compatible: omitting `expectedUpdatedAt` skips this check entirely, so
+  // existing callers are unaffected until they start sending it.
+  //
+  // This early check is a FAST-FAIL for the common case (an obviously-stale
+  // read), not the actual concurrency guarantee — it is a plain read-then-compare
+  // and is itself racy: two requests reading the same `updated_at` within this
+  // window would both pass it. The real guarantee is the `.eq('updated_at', ...)`
+  // predicate added to the UPDATE statement below, which Postgres evaluates
+  // atomically against the row as it exists at write time. `brands` has an
+  // unconditional `BEFORE UPDATE ... update_updated_at()` trigger (every write
+  // bumps it), so that predicate reliably fails when — and only when — another
+  // write landed in between. `expectedUpdatedAtChecked` (below) lets the
+  // post-update branch tell "predicate failed because of a race" apart from
+  // "row doesn't exist", since both otherwise look identical (`data` is null).
+  let expectedUpdatedAtChecked = false;
+  if (updates.expectedUpdatedAt !== undefined && existing) {
+    expectedUpdatedAtChecked = true;
+    const expected = new Date(updates.expectedUpdatedAt).getTime();
+    const actual = new Date(existing.updated_at).getTime();
+    if (Number.isNaN(expected) || expected !== actual) {
+      const err = new Error(
+        'This brand was changed since it was loaded - reload and reapply your edit.',
+      );
+      err.status = 409;
+      err.code = 'brand_stale_write';
+      throw err;
+    }
+  }
+
+  // baseSiteId mutation rules:
   //  - First set (NULL -> value): allowed for any brand.
-  //  - Re-point (value -> different value): allowed ONLY for pending brands, so a
-  //    draft can swap its primary URL before activation.
+  //  - Re-point (value -> different value): allowed for ANY brand via THIS explicit
+  //    updateBrand path (serenity-docs#349). A user deliberately picks an existing
+  //    Site in the org to become the brand's primary site, and the controller
+  //    (updateBrandForOrg) validates eligibility + drives the Semrush propagation
+  //    before this write. This is the sanctioned re-point path — NOT to be confused
+  //    with the SILENT overwrite guard that stays in upsertBrand (the automated
+  //    re-onboard path, LLMO-5556: mongodb.com -> learn.mongodb.com etc.), which
+  //    still refuses to move an existing site_id.
   //  - Clear (value -> NULL): allowed ONLY for pending brands, so the site can be
-  //    freed for reuse by another brand.
-  // Active brands stay immutable-once-set: a routine field save that echoes a
-  // stale baseSiteId must never re-point or strip a live brand's anchor (the
-  // LLMO-5556 / express.adobe.com regression guard). Clearing a pending brand's
-  // site_id is safe at the DB level — the partial unique index
-  // (brands_base_site_unique) skips NULLs and chk_active_brand_has_site_id only
-  // constrains active brands. The unique index still rejects a re-point that
-  // collides with another brand's primary URL.
+  //    freed for reuse by another brand. Active brands keep chk_active_brand_has_site_id.
+  // The partial unique index (brands_base_site_unique) skips NULLs and still rejects
+  // a re-point that collides with another brand's primary URL at the DB level.
   const isPending = (existing?.status || '').toLowerCase() === 'pending';
   if (wantsClearBaseSite) {
     if (isPending) {
       patch.site_id = null;
     }
-  } else if (hasText(updates.baseSiteId) && (!existing?.site_id || isPending)) {
+  } else if (hasText(updates.baseSiteId) && updates.baseSiteId !== existing?.site_id) {
+    // serenity-docs#346: same org-ID mismatch guard as upsertBrand — verify the
+    // new/re-pointed site actually belongs to this brand's org before persisting.
+    const brandLabel = existing?.name || brandId;
+    await assertSiteBelongsToOrg(postgrestClient, updates.baseSiteId, organizationId, brandLabel);
     patch.site_id = updates.baseSiteId;
   }
 
@@ -1303,26 +1499,45 @@ export async function updateBrand({
       .map((r) => (typeof r === 'string' ? r : String(r))).filter(hasText);
   }
 
-  // Deferred Semrush provisioning data (pending/draft brands). Activation passes
-  // `pendingSemrushProvisioning: null` to clear it once the real projects are
-  // provisioned.
-  if (updates.pendingSemrushProvisioning !== undefined) {
-    patch.pending_semrush_provisioning = normalizePendingSemrushProvisioning(
-      updates.pendingSemrushProvisioning,
-    );
-  }
-
   // Clear legacy columns on any brand update so old data doesn't linger.
   patch.social = [];
   patch.earned_sources = [];
 
-  const { data, error } = await postgrestClient
+  // LLMO-6591: the actual compare-and-swap. Adding the predicate directly on
+  // the UPDATE (rather than trusting the earlier read-then-compare) means
+  // Postgres evaluates it atomically against the row as it exists at write
+  // time — a concurrent write that lands between our read and this statement
+  // changes `updated_at` (the unconditional BEFORE UPDATE trigger guarantees
+  // that), so this predicate then matches zero rows instead of silently
+  // succeeding. Equality is Postgres's own timestamptz comparison, not a JS
+  // string compare, so it isn't sensitive to textual formatting differences
+  // between what the client echoes back and what's stored.
+  let updateQuery = postgrestClient
     .from('brands')
     .update(patch)
     .eq('organization_id', organizationId)
-    .eq('id', brandId)
-    .select('id')
-    .maybeSingle();
+    .eq('id', brandId);
+  if (updates.expectedUpdatedAt !== undefined) {
+    updateQuery = updateQuery.eq('updated_at', updates.expectedUpdatedAt);
+  }
+  // serenity-docs#349 / #3131 follow-up (LLMO — live e2e on prod): select the SAME
+  // wide embed getBrandById reads, directly off THIS UPDATE's own
+  // `Prefer: return=representation` — PostgREST embeds resources on an UPDATE's
+  // RETURNING exactly like it does on a GET. That makes `data` below a
+  // guaranteed-fresh snapshot: it comes back on the very request that just
+  // committed the write, and — confirmed against this env's Vault config
+  // (`dx_mysticat/prod/api-service` POSTGREST_URL=`http://data-svc-balanced.internal`)
+  // and mysticat-data-service's `reader.tf` ALB rules — every non-GET/HEAD/OPTIONS
+  // request on that host lands on the writer fleet, no exceptions. A plain
+  // follow-up `getBrandById()` call is a bare GET, and GETs on that same host ARE
+  // routed to a *separate* PostgREST fleet reading Aurora's reader endpoint — a
+  // real, independently-replicating replica with nonzero lag, not the same node
+  // the write just landed on. That is the confirmed mechanism behind the
+  // brand_repoint_not_persisted false-positive: the write commits on the writer,
+  // but the very next GET can still be served stale data by the reader. Selecting
+  // the full embed here means the common case (see below) never needs that
+  // second, possibly-stale GET at all.
+  const { data, error } = await updateQuery.select(BRAND_SELECT).maybeSingle();
 
   if (error) {
     if (error.code === '23505' && error.message?.includes('brands_base_site_unique')) {
@@ -1333,34 +1548,31 @@ export async function updateBrand({
     rethrowCheckViolation(error, `Failed to update brand: ${error.message}`);
   }
   if (!data) {
+    // The UPDATE matched zero rows. If we already confirmed via the pre-read
+    // that the row existed with a matching `updated_at`, the row must have
+    // changed between that read and this write — a genuine race the fast-fail
+    // check above could not catch on its own. Anything else (no expectedUpdatedAt,
+    // or the row never existed) is the pre-existing not-found case.
+    if (expectedUpdatedAtChecked) {
+      const err = new Error(
+        'This brand was changed since it was loaded - reload and reapply your edit.',
+      );
+      err.status = 409;
+      err.code = 'brand_stale_write';
+      throw err;
+    }
     return null;
   }
 
-  const childSyncs = [];
-
-  if (updates.brandAliases !== undefined) {
-    childSyncs.push(
-      syncAliases(brandId, organizationId, updates.brandAliases, postgrestClient, updatedBy),
-    );
-  }
-  if (updates.competitors !== undefined) {
-    childSyncs.push(
-      syncCompetitors(brandId, organizationId, updates.competitors, postgrestClient, updatedBy),
-    );
-  }
-  if (updates.socialAccounts !== undefined) {
-    // eslint-disable-next-line max-len
-    childSyncs.push(syncSocialAccounts(brandId, organizationId, updates.socialAccounts, postgrestClient, updatedBy));
-  }
-  if (updates.earnedContent !== undefined) {
-    childSyncs.push(
-      syncEarnedSources(brandId, organizationId, updates.earnedContent, postgrestClient, updatedBy),
-    );
-  }
-
-  if (childSyncs.length > 0) {
-    await Promise.all(childSyncs);
-  }
+  // Each sync function now skips itself when its collection is `undefined`
+  // (LLMO-6591), so the per-field `!== undefined` guards that used to live
+  // here are redundant — call unconditionally and let the shared guard decide.
+  await Promise.all([
+    syncAliases(brandId, organizationId, updates.brandAliases, postgrestClient, updatedBy),
+    syncCompetitors(brandId, organizationId, updates.competitors, postgrestClient, updatedBy),
+    syncSocialAccounts(brandId, organizationId, updates.socialAccounts, postgrestClient, updatedBy),
+    syncEarnedSources(brandId, organizationId, updates.earnedContent, postgrestClient, updatedBy),
+  ]);
 
   if (updates.urls !== undefined) {
     await Promise.all([
@@ -1369,35 +1581,162 @@ export async function updateBrand({
     ]);
   }
 
-  return getBrandById(organizationId, brandId, postgrestClient);
+  // Whether a follow-up read is even needed depends on what this call actually
+  // changed. `data` already reflects this UPDATE's own committed `brands` row —
+  // including the `base_site` join that drives baseSiteId/baseUrl — with none of
+  // the reader-replica staleness risk described above. A request that touched no
+  // child-table collection can therefore return it directly: no second read, no
+  // race, period.
+  const childTablesTouched = updates.brandAliases !== undefined
+    || updates.competitors !== undefined
+    || updates.socialAccounts !== undefined
+    || updates.earnedContent !== undefined
+    || updates.urls !== undefined;
+
+  if (!childTablesTouched) {
+    return mapDbBrandToV2(data);
+  }
+
+  // The child-table syncs above ran as separate requests AFTER this UPDATE
+  // committed, so their effect isn't part of `data`'s RETURNING payload — a
+  // follow-up read is genuinely unavoidable to pick up aliases/competitors/
+  // social/earned/urls. That follow-up is a plain GET, so on this host it CAN be
+  // served by the lagging reader fleet described above. Rather than trust it for
+  // the one field the #3131 safety net downstream actually gates on, override
+  // baseSiteId/baseUrl with the values this call already knows are correct from
+  // `data` — read back on the writer, in this same request, from the very UPDATE
+  // that changed `site_id` (or deliberately left it unchanged). This makes the
+  // re-point contract (returned baseSiteId always reflects the just-applied
+  // write) hold unconditionally, regardless of how stale the follow-up read's
+  // OTHER fields might transiently be.
+  const freshRow = await getBrandById(organizationId, brandId, postgrestClient);
+  if (!freshRow) {
+    return null;
+  }
+  freshRow.baseSiteId = data.base_site?.id ?? data.site_id ?? null;
+  freshRow.baseUrl = data.base_site?.base_url || null;
+  return freshRow;
 }
 
 /**
- * Soft-deletes a brand by setting status to 'deleted'.
+ * Soft-deletes a brand, renaming it to `{name}_deleted` so its original name is
+ * freed for reuse (LLMO-6978).
+ *
+ * The `brands` table has a per-org unique constraint on `name`
+ * (`uq_brand_name_per_org`) that spans deleted rows, so a soft-deleted brand
+ * that kept its original name would keep that name "taken" and block a customer
+ * from recreating a brand with the same name. To avoid that, the delete renames
+ * the brand to `{name}_deleted` in the same UPDATE that flips its status to
+ * `deleted`. If a same-named deleted brand already exists in the org (e.g. the
+ * customer created + deleted "Acme" more than once), an incrementing index is
+ * appended (`{name}_deleted2`, `{name}_deleted3`, ...) until the name is free —
+ * the only re-collision case is a customer literally naming a brand `..._deleted`.
+ *
+ * A brand that is already `deleted` short-circuits (returns true → idempotent
+ * 204) WITHOUT re-renaming, so a repeated delete never double-suffixes an
+ * already-renamed brand (`Acme_deleted` → `Acme_deleted_deleted`). Any other
+ * status — including a NULL status, which the rest of the code treats as a live
+ * brand — is renamed as normal. This early check is a JS `status === 'deleted'`
+ * guard rather than a SQL `status != 'deleted'` filter, which would also
+ * exclude NULL-status rows (`NULL <> 'deleted'` is NULL) and leave them
+ * undeletable. To also close the read-then-write race, the UPDATE itself is
+ * filtered with PostgREST `.not('status', 'eq', 'deleted')` — which DOES match
+ * NULL-status rows — so a concurrent delete that already renamed the row turns
+ * our UPDATE into a zero-row no-op (reported as success) instead of
+ * re-suffixing it.
+ *
+ * A colliding rename surfaces as a `23505` on the per-org name constraint
+ * (`uq_brand_name_per_org`, the only unique column this UPDATE touches), which
+ * we resolve by advancing the index and retrying; any other 23505 is surfaced
+ * rather than retried. Race-safe against concurrent deletes of same-named
+ * brands (the rename is keyed by brand id, so a re-run recomputes the same
+ * target and is idempotent).
+ *
+ * Backfilling brands deleted before this change (which kept their original
+ * names) is a separate one-off data migration and is intentionally out of scope
+ * here — this governs only the forward-looking delete path.
  *
  * @param {string} organizationId - SpaceCat organization UUID
  * @param {string} brandId - Brand UUID
  * @param {object} postgrestClient - PostgREST client
  * @param {string} [updatedBy] - User performing the operation
- * @returns {Promise<boolean>} True if deleted, false if not found
+ * @returns {Promise<boolean>} True if the brand is deleted (freshly soft-deleted,
+ *   or already deleted — DELETE stays idempotent), false if no such brand exists
  */
 export async function deleteBrand(organizationId, brandId, postgrestClient, updatedBy = 'system') {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required');
   }
 
-  const { data, error } = await postgrestClient
+  // Read the brand's current name (and status) so we can rename it on delete.
+  const { data: brand, error: readError } = await postgrestClient
     .from('brands')
-    .update({ status: 'deleted', updated_by: updatedBy })
+    .select('name, status')
     .eq('organization_id', organizationId)
     .eq('id', brandId)
-    .select('id')
     .maybeSingle();
 
-  if (error) {
-    throw new Error(`Failed to delete brand: ${error.message}`);
+  if (readError) {
+    throw new Error(`Failed to delete brand: ${readError.message}`);
   }
-  return !!data;
+  // Genuinely not found → false (404).
+  if (!brand) {
+    return false;
+  }
+  // Already soft-deleted → succeed idempotently (matches the pre-LLMO-6978
+  // behavior where a repeat delete returned 204) WITHOUT re-renaming, so an
+  // already-renamed name is never re-suffixed (`Acme_deleted_deleted`).
+  if (brand.status === 'deleted') {
+    return true;
+  }
+
+  // Try `{name}_deleted`, then `{name}_deleted2`, `{name}_deleted3`, ... until a
+  // free name lands. A collision rejects the UPDATE with a 23505 (a same-named
+  // brand was already deleted, or two deletes race) — advance the index and
+  // retry rather than surfacing a 500. The UPDATE is keyed by brand id, so a
+  // concurrent re-run recomputes the same target name and stays idempotent.
+  for (let index = 1; index <= MAX_DELETED_NAME_ATTEMPTS; index += 1) {
+    const deletedName = index === 1
+      ? `${brand.name}_deleted`
+      : `${brand.name}_deleted${index}`;
+
+    // eslint-disable-next-line no-await-in-loop -- sequential retry on name collision
+    const { error } = await postgrestClient
+      .from('brands')
+      .update({ status: 'deleted', name: deletedName, updated_by: updatedBy })
+      .eq('organization_id', organizationId)
+      .eq('id', brandId)
+      // Make the write itself the concurrency guard: only a still-live row is
+      // renamed. If a concurrent deleteBrand already flipped this row to
+      // `deleted` between our SELECT above and this UPDATE, we match zero rows
+      // instead of re-suffixing an already-renamed brand (`Acme_deleted` →
+      // `Acme_deleted2`). PostgREST `.not(...eq...)` still matches NULL-status
+      // rows (unlike a bare `status != 'deleted'`), so NULL-status live brands
+      // stay deletable.
+      .not('status', 'eq', 'deleted')
+      .select('id')
+      .maybeSingle();
+
+    if (!error) {
+      // Either we renamed + soft-deleted the row, OR a racing caller already
+      // soft-deleted it so our status-guarded UPDATE matched zero rows — either
+      // way the brand is now deleted, so report success idempotently.
+      return true;
+    }
+    // A 23505 on our per-org name constraint means `{name}_deletedN` is taken —
+    // advance the index and retry. Any other 23505 (a different unique
+    // constraint) can't be resolved by renaming, so surface it immediately
+    // rather than burning the whole retry budget on an unresolvable violation.
+    if (error.code !== '23505' || !error.message?.includes('uq_brand_name_per_org')) {
+      throw new Error(`Failed to delete brand: ${error.message}`);
+    }
+    // else: `{name}_deletedN` is taken — fall through and try the next index.
+  }
+
+  throw new Error(
+    `Failed to delete brand: could not free the name "${brand.name}" after `
+    + `${MAX_DELETED_NAME_ATTEMPTS} attempts`,
+  );
 }
 
 /**

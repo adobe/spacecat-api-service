@@ -1,0 +1,75 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Adobe LLMO EdgeOptimize connector role — log-only setup (CDN log delivery only, no
+  Lambda@Edge). Deploy this stack in the customer AWS account to grant Adobe SpaceCat
+  permission to read CloudFront distribution configs and enable CloudWatch Logs Delivery
+  for CDN access-log forwarding to Adobe. Use this template when the customer only wants
+  log forwarding without the EdgeOptimize routing feature.
+
+  Setup type: log-only (logs only, no Origin@Edge routing)
+
+Parameters:
+  TrustedPrincipalArn:
+    Type: String
+    Description: ARN of the Adobe SpaceCat IAM principal allowed to assume this role.
+    AllowedPattern: 'arn:aws:iam::[0-9]{12}:.*'
+  ExternalId:
+    Type: String
+    Description: >
+      Org-scoped external ID derived from the customer IMS org. Must match the value
+      SpaceCat presents during AssumeRole (confused-deputy prevention).
+    MinLength: 1
+  RoleName:
+    Type: String
+    Default: AdobeLLMOptimizerCloudFrontConnectorRole
+    Description: Name for the IAM role created in this account.
+
+Resources:
+  ConnectorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref RoleName
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Ref TrustedPrincipalArn
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                sts:ExternalId: !Ref ExternalId
+      Description: >
+        Grants Adobe SpaceCat cross-account read access to CloudFront distributions and
+        CloudWatch Logs Delivery permission for CDN log forwarding. Does not include
+        Lambda@Edge or CloudFront write permissions.
+      Policies:
+        - PolicyName: EdgeOptimizeLogOnlyPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # CloudFront read access — used for distribution discovery and delivery-source wiring
+              - Sid: CloudFrontRead
+                Effect: Allow
+                Action:
+                  - cloudfront:ListDistributions
+                  - cloudfront:GetDistribution
+                  - cloudfront:GetDistributionConfig
+                Resource: '*'
+              # CloudWatch Logs Delivery — create delivery source + link to Adobe destination
+              - Sid: LogsDeliveryWrite
+                Effect: Allow
+                Action:
+                  - logs:PutDeliverySource
+                  - logs:CreateDelivery
+                  - logs:GetDeliverySource
+                  - logs:DescribeDeliveries
+                Resource: '*'
+
+Outputs:
+  RoleArn:
+    Description: ARN of the connector IAM role
+    Value: !GetAtt ConnectorRole.Arn
+  RoleName:
+    Description: Name of the connector IAM role
+    Value: !Ref ConnectorRole

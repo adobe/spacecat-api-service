@@ -34,6 +34,7 @@ describe('Fix DTO', () => {
     getUpdatedAt: () => '2025-01-02T00:00:00.000Z',
     getExecutedBy: () => 'user@example.com',
     getExecutedAt: () => '2025-01-03T00:00:00.000Z',
+    getDeployedAt: () => '2025-01-03T06:00:00.000Z',
     getPublishedAt: () => '2025-01-04T00:00:00.000Z',
     getChangeDetails: () => ({ field: 'value' }),
     getStatus: () => 'PENDING',
@@ -68,12 +69,21 @@ describe('Fix DTO', () => {
         updatedAt: '2025-01-02T00:00:00.000Z',
         executedBy: 'user@example.com',
         executedAt: '2025-01-03T00:00:00.000Z',
+        deployedAt: '2025-01-03T06:00:00.000Z',
         publishedAt: '2025-01-04T00:00:00.000Z',
         changeDetails: { field: 'value' },
         status: 'PENDING',
         origin: 'MANUAL',
       });
       expect(json).to.not.have.property('suggestions');
+    });
+
+    it('emits deployedAt as null for fixes predating the deployed_at column', () => {
+      const fix = createMockFix({ getDeployedAt: () => null });
+
+      const json = FixDto.toJSON(fix);
+
+      expect(json.deployedAt).to.equal(null);
     });
 
     it('converts a fix entity with suggestions to JSON', () => {

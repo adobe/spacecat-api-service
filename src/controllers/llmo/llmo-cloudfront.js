@@ -11,7 +11,7 @@
  */
 
 import {
-  ok, badRequest, forbidden, notFound, internalServerError,
+  ok, badRequest, forbidden, notFound, internalServerError, createResponse,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
@@ -23,6 +23,9 @@ import TokowakaClient, {
   CloudFrontEdgeClient,
 } from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
+import { createCdnLogDelivery, buildDeliveryDestinationArn } from '../../support/cdn-log-delivery.js';
+import { hasSubpath } from '../../support/edge-routing-utils.js';
+import { auditHostname } from './llmo-utils.js';
 
 // CloudFormation templates use intrinsic-function tags (!Ref/!Sub/!GetAtt/...) that plain YAML
 // rejects. This schema tolerates them (constructing each to its raw value) so the permissions
@@ -45,6 +48,11 @@ const CFN_YAML_SCHEMA = yaml.DEFAULT_SCHEMA.extend(
 const TARGETED_PATHS_MAX_ENTRIES = 20;
 const TARGETED_PATHS_MAX_ENTRY_LENGTH = 256;
 
+// Cap parallel createCdnLogDelivery calls during a rescan. CloudWatch Logs delivery APIs are
+// per-account throttled (~10-25 TPS) and each distribution issues 1-3 calls, so a customer with
+// many distributions would otherwise hammer the limit and fail most calls with ThrottlingException.
+const CDN_LOG_RESCAN_CONCURRENCY = 5;
+
 /**
  * Controller for the CloudFront "Optimize at Edge" onboarding wizard. Mirrors the structure of
  * the Cloudflare onboarding controller: it owns the multi-step, cross-account control-plane flow
@@ -53,6 +61,30 @@ const TARGETED_PATHS_MAX_ENTRY_LENGTH = 256;
  */
 function LlmoCloudFrontController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
+
+  // Caller identity for audit lines; defaults so the field is always present (mirrors Cloudflare).
+  const getCallerId = (context) => context?.attributes?.authInfo?.getProfile?.()?.email || 'unknown';
+
+  // Greppable key=value audit line per mutation (started/done/error), correlated by requestId —
+  // same shape as the Cloudflare onboarding controller. Null/empty fields are dropped.
+  const auditLine = (context, action, outcome, fields = {}) => {
+    const entries = {
+      action,
+      outcome,
+      caller: getCallerId(context),
+      requestId: context?.invocation?.id || 'unknown',
+      ...fields,
+    };
+    const fmt = (v) => {
+      const s = String(v);
+      return /\s/.test(s) ? `"${s.replace(/"/g, "'")}"` : s;
+    };
+    const kv = Object.entries(entries)
+      .filter(([, v]) => v !== undefined && v !== null && v !== '')
+      .map(([k, v]) => `${k}=${fmt(v)}`)
+      .join(' ');
+    return `[cdn-onboard-cloudfront] ${kv}`;
+  };
 
   /**
    * POST /sites/{siteId}/llmo/cdn-onboard/cloudfront/bootstrap-url
@@ -94,8 +126,10 @@ function LlmoCloudFrontController(ctx) {
       if (!await accessControlUtil.hasAccess(site)) {
         return forbidden('User does not have access to this site');
       }
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can generate the CloudFront bootstrap URL');
+      if (!await accessControlUtil.hasLlmoCapabilityForSite(site)) {
+        return forbidden(accessControlUtil.llmoForbiddenMessage(
+          'Only LLMO administrators can generate the CloudFront bootstrap URL',
+        ));
       }
 
       // The template-hosting S3 bucket — per-environment, from Vault
@@ -147,7 +181,11 @@ function LlmoCloudFrontController(ctx) {
       Object.entries(params).forEach(([k, v]) => qs.set(`param_${k}`, v));
       const quickCreateUrl = `https://${region}.console.aws.amazon.com/cloudformation/home?region=${region}#/stacks/quickcreate?${qs.toString()}`;
 
-      log.info(`[cdn-onboard-cloudfront] Generated bootstrap URL for site ${siteId}, account ${accountId}`);
+      // First step of the CloudFront wizard the customer can reach, so this doubles as the
+      // "onboarding started" signal for alerting — hence caller + host, not just ids.
+      log.info(auditLine(context, 'bootstrap-url', 'generated', {
+        siteId, accountId, host: auditHostname(site),
+      }));
 
       return ok({
         externalId,
@@ -176,8 +214,15 @@ function LlmoCloudFrontController(ctx) {
     if (!await accessControlUtil.hasAccess(site)) {
       return { error: forbidden('User does not have access to this site') };
     }
-    if (!accessControlUtil.isLLMOAdministrator()) {
-      return { error: forbidden(`Only LLMO administrators can ${action}`) };
+    if (!await accessControlUtil.hasLlmoCapabilityForSite(site)) {
+      return {
+        error: forbidden(accessControlUtil.llmoForbiddenMessage(
+          `Only LLMO administrators can ${action}`,
+        )),
+      };
+    }
+    if (hasSubpath(site.getBaseURL())) {
+      return { error: createResponse({ message: 'CDN auto-routing is not supported for subpath sites' }, 501) };
     }
     // Server-derived external ID (site's IMS org id); never accepted from the client. Matches what
     // bootstrap baked into the role's trust policy. See resolveConnectorExternalId.
@@ -195,12 +240,13 @@ function LlmoCloudFrontController(ctx) {
   // `{ accountId, distributionId, error }` where `error` is a badRequest Response when validation
   // fails (undefined otherwise).
   const validateCloudfrontCredentials = (context, { requireDistribution = false } = {}) => {
-    const accountId = String(context.data?.accountId || '').replace(/\D/g, '');
+    const rawAccountId = String(context.data?.accountId || '');
     const distributionId = String(context.data?.distributionId || '').trim();
 
-    if (accountId.length !== 12) {
+    if (!/^\d{12}$/.test(rawAccountId)) {
       return { error: badRequest('accountId must be a 12-digit AWS account ID') };
     }
+    const accountId = rawAccountId;
     if (requireDistribution && !hasText(distributionId)) {
       return { error: badRequest('distributionId is required') };
     }
@@ -219,39 +265,20 @@ function LlmoCloudFrontController(ctx) {
     };
   };
 
-  // Caller identity for audit lines; defaults so the field is always present (mirrors Cloudflare).
-  const getCallerId = (context) => context?.attributes?.authInfo?.getProfile?.()?.email || 'unknown';
-
-  // Greppable key=value audit line per mutation (started/done/error), correlated by requestId —
-  // same shape as the Cloudflare onboarding controller. Null/empty fields are dropped.
-  const auditLine = (context, action, outcome, fields = {}) => {
-    const entries = {
-      action,
-      outcome,
-      caller: getCallerId(context),
-      requestId: context?.invocation?.id || 'unknown',
-      ...fields,
-    };
-    const fmt = (v) => {
-      const s = String(v);
-      return /\s/.test(s) ? `"${s.replace(/"/g, "'")}"` : s;
-    };
-    const kv = Object.entries(entries)
-      .filter(([, v]) => v !== undefined && v !== null && v !== '')
-      .map(([k, v]) => `${k}=${fmt(v)}`)
-      .join(' ');
-    return `[cdn-onboard-cloudfront] ${kv}`;
-  };
-
   // Surface actionable AWS failures (permissions, preconditions, throttling) as 4xx instead of a
   // generic 500 + "try again", which hides the cause and invites a blind retry.
   const CATEGORIZED_AWS_ERRORS = new Set([
     'AccessDenied', 'AccessDeniedException', 'PreconditionFailed',
     'ThrottlingException', 'TooManyRequestsException', 'InvalidArgument', 'NoSuchDistribution',
+    // CloudWatch Logs delivery errors (cdn-log-delivery endpoints):
+    'ServiceQuotaExceededException', 'ValidationException', 'ConflictException',
+    'ExpiredTokenException', 'DeliverySourceConflict',
   ]);
+  // Return only the error name for categorized AWS errors — not the full message, which can
+  // contain cross-account ARNs, assumed-role paths, or other sensitive infra details.
   const mutationErrorResponse = (error, fallbackMessage) => (
     CATEGORIZED_AWS_ERRORS.has(error?.name)
-      ? badRequest(cleanupHeaderValue(`${error.name}: ${error.message}`))
+      ? badRequest(cleanupHeaderValue(error.name))
       : internalServerError(fallbackMessage)
   );
 
@@ -314,19 +341,24 @@ function LlmoCloudFrontController(ctx) {
     }
 
     try {
-      const { error, externalId } = await gateEdgeOptimizeWizard(siteId, Site, 'connect the CloudFront connector role');
+      const { error, site, externalId } = await gateEdgeOptimizeWizard(siteId, Site, 'connect the CloudFront connector role');
       if (error) {
         return error;
       }
 
       try {
         const { roleArn } = await assumeConnectorRole({ accountId, externalId, roleName });
-        log.info(`[cdn-onboard-cloudfront] Connected site ${siteId} to account ${accountId}`);
+        log.info(auditLine(context, 'connect', 'done', {
+          siteId, accountId, host: auditHostname(site),
+        }));
         return ok({ connected: true, accountId, roleArn });
       } catch (assumeError) {
         // The role may not exist yet (customer still creating it) or the external ID may not
         // match — surface as not-connected so the wizard can keep polling rather than erroring.
-        log.info(`[cdn-onboard-cloudfront] Role not yet assumable for site ${siteId}: ${assumeError.message}`);
+        // Emitted once per poll, so dedupe by siteId before alerting on it.
+        log.info(auditLine(context, 'connect', 'role-not-assumable', {
+          siteId, accountId, error: assumeError.message,
+        }));
         return ok({ connected: false, reason: cleanupHeaderValue(assumeError.message) });
       }
     } catch (error) {
@@ -570,7 +602,11 @@ function LlmoCloudFrontController(ctx) {
       return ok(result);
     } catch (error) {
       log.error(auditLine(context, 'create-origin', 'error', {
-        siteId, accountId, distributionId, error: error.message,
+        severity: 'error',
+        siteId,
+        accountId,
+        distributionId,
+        error: error.message,
       }));
       return mutationErrorResponse(error, 'Failed to create the Edge Optimize origin, please try again');
     }
@@ -647,7 +683,11 @@ function LlmoCloudFrontController(ctx) {
       return ok(result);
     } catch (error) {
       log.error(auditLine(context, 'create-function', 'error', {
-        siteId, accountId, distributionId, error: error.message,
+        severity: 'error',
+        siteId,
+        accountId,
+        distributionId,
+        error: error.message,
       }));
       return mutationErrorResponse(error, 'Failed to create the CloudFront routing function, please try again');
     }
@@ -698,7 +738,12 @@ function LlmoCloudFrontController(ctx) {
       return ok(result);
     } catch (error) {
       log.error(auditLine(context, 'apply-cache', 'error', {
-        siteId, accountId, distributionId, behavior: pathPattern, error: error.message,
+        severity: 'error',
+        siteId,
+        accountId,
+        distributionId,
+        behavior: pathPattern,
+        error: error.message,
       }));
       return mutationErrorResponse(error, 'Failed to apply CloudFront cache headers, please try again');
     }
@@ -750,7 +795,11 @@ function LlmoCloudFrontController(ctx) {
       return ok(result);
     } catch (error) {
       log.error(auditLine(context, 'create-lambda', 'error', {
-        siteId, accountId, distributionId, error: error.message,
+        severity: 'error',
+        siteId,
+        accountId,
+        distributionId,
+        error: error.message,
       }));
       return mutationErrorResponse(error, 'Failed to create the CloudFront Lambda@Edge function, please try again');
     }
@@ -848,7 +897,12 @@ function LlmoCloudFrontController(ctx) {
       return ok(result);
     } catch (error) {
       log.error(auditLine(context, 'associate', 'error', {
-        siteId, accountId, distributionId, behavior: pathPattern, error: error.message,
+        severity: 'error',
+        siteId,
+        accountId,
+        distributionId,
+        behavior: pathPattern,
+        error: error.message,
       }));
       return mutationErrorResponse(error, 'Failed to associate CloudFront routing, please try again');
     }
@@ -901,7 +955,16 @@ function LlmoCloudFrontController(ctx) {
 
       const url = /^https?:\/\//.test(domain) ? domain : `https://${domain}/`;
       const result = await verifyAwsRouting(url);
-      log.info(`[cdn-onboard-cloudfront] Verified routing for site ${siteId}: passed=${result.passed}`);
+      // `host` is always the site (comparable across providers); `probedHost` is what was actually
+      // hit, which may be a caller override or the distribution's *.cloudfront.net fallback.
+      log.info(auditLine(context, 'verify', result.passed ? 'passed' : 'failed', {
+        siteId,
+        accountId,
+        distributionId,
+        host: auditHostname(site),
+        probedHost: domain,
+        severity: result.passed ? undefined : 'error',
+      }));
       return ok(result);
     } catch (error) {
       log.error(`Failed to verify CloudFront routing for site ${siteId}:`, error);
@@ -994,7 +1057,12 @@ function LlmoCloudFrontController(ctx) {
       return ok(result);
     } catch (error) {
       log.error(auditLine(context, 'deploy', 'error', {
-        siteId, accountId, distributionId, behavior, error: error.message,
+        severity: 'error',
+        siteId,
+        accountId,
+        distributionId,
+        behavior,
+        error: error.message,
       }));
       return mutationErrorResponse(error, 'Failed to deploy CloudFront routing, please try again');
     }
@@ -1072,8 +1140,13 @@ function LlmoCloudFrontController(ctx) {
         accountId: resolvedAccountId,
       });
 
-      log.info(`[cdn-onboard-cloudfront] site ${siteId}: canProceed=${result.canProceed},`
-        + ` steps=${result.steps.map((s) => `${s.key}:${s.action}`).join(',')}`);
+      log.info(auditLine(context, 'plan', result.canProceed ? 'ok' : 'blocked', {
+        siteId,
+        distributionId,
+        host: auditHostname(site),
+        forwardedHost,
+        steps: result.steps.map((s) => `${s.key}:${s.action}`).join(','),
+      }));
       // targetDomain lets the FE display exactly the host the BE will route to for this site.
       // Loosely coupled: the FE also knows it locally, so this is purely informational.
       return ok({ ...result, targetDomain: forwardedHost });
@@ -1140,11 +1213,197 @@ function LlmoCloudFrontController(ctx) {
         })),
       };
 
-      log.info(`[cdn-onboard-cloudfront] Returned permissions for site ${siteId}`);
+      log.info(auditLine(context, 'permissions', 'returned', { siteId }));
       return ok({ adobeAccount, manifest });
     } catch (error) {
       log.error(`Failed to read the CloudFront connector permissions for site ${siteId}:`, error);
       return internalServerError('Failed to read the CloudFront connector permissions, please try again');
+    }
+  };
+
+  // Enable CDN access-log forwarding for a SINGLE CloudFront distribution to Adobe's cross-account
+  // cdn-logs destination (mutation, idempotent). The assume-role externalId is the per-session UUID
+  // from bootstrap (client-supplied, must match the connector role's trust policy); the delivery
+  // destination + source names are org-scoped, derived server-side from the site's IMS org id (NOT
+  // from the externalId). Returns { created, alreadyExisted, deliverySourceName, deliveryId }.
+  const enableCdnLogDelivery = async (context) => {
+    const { log, dataAccess, env } = context;
+    const { siteId } = context.params;
+    const { Site, Organization } = dataAccess;
+    const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
+
+    const {
+      accountId, distributionId, error: credError,
+    } = validateCloudfrontCredentials(context, { requireDistribution: true });
+    if (credError) {
+      return credError;
+    }
+
+    try {
+      const { error, site, externalId } = await gateEdgeOptimizeWizard(siteId, Site, 'enable CDN log forwarding');
+      if (error) {
+        return error;
+      }
+
+      // The cdn-logs destination/source names are scoped by IMS org, resolved server-side from the
+      // site's organization — independent of the assume-role externalId.
+      const organization = await Organization.findById(site.getOrganizationId());
+      const imsOrgId = organization?.getImsOrgId();
+      if (!hasText(imsOrgId)) {
+        return badRequest('Site organization has no IMS org ID');
+      }
+
+      // Missing destination account is a server misconfiguration, not bad caller input → 500.
+      const adobeAccountId = env?.CDN_LOG_DELIVERY_DEST_ACCOUNT_ID;
+      if (!hasText(adobeAccountId)) {
+        return internalServerError('CDN log delivery destination account is not configured');
+      }
+      const deliveryDestinationArn = buildDeliveryDestinationArn({ imsOrgId, adobeAccountId });
+
+      const { cloudFrontClient, credentials } = await assumeCloudFrontClient({
+        accountId, externalId, roleName,
+      });
+
+      // Guard: only proceed if the distribution actually serves this site (prevents cross-org
+      // log capture in shared accounts; also surfaces a proper 404 for nonexistent distributions
+      // rather than a misleading "Adobe destination not provisioned" message).
+      const guard = await assertDistributionServesSite(
+        cloudFrontClient,
+        distributionId,
+        site,
+        context,
+        log,
+      );
+      if (guard.error) {
+        return guard.error;
+      }
+
+      let result;
+      try {
+        result = await createCdnLogDelivery(credentials, {
+          provider: 'cloudfront',
+          resourceId: distributionId,
+          accountId,
+          imsOrgId,
+          deliveryDestinationArn,
+        });
+      } catch (deliveryError) {
+        // Adobe destination not provisioned yet → clear 4xx instead of a raw AWS error + retry.
+        if (deliveryError?.name === 'ResourceNotFoundException') {
+          log.warn(`[cdn-onboard-cloudfront] Adobe log destination not provisioned for site ${siteId} (imsOrgId=${imsOrgId})`);
+          return badRequest('Adobe log destination is not provisioned for this organization yet — run cdn-logs provisioning first');
+        }
+        throw deliveryError;
+      }
+      log.info(auditLine(context, 'log-delivery', 'done', {
+        siteId, accountId, distributionId, alreadyExisted: result.alreadyExisted,
+      }));
+      return ok(result);
+    } catch (error) {
+      log.error(auditLine(context, 'log-delivery', 'error', {
+        siteId, accountId, distributionId, error: error.message,
+      }));
+      // Surface actionable AWS failures (AccessDenied/Throttling/…) as 4xx, like sibling endpoints.
+      return mutationErrorResponse(error, 'An unexpected error occurred');
+    }
+  };
+
+  // Idempotently enable CDN log delivery for ALL distributions in the customer account. Intended
+  // for re-scan use: after a new distribution is added, or to recover from a missed setup. Each
+  // distribution is attempted independently (Promise.allSettled) so one failure never aborts the
+  // rest; the response summarizes created/alreadyExisted/failed per distribution.
+  const rescanCdnLogDelivery = async (context) => {
+    const { log, dataAccess, env } = context;
+    const { siteId } = context.params;
+    const { Site, Organization } = dataAccess;
+    const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
+
+    const { accountId, error: credError } = validateCloudfrontCredentials(context);
+    if (credError) {
+      return credError;
+    }
+
+    try {
+      const { error, site, externalId } = await gateEdgeOptimizeWizard(siteId, Site, 'rescan CDN log delivery');
+      if (error) {
+        return error;
+      }
+
+      const organization = await Organization.findById(site.getOrganizationId());
+      const imsOrgId = organization?.getImsOrgId();
+      if (!hasText(imsOrgId)) {
+        return badRequest('Site organization has no IMS org ID');
+      }
+
+      // Missing destination account is a server misconfiguration, not bad caller input → 500.
+      const adobeAccountId = env?.CDN_LOG_DELIVERY_DEST_ACCOUNT_ID;
+      if (!hasText(adobeAccountId)) {
+        return internalServerError('CDN log delivery destination account is not configured');
+      }
+      const deliveryDestinationArn = buildDeliveryDestinationArn({ imsOrgId, adobeAccountId });
+
+      const { cloudFrontClient, credentials } = await assumeCloudFrontClient({
+        accountId, externalId, roleName,
+      });
+
+      const allDistributions = await cloudFrontClient.listDistributions();
+      const maxDists = Number(env?.CDN_LOG_RESCAN_MAX_DISTRIBUTIONS) || 0;
+      const truncated = maxDists > 0 && allDistributions.length > maxDists;
+      const distributions = truncated ? allDistributions.slice(0, maxDists) : allDistributions;
+
+      // Run in bounded batches (CDN_LOG_RESCAN_CONCURRENCY) so a large account doesn't trip
+      // CloudWatch Logs per-account throttling. slice()/push() preserve order, so the per-index
+      // summary mapping below stays aligned with `distributions`.
+      const results = [];
+      for (let i = 0; i < distributions.length; i += CDN_LOG_RESCAN_CONCURRENCY) {
+        const batch = distributions.slice(i, i + CDN_LOG_RESCAN_CONCURRENCY);
+        // eslint-disable-next-line no-await-in-loop
+        const batchResults = await Promise.allSettled(
+          batch.map((dist) => createCdnLogDelivery(credentials, {
+            provider: 'cloudfront',
+            resourceId: dist.id,
+            accountId,
+            imsOrgId,
+            deliveryDestinationArn,
+          })),
+        );
+        results.push(...batchResults);
+      }
+
+      // If every distribution failed with ResourceNotFoundException the Adobe destination is not
+      // provisioned — surface a clear top-level error instead of an all-failed distribution list.
+      if (results.length > 0 && results.every(
+        (r) => r.status === 'rejected' && r.reason?.name === 'ResourceNotFoundException',
+      )) {
+        return badRequest('Adobe log destination is not provisioned for this organization yet — run cdn-logs provisioning first');
+      }
+
+      const summary = distributions.map((dist, i) => {
+        const outcome = results[i];
+        if (outcome.status === 'fulfilled') {
+          return { distributionId: dist.id, ...outcome.value };
+        }
+        // Report only the AWS error category (e.g. ThrottlingException) — never the raw message,
+        // which can leak ARNs / role names to the caller.
+        return { distributionId: dist.id, error: outcome.reason?.name || 'unknown error' };
+      });
+
+      const createdCount = summary.filter((r) => r.created).length;
+      const alreadyExisted = summary.filter((r) => r.alreadyExisted).length;
+      const failed = summary.filter((r) => r.error).length;
+      log.info(`[cdn-onboard-cloudfront] log-rescan site ${siteId}: scanned ${distributions.length} `
+        + `distributions — created=${createdCount}, alreadyExisted=${alreadyExisted}, failed=${failed}`);
+      return ok({
+        scanned: distributions.length,
+        created: createdCount,
+        alreadyExisted,
+        failed,
+        ...(truncated && { truncated: true, totalFound: allDistributions.length }),
+        distributions: summary,
+      });
+    } catch (error) {
+      log.error(`Failed to rescan CDN log delivery for site ${siteId}:`, error);
+      return mutationErrorResponse(error, 'An unexpected error occurred');
     }
   };
 
@@ -1165,6 +1424,8 @@ function LlmoCloudFrontController(ctx) {
     deploy,
     plan,
     getPermissions,
+    enableCdnLogDelivery,
+    rescanCdnLogDelivery,
   };
 }
 

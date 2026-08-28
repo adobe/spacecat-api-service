@@ -31,6 +31,7 @@ import {
   findPromptsBlockingRegionRemoval,
   getIntentsByPromptIds,
   deriveV2PromptOrigin,
+  isServicePrincipal,
 } from '../../src/support/prompts-storage.js';
 
 use(chaiAsPromised);
@@ -94,6 +95,50 @@ describe('prompts-storage', () => {
     it('defaults a SERVICE principal to `human` when the body value is out-of-vocabulary', () => {
       expect(deriveV2PromptOrigin('robot', false)).to.equal('human');
       expect(deriveV2PromptOrigin('', false)).to.equal('human');
+    });
+  });
+
+  describe('isServicePrincipal (origin-dimension.md §3)', () => {
+    it('classifies an S2S consumer (JWT) as a service principal', () => {
+      // authType is `jwt` (same as an end user) — recognised only by the claim.
+      expect(isServicePrincipal({
+        getType: () => 'jwt',
+        isS2SConsumer: () => true,
+        isS2SAdmin: () => false,
+      })).to.equal(true);
+    });
+
+    it('classifies an S2S admin (JWT) as a service principal', () => {
+      expect(isServicePrincipal({
+        getType: () => 'jwt',
+        isS2SConsumer: () => false,
+        isS2SAdmin: () => true,
+      })).to.equal(true);
+    });
+
+    it('classifies a scoped/legacy API key (non-jwt/ims authType) as a service principal', () => {
+      expect(isServicePrincipal({ getType: () => 'scopedApiKey' })).to.equal(true);
+      expect(isServicePrincipal({ getType: () => 'legacyApiKey' })).to.equal(true);
+    });
+
+    it('classifies an end-user JWT/IMS session (no S2S claim) as NOT a service principal', () => {
+      expect(isServicePrincipal({
+        getType: () => 'jwt',
+        isS2SConsumer: () => false,
+        isS2SAdmin: () => false,
+      })).to.equal(false);
+      expect(isServicePrincipal({ getType: () => 'ims' })).to.equal(false);
+    });
+
+    it('fails SAFE to a user principal for absent / indeterminate auth', () => {
+      // no authInfo at all
+      expect(isServicePrincipal(undefined)).to.equal(false);
+      expect(isServicePrincipal(null)).to.equal(false);
+      // authInfo present but non-function getType and no S2S signal
+      expect(isServicePrincipal({})).to.equal(false);
+      expect(isServicePrincipal({ getType: 'not-a-function' })).to.equal(false);
+      // absent authType (getType returns undefined) with no S2S signal
+      expect(isServicePrincipal({ getType: () => undefined })).to.equal(false);
     });
   });
 
@@ -438,7 +483,10 @@ describe('prompts-storage', () => {
           or: () => chain,
           contains: () => chain,
           overlaps: () => chain,
-          in: () => chain,
+          in: (column, values) => {
+            eqCalls.push({ column, values });
+            return chain;
+          },
           range: () => thenable(result),
           maybeSingle: () => thenable(result),
           single: () => thenable(result),
@@ -453,7 +501,7 @@ describe('prompts-storage', () => {
       };
     }
 
-    it('applies the source filter as an exact match when source is provided', async () => {
+    it('filters source on the source_canonical generated column', async () => {
       const eqCalls = [];
       await listPrompts({
         organizationId: ORG_ID,
@@ -461,7 +509,24 @@ describe('prompts-storage', () => {
         source: 'gsc',
         postgrestClient: makeEqRecordingClient(eqCalls),
       });
-      expect(eqCalls).to.deep.include({ column: 'source', value: 'gsc' });
+      // Single equality on the DB-canonicalized column — no app-side variant expansion.
+      expect(eqCalls).to.deep.include({ column: 'source_canonical', value: 'gsc' });
+    });
+
+    it('folds the incoming filter value to canonical before matching source_canonical', async () => {
+      const eqCalls = [];
+      await listPrompts({
+        organizationId: ORG_ID,
+        brandId: BRAND_UUID,
+        source: 'CITATION_ATTEMPT',
+        postgrestClient: makeEqRecordingClient(eqCalls),
+      });
+      // The query-param value is folded (trim→lower→`_`→`-`) so it aligns with the
+      // generated column, which already stores the canonical form — one value, and
+      // a request for `citation_attempt`/`CITATION_ATTEMPT` finds `citation-attempt`.
+      expect(eqCalls).to.deep.include({
+        column: 'source_canonical', value: 'citation-attempt',
+      });
     });
 
     it('does not apply a source filter when source is omitted', async () => {
@@ -471,7 +536,7 @@ describe('prompts-storage', () => {
         brandId: BRAND_UUID,
         postgrestClient: makeEqRecordingClient(eqCalls),
       });
-      expect(eqCalls.some((c) => c.column === 'source')).to.equal(false);
+      expect(eqCalls.some((c) => c.column.includes('source'))).to.equal(false);
     });
 
     it('uses explicit limit and page values', async () => {
@@ -2695,6 +2760,79 @@ describe('prompts-storage', () => {
       expect(result.created).to.equal(0);
       expect(result.updated).to.equal(1);
     });
+
+    // Confirmed live 2026-08-24: a brand with >1000 existing prompts matching the
+    // incoming batch's ids returned an unchunked `.in('prompt_id', incomingIds)`
+    // response silently truncated at PostgREST's 1000-row default cap, so ~200
+    // already-existing rows were absent from `existing` and got misrouted to
+    // INSERT, which then 409'd against uq_prompt_text_region_source_per_brand.
+    // The existing-rows fetch must chunk the id list (mirroring
+    // getIntentsByPromptIds' INTENT_LOOKUP_CHUNK_SIZE=100 pattern) and merge every
+    // chunk's rows before matching, so no existing row is ever silently dropped.
+    it('chunks the existing-rows lookup so no match is dropped above the id-batch chunk size (regression)', async () => {
+      const TOTAL = 150; // > INTENT_LOOKUP_CHUNK_SIZE (100) — forces 2 chunks (100 + 50)
+      const incoming = Array.from({ length: TOTAL }, (_, i) => ({
+        id: `p-${i}`,
+        prompt: `Prompt number ${i}`,
+        regions: ['us'],
+      }));
+      const existingRowsById = new Map(incoming.map((p) => [p.id, {
+        id: `row-${p.id}`,
+        prompt_id: p.id,
+        text: p.prompt,
+        regions: p.regions,
+        status: 'active',
+        source: 'config',
+      }]));
+
+      const inStub = sinon.stub().callsFake((column, ids) => thenable({
+        data: ids.map((id) => existingRowsById.get(id)).filter(Boolean),
+        error: null,
+      }));
+      const insertStub = sinon.stub().returns({
+        select: () => thenable({ data: [], error: null }),
+      });
+      const updateStub = sinon.stub().returns({ eq: () => thenable({ error: null }) });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [], error: null }),
+                    in: inStub,
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: updateStub,
+            };
+          }
+          return makeChain({});
+        },
+      };
+
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: incoming,
+        postgrestClient: client,
+      });
+
+      // Chunked into 2 `.in()` calls, not one unchunked call over all 150 ids.
+      expect(inStub.callCount).to.equal(2);
+      const batchSizes = inStub.getCalls().map((c) => c.args[1].length).sort((a, b) => b - a);
+      expect(batchSizes).to.deep.equal([100, 50]);
+
+      // Every one of the 150 already-existing rows must be found and routed to
+      // UPDATE — none silently dropped and misrouted to INSERT.
+      expect(result.updated).to.equal(TOTAL);
+      expect(result.created).to.equal(0);
+      expect(insertStub.called).to.equal(false);
+      // Updates are issued per-row (UPDATE_CONCURRENCY workers), not bulk.
+      expect(updateStub.callCount).to.equal(TOTAL);
+    });
   });
 
   describe('updatePromptById', () => {
@@ -3326,6 +3464,87 @@ describe('prompts-storage', () => {
       });
       expect(result.items[0].source).to.equal('sheet');
     });
+
+    it('canonicalizes source on read (2nd derivation boundary — agentic_traffic → agentic-traffic)', async () => {
+      const rowWithSource = { ...sampleRow, source: 'agentic_traffic' };
+      const client = {
+        from: (table) => (table === 'brands'
+          ? makeChain({ data: { id: BRAND_UUID }, error: null })
+          : makeChain({ data: [rowWithSource], error: null, count: 1 })),
+      };
+      const result = await listPrompts({
+        organizationId: ORG_ID, brandId: BRAND_UUID, postgrestClient: client,
+      });
+      expect(result.items[0].source).to.equal('agentic-traffic');
+    });
+
+    it('returns the RAW stored value when it fails the canonical guard (grid still shows it)', async () => {
+      const rowWithSource = { ...sampleRow, source: 'has:colon' };
+      const client = {
+        from: (table) => (table === 'brands'
+          ? makeChain({ data: { id: BRAND_UUID }, error: null })
+          : makeChain({ data: [rowWithSource], error: null, count: 1 })),
+      };
+      const result = await listPrompts({
+        organizationId: ORG_ID, brandId: BRAND_UUID, postgrestClient: client,
+      });
+      expect(result.items[0].source).to.equal('has:colon');
+    });
+
+    it('returns the RAW value for the dimension-root shadow `source` (root-name guard — not null, not `config`)', async () => {
+      // `source` is a dimension-root name, so `canonicalizeSource` fails the guard
+      // and `mapRowToPrompt` returns the raw stored value — the grid still shows it,
+      // and it is NOT coerced to `null` or to the `config` proxy-create default.
+      const rowWithSource = { ...sampleRow, source: 'source' };
+      const client = {
+        from: (table) => (table === 'brands'
+          ? makeChain({ data: { id: BRAND_UUID }, error: null })
+          : makeChain({ data: [rowWithSource], error: null, count: 1 })),
+      };
+      const result = await listPrompts({
+        organizationId: ORG_ID, brandId: BRAND_UUID, postgrestClient: client,
+      });
+      expect(result.items[0].source).to.equal('source');
+    });
+
+    it('sorts source on the source_canonical generated column', async () => {
+      const orderCalls = [];
+      const recordingChain = (result) => {
+        const chain = {
+          select: () => chain,
+          eq: () => chain,
+          neq: () => chain,
+          or: () => chain,
+          contains: () => chain,
+          overlaps: () => chain,
+          in: () => chain,
+          order: (column, opts) => {
+            orderCalls.push({ column, opts });
+            return chain;
+          },
+          range: () => thenable(result),
+          maybeSingle: () => thenable(result),
+          single: () => thenable(result),
+          then: (resolve) => resolve(result),
+        };
+        return chain;
+      };
+      const client = {
+        from: (table) => (table === 'brands'
+          ? recordingChain({ data: { id: BRAND_UUID }, error: null })
+          : recordingChain({ data: [], error: null, count: 0 })),
+      };
+      await listPrompts({
+        organizationId: ORG_ID,
+        brandId: BRAND_UUID,
+        sort: 'source',
+        order: 'asc',
+        postgrestClient: client,
+      });
+      expect(orderCalls[0]).to.deep.equal({
+        column: 'source_canonical', opts: { ascending: true },
+      });
+    });
   });
 
   describe('upsertPrompts - source field', () => {
@@ -3841,6 +4060,47 @@ describe('prompts-storage', () => {
       // First attempt carried intent; retry stripped it.
       expect(insertStub.firstCall.args[0][0]).to.have.property('intent', 'informational');
       expect(insertStub.secondCall.args[0][0]).to.not.have.property('intent');
+    });
+
+    it('upsertPrompts retries the chunked existing-rows select without intent when the column is missing', async () => {
+      // The existing-rows fetch (id-filtered branch) now runs as one or more
+      // chunked `.in()` calls merged into a single {data, error} result before
+      // withMissingIntentFallback inspects it — this pins that the missing-
+      // intent-column retry still fires correctly through that merge.
+      const inStub = sinon.stub();
+      inStub.onFirstCall().returns(thenable({ data: null, error: MISSING_INTENT_SELECT }));
+      inStub.onSecondCall().returns(thenable({ data: [], error: null }));
+      const insertStub = sinon.stub().returns({
+        select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }),
+      });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: [], error: null }),
+                    in: inStub,
+                  }),
+                }),
+              }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ id: 'a', prompt: 'hello', regions: [] }],
+        postgrestClient: client,
+      });
+      expect(result.created).to.equal(1);
+      // First select attempt (with intent col) errors; retry without intent succeeds.
+      expect(inStub.callCount).to.equal(2);
     });
 
     it('upsertPrompts skips intent up front on a second call with the same client', async () => {

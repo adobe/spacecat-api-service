@@ -37,6 +37,19 @@
 > `GET …/family` leaf-direction semantics are live-verified — an always-on guard
 > would falsely 409 every deactivate if `family(leaf)` returns siblings. The
 > parent-equality guard remains always-on.
+>
+> **Superseded by ADR-008 / ADR-009 (2026-08, SITES-49206):** the resource-carve design this plan
+> describes — `createChildWorkspace`'s mandatory non-zero `resources.ai` sizing,
+> `ensureChildWorkspace`'s create/re-grant sizing, and `decommissionBrandWorkspace`'s
+> `transferWorkspaceResources` release-to-parent step (below, and in the create/re-grant flow
+> above) — was **never shipped this way**.
+> [ADR-008](../decisions/008-no-subworkspace-resource-carve.md) decided a sub-workspace carries no AI
+> resource allocation of its own, and [ADR-009](../decisions/009-remove-dormant-jit-allocator.md)
+> removed the JIT allocator that would have implemented it. `transferWorkspaceResources` had no
+> production caller — only the manual `scripts/serenity-metered-405-canary.mjs` probe — and
+> [ADR-010](../decisions/010-durable-limits-recheck-retires-canary.md) has since deleted both the
+> method and the script entirely. Do not treat the mentions below as a live caller inventory, or as
+> proof either still exists, for `transferWorkspaceResources`.
 
 **Status:** Plan · 2026-06-15
 **Implements:** `adobe/serenity-docs` PR #12 → `docs/discovery/brand-semrush-provisioning-v2-phase1-sync.md` (cited as *design §N*) and `…-v2-phase1-implementation.md`.

@@ -31,6 +31,7 @@ import {
 } from '@adobe/spacecat-shared-utils';
 
 import {
+  Audit,
   Suggestion as SuggestionModel,
   GeoExperiment as GeoExperimentModel,
   REVIEW_SOURCES,
@@ -39,6 +40,7 @@ import {
   FEEDBACK_TIERS,
   verdictToSignal,
   toReviewView,
+  isAllowedSuggestionTransition,
 } from '@adobe/spacecat-shared-data-access';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto/suggestion.js';
@@ -47,6 +49,8 @@ import { applyFieldProjection } from '../utils/field-projection.js';
 import {
   getScheduleParams,
   buildExperimentMetadata,
+  presignInsightsRawData,
+  isImpactMeasurementEligible,
 } from '../support/geo-experiment-helper.js';
 import { FixDto } from '../dto/fix.js';
 import { GeoExperimentDto } from '../dto/geo-experiment.js';
@@ -57,11 +61,16 @@ import {
   getHostName,
   getIsSummitPlgEnabled,
   isViewAsTrialRequest,
+  triggerGeoExperimentImpactMeasurement,
 } from '../support/utils.js';
 import AccessControlUtil, { X_PRODUCT_HEADER } from '../support/access-control-util.js';
 import { redactFeedbackContent } from '../support/feedback-redaction.js';
+import { filterOpportunitiesByFacsComposite } from '../support/facs-composite-resolvers.js';
 import { CAP_FIX_ENTITY_CREATE, CAP_SUGGESTION_WRITE } from '../routes/capability-constants.js';
-import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
+import {
+  grantSuggestionsForOpportunity,
+  revokeGrantsForSuggestions,
+} from '../support/grant-suggestions-handler.js';
 import { postSlackMessage } from '../utils/slack/base.js';
 import { createAtomicStrategy, deleteAtomicStrategy } from '../support/atomic-strategy-helper.js';
 
@@ -89,6 +98,16 @@ const EXPERIMENT_NAME_BY_OPPORTUNITY_TYPE = {
 
 const getExperimentName = (opportunityType) => EXPERIMENT_NAME_BY_OPPORTUNITY_TYPE[opportunityType]
   || `${opportunityType.charAt(0).toUpperCase()}${opportunityType.slice(1).replace(/-/g, ' ')}`;
+
+// The underlying opportunity type is generic (opportunityId, not prerenderOpportunityId) so a
+// future opportunity type can be added later without reshaping the route. This map is the one
+// place that gates which opportunity types are actually supported today, and which
+// import-worker message type knows how to validate each one — adding a second type means
+// adding an entry here (and building that type's own resolver/comparator on the import-worker
+// side); no other abstraction exists yet, per YAGNI.
+const VALIDATION_MESSAGE_TYPE_BY_OPPORTUNITY_TYPE = {
+  [Audit.AUDIT_TYPES.PRERENDER]: 'optimize-at-edge-enabled-marking',
+};
 
 async function isSitePlgTier(site, log) {
   try {
@@ -158,11 +177,27 @@ async function postPlgSuggestionSkipAlert(site, opportunity, suggestion, context
     const suggestionId = suggestion.getId?.() ?? 'unknown';
     const skipReason = suggestion.getSkipReason?.() ?? null;
     const skipDetail = suggestion.getSkipDetail?.() ?? null;
+    const organizationId = site.getOrganizationId?.() ?? null;
+
+    let orgName = null;
+    if (organizationId) {
+      try {
+        const org = await context.dataAccess.Organization.findById(organizationId);
+        orgName = org?.getName?.() || null;
+      } catch (orgLookupError) {
+        log.warn(`Failed to look up org name for PLG suggestion skip alert: ${orgLookupError.message}`);
+      }
+    }
 
     let message = ':no_entry_sign: *PLG Customer Skipped a Suggestion*\n\n'
       + `• *Site:* \`${siteBaseURL}\`\n`
-      + `• *Site ID:* \`${site.getId()}\`\n`
-      + `• *Opportunity Type:* \`${opportunityType}\`\n`
+      + `• *Site ID:* \`${site.getId()}\``;
+
+    if (orgName) {
+      message += `\n• *IMS Org Name:* ${orgName}`;
+    }
+
+    message += `\n• *Opportunity Type:* \`${opportunityType}\`\n`
       + `• *Opportunity ID:* \`${opportunityId}\`\n`
       + `• *Suggestion ID:* \`${suggestionId}\``;
 
@@ -171,6 +206,12 @@ async function postPlgSuggestionSkipAlert(site, opportunity, suggestion, context
     }
     if (skipDetail) {
       message += `\n• *Skip Detail:* \`${skipDetail}\``;
+    }
+
+    if (organizationId) {
+      const experienceUrl = env.EXPERIENCE_URL || 'https://experience.adobe.com';
+      const asoUrl = `${experienceUrl}/?organizationId=${organizationId}#/sites-optimizer/sites/${site.getId()}`;
+      message += `\n• *ASO Link:* ${asoUrl}`;
     }
 
     await postSlackMessage(channelId, message, token);
@@ -328,7 +369,7 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   const {
-    Opportunity, Suggestion, SuggestionGrant, Site, GeoExperiment,
+    Opportunity, Suggestion, SuggestionGrant, Site, GeoExperiment, Configuration,
   } = dataAccess;
 
   if (!isObject(Opportunity)) {
@@ -389,7 +430,7 @@ function SuggestionsController(ctx, sqs, env) {
    * @returns {Promise<Array>} Filtered suggestion entities.
    */
   const filterByGrantStatus = async (site, suggestions, context) => {
-    if (!await getIsSummitPlgEnabled(site, ctx, context)) {
+    if (!await getIsSummitPlgEnabled(site, ctx, context, accessControlUtil)) {
       return suggestions;
     }
     try {
@@ -456,7 +497,7 @@ function SuggestionsController(ctx, sqs, env) {
         return notFound('Opportunity not found');
       }
     }
-    if (opportunity && await getIsSummitPlgEnabled(site, ctx, context)) {
+    if (opportunity && await getIsSummitPlgEnabled(site, ctx, context, accessControlUtil)) {
       try {
         await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
       /* c8 ignore next 3 */
@@ -746,7 +787,7 @@ function SuggestionsController(ctx, sqs, env) {
     if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound();
     }
-    if (await getIsSummitPlgEnabled(site, ctx, context)
+    if (await getIsSummitPlgEnabled(site, ctx, context, accessControlUtil)
       && !(await SuggestionGrant.isSuggestionGranted(suggestion.getId()))) {
       return notFound('Suggestion not found');
     }
@@ -1124,6 +1165,21 @@ function SuggestionsController(ctx, sqs, env) {
             }
           }
 
+          // Per-item transition-legality gate (SITES-49063; part of the SITES-47286
+          // warn->enforce rollout). NOTE: the REJECTED hard-rule above is a stricter
+          // subset of this and fires first — keep it ahead of this general gate.
+          if (!isAllowedSuggestionTransition(currentStatus, status)) {
+            // logged so unexpected 400s can be triaged from Splunk when
+            // STATUS_TRANSITION_ENFORCEMENT is flipped to enforce (SITES-47286).
+            context.log.info(`[patchSuggestionsStatus] rejected illegal status transition suggestionId=${id} ${currentStatus} -> ${status}`);
+            return {
+              index,
+              uuid: id,
+              message: `Illegal status transition: ${currentStatus} -> ${status}`,
+              statusCode: 400,
+            };
+          }
+
           suggestion.setStatus(status);
           if (status === SuggestionModel.STATUSES.SKIPPED) {
             isNewSkipTransition = true;
@@ -1326,6 +1382,19 @@ function SuggestionsController(ctx, sqs, env) {
       return forbidden('User does not belong to the organization or does not have sufficient permissions');
     }
 
+    // LLMO auto-fix: enforce the finer-grained LLMO capability for this site.
+    // LLMO logins never carry the ASO `auto_fix` scope, so the access check above
+    // only confirmed org membership; require the LLMO capability too. S2S callers
+    // were already authorized via CAP_FIX_ENTITY_CREATE and are not FACS subjects,
+    // so they are exempt.
+    if (
+      xProduct === 'LLMO'
+      && !s2sResult.allowed
+      && !await accessControlUtil.hasLlmoCapabilityForSite(site)
+    ) {
+      return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can trigger auto-fix'));
+    }
+
     const opportunity = await Opportunity.findById(opportunityId);
     if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound('Opportunity not found');
@@ -1392,7 +1461,7 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     // Block auto-deploy on non-granted suggestions for summit-plg users
-    if (await getIsSummitPlgEnabled(site, ctx, context)) {
+    if (await getIsSummitPlgEnabled(site, ctx, context, accessControlUtil)) {
       const { notGrantedIds } = await SuggestionGrant.splitSuggestionsByGrantStatus(suggestionIds);
       if (notGrantedIds.length > 0) {
         const trialSuffix = isViewAsTrialRequest(context)
@@ -1663,6 +1732,12 @@ function SuggestionsController(ctx, sqs, env) {
 
     if (!suggestion || suggestion.getOpportunityId() !== opportunityId) {
       return notFound('Suggestion not found');
+    }
+
+    try {
+      await revokeGrantsForSuggestions(SuggestionGrant, [suggestionId]);
+    } catch (revokeError) {
+      context.log.warn(`Failed to revoke grants for suggestion ${suggestionId}`, revokeError?.message ?? revokeError);
     }
 
     try {
@@ -2090,9 +2165,6 @@ function SuggestionsController(ctx, sqs, env) {
       });
 
       let geoExperiment = null;
-      // Tracks whether the Atomic strategy was successfully written, so the
-      // outer catch knows whether to compensate by deleting it if a later
-      // step (e.g. response serialization) throws.
       let atomicStrategyCreated = false;
       let validSuggestionEntities = [];
       try {
@@ -2114,30 +2186,38 @@ function SuggestionsController(ctx, sqs, env) {
         ];
         const metadataBase = {};
 
-        if (hasPatternDeploy) {
-          const highImpactIds = context.data?.metadata?.highImpactSuggestionIds;
-          if (!Array.isArray(highImpactIds) || highImpactIds.length === 0
-            || !highImpactIds.every((id) => isValidUUID(id))) {
-            context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, missing/invalid metadata.highImpactSuggestionIds for pattern deploy`);
-            throw new Error('metadata.highImpactSuggestionIds is required for domain-wide/segment deployment');
-          }
+        const highImpactIds = context.data?.metadata?.highImpactSuggestionIds;
+        const hasHighImpactIds = Array.isArray(highImpactIds) && highImpactIds.length > 0;
+        if (hasPatternDeploy && !hasHighImpactIds) {
+          context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, missing/invalid metadata.highImpactSuggestionIds for pattern deploy`);
+          throw new Error('metadata.highImpactSuggestionIds is required for domain-wide/segment deployment');
+        }
+        if (hasHighImpactIds && !highImpactIds.every((id) => isValidUUID(id))) {
+          context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, invalid metadata.highImpactSuggestionIds`);
+          throw new Error('metadata.highImpactSuggestionIds must be an array of valid UUIDs');
+        }
+
+        if (hasHighImpactIds) {
+          context.log.info(`[edge-geo-exp] site: ${apexBaseUrl}, highImpactSuggestionIds: ${JSON.stringify(highImpactIds)}`);
           const highImpactIdSet = new Set(highImpactIds);
           const measurementSuggestions = allSuggestions.filter(
             (s) => highImpactIdSet.has(s.getId()),
           );
           if (measurementSuggestions.length === 0) {
-            context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, no high-impact suggestions resolved for pattern deploy`);
+            context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, no high-impact suggestions resolved for the provided IDs`);
             throw new Error('No high-impact suggestions found for the provided IDs');
           }
-          // suggestionIds holds only what actually deploys (the pattern[s]); the high-impact
-          // measurement suggestions live in metadata and drive prompt generation only.
+          // suggestionIds holds everything that actually deploys; the high-impact measurement
+          // suggestions live in metadata and drive prompt generation/measurement only.
           metadataBase.urls = [
             ...new Set(measurementSuggestions.map((s) => s.getData()?.url).filter(Boolean)),
           ];
-          metadataBase.patterns = patternSuggestions.map((ps) => (
-            ps.getData()?.isDomainWide ? '/*' : ps.getData()?.allowedRegexPatterns?.[0]
-          ));
           metadataBase.highImpactSuggestionIds = measurementSuggestions.map((s) => s.getId());
+          if (hasPatternDeploy) {
+            metadataBase.patterns = patternSuggestions.map((ps) => (
+              ps.getData()?.isDomainWide ? '/*' : ps.getData()?.allowedRegexPatterns?.[0]
+            ));
+          }
         } else {
           metadataBase.urls = [
             ...new Set(validSuggestions.map((s) => s.getData()?.url).filter(Boolean)),
@@ -2369,6 +2449,101 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   /**
+   * Returns the URLs already deployed to the edge by the site's non-prerender ELMO
+   * ("Tokowaka") opportunities, as `[{ url, sources: [opportunityType] }]`.
+   *
+   * The ELMO Overview uses this to derive prerender / Content-Visibility gains: if a URL
+   * was edge-deployed by another Tokowaka opportunity, prerendering is effectively enabled
+   * for it. Previously the UI computed this by fanning out one `getSuggestions` call per
+   * opportunity (~N per site) and doing it twice; this endpoint collapses that to a single
+   * server-side read with a tiny payload.
+   *
+   * Implementation deliberately avoids a per-opportunity fan-out: it runs two queries —
+   * all of the site's opportunities, then all suggestions for the relevant ones via a
+   * single `opportunity_id IN (...)` filter. LaunchDarkly per-type gating stays client-side
+   * (the endpoint has no visibility into UI flags), which is why each entry carries its
+   * source opportunity `type`.
+   */
+  const getEdgeDeployedUrls = async (context) => {
+    const { siteId } = context.params;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
+    }
+
+    // 1. All opportunities for the site (single query, auto-paginated). Keep the stable
+    //    Tokowaka set: non-prerender AND tagged `isElmo` — the same filter the UI applied
+    //    before per-opportunity type gating (which remains client-side).
+    // ReBAC composite scope (D4): narrow to the caller's permitted opportunity
+    // types before exposing edge-deployed URLs (which surface the opportunity
+    // type per URL), so a type-scoped caller cannot see other types. No-op for
+    // site-wide / non-FACS / admin callers.
+    const opportunities = filterOpportunitiesByFacsComposite(
+      context,
+      await Opportunity.allBySiteId(siteId),
+    );
+    const opptyTypeById = new Map();
+    for (const oppty of opportunities) {
+      if (oppty.getType() === 'prerender') {
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+      const tags = oppty.getTags() ?? [];
+      if (!tags.includes('isElmo')) {
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+      opptyTypeById.set(oppty.getId(), oppty.getType());
+    }
+
+    if (opptyTypeById.size === 0) {
+      return ok([]);
+    }
+
+    // 2. All suggestions across those opportunities in one query (no per-opportunity
+    //    fan-out) via an `opportunity_id IN (...)` filter; auto-paginated.
+    const suggestions = await Suggestion.all(
+      {},
+      { where: (attrs, op) => op.in(attrs.opportunityId, [...opptyTypeById.keys()]) },
+    );
+
+    // 3. Build [{ url, sources: [opportunityType] }] over edge-deployed suggestions,
+    //    deduping by raw url and aggregating the source opportunity types.
+    const byUrl = new Map();
+    for (const suggestion of suggestions) {
+      const data = suggestion.getData() ?? {};
+      if (!data.edgeDeployed || !hasText(data.url)) {
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+      const type = opptyTypeById.get(suggestion.getOpportunityId());
+      if (!type) {
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+      const existing = byUrl.get(data.url);
+      if (existing) {
+        if (!existing.sources.includes(type)) {
+          existing.sources.push(type);
+        }
+      } else {
+        byUrl.set(data.url, { url: data.url, sources: [type] });
+      }
+    }
+
+    return ok([...byUrl.values()]);
+  };
+
+  /**
    * Lists all geo experiments for a site (no prompts included).
    */
   const listGeoExperiments = async (context) => {
@@ -2438,19 +2613,25 @@ function SuggestionsController(ctx, sqs, env) {
     // Fetch impact-measurement insights from S3 only when explicitly requested.
     // Insights exist once impact measurement completes; the S3 key is stored on the
     // experiment as insightsLocation (see spacecat-shared GeoExperiment model).
+    // The insights JSON (and the per-analysis detail blobs its rawDataUrls point at) are
+    // written by Mystique/the engine to the Mystique assets bucket (S3_MYSTIQUE_BUCKET),
+    // NOT the default services bucket — read it from there.
     let insights;
     const includeInsights = context.data?.includeInsights === 'true';
     if (includeInsights) {
       insights = null;
       const insightsS3Key = geoExperiment.getInsightsLocation?.();
-      if (insightsS3Key) {
+      const { S3_MYSTIQUE_BUCKET: mystiqueBucket } = context.env;
+      if (insightsS3Key && mystiqueBucket) {
         try {
-          const { s3Client, s3Bucket, GetObjectCommand } = context.s3;
+          const { s3Client, GetObjectCommand } = context.s3;
           const response = await s3Client.send(
-            new GetObjectCommand({ Bucket: s3Bucket, Key: insightsS3Key }),
+            new GetObjectCommand({ Bucket: mystiqueBucket, Key: insightsS3Key }),
           );
           const body = await response.Body.transformToString();
           insights = JSON.parse(body);
+          // Presign each analysis's rawDataUrl so the UI can download the S3 detail blobs directly.
+          insights = await presignInsightsRawData(insights, context.s3, context.log);
         } catch (s3Error) {
           // Insights may not exist yet (e.g. impact measurement not yet complete)
           context.log.info(`[geo-experiment] Could not fetch insights for ${geoExperimentId}: ${s3Error.message}`);
@@ -2462,6 +2643,75 @@ function SuggestionsController(ctx, sqs, env) {
       ...GeoExperimentDto.toJSON(geoExperiment),
       prompts,
       ...(includeInsights ? { insights } : {}),
+    });
+  };
+
+  /**
+   * Returns the impact-measurement insights ("results") for a geo experiment.
+   *
+   * Read-only counterpart to POST .../trigger-impact-measurement: that endpoint asks the
+   * engine to (re-)run measurement, this one just fetches the already-computed report. The
+   * insights JSON is written by Mystique/the engine to the Mystique assets bucket
+   * (S3_MYSTIQUE_BUCKET) at the key stored on the experiment as insightsLocation (see the
+   * spacecat-shared GeoExperiment model); each analysis's rawDataUrl is presigned so the UI
+   * can download the S3 detail blobs directly. Returns 404 when the experiment has no
+   * insights yet (impact measurement not complete).
+   */
+  const getGeoExperimentResults = async (context) => {
+    const { siteId, geoExperimentId } = context.params;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(geoExperimentId)) {
+      return badRequest('GeoExperiment ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
+    }
+
+    const geoExperiment = await GeoExperiment.findById(geoExperimentId);
+    if (!geoExperiment || geoExperiment.getSiteId() !== siteId) {
+      return notFound('GeoExperiment not found');
+    }
+
+    const notReadyMessage = `No results available for GeoExperiment ${geoExperimentId} yet `
+      + `(phase '${geoExperiment.getPhase()}', status '${geoExperiment.getStatus()}'). `
+      + 'Impact measurement has not produced insights.';
+
+    const insightsS3Key = geoExperiment.getInsightsLocation?.();
+    const { S3_MYSTIQUE_BUCKET: mystiqueBucket } = context.env;
+    if (!insightsS3Key || !mystiqueBucket) {
+      return notFound(notReadyMessage);
+    }
+
+    let insights;
+    try {
+      const { s3Client, GetObjectCommand } = context.s3;
+      const response = await s3Client.send(
+        new GetObjectCommand({ Bucket: mystiqueBucket, Key: insightsS3Key }),
+      );
+      const body = await response.Body.transformToString();
+      insights = JSON.parse(body);
+      // Presign each analysis's rawDataUrl so the UI can download the S3 detail blobs directly.
+      insights = await presignInsightsRawData(insights, context.s3, context.log);
+    } catch (s3Error) {
+      // Insights may not exist yet (e.g. impact measurement not yet complete).
+      context.log.info(`[geo-experiment] Could not fetch results for ${geoExperimentId}: ${s3Error.message}`);
+      return notFound(notReadyMessage);
+    }
+
+    return ok({
+      geoExperimentId,
+      status: geoExperiment.getStatus(),
+      phase: geoExperiment.getPhase(),
+      insights,
     });
   };
 
@@ -2509,6 +2759,7 @@ function SuggestionsController(ctx, sqs, env) {
       { key: 'suggestionIds', setter: 'setSuggestionIds' },
       { key: 'promptsCount', setter: 'setPromptsCount' },
       { key: 'promptsLocation', setter: 'setPromptsLocation' },
+      { key: 'insightsLocation', setter: 'setInsightsLocation' },
       { key: 'startTime', setter: 'setStartTime' },
       { key: 'endTime', setter: 'setEndTime' },
       { key: 'metadata', setter: 'setMetadata' },
@@ -2561,6 +2812,126 @@ function SuggestionsController(ctx, sqs, env) {
 
     await geoExperiment.remove();
     return noContent();
+  };
+
+  /**
+   * Manually (re-)triggers Mystique impact measurement for a GeoExperiment. Only allowed once
+   * the experiment has reached post-analysis, with status in_progress or completed (see
+   * isImpactMeasurementEligible). Sends a TRIGGER_IMPACT_MEASUREMENT message to the
+   * llmo-experimentation-engine-queue; the engine re-validates eligibility and re-arms the
+   * experiment before resubmitting via its normal handlePostAnalysisCompleted path.
+   * See llmo-experimentation-engine's docs/decisions/004-manual-impact-measurement-retrigger.md.
+   */
+  const triggerImpactMeasurement = async (context) => {
+    const { siteId, geoExperimentId } = context.params;
+    const { authInfo: { profile } } = context.attributes;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(geoExperimentId)) {
+      return badRequest('GeoExperiment ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
+    }
+
+    const geoExperiment = await GeoExperiment.findById(geoExperimentId);
+    if (!geoExperiment || geoExperiment.getSiteId() !== siteId) {
+      return notFound('GeoExperiment not found');
+    }
+
+    if (!isImpactMeasurementEligible(geoExperiment)) {
+      return badRequest(`GeoExperiment ${geoExperimentId} is at phase '${geoExperiment.getPhase()}' / status '${geoExperiment.getStatus()}' - impact measurement can only be triggered at phase 'post_analysis_done', 'impact_measurement_started', or 'impact_measurement_done' with status 'in_progress' or 'completed'.`);
+    }
+
+    const triggeredBy = profile?.email || profile?.name || 'unknown';
+    await triggerGeoExperimentImpactMeasurement(geoExperimentId, triggeredBy, { sqs, env });
+
+    context.log.info(`[geo-experiment] Sent manual impact-measurement trigger for GeoExperiment ${geoExperimentId} (siteId: ${siteId}, phase: ${geoExperiment.getPhase()}, status: ${geoExperiment.getStatus()}, triggeredBy: ${triggeredBy})`);
+
+    return accepted({
+      message: `Triggered impact measurement for GeoExperiment ${geoExperimentId}. The experimentation engine will process it shortly.`,
+    });
+  };
+
+  /**
+   * Triggers on-demand validation of a GeoExperiment's own suggestions. Lets the deploy-to-edge
+   * experimentation flow trigger the same S3-vs-live-edge content validation the hourly
+   * optimize-at-edge-enabled-marking job runs, scoped to one GeoExperiment's own suggestions.
+   *
+   * This is a validation of the GeoExperiment itself (not of its linked opportunity), so
+   * geoExperimentId lives in the route, matching the sibling GeoExperiment routes
+   * (PATCH/DELETE/trigger-impact-measurement). The linked opportunity is only used internally
+   * to determine which import-worker message type knows how to validate this GeoExperiment's
+   * suggestions.
+   *
+   * Fire-and-forget: enqueues an SQS message to import-worker's existing "imports" queue and
+   * responds immediately — this endpoint does not wait for or return the validation outcome
+   * itself. The result lands on GeoExperiment.metadata.validation and each covered Suggestion's
+   * own data.validation, not opportunity.data.validation (a geoExperimentId run only covers a
+   * scoped subset of suggestions, so writing the site-wide opportunity field would corrupt the
+   * bulk job's cache).
+   */
+  const triggerGeoExperimentValidation = async (context) => {
+    const { siteId, geoExperimentId } = context.params;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(geoExperimentId)) {
+      return badRequest('GeoExperiment ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
+    }
+
+    const geoExperiment = await GeoExperiment.findById(geoExperimentId);
+    if (!geoExperiment || geoExperiment.getSiteId() !== siteId) {
+      return notFound('GeoExperiment not found');
+    }
+
+    const opportunityId = geoExperiment.getOpportunityId();
+    if (!opportunityId) {
+      return badRequest('GeoExperiment has no linked opportunity to validate');
+    }
+
+    const opportunity = await Opportunity.findById(opportunityId);
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      return notFound('Opportunity not found');
+    }
+
+    const opportunityType = opportunity.getType();
+    const messageType = VALIDATION_MESSAGE_TYPE_BY_OPPORTUNITY_TYPE[opportunityType];
+    if (!messageType) {
+      return badRequest(`Validation not supported for opportunity type '${opportunityType}'`);
+    }
+
+    const configuration = await Configuration.findLatest();
+    await sqs.sendMessage(configuration.getQueues().imports, {
+      type: messageType,
+      siteId,
+      validateOnly: true,
+      geoExperimentId,
+    });
+
+    context.log.info(`[geo-experiment-validation] queued validation for site ${siteId}, geoExperiment ${geoExperimentId}, opportunity ${opportunityId}`);
+
+    return accepted({
+      siteId, geoExperimentId, opportunityId, status: 'queued',
+    });
   };
 
   const rollbackSuggestionFromEdge = async (context) => {
@@ -3070,10 +3441,14 @@ function SuggestionsController(ctx, sqs, env) {
     autofixSuggestions,
     createSuggestions,
     deploySuggestionToEdge,
+    getEdgeDeployedUrls,
     listGeoExperiments,
     getGeoExperiment,
+    getGeoExperimentResults,
     patchGeoExperiment,
     deleteGeoExperiment,
+    triggerImpactMeasurement,
+    triggerGeoExperimentValidation,
     rollbackSuggestionFromEdge,
     previewSuggestions,
     fetchFromEdge,

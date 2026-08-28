@@ -14,20 +14,24 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
+import esmock from 'esmock';
 
 import {
   indexLevelByName,
   ensureChildren,
   ensureDimensionRoots,
   provisionDimensionTree,
-  ensureClosedValue,
+  ensureServerOwnedValue,
   resolveTypeValueInjection,
   resolveIntentValueInjection,
-  resolveClosedValueInjection,
+  resolveServerOwnedValueInjection,
   findTagsInTree,
   assertParentWithinDimension,
 } from '../../../src/support/serenity/tag-tree.js';
-import { DIMENSION } from '../../../src/support/serenity/prompt-tags.js';
+import {
+  DIMENSION,
+  INTENT_ROOT_NAME,
+} from '../../../src/support/serenity/prompt-tags.js';
 import {
   TAG_IDS,
   dimensionTreeLevels,
@@ -257,33 +261,118 @@ describe('serenity tag-tree', () => {
   });
 
   describe('ensureDimensionRoots', () => {
-    it('resolves all four roots without creating them when they exist', async () => {
+    it('resolves all five roots without creating them when they exist', async () => {
       const transport = {
         listProjectTags: makeListProjectTagsStub(),
         createProjectTags: sinon.stub(),
       };
-      const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
-      expect([...roots.keys()]).to.deep.equal(['category', 'intent', 'origin', 'type']);
+      const log = fakeLog();
+      const roots = await ensureDimensionRoots(transport, WS, PROJECT, log);
+      expect([...roots.keys()]).to.include.members(['category', 'intent', 'origin', 'type', 'source']);
+      // The producing-system `source` root resolves, distinct from the `origin` root.
+      expect(roots.get('source')).to.equal(TAG_IDS.sourceRoot);
       expect(transport.createProjectTags).to.not.have.been.called;
+      // Third leg of the guardrail contract: nothing was created (empty `createdNames`),
+      // so the reshape-missed check is skipped entirely — no re-read, no warning.
+      expect(log.warn).to.not.have.been.called;
     });
 
     it('brings a project that predates the taxonomy forward on first touch', async () => {
       const { listProjectTags, createProjectTags } = makeProvisioningTransportStubs();
       const transport = { listProjectTags, createProjectTags };
-      const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
+      const log = fakeLog();
+      const roots = await ensureDimensionRoots(transport, WS, PROJECT, log);
       expect(createProjectTags).to.have.been.calledOnce;
+      // Provisioned under the UPSTREAM root names, so a fresh project starts out
+      // with the renamed intent root rather than one the migration must revisit.
       expect(createProjectTags.firstCall.args[2])
-        .to.deep.equal(['category', 'intent', 'origin', 'type']);
+        .to.deep.equal(['category', INTENT_ROOT_NAME, 'origin', 'type', 'source']);
+      // …and the map a caller reads is keyed by DIMENSION, not by that name.
+      expect(roots.get('intent')).to.equal(`created::${INTENT_ROOT_NAME}`);
       expect(roots.get('type')).to.equal('created::type');
+      // A fresh project mints the producing-system `source` root outright.
+      expect(roots.get('source')).to.equal('created::source');
+      // Complement of the reshape-missed guardrail: `origin` is minted, but no legacy
+      // `source` root is present, so the guardrail must NOT warn on the fresh path.
+      expect(log.warn).to.not.have.been.called;
     });
 
-    it('adopts a legacy `source` authorship root in place, minting no second `origin`', async () => {
-      // A project the reshape has not yet renamed: its authorship root is still `source`,
-      // with `ai`/`human` beneath it (origin-dimension.md §7 gate 3).
+    it('resolves the intent root by its upstream name, keyed by dimension', async () => {
+      const transport = {
+        listProjectTags: makeListProjectTagsStub(dimensionTreeLevels()),
+        createProjectTags: sinon.stub(),
+      };
+      const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
+      expect(transport.createProjectTags).to.not.have.been.called;
+      // Upstream names it `$abv_tags$intent`; the caller reads it by dimension.
+      expect(roots.get(DIMENSION.INTENT)).to.equal(TAG_IDS.intentRoot);
+    });
+
+    it('resolves every root when a concurrent writer wins the create race', async () => {
+      // The race-recovery path answers from a FRESH level index. A root missing from
+      // that map yields an `undefined` root id, which makes the next create mint the
+      // dimension's VALUES as bogus root-level tags.
+      const rootLevel = (extra = []) => ([
+        { id: 'r-category', name: 'category', children_count: 0 },
+        { id: 'r-intent', name: INTENT_ROOT_NAME, children_count: 5 },
+        { id: 'r-origin', name: 'origin', children_count: 2 },
+        { id: 'r-type', name: 'type', children_count: 2 },
+        ...extra,
+      ]);
+      const listProjectTags = sinon.stub();
+      // The re-read sees `source`, minted by a concurrent writer between our read
+      // and our create — which is what makes the create's rejection survivable.
+      listProjectTags.resolves({
+        items: rootLevel([{ id: 'r-source-other', name: 'source', children_count: 0 }]),
+      });
+      listProjectTags.onFirstCall().resolves({ items: rootLevel() });
+      const transport = {
+        listProjectTags,
+        createProjectTags: sinon.stub().rejects(new Error('duplicate (parent, name)')),
+      };
+      const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
+      expect(roots.get(DIMENSION.INTENT)).to.equal('r-intent');
+      expect(roots.get('source')).to.equal('r-source-other');
+    });
+
+    it('resolves the renamed root and reports a bare `intent` root beside it', async () => {
+      // A bare `intent` root sitting beside the renamed one. Resolution is unaffected
+      // — the root is found by its upstream name only — but the project is in the
+      // split state, which no rename or reshape can repair on its own, so the pass
+      // must say so even though it creates nothing.
+      const levels = dimensionTreeLevels();
+      const transport = {
+        listProjectTags: makeListProjectTagsStub({
+          ...levels,
+          '': [
+            ...levels[''],
+            {
+              id: 'stale-intent', name: DIMENSION.INTENT, parent_id: null, children_count: 0,
+            },
+          ],
+        }),
+        createProjectTags: sinon.stub(),
+      };
+      const log = fakeLog();
+      const roots = await ensureDimensionRoots(transport, WS, PROJECT, log);
+      expect(roots.get('intent')).to.equal(TAG_IDS.intentRoot);
+      expect(transport.createProjectTags).to.not.have.been.called;
+      // Nothing was minted, and it still warns: the split is a STATE, and a check that
+      // only fired at the moment of minting would stay silent on every later pass over
+      // exactly the projects that are still broken.
+      expect(log.warn).to.have.been.calledWithMatch(/intent dimension is split/);
+    });
+
+    it('creates a fresh `origin` root, leaving a legacy `source` root untouched', async () => {
+      // A project the reshape somehow left authorship-on-`source` (ai/human beneath a
+      // `source` root, no `origin` root). The tolerant fallback that adopted such a root
+      // in place is gone: `origin` is created strictly, and the stale `source` root is
+      // neither adopted nor touched — the data reshape retires it separately.
+      const created = [];
       const legacyLevels = {
         '': [
           { id: 'root-category', name: 'category', children_count: 0 },
-          { id: 'root-intent', name: 'intent', children_count: 5 },
+          { id: 'root-intent', name: INTENT_ROOT_NAME, children_count: 5 },
           { id: 'root-source', name: 'source', children_count: 2 },
           { id: 'root-type', name: 'type', children_count: 2 },
         ],
@@ -294,48 +383,40 @@ describe('serenity tag-tree', () => {
       };
       const transport = {
         listProjectTags: makeListProjectTagsStub(legacyLevels),
-        createProjectTags: sinon.stub(),
-      };
-      const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
-      // The `origin` key maps to the physical `source` root — adopted in place …
-      expect(roots.get('origin')).to.equal('root-source');
-      // … and NOTHING was created: no empty second authorship root (spec §8).
-      expect(transport.createProjectTags).to.not.have.been.called;
-    });
-
-    it('does NOT adopt a `source` root carrying non-authorship values; creates `origin`', async () => {
-      // The companion producing-system `source` dimension (source-dimension.md §9): its
-      // children are not {ai, human}, so it must not be mistaken for authorship.
-      const created = [];
-      const levels = {
-        '': [
-          { id: 'root-category', name: 'category', children_count: 0 },
-          { id: 'root-intent', name: 'intent', children_count: 5 },
-          { id: 'root-source', name: 'source', children_count: 1 },
-          { id: 'root-type', name: 'type', children_count: 2 },
-        ],
-        'root-source': [{ id: 'src-config', name: 'config', parent_id: 'root-source' }],
-      };
-      const transport = {
-        listProjectTags: makeListProjectTagsStub(levels),
-        createProjectTags: sinon.stub().callsFake((ws, pid, names) => {
+        createProjectTags: sinon.stub().callsFake((ws, pid, names, opts = {}) => {
           created.push(...names);
-          return Promise.resolve(names.map((n) => ({ id: `made-${n}`, name: n })));
+          const parentId = opts.parentId || '';
+          const nodes = names.map((n) => ({ id: `made-${n}`, name: n, children_count: 0 }));
+          // Fold the minted node(s) back into the served level, mirroring upstream's
+          // draft layer, so the guardrail's re-read reflects the write (higher fidelity:
+          // a future `level.has('origin')` assertion on that re-read would then hold).
+          legacyLevels[parentId] = [...(legacyLevels[parentId] || []), ...nodes];
+          return Promise.resolve(nodes);
         }),
       };
-      const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
+      const log = fakeLog();
+      const roots = await ensureDimensionRoots(transport, WS, PROJECT, log);
+      // `origin` is minted fresh — never resolved to the physical `source` root.
       expect(created).to.deep.equal(['origin']);
       expect(roots.get('origin')).to.equal('made-origin');
+      // The other three roots resolve to their existing ids — nothing else is created.
+      expect(roots.get('category')).to.equal('root-category');
+      expect(roots.get('intent')).to.equal('root-intent');
+      expect(roots.get('type')).to.equal('root-type');
+      // Minting `origin` beside a still-present legacy `source` root trips the
+      // reshape-missed guardrail: it re-reads the root level once (hence two reads) and
+      // warns — surfacing the stale project without re-introducing any tolerance.
+      expect(transport.listProjectTags).to.have.callCount(2);
+      expect(log.warn).to.have.been.calledWithMatch(/reshape may have missed/);
     });
 
-    it('prefers `origin` over a legacy `source` when a project carries BOTH roots', async () => {
-      // A partially-migrated project: the new `origin` root already exists alongside
-      // the not-yet-cleaned-up legacy `source` root. `origin` must win, and the
-      // orphan `source` is left untouched (removed at WP-O6) — never a second mint.
+    it('resolves both `origin` and `source` when a project carries both roots', async () => {
+      // A fully-migrated project with all 5 roots present: `origin` (authorship) and
+      // `source` (producing-system) are distinct roots — each resolves to its own id.
       const bothLevels = {
         '': [
           { id: 'root-category', name: 'category', children_count: 0 },
-          { id: 'root-intent', name: 'intent', children_count: 5 },
+          { id: 'root-intent', name: INTENT_ROOT_NAME, children_count: 5 },
           { id: 'root-origin', name: 'origin', children_count: 2 },
           { id: 'root-source', name: 'source', children_count: 2 },
           { id: 'root-type', name: 'type', children_count: 2 },
@@ -346,35 +427,10 @@ describe('serenity tag-tree', () => {
         createProjectTags: sinon.stub(),
       };
       const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
-      // The `origin` key resolves to the real `origin` root, not the legacy `source`.
       expect(roots.get('origin')).to.equal('root-origin');
-      // Nothing was created and the orphan `source` was not touched.
+      expect(roots.get('source')).to.equal('root-source');
       expect(transport.createProjectTags).to.not.have.been.called;
-      // Performance contract: finding `origin` short-circuits before any legacy
-      // adoption, so no child-level read of the orphan `source` — exactly ONE read.
       expect(transport.listProjectTags).to.have.callCount(1);
-    });
-
-    it('adopts a CHILDLESS legacy `source` root in place (vacuous authorship guard)', async () => {
-      // The intentional vacuous-true branch of `childrenAreAuthorship`: a `source`
-      // root not yet populated is still an authorship root, so it is adopted rather
-      // than shadowed by a second `origin`. Documents the behavior until WP-O6.
-      const childlessLevels = {
-        '': [
-          { id: 'root-category', name: 'category', children_count: 0 },
-          { id: 'root-intent', name: 'intent', children_count: 5 },
-          { id: 'root-source', name: 'source', children_count: 0 },
-          { id: 'root-type', name: 'type', children_count: 2 },
-        ],
-        'root-source': [],
-      };
-      const transport = {
-        listProjectTags: makeListProjectTagsStub(childlessLevels),
-        createProjectTags: sinon.stub(),
-      };
-      const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
-      expect(roots.get('origin')).to.equal('root-source');
-      expect(transport.createProjectTags).to.not.have.been.called;
     });
   });
 
@@ -405,7 +461,7 @@ describe('serenity tag-tree', () => {
       expect(createProjectTags).to.have.callCount(4);
       expect(values.get('origin').get('ai')).to.equal('created:created::origin:ai');
       expect(values.get('intent').get('Navigational'))
-        .to.equal('created:created::intent:Navigational');
+        .to.equal(`created:created::${INTENT_ROOT_NAME}:Navigational`);
     });
 
     it('502s rather than return a values map missing a dimension', async () => {
@@ -415,11 +471,11 @@ describe('serenity tag-tree', () => {
       const listProjectTags = makeListProjectTagsStub({
         '': [
           { id: 'r-cat', name: 'category', children_count: 0 },
-          { id: 'r-int', name: 'intent', children_count: 0 },
-          { id: 'r-src', name: 'source', children_count: 0 },
+          { id: 'r-int', name: INTENT_ROOT_NAME, children_count: 0 },
+          { id: 'r-org', name: 'origin', children_count: 0 },
         ],
         'r-int': [],
-        'r-src': [],
+        'r-org': [],
       });
       const transport = {
         listProjectTags,
@@ -440,22 +496,25 @@ describe('serenity tag-tree', () => {
       const listProjectTags = makeListProjectTagsStub();
       const transport = { listProjectTags, createProjectTags: sinon.stub() };
       const { roots, values } = await provisionDimensionTree(transport, WS, PROJECT, fakeLog());
-      expect([...roots.keys()]).to.have.members(['category', 'intent', 'origin', 'type']);
+      expect([...roots.keys()]).to.include.members(['category', 'intent', 'origin', 'type', 'source']);
       expect(values.get('origin')?.get('ai')).to.equal(TAG_IDS.originAi);
       expect(values.get('type')?.get('branded')).to.equal(TAG_IDS.typeBranded);
       // The open `category` root is provisioned but its children are customer content.
       expect(values.has('category')).to.equal(false);
+      // The open producing-system `source` dimension is likewise never pre-provisioned
+      // — its values appear on first use, like categories.
+      expect(values.has('source')).to.equal(false);
       expect(transport.createProjectTags).to.not.have.been.called;
     });
   });
 
-  describe('ensureClosedValue', () => {
+  describe('ensureServerOwnedValue', () => {
     it('resolves an existing value and reports created:false', async () => {
       const transport = {
         listProjectTags: makeListProjectTagsStub(),
         createProjectTags: sinon.stub(),
       };
-      const res = await ensureClosedValue(transport, WS, PROJECT, 'origin', 'ai', fakeLog());
+      const res = await ensureServerOwnedValue(transport, WS, PROJECT, 'origin', 'ai', fakeLog());
       expect(res).to.deep.equal({
         id: TAG_IDS.originAi, rootId: TAG_IDS.originRoot, created: false,
       });
@@ -471,7 +530,7 @@ describe('serenity tag-tree', () => {
           { id: 'made-ai', name: 'ai', parent_id: TAG_IDS.originRoot },
         ]),
       };
-      const res = await ensureClosedValue(transport, WS, PROJECT, 'origin', 'ai', fakeLog());
+      const res = await ensureServerOwnedValue(transport, WS, PROJECT, 'origin', 'ai', fakeLog());
       expect(res).to.deep.equal({
         id: 'made-ai', rootId: TAG_IDS.originRoot, created: true,
       });
@@ -483,7 +542,7 @@ describe('serenity tag-tree', () => {
         // The create echoes nothing, so no root id is ever learned.
         createProjectTags: sinon.stub().resolves([]),
       };
-      const err = await ensureClosedValue(transport, WS, PROJECT, 'origin', 'ai', fakeLog())
+      const err = await ensureServerOwnedValue(transport, WS, PROJECT, 'origin', 'ai', fakeLog())
         .then(() => null, (e) => e);
       expect(err).to.be.an('error');
       expect(err.status).to.equal(502);
@@ -498,13 +557,13 @@ describe('serenity tag-tree', () => {
   // not here — this resolver only returns the strip SET (`valueTagIds`), scoped to
   // the dimension root. So these tests pin that the returned set is root-scoped;
   // the strip behaviour itself is covered by the injector tests in prompts.test.js.
-  describe('resolveClosedValueInjection', () => {
+  describe('resolveServerOwnedValueInjection', () => {
     it('resolves an `origin` value id plus EVERY id under the origin root (strip set)', async () => {
       const transport = {
         listProjectTags: makeListProjectTagsStub(),
         createProjectTags: sinon.stub(),
       };
-      const res = await resolveClosedValueInjection(transport, WS, PROJECT, DIMENSION.ORIGIN, 'human', fakeLog());
+      const res = await resolveServerOwnedValueInjection(transport, WS, PROJECT, DIMENSION.ORIGIN, 'human', fakeLog());
       expect(res.computedId).to.equal(TAG_IDS.originHuman);
       // Strip set is every id under the ORIGIN root — the two closed values only.
       expect(res.valueTagIds).to.have.members([TAG_IDS.originAi, TAG_IDS.originHuman]);
@@ -523,9 +582,207 @@ describe('serenity tag-tree', () => {
         listProjectTags: makeListProjectTagsStub(),
         createProjectTags: sinon.stub(),
       };
-      const res = await resolveClosedValueInjection(transport, WS, PROJECT, DIMENSION.ORIGIN, 'ai', fakeLog());
+      const res = await resolveServerOwnedValueInjection(transport, WS, PROJECT, DIMENSION.ORIGIN, 'ai', fakeLog());
       expect(res.computedId).to.equal(TAG_IDS.originAi);
       expect(res.valueTagIds).to.have.members([TAG_IDS.originAi, TAG_IDS.originHuman]);
+      expect(transport.createProjectTags).to.not.have.been.called;
+    });
+  });
+
+  // A POST-O5-MIGRATION project that the O5 reshape somehow missed: `source` root
+  // still carries the legacy ai/human children, and no `origin` root exists yet.
+  // WP-O6 removed the tolerant adoption — the strict resolver mints a fresh `origin`
+  // and maps the existing `source` as the producing-system root (WP-S2). The
+  // observability guardrail fires to surface the reshape-missed state.
+  describe('ensureDimensionRoots on a reshape-missed project', () => {
+    // Shared levels fixture: legacy `source` (ai/human), no `origin`. The intent
+    // root is already renamed here so this fixture isolates the `origin` concern —
+    // the un-renamed intent case is its own test below.
+    const midRenameLevels = () => ({
+      '': [
+        { id: 'root-category', name: 'category', children_count: 0 },
+        { id: 'root-intent', name: INTENT_ROOT_NAME, children_count: 5 },
+        { id: 'root-source', name: 'source', children_count: 2 },
+        { id: 'root-type', name: 'type', children_count: 2 },
+      ],
+      'root-source': [
+        { id: 'legacy-ai', name: 'ai', parent_id: 'root-source' },
+        { id: 'legacy-human', name: 'human', parent_id: 'root-source' },
+      ],
+    });
+
+    it('mints a fresh `origin`, maps legacy `source` as producing-system root, and warns', async () => {
+      // Use a provisioning-style stub so `createProjectTags` echoes back the node
+      // it creates (otherwise `ensureChildren` throws "upstream did not persist").
+      const levels = midRenameLevels();
+      const listProjectTags = makeListProjectTagsStub(levels);
+      const createProjectTags = sinon.stub().callsFake(
+        (_ws, _proj, names, options = {}) => Promise.resolve(
+          names.map((name) => ({ id: `new-${name}`, name, parent_id: options.parentId ?? null })),
+        ),
+      );
+      const log = fakeLog();
+      const transport = { listProjectTags, createProjectTags };
+      const roots = await ensureDimensionRoots(transport, WS, PROJECT, log);
+      // A fresh `origin` root was minted, not the legacy `source` root.
+      expect(roots.get('origin')).to.equal('new-origin');
+      // The existing `source` root is mapped as the producing-system dimension.
+      expect(roots.get('source')).to.equal('root-source');
+      // Guardrail: minting `origin` while `source` was already present triggers the warn.
+      expect(log.warn).to.have.been.calledWithMatch(/reshape may have missed/);
+      // Pin the create batch: `origin` is the ONLY root missing from this fixture.
+      // Without this, a fixture whose intent root is spelled the pre-rename way
+      // would silently add `$abv_tags$intent` to the batch and still pass.
+      expect(createProjectTags).to.have.been.calledOnce;
+      expect(createProjectTags.firstCall.args[2]).to.deep.equal(['origin']);
+      expect(log.warn).to.not.have.been.calledWithMatch(/intent dimension is split/);
+    });
+
+    // The intent counterpart: a project the rename never reached still names its
+    // populated root `intent`. The strict resolver mints `$abv_tags$intent` beside
+    // it, which splits the dimension and strands every prompt tagged under the old
+    // root. That state must not pass through silently — the fleet-sweep gate proves
+    // it is empty at merge time, not that it stays empty.
+    it('warns when it mints a fresh intent root beside a pre-rename `intent` one', async () => {
+      const levels = midRenameLevels();
+      levels[''] = levels[''].map(
+        (t) => (t.name === INTENT_ROOT_NAME ? { ...t, name: DIMENSION.INTENT } : t),
+      );
+      const listProjectTags = makeListProjectTagsStub(levels);
+      const createProjectTags = sinon.stub().callsFake(
+        (_ws, _proj, names, options = {}) => Promise.resolve(
+          names.map((name) => ({ id: `new-${name}`, name, parent_id: options.parentId ?? null })),
+        ),
+      );
+      const log = fakeLog();
+      const transport = { listProjectTags, createProjectTags };
+      const roots = await ensureDimensionRoots(transport, WS, PROJECT, log);
+
+      // The split really happens: a second, empty intent root is minted.
+      expect(createProjectTags.firstCall.args[2]).to.include(INTENT_ROOT_NAME);
+      expect(roots.get('intent')).to.equal(`new-${INTENT_ROOT_NAME}`);
+      // And it is loud rather than silent.
+      expect(log.warn).to.have.been.calledWithMatch(/intent dimension is split/);
+    });
+
+    // The common case must stay quiet, or the warn is noise nobody reads.
+    it('stays quiet about intent when the project is already renamed', async () => {
+      const listProjectTags = makeListProjectTagsStub(midRenameLevels());
+      const createProjectTags = sinon.stub().callsFake(
+        (_ws, _proj, names, options = {}) => Promise.resolve(
+          names.map((name) => ({ id: `new-${name}`, name, parent_id: options.parentId ?? null })),
+        ),
+      );
+      const log = fakeLog();
+      await ensureDimensionRoots({ listProjectTags, createProjectTags }, WS, PROJECT, log);
+      expect(log.warn).to.not.have.been.calledWithMatch(/intent dimension is split/);
+    });
+  });
+
+  // The generalized display-rename split-root guardrail (tag-display-names.md §3
+  // step 4, §5 phase 1) is dormant today — ROOT_DISPLAY_NAME is an IDENTITY
+  // PLACEHOLDER, so `rootNameOfDimension(dimension) === dimension` for all three
+  // display-renaming dimensions and the loop body in `ensureDimensionRoots` never
+  // runs. Exercising it for real means mocking `rootNameOfDimension` to actually
+  // diverge, which is exactly what happens the moment serenity-docs#407 merges and
+  // the orchestrator swaps the placeholder values in — this pins that the guardrail
+  // will fire correctly on that day, not just today's no-op shape.
+  //
+  // Parameterized across all three DISPLAY_RENAMING_DIMENSIONS (category, type,
+  // source — MysticatBot review, WP-D2): the guardrail loop body is generic over
+  // the dimension, so a bug specific to one dimension's branch (e.g. an
+  // off-by-one in which array position feeds the log message) would not
+  // necessarily show up if only `category` were ever exercised.
+  describe('ensureDimensionRoots — generalized display-rename split-root guardrail', () => {
+    const CASES = [
+      { dimension: DIMENSION.CATEGORY, slug: 'category', display: 'Category' },
+      { dimension: DIMENSION.TYPE, slug: 'type', display: 'Type' },
+      { dimension: DIMENSION.SOURCE, slug: 'source', display: 'Source' },
+    ];
+
+    /** Every OTHER root at its normal, un-renamed spelling. */
+    const OTHER_DEFAULT_ROOTS = [
+      { id: 'root-intent', name: INTENT_ROOT_NAME, children_count: 5 },
+      { id: 'root-origin', name: 'origin', children_count: 2 },
+      { id: 'root-category', name: 'category', children_count: 0 },
+      { id: 'root-type', name: 'type', children_count: 2 },
+      { id: 'root-source', name: 'source', children_count: 0 },
+    ];
+
+    /**
+     * Mocks `rootNameOfDimension` so ONLY `targetDimension` diverges to
+     * `fakeDisplayName` — every other dimension keeps resolving through the
+     * real implementation, so a test for one dimension can't accidentally
+     * exercise (or mask) another's branch of the guardrail loop.
+     */
+    async function ensureDimensionRootsRenaming(targetDimension, fakeDisplayName) {
+      const realPromptTags = await import('../../../src/support/serenity/prompt-tags.js');
+      const { ensureDimensionRoots: renamed } = await esmock(
+        '../../../src/support/serenity/tag-tree.js',
+        {
+          '../../../src/support/serenity/prompt-tags.js': {
+            rootNameOfDimension: (dimension) => (
+              dimension === targetDimension
+                ? fakeDisplayName
+                : realPromptTags.rootNameOfDimension(dimension)
+            ),
+          },
+        },
+      );
+      return renamed;
+    }
+
+    /** Root-level fixture: every other dimension default, plus `slug`/`display` rows. */
+    function rootsFixture(slug, display, { includeSlug, includeDisplay }) {
+      const others = OTHER_DEFAULT_ROOTS.filter((r) => r.name !== slug);
+      const target = [
+        ...(includeSlug ? [{ id: `root-${slug}-slug`, name: slug, children_count: 0 }] : []),
+        ...(includeDisplay ? [{ id: `root-${slug}-display`, name: display, children_count: 0 }] : []),
+      ];
+      return { '': [...others, ...target] };
+    }
+
+    CASES.forEach(({ dimension, slug, display }) => {
+      describe(`${slug} dimension`, () => {
+        it(`warns when "${slug}" and "${display}" exist as distinct root tags`, async () => {
+          const renamed = await ensureDimensionRootsRenaming(dimension, display);
+          const listProjectTags = makeListProjectTagsStub(
+            rootsFixture(slug, display, { includeSlug: true, includeDisplay: true }),
+          );
+          const createProjectTags = sinon.stub();
+          const log = fakeLog();
+          const roots = await renamed(
+            { listProjectTags, createProjectTags },
+            WS,
+            PROJECT,
+            log,
+          );
+          // Both spellings already existed — nothing to create.
+          expect(createProjectTags).to.not.have.been.called;
+          // The split is real (two different ids under the same dimension) and loud.
+          expect(log.warn).to.have.been.calledWithMatch(
+            new RegExp(`both the slug root "${slug}" and its display root "${display}" exist as distinct tags`),
+          );
+          // The canonical (display) spelling wins in the returned map.
+          expect(roots.get(slug)).to.equal(`root-${slug}-display`);
+        });
+
+        it(`stays quiet when only "${display}" exists (the migrated, common case)`, async () => {
+          const renamed = await ensureDimensionRootsRenaming(dimension, display);
+          const listProjectTags = makeListProjectTagsStub(
+            rootsFixture(slug, display, { includeSlug: false, includeDisplay: true }),
+          );
+          const createProjectTags = sinon.stub();
+          const log = fakeLog();
+          await renamed(
+            { listProjectTags, createProjectTags },
+            WS,
+            PROJECT,
+            log,
+          );
+          expect(log.warn).to.not.have.been.calledWithMatch(/display-name migration may/);
+        });
+      });
     });
   });
 
@@ -576,7 +833,7 @@ describe('serenity tag-tree', () => {
 
   // Twin of the `resolveTypeValueInjection` block above for the `intent` closed
   // dimension (serenity-docs#32). Both are thin wrappers over
-  // `resolveClosedValueInjection`; this pins the intent-specific return key
+  // `resolveServerOwnedValueInjection`; this pins the intent-specific return key
   // (`intentTagIds`) and the fail-closed contract independently of the type twin.
   describe('resolveIntentValueInjection', () => {
     it('returns the wanted value id plus EVERY id under the intent root', async () => {
@@ -601,8 +858,8 @@ describe('serenity tag-tree', () => {
       const { listProjectTags, createProjectTags } = makeProvisioningTransportStubs();
       const transport = { listProjectTags, createProjectTags };
       const res = await resolveIntentValueInjection(transport, WS, PROJECT, 'Task', fakeLog());
-      expect(res.computedId).to.equal('created:created::intent:Task');
-      expect(res.intentTagIds).to.deep.equal(['created:created::intent:Task']);
+      expect(res.computedId).to.equal(`created:created::${INTENT_ROOT_NAME}:Task`);
+      expect(res.intentTagIds).to.deep.equal([`created:created::${INTENT_ROOT_NAME}:Task`]);
     });
 
     it('502s rather than skip injection when the intent root cannot be resolved', async () => {
@@ -712,13 +969,25 @@ describe('serenity tag-tree', () => {
   });
 
   describe('findTagsInTree — single-id placement', () => {
-    it('reports a dimension root as a root, with its own name as the dimension', async () => {
+    it('reports a dimension root as a root, folding its upstream name to the dimension', async () => {
       const transport = { listProjectTags: makeListProjectTagsStub() };
       const placed = await findTagsInTree(transport, WS, PROJECT, [TAG_IDS.intentRoot], fakeLog());
       const found = placed.get(TAG_IDS.intentRoot);
+      // Upstream names this root `$abv_tags$intent`; a caller reasons in dimensions.
       expect(found).to.deep.equal({
         kind: 'root', parentId: null, rootName: 'intent', ancestorIds: [],
       });
+    });
+
+    // The descendant branch reads `path[0]`, which upstream fills with the root's
+    // real name — so this is where an unfolded `$abv_tags$intent` would leak out and
+    // silently disarm every guard that compares against `DIMENSION.*`.
+    it('reports a value under the intent root as the `intent` dimension', async () => {
+      const transport = { listProjectTags: makeListProjectTagsStub(dimensionTreeLevels()) };
+      const id = TAG_IDS.intentCommercial;
+      const found = (await findTagsInTree(transport, WS, PROJECT, [id], fakeLog())).get(id);
+      expect(found.kind).to.equal('descendant');
+      expect(found.rootName).to.equal(DIMENSION.INTENT);
     });
 
     it('reports a depth-3 sub-category with the dimension it descends from', async () => {

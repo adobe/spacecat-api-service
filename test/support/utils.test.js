@@ -25,7 +25,10 @@ import {
   deriveProjectName,
   autoResolveAuthorUrl,
   updateCodeConfig,
+  deriveCodeFromHlxConfig,
   getIsSummitPlgEnabled,
+  getAsoEntitlement,
+  getAsoTier,
   getCookieValue,
   filterSitesForProductCode,
   getEntitledProductCodes,
@@ -34,9 +37,12 @@ import {
   validateSiteForRedirects,
   sendAutofixMessage,
   isViewAsTrialRequest,
+  isViewFullExperienceRequest,
   getImsUserTokenStrict,
+  resolveCallerImsUserId,
   sendGlobalImportRunMessage,
   triggerGlobalImportRun,
+  triggerGeoExperimentImpactMeasurement,
 } from '../../src/support/utils.js';
 
 use(chaiAsPromised);
@@ -525,6 +531,64 @@ describe('utils', () => {
     });
   });
 
+  describe('deriveCodeFromHlxConfig', () => {
+    it('derives from hlxConfig.code (owner/repo/type/url) + rso.ref', () => {
+      const code = deriveCodeFromHlxConfig({
+        rso: {
+          ref: 'main', tld: 'aem.live', site: 'externalweb-ibrd', owner: 'wbgextapp',
+        },
+        code: {
+          repo: 'externalweb-ibrd',
+          owner: 'wbgextapp',
+          source: { url: 'https://github.com/wbgextapp/externalweb-ibrd', type: 'github' },
+        },
+      });
+
+      expect(code).to.eql({
+        type: 'github',
+        owner: 'wbgextapp',
+        repo: 'externalweb-ibrd',
+        ref: 'main',
+        url: 'https://github.com/wbgextapp/externalweb-ibrd',
+      });
+    });
+
+    it('falls back to hlxConfig.rso when hlxConfig.code is absent (repo from rso.site)', () => {
+      const code = deriveCodeFromHlxConfig({
+        rso: {
+          ref: 'dev', tld: 'aem.live', site: 'my-repo', owner: 'my-owner',
+        },
+      });
+
+      expect(code).to.eql({
+        type: 'github',
+        owner: 'my-owner',
+        repo: 'my-repo',
+        ref: 'dev',
+        url: 'https://github.com/my-owner/my-repo',
+      });
+    });
+
+    it('defaults ref to main and type to github when rso.ref / code.source.type are missing', () => {
+      const code = deriveCodeFromHlxConfig({
+        code: { owner: 'o', repo: 'r' },
+      });
+
+      expect(code).to.include({ ref: 'main', type: 'github' });
+    });
+
+    it('returns null when owner/repo cannot be resolved', () => {
+      expect(deriveCodeFromHlxConfig({ rso: {}, code: {} })).to.be.null;
+    });
+
+    it('returns null for a non-object / empty hlxConfig', () => {
+      expect(deriveCodeFromHlxConfig(null)).to.be.null;
+      expect(deriveCodeFromHlxConfig(undefined)).to.be.null;
+      expect(deriveCodeFromHlxConfig('nope')).to.be.null;
+      expect(deriveCodeFromHlxConfig({})).to.be.null;
+    });
+  });
+
   describe('getIsSummitPlgEnabled', () => {
     let sandbox;
     let context;
@@ -680,6 +744,152 @@ describe('utils', () => {
 
       expect(result).to.be.false;
     });
+
+    it('bypasses PLG limiting (returns false) when x-view-full-experience is set and caller has admin access', async () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-full-experience': 'true' } },
+      };
+      // Entitlement is PLG, but the admin override must win and short-circuit to false
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub().resolves({ getTier: () => 'PLG' }),
+      };
+      const accessControlUtil = { hasAdminAccess: () => true };
+
+      const result = await getIsSummitPlgEnabled(site, context, requestContext, accessControlUtil);
+
+      expect(result).to.be.false;
+      // entitlement lookup must not be reached — the override short-circuits first
+      expect(context.dataAccess.Entitlement.findByOrganizationIdAndProductCode)
+        .to.not.have.been.called;
+    });
+
+    it('does NOT bypass PLG limiting for x-view-full-experience when caller lacks admin access', async () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-full-experience': 'true' } },
+      };
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub().resolves({ getTier: () => 'PLG' }),
+      };
+      const accessControlUtil = { hasAdminAccess: () => false };
+
+      const result = await getIsSummitPlgEnabled(site, context, requestContext, accessControlUtil);
+
+      // falls through to the entitlement check → PLG → limiting still applies
+      expect(result).to.be.true;
+    });
+
+    it('does NOT bypass PLG limiting for x-view-full-experience when no accessControlUtil is provided', async () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-full-experience': 'true' } },
+      };
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub().resolves({ getTier: () => 'PLG' }),
+      };
+
+      const result = await getIsSummitPlgEnabled(site, context, requestContext);
+
+      expect(result).to.be.true;
+    });
+  });
+
+  describe('getAsoEntitlement / getAsoTier', () => {
+    let sandbox;
+    let context;
+
+    beforeEach(() => {
+      sandbox = sinon.createSandbox();
+      context = {
+        log: { error: sandbox.stub() },
+        dataAccess: {},
+      };
+    });
+
+    afterEach(() => {
+      sandbox.restore();
+    });
+
+    it('getAsoEntitlement returns the entitlement for the org', async () => {
+      const entitlement = { getTier: () => 'PAID' };
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub()
+          .withArgs('org-456', 'ASO')
+          .resolves(entitlement),
+      };
+
+      const result = await getAsoEntitlement('org-456', context);
+
+      expect(result).to.equal(entitlement);
+      expect(context.dataAccess.Entitlement.findByOrganizationIdAndProductCode)
+        .to.have.been.calledWith('org-456', 'ASO');
+    });
+
+    it('getAsoEntitlement returns null when organizationId is missing', async () => {
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub(),
+      };
+
+      const result = await getAsoEntitlement(undefined, context);
+
+      expect(result).to.be.null;
+      expect(context.dataAccess.Entitlement.findByOrganizationIdAndProductCode)
+        .to.not.have.been.called;
+    });
+
+    it('getAsoEntitlement returns null when context.dataAccess has no Entitlement', async () => {
+      context.dataAccess = {};
+
+      const result = await getAsoEntitlement('org-456', context);
+
+      expect(result).to.be.null;
+    });
+
+    it('getAsoEntitlement returns null and logs error when the lookup throws', async () => {
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub().rejects(new Error('Entitlement DB error')),
+      };
+
+      const result = await getAsoEntitlement('org-456', context);
+
+      expect(result).to.be.null;
+      expect(context.log.error).to.have.been.calledWithMatch(/Error resolving ASO entitlement/, sinon.match.instanceOf(Error));
+    });
+
+    it('getAsoTier returns the tier when an entitlement exists', async () => {
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub().resolves({ getTier: () => 'PAID' }),
+      };
+
+      const result = await getAsoTier('org-456', context);
+
+      expect(result).to.equal('PAID');
+    });
+
+    it('getAsoTier returns null when no ASO entitlement exists', async () => {
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub().resolves(null),
+      };
+
+      const result = await getAsoTier('org-456', context);
+
+      expect(result).to.be.null;
+    });
+
+    it('getAsoTier returns null when organizationId is missing', async () => {
+      const result = await getAsoTier(undefined, context);
+
+      expect(result).to.be.null;
+    });
+
+    it('getAsoTier returns null and logs error when the lookup throws', async () => {
+      context.dataAccess.Entitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub().rejects(new Error('Entitlement DB error')),
+      };
+
+      const result = await getAsoTier('org-456', context);
+
+      expect(result).to.be.null;
+      expect(context.log.error).to.have.been.calledWithMatch(/Error resolving ASO entitlement/, sinon.match.instanceOf(Error));
+    });
   });
 
   describe('isViewAsTrialRequest', () => {
@@ -717,6 +927,44 @@ describe('utils', () => {
 
     it('returns false when pathInfo is undefined', () => {
       expect(isViewAsTrialRequest({})).to.be.false;
+    });
+  });
+
+  describe('isViewFullExperienceRequest', () => {
+    it('returns true when both x-client-type and x-view-full-experience headers are correct', () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-full-experience': 'true' } },
+      };
+      expect(isViewFullExperienceRequest(requestContext)).to.be.true;
+    });
+
+    it('returns false when x-client-type is not sites-optimizer-ui', () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'other-client', 'x-view-full-experience': 'true' } },
+      };
+      expect(isViewFullExperienceRequest(requestContext)).to.be.false;
+    });
+
+    it('returns false when x-view-full-experience header is absent', () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui' } },
+      };
+      expect(isViewFullExperienceRequest(requestContext)).to.be.false;
+    });
+
+    it('returns false when x-view-full-experience is not "true"', () => {
+      const requestContext = {
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui', 'x-view-full-experience': 'false' } },
+      };
+      expect(isViewFullExperienceRequest(requestContext)).to.be.false;
+    });
+
+    it('returns false when requestContext is undefined', () => {
+      expect(isViewFullExperienceRequest(undefined)).to.be.false;
+    });
+
+    it('returns false when pathInfo is undefined', () => {
+      expect(isViewFullExperienceRequest({})).to.be.false;
     });
   });
 
@@ -1565,6 +1813,49 @@ describe('utils', () => {
     });
   });
 
+  describe('resolveCallerImsUserId', () => {
+    const withProfile = (profile) => ({
+      attributes: { authInfo: { getProfile: () => profile } },
+    });
+
+    it('prefers the user_id claim over sub', () => {
+      expect(resolveCallerImsUserId(withProfile({ user_id: 'user-123', sub: 'sub-x' })))
+        .to.equal('user-123');
+    });
+
+    it('falls back to sub — the claim a SpaceCat JWT session token carries', () => {
+      expect(resolveCallerImsUserId(withProfile({ sub: 'sub-x' }))).to.equal('sub-x');
+    });
+
+    // The IMS handler deletes user_id from the profile it builds and leaves the
+    // id only on `email`, so this is the sole carrier for an IMS-authenticated
+    // caller — and it is an id, not a human address.
+    it('falls back to the email claim, the platform user-id alias', () => {
+      expect(resolveCallerImsUserId(withProfile({ email: 'ims-user-9@AdobeID' })))
+        .to.equal('ims-user-9@AdobeID');
+    });
+
+    it('prefers sub over email when both are present', () => {
+      expect(resolveCallerImsUserId(withProfile({ sub: 'sub-x', email: 'sub-x' })))
+        .to.equal('sub-x');
+    });
+
+    it('returns null for an empty claim', () => {
+      expect(resolveCallerImsUserId(withProfile({ user_id: '', sub: '', email: '' })))
+        .to.equal(null);
+    });
+
+    it('returns null when there is no profile, authInfo, or context', () => {
+      expect(resolveCallerImsUserId(withProfile(undefined))).to.equal(null);
+      expect(resolveCallerImsUserId({ attributes: {} })).to.equal(null);
+      expect(resolveCallerImsUserId(undefined)).to.equal(null);
+    });
+
+    it('returns null for a non-string claim', () => {
+      expect(resolveCallerImsUserId(withProfile({ user_id: 12345 }))).to.equal(null);
+    });
+  });
+
   describe('getImsUserTokenStrict', () => {
     function buildContext(authInfo) {
       return {
@@ -1725,6 +2016,127 @@ describe('utils', () => {
     });
   });
 
+  describe('resolvePromisePair', () => {
+    let resolvePromisePair;
+
+    beforeEach(async () => {
+      ({ resolvePromisePair } = await esmock('../../src/support/utils.js', {
+        '@adobe/spacecat-shared-ims-client': {
+          ImsPromiseClient: {
+            PROMISE_PAIR: { SEMRUSH: 'SEMRUSH' },
+            CLIENT_TYPE: { CONSUMER: 'consumer', EMITTER: 'emitter' },
+          },
+        },
+      }));
+    });
+
+    const ctx = (audience) => ({
+      pathInfo: { headers: audience ? { 'x-promise-audience': audience } : {} },
+    });
+
+    it('returns undefined when the audience header is absent', () => {
+      expect(resolvePromisePair(ctx())).to.equal(undefined);
+    });
+
+    it('returns undefined when the audience header is empty', () => {
+      expect(resolvePromisePair(ctx(''))).to.equal(undefined);
+    });
+
+    it('returns the SEMRUSH pair for x-promise-audience: semrush', () => {
+      expect(resolvePromisePair(ctx('semrush'))).to.equal('SEMRUSH');
+    });
+
+    it('is case-insensitive on the audience value', () => {
+      expect(resolvePromisePair(ctx('SemRush'))).to.equal('SEMRUSH');
+    });
+
+    it('trims surrounding whitespace before matching', () => {
+      expect(resolvePromisePair(ctx('  semrush  '))).to.equal('SEMRUSH');
+    });
+
+    it('throws 400 on an unknown audience', () => {
+      let err;
+      try {
+        resolvePromisePair(ctx('bogus'));
+      } catch (e) {
+        err = e;
+      }
+      expect(err).to.exist;
+      expect(err.message).to.contain('Unknown promise audience: bogus');
+      expect(err.status).to.equal(400);
+    });
+
+    it('sanitizes CR/LF from the reflected value in the 400 message', () => {
+      let err;
+      try {
+        resolvePromisePair(ctx('bad\r\ninjected'));
+      } catch (e) {
+        err = e;
+      }
+      expect(err.status).to.equal(400);
+      expect(err.message).to.not.contain('\n');
+      expect(err.message).to.not.contain('\r');
+    });
+  });
+
+  describe('resolveSemrushImsToken audience selection', () => {
+    let resolveSemrushImsToken;
+    let createFromStub;
+    let exchangeTokenStub;
+
+    beforeEach(async () => {
+      exchangeTokenStub = sinon.stub().resolves({ access_token: 'exchanged' });
+      createFromStub = sinon.stub().returns({ exchangeToken: exchangeTokenStub });
+      ({ resolveSemrushImsToken } = await esmock('../../src/support/utils.js', {
+        '@adobe/spacecat-shared-ims-client': {
+          ImsPromiseClient: {
+            createFrom: createFromStub,
+            PROMISE_PAIR: { SEMRUSH: 'SEMRUSH' },
+            CLIENT_TYPE: { CONSUMER: 'consumer', EMITTER: 'emitter' },
+          },
+        },
+      }));
+    });
+
+    const ctx = (headers) => ({ pathInfo: { headers } });
+
+    it('selects the SEMRUSH consumer pair when x-promise-audience: semrush accompanies the token', async () => {
+      await resolveSemrushImsToken(
+        ctx({ 'x-promise-token': 'pt', 'x-promise-audience': 'semrush' }),
+        { error: sinon.stub() },
+        'label',
+      );
+      const [, type, opts] = createFromStub.firstCall.args;
+      expect(type).to.equal('consumer');
+      expect(opts).to.deep.equal({ pair: 'SEMRUSH' });
+    });
+
+    it('uses the default pair (undefined) when no audience header is present', async () => {
+      await resolveSemrushImsToken(
+        ctx({ 'x-promise-token': 'pt' }),
+        { error: sinon.stub() },
+        'label',
+      );
+      const [, , opts] = createFromStub.firstCall.args;
+      expect(opts).to.deep.equal({ pair: undefined });
+    });
+
+    it('throws 400 and never exchanges when the audience is unknown', async () => {
+      let err;
+      try {
+        await resolveSemrushImsToken(
+          ctx({ 'x-promise-token': 'pt', 'x-promise-audience': 'bogus' }),
+          { error: sinon.stub() },
+          'label',
+        );
+      } catch (e) {
+        err = e;
+      }
+      expect(err?.status).to.equal(400);
+      expect(createFromStub).to.not.have.been.called;
+    });
+  });
+
   describe('sendGlobalImportRunMessage', () => {
     it('sends a message without a siteId when none is provided', async () => {
       const sqs = { sendMessage: sinon.stub().resolves() };
@@ -1873,6 +2285,34 @@ describe('utils', () => {
       expect(sqs.sendMessage).to.have.been.calledWith('queue-url', {
         type: 'stale-suggestions-cleanup',
         slackContext: { channelId: 'C1', threadTs: '123' },
+      });
+    });
+  });
+
+  describe('triggerGeoExperimentImpactMeasurement', () => {
+    it('sends a TRIGGER_IMPACT_MEASUREMENT message with the given triggeredBy', async () => {
+      const sqs = { sendMessage: sinon.stub().resolves() };
+      const lambdaContext = { sqs, env: { LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'queue-url' } };
+
+      await triggerGeoExperimentImpactMeasurement('geo-exp-1', 'user@example.com', lambdaContext);
+
+      expect(sqs.sendMessage).to.have.been.calledOnceWithExactly('queue-url', {
+        type: 'TRIGGER_IMPACT_MEASUREMENT',
+        geoExperimentId: 'geo-exp-1',
+        triggeredBy: 'user@example.com',
+      });
+    });
+
+    it('falls back triggeredBy to "unknown" when not provided', async () => {
+      const sqs = { sendMessage: sinon.stub().resolves() };
+      const lambdaContext = { sqs, env: { LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'queue-url' } };
+
+      await triggerGeoExperimentImpactMeasurement('geo-exp-1', undefined, lambdaContext);
+
+      expect(sqs.sendMessage).to.have.been.calledOnceWithExactly('queue-url', {
+        type: 'TRIGGER_IMPACT_MEASUREMENT',
+        geoExperimentId: 'geo-exp-1',
+        triggeredBy: 'unknown',
       });
     });
   });

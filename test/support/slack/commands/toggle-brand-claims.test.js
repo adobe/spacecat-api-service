@@ -21,18 +21,25 @@ describe('BrandClaimsCommand', () => {
   let context;
   let slackContext;
   let setBrandClaimsEnabledStub;
+  let getBrandBySiteStub;
+  let mockSite;
+  let mockConfiguration;
   let BrandClaimsCommand;
 
   const BRAND_ID = 'a1b2c3d4-5678-90ab-cdef-1234567890ab';
-  const BRAND = { id: BRAND_ID, name: 'Acme' };
+  const SITE_ID = '11111111-1111-4111-8111-111111111111';
+  const ORG_ID = '22222222-2222-4222-8222-222222222222';
+  const BRAND = { id: BRAND_ID, name: 'Acme', site_id: SITE_ID };
 
   before(async () => {
     setBrandClaimsEnabledStub = sinon.stub();
+    getBrandBySiteStub = sinon.stub();
     BrandClaimsCommand = await esmock(
       '../../../../src/support/slack/commands/toggle-brand-claims.js',
       {
         '../../../../src/support/brands-storage.js': {
           setBrandClaimsEnabled: setBrandClaimsEnabledStub,
+          getBrandBySite: getBrandBySiteStub,
         },
       },
     );
@@ -40,8 +47,28 @@ describe('BrandClaimsCommand', () => {
 
   beforeEach(() => {
     setBrandClaimsEnabledStub.reset();
+    getBrandBySiteStub.reset();
+    mockSite = {
+      getId: () => SITE_ID,
+      getBaseURL: () => 'https://example.com',
+      getOrganizationId: () => ORG_ID,
+    };
+    mockConfiguration = {
+      enableHandlerForSite: sinon.stub(),
+      disableHandlerForSite: sinon.stub(),
+      save: sinon.stub().resolves(),
+    };
     context = {
-      dataAccess: { services: { postgrestClient: { from: sinon.stub() } } },
+      dataAccess: {
+        Site: {
+          findByBaseURL: sinon.stub().resolves(mockSite),
+          findById: sinon.stub().resolves(mockSite),
+        },
+        Configuration: {
+          findLatest: sinon.stub().resolves(mockConfiguration),
+        },
+        services: { postgrestClient: { from: sinon.stub() } },
+      },
       log: console,
     };
     slackContext = { say: sinon.spy(), user: 'U123' };
@@ -70,6 +97,19 @@ describe('BrandClaimsCommand', () => {
       expect(slackContext.say.calledWithMatch(/Brand claims \*enabled\* for brand "Acme"/)).to.be.true;
     });
 
+    it('enables the brand-claims audit for the brand primary site (resolved from site_id)', async () => {
+      setBrandClaimsEnabledStub.resolves(BRAND);
+
+      const command = BrandClaimsCommand(context);
+      await command.execute(`enable-brand-claims ${BRAND_ID}`, slackContext);
+
+      expect(context.dataAccess.Site.findById).to.have.been.calledWith(SITE_ID);
+      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('brand-claims', mockSite);
+      expect(mockConfiguration.disableHandlerForSite).to.not.have.been.called;
+      expect(mockConfiguration.save).to.have.been.calledOnce;
+      expect(slackContext.say.calledWithMatch(/`brand-claims` audit was enabled for https:\/\/example\.com/)).to.be.true;
+    });
+
     it('disables brand claims when the disable keyword is used', async () => {
       setBrandClaimsEnabledStub.resolves(BRAND);
 
@@ -78,22 +118,108 @@ describe('BrandClaimsCommand', () => {
 
       const args = setBrandClaimsEnabledStub.firstCall.args[0];
       expect(args.enabled).to.equal(false);
+      expect(mockConfiguration.disableHandlerForSite).to.have.been.calledWith('brand-claims', mockSite);
+      expect(mockConfiguration.enableHandlerForSite).to.not.have.been.called;
+      expect(mockConfiguration.save).to.have.been.calledOnce;
       expect(slackContext.say.calledWithMatch(/Brand claims \*disabled\* for brand "Acme"/)).to.be.true;
+      expect(slackContext.say.calledWithMatch(/`brand-claims` audit was disabled for https:\/\/example\.com/)).to.be.true;
     });
 
-    it('warns when no brand ID is provided', async () => {
-      const command = BrandClaimsCommand(context);
-      await command.execute('enable-brand-claims', slackContext);
+    it('resolves a brand by site base URL and enables it', async () => {
+      getBrandBySiteStub.resolves(BRAND);
+      setBrandClaimsEnabledStub.resolves(BRAND);
 
-      expect(slackContext.say.calledWithMatch(/Please provide a brand ID/)).to.be.true;
+      const command = BrandClaimsCommand(context);
+      await command.execute('enable-brand-claims https://example.com', slackContext);
+
+      expect(context.dataAccess.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
+      expect(getBrandBySiteStub).to.have.been.calledWith(ORG_ID, SITE_ID);
+      const args = setBrandClaimsEnabledStub.firstCall.args[0];
+      expect(args.brandId).to.equal(BRAND_ID);
+      expect(args.enabled).to.equal(true);
+      // URL branch already has the site, so it toggles the audit without a findById.
+      expect(context.dataAccess.Site.findById).to.not.have.been.called;
+      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('brand-claims', mockSite);
+      expect(mockConfiguration.save).to.have.been.calledOnce;
+      expect(slackContext.say.calledWithMatch(/Brand claims \*enabled\* for brand "Acme"/)).to.be.true;
+    });
+
+    it('flips the flag but leaves the audit unchanged when the brand has no primary site', async () => {
+      setBrandClaimsEnabledStub.resolves({ id: BRAND_ID, name: 'Acme', site_id: null });
+
+      const command = BrandClaimsCommand(context);
+      await command.execute(`enable-brand-claims ${BRAND_ID}`, slackContext);
+
+      expect(context.dataAccess.Site.findById).to.not.have.been.called;
+      expect(mockConfiguration.enableHandlerForSite).to.not.have.been.called;
+      expect(mockConfiguration.save).to.not.have.been.called;
+      expect(slackContext.say.calledWithMatch(/Brand claims \*enabled\* for brand "Acme"/)).to.be.true;
+      expect(slackContext.say.calledWithMatch(/No primary site resolved/)).to.be.true;
+    });
+
+    it('warns when brand.site_id is set but Site.findById returns null', async () => {
+      setBrandClaimsEnabledStub.resolves({ id: BRAND_ID, name: 'Acme', site_id: SITE_ID });
+      context.dataAccess.Site.findById.resolves(null);
+
+      const command = BrandClaimsCommand(context);
+      await command.execute(`enable-brand-claims ${BRAND_ID}`, slackContext);
+
+      expect(context.dataAccess.Site.findById).to.have.been.calledWith(SITE_ID);
+      expect(mockConfiguration.enableHandlerForSite).to.not.have.been.called;
+      expect(mockConfiguration.save).to.not.have.been.called;
+      expect(slackContext.say.calledWithMatch(/Brand claims \*enabled\* for brand "Acme"/)).to.be.true;
+      expect(slackContext.say.calledWithMatch(/No primary site resolved/)).to.be.true;
+    });
+
+    it('reports partial state when the flag flips but the audit toggle fails', async () => {
+      setBrandClaimsEnabledStub.resolves(BRAND);
+      mockConfiguration.save.rejects(new Error('config write boom'));
+
+      const command = BrandClaimsCommand(context);
+      await command.execute(`enable-brand-claims ${BRAND_ID}`, slackContext);
+
+      // Flag was flipped (setBrandClaimsEnabled resolved) but the audit toggle threw.
+      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('brand-claims', mockSite);
+      expect(slackContext.say.calledWithMatch(/Brand claims \*enabled\* for brand "Acme"/)).to.be.true;
+      expect(slackContext.say.calledWithMatch(/the brand flag was enabled, but toggling the `brand-claims` audit failed: config write boom/i)).to.be.true;
+      // The generic error handler must NOT fire — we handle this inline.
+      expect(slackContext.say.calledWithMatch(/Something went wrong/)).to.be.false;
+    });
+
+    it('errors when the site URL resolves to no site', async () => {
+      context.dataAccess.Site.findByBaseURL.resolves(null);
+
+      const command = BrandClaimsCommand(context);
+      await command.execute('enable-brand-claims https://example.com', slackContext);
+
+      expect(slackContext.say.calledWithMatch(/Site not found/)).to.be.true;
       expect(setBrandClaimsEnabledStub).to.not.have.been.called;
     });
 
-    it('rejects a brand ID that is not a valid UUID', async () => {
-      const command = BrandClaimsCommand(context);
-      await command.execute('enable-brand-claims not-a-uuid', slackContext);
+    it('warns when the resolved site has no active brand', async () => {
+      getBrandBySiteStub.resolves(null);
 
-      expect(slackContext.say.calledWithMatch(/not a valid brand ID/)).to.be.true;
+      const command = BrandClaimsCommand(context);
+      await command.execute('enable-brand-claims https://example.com', slackContext);
+
+      expect(slackContext.say.calledWithMatch(/No active brand found for site/)).to.be.true;
+      expect(setBrandClaimsEnabledStub).to.not.have.been.called;
+    });
+
+    it('warns when no target is provided', async () => {
+      const command = BrandClaimsCommand(context);
+      await command.execute('enable-brand-claims', slackContext);
+
+      expect(slackContext.say.calledWithMatch(/Please provide a brand ID or site URL/)).to.be.true;
+      expect(setBrandClaimsEnabledStub).to.not.have.been.called;
+    });
+
+    it('rejects an argument that is neither a valid UUID nor a parseable URL', async () => {
+      const command = BrandClaimsCommand(context);
+      await command.execute('enable-brand-claims garbage!!!', slackContext);
+
+      expect(slackContext.say.calledWithMatch(/not a valid brand ID \(UUID\) or site URL/)).to.be.true;
+      expect(context.dataAccess.Site.findByBaseURL).to.not.have.been.called;
       expect(setBrandClaimsEnabledStub).to.not.have.been.called;
     });
 

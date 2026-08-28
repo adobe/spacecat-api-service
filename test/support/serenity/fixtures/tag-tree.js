@@ -13,8 +13,9 @@
 import sinon from 'sinon';
 
 import {
-  DIMENSION_ROOT_NAMES,
+  DIMENSION_PROVISION_ORDER,
   CLOSED_DIMENSION_VALUES,
+  rootNameOfDimension,
 } from '../../../../src/support/serenity/prompt-tags.js';
 
 /**
@@ -38,6 +39,7 @@ export const TAG_IDS = Object.freeze({
   intentRoot: 'root-intent',
   originRoot: 'root-origin',
   typeRoot: 'root-type',
+  sourceRoot: 'root-source',
 
   intentInformational: 'intent-informational',
   intentTask: 'intent-task',
@@ -53,6 +55,14 @@ export const TAG_IDS = Object.freeze({
 
   categoryRunningShoes: 'category-running-shoes',
   subCategoryHuman: 'subcategory-human',
+
+  // The producing-system `source` root carries a couple of already-minted values
+  // (`config`, the commonest producer, and `semrush`, the market generator's).
+  // `source` is OPEN so this is not a fixed enum — these are just values that
+  // happen to exist on this project, the way the server resolves-or-creates one on
+  // first use (source-dimension.md §1 item 4).
+  sourceConfig: 'source-config',
+  sourceSemrush: 'source-semrush',
 });
 
 const ROOT_IDS = Object.freeze({
@@ -60,6 +70,7 @@ const ROOT_IDS = Object.freeze({
   intent: TAG_IDS.intentRoot,
   origin: TAG_IDS.originRoot,
   type: TAG_IDS.typeRoot,
+  source: TAG_IDS.sourceRoot,
 });
 
 const CLOSED_VALUE_IDS = Object.freeze({
@@ -93,14 +104,22 @@ const CATEGORY_CRUMB = [{ id: TAG_IDS.categoryRoot, name: 'category' }];
  * Builds the level map: `parentId` → the tags directly beneath it. `''` is the
  * root level. Callers may add or replace levels via `extraLevels`.
  *
+ * Each root is named as upstream names it, so the intent root is
+ * `$abv_tags$intent`.
+ *
  * @param {Record<string, object[]>} [extraLevels]
  * @returns {Record<string, object[]>}
  */
 export function dimensionTreeLevels(extraLevels = {}) {
-  const roots = DIMENSION_ROOT_NAMES.map((name) => upstreamTag({
+  const roots = DIMENSION_PROVISION_ORDER.map((name) => upstreamTag({
     id: ROOT_IDS[name],
-    name,
-    childrenCount: name === 'category' ? 1 : CLOSED_DIMENSION_VALUES[name].length,
+    name: rootNameOfDimension(name),
+    // `category` carries one seeded sub-tree; the closed dimensions carry their
+    // enum. The open `source` root reports `children_count: 0` so tree WALKS
+    // (findTagsInTree) do not descend it, yet its level below still serves one
+    // already-minted `config` value for by-parent resolution (indexLevelByName),
+    // matching how a real project accrues `source` values on first use.
+    childrenCount: name === 'category' ? 1 : (CLOSED_DIMENSION_VALUES[name]?.length ?? 0),
   }));
 
   const closedLevels = {};
@@ -110,7 +129,7 @@ export function dimensionTreeLevels(extraLevels = {}) {
         id: CLOSED_VALUE_IDS[dimension][value],
         name: value,
         parentId: ROOT_IDS[dimension],
-        path: [{ id: ROOT_IDS[dimension], name: dimension }],
+        path: [{ id: ROOT_IDS[dimension], name: rootNameOfDimension(dimension) }],
       })
     ));
   }
@@ -132,6 +151,21 @@ export function dimensionTreeLevels(extraLevels = {}) {
       parentId: TAG_IDS.categoryRunningShoes,
       path: [...CATEGORY_CRUMB, { id: TAG_IDS.categoryRunningShoes, name: 'Running Shoes' }],
     })],
+    // Already-minted producing-system values under the `source` root.
+    [TAG_IDS.sourceRoot]: [
+      upstreamTag({
+        id: TAG_IDS.sourceConfig,
+        name: 'config',
+        parentId: TAG_IDS.sourceRoot,
+        path: [{ id: TAG_IDS.sourceRoot, name: 'source' }],
+      }),
+      upstreamTag({
+        id: TAG_IDS.sourceSemrush,
+        name: 'semrush',
+        parentId: TAG_IDS.sourceRoot,
+        path: [{ id: TAG_IDS.sourceRoot, name: 'source' }],
+      }),
+    ],
     ...extraLevels,
   };
 }

@@ -87,6 +87,50 @@ function getProductResourceTypes(product) {
   return Object.keys(resourceMap);
 }
 
+/**
+ * Resolve + validate the composite-key SLOT(S) for a create request. Slot types
+ * are anchored per product in PRODUCTS_FACS_COMPOSITE_RESOURCE.compositeKeySlots
+ * (ordered; index i → DB columns composite_key_type_<i+1>/value_<i+1>). A slot's
+ * TYPE is not client-chosen: a supplied `compositeKeyType1` must equal the
+ * product's configured slot-1 dimension (ASO → 'opportunity'), else it is
+ * rejected; a product that declares no slots (e.g. LLMO) rejects any composite
+ * key. Type is filled from config; value defaults to 'all' (wildcard). Anchoring
+ * the type here keeps slot _1 permanently bound to its entity, so a future slot
+ * _2 (a different entity) can never be cross-wired.
+ *
+ * @returns {{ compositeKeyType1: string, compositeKeyValue1: string }
+ *   | { error: Response }}
+ */
+function resolveCompositeKeys(product, compositeKeyType1, compositeKeyValue1) {
+  const slots = routeFacsCapabilities
+    .PRODUCTS_FACS_COMPOSITE_RESOURCE?.[product]?.compositeKeySlots ?? [];
+  if (slots.length === 0) {
+    // No-slot products carry the ('all','all') sentinel = "no scoping". Accept an
+    // explicit 'all'/'all' as a no-op so a DTO round-trip (GET a binding, then
+    // POST the same body back) does not 400; reject only a real (non-'all')
+    // qualifier, which genuinely isn't supported for this product.
+    const typeOk = compositeKeyType1 === undefined || compositeKeyType1 === 'all';
+    const valueOk = compositeKeyValue1 === undefined || compositeKeyValue1 === 'all';
+    if (!typeOk || !valueOk) {
+      return { error: badRequest(`Product ${product} does not support composite keys`) };
+    }
+    return { compositeKeyType1: 'all', compositeKeyValue1: 'all' };
+  }
+  const [slot1Type] = slots;
+  if (compositeKeyType1 !== undefined && compositeKeyType1 !== slot1Type) {
+    return { error: badRequest(`compositeKeyType1 for ${product} must be '${slot1Type}'`) };
+  }
+  if (compositeKeyValue1 !== undefined && !hasText(compositeKeyValue1)) {
+    return { error: badRequest('compositeKeyValue1, when provided, must be a non-empty string') };
+  }
+  return {
+    compositeKeyType1: slot1Type,
+    // Trim so trailing/leading whitespace can't produce a stored qualifier that
+    // silently matches no live Opportunity.type (enforcement is exact-match).
+    compositeKeyValue1: hasText(compositeKeyValue1) ? compositeKeyValue1.trim() : 'all',
+  };
+}
+
 function encodeCursor(offset) {
   return Buffer.from(JSON.stringify({ offset }), 'utf8').toString('base64url');
 }
@@ -158,6 +202,10 @@ function toMappingDto(row) {
     subjectId: row.subject_id,
     resourceType: row.resource_type,
     resourceId: row.resource_id,
+    // Columns are NOT NULL DEFAULT 'all'; surface the 'all' sentinel (not null)
+    // so the DTO round-trips cleanly back through create.
+    compositeKeyType1: row.composite_key_type_1 ?? 'all',
+    compositeKeyValue1: row.composite_key_value_1 ?? 'all',
     imsOrgId: row.ims_org_id,
     product: row.product,
     grantedCapabilities: row.granted_capabilities ?? [],
@@ -309,6 +357,8 @@ function StateAccessMappingsController(context) {
       subjectId: queryParams.subjectId,
       resourceType: queryParams.resourceType,
       resourceId: queryParams.resourceId,
+      compositeKeyType1: queryParams.compositeKeyType1,
+      compositeKeyValue1: queryParams.compositeKeyValue1,
       limit: queryParams.limit,
     };
   }
@@ -572,6 +622,148 @@ function StateAccessMappingsController(context) {
   }
 
   /**
+   * Persists ONE subject↔resource binding and returns the HTTP response —
+   * shared by `createMapping` (customer manager flow) and `adminCreateMapping`
+   * (admin backend flow). The caller owns ALL authorization + validation before
+   * calling this; here we only insert (or, on an active duplicate,
+   * upsert-overwrite) and emit the audit event.
+   *
+   * Upsert semantics: an active duplicate (same subject + resource + org +
+   * product) has its `granted_capabilities` overwritten with `capabilitiesToStore`
+   * and returns `200`; a fresh insert returns `201`. A rare revoke race between
+   * the insert conflict and the overwrite surfaces as `409`.
+   *
+   * @param {object} ctx
+   * @param {object} args
+   * @param {string} args.imsOrgId               Canonical org id.
+   * @param {string} args.product                Uppercase product code.
+   * @param {'user'|'org'} args.subjectType
+   * @param {string} args.subjectId
+   * @param {string} args.resourceType
+   * @param {string} args.resourceId
+   * @param {string[]} args.capabilitiesToStore  Validated, deduped, can_view-baselined.
+   * @param {string|null} args.createdBy         Actor recorded as created_by / updated_by.
+   * @returns {Promise<Response>}
+   */
+  async function persistMappingBinding(ctx, {
+    imsOrgId,
+    product,
+    subjectType,
+    subjectId,
+    resourceType,
+    resourceId,
+    capabilitiesToStore,
+    createdBy,
+    compositeKeyType1,
+    compositeKeyValue1,
+  }) {
+    try {
+      const { postgrestClient } = ctx.dataAccess.services;
+      const result = await createFacsAccessMappings(postgrestClient, {
+        imsOrgId,
+        product,
+        resourceType,
+        resourceId,
+        grantedCapabilities: capabilitiesToStore,
+        subjects: [{ type: subjectType, id: subjectId }],
+        createdBy,
+        compositeKeyType1,
+        compositeKeyValue1,
+      });
+      if (result.created.length === 0 && result.skipped.length > 0) {
+        // Active duplicate already exists — upsert semantics: overwrite the
+        // existing binding's capabilities with the request's set rather than
+        // rejecting the call. Look the row up by its natural key, then replace
+        // its capabilities via the same capability-edit RPC PATCH uses.
+        const existing = await listFacsAccessMappings(postgrestClient, {
+          imsOrgId,
+          product,
+          subjectType,
+          subjectId,
+          resourceType,
+          resourceId,
+          // The active-row unique key now includes the qualifier, so the conflict
+          // re-lookup must match it too — otherwise the upsert could overwrite a
+          // different-qualifier binding for the same subject+resource.
+          compositeKeyType1,
+          compositeKeyValue1,
+          limit: 1,
+        });
+        const conflictId = existing[0]?.id ?? null;
+        // Defensive: the active row vanished (revoked) between the insert
+        // conflict and this read. Nothing to update — surface the conflict.
+        if (!conflictId) {
+          return createResponse(
+            {
+              message: 'Active access mapping already exists for this subject and resource',
+              id: null,
+            },
+            409,
+          );
+        }
+        const updated = await updateFacsAccessMappingCapabilities(postgrestClient, {
+          id: conflictId,
+          imsOrgId,
+          product,
+          grantedCapabilities: capabilitiesToStore,
+          updatedBy: createdBy,
+        });
+        if (!updated) {
+          // Same race as above, observed one layer down (the RPC filters on
+          // `revoked_at IS NULL`). Surface the conflict rather than a 500.
+          return createResponse(
+            {
+              message: 'Active access mapping already exists for this subject and resource',
+              id: conflictId,
+            },
+            409,
+          );
+        }
+        await emitAuditEvent(ctx, {
+          imsOrgId,
+          product,
+          operation: 'update_capabilities',
+          outcome: 'allow',
+          statusCode: 200,
+          mappingId: updated.id,
+          bindingSubjectType: updated.subject_type,
+          bindingSubjectId: updated.subject_id,
+          resourceType: updated.resource_type,
+          resourceId: updated.resource_id,
+          grantedCapabilities: capabilitiesToStore,
+        });
+        return ok(toMappingDto(updated));
+      }
+      const createdRow = result.created[0];
+      await emitAuditEvent(ctx, {
+        imsOrgId,
+        product,
+        operation: 'create',
+        outcome: 'allow',
+        statusCode: 201,
+        mappingId: createdRow.id,
+        bindingSubjectType: subjectType,
+        bindingSubjectId: subjectId,
+        resourceType,
+        resourceId,
+        // Audit the capabilities actually persisted (incl. the auto-injected
+        // can_view baseline), not the raw request input.
+        grantedCapabilities: capabilitiesToStore,
+      });
+      return createResponse(toMappingDto(createdRow), 201);
+    } catch (error) {
+      // Log the full error (stack + any nested cause), not just the message:
+      // this shared helper fails for several reasons (PostgREST drop, constraint
+      // violation, unexpected null) and the stack is what pins the call site.
+      log.error(
+        { tag: 'state-access-mappings', err: error },
+        'Failed to create state-layer access mapping',
+      );
+      return internalServerError('Failed to create access mapping');
+    }
+  }
+
+  /**
    * GET /state/access-mappings — list ACTIVE bindings. Requires at least one
    * of (subjectType + subjectId) or (resourceType + resourceId).
    */
@@ -706,6 +898,7 @@ function StateAccessMappingsController(context) {
     }
     const {
       subjectType, subjectId, resourceType, resourceId, grantedCapabilities,
+      compositeKeyType1, compositeKeyValue1,
     } = data;
 
     if (!ALLOWED_SUBJECT_TYPES.has(subjectType)) {
@@ -759,100 +952,169 @@ function StateAccessMappingsController(context) {
       product,
     );
 
-    try {
-      const { postgrestClient } = ctx.dataAccess.services;
-      const result = await createFacsAccessMappings(postgrestClient, {
-        imsOrgId,
-        product,
-        resourceType,
-        resourceId,
-        grantedCapabilities: capabilitiesToStore,
-        subjects: [{ type: subjectType, id: subjectId }],
-        createdBy,
-      });
-      if (result.created.length === 0 && result.skipped.length > 0) {
-        // Active duplicate already exists — upsert semantics: overwrite the
-        // existing binding's capabilities with the request's set rather than
-        // rejecting the call. Look the row up by its natural key, then replace
-        // its capabilities via the same capability-edit RPC PATCH uses.
-        const existing = await listFacsAccessMappings(postgrestClient, {
-          imsOrgId,
-          product,
-          subjectType,
-          subjectId,
-          resourceType,
-          resourceId,
-          limit: 1,
-        });
-        const conflictId = existing[0]?.id ?? null;
-        // Defensive: the active row vanished (revoked) between the insert
-        // conflict and this read. Nothing to update — surface the conflict.
-        if (!conflictId) {
-          return createResponse(
-            {
-              message: 'Active access mapping already exists for this subject and resource',
-              id: null,
-            },
-            409,
-          );
-        }
-        const updated = await updateFacsAccessMappingCapabilities(postgrestClient, {
-          id: conflictId,
-          imsOrgId,
-          product,
-          grantedCapabilities: capabilitiesToStore,
-          updatedBy: createdBy,
-        });
-        if (!updated) {
-          // Same race as above, observed one layer down (the RPC filters on
-          // `revoked_at IS NULL`). Surface the conflict rather than a 500.
-          return createResponse(
-            {
-              message: 'Active access mapping already exists for this subject and resource',
-              id: conflictId,
-            },
-            409,
-          );
-        }
-        await emitAuditEvent(ctx, {
-          imsOrgId,
-          product,
-          operation: 'update_capabilities',
-          outcome: 'allow',
-          statusCode: 200,
-          mappingId: updated.id,
-          bindingSubjectType: updated.subject_type,
-          bindingSubjectId: updated.subject_id,
-          resourceType: updated.resource_type,
-          resourceId: updated.resource_id,
-          grantedCapabilities: capabilitiesToStore,
-        });
-        return ok(toMappingDto(updated));
-      }
-      const createdRow = result.created[0];
-      await emitAuditEvent(ctx, {
-        imsOrgId,
-        product,
-        operation: 'create',
-        outcome: 'allow',
-        statusCode: 201,
-        mappingId: createdRow.id,
-        bindingSubjectType: subjectType,
-        bindingSubjectId: subjectId,
-        resourceType,
-        resourceId,
-        // Audit the capabilities actually persisted (incl. the auto-injected
-        // can_view baseline), not the raw request input.
-        grantedCapabilities: capabilitiesToStore,
-      });
-      return createResponse(toMappingDto(createdRow), 201);
-    } catch (error) {
-      log.error(
-        { tag: 'state-access-mappings', err: error.message },
-        'Failed to create state-layer access mapping',
-      );
-      return internalServerError('Failed to create access mapping');
+    // Composite-key slot(s): the TYPE is anchored + validated per product+slot
+    // (ASO slot 1 = 'opportunity'), not client-chosen; the VALUE is matched against
+    // the live resource at enforcement (per D5). See resolveCompositeKeys.
+    const composite = resolveCompositeKeys(product, compositeKeyType1, compositeKeyValue1);
+    if (composite.error) {
+      return composite.error;
     }
+
+    return persistMappingBinding(ctx, {
+      imsOrgId,
+      product,
+      subjectType,
+      subjectId,
+      resourceType,
+      resourceId,
+      capabilitiesToStore,
+      createdBy,
+      compositeKeyType1: composite.compositeKeyType1,
+      compositeKeyValue1: composite.compositeKeyValue1,
+    });
+  }
+
+  /**
+   * POST /state/access-mappings/admin — admin-only backend provisioning of a
+   * single binding. Unlike `createMapping`, EVERYTHING that scopes the binding
+   * is taken from the request body — `imsOrgId`, `product`, `subjectType`,
+   * `subjectId`, `resourceType`, `resourceId`, `grantedCapabilities`. Nothing is
+   * derived from `authInfo` except the actor id recorded in the audit trail.
+   *
+   * This is the backend path for provisioning a narrow, resource-scoped binding
+   * on behalf of a trial customer in THEIR org — a case the customer-facing
+   * `createMapping` cannot serve because it (a) derives the org from the caller's
+   * JWT tenant, (b) derives the product from the `x-product` header, (c) enforces
+   * the hybrid manager gate (`gateManager`), and (d) restricts internal admins to
+   * resources in their own org (`requireAdminResourceInOrg`). All four are
+   * intentionally bypassed here; the sole gate is `isAdmin()`.
+   *
+   * Body: { imsOrgId, product, subjectType, subjectId, resourceType, resourceId,
+   *         grantedCapabilities }. Capabilities are validated against the
+   *         product's catalog; the upsert + `can_view`-baseline semantics match
+   *         `createMapping`. An admin caller is trusted to grant any catalog
+   *         capability (including `can_manage_users`), so there is no
+   *         `requireFacsManageToGrant` gate here.
+   */
+  async function adminCreateMapping(ctx) {
+    // Sole authorization gate: internal admin. No FACS/manager evaluation and no
+    // org/product derivation — this is a trusted backend provisioning surface.
+    if (!ctx.attributes?.authInfo?.isAdmin?.()) {
+      return forbidden('Admin access required');
+    }
+    const guard = requirePostgrestForFacsMappings(ctx);
+    if (guard) {
+      return guard;
+    }
+
+    const { data } = ctx;
+    if (!data || typeof data !== 'object') {
+      return badRequest('request body is required');
+    }
+    const {
+      imsOrgId: rawImsOrgId,
+      product: rawProduct,
+      subjectType,
+      subjectId,
+      resourceType,
+      resourceId,
+      grantedCapabilities,
+      compositeKeyType1,
+      compositeKeyValue1,
+    } = data;
+
+    // Product comes from the body (NOT the x-product header). Must reference a
+    // known product so the capability-catalog + resource-type checks below have
+    // a valid basis.
+    if (!hasText(rawProduct)) {
+      return badRequest('product is required');
+    }
+    const product = rawProduct.toUpperCase();
+    if (!routeFacsCapabilities.PRODUCTS_ROUTES[product]) {
+      return badRequest('product must reference a known product');
+    }
+
+    // IMS org comes from the body. Normalize to the canonical `<ident>@<authSrc>`
+    // form so the stored row and the org-subject check below use the same shape
+    // as the rest of the table.
+    if (!hasText(rawImsOrgId)) {
+      return badRequest('imsOrgId is required');
+    }
+    const imsOrgId = normalizeImsOrgId(rawImsOrgId);
+
+    if (!ALLOWED_SUBJECT_TYPES.has(subjectType)) {
+      return badRequest("subjectType must be 'user' or 'org'");
+    }
+    if (!hasText(subjectId)) {
+      return badRequest('subjectId is required');
+    }
+    if (subjectType === 'user' && !subjectId.includes('@')) {
+      return badRequest("subjectId for type 'user' must be canonical '<ident>@<authSrc>'");
+    }
+    // An org subject binds the org to its OWN resources; the only legal org
+    // subjectId is the payload's imsOrgId. Normalize it the same way as imsOrgId
+    // so a caller may send both bare (e.g. 'FOO' / 'FOO') or both canonical — the
+    // canonical form is what gets compared and persisted.
+    const normalizedSubjectId = subjectType === 'org'
+      ? normalizeImsOrgId(subjectId)
+      : subjectId;
+    if (subjectType === 'org' && normalizedSubjectId !== imsOrgId) {
+      return badRequest("subjectId for type 'org' must equal the payload imsOrgId");
+    }
+
+    const productResourceTypes = getProductResourceTypes(product);
+    if (!productResourceTypes.includes(resourceType)) {
+      return badRequest(
+        `resourceType must be one of [${productResourceTypes.join(', ')}] for product ${product}`,
+      );
+    }
+    if (!hasText(resourceId)) {
+      return badRequest('resourceId is required');
+    }
+    // The only ReBAC resource types (brand, site) are UUID-keyed. Unlike
+    // createMapping, this endpoint performs no DB-backed resource check
+    // (canActOnResource / requireAdminResourceInOrg are bypassed), so validate
+    // the format here to avoid writing a dangling reference into the table.
+    if (!isValidUUID(resourceId)) {
+      return badRequest('resourceId must be a valid UUID');
+    }
+
+    // No requireFacsManageToGrant gate: unlike the customer flow, an internal
+    // admin is trusted to grant any capability in the product catalog (incl.
+    // can_manage_users). Catalog membership is still enforced below.
+    const capErr = validateGrantedCapabilities(grantedCapabilities, product);
+    if (capErr) {
+      return badRequest(capErr);
+    }
+    // De-duplicate, then guarantee the baseline `<product>/can_view` (see
+    // createMapping).
+    const capabilitiesToStore = ensureBaselineCanView(
+      [...new Set(grantedCapabilities)],
+      product,
+    );
+
+    // Composite-key slot(s): TYPE anchored + validated per product+slot (ASO slot 1
+    // = 'opportunity'), not client-chosen; value defaults to 'all'. See
+    // resolveCompositeKeys.
+    const composite = resolveCompositeKeys(product, compositeKeyType1, compositeKeyValue1);
+    if (composite.error) {
+      return composite.error;
+    }
+
+    return persistMappingBinding(ctx, {
+      imsOrgId,
+      product,
+      subjectType,
+      subjectId: normalizedSubjectId,
+      resourceType,
+      resourceId,
+      capabilitiesToStore,
+      // Audit trail only: record the real admin/service caller. No mapping
+      // access-scope data is derived from authInfo.
+      createdBy: resolveCallerUserIdent(ctx),
+      compositeKeyType1: composite.compositeKeyType1,
+      compositeKeyValue1: composite.compositeKeyValue1,
+    });
   }
 
   /**
@@ -1281,6 +1543,7 @@ function StateAccessMappingsController(context) {
     listMappings,
     listHistory,
     createMapping,
+    adminCreateMapping,
     patchMapping,
     deleteMapping,
     getProductCapabilities,

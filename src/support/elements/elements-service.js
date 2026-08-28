@@ -12,9 +12,14 @@
 
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { ELEMENT_IDS } from './element-ids.js';
+import { SEP } from './constants.js';
 import { mapWithConcurrency } from './concurrency.js';
 import { splitDateRangeIntoWeeksBackward } from './week-utils.js';
-import { INTENT_VALUE } from '../serenity/prompt-tags.js';
+import {
+  DIMENSION,
+  INTENT_VALUE,
+  INTENT_ROOT_NAME,
+} from '../serenity/prompt-tags.js';
 import {
   buildBrandsPayload,
   transformBrandsToFilterDimensions,
@@ -36,6 +41,12 @@ import {
   buildCitedDomainsPayload,
   transformCitedDomainsResponse,
   transformCitedDomainsResponses,
+  buildSubredditsPayload,
+  transformSubredditsResponse,
+  buildRedditThreadsPayload,
+  transformRedditThreadsResponse,
+  buildYoutubeVideosPayload,
+  transformYoutubeVideosResponse,
   buildTopicPromptsPayload,
   transformTopicPromptsResponse,
   aggregateTopicsFromPrompts,
@@ -46,6 +57,9 @@ import {
   transformOwnedUrlsResponse,
   buildDomainUrlsPayload,
   transformDomainUrlsResponse,
+  buildUrlPromptsPayload,
+  transformUrlPromptsResponse,
+  mergeUrlPromptsResponses,
   buildMarketMentionsTrendPayload,
   buildMarketCitationsTrendPayload,
   transformMarketTrackingTrends,
@@ -132,8 +146,17 @@ export function createElementsService(transport, log) {
       // below would repoint result's prototype instead of adding a property for
       // those (rather than dropping such tags, routing them as "reserved" sends
       // them into the generic `tags` array, same as any other collision).
+      //
+      // `intent` is reserved explicitly because it is NOT one of `result`'s keys —
+      // the intent dimension surfaces as `page_intents`. Without it, a project the
+      // intent rename has not reached would have its pre-rename `intent__` tags
+      // caught by the catch-all and published as a dynamic, customer-visible
+      // `intent` filter group — the exposure the `$abv_tags$` marker exists to
+      // prevent. Reserving it routes them to the generic `tags` array instead.
+      // This is a blast-radius bound on an un-swept project, not a tolerance: the
+      // tags are still not read as intents.
       const reservedResultKeys = [
-        ...Object.keys(result), 'tags', '__proto__', 'constructor', 'prototype',
+        ...Object.keys(result), DIMENSION.INTENT, 'tags', '__proto__', 'constructor', 'prototype',
       ];
       const { tags, ...otherGroups } = transformOtherTagsForFilterDimensions(
         rawTopics,
@@ -170,8 +193,14 @@ export function createElementsService(transport, log) {
      * When `params.enrichUserIntent` is set (and the query is scoped to exactly
      * one `projectId` — see below), each returned row also carries its OWN intent
      * (`userIntent`). The intent isn't a column on the PROMPTS element, so it's
-     * derived with one `intent__<value>`-filtered call per Semrush intent, run in
-     * parallel and joined back to the base rows.
+     * derived with one `<intentRoot>__<value>`-filtered call per Semrush intent, run
+     * in parallel and joined back to the base rows.
+     *
+     * An Elements tag filter is the `__`-joined tag PATH, so the intent root's name
+     * IS the prefix every one of those five filters carries: `$abv_tags$intent__`
+     * ({@link INTENT_ROOT_NAME}). A filter carrying any other spelling matches
+     * nothing and answers 200 with an empty `userIntent` on every row, so the
+     * prefix is taken from the constant rather than written out here.
      *
      * Enrichment is non-fatal per intent value: each call catches its own failure
      * and contributes nothing, so one failing intent drops only that intent's rows.
@@ -203,11 +232,17 @@ export function createElementsService(transport, log) {
       }
 
       // `(prompt, prompt_topic)` join key — unique within the single requested slice.
-      const rowKey = (row) => `${row?.prompt ?? ''} ${row?.prompt_topic ?? ''}`;
+      // `\0` is the separator because prompt text is free-form and may contain any
+      // printable character, including whatever would otherwise read as a delimiter.
+      // Only a NUL cannot occur in either field, so only a NUL keeps the composite
+      // key collision-free. Keep it escaped — a literal byte makes whole-file
+      // scanners treat this file as binary and silently skip it.
+      const rowKey = (row) => `${row?.prompt ?? ''}\0${row?.prompt_topic ?? ''}`;
 
-      // Base call + one intent-filtered call per intent value, in parallel
-      // (~one extra round-trip). Each intent call degrades independently.
-      const intentPromise = mapWithConcurrency(
+      // One intent-filtered call per intent value, in parallel (~one extra
+      // round-trip). Each call degrades independently. Started here rather than at
+      // the join below so it runs alongside the base call, not after it.
+      const intentRound = mapWithConcurrency(
         Object.values(INTENT_VALUE),
         INTENT_ENRICH_CONCURRENCY,
         async (value) => {
@@ -216,17 +251,27 @@ export function createElementsService(transport, log) {
             const raw = await transport.fetchElement(
               workspaceId,
               ELEMENT_IDS.PROMPTS,
-              buildPromptsPayload({ ...promptParams, tags: [...(promptParams.tags ?? []), `intent__${value}`] }),
+              buildPromptsPayload({
+                ...promptParams,
+                tags: [...(promptParams.tags ?? []), `${INTENT_ROOT_NAME}${SEP}${value}`],
+              }),
             );
             return { key, rows: transformPromptsResponse(raw).prompts };
           } catch (e) {
-            log?.warn?.(`serenity userIntent enrichment: intent-filtered PROMPTS call failed for '${value}'`, { workspaceId, error: e?.message });
+            // A failed call contributes an empty round, so it reaches the caller as a
+            // blank `userIntent` — indistinguishable in the response from a prompt that
+            // genuinely carries no intent tag. This warn is the only thing that tells
+            // the two apart, so it carries an `event` key to stay queryable.
+            log?.warn?.(
+              `serenity userIntent enrichment: intent-filtered PROMPTS call failed for '${value}'`,
+              { workspaceId, error: e?.message, event: 'intent-enrichment-call-failed' },
+            );
             return { key, rows: [] };
           }
         },
       );
 
-      const [base, intentResults] = await Promise.all([basePromise, intentPromise]);
+      const [base, intentResults] = await Promise.all([basePromise, intentRound]);
 
       // (prompt, prompt_topic) → own intent. A prompt carries exactly one intent
       // tag, so within a single slice it appears in at most one filtered result.
@@ -289,6 +334,84 @@ export function createElementsService(transport, log) {
     },
 
     /**
+     * Fetches per-subreddit Reddit stats from the Subreddits element (faf56e29),
+     * normalized into `{ subreddits: [...], totalCount }`. (Inside the surrounding
+     * c8-ignore region — same POC coverage treatment as the sibling methods here.)
+     *
+     * Single call (no per-project fan-out): the element aggregates across ALL of the
+     * workspace's projects when no `project_id` is supplied (verified live). A
+     * caller-supplied project id scopes to that one project. `projectIds` (a CSV the
+     * controller already parsed + ownership-checked) is narrowed to its first id here.
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params - Query params (model/platform, startDate, endDate,
+     *   projectIds, page, pageSize).
+     * @returns {Promise<{ subreddits: object[], totalCount: number }>}
+     */
+    async getSubreddits(workspaceId, params) {
+      const { projectIds, ...rest } = params;
+      const projectId = Array.isArray(projectIds) ? projectIds.find(hasText) : undefined;
+      const raw = await transport.fetchElement(
+        workspaceId,
+        ELEMENT_IDS.SUBREDDITS,
+        buildSubredditsPayload({ ...rest, projectId }),
+      );
+      return transformSubredditsResponse(raw, rest);
+    },
+
+    /**
+     * Fetches top Reddit threads by response count from the Reddit Threads element
+     * (5af96fd9), normalized into `{ threads: [...], totalCount }`. (Inside the
+     * surrounding c8-ignore region — same POC coverage treatment as the sibling
+     * methods here.)
+     *
+     * Single call (no per-project fan-out), mirroring `getSubreddits`. A
+     * caller-supplied project id scopes to that one project; `projectIds` (a CSV the
+     * controller already parsed + ownership-checked) is narrowed to its first id here.
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params - Query params (model/platform, startDate, endDate,
+     *   projectIds, page, pageSize).
+     * @returns {Promise<{ threads: object[], totalCount: number }>}
+     */
+    async getRedditThreads(workspaceId, params) {
+      const { projectIds, ...rest } = params;
+      const projectId = Array.isArray(projectIds) ? projectIds.find(hasText) : undefined;
+      const raw = await transport.fetchElement(
+        workspaceId,
+        ELEMENT_IDS.REDDIT_THREADS,
+        buildRedditThreadsPayload({ ...rest, projectId }),
+      );
+      return transformRedditThreadsResponse(raw, rest);
+    },
+
+    /**
+     * Fetches top YouTube videos by citation count from the YouTube Videos element
+     * (05e624db), normalized into `{ videos: [...], totalCount }`. (Inside the
+     * surrounding c8-ignore region — same POC coverage treatment as the sibling
+     * methods here.)
+     *
+     * Single call (no per-project fan-out), mirroring `getRedditThreads`. A
+     * caller-supplied project id scopes to that one project; `projectIds` (a CSV the
+     * controller already parsed + ownership-checked) is narrowed to its first id here.
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params - Query params (model/platform, startDate, endDate,
+     *   projectIds, page, pageSize).
+     * @returns {Promise<{ videos: object[], totalCount: number }>}
+     */
+    async getYoutubeVideos(workspaceId, params) {
+      const { projectIds, ...rest } = params;
+      const projectId = Array.isArray(projectIds) ? projectIds.find(hasText) : undefined;
+      const raw = await transport.fetchElement(
+        workspaceId,
+        ELEMENT_IDS.YOUTUBE_VIDEOS,
+        buildYoutubeVideosPayload({ ...rest, projectId }),
+      );
+      return transformYoutubeVideosResponse(raw, rest);
+    },
+
+    /**
      * Fetches per-week brand sentiment (positive/neutral/negative) from the Sentiment
      * element (f4153af8…), transformed into the legacy Brand Presence
      * `sentiment-overview` contract `{ weeklyTrends: [...] }`.
@@ -336,6 +459,63 @@ export function createElementsService(transport, log) {
       // returns rows in an unspecified order.
       return transformTopicPromptsResponse(raw)
         .sort((a, b) => (Number(b.volume) || 0) - (Number(a.volume) || 0));
+    },
+    /* c8 ignore stop */
+
+    /**
+     * Fetches the URL Inspector details drill-down: the prompts that cited a specific
+     * URL, from the URL_PROMPTS element (b4f1ead7), scoped by `CBF_source` (the URL).
+     * Returns a flat array of per-prompt rows. Pagination is applied client-side by the
+     * controller (Semrush has no server-side paging).
+     *
+     * Market scope: the element takes ONE top-level `project_id` per call (a `CBF_project`
+     * advanced filter is a no-op — verified live LLMO-6674). So when the caller selects
+     * markets, this fans out one call per project id (bounded concurrency, mirroring
+     * owned-urls) and UNIONS the results, deduped by prompt text via
+     * {@link mergeUrlPromptsResponses} (which documents the dedupe/collision rules). No
+     * `projectIds` → one unscoped call across the whole sub-workspace (unchanged behavior).
+     * Category is a `CBF_tags` filter applied on every per-project call.
+     *
+     * @param {string} workspaceId - Semrush sub-workspace UUID (projects/prompts live here).
+     * @param {object} params - Query params (url, model/platform, startDate, endDate,
+     *   category, projectIds).
+     * @param {string[]} [params.projectIds] - Semrush project ids to scope to. Empty → one
+     *   unscoped (sub-workspace-wide) fetch.
+     * @returns {Promise<Array<object>>} Per-prompt rows (see transformUrlPromptsResponse).
+     */
+    /* c8 ignore start -- LLMO-6620 POC endpoint; unit tests deferred (see url-prompts.js tests) */
+    async getUrlPrompts(workspaceId, {
+      url, model, platform, startDate, endDate, category, projectIds = [],
+    }) {
+      const ids = Array.isArray(projectIds)
+        ? [...new Set(projectIds.filter(hasText))]
+        : [];
+      // One top-level project_id per call; `undefined` = the unscoped aggregate.
+      const scopes = ids.length > 0 ? ids : [undefined];
+      // Bound the per-market fan-out (mirrors owned-urls) so a brand with many markets
+      // can't spawn unbounded parallel Semrush requests (429 / pool risk).
+      const URL_PROMPTS_PROJECT_CONCURRENCY = 8;
+      const perProject = await mapWithConcurrency(
+        scopes,
+        URL_PROMPTS_PROJECT_CONCURRENCY,
+        async (projectId) => {
+          const raw = await transport.fetchElement(
+            workspaceId,
+            ELEMENT_IDS.URL_PROMPTS,
+            buildUrlPromptsPayload({
+              url, model, platform, startDate, endDate, category, projectId,
+            }),
+          );
+          return transformUrlPromptsResponse(raw);
+        },
+      );
+
+      // Single scope → nothing to merge; return the transformed rows as-is.
+      if (scopes.length === 1) {
+        return perProject[0];
+      }
+      // Multi-market: union + dedupe by prompt text (see mergeUrlPromptsResponses).
+      return mergeUrlPromptsResponses(perProject);
     },
     /* c8 ignore stop */
 

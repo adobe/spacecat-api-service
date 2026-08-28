@@ -113,7 +113,11 @@ describe('serenity quota-alerts', () => {
       );
       await alerts.alertQuotaRejection(
         {
-          orgId: 'org-1', brandId: 'brand-1', caseType: 'orgPoolExhausted', dimension: 'prompts',
+          // A distinct caseType proves it participates in the dedup key. `brandCarveExhausted` is
+          // the only case `alertQuotaRejection` emits now (SITES-49206 narrowed QuotaCase), so this
+          // arm uses `rollbackFailed` — another caseType the module still keys on
+          // (alertRollbackFailure).
+          orgId: 'org-1', brandId: 'brand-1', caseType: 'rollbackFailed', dimension: 'prompts',
         },
         ENABLED_ENV,
       );
@@ -221,60 +225,6 @@ describe('serenity quota-alerts', () => {
         log,
       );
       expect(log.warn).to.have.been.called;
-    });
-  });
-
-  describe('alertPoolFreeThreshold', () => {
-    it('is a no-op when the kill-switch is OFF', async () => {
-      await alerts.alertPoolFreeThreshold(
-        {
-          parentWorkspaceId: 'parent-1', dimension: 'prompts', free: 10, total: 1000,
-        },
-        {},
-      );
-      expect(postSlackMessage).to.not.have.been.called;
-    });
-
-    it('is a no-op when free/total is at or above the threshold', async () => {
-      await alerts.alertPoolFreeThreshold(
-        {
-          parentWorkspaceId: 'parent-1', dimension: 'prompts', free: 500, total: 1000,
-        },
-        { ...ENABLED_ENV, SERENITY_POOL_FREE_ALERT_THRESHOLD: '0.1' },
-      );
-      expect(postSlackMessage).to.not.have.been.called;
-    });
-
-    it('posts when free/total drops below the configured threshold', async () => {
-      await alerts.alertPoolFreeThreshold(
-        {
-          orgId: 'org-1', parentWorkspaceId: 'parent-1', dimension: 'prompts', free: 50, total: 1000,
-        },
-        { ...ENABLED_ENV, SERENITY_POOL_FREE_ALERT_THRESHOLD: '0.1' },
-      );
-      expect(postSlackMessage).to.have.been.calledOnce;
-      const [, message] = postSlackMessage.firstCall.args;
-      expect(message).to.contain('parent-1');
-      expect(message).to.contain('below threshold');
-    });
-
-    it('defaults the threshold to 0.1 when not configured', async () => {
-      await alerts.alertPoolFreeThreshold(
-        {
-          parentWorkspaceId: 'parent-1', dimension: 'prompts', free: 50, total: 1000,
-        },
-        ENABLED_ENV,
-      );
-      expect(postSlackMessage).to.have.been.calledOnce;
-    });
-
-    it('dedupes repeated threshold alerts for the same parent+dimension within the window', async () => {
-      const payload = {
-        parentWorkspaceId: 'parent-1', dimension: 'prompts', free: 50, total: 1000,
-      };
-      await alerts.alertPoolFreeThreshold(payload, ENABLED_ENV);
-      await alerts.alertPoolFreeThreshold(payload, ENABLED_ENV);
-      expect(postSlackMessage).to.have.been.calledOnce;
     });
   });
 });

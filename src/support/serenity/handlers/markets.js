@@ -12,8 +12,7 @@
 
 // @ts-check
 
-import { hasText } from '@adobe/spacecat-shared-utils';
-import crypto from 'node:crypto';
+import { hasText, isValidUUID, siteIdentityFromUrlString } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from '../../utils.js';
 import {
@@ -21,7 +20,8 @@ import {
 } from '../errors.js';
 import { normalizeLanguageCode, normalizeGeoTargetId } from '../validation.js';
 import { resolveLocation } from '../locations.js';
-import { resolveSiteDomain } from '../site-linkage.js';
+import { resolveSiteIdentity } from '../site-linkage.js';
+import { createProvisionAndPublishProject, CreateNoProjectIdError } from '../project-provisioning.js';
 import { alertQuotaRejection } from '../quota-alerts.js';
 
 /** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
@@ -223,10 +223,17 @@ function validateCreateBody(body) {
     errors.push('languageCode must match ^[a-z]{2,3}(-[a-z]{2,4})?$');
   }
   // brandDomain OR siteId (LLMO-6405 Phase 2): a caller may supply the market's
-  // SpaceCat Site UUID instead of a raw domain — the controller derives the
-  // domain from it (resolveSiteDomain). One of the two is required.
+  // SpaceCat Site UUID instead of a raw domain — the controller derives both the
+  // domain and the tracked url from it (resolveSiteUrls). One of the two is required.
   if (!hasText(body?.brandDomain) && !hasText(body?.siteId)) {
     errors.push('brandDomain or siteId is required');
+  }
+  // Validated even though only the sub-workspace path resolves it: flat mode
+  // records it straight onto `brand_to_semrush_projects.site_id`, a uuid column,
+  // so a malformed value that gets this far surfaces as a write failure rather
+  // than as the bad request it is.
+  if (hasText(body?.siteId) && !isValidUUID(body.siteId)) {
+    errors.push('siteId must be a valid UUID');
   }
   if (!Array.isArray(body?.brandNames) || body.brandNames.length === 0
       || !body.brandNames.every(hasText)) {
@@ -236,14 +243,43 @@ function validateCreateBody(body) {
 }
 
 /**
- * Default market display name. Format: `<brandDisplayName>-<6-hex>`.
- * The random suffix prevents collisions in shared workspaces and
- * disambiguates re-create-after-delete.
+ * Default market display name. Format: `<REGION>-<language>` — uppercase ISO-2
+ * country code + the normalized language code (`US-en`, `CH-de`).
+ *
+ * LLMO-managed sub-workspaces are locked but still VISIBLE to the customer in
+ * the Semrush navigation, so a project's name has to read as the market it is.
+ * This is the same convention the Semrush migration writes (adobe/
+ * mysticat-data-service `scripts/serenity_migration/planner.py`), so a market
+ * added from the Markets tab is indistinguishable from a migrated one — and a
+ * later migration pass, which adopts a project by matching its exact name
+ * within the sub-workspace, adopts it instead of creating a duplicate beside it.
+ *
+ * The name carries no identity: a market is addressed by its
+ * (geoTargetId, languageCode) slice, which is unique per brand, so the whole
+ * set of names within a sub-workspace is collision-free.
+ *
+ * Both parts are required, and an empty one throws rather than yielding a
+ * half-formed `-en` / `US-` name: the result is customer-visible in the Semrush
+ * navigation, so there is no value in a degenerate name reaching a workspace.
+ * Every caller today validates the slice first (both create handlers 400 on an
+ * unparseable market or language before naming anything), so this guards the
+ * exported contract against a future caller that skips that gauntlet.
+ *
+ * @param {string} market - ISO-2 country code (any case).
+ * @param {string|null} languageCode - normalized BCP-47 language code.
+ * @returns {string}
+ * @throws {ErrorWithStatusCode} 400 when either part is missing/empty.
  */
-export function defaultMarketName(brandDisplayName) {
-  const base = hasText(brandDisplayName) ? String(brandDisplayName) : 'brand';
-  const suffix = crypto.randomBytes(3).toString('hex');
-  return `${base}-${suffix}`;
+export function defaultMarketName(market, languageCode) {
+  const region = String(market || '').toUpperCase();
+  const lang = String(languageCode || '').toLowerCase();
+  if (!hasText(region) || !hasText(lang)) {
+    throw new ErrorWithStatusCode(
+      'market and languageCode are both required to name a market',
+      400,
+    );
+  }
+  return `${region}-${lang}`;
 }
 
 /**
@@ -343,16 +379,32 @@ export async function handleCreateMarket(
     };
   }
 
-  const name = hasText(body?.name) ? String(body.name) : defaultMarketName(body.brandDisplayName);
+  const name = hasText(body?.name)
+    ? String(body.name)
+    : defaultMarketName(body.market, languageCode);
 
   // brandDomain OR siteId (LLMO-6405 Phase 2): when the caller supplied a Site
   // UUID instead of a raw domain, derive the Semrush project domain from it. The
   // flat handler holds full `dataAccess` (incl. Site), so it self-derives — the
   // subworkspace handler cannot (narrowed dataAccess) and relies on the controller.
   // A supplied-but-unresolvable siteId is a hard 400 (never silently proceeds).
-  const brandDomain = hasText(body.brandDomain)
-    ? body.brandDomain
-    : await resolveSiteDomain(dataAccess, body.siteId, log);
+  // Both values come from ONE input — a caller-threaded url, a caller-supplied
+  // brandDomain, or the Site behind body.siteId — because a project domained to
+  // one url while tracking another is worse than one tracking its apex: it looks
+  // deliberate. `domain` stays host-only (a path there is a hard 400 upstream);
+  // `primaryUrl` keeps whatever subdomain or subpath the source carried.
+  let brandDomain;
+  let primaryUrl;
+  if (hasText(body.brandDomain)) {
+    brandDomain = body.brandDomain;
+    primaryUrl = siteIdentityFromUrlString(
+      hasText(body.primaryUrl) ? body.primaryUrl : body.brandDomain,
+    );
+  } else {
+    const identity = await resolveSiteIdentity(dataAccess, body.siteId, log);
+    brandDomain = identity?.domain ?? null;
+    primaryUrl = identity?.primaryUrl ?? null;
+  }
   if (!hasText(brandDomain)) {
     return {
       status: 400,
@@ -376,63 +428,33 @@ export async function handleCreateMarket(
     language_id: languageId,
   };
 
-  const createResp = await transport.createProject(semrushWorkspaceId, upstreamBody);
-  const semrushProjectId = String(createResp?.id || '');
-  if (!hasText(semrushProjectId)) {
-    return {
-      status: 502,
-      body: {
-        error: 'createNoProjectId',
-        message: 'Upstream createProject returned no id',
-      },
-    };
-  }
-
+  // create -> PATCH primary_url -> publish. The middle step is not optional for a
+  // brand whose site is a subdomain or a subpath: `domain` cannot carry a path and
+  // the upstream folds it to the registrable domain, so without the PATCH the
+  // project tracks the parent domain. See project-provisioning.js.
+  let semrushProjectId;
   try {
-    await transport.publishProject(semrushWorkspaceId, semrushProjectId);
-  } catch (e) {
-    // Best-effort upstream cleanup so the documented retry contract holds.
-    // Without this, every retry generates a fresh `defaultMarketName` (random
-    // hex suffix) and the upstream `createProject` body has no idempotency
-    // key — a retry after a `publishProject` failure would create a SECOND
-    // upstream project, not recover the first. The 409 gate only fires when
-    // a DB row exists; it never sees orphan upstream projects.
-    //
-    // Swallow the delete's own errors: the publishProject error is what we
-    // need to propagate to the caller, and we don't want a follow-on cleanup
-    // failure to mask it. Both outcomes are logged so an operator can still
-    // reconcile if cleanup itself fails.
-    let cleanedUp = false;
-    try {
-      await transport.deleteProject(semrushWorkspaceId, semrushProjectId);
-      cleanedUp = true;
-    } catch (cleanupErr) {
-      log?.error?.(
-        'handleCreateMarket: best-effort cleanup deleteProject failed; orphan upstream project remains',
-        {
-          brandId,
-          semrushWorkspaceId,
-          semrushProjectId,
-          geoTargetId: location.geoTargetId,
-          languageCode,
-          error: cleanupErr.message,
-        },
-      );
-    }
-    log?.error?.(
-      cleanedUp
-        ? 'handleCreateMarket: publish failed; upstream project cleaned up'
-        : 'handleCreateMarket: orphaned upstream project after publish failure',
+    semrushProjectId = await createProvisionAndPublishProject(
+      transport,
+      semrushWorkspaceId,
+      upstreamBody,
       {
-        brandId,
-        semrushWorkspaceId,
-        semrushProjectId,
-        geoTargetId: location.geoTargetId,
-        languageCode,
-        error: e.message,
-        cleanedUp,
+        primaryUrl,
+        log,
+        caller: 'handleCreateMarket',
+        logContext: { brandId, geoTargetId: location.geoTargetId, languageCode },
       },
     );
+  } catch (e) {
+    if (e instanceof CreateNoProjectIdError) {
+      return {
+        status: 502,
+        body: {
+          error: 'createNoProjectId',
+          message: 'Upstream createProject returned no id',
+        },
+      };
+    }
     throw e;
   }
 
@@ -442,6 +464,15 @@ export async function handleCreateMarket(
       semrushProjectId,
       geoTargetId: location.geoTargetId,
       languageCode,
+      // The market's own Site, when the caller named one — the per-market source
+      // of truth for the url this project tracks. It is the identity the project
+      // was just provisioned against (`resolveSiteIdentity` above derived both
+      // `brandDomain` and `primaryUrl` from it), so recording it here is what
+      // stops the market resolving to its brand's anchor by fallback later.
+      // A `brandDomain`-only create records none: flat mode resolves no Site from
+      // a raw domain, and inventing the brand's anchor would assert a per-market
+      // fact nobody stated.
+      ...(hasText(body.siteId) ? { siteId: body.siteId } : {}),
     });
   } catch (e) {
     log?.error?.(
@@ -1046,59 +1077,6 @@ export async function listUnionModels(transport, semrushWorkspaceId, projectIds)
   return { items: [...byKey.values()] };
 }
 
-/**
- * Counts the project's currently-PUBLISHED prompts (the live layer), by paginating
- * `listPromptsByTags` with an empty tag filter — the same live-layer walk `listTagsForProject`
- * uses, with the same page ceiling. Used by the dynamic allocator to size the prompt re-meter of a
- * model-set change: attaching Δ models to a project re-meters every published text
- * (`publishedTexts × Δmodels`, plan §12 / resource-manager `modelChangeUnits`). Bounded by
- * `PROMPT_COUNT_PAGE_LIMIT` pages; on a truncated walk it returns the counted-so-far (a floor),
- * which can only UNDER-state the need — the transfer 422 remains the authoritative backstop.
- *
- * @param {SerenityTransport} transport
- * @param {string} semrushWorkspaceId
- * @param {string} projectId
- * @param {any} [log]
- * @returns {Promise<number>} number of published prompts on the project.
- */
-export async function countPublishedPrompts(transport, semrushWorkspaceId, projectId, log) {
-  const LIMIT = 200;
-  const PROMPT_COUNT_PAGE_LIMIT = 50;
-  let count = 0;
-  let page = 1;
-  while (page <= PROMPT_COUNT_PAGE_LIMIT) {
-    let resp;
-    try {
-      // eslint-disable-next-line no-await-in-loop
-      resp = await transport.listPromptsByTags(semrushWorkspaceId, projectId, {
-        tag_ids: [], page, limit: LIMIT,
-      });
-    } catch (e) {
-      // An upstream failure MID-WALK is truncation, same as hitting the page ceiling below: return
-      // the counted-so-far (a floor) instead of propagating the rejection and failing the WHOLE
-      // metered write over a partial-page read error. The transfer 422 remains the authoritative
-      // backstop if this under-states the real need.
-      log?.warn?.('countPublishedPrompts: upstream failure mid-walk; returning counted-so-far', {
-        semrushWorkspaceId, projectId, page, error: e?.message,
-      });
-      return count;
-    }
-    const items = Array.isArray(resp?.items) ? resp.items : [];
-    count += items.length;
-    if (items.length < LIMIT) {
-      break;
-    }
-    if (page === PROMPT_COUNT_PAGE_LIMIT) {
-      log?.warn?.('countPublishedPrompts: page ceiling hit; published-prompt count may be under-stated', {
-        semrushWorkspaceId, projectId, pages: PROMPT_COUNT_PAGE_LIMIT,
-      });
-      break;
-    }
-    page += 1;
-  }
-  return count;
-}
-
 /** @param {SerenityTransport} transport */
 export async function handleListModels(
   transport,
@@ -1151,9 +1129,8 @@ export async function handleListModels(
  * inner publish runs on an unpublishable (e.g. unit-less) project and throws.
  *
  * `wrapPublish` (default identity — a plain call, byte-for-byte the pre-existing behavior) wraps
- * the inner `publishProject` call. The subworkspace update-models caller passes
- * `headroom.retryOnQuota` (LLMO-6190 item 4) so a disguised metered-405 gets ONE bounded
- * top-up+retry; flat-mode callers omit this param, so flat mode is untouched.
+ * the inner `publishProject` call. Retained as an injection seam for a future publish-retry
+ * wrapper (§10.3); no caller passes a non-identity wrapper today, so every publish is a plain call.
  * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
@@ -1304,6 +1281,12 @@ export async function syncModelsForProject(
  * internally for the DELETE batch and are never exposed to callers.
  *
  * Returns the final model list in the same shape as `handleListModels`.
+ *
+ * `publish` (default true — the standalone-endpoint contract) commits the
+ * model-set change to the live project. Set it false when the caller batches
+ * its own publish afterwards (LLMO-5492 publish-after-populate: finalize sets
+ * models with publish deferred, then publishes each project once) — the inner
+ * publish is forwarded to {@link syncModelsForProject}.
  * @param {SerenityTransport} transport
  * @param {any} dataAccess
  * @param {string | undefined} brandId
@@ -1311,6 +1294,7 @@ export async function syncModelsForProject(
  * @param {any} body
  * @param {any} log
  * @param {object} [options]
+ * @param {boolean} [options.publish] - see above.
  * @param {string | null} [options.orgId] - serenity-docs#72 §5 alert payload only.
  * @param {object | null} [options.env] - serenity-docs#72 §5 alert kill-switch/config only.
  */
@@ -1321,7 +1305,7 @@ export async function handleUpdateModels(
   semrushWorkspaceId,
   body,
   log,
-  { orgId = null, env = null } = {},
+  { publish = true, orgId = null, env = null } = {},
 ) {
   const geoTargetId = normalizeGeoTargetId(Number(body?.geoTargetId));
   const languageCode = normalizeLanguageCode(body?.languageCode);
@@ -1360,6 +1344,6 @@ export async function handleUpdateModels(
     modelIds,
     { brandId, geoTargetId, languageCode },
     log,
-    { alertContext: { orgId, brandId, env } },
+    { publish, alertContext: { orgId, brandId, env } },
   );
 }

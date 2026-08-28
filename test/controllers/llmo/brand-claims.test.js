@@ -14,12 +14,17 @@ import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
-import { HeadObjectCommand } from '@aws-sdk/client-s3';
+import { HeadObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 
 use(sinonChai);
 
 const TEST_SITE_ID = 'test-site-id';
-const TEST_PRESIGNED_URL = 'https://s3.amazonaws.com/test-bucket/brand_claims/llmo/test-site-id/data.json.gz?X-Amz-Signature=abc123';
+const TEST_PRESIGNED_URL = 'https://s3.amazonaws.com/test-bucket/brand_claims/llmo/test-site-id/2026-W17/data.json.gz?X-Amz-Signature=abc123';
+const FLAT_KEY = `brand_claims/llmo/${TEST_SITE_ID}/data.json.gz`;
+
+function weekPrefix(week) {
+  return { Prefix: `brand_claims/llmo/${TEST_SITE_ID}/${week}/` };
+}
 
 describe('handleBrandClaims', () => {
   let handleBrandClaims;
@@ -28,6 +33,9 @@ describe('handleBrandClaims', () => {
   let mockS3Send;
   let mockGetSignedUrl;
   let baseContext;
+  let listResult; // ListObjectsV2 response for the default (latest-week) path
+  let listBehavior; // () => Promise, controls the ListObjectsV2 call
+  let headBehavior; // () => Promise, controls HeadObject existence
 
   const mockHttpUtils = {
     ok: (data) => ({
@@ -58,8 +66,19 @@ describe('handleBrandClaims', () => {
       warn: sinon.stub(),
     };
 
-    // HeadObject resolves by default → the object exists.
-    mockS3Send = sinon.stub().resolves({});
+    listResult = { CommonPrefixes: [] }; // no week folders → fall back to flat key
+    listBehavior = () => Promise.resolve(listResult);
+    headBehavior = () => Promise.resolve({}); // object exists
+
+    mockS3Send = sinon.stub().callsFake((command) => {
+      if (command instanceof ListObjectsV2Command) {
+        return listBehavior();
+      }
+      if (command instanceof HeadObjectCommand) {
+        return headBehavior();
+      }
+      return Promise.resolve({});
+    });
     mockS3Client = { send: mockS3Send };
     mockGetSignedUrl = sinon.stub().resolves(TEST_PRESIGNED_URL);
 
@@ -79,119 +98,192 @@ describe('handleBrandClaims', () => {
     };
   });
 
-  it('should return presigned URL for default model when no model specified', async () => {
+  const signedKey = () => mockGetSignedUrl.getCall(0).args[1].params.Key;
+
+  it('serves the latest week folder when several exist', async () => {
+    listResult = {
+      CommonPrefixes: [weekPrefix('2026-W15'), weekPrefix('2026-W17'), weekPrefix('2026-W16')],
+    };
+
     const result = await handleBrandClaims(baseContext);
 
     expect(result.status).to.equal(200);
     const body = await result.json();
-    expect(body.siteId).to.equal(TEST_SITE_ID);
     expect(body.model).to.equal('default');
     expect(body.presignedUrl).to.equal(TEST_PRESIGNED_URL);
-    expect(body.expiresAt).to.be.a('string');
 
-    // HeadObject checked existence for the default key before signing
-    expect(mockS3Send).to.have.been.calledOnce;
-    const headCommand = mockS3Send.getCall(0).args[0];
-    expect(headCommand).to.be.instanceOf(HeadObjectCommand);
-    expect(headCommand.input.Bucket).to.equal('test-bucket');
-    expect(headCommand.input.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/data.json.gz`);
+    // Listed once, then HeadObject + presign on the latest week key.
+    const listCmd = mockS3Send.getCall(0).args[0];
+    expect(listCmd).to.be.instanceOf(ListObjectsV2Command);
+    expect(listCmd.input.Prefix).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/`);
+    expect(listCmd.input.Delimiter).to.equal('/');
 
-    // Verify S3 key uses default path
-    const commandArg = mockGetSignedUrl.getCall(0).args[1];
-    expect(commandArg.params.Bucket).to.equal('test-bucket');
-    expect(commandArg.params.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/data.json.gz`);
-
-    // Verify expiresIn is 1 hour
-    const options = mockGetSignedUrl.getCall(0).args[2];
-    expect(options.expiresIn).to.equal(3600);
+    const headCmd = mockS3Send.getCall(1).args[0];
+    expect(headCmd).to.be.instanceOf(HeadObjectCommand);
+    expect(headCmd.input.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/2026-W17/data.json.gz`);
+    expect(signedKey()).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/2026-W17/data.json.gz`);
   });
 
-  it('should return presigned URL for specific model', async () => {
-    const context = {
-      ...baseContext,
-      data: { model: 'gpt-4.1' },
-    };
+  it('falls back to the legacy flat key when no week folder exists', async () => {
+    listResult = { CommonPrefixes: [] };
+
+    const result = await handleBrandClaims(baseContext);
+
+    expect(result.status).to.equal(200);
+    const headCmd = mockS3Send.getCall(1).args[0];
+    expect(headCmd.input.Key).to.equal(FLAT_KEY);
+    expect(signedKey()).to.equal(FLAT_KEY);
+  });
+
+  it('ignores non-week folders when resolving the latest run', async () => {
+    listResult = { CommonPrefixes: [weekPrefix('archive'), weekPrefix('2026-W09')] };
+
+    await handleBrandClaims(baseContext);
+
+    expect(signedKey()).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/2026-W09/data.json.gz`);
+  });
+
+  it('serves the week for an explicit date without listing', async () => {
+    const context = { ...baseContext, data: { date: '2026-04-22' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(200);
+    // No list call — the date maps directly to a week key.
+    expect(mockS3Send.getCall(0).args[0]).to.be.instanceOf(HeadObjectCommand);
+    expect(signedKey()).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/2026-W17/data.json.gz`);
+  });
+
+  it('returns 400 for an invalid date', async () => {
+    const context = { ...baseContext, data: { date: 'not-a-date' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(400);
+    const body = await result.json();
+    expect(body.message).to.equal('Invalid date parameter: expected YYYY-MM-DD format');
+    expect(mockS3Send).not.to.have.been.called;
+  });
+
+  it('returns 400 for a partial date that is not YYYY-MM-DD', async () => {
+    const context = { ...baseContext, data: { date: '2026' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(400);
+    expect((await result.json()).message).to.equal('Invalid date parameter: expected YYYY-MM-DD format');
+    expect(mockS3Send).not.to.have.been.called;
+  });
+
+  it('returns 400 for a calendar-invalid date that would roll over', async () => {
+    // 2026-02-30 parses (JS rolls it to Mar 2); reject rather than key the wrong week.
+    const context = { ...baseContext, data: { date: '2026-02-30' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(400);
+    expect((await result.json()).message).to.equal('Invalid date parameter: expected YYYY-MM-DD format');
+    expect(mockS3Send).not.to.have.been.called;
+  });
+
+  it('resolves the latest week and warns when the listing is truncated', async () => {
+    listResult = { IsTruncated: true, CommonPrefixes: [weekPrefix('2026-W17')] };
+
+    const result = await handleBrandClaims(baseContext);
+
+    expect(result.status).to.equal(200);
+    expect(signedKey()).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/2026-W17/data.json.gz`);
+    expect(mockLog.warn).to.have.been.calledWithMatch(/listing truncated/);
+  });
+
+  it('falls back to the legacy flat key when listing fails', async () => {
+    listBehavior = () => Promise.reject(new Error('boom'));
+
+    const result = await handleBrandClaims(baseContext);
+
+    expect(result.status).to.equal(200);
+    const headCmd = mockS3Send.getCall(1).args[0];
+    expect(headCmd.input.Key).to.equal(FLAT_KEY);
+    expect(signedKey()).to.equal(FLAT_KEY);
+    expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to list brand claims weeks/);
+  });
+
+  it('serves a specific model from the legacy flat key without listing', async () => {
+    const context = { ...baseContext, data: { model: 'gpt-4.1' } };
 
     const result = await handleBrandClaims(context);
 
     expect(result.status).to.equal(200);
     const body = await result.json();
-    expect(body.siteId).to.equal(TEST_SITE_ID);
     expect(body.model).to.equal('gpt-4.1');
-    expect(body.presignedUrl).to.equal(TEST_PRESIGNED_URL);
 
-    // HeadObject + presign both target the model-specific key
-    const headCommand = mockS3Send.getCall(0).args[0];
-    expect(headCommand.input.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/gpt-4.1.json.gz`);
-    const commandArg = mockGetSignedUrl.getCall(0).args[1];
-    expect(commandArg.params.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/gpt-4.1.json.gz`);
+    // Model path is flat: HeadObject only, no ListObjectsV2.
+    expect(mockS3Send).to.have.been.calledOnce;
+    const headCmd = mockS3Send.getCall(0).args[0];
+    expect(headCmd).to.be.instanceOf(HeadObjectCommand);
+    expect(headCmd.input.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/gpt-4.1.json.gz`);
+    expect(signedKey()).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/gpt-4.1.json.gz`);
   });
 
-  it('should return 400 when S3 is not configured', async () => {
-    const context = {
-      ...baseContext,
-      s3: null,
-    };
+  it('returns 400 for a model containing a path separator (no key probing)', async () => {
+    const context = { ...baseContext, data: { model: 'foo/bar' } };
 
     const result = await handleBrandClaims(context);
 
     expect(result.status).to.equal(400);
-    const body = await result.json();
-    expect(body.message).to.equal('S3 storage is not configured for this environment');
+    expect((await result.json()).message).to.equal('Invalid model parameter');
+    expect(mockS3Send).not.to.have.been.called;
   });
 
-  it('should return 400 when S3 client is not configured', async () => {
-    const context = {
-      ...baseContext,
-      s3: { s3Client: null },
-    };
+  it('ignores a malformed date when model is supplied (model takes precedence)', async () => {
+    const context = { ...baseContext, data: { model: 'gpt-4.1', date: 'garbage' } };
 
     const result = await handleBrandClaims(context);
 
-    expect(result.status).to.equal(400);
-    const body = await result.json();
-    expect(body.message).to.equal('S3 storage is not configured for this environment');
+    expect(result.status).to.equal(200);
+    const headCmd = mockS3Send.getCall(0).args[0];
+    expect(headCmd.input.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/gpt-4.1.json.gz`);
   });
 
-  it('should return 400 when S3 bucket is not configured', async () => {
-    const context = {
-      ...baseContext,
-      s3: {
-        ...baseContext.s3,
-        s3Bucket: null,
-      },
-    };
+  it('returns 400 when S3 is not configured', async () => {
+    const result = await handleBrandClaims({ ...baseContext, s3: null });
+    expect(result.status).to.equal(400);
+    expect((await result.json()).message).to.equal('S3 storage is not configured for this environment');
+  });
 
+  it('returns 400 when S3 client is not configured', async () => {
+    const result = await handleBrandClaims({ ...baseContext, s3: { s3Client: null } });
+    expect(result.status).to.equal(400);
+    expect((await result.json()).message).to.equal('S3 storage is not configured for this environment');
+  });
+
+  it('returns 400 when S3 bucket is not configured', async () => {
+    const context = { ...baseContext, s3: { ...baseContext.s3, s3Bucket: null } };
     const result = await handleBrandClaims(context);
-
     expect(result.status).to.equal(400);
-    const body = await result.json();
-    expect(body.message).to.equal('S3 bucket is not configured for this environment');
+    expect((await result.json()).message).to.equal('S3 bucket is not configured for this environment');
   });
 
-  it('should return 404 when the object does not exist (HeadObject NotFound)', async () => {
+  it('returns 404 when the resolved object does not exist (HeadObject NotFound)', async () => {
     const notFoundError = new Error('Not Found');
     notFoundError.name = 'NotFound';
-    mockS3Send.rejects(notFoundError);
+    headBehavior = () => Promise.reject(notFoundError);
 
     const result = await handleBrandClaims(baseContext);
 
     expect(result.status).to.equal(404);
-    const body = await result.json();
-    expect(body.message).to.equal(`Brand claims data not found for site ${TEST_SITE_ID}`);
-
-    // Never sign a URL for a missing object
+    expect((await result.json()).message).to.equal(`Brand claims data not found for site ${TEST_SITE_ID}`);
     expect(mockGetSignedUrl).not.to.have.been.called;
     expect(mockLog.warn).to.have.been.calledWith(
-      `Brand claims file not found for site ${TEST_SITE_ID} at brand_claims/llmo/${TEST_SITE_ID}/data.json.gz`,
+      `Brand claims file not found for site ${TEST_SITE_ID} at ${FLAT_KEY}`,
     );
   });
 
-  it('should return 404 when HeadObject error carries httpStatusCode 404', async () => {
+  it('returns 404 when HeadObject error carries httpStatusCode 404', async () => {
     const err = new Error('Object not found');
     err.name = 'SomethingElse';
     err.$metadata = { httpStatusCode: 404 };
-    mockS3Send.rejects(err);
+    headBehavior = () => Promise.reject(err);
 
     const result = await handleBrandClaims(baseContext);
 
@@ -199,68 +291,53 @@ describe('handleBrandClaims', () => {
     expect(mockGetSignedUrl).not.to.have.been.called;
   });
 
-  it('should return 400 when bucket not found (NoSuchBucket)', async () => {
+  it('returns 400 when bucket not found (NoSuchBucket)', async () => {
     const noSuchBucketError = new Error('The specified bucket does not exist');
     noSuchBucketError.name = 'NoSuchBucket';
-    mockS3Send.rejects(noSuchBucketError);
+    headBehavior = () => Promise.reject(noSuchBucketError);
 
     const result = await handleBrandClaims(baseContext);
 
     expect(result.status).to.equal(400);
-    const body = await result.json();
-    expect(body.message).to.equal('Storage bucket not found: test-bucket');
-
-    expect(mockLog.error).to.have.been.calledWith(
-      'S3 bucket test-bucket not found',
-    );
+    expect((await result.json()).message).to.equal('Storage bucket not found: test-bucket');
+    expect(mockLog.error).to.have.been.calledWith('S3 bucket test-bucket not found');
   });
 
-  it('should return 400 for generic S3 errors', async () => {
+  it('returns 400 for generic S3 errors', async () => {
     const accessDeniedError = new Error('Access denied');
     accessDeniedError.name = 'AccessDenied';
-    mockS3Send.rejects(accessDeniedError);
+    headBehavior = () => Promise.reject(accessDeniedError);
 
     const result = await handleBrandClaims(baseContext);
 
     expect(result.status).to.equal(400);
-    const body = await result.json();
-    expect(body.message).to.equal('Error retrieving brand claims: Access denied');
-
+    expect((await result.json()).message).to.equal('Error retrieving brand claims: Access denied');
     expect(mockLog.error).to.have.been.calledWith(
       `S3 error retrieving brand claims for site ${TEST_SITE_ID}: Access denied`,
     );
   });
 
-  it('should log info with model name when model is specified', async () => {
-    const context = {
-      ...baseContext,
-      data: { model: 'gpt-4o-mini' },
-    };
-
-    await handleBrandClaims(context);
-
+  it('logs info with model name when model is specified', async () => {
+    await handleBrandClaims({ ...baseContext, data: { model: 'gpt-4o-mini' } });
     expect(mockLog.info).to.have.been.calledWith(
       `Getting brand claims for site ${TEST_SITE_ID}, model: gpt-4o-mini`,
     );
   });
 
-  it('should log info with default when no model is specified', async () => {
+  it('logs info with default when no model is specified', async () => {
     await handleBrandClaims(baseContext);
-
     expect(mockLog.info).to.have.been.calledWith(
       `Getting brand claims for site ${TEST_SITE_ID}, model: default`,
     );
   });
 
-  it('should set expiresAt approximately 1 hour in the future', async () => {
+  it('sets expiresAt approximately 1 hour in the future', async () => {
     const before = Date.now();
     const result = await handleBrandClaims(baseContext);
     const after = Date.now();
 
-    const body = await result.json();
-    const expiresAt = new Date(body.expiresAt).getTime();
+    const expiresAt = new Date((await result.json()).expiresAt).getTime();
     const oneHourMs = 60 * 60 * 1000;
-
     expect(expiresAt).to.be.at.least(before + oneHourMs);
     expect(expiresAt).to.be.at.most(after + oneHourMs);
   });

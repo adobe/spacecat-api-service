@@ -81,8 +81,7 @@ export function hasPaidLlmoProductContext(imsUserProfile) {
  * @param {object} params.org - The site's organization entity.
  * @param {string} params.imsOrgId - The IMS org ID.
  * @param {string} params.imsUserToken - The IMS user access token (from promiseToken exchange).
- * @param {string} params.userEmail - The authenticated user's email.
- * @param {string} params.siteId - Site ID (for log context).
+ * @param {string} params.siteId - Site ID (log context + FACS capability lookup).
  * @param {object} log - Logger.
  * @returns {Promise<void>} Resolves if authorized.
  * @throws {Error} With a `status` property (403 or 500) if not authorized or on unexpected error.
@@ -109,7 +108,20 @@ export async function authorizeEdgeCdnRouting(context, {
   log.info(`[edge-routing-auth] Site ${siteId} has entitlement tier '${tier}'`);
 
   if (isPaid) {
-    // Paid: validate LLMO product context in the user's IMS profile
+    // FACS-enrolled paid orgs are authorized upstream by facsWrapper: site-scoped
+    // LLMO routes go through the secondary resource param (site → brands), so
+    // reaching this controller means the wrapper already admitted the request →
+    // allow. Gate on the JWT `facs_enabled` claim, NOT context.attributes.facs
+    // (only set when the wrapper DEFERS — no longer the case for site routes now
+    // that the secondary resolver decides them); mirrors hasLlmoCapabilityForSite.
+    // The former FACS-deferred branch (PR #2947) is superseded and removed. See
+    // mysticat-architecture/platform/decisions/facs-wrapper-secondary-resource-param.md.
+    const facsEnabled = context.attributes?.authInfo?.getProfile?.()?.facs_enabled === true;
+    if (facsEnabled) {
+      return;
+    }
+
+    // Paid (non-FACS): validate LLMO product context in the user's IMS profile
     let imsUserProfile;
     try {
       imsUserProfile = await context.imsClient.getImsUserProfile(imsUserToken);

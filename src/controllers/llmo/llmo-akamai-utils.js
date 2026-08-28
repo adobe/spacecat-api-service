@@ -24,18 +24,25 @@
  * and dependency-free so it can be unit-tested and previewed offline (no Akamai credentials).
  */
 
-// Loop guard: one of the headers the routing rule ALREADY injects via
-// modifyIncomingRequestHeader (see buildRoutingRule). No real client ever sends this on its own —
-// only this rule sets it. On the first pass it doesn't exist yet; on Akamai's internal failover
-// retry of the SAME request it is still attached (the retry continues the same request context,
-// not a fresh replay), so a DOES_NOT_EXIST check detects "is this a retry" using a header we need
-// anyway — no advanced XML or dedicated marker required.
+// Edge-tier guard: the api-key header the "Routing Edge" rule injects. On the client-facing edge
+// pass it doesn't exist yet (Routing Edge matches and injects it); on any re-evaluation where it is
+// already present, Routing Edge no longer matches. Combined with the requestType CLIENT_REQ
+// criterion this cleanly separates the edge pass from the parent/recreated pass.
 const LOOP_GUARD_HEADER = 'x-edgeoptimize-api-key';
 
-// A header we never set. The routing rule's loop guard requires it to be ABSENT, and the
-// failover-test rule keys on its absence too. Kept as a named constant so both rules reference the
-// same header name.
+// Worker-callback loop guard. The Edge Optimize worker sets this header when it fetches
+// the original
+// page back from the customer's CDN; the wrapper rule requires it to be ABSENT so those callbacks
+// are NOT re-routed into Optimize at Edge (which would loop). The failover-test rule keys on its
+// absence too.
 const FAILOVER_MARKER_HEADER = 'x-edgeoptimize-request';
+
+// Internal tier marker. "Routing Edge" sets it (value `true`) on the client-facing pass; "Routing
+// Parent" matches on it to recognise the request as one this rule set forwarded through Akamai's
+// parent tier (tiered distribution / SureRoute), and a child rule strips it before the origin fetch
+// so it never reaches Edge Optimize. Namespaced with the other x-edgeoptimize-* headers, vendor-
+// neutral (the CLIENT_REQ design is CDN-agnostic).
+const EDGE_ROUTED_MARKER_HEADER = 'x-edgeoptimize-edge-routed';
 
 // Stable defaults for the managed rule config. These mirror the doc 1:1 and are service-owned
 // (not caller-supplied); only the per-site hostname and the LLMO API key are injected at runtime
@@ -72,13 +79,19 @@ export const EDGE_OPTIMIZE_DEFAULTS = Object.freeze({
   },
   removeIncomingResponseHeaders: ['Age'],
   ruleNames: {
-    parent: 'Optimize at Edge',
-    routing: 'Optimize at Edge Routing',
+    parent: 'ABV - Optimize at Edge',
+    routingEdge: 'Routing Edge',
+    routingParent: 'Routing Parent',
+    removeMarker: `remove ${EDGE_ROUTED_MARKER_HEADER}`,
     failoverTest: 'EdgeOptimize Failover - Test Header',
   },
 });
 
-const MANAGED_COMMENT_ROUTING = 'Managed by Adobe LLM Optimizer (Optimize at Edge). Routes '
+// Managed rule names from earlier layouts, cleaned up (removed/replaced) on re-onboard so upgrading
+// a property from the old single-routing-rule design to the two-tier design leaves no orphans.
+const LEGACY_MANAGED_RULE_NAMES = Object.freeze(['Optimize at Edge', 'Optimize at Edge Routing']);
+
+const MANAGED_COMMENT_ROUTING = 'Managed by Adobe Brand Visibility (Optimize at Edge). Routes '
   + 'AI-bot HTML traffic to live.edgeoptimize.net.';
 
 // ---------------------------------------------------------------------------
@@ -156,31 +169,38 @@ const behaviorSetVariable = (name, value) => ({
   },
 });
 
-const behaviorModifyHeader = (name, header, value) => ({
-  name,
-  options: {
-    action: 'ADD',
-    standardAddHeaderName: 'OTHER',
-    customHeaderName: header,
-    headerValue: value,
-    avoidDuplicateHeaders: false,
-  },
-});
+// action = ADD | MODIFY | DELETE. PAPI keys the value/name option on the action:
+//  - ADD    -> standardAddHeaderName + headerValue
+//  - MODIFY -> standardModifyHeaderName + newHeaderValue (replaces the header, no duplicate)
+//  - DELETE -> standardDeleteHeaderName (no value)
+// Managed request headers use MODIFY so re-processing at the parent tier overwrites rather than
+// appends (avoidDuplicateHeaders); the failover-test response header uses ADD.
+const behaviorModifyHeader = (name, action, header, value) => {
+  const options = { action, customHeaderName: header };
+  if (action === 'ADD') {
+    options.standardAddHeaderName = 'OTHER';
+    options.headerValue = value;
+    options.avoidDuplicateHeaders = false;
+  } else if (action === 'MODIFY') {
+    options.standardModifyHeaderName = 'OTHER';
+    options.newHeaderValue = value;
+    options.avoidDuplicateHeaders = true;
+  } else {
+    options.standardDeleteHeaderName = 'OTHER';
+  }
+  return { name, options };
+};
 
-const behaviorModifyIncomingRequestHeader = (header, value) => behaviorModifyHeader('modifyIncomingRequestHeader', header, value);
-const behaviorModifyOutgoingRequestHeader = (header, value) => behaviorModifyHeader('modifyOutgoingRequestHeader', header, value);
-const behaviorModifyOutgoingResponseHeader = (header, value) => behaviorModifyHeader('modifyOutgoingResponseHeader', header, value);
+const behaviorModifyIncomingRequestHeader = (header, value) => behaviorModifyHeader('modifyIncomingRequestHeader', 'MODIFY', header, value);
+const behaviorModifyOutgoingRequestHeader = (header, value) => behaviorModifyHeader('modifyOutgoingRequestHeader', 'MODIFY', header, value);
+const behaviorModifyOutgoingResponseHeader = (header, value) => behaviorModifyHeader('modifyOutgoingResponseHeader', 'ADD', header, value);
+
+// Strip an incoming REQUEST header before it reaches origin (e.g. the internal edge-routed marker).
+const behaviorRemoveIncomingRequestHeader = (header) => behaviorModifyHeader('modifyIncomingRequestHeader', 'DELETE', header);
 
 // "Modify Incoming Response Headers" -> Remove, for headers returned by origin that shouldn't
 // pass through as-is (e.g. Age).
-const behaviorRemoveIncomingResponseHeader = (header) => ({
-  name: 'modifyIncomingResponseHeader',
-  options: {
-    action: 'DELETE',
-    standardDeleteHeaderName: 'OTHER',
-    customHeaderName: header,
-  },
-});
+const behaviorRemoveIncomingResponseHeader = (header) => behaviorModifyHeader('modifyIncomingResponseHeader', 'DELETE', header);
 
 // "Cache ID Modification" -> Include a user-defined variable. Without this, setVariable only
 // computes the value; it isn't actually folded into the cache key until cacheId references it.
@@ -210,11 +230,35 @@ const behaviorCaching = () => ({
   },
 });
 
-// Every request-header criterion we emit is a presence check (EXISTS / DOES_NOT_EXIST): PAPI
-// ignores value/match flags for those, and including them wouldn't match what PAPI itself emits.
+// Presence-check request-header criterion (EXISTS / DOES_NOT_EXIST): PAPI ignores value/match flags
+// for those, and including them wouldn't match what PAPI itself emits.
 const criterionRequestHeader = (header, matchOperator) => ({
   name: 'requestHeader',
   options: { headerName: header, matchOperator },
+});
+
+// Value-match request-header criterion (IS_ONE_OF a list of literal values). Used by "Routing
+// Parent" to match the internal edge-routed marker header == "true".
+const criterionRequestHeaderValue = (header, values) => ({
+  name: 'requestHeader',
+  options: {
+    headerName: header,
+    matchOperator: 'IS_ONE_OF',
+    values: [...values],
+    matchCaseSensitiveValue: true,
+    matchWildcardName: false,
+    matchWildcardValue: false,
+  },
+});
+
+// Akamai "Request Type" criterion. CLIENT_REQ is the initial client-facing request at the edge;
+// IS_NOT CLIENT_REQ is a parent-tier / internally-recreated request (tiered distribution,
+// SureRoute,
+// site failover). This is the native, Advanced-Metadata-free way to tell the edge pass from the
+// parent pass — the crux of the two-tier routing split.
+const criterionRequestType = (matchOperator) => ({
+  name: 'requestType',
+  options: { matchOperator, value: 'CLIENT_REQ' },
 });
 
 const criterionMatchResponseCode = (lower, upper) => ({
@@ -244,7 +288,8 @@ const behaviorFailActionAlternateHostname = (hostname) => ({
 // ---------------------------------------------------------------------------
 
 /**
- * Nested child rule of the routing rule ("Site Failover Behavior"): on a 4xx/5xx from
+ * Sibling rule of the two routing rules ("Site Failover Behavior"), evaluated for both.
+ * On a 4xx/5xx from
  * live.edgeoptimize.net or an origin timeout, fail over to the property's normal origin via the
  * alternate-hostname mechanism — standard GA behavior, no Advanced Metadata access needed.
  * @param {object} cfg
@@ -257,22 +302,27 @@ export function buildSiteFailoverRule(cfg) {
     criteriaMustSatisfy: 'any',
     behaviors: [behaviorFailActionAlternateHostname(cfg.failover.alternateHostname)],
     children: [],
-    comments: 'Managed by Adobe LLM Optimizer (Optimize at Edge). On origin failure, fails over '
+    comments: 'Managed by Adobe Brand Visibility (Optimize at Edge). On origin failure, fails over '
       + "to the property's normal origin so the end user still gets a response.",
   };
 }
 
 /**
- * The main "Optimize at Edge Routing" rule.
+ * Behaviors common to BOTH routing rules (Routing Edge and Routing Parent): origin + SSL, the cache
+ * key variable, the outgoing X-Forwarded-Host, the Age response-header strip, conditional caching,
+ * and cacheId. `extraIncomingRequestHeaders` lets the edge rule inject the managed request headers
+ * (api-key/config/url/fetcher-key) and the tier marker; the parent rule passes none (those headers
+ * were already injected at the edge and persist across the parent tier).
  * @param {object} cfg
- * @returns {object}
+ * @param {Array<[string, string]>} [extraIncomingRequestHeaders]
+ * @returns {object[]}
  */
-export function buildRoutingRule(cfg) {
+function buildCommonRoutingBehaviors(cfg, extraIncomingRequestHeaders = []) {
   const behaviors = [
     behaviorOrigin(cfg.origin.hostname, cfg.origin.matchSan),
     behaviorSetVariable(cfg.cacheKeyVariable.name, cfg.cacheKeyVariable.value),
   ];
-  Object.entries(cfg.incomingRequestHeaders).forEach(([header, value]) => {
+  extraIncomingRequestHeaders.forEach(([header, value]) => {
     behaviors.push(behaviorModifyIncomingRequestHeader(header, value));
   });
   Object.entries(cfg.outgoingRequestHeaders).forEach(([header, value]) => {
@@ -288,51 +338,78 @@ export function buildRoutingRule(cfg) {
     behaviors.push(behaviorCaching());
   }
   behaviors.push(behaviorCacheId(cfg.cacheKeyVariable.name));
+  return behaviors;
+}
 
+/**
+ * "Routing Edge": the client-facing pass. `requestType IS CLIENT_REQ` AND the api-key header is
+ * absent (it hasn't been injected yet). Injects the managed request headers + the internal
+ * `x-edgeoptimize-edge-routed` marker, and fails over on origin trouble.
+ * @param {object} cfg
+ * @returns {object}
+ */
+export function buildRoutingEdgeRule(cfg) {
+  const extraHeaders = [
+    ...Object.entries(cfg.incomingRequestHeaders),
+    [EDGE_ROUTED_MARKER_HEADER, 'true'],
+  ];
   if (cfg.wafBypass?.enabled) {
-    behaviors.push(
-      behaviorModifyIncomingRequestHeader(cfg.wafBypass.headerName, cfg.wafBypass.value),
-    );
+    extraHeaders.push([cfg.wafBypass.headerName, cfg.wafBypass.value]);
   }
-
-  const criteria = [];
-  const hostnames = cfg.match.hostnames || [];
-  if (hostnames.length > 0) {
-    criteria.push(criterionHostname(hostnames));
-  }
-  criteria.push(
-    criterionUserAgent(cfg.match.userAgents),
-    criterionFileExtension(cfg.match.fileExtensions),
-  );
-  // Loop guard: exclude requests that already carry one of the headers this rule injects (see
-  // LOOP_GUARD_HEADER) — true for Akamai's internal failover retry of the SAME request, never
-  // true for a fresh client request.
-  //
-  // TRUST ASSUMPTION: this keys on the mere presence of a client-suppliable header, so a client
-  // that forges x-edgeoptimize-api-key (or x-edgeoptimize-request) can suppress Optimize-at-Edge
-  // routing for itself or force a false x-edgeoptimize-fo. That is acceptable here: the only party
-  // harmed is the forging client (it opts itself out of optimization), and stripping/validating
-  // these at the edge before rule evaluation would require Advanced Metadata, which this GA-only
-  // rule set deliberately avoids. Revisit if these headers ever gate anything security-sensitive.
-  const incomingHeaders = cfg.incomingRequestHeaders;
-  const guardHeader = LOOP_GUARD_HEADER in incomingHeaders
-    ? LOOP_GUARD_HEADER
-    : Object.keys(incomingHeaders)[0];
-  if (guardHeader) {
-    criteria.push(criterionRequestHeader(guardHeader, 'DOES_NOT_EXIST'));
-  }
-  // Belt-and-suspenders: also require the failover marker header to be absent. We never set it, so
-  // this is always true today, but it keeps the routing rule symmetric with the failover-test rule
-  // and future-proofs against a marker being introduced.
-  criteria.push(criterionRequestHeader(FAILOVER_MARKER_HEADER, 'DOES_NOT_EXIST'));
-
   return {
-    name: cfg.ruleNames.routing,
-    criteria,
+    name: cfg.ruleNames.routingEdge,
+    criteria: [
+      criterionRequestType('IS'),
+      // Edge-pass guard: on the client-facing request the api-key header isn't set yet.
+      criterionRequestHeader(LOOP_GUARD_HEADER, 'DOES_NOT_EXIST'),
+    ],
     criteriaMustSatisfy: 'all',
-    behaviors,
-    children: [buildSiteFailoverRule(cfg)],
+    behaviors: buildCommonRoutingBehaviors(cfg, extraHeaders),
+    children: [],
     comments: MANAGED_COMMENT_ROUTING,
+  };
+}
+
+/**
+ * "Routing Parent": the parent-tier / internally-recreated pass (`requestType IS_NOT CLIENT_REQ`)
+ * that carries the `x-edgeoptimize-edge-routed=true` marker the edge rule set. Re-applies the
+ * origin/cache behaviors (they don't persist across the tier), strips the marker before origin, and
+ * fails over on origin trouble. Does NOT re-inject the credential headers — those were set at the
+ * edge and persist.
+ * @param {object} cfg
+ * @returns {object}
+ */
+export function buildRoutingParentRule(cfg) {
+  return {
+    name: cfg.ruleNames.routingParent,
+    criteria: [
+      criterionRequestType('IS_NOT'),
+      criterionRequestHeaderValue(EDGE_ROUTED_MARKER_HEADER, ['true']),
+    ],
+    criteriaMustSatisfy: 'all',
+    behaviors: buildCommonRoutingBehaviors(cfg),
+    // eslint-disable-next-line no-use-before-define
+    children: [buildRemoveMarkerRule(cfg)],
+    comments: MANAGED_COMMENT_ROUTING,
+  };
+}
+
+/**
+ * Child of "Routing Parent" that strips the internal `x-edgeoptimize-edge-routed` marker from the
+ * request before it is forwarded to origin, so the marker never reaches Edge Optimize. No criteria
+ * (always runs for the parent rule).
+ * @param {object} cfg
+ * @returns {object}
+ */
+export function buildRemoveMarkerRule(cfg) {
+  return {
+    name: cfg.ruleNames.removeMarker,
+    criteria: [],
+    criteriaMustSatisfy: 'all',
+    behaviors: [behaviorRemoveIncomingRequestHeader(EDGE_ROUTED_MARKER_HEADER)],
+    children: [],
+    comments: 'Managed by Adobe Brand Visibility (Optimize at Edge). Removes the internal '
+      + 'edge-routed marker header before the origin fetch.',
   };
 }
 
@@ -358,27 +435,46 @@ export function buildFailoverTestRule(cfg) {
     criteriaMustSatisfy: 'all',
     behaviors: [behaviorModifyOutgoingResponseHeader('x-edgeoptimize-fo', 'true')],
     children: [],
-    comments: 'Managed by Adobe LLM Optimizer (Optimize at Edge). Surfaces failover as the '
+    comments: 'Managed by Adobe Brand Visibility (Optimize at Edge). Surfaces failover as the '
       + 'x-edgeoptimize-fo response header, detected without advanced metadata.',
   };
 }
 
 /**
- * Wrapper rule grouping the routing rule and its failover-test sibling under one named parent, so
- * they show up in Property Manager as a single manageable unit. No criteria of its own (matches
- * everything) — each child still gates on its own criteria.
+ * Wrapper rule "Optimize at Edge" grouping the two routing rules and the failover-test sibling. It
+ * carries the SHARED gating criteria (hostname + AI-bot user agents + HTML/extensionless + the
+ * worker-callback loop guard); the CLIENT_REQ / marker split lives on the child rules. Hoisting the
+ * common match here means it is evaluated once and each child only adds what distinguishes it.
  * @param {object} cfg
  * @returns {object}
  */
 export function buildParentRule(cfg) {
+  const criteria = [];
+  const hostnames = cfg.match.hostnames || [];
+  if (hostnames.length > 0) {
+    criteria.push(criterionHostname(hostnames));
+  }
+  criteria.push(
+    criterionUserAgent(cfg.match.userAgents),
+    criterionFileExtension(cfg.match.fileExtensions),
+    // Worker-callback loop guard: when Edge Optimize fetches the original page back from the
+    // customer CDN it sets x-edgeoptimize-request; requiring its ABSENCE keeps those callbacks out
+    // of the routing rules (otherwise they'd loop).
+    criterionRequestHeader(FAILOVER_MARKER_HEADER, 'DOES_NOT_EXIST'),
+  );
   return {
     name: cfg.ruleNames.parent,
-    criteria: [],
+    criteria,
     criteriaMustSatisfy: 'all',
     behaviors: [],
-    children: [buildRoutingRule(cfg), buildFailoverTestRule(cfg)],
-    comments: 'Managed by Adobe LLM Optimizer (Optimize at Edge). Groups the Optimize at Edge '
-      + 'routing rule and its failover-test sibling.',
+    children: [
+      buildRoutingEdgeRule(cfg),
+      buildRoutingParentRule(cfg),
+      buildSiteFailoverRule(cfg),
+      buildFailoverTestRule(cfg),
+    ],
+    comments: 'Managed by Adobe Brand Visibility (Optimize at Edge). Routes AI-bot HTML traffic to '
+      + 'live.edgeoptimize.net via a two-tier (edge/parent) split, with per-rule site failover.',
   };
 }
 
@@ -402,7 +498,7 @@ function managedCacheKeyVariable(varName) {
   return {
     name: varName,
     value: '',
-    description: 'Edge Optimize cache key (managed by Adobe LLM Optimizer)',
+    description: 'Edge Optimize cache key (managed by Adobe Brand Visibility)',
     hidden: false,
     sensitive: false,
   };
@@ -448,11 +544,10 @@ export function mergeIntoTree(ruleTree, cfg, insertIndex) {
   }
   ensureVariableDeclared(root.variables, managedCacheKeyVariable(cfg.cacheKeyVariable.name));
 
-  const managedNames = new Set([
-    cfg.ruleNames.parent,
-    cfg.ruleNames.routing,
-    cfg.ruleNames.failoverTest,
-  ]);
+  const managedNames = new Set(
+    // eslint-disable-next-line no-use-before-define
+    [...managedRuleNames(cfg), ...LEGACY_MANAGED_RULE_NAMES].map((name) => name.trim()),
+  );
   // Match by TRIMMED name so a legacy `"Optimize at Edge "` (trailing space) is replaced, not left
   // as a duplicate — keeps this preview in step with buildRuleTreePatch (which also trims).
   const children = (root.children || []).filter((c) => !managedNames.has((c?.name ?? '').trim()));
@@ -473,7 +568,53 @@ export function mergeIntoTree(ruleTree, cfg, insertIndex) {
  * @returns {string[]}
  */
 export function managedRuleNames(cfg) {
-  return [cfg.ruleNames.parent, cfg.ruleNames.routing, cfg.ruleNames.failoverTest];
+  // The rules this deploy ADDS at the top level (surfaced to the review UI as "rules to add"):
+  // the wrapper plus the failover-test rule. The nested routing rules live inside the wrapper and
+  // their generic names must not match a customer's own top-level rules, so they are not listed.
+  // Legacy names (older layouts) are NOT included here; they are only removed during cleanup (see
+  // mergeIntoTree / buildRuleTreePatch), never "added", so listing them would wrongly show them
+  // as pending additions.
+  return [cfg.ruleNames.parent, cfg.ruleNames.failoverTest];
+}
+
+/**
+ * The full hierarchy of rules this deploy adds (the wrapper and everything nested inside it), as a
+ * {name, children} tree — for the review UI to show what the property will look like. Names only,
+ * no behaviors, so it carries no secrets.
+ * @param {object} cfg
+ * @returns {{name: string, children: object[]}}
+ */
+export function managedRuleTree(cfg) {
+  const toNode = (rule) => ({ name: rule.name, children: (rule.children || []).map(toNode) });
+  return toNode(buildParentRule(cfg));
+}
+
+/**
+ * Detects which managed "Optimize at Edge" rules are already present at the TOP LEVEL of a rule
+ * tree, by trimmed name. Used by the deploy-status endpoint to answer "did the OAE rule actually
+ * land in this version?" by re-reading live Akamai state — the source of truth when a deploy's own
+ * HTTP response was lost to a CDN timeout. Matches both the current wrapped layout (only the parent
+ * `"Optimize at Edge"` sits at top level, with routing/failover-test nested inside it) and the
+ * older flat layout (routing/failover-test at top level), and tolerates a legacy trailing space.
+ * Uses the frozen EDGE_OPTIMIZE_DEFAULTS names — no cfg needed, since a status check has no
+ * hostname/apiKey to build one from.
+ * @param {object} ruleTree - a PAPI rule tree ({ rules: {...} })
+ * @returns {string[]} the managed rule names found at top level (deduped); empty if none
+ */
+export function detectManagedRuleNames(ruleTree) {
+  // Only names that can appear at TOP LEVEL: the wrapper (current layout), plus the failover-test
+  // and legacy routing names from the oldest flat layout. The two-tier routing rules are nested
+  // inside the wrapper and never surface here.
+  const managed = new Set([
+    EDGE_OPTIMIZE_DEFAULTS.ruleNames.parent,
+    EDGE_OPTIMIZE_DEFAULTS.ruleNames.failoverTest,
+    ...LEGACY_MANAGED_RULE_NAMES,
+  ]);
+  const children = ruleTree?.rules?.children || [];
+  const found = children
+    .map((c) => (c?.name ?? '').trim())
+    .filter((name) => managed.has(name));
+  return [...new Set(found)];
 }
 
 /**
@@ -513,7 +654,9 @@ export function buildRuleTreePatch(ruleTree, cfg, insertIndex) {
     ops.push({ op: 'add', path: '/rules/children', value: [buildParentRule(cfg)] });
   } else {
     const { children } = root;
-    const managed = new Set(managedRuleNames(cfg).map((name) => name.trim()));
+    const managed = new Set(
+      [...managedRuleNames(cfg), ...LEGACY_MANAGED_RULE_NAMES].map((name) => name.trim()),
+    );
     // Match by TRIMMED name so a legacy `"Optimize at Edge "` (trailing space) is cleaned up too.
     const isManaged = (child) => managed.has((child?.name ?? '').trim());
 
@@ -579,15 +722,120 @@ export function redactSecrets(tree) {
     }
     (rule.behaviors || []).forEach((b) => {
       if (b?.name === 'modifyIncomingRequestHeader' && SECRET_HEADERS.has(b.options?.customHeaderName)) {
+        // Redact whichever value field the action uses: MODIFY -> newHeaderValue,
+        // ADD -> headerValue.
         // Mutating a deep clone we own, not the caller's tree.
-        // eslint-disable-next-line no-param-reassign
-        b.options.headerValue = REDACTED;
+        /* eslint-disable no-param-reassign */
+        if ('newHeaderValue' in b.options) {
+          b.options.newHeaderValue = REDACTED;
+        }
+        if ('headerValue' in b.options) {
+          b.options.headerValue = REDACTED;
+        }
+        /* eslint-enable no-param-reassign */
       }
     });
     (rule.children || []).forEach(walk);
   };
   walk(clone.rules);
   return clone;
+}
+
+// PAPI validation errors/details echo back the rules we sent, so they can carry the injected
+// x-edgeoptimize-api-key / x-edgeoptimize-fetcher-key header values — scrub those before returning
+// them to a client. Redacts any explicitly-known secret value, any value following a secret header
+// name, and any 32-byte hex token (the shape of a minted fetcher key).
+const SECRET_HEADER_VALUE_RE = /(x-edgeoptimize-(?:api|fetcher)-key["'\s]*[:=]["'\s]*)([^"'\s,}\]]+)/gi;
+const MINTED_FETCHER_KEY_RE = /\b[0-9a-f]{64}\b/gi;
+
+function scrubSecretText(text, extraSecrets) {
+  let out = String(text);
+  extraSecrets.forEach((v) => {
+    if (typeof v === 'string' && v.length >= 4) {
+      out = out.split(v).join(REDACTED);
+    }
+  });
+  return out.replace(SECRET_HEADER_VALUE_RE, `$1${REDACTED}`).replace(MINTED_FETCHER_KEY_RE, REDACTED);
+}
+
+/**
+ * Redacts injected secrets from PAPI errors before they leave the server. Accepts the errors array
+ * (deploy's validateRules result) or the raw detail string (activation's 400 body) and returns the
+ * same shape — arrays bounded to `max` entries. Pass any secret values known at the call site (e.g.
+ * the deploy's apiKey/fetcherKey); header-name and hex-token patterns catch the rest.
+ * @param {Array|string|null} errors
+ * @param {string[]} [extraSecrets] - explicit secret values to redact
+ * @param {number} [max] - max array entries to keep
+ * @returns {Array|string|null} the redacted errors, same shape as the input
+ */
+export function redactPapiErrors(errors, extraSecrets = [], max = 25) {
+  if (errors == null) {
+    return errors;
+  }
+  if (typeof errors === 'string') {
+    return scrubSecretText(errors, extraSecrets);
+  }
+  const bounded = Array.isArray(errors) ? errors.slice(0, max) : errors;
+  return JSON.parse(scrubSecretText(JSON.stringify(bounded), extraSecrets));
+}
+
+/**
+ * Returns the fetcher-key value (the x-edgeoptimize-fetcher-key incoming-request header the managed
+ * routing rule injects) from a rule tree, or null if absent. A fresh fetcher key is minted on every
+ * deploy, so it's a per-deploy fingerprint: deploy-status compares it between a version and its
+ * base to tell "this deploy's fresh write landed" (keys differ) from "the version is just an
+ * unwritten clone inheriting the previous onboard's rule" (keys identical).
+ * NEVER return this value to a client — it's a secret (redactSecrets scrubs it from responses); it
+ * is only compared server-side. Walks the whole tree for the first matching header.
+ * @param {object} tree - a PAPI rule tree ({ rules: {...} })
+ * @returns {string|null} the fetcher-key header value, or null when the tree has no managed rule
+ */
+export function getManagedFetcherKey(tree) {
+  let found = null;
+  const walk = (rule) => {
+    if (found !== null || !rule || typeof rule !== 'object') {
+      return;
+    }
+    (rule.behaviors || []).forEach((b) => {
+      // MODIFY carries the value in newHeaderValue, ADD in headerValue.
+      const value = b?.options?.newHeaderValue ?? b?.options?.headerValue;
+      if (found === null
+        && b?.name === 'modifyIncomingRequestHeader'
+        && b.options?.customHeaderName === FETCHER_KEY_HEADER
+        && typeof value === 'string') {
+        found = value;
+      }
+    });
+    (rule.children || []).forEach(walk);
+  };
+  walk(tree?.rules);
+  return found;
+}
+
+/**
+ * Estimates how expensive Akamai's own PAPI `validateRules` pass will be for a rule tree, by
+ * summing behaviors + criteria (match conditions) across every rule, recursively. This mirrors the
+ * exact metric PAPI itself enforces a hard ceiling on — a property reports "Current usage is X out
+ * of 3000 available" for this same behaviors+matches total when exceeded (confirmed against a real
+ * Akamai property while testing a large-property fix). Used as a fast, pre-flight proxy for "will
+ * this take too long to validate" before ever attempting the slow validate/write call — Akamai's
+ * own processing time scales with this same total, and unlike raw rule count it's tied to a real,
+ * already-observed Akamai constraint rather than an arbitrary number.
+ * @param {object} ruleTree - a PAPI rule tree ({ rules: {...} })
+ * @returns {number} total behaviors + criteria across every rule in the tree
+ */
+export function estimateRuleTreeComplexity(ruleTree) {
+  let total = 0;
+  const walk = (rule) => {
+    if (!rule || typeof rule !== 'object') {
+      return;
+    }
+    total += (rule.behaviors || []).length;
+    total += (rule.criteria || []).length;
+    (rule.children || []).forEach(walk);
+  };
+  walk(ruleTree?.rules);
+  return total;
 }
 
 // ---------------------------------------------------------------------------

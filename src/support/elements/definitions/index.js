@@ -33,6 +33,9 @@ export {
 export {
   buildCitedDomainsPayload, transformCitedDomainsResponse, transformCitedDomainsResponses,
 } from './cited-domains.js';
+export { buildSubredditsPayload, transformSubredditsResponse } from './subreddits.js';
+export { buildRedditThreadsPayload, transformRedditThreadsResponse } from './reddit-threads.js';
+export { buildYoutubeVideosPayload, transformYoutubeVideosResponse } from './youtube-videos.js';
 export { buildTopicPromptsPayload, transformTopicPromptsResponse } from './topic-prompts.js';
 export { aggregateTopicsFromPrompts } from './topics-insights.js';
 export {
@@ -45,6 +48,7 @@ export {
   transformOwnedUrlsResponse,
 } from './owned-urls.js';
 export { buildDomainUrlsPayload, transformDomainUrlsResponse } from './domain-urls.js';
+export { buildUrlPromptsPayload, transformUrlPromptsResponse, mergeUrlPromptsResponses } from './url-prompts.js';
 export { aggregateUrlInspectorStats } from './url-inspector-stats.js';
 export {
   buildMarketMentionsTrendPayload,

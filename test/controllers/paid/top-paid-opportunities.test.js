@@ -218,6 +218,20 @@ describe('TopPaidOpportunitiesController', () => {
       expect(opportunities).to.have.lengthOf(1);
     });
 
+    it('narrows top-paid opportunities to the caller\'s permitted types (D4)', async () => {
+      const oppty = createOpportunity({ id: 'oppty-1', tags: ['paid media'] });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [oppty]);
+      // Resolver deferred with a type restriction the seeded opp does not match →
+      // the list controller filters it out (D4).
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID },
+        data: {},
+        attributes: { facsComposite: { values: ['__no-match__'] } },
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(0);
+    });
+
     it('does not filter out opportunities with projectedEngagementValue', async () => {
       const engagementOppty = createOpportunity({
         id: 'oppty-1',

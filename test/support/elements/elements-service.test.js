@@ -17,7 +17,11 @@ import sinonChai from 'sinon-chai';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { createElementsService } from '../../../src/support/elements/elements-service.js';
 import { ELEMENT_IDS } from '../../../src/support/elements/element-ids.js';
-import { INTENT_VALUE } from '../../../src/support/serenity/prompt-tags.js';
+import {
+  DIMENSION,
+  INTENT_VALUE,
+  INTENT_ROOT_NAME,
+} from '../../../src/support/serenity/prompt-tags.js';
 
 const INTENT_VALUES = Object.values(INTENT_VALUE);
 
@@ -47,7 +51,7 @@ const RAW_TOPICS = {
     value: [
       { value: 'topic__SEO' },
       { value: 'category__Firefly' },
-      { value: 'intent__Informational' },
+      { value: `${INTENT_ROOT_NAME}__Informational` },
       { value: 'source__organic' },
       { value: 'type__branded' },
       { value: 'plain-tag' },
@@ -130,6 +134,47 @@ describe('createElementsService', () => {
       expect(result.type).to.deep.equal([{ id: 'type__branded', label: 'branded' }]);
     });
 
+    it('populates page_intents from the renamed intent root without leaking it as a group', async () => {
+      // The whole point of the rename is that the intent dimension stops showing up
+      // in the customer-facing tag filter. Reaching this payload as a dynamic
+      // `$abv_tags$intent` group beside an empty `page_intents` would put it back —
+      // under its internal name, no less.
+      transport.fetchElement
+        .withArgs('ws-1', ELEMENT_IDS.TOPICS, sinon.match.any)
+        .resolves({
+          blocks: {
+            value: [
+              { value: 'topic__SEO' },
+              { value: `${INTENT_ROOT_NAME}__Informational` },
+              { value: INTENT_ROOT_NAME },
+            ],
+          },
+        });
+      const result = await service.getUrlInspectorFilterDimensions('ws-1', {});
+      expect(result.page_intents).to.deep.equal([
+        { id: `${INTENT_ROOT_NAME}__Informational`, label: 'Informational' },
+      ]);
+      expect(result).to.not.have.property(INTENT_ROOT_NAME);
+      expect(result.tags).to.deep.equal([]);
+    });
+
+    it('routes a bare `intent__` tag to `tags`, never to page_intents or a customer-facing group', async () => {
+      // The intent prefix IS the root's name, so a bare `intent__` tag is the
+      // pre-rename spelling and must not be claimed as an intent. Nor may it become
+      // a dynamic `intent` group: that is a customer-visible filter under the very
+      // name the `$abv_tags$` marker exists to hide. `intent` is reserved for
+      // exactly that reason, so it lands in the generic `tags` array instead.
+      transport.fetchElement
+        .withArgs('ws-1', ELEMENT_IDS.TOPICS, sinon.match.any)
+        .resolves({ blocks: { value: [{ value: 'intent__Informational' }] } });
+      const result = await service.getUrlInspectorFilterDimensions('ws-1', {});
+      expect(result.page_intents).to.deep.equal([]);
+      expect(result).to.not.have.property('intent');
+      expect(result.tags).to.deep.equal([
+        { id: 'intent__Informational', label: 'Informational' },
+      ]);
+    });
+
     it('ignores plain, separator-less tags (bare prefix declarations)', async () => {
       const result = await service.getUrlInspectorFilterDimensions('ws-1', {});
       expect(result.tags).to.deep.equal([]);
@@ -157,9 +202,11 @@ describe('createElementsService', () => {
       expect(result.categories).to.deep.equal([{ id: 'category__Firefly', label: 'Firefly' }]);
     });
 
-    it('page_intents contains only intent__-prefixed entries with the original tag as id', async () => {
+    it('page_intents contains only intent-prefixed entries with the original tag as id', async () => {
       const result = await service.getUrlInspectorFilterDimensions('ws-1', {});
-      expect(result.page_intents).to.deep.equal([{ id: 'intent__Informational', label: 'Informational' }]);
+      expect(result.page_intents).to.deep.equal([
+        { id: `${INTENT_ROOT_NAME}__Informational`, label: 'Informational' },
+      ]);
     });
 
     it('origins contains only source__-prefixed entries', async () => {
@@ -264,26 +311,45 @@ describe('createElementsService', () => {
         primary_intent: 'informational', prompt: 'p-comm', prompt_topic: 'T1', volume: 10,
       },
     ]);
-    // Matches a PROMPTS payload carrying a specific `intent__X` tag clause.
+    // Matches a PROMPTS payload carrying a specific `<intentRoot>__X` tag clause.
     const withTag = (val) => sinon.match((payload) => Boolean(
       payload?.filters?.advanced?.filters?.some((f) => f.col === 'tags' && f.val === val),
     ));
-    // Matches the base call (no `intent__` tag clause).
+    // The intent tag as Elements encodes it: the `__`-joined path, so the root's
+    // own name is the PREFIX — which is why the matchers below test startsWith,
+    // matching production rather than a looser substring search that a tag merely
+    // containing `intent__` further in would also satisfy.
+    const intentTag = (root, value) => `${root}__${value}`;
+    const isIntentTag = (val) => String(val).startsWith(`${INTENT_ROOT_NAME}__`);
+    // Matches the base call — no intent tag clause.
     const noIntentTag = sinon.match((payload) => !payload?.filters?.advanced?.filters
-      ?.some((f) => f.col === 'tags' && String(f.val).startsWith('intent__')));
-
-    beforeEach(() => {
-      transport.fetchElement.withArgs('ws-1', ELEMENT_IDS.PROMPTS, noIntentTag).resolves(RAW_BASE);
-      // All intent-filtered calls return empty except Commercial, which claims p-comm.
+      ?.some((f) => f.col === 'tags' && isIntentTag(f.val)));
+    const promptCallsWith = (root) => transport.fetchElement.getCalls().filter(
+      (c) => c.args[1] === ELEMENT_IDS.PROMPTS
+        && c.args[2]?.filters?.advanced?.filters?.some(
+          (f) => f.col === 'tags' && String(f.val).startsWith(`${root}__`),
+        ),
+    );
+    const P_COMM_ROW = {
+      primary_intent: 'informational', prompt: 'p-comm', prompt_topic: 'T1', volume: 10,
+    };
+    /**
+     * Stubs the five intent-filtered calls: every value empty except Commercial,
+     * which claims p-comm.
+     */
+    const stubIntentRound = (root) => {
       INTENT_VALUES
         .filter((v) => v !== 'Commercial')
         .forEach((v) => transport.fetchElement
-          .withArgs('ws-1', ELEMENT_IDS.PROMPTS, withTag(`intent__${v}`)).resolves(rawWith([])));
+          .withArgs('ws-1', ELEMENT_IDS.PROMPTS, withTag(intentTag(root, v))).resolves(rawWith([])));
       transport.fetchElement
-        .withArgs('ws-1', ELEMENT_IDS.PROMPTS, withTag('intent__Commercial'))
-        .resolves(rawWith([{
-          primary_intent: 'informational', prompt: 'p-comm', prompt_topic: 'T1', volume: 10,
-        }]));
+        .withArgs('ws-1', ELEMENT_IDS.PROMPTS, withTag(intentTag(root, 'Commercial')))
+        .resolves(rawWith([P_COMM_ROW]));
+    };
+
+    beforeEach(() => {
+      transport.fetchElement.withArgs('ws-1', ELEMENT_IDS.PROMPTS, noIntentTag).resolves(RAW_BASE);
+      stubIntentRound(INTENT_ROOT_NAME);
     });
 
     // Enrichment requires exactly one projectId (single slice).
@@ -294,6 +360,33 @@ describe('createElementsService', () => {
       const byPrompt = Object.fromEntries(result.prompts.map((p) => [p.prompt, p.userIntent]));
       expect(byPrompt['p-comm']).to.equal('commercial');
       expect(byPrompt['p-info']).to.equal('');
+      const promptCalls = transport.fetchElement.getCalls()
+        .filter((c) => c.args[1] === ELEMENT_IDS.PROMPTS);
+      expect(promptCalls).to.have.length(1 + INTENT_VALUES.length);
+    });
+
+    it('costs exactly five intent calls, one per value, all under the renamed root', async () => {
+      await service.getPrompts('ws-1', ENRICH);
+      // Assert the SET, not the count: five calls all carrying the same value would
+      // satisfy a length check while enriching nothing.
+      const intentTags = promptCallsWith(INTENT_ROOT_NAME).map(
+        (c) => c.args[2].filters.advanced.filters.find((f) => f.col === 'tags').val,
+      );
+      expect(intentTags.sort()).to.deep.equal(
+        INTENT_VALUES.map((v) => `${INTENT_ROOT_NAME}__${v}`).sort(),
+      );
+      // No call goes out under the pre-rename root. This trips if the legacy round
+      // is ever reintroduced, since those calls carry an `intent__`-prefixed tag.
+      expect(promptCallsWith(DIMENSION.INTENT)).to.have.length(0);
+    });
+
+    it('leaves userIntent blank at the same five-call cost when a project has no intent tags', async () => {
+      // An empty round is just an empty answer — it buys no second round, so the
+      // call count does not depend on how the project is tagged.
+      transport.fetchElement.reset();
+      transport.fetchElement.withArgs('ws-1', ELEMENT_IDS.PROMPTS, noIntentTag).resolves(RAW_BASE);
+      const result = await service.getPrompts('ws-1', ENRICH);
+      result.prompts.forEach((p) => expect(p.userIntent).to.equal(''));
       const promptCalls = transport.fetchElement.getCalls()
         .filter((c) => c.args[1] === ELEMENT_IDS.PROMPTS);
       expect(promptCalls).to.have.length(1 + INTENT_VALUES.length);
@@ -327,11 +420,13 @@ describe('createElementsService', () => {
           primary_intent: 'informational', prompt: 'best sofa', prompt_topic: 'Recliners', volume: 5,
         },
       ]));
-      transport.fetchElement.withArgs('ws-1', ELEMENT_IDS.PROMPTS, withTag('intent__Commercial'))
+      transport.fetchElement
+        .withArgs('ws-1', ELEMENT_IDS.PROMPTS, withTag(intentTag(INTENT_ROOT_NAME, 'Commercial')))
         .resolves(rawWith([{
           primary_intent: 'informational', prompt: 'best sofa', prompt_topic: 'Sofas', volume: 5,
         }]));
-      transport.fetchElement.withArgs('ws-1', ELEMENT_IDS.PROMPTS, withTag('intent__Navigational'))
+      transport.fetchElement
+        .withArgs('ws-1', ELEMENT_IDS.PROMPTS, withTag(intentTag(INTENT_ROOT_NAME, 'Navigational')))
         .resolves(rawWith([{
           primary_intent: 'informational', prompt: 'best sofa', prompt_topic: 'Recliners', volume: 5,
         }]));
@@ -343,11 +438,30 @@ describe('createElementsService', () => {
 
     it('is non-fatal: a failing intent call degrades to blank userIntent', async () => {
       transport.fetchElement
-        .withArgs('ws-1', ELEMENT_IDS.PROMPTS, withTag('intent__Commercial'))
+        .withArgs('ws-1', ELEMENT_IDS.PROMPTS, withTag(intentTag(INTENT_ROOT_NAME, 'Commercial')))
         .rejects(new Error('intent call failed'));
       const result = await service.getPrompts('ws-1', ENRICH);
       expect(result.count).to.equal(2);
       result.prompts.forEach((p) => expect(p.userIntent).to.equal(''));
+    });
+
+    it('logs the failed intent call, since the response cannot show one happened', async () => {
+      // A blank `userIntent` means either "no intent tag" or "the call failed", and
+      // the response cannot distinguish them. The warn is the only thing that can,
+      // so assert it with a real logger — the test above builds its service without
+      // one, which makes `log?.warn?.` a no-op and the message unverified.
+      const log = { info: sinon.stub(), warn: sinon.stub(), error: sinon.stub() };
+      const logged = createElementsService(transport, log);
+      transport.fetchElement
+        .withArgs('ws-1', ELEMENT_IDS.PROMPTS, withTag(intentTag(INTENT_ROOT_NAME, 'Commercial')))
+        .rejects(new Error('intent call failed'));
+
+      await logged.getPrompts('ws-1', ENRICH);
+
+      expect(log.warn).to.have.been.calledWithMatch(
+        /intent-filtered PROMPTS call failed for 'Commercial'/,
+        sinon.match({ workspaceId: 'ws-1', event: 'intent-enrichment-call-failed' }),
+      );
     });
   });
 

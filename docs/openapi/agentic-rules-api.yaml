@@ -31,7 +31,7 @@ agentic-categories-list:
       '404': { $ref: './responses.yaml#/404-site-not-found-with-id' }
       '500': { $ref: './responses.yaml#/500' }
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
   post:
     tags:
@@ -65,7 +65,7 @@ agentic-categories-list:
       '409': { $ref: '#/AgenticRuleConflictResponse' }
       '500': { $ref: './responses.yaml#/500' }
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 
 agentic-categories-one:
@@ -107,7 +107,7 @@ agentic-categories-one:
       '409': { $ref: '#/AgenticRuleConflictResponse' }
       '500': { $ref: './responses.yaml#/500' }
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
   delete:
     tags:
@@ -136,7 +136,7 @@ agentic-categories-one:
       '404': { $ref: './responses.yaml#/404' }
       '500': { $ref: './responses.yaml#/500' }
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 
 # ───────────────────────────── page-types ─────────────────────────────
@@ -164,7 +164,7 @@ agentic-page-types-list:
       '404': { $ref: './responses.yaml#/404-site-not-found-with-id' }
       '500': { $ref: './responses.yaml#/500' }
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
   post:
     tags:
@@ -198,7 +198,7 @@ agentic-page-types-list:
       '409': { $ref: '#/AgenticRuleConflictResponse' }
       '500': { $ref: './responses.yaml#/500' }
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 
 agentic-page-types-one:
@@ -240,7 +240,7 @@ agentic-page-types-one:
       '409': { $ref: '#/AgenticRuleConflictResponse' }
       '500': { $ref: './responses.yaml#/500' }
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
   delete:
     tags:
@@ -269,7 +269,7 @@ agentic-page-types-one:
       '404': { $ref: './responses.yaml#/404' }
       '500': { $ref: './responses.yaml#/500' }
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 
 # ─────────────────────────────── schemas ──────────────────────────────

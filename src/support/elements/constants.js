@@ -12,6 +12,41 @@
 
 export const DEFAULT_ELEMENT_MODEL = 'search-gpt';
 
+/**
+ * Semrush's Elements API tag encoding: `prefix__value`, with `__` also used for
+ * `parent__child` nesting within the value. A tag's wire form is its `__`-joined
+ * PATH, so the leading segment is the name of its ROOT tag — which is why renaming
+ * a dimension root renames every one of its tags on this surface.
+ *
+ * This replaced an earlier `prefix:value` encoding (colon-delimited, `Parent__Child`
+ * nesting only within the value). The cutover was a one-time, atomic migration on
+ * Semrush's side — all workspaces/customers moved to `__` together, so there is no
+ * dual-format transition period and nothing parses both encodings.
+ */
+export const SEP = '__';
+
+/**
+ * Sentinel platform/model value meaning "all platforms" — no single-model filter.
+ * Mirrors the UI's `PLATFORM_CODES.All` ('all'), the same "no filter" convention the
+ * category/region dimensions already use. Elements that support it OMIT the `CBF_model`
+ * filter for this value, returning the deduped cross-model union.
+ */
+export const ALL_PLATFORMS = 'all';
+
+/**
+ * True when `value` is the {@link ALL_PLATFORMS} sentinel (case-insensitive, whitespace
+ * trimmed — matching the sibling `'all'`-sentinel helpers `SKIP_VALUES` in
+ * `llmo-brand-presence.js` and `normalizeEngineFromQuery`). Callers MUST check this
+ * BEFORE {@link resolveElementModel}, which would otherwise coerce `'all'` to
+ * {@link DEFAULT_ELEMENT_MODEL} (it is not a valid Semrush model).
+ *
+ * @param {string} [value] - Raw value from the `model` or `platform` query param.
+ * @returns {boolean}
+ */
+export function isAllPlatforms(value) {
+  return typeof value === 'string' && value.trim().toLowerCase() === ALL_PLATFORMS;
+}
+
 export const ELEMENT_MODELS = Object.freeze([
   'google-ai-mode',
   'grok-3',

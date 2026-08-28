@@ -11,7 +11,7 @@
  */
 
 import { ctx } from './harness.js';
-import { resetPostgres } from './seed.js';
+import { resetPostgres, seedAuditScopePages } from './seed.js';
 import auditPolicyTests from '../shared/tests/audit-policy.js';
 
-auditPolicyTests(() => ctx.httpClient, resetPostgres);
+auditPolicyTests(() => ctx.httpClient, resetPostgres, seedAuditScopePages);

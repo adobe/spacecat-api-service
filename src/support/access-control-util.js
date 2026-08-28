@@ -385,30 +385,41 @@ export default class AccessControlUtil {
           lastSeenAt: new Date().toISOString(),
         });
       }
-    // Lazy one-time backfill of externalUserId for PAID-tier (Brandalf) users onboarded via
-    // invitation. These users are created without externalUserId; we record it here on the
-    // first authenticated request so the userDetails lookup can resolve their display name.
-    // NOTE: profile.email is an IMS user GUID (e.g. GUID@hexOrgId.e), not an RFC-5322 address.
-    // profile.trial_email is the human-readable email used as the DB row selector.
-    // Both claims refer to the same identity and are attested by IMS on the same token.
-    // findByEmailId runs on every non-FREE_TRIAL request (same as the FREE_TRIAL branch above),
-    // so this adds no new per-request overhead relative to existing behaviour.
+    // lastSeenAt refresh (plus a lazy one-time externalUserId backfill) for PAID/PLG-tier
+    // (Brandalf) trial users. Paying-customer trial users are looked up by externalUserId —
+    // unlike FREE_TRIAL users, email is not stored for them (@adobe/spacecat-shared-data-access
+    // 4.19.0 added the findByExternalUserId index for this). We fall back to the legacy
+    // emailId lookup (and backfill externalUserId from it) for PAID/PLG trial users created
+    // via the older email-invite flow, before that support existed.
+    // NOTE: profile.email is an IMS user GUID (e.g. GUID@hexOrgId.e), not an RFC-5322 address,
+    // and doubles as externalUserId. profile.trial_email is the human-readable email used as
+    // the legacy DB row selector. Both claims refer to the same identity and are attested by
+    // IMS on the same token.
     } else if (!this.authInfo?.isS2SConsumer?.()) {
       const profile = this.authInfo.getProfile?.();
-      if (profile?.email && profile?.trial_email) {
+      if (profile?.email) {
         try {
-          const trialUser = await this.TrialUser.findByEmailId(profile.trial_email);
-          if (trialUser && !trialUser.getExternalUserId()) {
-            trialUser.setExternalUserId(profile.email);
+          let trialUser = await this.TrialUser.findByExternalUserId(profile.email);
+
+          if (!trialUser && profile.trial_email) {
+            trialUser = await this.TrialUser.findByEmailId(profile.trial_email);
+            if (trialUser && !trialUser.getExternalUserId()) {
+              trialUser.setExternalUserId(profile.email);
+              this.log?.info('[AccessControl] Backfilled externalUserId for PAID-tier user', {
+                trialEmail: profile.trial_email,
+                organizationId: org.getId(),
+              });
+            }
+          }
+
+          if (trialUser) {
+            trialUser.setLastSeenAt(new Date().toISOString());
             await trialUser.save();
-            this.log?.info('[AccessControl] Backfilled externalUserId for PAID-tier user', {
-              trialEmail: profile.trial_email,
-              organizationId: org.getId(),
-            });
           }
         } catch (err) {
-          this.log?.warn('[AccessControl] externalUserId backfill failed; continuing', {
-            trialEmail: profile.trial_email,
+          this.log?.warn('[AccessControl] trial user update failed; continuing', {
+            externalUserId: profile.email,
+            ...(profile.trial_email && { trialEmail: profile.trial_email }),
             error: err.message,
           });
         }

@@ -35,6 +35,35 @@ export const ELEMENT_IDS = Object.freeze({
   // Brand scoping is via the request's sub-workspace, not a filter (`CBF_ws_brand` is a no-op).
   CITED_DOMAINS: '98b91d00-9531-4120-b3b5-17cc27489fce',
 
+  // Subreddits — per-subreddit Reddit stats (`table`), one row per (subreddit, project):
+  // { subreddit, subreddit_key, link, mentions, prompts, responses_with_citations,
+  //   threads, visibility, project_id }. Honors date (`CBF_date__start`/`__end`) + `CBF_model`.
+  // Optional top-level `project_id` — omit → workspace-wide across ALL projects (verified
+  // live: omitted returns every project's rows; supplied scopes to that one). Brand scoping
+  // is via the request's sub-workspace, not a filter.
+  SUBREDDITS: 'faf56e29-ddda-4480-b639-586d526c9080',
+
+  // Reddit Threads — top Reddit threads by response count (`table`), one row per thread:
+  // { link, mentions, prompts, responses, subreddit, thread, url_cbf }. Honors date
+  // (`CBF_date__start`/`__end`) + `CBF_model`, plus a comparison window
+  // (`CBF_date__start_comparison`/`__end_comparison`) and `comparison_data_formatting: 'join'`
+  // — unlike Subreddits, this element's discovery payload carries comparison columns, and
+  // (not yet verified live) they are assumed load-bearing rather than dropped. Optional
+  // top-level `project_id` — mirrors Subreddits' optional scoping (unverified for this
+  // element; assumed workspace-wide when omitted). Brand scoping is via the request's
+  // sub-workspace, not a filter.
+  REDDIT_THREADS: '5af96fd9-4f62-44d3-96c6-5c0604330f6a',
+
+  // YouTube Videos — top YouTube videos by citation count (`table`), one row per video:
+  // { channel, citations, link, prompts, video, views, url_cbf }. Honors date
+  // (`CBF_date__start`/`__end`) + `CBF_model`, plus a comparison window
+  // (`CBF_date__start_comparison`/`__end_comparison`) and `comparison_data_formatting: 'join'`,
+  // same shape as Reddit Threads. Optional top-level `project_id` (also set in
+  // `filters.simple`) scopes to a single project; omitted → workspace-wide. Brand scoping
+  // is via the request's sub-workspace, not a filter. `views` may be `null` upstream (not
+  // every video has a tracked view count).
+  YOUTUBE_VIDEOS: '05e624db-0314-4f93-9337-1fae5148f057',
+
   // URL Inspector — Owned URLs ("Your cited URLs" table). Two elements, both
   // scoped by a top-level `project_id` (region/market) + date + `CBF_model`;
   // neither honors a server-side content-type filter, so `domain_type='Owned'`
@@ -48,6 +77,16 @@ export const ELEMENT_IDS = Object.freeze({
   //    per-URL filter needed — the wiki's "one call per URL" claim is wrong).
   STATS_PER_URL: '9af5ed83-049b-493a-85d7-99c7d4deddba',
   URL_TRENDS: 'afb2e5d3-3955-4e0d-aeb1-7e28cdecd9f9',
+
+  // URL Inspector — URL Prompts (details drill-down: the prompts that cited a
+  // specific URL). `table` envelope, one row per distinct prompt:
+  //   { prompt, source(=url), source_title, brand_mentioned, brands_string,
+  //     closest_date, url_cbf }.
+  // Scoped by `CBF_source` = the full URL string (placed in BOTH simple and
+  // advanced — unique to this element) + date (`CBF_date__start`/`__end`) +
+  // `CBF_model`. Brand scoping is via the sub-workspace (no CBF_brand filter).
+  // Does NOT return category/topic/region. Verified live 2026-07-29.
+  URL_PROMPTS: 'b4f1ead7-4aea-41ea-b1ce-311004715d63',
 
   MENTIONS: 'e1a6811b-d0c9-4d6f-8a29-290a32db863f',
   VISIBILITY: '2724878e-e0e9-4217-ad21-d6bcb7887a09',

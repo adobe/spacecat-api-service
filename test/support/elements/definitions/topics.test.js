@@ -20,6 +20,11 @@ import {
   transformOtherTagsForFilterDimensions,
 } from '../../../../src/support/elements/definitions/topics.js';
 import { DEFAULT_ELEMENT_MODEL } from '../../../../src/support/elements/constants.js';
+import {
+  INTENT_ROOT_NAME,
+  ORIGIN_ROOT_NAME,
+  LEGACY_ORIGIN_ROOT_NAME,
+} from '../../../../src/support/serenity/prompt-tags.js';
 
 // Mirrors the fixed keys elements-service.js's `getUrlInspectorFilterDimensions`
 // builds `result` with, plus the JS-unsafe names it also guards against.
@@ -39,9 +44,9 @@ const RAW_MIXED = {
       { value: 'category__Experience Cloud' },
       { value: 'category__Modular & Configurable Sofas__Compact Shippable Furniture' },
       { value: 'topic__Furniture__Compact Shippable Furniture' },
-      { value: 'intent' },
-      { value: 'intent__Informational' },
-      { value: 'intent__Transactional' },
+      { value: INTENT_ROOT_NAME },
+      { value: `${INTENT_ROOT_NAME}__Informational` },
+      { value: `${INTENT_ROOT_NAME}__Transactional` },
       { value: 'source' },
       { value: 'source__organic' },
       { value: 'source__paid' },
@@ -312,37 +317,49 @@ describe('topics definitions', () => {
       expect(transformIntentsToFilterDimensions(null)).to.deep.equal([]);
     });
 
-    it('ignores the bare "intent" prefix declaration and returns only intent__-prefixed entries', () => {
+    it('ignores the bare root declaration and returns only prefixed entries', () => {
       const result = transformIntentsToFilterDimensions(RAW_MIXED);
       expect(result).to.deep.equal([
-        { id: 'intent__Informational', label: 'Informational' },
-        { id: 'intent__Transactional', label: 'Transactional' },
+        { id: `${INTENT_ROOT_NAME}__Informational`, label: 'Informational' },
+        { id: `${INTENT_ROOT_NAME}__Transactional`, label: 'Transactional' },
       ]);
     });
 
     it('sets id to the original tag value (including prefix) and preserves original casing in label', () => {
-      const raw = { blocks: { value: [{ value: 'intent__informational' }] } };
+      const raw = { blocks: { value: [{ value: `${INTENT_ROOT_NAME}__informational` }] } };
       const [item] = transformIntentsToFilterDimensions(raw);
-      expect(item.id).to.equal('intent__informational');
+      expect(item.id).to.equal(`${INTENT_ROOT_NAME}__informational`);
       expect(item.label).to.equal('informational');
     });
 
     it('excludes non-intent entries', () => {
-      const raw = { blocks: { value: [{ value: 'category__AI' }, { value: 'intent__Buy' }] } };
+      const raw = {
+        blocks: {
+          value: [{ value: 'category__AI' }, { value: `${INTENT_ROOT_NAME}__Buy` }],
+        },
+      };
       const result = transformIntentsToFilterDimensions(raw);
       expect(result).to.have.length(1);
       expect(result[0].label).to.equal('Buy');
     });
 
-    it('adds parent_id/parent_label when the value contains a double underscore', () => {
-      const raw = { blocks: { value: [{ value: 'intent__Commercial__Buy' }] } };
+    it('adds parent_id/parent_label for a nested value', () => {
+      const raw = { blocks: { value: [{ value: `${INTENT_ROOT_NAME}__Commercial__Buy` }] } };
       const [item] = transformIntentsToFilterDimensions(raw);
       expect(item).to.deep.equal({
-        id: 'intent__Commercial__Buy',
+        id: `${INTENT_ROOT_NAME}__Commercial__Buy`,
         label: 'Buy',
-        parent_id: 'intent__Commercial',
+        parent_id: `${INTENT_ROOT_NAME}__Commercial`,
         parent_label: 'Commercial',
       });
+    });
+
+    // An Elements tag prefix is the `__`-joined tag PATH, so the intent root's
+    // name IS the prefix — a bare `intent__` tag belongs to no dimension this
+    // reader knows and must not be claimed as an intent.
+    it('does not read a bare `intent__` tag as an intent', () => {
+      const raw = { blocks: { value: [{ value: 'intent__Commercial' }] } };
+      expect(transformIntentsToFilterDimensions(raw)).to.deep.equal([]);
     });
   });
 
@@ -366,11 +383,72 @@ describe('topics definitions', () => {
       expect(item.label).to.equal('direct');
     });
 
-    it('excludes non-source entries', () => {
+    it('excludes entries under no origin root', () => {
       const raw = { blocks: { value: [{ value: 'topic__SEO' }, { value: 'source__organic' }] } };
       const result = transformOriginsToFilterDimensions(raw);
       expect(result).to.have.length(1);
       expect(result[0].id).to.equal('source__organic');
+    });
+
+    // Both spellings read the same way; parent_id is rebuilt from whichever
+    // prefix matched. The tolerance drops to `origin__` alone once no live
+    // project carries the pre-rename `source__` authorship spelling.
+    [LEGACY_ORIGIN_ROOT_NAME, ORIGIN_ROOT_NAME].forEach((root) => {
+      it(`adds parent_id/parent_label under the \`${root}\` root`, () => {
+        const raw = { blocks: { value: [{ value: `${root}__Team__ai` }] } };
+        const [item] = transformOriginsToFilterDimensions(raw);
+        expect(item).to.deep.equal({
+          id: `${root}__Team__ai`,
+          label: 'ai',
+          parent_id: `${root}__Team`,
+          parent_label: 'Team',
+        });
+      });
+    });
+
+    // LLMO-7000: the authorship root was renamed `source` -> `origin`, so real
+    // authorship values now arrive as `origin__ai` / `origin__human`. They must
+    // land in `origins`, not leak through the catch-all as a stray `origin` group
+    // (see transformOtherTagsForFilterDimensions).
+    it('reads the renamed `origin` root, keeping the prefix in id and stripping it from label', () => {
+      const raw = {
+        blocks: {
+          value: [
+            { value: `${ORIGIN_ROOT_NAME}__ai` },
+            { value: `${ORIGIN_ROOT_NAME}__human` },
+          ],
+        },
+      };
+      expect(transformOriginsToFilterDimensions(raw)).to.deep.equal([
+        { id: `${ORIGIN_ROOT_NAME}__ai`, label: 'ai' },
+        { id: `${ORIGIN_ROOT_NAME}__human`, label: 'human' },
+      ]);
+    });
+
+    // A reshaped project carries authorship under `origin__` and producing-system
+    // values under `source__`; both surface here while the `source__` tolerance
+    // stands — they cannot be told apart at the prefix. `origin__` is read first,
+    // matching the ORIGIN_ROOT_NAMES order.
+    it('reads renamed authorship and pre-rename/producing-system source together', () => {
+      const raw = {
+        blocks: {
+          value: [
+            { value: `${ORIGIN_ROOT_NAME}__ai` },
+            { value: `${ORIGIN_ROOT_NAME}__human` },
+            { value: 'source__config' },
+          ],
+        },
+      };
+      expect(transformOriginsToFilterDimensions(raw)).to.deep.equal([
+        { id: `${ORIGIN_ROOT_NAME}__ai`, label: 'ai' },
+        { id: `${ORIGIN_ROOT_NAME}__human`, label: 'human' },
+        { id: 'source__config', label: 'config' },
+      ]);
+    });
+
+    it('does not double-count: the legacy prefix does not also match a renamed tag', () => {
+      const raw = { blocks: { value: [{ value: `${ORIGIN_ROOT_NAME}__ai` }] } };
+      expect(transformOriginsToFilterDimensions(raw)).to.have.length(1);
     });
   });
 
@@ -379,13 +457,70 @@ describe('topics definitions', () => {
       expect(transformOtherTagsForFilterDimensions(null)).to.deep.equal({ tags: [] });
     });
 
-    it('excludes known-prefixed entries (topic/category/intent/source)', () => {
+    it('excludes known-prefixed entries (topic/category/intent/origin/source)', () => {
       const result = transformOtherTagsForFilterDimensions(RAW_MIXED);
       expect(result).to.not.have.property('topic');
       expect(result).to.not.have.property('category');
-      expect(result).to.not.have.property('intent');
+      // RAW_MIXED spells intent the renamed way, so this is the assertion that
+      // carries weight here; the bare spelling is covered by its own test below.
+      expect(result).to.not.have.property(INTENT_ROOT_NAME);
+      expect(result).to.not.have.property('origin');
       expect(result).to.not.have.property('source');
       expect(result.tags).to.deep.equal([]);
+    });
+
+    it('drops anything carrying the hidden-tag marker, not just the known intent root', () => {
+      // The marker is the exposure control: Semrush hides a marked root from the
+      // customer-facing filter, so a marked family must never reach this payload.
+      // A second marked root Semrush adds later must be dropped without a code
+      // change here, which is why the filter keys on the marker and not on the
+      // known-prefix list.
+      const result = transformOtherTagsForFilterDimensions({
+        blocks: { value: [{ value: '$abv_tags$somethingnew__Value' }] },
+      });
+      expect(result).to.not.have.property('$abv_tags$somethingnew');
+      expect(result.tags).to.deep.equal([]);
+    });
+
+    // The catch-all is what would otherwise expose the rename to customers: an
+    // unrecognised prefix becomes a dynamic group keyed by its raw upstream name,
+    // so a renamed project would grow a `$abv_tags$intent` group in the filter
+    // payload beside an empty `page_intents`.
+    it('claims the renamed intent prefix rather than grouping it under its raw name', () => {
+      const raw = {
+        blocks: {
+          value: [
+            { value: `${INTENT_ROOT_NAME}__Commercial` },
+            { value: INTENT_ROOT_NAME },
+            { value: 'type__branded' },
+          ],
+        },
+      };
+      const result = transformOtherTagsForFilterDimensions(raw);
+      expect(result).to.not.have.property(INTENT_ROOT_NAME);
+      expect(result.tags).to.deep.equal([]);
+      // An genuinely unknown prefix still surfaces — the catch-all keeps working.
+      expect(result.type).to.deep.equal([{ id: 'type__branded', label: 'branded' }]);
+    });
+
+    // LLMO-7000: the renamed origin prefix must be claimed by `origins`, not
+    // grouped under its raw `origin` name in the catch-all — the customer-visible
+    // half of the defect (real authorship options vanishing from the Origin
+    // dropdown, resurfacing as a stray dynamic group).
+    it('claims the renamed origin prefix rather than grouping it under its raw name', () => {
+      const raw = {
+        blocks: {
+          value: [
+            { value: `${ORIGIN_ROOT_NAME}__ai` },
+            { value: ORIGIN_ROOT_NAME },
+            { value: 'type__branded' },
+          ],
+        },
+      };
+      const result = transformOtherTagsForFilterDimensions(raw);
+      expect(result).to.not.have.property(ORIGIN_ROOT_NAME);
+      expect(result.tags).to.deep.equal([]);
+      expect(result.type).to.deep.equal([{ id: 'type__branded', label: 'branded' }]);
     });
 
     it('groups unknown prefix__value tags by their prefix', () => {

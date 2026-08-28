@@ -263,6 +263,8 @@ describe('Hooks Controller', () => {
         getDeliveryType: () => 'aem_edge',
         getHlxConfig: () => ({}),
         setHlxConfig: () => {},
+        getCode: () => null,
+        setCode: () => {},
         save() {},
       });
 
@@ -280,6 +282,8 @@ describe('Hooks Controller', () => {
         getDeliveryType: () => 'aem_edge',
         getHlxConfig: () => ({}),
         setHlxConfig: sinon.stub(),
+        getCode: sinon.stub().returns(null),
+        setCode: sinon.stub(),
         save: sinon.stub(),
       };
       context.dataAccess.Site.findByBaseURL.resolves(site);
@@ -337,6 +341,8 @@ describe('Hooks Controller', () => {
           },
         }),
         setHlxConfig: sinon.stub(),
+        getCode: sinon.stub().returns(null),
+        setCode: sinon.stub(),
         save: sinon.stub(),
       };
       context.dataAccess.Site.findByBaseURL.resolves(site);
@@ -392,6 +398,8 @@ describe('Hooks Controller', () => {
           },
         }),
         setHlxConfig: sinon.stub(),
+        getCode: sinon.stub().returns(null),
+        setCode: sinon.stub(),
         save: sinon.stub(),
       };
       context.dataAccess.Site.findByBaseURL.resolves(site);
@@ -462,6 +470,8 @@ describe('Hooks Controller', () => {
           },
         }),
         setHlxConfig: sinon.stub(),
+        getCode: sinon.stub().returns(null),
+        setCode: sinon.stub(),
         save: sinon.stub(),
       };
       context.dataAccess.Site.findByBaseURL.resolves(site);
@@ -473,9 +483,54 @@ describe('Hooks Controller', () => {
       const resp = await (await hooksController.processCDNHook(context)).json();
       expect(resp).to.equal('CDN site candidate disregarded');
       expect(site.setHlxConfig).to.have.been.calledWithExactly(expectedConfig);
+      // top-level code is backfilled from the resolved hlxConfig (rso.site -> repo)
+      expect(site.setCode).to.have.been.calledWithExactly({
+        type: 'github',
+        owner: 'some-owner',
+        repo: 'some-site',
+        ref: 'main',
+        url: 'https://github.com/some-owner/some-site',
+      });
       expect(site.save).to.have.been.calledOnce;
       expect(context.log.info).to.have.been.calledWith('HLX config updated for existing site: *<https://some-domain.com|https://some-domain.com>*, _HLX Version_: *5*, _Dev URL_: `https://main--some-site--some-owner.aem.live`');
       expect(context.log.info).to.have.been.calledWith('Could not process site candidate. Reason: Site candidate already exists in sites db, Source: CDN, Candidate: https://some-domain.com');
+    });
+
+    it('does not backfill top-level code when the existing site already has one', async () => {
+      context.dataAccess.SiteCandidate.findByBaseURL.resolves(null);
+      context.data = {
+        hlxVersion: 5,
+        requestXForwardedHost: 'some-domain.com, main--some-site--some-owner.hlx.live',
+      };
+
+      const hlxConfig = {
+        cdn: { prod: { host: 'some-domain.com' } },
+        code: {},
+        hlxVersion: 5,
+      };
+
+      nock('https://admin.hlx.page')
+        .get('/config/some-owner/aggregated/some-site.json')
+        .reply(200, hlxConfig);
+
+      const site = {
+        getBaseURL: () => 'https://some-domain.com',
+        getIsLive: () => true,
+        getDeliveryType: () => 'aem_edge',
+        getHlxConfig: () => ({ hlxVersion: 5, rso: {} }),
+        setHlxConfig: sinon.stub(),
+        getCode: sinon.stub().returns({
+          type: 'github', owner: 'existing', repo: 'existing', ref: 'main', url: 'https://github.com/existing/existing',
+        }),
+        setCode: sinon.stub(),
+        save: sinon.stub(),
+      };
+      context.dataAccess.Site.findByBaseURL.resolves(site);
+
+      await (await hooksController.processCDNHook(context)).json();
+
+      expect(site.setHlxConfig).to.have.been.calledOnce;
+      expect(site.setCode).to.not.have.been.called;
     });
 
     it('only hlx config keys from site candidate are updated when different from site', async () => {
@@ -533,6 +588,8 @@ describe('Hooks Controller', () => {
           },
         }),
         setHlxConfig: sinon.stub(),
+        getCode: sinon.stub().returns(null),
+        setCode: sinon.stub(),
         save: sinon.stub(),
       };
       context.dataAccess.Site.findByBaseURL.resolves(site);
