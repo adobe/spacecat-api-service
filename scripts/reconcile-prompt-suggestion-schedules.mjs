@@ -102,21 +102,23 @@ const { values } = parseArgs({
   },
 });
 
-function parseNumericOption(flag, raw, fallback) {
+function parseNumericOption(flag, raw, fallback, min) {
   if (raw === undefined) {
     return fallback;
   }
   const n = Number(raw);
-  if (Number.isNaN(n)) {
-    console.error(`ERROR: ${flag} must be a number, got "${raw}"`);
+  if (Number.isNaN(n) || n < min) {
+    console.error(`ERROR: ${flag} must be a number >= ${min}, got "${raw}"`);
     exit(1);
   }
   return n;
 }
 
 const { execute } = values;
-const pageSize = parseNumericOption('--page-size', values['page-size'], DEFAULT_PAGE_SIZE);
-const rateLimitMs = parseNumericOption('--rate-limit-ms', values['rate-limit-ms'], DEFAULT_RATE_LIMIT_MS);
+// page-size must be positive (a paginated query with a non-positive limit is nonsensical);
+// rate-limit-ms may be 0 (an operator deliberately choosing no throttle), but not negative.
+const pageSize = parseNumericOption('--page-size', values['page-size'], DEFAULT_PAGE_SIZE, 1);
+const rateLimitMs = parseNumericOption('--rate-limit-ms', values['rate-limit-ms'], DEFAULT_RATE_LIMIT_MS, 0);
 const siteIdFilter = values['site-id']
   ? new Set(values['site-id'].split(',').map((s) => s.trim()).filter(Boolean))
   : null;
@@ -166,14 +168,25 @@ async function fetchExistingProviderIds(siteId) {
   const base = env.DRS_API_URL.replace(/\/+$/, '');
   const response = await fetch(`${base}/schedules?site_id=${siteId}`, {
     headers: { 'x-api-key': env.DRS_API_KEY },
+    signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) {
-    const body = await response.text();
+    // Truncated: this is an ops script whose output an operator is likely to paste into a
+    // ticket or Slack thread, so an unexpectedly verbose DRS error body should not ride along
+    // unbounded.
+    const body = (await response.text()).slice(0, 500);
     throw new Error(`DRS GET /schedules?site_id=${siteId} failed: ${response.status} - ${body}`);
   }
   const { schedules } = await response.json();
+  // Fail loudly on an unexpected response shape rather than silently treating it as "no
+  // schedules exist" — that would make a dry run under-report and an --execute run blindly
+  // re-create schedules that already exist (harmless per createSchedule's own idempotency, but
+  // it would silently defeat the whole point of reading first).
+  if (!Array.isArray(schedules)) {
+    throw new Error(`DRS GET /schedules?site_id=${siteId} returned an unexpected shape (schedules is not an array)`);
+  }
   const existing = new Set();
-  for (const schedule of schedules ?? []) {
+  for (const schedule of schedules) {
     for (const providerId of schedule.provider_ids ?? []) {
       existing.add(providerId);
     }
@@ -194,19 +207,29 @@ const totals = {
   failures: 0,
 };
 const semrushProvisioningIncomplete = [];
+// Per-site failure detail, so a run summary can point at exactly which sites need a targeted
+// --site-id retry instead of only reporting a bare count.
+const failedSites = [];
+// Heartbeat cadence for a long fleet-wide sweep: sites with nothing to report (the expected
+// steady-state majority once the backfill converges) otherwise produce zero log output, making
+// a live run indistinguishable from a hung one over a long stretch.
+const HEARTBEAT_EVERY = 100;
 
 /**
  * Reconciles one site: resolves its active Brand-V2 brand (if any), reads DRS's current
  * schedule state, and — in --execute mode — creates whichever of the three prompt-suggestion
- * pipelines are missing. Mutates `totals` / `semrushProvisioningIncomplete` directly; every
- * exit path (early return or the catch) runs through here, which is what lets the caller apply
- * `rateLimitMs` uniformly after every site that actually made a DB/DRS call.
+ * pipelines are missing. Mutates `totals` / `semrushProvisioningIncomplete` / `failedSites`
+ * directly; every exit path (early return or the catch) runs through here, which is what lets
+ * the caller apply `rateLimitMs` uniformly after every site that actually made a DB/DRS call.
  * @param {object} site - SpaceCat Site model instance.
  * @returns {Promise<void>}
  */
 async function reconcileSite(site) {
   const siteId = site.getId();
   totals.sitesScanned += 1;
+  if (totals.sitesScanned % HEARTBEAT_EVERY === 0) {
+    log.info(`... progress: ${totals.sitesScanned} sites scanned so far`);
+  }
   const organizationId = site.getOrganizationId();
 
   try {
@@ -249,17 +272,26 @@ async function reconcileSite(site) {
           }
         } catch (scheduleError) {
           totals.failures += 1;
-          log.error(`site=${siteId} providerId=${providerId} FAILED to create schedule: ${scheduleError.message}`);
+          failedSites.push({ siteId, stage: `schedule:${providerId}`, message: scheduleError.message });
+          log.error(`site=${siteId} providerId=${providerId} FAILED to create schedule: ${scheduleError.message}`, scheduleError);
         }
       }
     }
   } catch (siteError) {
     totals.failures += 1;
-    log.error(`site=${siteId} FAILED: ${siteError.message}`);
+    failedSites.push({ siteId, stage: 'reconcile', message: siteError.message });
+    log.error(`site=${siteId} FAILED: ${siteError.message}`, siteError);
   }
 }
 
 log.info(`Reconciling PAID LLMO sites' prompt-suggestion schedules${execute ? '' : ' (DRY RUN — no writes)'}`);
+
+// --site-id pushes the filter into the query itself (rather than paginating the whole fleet and
+// discarding non-matching rows client-side) so the documented "verify one site before a
+// fleet-wide --execute run" workflow is actually cheap.
+const siteQueryOptions = siteIdFilter
+  ? { where: (attrs, op) => op.in(attrs.siteId, [...siteIdFilter]) }
+  : {};
 
 let cursor;
 let paginationFailed = false;
@@ -269,7 +301,18 @@ do {
     // eslint-disable-next-line no-await-in-loop
     page = await dataAccess.Site.allByEnrollmentFiltered(
       { tier: 'PAID', productCode: 'LLMO' },
-      { limit: pageSize, cursor, returnCursor: true },
+      {
+        limit: pageSize,
+        cursor,
+        returnCursor: true,
+        // The default sort (updatedAt desc) is a volatile column: a write to any PAID site's
+        // updatedAt between this call and the next page's call can shift row order across the
+        // page boundary and silently skip a site for this run. Sorting by the immutable site id
+        // instead makes traversal order (and therefore full-fleet coverage) independent of
+        // concurrent writes elsewhere in the fleet.
+        orderBy: { attribute: 'siteId', direction: 'asc' },
+        ...siteQueryOptions,
+      },
     );
   } catch (pageError) {
     // A page-listing failure (e.g. a transient network blip) is NOT a per-site failure — there
@@ -277,16 +320,12 @@ do {
     // on the same failing page or silently skipping the rest of the fleet.
     totals.failures += 1;
     paginationFailed = true;
-    log.error(`FAILED to list PAID LLMO sites (cursor=${cursor ?? '<start>'}): ${pageError.message}`);
+    log.error(`FAILED to list PAID LLMO sites (cursor=${cursor ?? '<start>'}): ${pageError.message}`, pageError);
     break;
   }
   const sites = page.data ?? [];
 
   for (const site of sites) {
-    if (siteIdFilter && !siteIdFilter.has(site.getId())) {
-      // eslint-disable-next-line no-continue
-      continue;
-    }
     // eslint-disable-next-line no-await-in-loop
     await reconcileSite(site);
     // eslint-disable-next-line no-await-in-loop
@@ -306,7 +345,15 @@ if (execute) {
   log.info(`schedules created: ${totals.schedulesCreated}, already existed (race): ${totals.schedulesAlreadyExisted}`);
 }
 if (totals.failures > 0) {
+  // totals.failures can exceed failedSites.length by one when the sweep also hit the
+  // page-listing failure above (a fleet-level, not per-site, failure).
   log.error(`failures: ${totals.failures}`);
+}
+if (failedSites.length > 0) {
+  log.error(`${failedSites.length} site-level failure(s) — retarget these specifically via --site-id for a retry:`);
+  for (const { siteId, stage, message } of failedSites) {
+    log.error(`  site=${siteId} stage=${stage}: ${message}`);
+  }
 }
 if (semrushProvisioningIncomplete.length > 0) {
   log.warn(`${semrushProvisioningIncomplete.length} active brand(s) have no Semrush (sub-)workspace provisioned — reported here, NOT bypassed with a DRS Brand Presence schedule. Needs separate Semrush-provisioning triage:`);
