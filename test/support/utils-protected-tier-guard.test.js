@@ -87,6 +87,7 @@ describe('onboardSingleSite — protected-tier preservation (SITES-49886)', func
     const tierCreateForSiteStub = sandbox.stub().resolves({
       createEntitlement: createEntitlementStub,
     });
+    const notifyForcedTierDowngradeStub = sandbox.stub().resolves();
     const { onboardSingleSite } = await esmock('../../src/support/utils.js', {
       '@aws-sdk/client-sfn': {
         // eslint-disable-next-line func-style
@@ -118,9 +119,16 @@ describe('onboardSingleSite — protected-tier preservation (SITES-49886)', func
       '../../src/support/rum-config-service.js': {
         updateRumConfig: sandbox.stub().resolves(true),
       },
+      '../../src/support/slack/tier-change-alert.js': {
+        notifyForcedTierDowngrade: notifyForcedTierDowngradeStub,
+      },
     });
     return {
-      onboardSingleSite, sfnSendStub, tierCreateForSiteStub, createEntitlementStub,
+      onboardSingleSite,
+      sfnSendStub,
+      tierCreateForSiteStub,
+      createEntitlementStub,
+      notifyForcedTierDowngradeStub,
     };
   };
 
@@ -241,5 +249,78 @@ describe('onboardSingleSite — protected-tier preservation (SITES-49886)', func
     expect(tierCreateForSiteStub).to.have.been.calledOnce;
     expect(configurationFindLatest).to.have.been.calledOnce;
     expect(result.status).to.equal('Success');
+  });
+
+  /**
+   * SITES-50179: whenever the Force Tier Update escape hatch actually downgrades a PLG/PRE_ONBOARD
+   * org to FREE_TRIAL, the team must get a Slack alert so every deliberate override is visible
+   * without manual auditing. The alert is fire-and-forget (see tier-change-alert.js) — these tests
+   * only assert the wiring: it fires on that exact transition and stays silent otherwise.
+   */
+  describe('force-downgrade alert (SITES-50179)', () => {
+    ['PLG', 'PRE_ONBOARD'].forEach((protectedTier) => {
+      it(`alerts the team when forceTierUpdate downgrades ${protectedTier} → FREE_TRIAL`, async () => {
+        const { onboardSingleSite, notifyForcedTierDowngradeStub } = await loadOnboard();
+        const site = makeHappyPathSite();
+        const { context } = makeContext(site, { getTier: () => protectedTier });
+
+        await run(onboardSingleSite, context, { forceTierUpdate: true });
+
+        expect(notifyForcedTierDowngradeStub).to.have.been.calledOnce;
+        const [payload, env] = notifyForcedTierDowngradeStub.firstCall.args;
+        expect(payload).to.include({
+          fromTier: protectedTier,
+          toTier: 'FREE_TRIAL',
+          baseURL: SITE_URL,
+          siteId: 'site-happy',
+          entitlementId: 'ent-test',
+        });
+        // Source thread is threaded through so the team can see who forced it.
+        expect(payload.sourceChannelId).to.equal('C1');
+        expect(payload.sourceThreadTs).to.equal('1.0');
+        // env is forwarded so the helper can resolve the PLG channel + bot token.
+        expect(env).to.equal(context.env);
+      });
+    });
+
+    it('does NOT alert when the protected tier is preserved (no forceTierUpdate)', async () => {
+      const { onboardSingleSite, notifyForcedTierDowngradeStub } = await loadOnboard();
+      const site = makeHappyPathSite();
+      const { context } = makeContext(site, { getTier: () => 'PLG' });
+
+      await run(onboardSingleSite, context);
+
+      expect(notifyForcedTierDowngradeStub).to.not.have.been.called;
+    });
+
+    it('does NOT alert when the org has no existing ASO entitlement', async () => {
+      const { onboardSingleSite, notifyForcedTierDowngradeStub } = await loadOnboard();
+      const site = makeHappyPathSite();
+      const { context } = makeContext(site, null);
+
+      await run(onboardSingleSite, context, { forceTierUpdate: true });
+
+      expect(notifyForcedTierDowngradeStub).to.not.have.been.called;
+    });
+
+    it('does NOT alert when the existing tier is FREE_TRIAL (not a protected downgrade)', async () => {
+      const { onboardSingleSite, notifyForcedTierDowngradeStub } = await loadOnboard();
+      const site = makeHappyPathSite();
+      const { context } = makeContext(site, { getTier: () => 'FREE_TRIAL' });
+
+      await run(onboardSingleSite, context, { forceTierUpdate: true });
+
+      expect(notifyForcedTierDowngradeStub).to.not.have.been.called;
+    });
+
+    it('does NOT alert when forceTierUpdate targets a non-FREE_TRIAL tier (e.g. PAID upgrade)', async () => {
+      const { onboardSingleSite, notifyForcedTierDowngradeStub } = await loadOnboard();
+      const site = makeHappyPathSite();
+      const { context } = makeContext(site, { getTier: () => 'PLG' });
+
+      await run(onboardSingleSite, context, { forceTierUpdate: true, tier: 'PAID' });
+
+      expect(notifyForcedTierDowngradeStub).to.not.have.been.called;
+    });
   });
 });

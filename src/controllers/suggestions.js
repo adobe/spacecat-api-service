@@ -65,8 +65,12 @@ import {
 } from '../support/utils.js';
 import AccessControlUtil, { X_PRODUCT_HEADER } from '../support/access-control-util.js';
 import { redactFeedbackContent } from '../support/feedback-redaction.js';
+import { filterOpportunitiesByFacsComposite } from '../support/facs-composite-resolvers.js';
 import { CAP_FIX_ENTITY_CREATE, CAP_SUGGESTION_WRITE } from '../routes/capability-constants.js';
-import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
+import {
+  grantSuggestionsForOpportunity,
+  revokeGrantsForSuggestions,
+} from '../support/grant-suggestions-handler.js';
 import { postSlackMessage } from '../utils/slack/base.js';
 import { createAtomicStrategy, deleteAtomicStrategy } from '../support/atomic-strategy-helper.js';
 
@@ -1731,6 +1735,12 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     try {
+      await revokeGrantsForSuggestions(SuggestionGrant, [suggestionId]);
+    } catch (revokeError) {
+      context.log.warn(`Failed to revoke grants for suggestion ${suggestionId}`, revokeError?.message ?? revokeError);
+    }
+
+    try {
       await suggestion.remove();
       return noContent();
     } catch (e) {
@@ -2473,7 +2483,14 @@ function SuggestionsController(ctx, sqs, env) {
     // 1. All opportunities for the site (single query, auto-paginated). Keep the stable
     //    Tokowaka set: non-prerender AND tagged `isElmo` — the same filter the UI applied
     //    before per-opportunity type gating (which remains client-side).
-    const opportunities = await Opportunity.allBySiteId(siteId);
+    // ReBAC composite scope (D4): narrow to the caller's permitted opportunity
+    // types before exposing edge-deployed URLs (which surface the opportunity
+    // type per URL), so a type-scoped caller cannot see other types. No-op for
+    // site-wide / non-FACS / admin callers.
+    const opportunities = filterOpportunitiesByFacsComposite(
+      context,
+      await Opportunity.allBySiteId(siteId),
+    );
     const opptyTypeById = new Map();
     for (const oppty of opportunities) {
       if (oppty.getType() === 'prerender') {

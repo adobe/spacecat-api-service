@@ -30,9 +30,11 @@ import { OpportunityDto } from '../dto/opportunity.js';
 import { isValidLocale } from '../utils/validations.js';
 import { applyFieldProjection } from '../utils/field-projection.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { filterOpportunitiesByFacsComposite } from '../support/facs-composite-resolvers.js';
 import {
   grantSuggestionsForOpportunity,
   revokeExistingGrants,
+  revokeGrantsForOpportunity,
 } from '../support/grant-suggestions-handler.js';
 import { getIsSummitPlgEnabled } from '../support/utils.js';
 
@@ -121,7 +123,9 @@ function OpportunitiesController(ctx) {
     }
 
     const allOpptys = await Opportunity.allBySiteId(siteId);
-    const opptys = (await filterForSummitPlg(site, allOpptys, context))
+    const summitFiltered = await filterForSummitPlg(site, allOpptys, context);
+    // D4: narrow to the caller's ReBAC-permitted opportunity types (composite key).
+    const opptys = filterOpportunitiesByFacsComposite(context, summitFiltered)
       .map((oppty) => OpportunityDto.toJSON(oppty, locale));
 
     const { list, error } = applyFieldProjection(opptys, context.data?.fields);
@@ -161,7 +165,9 @@ function OpportunitiesController(ctx) {
     }
 
     const allOpptys = await Opportunity.allBySiteIdAndStatus(siteId, status);
-    const opptys = (await filterForSummitPlg(site, allOpptys, context))
+    const summitFiltered = await filterForSummitPlg(site, allOpptys, context);
+    // D4: narrow to the caller's ReBAC-permitted opportunity types (composite key).
+    const opptys = filterOpportunitiesByFacsComposite(context, summitFiltered)
       .map((oppty) => OpportunityDto.toJSON(oppty, locale));
 
     const { list, error } = applyFieldProjection(opptys, context.data?.fields);
@@ -375,6 +381,12 @@ function OpportunitiesController(ctx) {
     const opportunity = await Opportunity.findById(opportunityId);
     if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound('Opportunity not found');
+    }
+
+    try {
+      await revokeGrantsForOpportunity(dataAccess, opportunity);
+    } catch (revokeError) {
+      ctx.log?.warn?.(`Failed to revoke grants for opportunity ${opportunityId} on site ${siteId}`, revokeError?.message ?? revokeError);
     }
 
     try {

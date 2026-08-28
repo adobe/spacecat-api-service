@@ -51,6 +51,7 @@ import {
   resolveBrandUuid,
   findPromptsBlockingRegionRemoval,
   deriveV2PromptOrigin,
+  isServicePrincipal,
 } from '../support/prompts-storage.js';
 import {
   listBrands,
@@ -70,7 +71,10 @@ import { isFacsRebacResource } from '../routes/facs-capabilities.js';
 import { provisionBrandSubworkspace, provisionBrandSubworkspaceBare, emptyProvisionedWorkspace } from '../support/serenity/brand-provisioning.js';
 import { computeWriteDeadline } from '../support/serenity/intent-classification.js';
 import { ensureMarketSite } from '../support/serenity/site-linkage.js';
-import { upsertMappingRow, linkSiteToLiveRows } from '../support/serenity/mapping-rows.js';
+import {
+  upsertMappingRow, linkSiteToLiveRows, projectsForSite, relinkSiteForRows,
+} from '../support/serenity/mapping-rows.js';
+import { propagateSiteUrlToSemrush } from '../support/serenity/site-url-propagation.js';
 import { createSerenityTransport } from '../support/serenity/rest-transport.js';
 import { isSemrushTransportError, unwrapTransportCause } from '../support/serenity/errors.js';
 import { logUpstreamError } from '../support/serenity/upstream-log.js';
@@ -710,23 +714,17 @@ function BrandsController(ctx, log, env) {
       }
 
       // `origin` is derived from the request PRINCIPAL, never trusted from the
-      // body (origin-dimension.md §3): a user (IMS/JWT) write is `human`, body
-      // ignored; a service principal (e.g. DRS via admin x-api-key, whose auth
-      // type is neither `ims` nor `jwt`) is believed. The auth type is read from
-      // the per-request context — the same source as `updatedBy` above — so it
-      // reflects the actual caller. Stamp it here so the store writes the derived
-      // value on insert; on update the stored origin is preserved (upsertPrompts)
-      // and never patched (updatePromptById).
+      // body (origin-dimension.md §3): an end-user write is `human`, body ignored;
+      // a service principal is believed and its body `origin` honoured. Stamp it
+      // here so the store writes the derived value on insert; on update the stored
+      // origin is preserved (upsertPrompts) and never patched (updatePromptById).
       //
-      // Fail SAFE to the least-privileged (USER) principal: an ABSENT or
-      // indeterminate auth type must NEVER fall through to the privileged service
-      // path that honours a body-supplied `origin`. Only a KNOWN non-user auth
-      // type (jwt/ims are user; anything else, e.g. DRS admin x-api-key, is
-      // service) is trusted as a service principal. `authWrapper` blocks
-      // unauthenticated requests today, but a future unwrapped caller (an internal
-      // queue consumer, re-ordered middleware) must not silently gain service
-      // privilege — hence `!authType → user`, and a non-function `getType` resolves
-      // to `undefined` (→ user) rather than throwing.
+      // `isServicePrincipal` carries the classification (and its fail-safe rules):
+      // crucially, an S2S consumer/admin authenticates with a JWT — same
+      // `authType` as an end-user session — so it is recognised by its S2S claim,
+      // not its auth type. Classifying by auth type alone forced DRS's generated
+      // prompts (posted `origin: 'ai'` over an S2S JWT) to `human`, since the
+      // x-api-key service path DRS used to take was removed (SITES-34224).
       //
       // `source` (the producing system) has NO write surface (source-dimension.md
       // §1 item 6): a caller-supplied `source` is ignored, so a v2 create becomes
@@ -736,8 +734,7 @@ function BrandsController(ctx, log, env) {
       // it. `updatePromptById` likewise never patches source (producer is fixed at
       // creation).
       const { authInfo } = context.attributes ?? {};
-      const authType = typeof authInfo?.getType === 'function' ? authInfo.getType() : undefined;
-      const isUserPrincipal = !authType || authType === 'jwt' || authType === 'ims';
+      const isUserPrincipal = !isServicePrincipal(authInfo);
       const derivedPrompts = prompts.map(({ source: _, ...p }) => ({
         ...p,
         origin: deriveV2PromptOrigin(p?.origin, isUserPrincipal),
@@ -2211,6 +2208,105 @@ function BrandsController(ctx, log, env) {
       // exception.
       const serenityScopes = await readSerenityFlagScopes(spaceCatId, postgrestClient);
 
+      // serenity-docs#349 (re-point): a user picks an EXISTING onboarded Site in the
+      // org to become this brand's primary site. This replaces the earlier free-text
+      // baseURL-rename flow — the frontend now sends `{ baseSiteId }` here rather than
+      // calling PATCH /sites with a new baseURL. Validation + Semrush propagation run
+      // BEFORE the row is persisted, so a rejected target or a Semrush failure fails
+      // the whole re-point rather than leaving SpaceCat ahead of Semrush.
+      // Hoisted out of the `hasText(updates.baseSiteId)` block below so the
+      // post-write verification (right before the `return ok(updated)`) can tell
+      // a genuine re-point request apart from a same-site no-op resubmit or a
+      // plain field edit that never touched baseSiteId at all.
+      let repointOldSiteId = null;
+      let repointRequested = false;
+      if (hasText(updates.baseSiteId)) {
+        const current = await getBrandById(spaceCatId, brandUuid, postgrestClient);
+        const oldSiteId = current?.baseSiteId || null;
+        repointOldSiteId = oldSiteId;
+        // Only act on an actual change; re-submitting the same site is a no-op that
+        // falls through to the normal update below.
+        if (current && updates.baseSiteId !== oldSiteId) {
+          repointRequested = true;
+          // Resolve the target by id ALONE — do NOT filter by org here. A missing or
+          // cross-org target must fall through to updateBrand, whose anchor guard raises
+          // the existing `brand_site_org_mismatch` 409 (brands-storage.js, serenity-docs#346);
+          // filtering by org here would mask that as a generic 404 and regress the contract
+          // (test/it/shared/tests/brands.js). We only layer re-point eligibility + Semrush
+          // propagation onto a target that actually belongs to THIS org.
+          const { data: targetSite, error: targetErr } = await postgrestClient
+            .from('sites')
+            .select('id, base_url, organization_id')
+            .eq('id', updates.baseSiteId)
+            .maybeSingle();
+          if (targetErr) {
+            throw new Error(`Failed to resolve target site: ${targetErr.message}`);
+          }
+
+          if (targetSite && targetSite.organization_id === spaceCatId) {
+            // Eligibility (matches the frontend picker's filter, backend is authority):
+            // the target may not already be the primary site of ANOTHER active brand.
+            // Pending brands don't block; the brand's own current site is the no-op above.
+            const owningBrand = await getBrandBySite(
+              spaceCatId,
+              updates.baseSiteId,
+              postgrestClient,
+              log,
+            );
+            if (owningBrand && owningBrand.id !== brandUuid) {
+              return createResponse({ code: 'siteUrlTaken' }, 409);
+            }
+
+            // Active + Semrush sub-workspace brand: the tracked projects follow the new
+            // site's URL. Read the mapping rows against the OLD site, propagate to Semrush
+            // FIRST (propagate-before-persist), then re-link the rows to the new site.
+            if (current.status === 'active' && hasText(current.semrushSubWorkspaceId)) {
+              const rows = await projectsForSite(context.dataAccess, brandUuid, oldSiteId);
+              try {
+                await propagateSiteUrlToSemrush({
+                  dataAccess: context.dataAccess,
+                  transport: createSerenityTransport({
+                    env: context.env,
+                    imsToken: await resolveSemrushImsToken(context, log, 'brands'),
+                  }),
+                  workspaceId: current.semrushSubWorkspaceId,
+                  brandId: brandUuid,
+                  siteId: oldSiteId,
+                  brandIdentity: { name: current.name, aliases: current.brandAliases },
+                  newBaseURL: targetSite.base_url,
+                  log,
+                  rows,
+                });
+              } catch (propagationError) {
+                const err = /** @type {{status?: number, message?: string, code?: string}} */ (
+                  unwrapTransportCause(propagationError)
+                );
+                log.error('updateBrand: Semrush URL propagation failed on primary-site re-point', {
+                  brandId,
+                  oldSiteId,
+                  newSiteId: updates.baseSiteId,
+                  status: err?.status,
+                  error: err?.message,
+                });
+                if (isSemrushTransportError(err)) {
+                  // Never echo an upstream message (embeds the gateway host + workspace/
+                  // project UUIDs) — mirrors the sites.js #349 error hygiene.
+                  return createResponse({ message: 'Failed to update the tracked URL in Semrush' }, 502);
+                }
+                const status = err?.status || 500;
+                // toQuotaExceededError() sets status=409, code='quotaExceeded' — passes through.
+                return createResponse({
+                  message: status === 500 ? 'Failed to update the tracked URL in Semrush' : err.message,
+                  ...(err?.code ? { code: err.code } : {}),
+                }, status);
+              }
+              // Semrush is now ahead of SpaceCat — safe to move the SpaceCat-side links.
+              await relinkSiteForRows(context.dataAccess, rows, updates.baseSiteId, log);
+            }
+          }
+        }
+      }
+
       const updatedRow = await updateBrand({
         organizationId: spaceCatId,
         brandId: brandUuid,
@@ -2222,6 +2318,34 @@ function BrandsController(ctx, log, env) {
       if (!updatedRow) {
         return notFound(`Brand not found: ${brandId}`);
       }
+
+      // serenity-docs#349 hardening: a re-point that was actually eligible (passed
+      // the siteUrlTaken/Semrush gates above and reached updateBrand) must land.
+      // Live e2e testing surfaced a silent-no-op shape where updateBrand/its
+      // final re-read reported success (200, no thrown error) yet the returned
+      // row still carried the OLD baseSiteId — most consistent with a stale read
+      // on the post-write re-fetch rather than anything in this repo's write-path
+      // logic (which this handler's own unit + IT coverage exercises directly and
+      // finds correct, including when the target is already one of the brand's
+      // OWN secondary siteIds). Rather than let that stale read silently masquerade
+      // as a successful re-point, treat the mismatch as a hard failure: log full
+      // context for on-call and surface a typed 500 the caller can retry, instead
+      // of a 200 that lies about what was persisted.
+      if (repointRequested && updatedRow.baseSiteId !== updates.baseSiteId) {
+        log.error('brands: re-point did not persist — updateBrand returned a row still '
+          + 'carrying the old baseSiteId (possible stale read on the post-write re-fetch)', {
+          brandId,
+          organizationId: spaceCatId,
+          oldSiteId: repointOldSiteId,
+          requestedSiteId: updates.baseSiteId,
+          returnedSiteId: updatedRow.baseSiteId,
+        });
+        return createResponse({
+          message: 'The primary site could not be verified as updated. Please retry.',
+          code: 'brand_repoint_not_persisted',
+        }, 500);
+      }
+
       const updated = withSerenityState(updatedRow, serenityScopes);
 
       if (beforeForWipeCheck) {

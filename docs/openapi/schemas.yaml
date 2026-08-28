@@ -6813,11 +6813,14 @@ V2PromptInput:
       default: human
       description: >-
         Who authored the prompt's text. SERVICE-PRINCIPAL-ONLY and read-only for
-        end users: a user-authenticated request (IMS/JWT) has this field IGNORED
+        end users: an end-user request (IMS/JWT session) has this field IGNORED
         (never rejected) and the value derived as `human`; only a service
-        principal (e.g. the generation pipeline) may assert it, validated against
-        the enum. It is never patched on update — it is fixed by the writer that
-        created the row (origin-dimension.md §3).
+        principal may assert it, validated against the enum. A service principal
+        is an S2S consumer/admin or a scoped/legacy API key — e.g. the DRS
+        generation pipeline, which posts `origin: ai`. Note an S2S caller
+        authenticates with a JWT, so the principal is resolved from the token's
+        S2S claims, not the auth type alone. It is never patched on update — it is
+        fixed by the writer that created the row (origin-dimension.md §3).
     intent:
       type: string
       description: >-
@@ -12029,7 +12032,20 @@ SerenityCreatePromptsRequest:
         carries `published: false`). Used for chunked CSV imports, where the
         client posts several chunks and issues a single publish after the last
         one (serenity-docs#32). Omitted/false publishes once at the end of the
-        call as usual.
+        call as usual. This is a SYNCHRONOUS-path hint only and does NOT trigger
+        async processing — use `async` for that.
+    async:
+      type: boolean
+      default: false
+      description: >
+        When true, the request is processed ASYNCHRONOUSLY: instead of
+        classifying + creating + publishing inline, the whole write is enqueued
+        to a background job and the endpoint returns 202 with a job id to poll
+        via `GET .../serenity/prompts/jobs/{jobId}` (serenity-docs#33).
+        Deliberately distinct from `deferPublish` (a synchronous publish-batching
+        hint) so that the synchronous CSV-chunking client — which sets
+        `deferPublish` on every non-final chunk — is never routed to async
+        unexpectedly. Omitted/false processes synchronously as usual.
 
 SerenityCreatePromptsResponse:
   type: object
@@ -12064,6 +12080,53 @@ SerenityCreatePromptsResponse:
         unless the request set `deferPublish: true`, in which case the prompts
         were written as drafts and the caller must publish separately
         (serenity-docs#32).
+
+SerenityPromptsJobAccepted:
+  type: object
+  description: |
+    202 body for an async prompt-create (`async: true`). The write runs
+    asynchronously on the job runner; poll `jobId` at
+    `GET .../serenity/prompts/jobs/{jobId}`.
+  required: [jobId, status]
+  properties:
+    jobId:
+      type: string
+      format: uuid
+    status:
+      type: string
+      description: The job's initial state (IN_PROGRESS at enqueue time).
+      enum: [IN_PROGRESS, COMPLETED, FAILED]
+
+SerenityPromptsJobStatus:
+  type: object
+  description: |
+    Poll response for an async `serenity-classify-prompts` job. Secret-free by
+    design — the job's internal metadata (promise token etc.) is never exposed.
+  required: [jobId, status]
+  properties:
+    jobId:
+      type: string
+      format: uuid
+    status:
+      type: string
+      enum: [IN_PROGRESS, COMPLETED, FAILED]
+    result:
+      description: >
+        The job result once COMPLETED (the same envelope the synchronous create
+        returns: created/skipped/failed/published, plus
+        pendingClassificationCount/requeuedJobId). Null while IN_PROGRESS or on
+        FAILED.
+      oneOf:
+        - { $ref: '#/SerenityCreatePromptsResponse' }
+        - { type: 'null' }
+    error:
+      description: The failure envelope once FAILED; null otherwise.
+      oneOf:
+        - type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+        - { type: 'null' }
 
 SerenityUpdatePromptRequest:
   type: object
@@ -12647,6 +12710,163 @@ SerenityBrandPresenceSentimentOverview:
             type: array
             description: Stubbed empty (parity with the legacy contract).
             items: { type: object }
+
+SerenityBrandPresenceSubredditRow:
+  type: object
+  description: Per-subreddit Reddit stats for one (subreddit, project).
+  required: [subreddit, subredditKey, mentions, prompts, responsesWithCitations, threads, visibility]
+  properties:
+    subreddit:
+      type: string
+      description: Subreddit display name (with the `r/` prefix).
+      example: 'r/Lovesac'
+    subredditKey:
+      type: string
+      description: Subreddit name without the `r/` prefix.
+      example: 'Lovesac'
+    link:
+      type: string
+      description: Subreddit link/handle as returned by the element.
+      example: 'r/Lovesac'
+    mentions:
+      type: integer
+      example: 4407
+    prompts:
+      type: integer
+      description: Number of prompts whose responses cited this subreddit.
+      example: 430
+    responsesWithCitations:
+      type: integer
+      example: 2603
+    threads:
+      type: integer
+      example: 1879
+    visibility:
+      type: number
+      format: float
+      description: Within-window visibility share for the subreddit (0..1).
+      example: 0.7477736282677392
+    projectId:
+      type: string
+      format: uuid
+      description: Semrush project the row belongs to.
+      example: 'cb4f6443-e01f-4075-a586-85511f136e31'
+
+SerenityBrandPresenceSubreddits:
+  type: object
+  description: |
+    Per-subreddit Reddit stats from the Semrush "Subreddits" element (faf56e29),
+    sorted by `mentions` descending (tie-broken by `subredditKey`) and paginated.
+    `totalCount` is the full pre-pagination row count. In workspace-wide mode (no
+    `projectId`) the same subreddit can appear once per project.
+  required: [subreddits, totalCount]
+  properties:
+    subreddits:
+      type: array
+      items:
+        $ref: '#/SerenityBrandPresenceSubredditRow'
+    totalCount:
+      type: integer
+      example: 107
+
+SerenityBrandPresenceRedditThreadRow:
+  type: object
+  description: A single Reddit thread ranked by response count.
+  required: [link, mentions, prompts, responses, subreddit, thread]
+  properties:
+    link:
+      type: string
+      description: Thread URL.
+      example: 'https://www.reddit.com/r/BuyItForLife/comments/1kqgvja/lovesac_sactional_is_it_worth_it'
+    mentions:
+      type: integer
+      example: 75
+    prompts:
+      type: integer
+      description: Number of prompts whose responses cited this thread.
+      example: 28
+    responses:
+      type: integer
+      description: Number of AI responses citing this thread. Endpoint's ranking metric ("citation count").
+      example: 62
+    subreddit:
+      type: string
+      description: Subreddit the thread belongs to (with the `r/` prefix).
+      example: 'r/BuyItForLife'
+    thread:
+      type: string
+      description: Thread title, as returned by the element.
+      example: 'LoveSac Sactional, is it worth it? : r/BuyItForLife - Reddit'
+    urlCbf:
+      type: string
+      description: Opaque Semrush custom-field-value key for the thread URL.
+      example: '59bfcb03-11df-44ff-867a-ac2b30c49578:eq:https_C0L_//www.reddit.com/r/BuyItForLife/comments/1kqgvja/lovesac_sactional_is_it_worth_it'
+
+SerenityBrandPresenceRedditThreads:
+  type: object
+  description: |
+    Top Reddit threads from the Semrush "Reddit Threads" element (5af96fd9), sorted by
+    `responses` descending (tie-broken by `urlCbf`) and paginated. `totalCount` is the
+    full pre-pagination row count.
+  required: [threads, totalCount]
+  properties:
+    threads:
+      type: array
+      items:
+        $ref: '#/SerenityBrandPresenceRedditThreadRow'
+    totalCount:
+      type: integer
+      example: 42
+
+SerenityBrandPresenceYoutubeVideoRow:
+  type: object
+  description: A single YouTube video ranked by citation count.
+  required: [channel, citations, link, prompts, video, views]
+  properties:
+    channel:
+      type: string
+      description: YouTube channel name. Empty string when the element has no channel data for this video.
+      example: 'Lovesac'
+    citations:
+      type: integer
+      description: Number of AI responses citing this video. Endpoint's ranking metric ("citation count").
+      example: 53
+    link:
+      type: string
+      description: Video URL.
+      example: 'https://www.youtube.com/watch?v=4ECf112-SSc'
+    prompts:
+      type: integer
+      description: Number of prompts whose responses cited this video.
+      example: 47
+    video:
+      type: string
+      description: Video title, as returned by the element.
+      example: 'Lovesac Product Guide - CitySac Overview'
+    views:
+      type: integer
+      description: View count, coerced to 0 when the element has no tracked view count for this video.
+      example: 106100
+    urlCbf:
+      type: string
+      description: Opaque Semrush custom-field-value key for the video URL.
+      example: '59bfcb03-11df-44ff-867a-ac2b30c49578:eq:https_C0L_//www.youtube.com/watch?v=4ECf112-SSc'
+
+SerenityBrandPresenceYoutubeVideos:
+  type: object
+  description: |
+    Top YouTube videos from the Semrush "YouTube Videos" element (05e624db), sorted by
+    `citations` descending (tie-broken by `urlCbf`) and paginated. `totalCount` is the
+    full pre-pagination row count.
+  required: [videos, totalCount]
+  properties:
+    videos:
+      type: array
+      items:
+        $ref: '#/SerenityBrandPresenceYoutubeVideoRow'
+    totalCount:
+      type: integer
+      example: 42
 
 SerenityBrandPresenceTopics:
   type: object
@@ -13728,6 +13948,23 @@ StateAccessMapping:
     resourceId:
       type: string
       example: '11111111-2222-4333-9444-555555555555'
+    compositeKeyType1:
+      type: string
+      description: |
+        Composite-key slot 1 *type* (DB `composite_key_type_1`) — the scope
+        dimension the binding is narrowed by. Product-anchored (ASO →
+        `opportunity`); `all` is the sentinel meaning no composite scoping. NOT
+        NULL server-side (defaults to `all`), so it is always present.
+      example: opportunity
+    compositeKeyValue1:
+      type: string
+      description: |
+        Composite-key slot 1 *value* (DB `composite_key_value_1`) paired with
+        `compositeKeyType1` (e.g. an opportunity type such as `security`). `all`
+        means every value in the dimension (site-wide). NOT NULL server-side
+        (defaults to `all`). Matched exactly and case-sensitively against the live
+        `Opportunity.type` at enforcement — send the exact type string.
+      example: security
     imsOrgId:
       type: string
       example: ABC123@AdobeOrg
@@ -13778,6 +14015,24 @@ StateAccessMappingCreateRequest:
     resourceId:
       type: string
       example: '11111111-2222-4333-9444-555555555555'
+    compositeKeyType1:
+      type: string
+      description: |
+        Optional composite-key slot 1 *type* (mirrors DB `composite_key_type_1`).
+        Anchored per product: when sent it MUST equal the product's slot-1
+        dimension (ASO → `opportunity`) or the request is rejected; omit to have it
+        filled from config. Products without composite scoping reject a non-`all`
+        value here (an explicit `all` is accepted as a no-op).
+      example: opportunity
+    compositeKeyValue1:
+      type: string
+      description: |
+        Composite-key slot 1 *value* (mirrors DB `composite_key_value_1`) paired
+        with `compositeKeyType1` (e.g. `security`). Omit — or send `all` — to scope
+        to every value in the dimension; defaults to `all` server-side. Trimmed on
+        write and matched exactly and case-sensitively against the live
+        `Opportunity.type` at enforcement — send the exact type string.
+      example: security
     grantedCapabilities:
       type: array
       minItems: 1
