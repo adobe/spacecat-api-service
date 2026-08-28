@@ -1,3 +1,24 @@
+# [1.776.0](https://github.com/adobe/spacecat-api-service/compare/v1.775.1...v1.776.0) (2026-08-28)
+
+
+### Features
+
+* **llmo:** fleet-wide reconciler for missing PAID prompt-suggestion schedules ([#3152](https://github.com/adobe/spacecat-api-service/issues/3152)) ([6faa3ce](https://github.com/adobe/spacecat-api-service/commit/6faa3ceb70ed74cf6f1eb86539605d2010a57ed2)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+## [1.775.1](https://github.com/adobe/spacecat-api-service/compare/v1.775.0...v1.775.1) (2026-08-28)
+
+
+### Bug Fixes
+
+* **serenity:** gate async prompt-classification on an explicit async flag, not deferPublish ([#3150](https://github.com/adobe/spacecat-api-service/issues/3150)) ([36d65d0](https://github.com/adobe/spacecat-api-service/commit/36d65d04736ae55ce42831adbfb7cd25a12bf22a)), closes [#3138](https://github.com/adobe/spacecat-api-service/issues/3138) [#3138](https://github.com/adobe/spacecat-api-service/issues/3138) [#3138](https://github.com/adobe/spacecat-api-service/issues/3138) [#3071](https://github.com/adobe/spacecat-api-service/issues/3071)
+
+# [1.775.0](https://github.com/adobe/spacecat-api-service/compare/v1.774.0...v1.775.0) (2026-08-28)
+
+
+### Features
+
+* Semrush onboarding improve log message and slack message for failing calls ([#3151](https://github.com/adobe/spacecat-api-service/issues/3151)) ([5f11971](https://github.com/adobe/spacecat-api-service/commit/5f1197158a59a9faaf7af51fc1020ced2d681ae2))
+
 # [1.774.0](https://github.com/adobe/spacecat-api-service/compare/v1.773.0...v1.774.0) (2026-08-28)
 
 

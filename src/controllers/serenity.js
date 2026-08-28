@@ -31,7 +31,7 @@ import {
   handleCreatePrompts,
   handleUpdatePrompt,
   handleBulkDeletePrompts,
-  validateDeferPublish,
+  validateAsync,
   BULK_PROMPTS_MAX_ITEMS,
   resolveCallerId,
 } from '../support/serenity/handlers/prompts.js';
@@ -564,20 +564,20 @@ function SerenityController(context, log, env) {
       if (auth.error) {
         return auth.error;
       }
-      // serenity-docs#33 (Layer 1, #2920): CSV import is the ONLY bulk write path
-      // that routes to the async job runner — every other write path (single
-      // create, single edit, UI multi-add) stays synchronous. Routing is by
-      // SOURCE, not array length: `deferPublish` is the exact flag CSV-chunking
-      // already sets (see handleCreatePrompts' docstring) precisely because a UI
-      // multi-add never sets it, so a three-prompt UI add never pays
-      // queue+worker+publish latency. BOTH modes enqueue: subworkspace is the only
-      // mode that exists in practice (flat brands are effectively extinct), so
-      // gating the async path on flat-only meant it never fired. The worker
-      // reconstructs the write from the metadata below — `authMode` picks the
-      // subworkspace-vs-flat create branch, `workspaceId`/`parentWorkspaceId` give
-      // it the sub-workspace and org parent it needs.
+      // serenity-docs#33 (Layer 1, #2920): async routing is keyed off a DEDICATED
+      // `async: true` flag, NOT `deferPublish`. `deferPublish` is a publish-
+      // batching hint on the SYNCHRONOUS CSV-chunking path (set on every non-final
+      // chunk); conflating the two made that sync client silently receive 202s it
+      // never handled (a multi-chunk import broke). Keying async off its own
+      // explicit opt-in keeps every existing write path — single create/edit, UI
+      // multi-add, and the sync CSV-chunking client — synchronous and untouched,
+      // and makes the async job runner strictly opt-in for callers that will poll
+      // the job. BOTH modes enqueue: the worker reconstructs the write from the
+      // metadata below — `authMode` picks the subworkspace-vs-flat create branch,
+      // `workspaceId`/`parentWorkspaceId` give it the sub-workspace and org parent
+      // it needs.
       const body = ctx.data || {};
-      if (validateDeferPublish(body)) {
+      if (validateAsync(body)) {
         const prompts = Array.isArray(body.prompts) ? body.prompts : [];
         if (prompts.length === 0) {
           return createResponse(
