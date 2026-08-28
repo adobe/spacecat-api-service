@@ -1,3 +1,10 @@
+# [1.774.0](https://github.com/adobe/spacecat-api-service/compare/v1.773.0...v1.774.0) (2026-08-28)
+
+
+### Features
+
+* **llmo:** resolve canonical host (redirect-follow + PSL) for Cloudflare worker + route ([#3065](https://github.com/adobe/spacecat-api-service/issues/3065)) ([4cecde7](https://github.com/adobe/spacecat-api-service/commit/4cecde7328181e01c1885c689dba96d393c36266))
+
 # [1.773.0](https://github.com/adobe/spacecat-api-service/compare/v1.772.0...v1.773.0) (2026-08-27)
 
 
