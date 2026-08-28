@@ -1,3 +1,10 @@
+# [1.776.0](https://github.com/adobe/spacecat-api-service/compare/v1.775.1...v1.776.0) (2026-08-28)
+
+
+### Features
+
+* **llmo:** fleet-wide reconciler for missing PAID prompt-suggestion schedules ([#3152](https://github.com/adobe/spacecat-api-service/issues/3152)) ([6faa3ce](https://github.com/adobe/spacecat-api-service/commit/6faa3ceb70ed74cf6f1eb86539605d2010a57ed2)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 ## [1.775.1](https://github.com/adobe/spacecat-api-service/compare/v1.775.0...v1.775.1) (2026-08-28)
 
 
