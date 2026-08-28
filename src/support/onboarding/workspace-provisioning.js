@@ -24,12 +24,13 @@ const WORKSPACE_MEMBERS_PATH = '/enterprise/users/api/v1/adobe-ims/workspace-mem
  * calling user admin access to their organization's Semrush workspace.
  *
  * The caller's Adobe IMS access token IS the credential — Semrush validates it
- * directly against Adobe IMS and resolves the user's email and Adobe
- * Organization ID from it server-side. We send the same token on both the
- * `Authorization` header and the JSON body's `token` field: the header is how
- * every other Semrush gateway call in this codebase authenticates
- * (`rest-transport.js`'s `authToken`), and the body field is this specific
- * API's documented contract.
+ * against Adobe IMS server-side and resolves the user's email and Adobe
+ * Organization ID from it. Per a special request from Semrush for this specific
+ * endpoint, the token is sent ONLY in the JSON body's `token` field — no
+ * `Authorization` header is sent on this call. This deviates from every other
+ * Semrush gateway call in this codebase, which authenticates via the
+ * `Authorization` header (`rest-transport.js`'s `authToken`); do not carry this
+ * no-header behavior over to other Semrush calls.
  *
  * @param {Record<string, string|undefined>} env - Runtime env (context.env);
  *   resolves the User Manager gateway origin via `usersBaseUrl` (`SEMRUSH_USERS_BASE_URL`,
@@ -51,7 +52,6 @@ export async function provisionWorkspaceMember(env, imsToken) {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        authorization: `Bearer ${imsToken}`,
       },
       body: JSON.stringify({ token: imsToken }),
       // Caps the upstream call so a hung Semrush connection doesn't pin the
