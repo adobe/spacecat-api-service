@@ -816,6 +816,30 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(503);
     });
 
+    it('maps an S3 error carrying a 429 $metadata status to 503 (throttled)', async () => {
+      returnSuggestion(gadsSuggestion(fullGuidance()));
+      const throttled = Object.assign(new Error('too many requests'), { $metadata: { httpStatusCode: 429 } });
+      const s3 = buildS3(sandbox.stub().rejects(throttled));
+
+      const response = await buildController(s3).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(503);
+      expect(presignLog.error.calledOnce).to.equal(true);
+    });
+
+    it('maps a getSignedUrl rejection (HeadObject ok, presign throws) to 500 and does not leak the error', async () => {
+      returnSuggestion(gadsSuggestion(fullGuidance()));
+      getSignedUrl = sandbox.stub().rejects(new Error('presign boom secret detail'));
+      const s3 = buildS3(); // HeadObject (send) resolves; only the presign fails
+
+      const response = await buildController(s3).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(500);
+      const body = await response.json();
+      expect(body.message).to.not.match(/presign boom/); // internal detail stays in the log
+      expect(s3.s3Client.send.callCount).to.equal(1); // HeadObject ran
+      expect(presignLog.error.calledOnce).to.equal(true);
+      expect(presignLog.error.firstCall.args[0]).to.match(/presign boom/);
+    });
+
     it('returns forbidden when the caller lacks access to the site', async () => {
       returnSuggestion(gadsSuggestion(fullGuidance()));
       sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
