@@ -129,6 +129,62 @@ describe('OnboardingController', () => {
     expect(notifyStub.firstCall.args[1].reason).to.contain('422');
   });
 
+  it('includes the upstream error body message in the log and Slack reason when Semrush provides one', async () => {
+    const err = Object.assign(new Error('workspace-members request failed with status 422'), {
+      status: 422,
+      body: { message: 'no workspace mapped to adobe_ims_org_id' },
+    });
+    provisionStub.rejects(err);
+    const ctx = buildContext();
+    const controller = OnboardingController(ctx, ctx.log, ctx.env);
+    await controller.triggerOnboarding(ctx);
+
+    expect(notifyStub.firstCall.args[1].reason).to.contain('no workspace mapped to adobe_ims_org_id');
+    expect(ctx.log.error.calledOnce).to.equal(true);
+    expect(ctx.log.error.firstCall.args[0]).to.contain('no workspace mapped to adobe_ims_org_id');
+  });
+
+  it('omits the upstream suffix entirely when the error body has none of error/message/reason', async () => {
+    const err = Object.assign(new Error('workspace-members request failed with status 500'), {
+      status: 500,
+      body: {},
+    });
+    provisionStub.rejects(err);
+    const ctx = buildContext();
+    const controller = OnboardingController(ctx, ctx.log, ctx.env);
+    await controller.triggerOnboarding(ctx);
+
+    expect(notifyStub.firstCall.args[1].reason).to.not.contain('upstream');
+    expect(ctx.log.error.firstCall.args[0]).to.not.contain('upstream');
+  });
+
+  it('includes upstream error/message/reason together when Semrush returns all three', async () => {
+    const err = Object.assign(new Error('workspace-members request failed with status 401'), {
+      status: 401,
+      body: {
+        error: 'adobe_auth_failed',
+        message: 'rpc error: code = Unauthenticated desc = ims token expired at 2026-08-14 05:12:13.85 +0000 UTC',
+        reason: 'INVALID_OR_EXPIRED_TOKEN',
+      },
+    });
+    provisionStub.rejects(err);
+    const ctx = buildContext();
+    const controller = OnboardingController(ctx, ctx.log, ctx.env);
+    await controller.triggerOnboarding(ctx);
+
+    const logLine = ctx.log.error.firstCall.args[0];
+    const { reason } = notifyStub.firstCall.args[1];
+
+    for (const text of [
+      'upstreamError="adobe_auth_failed"',
+      'upstreamMessage="rpc error: code = Unauthenticated desc = ims token expired at 2026-08-14 05:12:13.85 +0000 UTC"',
+      'upstreamReason="INVALID_OR_EXPIRED_TOKEN"',
+    ]) {
+      expect(logLine).to.contain(text);
+      expect(reason).to.contain(text);
+    }
+  });
+
   it('treats a 409 (already a member) as success: 200 with alreadyMember, and sends no Slack alert', async () => {
     const err = Object.assign(new Error('workspace-members request failed with status 409'), {
       status: 409,

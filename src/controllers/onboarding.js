@@ -98,7 +98,17 @@ export default function OnboardingController(context, log, env) {
         });
       }
 
-      log.error(`[onboarding] workspace provisioning failed for org=${spaceCatId} status=${status}: ${e.message}`);
+      // Semrush's error body optionally echoes `error`/`message`/`reason` fields
+      // (e.g. { error: "adobe_auth_failed", message: "rpc error: ... ims token
+      // expired ...", reason: "INVALID_OR_EXPIRED_TOKEN" }) — none are guaranteed
+      // on every failure, so append only the ones present rather than assuming
+      // the shape.
+      const upstreamFields = ['error', 'message', 'reason']
+        .filter((field) => hasText(e.body?.[field]))
+        .map((field) => `upstream${field[0].toUpperCase()}${field.slice(1)}="${e.body[field]}"`);
+      const upstreamSuffix = upstreamFields.length ? ` ${upstreamFields.join(' ')}` : '';
+
+      log.error(`[onboarding] workspace provisioning failed for org=${spaceCatId} status=${status}: ${e.message}${upstreamSuffix}`);
 
       const profile = ctx.attributes?.authInfo?.getProfile?.();
       const email = profile?.trial_email || profile?.email;
@@ -108,7 +118,7 @@ export default function OnboardingController(context, log, env) {
           email: hasText(email) ? email : 'unknown',
           workspaceId,
           spaceCatId,
-          reason: `status ${status}: ${e.message || 'unknown error'}`,
+          reason: `status ${status}: ${e.message || 'unknown error'}${upstreamSuffix}`,
         });
       } catch (slackErr) {
         // Best-effort alert — a broken webhook must not mask the original
