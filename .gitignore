@@ -22,6 +22,7 @@ admin-idp-p*.json
 scripts/*
 !scripts/backfill-rum-config.mjs
 !scripts/generate-insomnia-collection.mjs
+!scripts/reconcile-prompt-suggestion-schedules.mjs
 !scripts/serenity-job-runner-ops.mjs
 !scripts/serenity-retype-backfill.mjs
 docs/index.html
