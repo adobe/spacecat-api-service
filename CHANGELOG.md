@@ -1,3 +1,10 @@
+## [1.775.1](https://github.com/adobe/spacecat-api-service/compare/v1.775.0...v1.775.1) (2026-08-28)
+
+
+### Bug Fixes
+
+* **serenity:** gate async prompt-classification on an explicit async flag, not deferPublish ([#3150](https://github.com/adobe/spacecat-api-service/issues/3150)) ([36d65d0](https://github.com/adobe/spacecat-api-service/commit/36d65d04736ae55ce42831adbfb7cd25a12bf22a)), closes [#3138](https://github.com/adobe/spacecat-api-service/issues/3138) [#3138](https://github.com/adobe/spacecat-api-service/issues/3138) [#3138](https://github.com/adobe/spacecat-api-service/issues/3138) [#3071](https://github.com/adobe/spacecat-api-service/issues/3071)
+
 # [1.775.0](https://github.com/adobe/spacecat-api-service/compare/v1.774.0...v1.775.0) (2026-08-28)
 
 
