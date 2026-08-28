@@ -14,6 +14,7 @@ import {
   badRequest,
   createResponse,
   forbidden,
+  internalServerError,
   noContent,
   notFound,
   ok,
@@ -93,6 +94,15 @@ const GADS_GUIDANCE_REF_KEYS = [
 // Click-time presigned guidance-CSV download URLs are short-lived (1 hour): the
 // URL is minted on the download request, so it only needs to outlive the click.
 const GADS_GUIDANCE_CSV_TTL_SECONDS = 60 * 60;
+
+// Server-side key prefix that binds a guidance CSV to its site. Mystique writes
+// these CSVs to
+// `gads-placement-exclusions/csv/{site_id}/{customer_id}/{obs_version}/{scope}.{source}.csv`
+// (contract: experience-platform/mystique `s3_bodies.write_csv_body`). Because
+// `data.guidance` is caller-writable, we presign only keys under the AUTHORIZED
+// site's prefix, so a tampered `uri` cannot read another tenant's object within
+// the shared mystique-assets bucket.
+const GADS_GUIDANCE_CSV_KEY_ROOT = 'gads-placement-exclusions/csv';
 
 /**
  * Parses an `s3://bucket/key` URI into its bucket and key parts.
@@ -857,10 +867,12 @@ function SuggestionsController(ctx, sqs, env) {
    *
    * The browser cannot presign S3 keys, so the URL is minted on the download
    * request (mirroring `llmo/brand-claims.js`): the CSV's `s3://` uri is resolved
-   * from the suggestion's stored `data.guidance[refKey]`, the bucket is pinned
-   * server-side to `S3_MYSTIQUE_BUCKET` so a caller-tampered `uri` cannot turn
-   * this into a cross-bucket read (confused-deputy guard), existence is verified,
-   * and a 1-hour `GetObject` URL is signed. Minting per click needs no long TTL.
+   * from the suggestion's stored `data.guidance[refKey]`. Because that stored data
+   * is caller-writable, authorization does not trust it: the bucket is pinned
+   * server-side to `S3_MYSTIQUE_BUCKET` (no cross-bucket reads) and the key must
+   * sit under the authorized site's prefix `gads-placement-exclusions/csv/{siteId}/`
+   * (no cross-object/cross-tenant reads). Existence is verified, then a 1-hour
+   * `GetObject` URL is signed. Minting per click needs no long TTL.
    *
    * @param {object} context of the request.
    * @returns {Promise<Response>} `{ presignedUrl, expiresAt }`, or an error response.
@@ -884,18 +896,20 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest('Invalid guidance CSV reference');
     }
 
-    const { s3 } = ctx;
-    const mystiqueBucket = env?.S3_MYSTIQUE_BUCKET;
-    if (!s3?.s3Client || !s3.getSignedUrl || !s3.GetObjectCommand || !hasText(mystiqueBucket)) {
-      return badRequest('S3 storage is not configured for this environment');
-    }
-
     const site = await Site.findById(siteId);
     if (!site) {
       return notFound('Site not found');
     }
     if (!await accessControlUtil.hasAccess(site)) {
       return forbidden('User does not belong to the organization');
+    }
+
+    // S3 config is an environment-global signal, so this guard is placed after
+    // access control (consistent with the sibling handlers) rather than ahead of it.
+    const { s3 } = ctx;
+    const mystiqueBucket = env?.S3_MYSTIQUE_BUCKET;
+    if (!s3?.s3Client || !s3.getSignedUrl || !s3.GetObjectCommand || !hasText(mystiqueBucket)) {
+      return badRequest('S3 storage is not configured for this environment');
     }
 
     const suggestion = await Suggestion.findById(suggestionId);
@@ -915,11 +929,19 @@ function SuggestionsController(ctx, sqs, env) {
     if (!parsed) {
       return notFound('Guidance CSV not available');
     }
-    // `data` is caller-writable (PATCH/POST persist it verbatim), so the ref's
-    // bucket is never trusted: only objects in the pinned mystique-assets bucket
-    // are signable. A mismatch is a tampering/misconfiguration signal — warn.
+    // `data` is caller-writable (PATCH/POST persist it verbatim), so neither the
+    // ref's bucket nor its key is trusted for authorization. Bucket must be the
+    // pinned mystique-assets bucket (no cross-bucket reads)...
     if (parsed.bucket !== mystiqueBucket) {
-      ctx.log?.warn?.(`Refusing to presign guidance CSV for suggestion ${suggestionId}: ref ${refKey} names bucket ${parsed.bucket}, expected ${mystiqueBucket}`);
+      context.log.warn(`Refusing to presign guidance CSV for suggestion ${suggestionId}: ref ${refKey} names bucket ${parsed.bucket}, expected ${mystiqueBucket}`);
+      return notFound('Guidance CSV not available');
+    }
+    // ...and key must sit under the AUTHORIZED site's CSV prefix, binding the
+    // signed object to the site (closes cross-object/cross-tenant reads within
+    // the shared bucket). `siteId` is already access-checked above.
+    const expectedKeyPrefix = `${GADS_GUIDANCE_CSV_KEY_ROOT}/${siteId}/`;
+    if (!parsed.key.startsWith(expectedKeyPrefix)) {
+      context.log.warn(`Refusing to presign guidance CSV for suggestion ${suggestionId}: ref ${refKey} key is outside the site prefix ${expectedKeyPrefix}`);
       return notFound('Guidance CSV not available');
     }
 
@@ -939,11 +961,19 @@ function SuggestionsController(ctx, sqs, env) {
       });
     } catch (err) {
       if (err.name === 'NotFound' || err.$metadata?.httpStatusCode === 404) {
-        ctx.log?.warn?.(`Guidance CSV object missing for suggestion ${suggestionId} ref ${refKey}: ${parsed.key}`);
+        context.log.warn(`Guidance CSV object missing for suggestion ${suggestionId} ref ${refKey}: ${parsed.key}`);
         return notFound('Guidance CSV not available');
       }
-      ctx.log?.error?.(`Failed to presign guidance CSV for suggestion ${suggestionId} ref ${refKey}: ${err.message}`);
-      return badRequest(`Error retrieving guidance CSV: ${err.message}`);
+      // A server-side S3 failure is not the client's fault: return 5xx (503 for
+      // throttling/transient so clients retry, 500 otherwise) with a generic
+      // message — the internal error text stays in the log, not the response.
+      context.log.error(`Failed to presign guidance CSV for suggestion ${suggestionId} ref ${refKey}: ${err.message}`);
+      const status = err.$metadata?.httpStatusCode;
+      const transient = status === 429 || status === 503
+        || ['ThrottlingException', 'TooManyRequestsException', 'SlowDown', 'RequestLimitExceeded', 'ServiceUnavailable'].includes(err.name);
+      return transient
+        ? createResponse({ message: 'Guidance CSV service temporarily unavailable' }, 503)
+        : internalServerError('Error retrieving guidance CSV');
     }
   };
 
