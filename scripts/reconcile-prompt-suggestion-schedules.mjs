@@ -150,6 +150,16 @@ const dataAccess = createDataAccess({
 }, log);
 const { postgrestClient } = dataAccess.services;
 const drsClient = DrsClient.createFrom({ env, log });
+if (!drsClient.isConfigured()) {
+  // registerPromptSuggestionSchedule silently no-ops (returns null, logs at DEBUG) when the
+  // client considers itself unconfigured — without this gate, a malformed DRS_API_URL/KEY would
+  // make an --execute run report "0 failures, 0 created" for the whole fleet, indistinguishable
+  // from a genuinely fully-provisioned one. Delegate to the client's own canonical check rather
+  // than re-deriving it from the raw env vars above, so this can't drift if isConfigured()'s
+  // definition ever changes.
+  console.error('ERROR: DRS client not configured (check DRS_API_URL/DRS_API_KEY)');
+  exit(1);
+}
 
 const sleep = (ms) => new Promise((resolve) => {
   setTimeout(resolve, ms);
@@ -257,6 +267,13 @@ async function reconcileSite(site) {
     log.info(`site=${siteId} brand=${brand.id} missing=[${missingPipelines.map((p) => p.providerId).join(', ')}]`);
 
     if (execute) {
+      // Up to 3 sequential POSTs per site (one per missing pipeline), each with
+      // triggerImmediately: true (hardcoded in registerPromptSuggestionSchedule) — so a
+      // fleet-wide --execute run doesn't just register schedules, it also submits up to 3
+      // immediate Fargate jobs per newly-reconciled site in rapid succession. --rate-limit-ms
+      // only throttles between sites, not between these per-site POSTs; harmless at the scale
+      // this backfill targets (a subset of the fleet still missing schedules), but an operator
+      // running --execute against a large fleet should weigh that immediate-job burst.
       for (const { providerId, cadence } of missingPipelines) {
         try {
           // eslint-disable-next-line no-await-in-loop
