@@ -314,7 +314,8 @@ async function createAndClassify(context, job, transport, metadata) {
  * @param {SerenityTransport} transport
  * @param {object} metadata - `{ semrushWorkspaceId, items: [{ projectId,
  *   promptId, text, tagIds }] }` — `tagIds` is the FULL desired tag set minus
- *   `intent` (caller tags + server type/origin), matching the edit handlers'
+ *   `intent` (caller tags + server type/source; `origin` no longer gets its
+ *   own tag, tag-display-names.md §3), matching the edit handlers'
  *   "recompute the whole set, then replace" contract.
  * @returns {Promise<object>} the job result.
  */

@@ -1,3 +1,17 @@
+# [1.773.0](https://github.com/adobe/spacecat-api-service/compare/v1.772.0...v1.773.0) (2026-08-27)
+
+
+### Features
+
+* **LLMO-6973:** add structured audit_orchestration logging for offsite audit types ([#3144](https://github.com/adobe/spacecat-api-service/issues/3144)) ([17d3eaa](https://github.com/adobe/spacecat-api-service/commit/17d3eaa3a3b24143e9e15e92d501677ea470565d))
+
+# [1.772.0](https://github.com/adobe/spacecat-api-service/compare/v1.771.0...v1.772.0) (2026-08-27)
+
+
+### Features
+
+* **serenity:** build the tag-display-names mapping seam (WP-D2) ([#3147](https://github.com/adobe/spacecat-api-service/issues/3147)) ([b1240e3](https://github.com/adobe/spacecat-api-service/commit/b1240e37a253f414216c920be781ec8c684f572e)), closes [serenity-docs#407](https://github.com/serenity-docs/issues/407) [Hi#level](https://github.com/Hi/issues/level)
+
 # [1.771.0](https://github.com/adobe/spacecat-api-service/compare/v1.770.0...v1.771.0) (2026-08-27)
 
 
