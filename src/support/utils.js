@@ -322,6 +322,18 @@ export const sendAuditMessages = async (
  * @param {Object} lambdaContext - The Lambda context object.
  * @return {Promise} - A promise representing the audit trigger operation.
  */
+// Offsite Opportunities audit types (LLMO-6973). Single source of truth — imported by
+// src/support/slack/commands/run-audit.js, which already depends on this module for
+// triggerAuditForSite, so importing this predicate back into it introduces no new cycle.
+export const OFFSITE_AUDIT_TYPES = [
+  'offsite-brand-presence',
+  'cited-analysis',
+  'reddit-analysis',
+  'youtube-analysis',
+  'wikipedia-analysis',
+];
+export const isOffsiteAuditType = (auditType) => OFFSITE_AUDIT_TYPES.includes(auditType);
+
 export const triggerAuditForSite = async (
   site,
   auditType,
@@ -338,6 +350,15 @@ export const triggerAuditForSite = async (
       channelId: slackContext.channelId,
       threadTs: slackContext.threadTs,
     },
+    // LLMO-6973: stamp the dispatching service into the message's auditContext, scoped
+    // strictly to the five offsite audit types — spacecat-audit-worker reads this (via an
+    // `origin` marker, see the audit_orchestration_spacecat_request_received "trigger"/"peer"
+    // fields) to tell a scheduled run apart from a Slack-triggered one, but only for offsite
+    // analyses. Gated here (rather than added unconditionally) to keep this shared framework
+    // code's message shape byte-for-byte unchanged for every other audit type in the system,
+    // mirroring how spacecat-jobs-dispatcher's equivalent change stays strictly scoped to
+    // offsite-brand-presence in its own shared dispatch path.
+    ...(isOffsiteAuditType(auditType) && { origin: 'api-service' }),
     ...auditContext,
   },
   site.getId(),
