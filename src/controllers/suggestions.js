@@ -80,7 +80,7 @@ const VALIDATION_ERROR_NAME = 'ValidationError';
 // Freemium (PLG / FREE_TRIAL) orgs cannot be assigned per-user product profiles,
 // so EDS auto-fix is gated behind membership of this IMS group instead. Members
 // of the group are allowed to trigger auto-fix; everyone else is blocked.
-const ASO_EDS_AUTOFIX_GROUP_NAME = 'ASO-EDS-Autofix-users';
+const ASO_EDS_AUTOFIX_GROUP_NAME = 'ASO-EDS-Autofix-Users';
 
 // Allowed state_transition values on a backoffice review (SITES-43974). Validated
 // so the Learning Agent corpus never receives arbitrary free-text transitions.

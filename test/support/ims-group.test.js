@@ -23,7 +23,7 @@ describe('ims-group', () => {
   let context;
 
   const IMS_ORG_ID = '12345@AdobeOrg';
-  const GROUP_NAME = 'ASO-EDS-Autofix-users';
+  const GROUP_NAME = 'ASO-EDS-Autofix-Users';
   const TOKEN = 'ims-user-token';
 
   beforeEach(() => {
@@ -52,7 +52,7 @@ describe('ims-group', () => {
       expect(getImsUserOrganizations).to.have.been.calledOnceWithExactly(TOKEN);
     });
 
-    it('matches the group name case-insensitively', async () => {
+    it('matches the group name case-sensitively (differently-cased name is not a member)', async () => {
       getImsUserOrganizations.resolves([{
         orgRef: { ident: '12345', authSrc: 'AdobeOrg' },
         groups: [{ groupName: 'aso-eds-autofix-users' }],
@@ -62,7 +62,7 @@ describe('ims-group', () => {
         imsOrgId: IMS_ORG_ID, imsUserToken: TOKEN, groupName: GROUP_NAME,
       }, log);
 
-      expect(result).to.equal(true);
+      expect(result).to.equal(false);
     });
 
     it('returns false when the caller is not in the group', async () => {

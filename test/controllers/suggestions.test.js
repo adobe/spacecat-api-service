@@ -5558,7 +5558,7 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(403);
       const body = await response.json();
       expect(body.message).to.match(
-        /requires membership of the 'ASO-EDS-Autofix-users' IMS group/,
+        /requires membership of the 'ASO-EDS-Autofix-Users' IMS group/,
       );
       expect(context.log.warn).to.have.been.calledWithMatch(/Auto-fix blocked/);
     });
@@ -5588,7 +5588,7 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(403);
       const body = await response.json();
       expect(body.message).to.match(
-        /requires membership of the 'ASO-EDS-Autofix-users' IMS group/,
+        /requires membership of the 'ASO-EDS-Autofix-Users' IMS group/,
       );
     });
 
@@ -5617,7 +5617,7 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.not.equal(403);
     });
 
-    it('auto-fix suggestions allows AEM Edge Freemium caller in the ASO-EDS-Autofix-users IMS group', async () => {
+    it('auto-fix suggestions allows AEM Edge Freemium caller in the ASO-EDS-Autofix-Users IMS group', async () => {
       const mockTierClient = {
         checkValidEntitlement: sandbox.stub().resolves({
           entitlement: { getTier: () => 'PLG' },
@@ -5644,11 +5644,11 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.not.equal(403);
       expect(isImsGroupMemberStub).to.have.been.calledWithMatch(
         sinon.match.any,
-        sinon.match({ groupName: 'ASO-EDS-Autofix-users' }),
+        sinon.match({ groupName: 'ASO-EDS-Autofix-Users' }),
       );
     });
 
-    it('auto-fix suggestions returns 403 for AEM Edge Freemium caller not in the ASO-EDS-Autofix-users IMS group', async () => {
+    it('auto-fix suggestions returns 403 for AEM Edge Freemium caller not in the ASO-EDS-Autofix-Users IMS group', async () => {
       const mockTierClient = {
         checkValidEntitlement: sandbox.stub().resolves({
           entitlement: { getTier: () => 'FREE_TRIAL' },
@@ -5674,9 +5674,9 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(403);
       const body = await response.json();
       expect(body.message).to.match(
-        /requires membership of the 'ASO-EDS-Autofix-users' IMS group/,
+        /requires membership of the 'ASO-EDS-Autofix-Users' IMS group/,
       );
-      expect(context.log.warn).to.have.been.calledWithMatch(/not in 'ASO-EDS-Autofix-users' IMS group/);
+      expect(context.log.warn).to.have.been.calledWithMatch(/not in 'ASO-EDS-Autofix-Users' IMS group/);
     });
 
     it('auto-fix suggestions exempts a crosswalk EDS site from the group gate (user-token source)', async () => {
@@ -5738,7 +5738,7 @@ describe('Suggestions Controller', () => {
       expect(isImsGroupMemberStub).to.have.been.called;
       const body = await response.json();
       expect(body.message).to.match(
-        /requires membership of the 'ASO-EDS-Autofix-users' IMS group/,
+        /requires membership of the 'ASO-EDS-Autofix-Users' IMS group/,
       );
     });
 

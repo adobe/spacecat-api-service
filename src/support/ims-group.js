@@ -29,7 +29,7 @@ import { hasText } from '@adobe/spacecat-shared-utils';
  * @param {object} params
  * @param {string} params.imsOrgId - IMS org id in `<ident>@<authSrc>` form.
  * @param {string} params.imsUserToken - The caller's IMS user access token.
- * @param {string} params.groupName - Target IMS group name (case-insensitive match).
+ * @param {string} params.groupName - Target IMS group name (exact, case-sensitive match).
  * @param {object} [log] - Optional logger.
  * @returns {Promise<boolean>} `true` only when the caller is a confirmed member.
  */
@@ -48,9 +48,8 @@ export async function isImsGroupMember(context, {
     if (!matchingOrg) {
       return false;
     }
-    const target = groupName.toLowerCase();
     return matchingOrg.groups?.some(
-      (g) => g.groupName?.toLowerCase() === target,
+      (g) => g.groupName === groupName,
     ) ?? false;
   } catch (err) {
     log?.warn?.(`[ims-group] membership check failed: ${err.message}`);
