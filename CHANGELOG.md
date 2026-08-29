@@ -1,3 +1,10 @@
+# [1.777.0](https://github.com/adobe/spacecat-api-service/compare/v1.776.0...v1.777.0) (2026-08-29)
+
+
+### Features
+
+* presign Google Ads placement-exclusion CSVs via a click-time endpoint (SITES-50551) ([#3149](https://github.com/adobe/spacecat-api-service/issues/3149)) ([2beeedc](https://github.com/adobe/spacecat-api-service/commit/2beeedc5d0d6965416f13e4eb0ff29a88f7fb7da))
+
 # [1.776.0](https://github.com/adobe/spacecat-api-service/compare/v1.775.1...v1.776.0) (2026-08-28)
 
 
