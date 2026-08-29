@@ -36,6 +36,8 @@ import {
   Audit,
   Suggestion as SuggestionModel,
   GeoExperiment as GeoExperimentModel,
+  Site as SiteModel,
+  Entitlement as EntitlementModel,
   REVIEW_SOURCES,
   REVIEW_VERDICTS,
   REJECTION_CATEGORIES,
@@ -44,6 +46,7 @@ import {
   toReviewView,
   isAllowedSuggestionTransition,
 } from '@adobe/spacecat-shared-data-access';
+import TierClient from '@adobe/spacecat-shared-tier-client';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto/suggestion.js';
 import { isValidLocale } from '../utils/validations.js';
@@ -73,10 +76,17 @@ import {
   grantSuggestionsForOpportunity,
   revokeGrantsForSuggestions,
 } from '../support/grant-suggestions-handler.js';
+import { getImsTokenFromPromiseToken } from '../support/edge-routing-auth.js';
+import { isImsGroupMember } from '../support/ims-group.js';
 import { postSlackMessage } from '../utils/slack/base.js';
 import { createAtomicStrategy, deleteAtomicStrategy } from '../support/atomic-strategy-helper.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
+
+// Freemium (PLG / FREE_TRIAL) orgs cannot be assigned per-user product profiles,
+// so EDS auto-fix is gated behind membership of this IMS group instead. Members
+// of the group are allowed to trigger auto-fix; everyone else is blocked.
+const ASO_EDS_AUTOFIX_GROUP_NAME = 'ASO-EDS-Autofix-Users';
 
 /**
  * Guidance CSV reference keys carried by `gads-placement-exclusions` suggestions.
@@ -1561,6 +1571,87 @@ function SuggestionsController(ctx, sqs, env) {
       && !await accessControlUtil.hasLlmoCapabilityForSite(site)
     ) {
       return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can trigger auto-fix'));
+    }
+
+    if (site.getDeliveryType() === SiteModel.DELIVERY_TYPES.AEM_EDGE) {
+      try {
+        const asoProductCode = EntitlementModel.PRODUCT_CODES.ASO;
+        const tierClient = await TierClient.createForSite(context, site, asoProductCode);
+        const { entitlement, siteEnrollment } = await tierClient.checkValidEntitlement();
+        const blockedTiers = [EntitlementModel.TIERS.PLG, EntitlementModel.TIERS.FREE_TRIAL];
+        if (blockedTiers.includes(entitlement?.getTier()) && siteEnrollment) {
+          // Crosswalk and Dark Alley (da.live) EDS sites author with the caller's
+          // OWN IMS token, so their existing permissions govern the write and the
+          // IMS group is NOT required — they are exempt from the group gate. Only
+          // Google Drive / SharePoint sources are written via a service account
+          // disconnected from the caller and therefore need the group. Fail-closed:
+          // exempt ONLY known user-token sources (authoringType cs/crosswalk, or a
+          // `markup` content source resolved from the stored type or the source URL);
+          // an unknown/absent source is still gated.
+          //
+          // NOTE: authoringType `documentauthoring` is NOT a reliable user-token
+          // signal — it is the DEFAULT for EDS (getAuthoringType returns DA for every
+          // hlx-hosted site, and the UI flattens all non-crosswalk EDS sites to it on
+          // save), so Google Drive / SharePoint sites carry it too. Exempting on it
+          // would skip the group gate for exactly the service-account sources it
+          // protects. Dark Alley is instead identified by its `markup` source below.
+          const authoringType = site.getAuthoringType?.();
+          const contentSource = site.getHlxConfig?.()?.content?.source;
+          const contentSourceType = contentSource?.type;
+          const contentSourceUrl = contentSource?.url ?? '';
+          // da.live (Dark Alley) and the `/franklin.delivery/` bin path (crosswalk)
+          // are user-token `markup` sources even when the stored `type` is absent —
+          // resolve from the URL, mirroring the UI's detectContentSourceType.
+          const isMarkupSource = contentSourceType === 'markup'
+            || contentSourceUrl.includes('da.live')
+            || contentSourceUrl.includes('/franklin.delivery/');
+          const isUserTokenContentSource = authoringType === SiteModel.AUTHORING_TYPES.CS_CW
+            || isMarkupSource;
+
+          if (isUserTokenContentSource) {
+            context.log.info(`Auto-fix allowed for site ${siteId}: AEM Edge user-token content source (authoringType=${authoringType}, contentSourceType=${contentSourceType}); IMS group not required`);
+          } else {
+            // Freemium EDS auto-fix on a service-account source (Google Drive /
+            // SharePoint) applies changes via a service account disconnected from
+            // the caller, so authorize the caller only when they belong to the
+            // dedicated IMS group. Recover the caller's IMS identity by exchanging
+            // the forwarded promise token — safe to consume here because these EDS
+            // fixes run under service credentials (not this token), unlike
+            // promise-based CS authoring.
+            //
+            // Once the user is CONFIRMED freemium (blocked tier + active
+            // enrollment) on a service-account source, the gate is fail-closed: any
+            // error resolving the org, token, or group membership denies. This
+            // inner try/catch is separate from the outer one on purpose — the outer
+            // catch stays fail-open for the tier-determination phase (so a transient
+            // TierClient error never blocks paid users), but must not swallow errors
+            // here and let a confirmed freemium caller through ungated.
+            try {
+              const org = await site.getOrganization();
+              const imsOrgId = org?.getImsOrgId();
+              let imsUserToken;
+              try {
+                imsUserToken = await getImsTokenFromPromiseToken(context);
+              } catch (tokenErr) {
+                context.log?.warn(`Auto-fix group check: could not resolve IMS token for site ${siteId}: ${tokenErr.message}`);
+              }
+              const isGroupMember = await isImsGroupMember(context, {
+                imsOrgId, imsUserToken, groupName: ASO_EDS_AUTOFIX_GROUP_NAME,
+              }, context.log);
+              if (!isGroupMember) {
+                context.log.warn(`Auto-fix blocked for site ${siteId}: AEM Edge Freemium caller not in '${ASO_EDS_AUTOFIX_GROUP_NAME}' IMS group`);
+                return forbidden(`Deploying auto-fixes on this Edge Delivery site requires membership of the '${ASO_EDS_AUTOFIX_GROUP_NAME}' IMS group`);
+              }
+              context.log.info(`Auto-fix allowed for site ${siteId}: AEM Edge Freemium caller in '${ASO_EDS_AUTOFIX_GROUP_NAME}' IMS group`);
+            } catch (gateErr) {
+              context.log.warn(`Auto-fix blocked for site ${siteId}: freemium authorization gate error: ${gateErr.message}`);
+              return forbidden('Could not verify Edge Delivery auto-fix authorization; please try again');
+            }
+          }
+        }
+      } catch (e) {
+        context.log?.warn(`Failed to check entitlement tier for site ${siteId}: ${e.message}`);
+      }
     }
 
     const opportunity = await Opportunity.findById(opportunityId);
