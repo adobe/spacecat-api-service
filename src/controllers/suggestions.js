@@ -1413,14 +1413,28 @@ function SuggestionsController(ctx, sqs, env) {
           // IMS group is NOT required — they are exempt from the group gate. Only
           // Google Drive / SharePoint sources are written via a service account
           // disconnected from the caller and therefore need the group. Fail-closed:
-          // exempt ONLY known user-token sources (authoringType cs/crosswalk or
-          // documentauthoring, or a `markup` content source); an unknown/absent
-          // source is still gated.
+          // exempt ONLY known user-token sources (authoringType cs/crosswalk, or a
+          // `markup` content source resolved from the stored type or the source URL);
+          // an unknown/absent source is still gated.
+          //
+          // NOTE: authoringType `documentauthoring` is NOT a reliable user-token
+          // signal — it is the DEFAULT for EDS (getAuthoringType returns DA for every
+          // hlx-hosted site, and the UI flattens all non-crosswalk EDS sites to it on
+          // save), so Google Drive / SharePoint sites carry it too. Exempting on it
+          // would skip the group gate for exactly the service-account sources it
+          // protects. Dark Alley is instead identified by its `markup` source below.
           const authoringType = site.getAuthoringType?.();
-          const contentSourceType = site.getHlxConfig?.()?.content?.source?.type;
+          const contentSource = site.getHlxConfig?.()?.content?.source;
+          const contentSourceType = contentSource?.type;
+          const contentSourceUrl = contentSource?.url ?? '';
+          // da.live (Dark Alley) and the `/franklin.delivery/` bin path (crosswalk)
+          // are user-token `markup` sources even when the stored `type` is absent —
+          // resolve from the URL, mirroring the UI's detectContentSourceType.
+          const isMarkupSource = contentSourceType === 'markup'
+            || contentSourceUrl.includes('da.live')
+            || contentSourceUrl.includes('/franklin.delivery/');
           const isUserTokenContentSource = authoringType === SiteModel.AUTHORING_TYPES.CS_CW
-            || authoringType === SiteModel.AUTHORING_TYPES.DA
-            || contentSourceType === 'markup';
+            || isMarkupSource;
 
           if (isUserTokenContentSource) {
             context.log.info(`Auto-fix allowed for site ${siteId}: AEM Edge user-token content source (authoringType=${authoringType}, contentSourceType=${contentSourceType}); IMS group not required`);

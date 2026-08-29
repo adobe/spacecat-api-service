@@ -5709,7 +5709,7 @@ describe('Suggestions Controller', () => {
       expect(context.log.info).to.have.been.calledWithMatch(/user-token content source/);
     });
 
-    it('auto-fix suggestions exempts a Dark Alley (documentauthoring) EDS site from the group gate', async () => {
+    it('auto-fix suggestions does NOT exempt a documentauthoring EDS site on the authoring type alone (it is the EDS default and covers Google Drive / SharePoint)', async () => {
       site.getAuthoringType = sandbox.stub().returns('documentauthoring');
       const mockTierClient = {
         checkValidEntitlement: sandbox.stub().resolves({
@@ -5717,9 +5717,44 @@ describe('Suggestions Controller', () => {
           siteEnrollment: { getId: () => 'enrollment-3' },
         }),
       };
+      const isImsGroupMemberStub = sandbox.stub().resolves(false);
       const Controller = await esmock('../../src/controllers/suggestions.js', {
         '@adobe/spacecat-shared-tier-client': { default: { createForSite: sandbox.stub().resolves(mockTierClient) } },
-        '../../src/support/ims-group.js': { isImsGroupMember: sandbox.stub().resolves(false) },
+        '../../src/support/ims-group.js': { isImsGroupMember: isImsGroupMemberStub },
+      });
+      const controller = Controller({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'ASO' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controller.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(403);
+      expect(isImsGroupMemberStub).to.have.been.called;
+      const body = await response.json();
+      expect(body.message).to.match(
+        /requires membership of the 'ASO-EDS-Autofix-users' IMS group/,
+      );
+    });
+
+    it('auto-fix suggestions exempts a Dark Alley EDS site identified by a da.live content source URL (no stored markup type)', async () => {
+      site.getAuthoringType = sandbox.stub().returns('documentauthoring');
+      site.getHlxConfig = sandbox.stub().returns({ content: { source: { url: 'https://content.da.live/org/site/main' } } });
+      const mockTierClient = {
+        checkValidEntitlement: sandbox.stub().resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          siteEnrollment: { getId: () => 'enrollment-3b' },
+        }),
+      };
+      const isImsGroupMemberStub = sandbox.stub().resolves(false);
+      const Controller = await esmock('../../src/controllers/suggestions.js', {
+        '@adobe/spacecat-shared-tier-client': { default: { createForSite: sandbox.stub().resolves(mockTierClient) } },
+        '../../src/support/ims-group.js': { isImsGroupMember: isImsGroupMemberStub },
       });
       const controller = Controller({
         dataAccess: mockSuggestionDataAccess,
@@ -5734,6 +5769,8 @@ describe('Suggestions Controller', () => {
       });
 
       expect(response.status).to.not.equal(403);
+      expect(isImsGroupMemberStub).to.not.have.been.called;
+      expect(context.log.info).to.have.been.calledWithMatch(/user-token content source/);
     });
 
     it('auto-fix suggestions exempts an EDS site with a markup content source from the group gate', async () => {
