@@ -1,3 +1,10 @@
+# [1.778.0](https://github.com/adobe/spacecat-api-service/compare/v1.777.0...v1.778.0) (2026-08-29)
+
+
+### Features
+
+* **suggestions:** gate EDS auto-fix behind IMS group for PLG/FREE_TRIAL tiers ([#2271](https://github.com/adobe/spacecat-api-service/issues/2271)) ([9a98153](https://github.com/adobe/spacecat-api-service/commit/9a9815324e589bebc1f888636327b887e727d959))
+
 # [1.777.0](https://github.com/adobe/spacecat-api-service/compare/v1.776.0...v1.777.0) (2026-08-29)
 
 
