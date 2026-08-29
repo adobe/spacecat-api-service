@@ -14,10 +14,12 @@ import {
   badRequest,
   createResponse,
   forbidden,
+  internalServerError,
   noContent,
   notFound,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
+import { HeadObjectCommand } from '@aws-sdk/client-s3';
 import {
   hasText,
   isArray, isNonEmptyArray,
@@ -75,6 +77,56 @@ import { postSlackMessage } from '../utils/slack/base.js';
 import { createAtomicStrategy, deleteAtomicStrategy } from '../support/atomic-strategy-helper.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
+
+/**
+ * Guidance CSV reference keys carried by `gads-placement-exclusions` suggestions.
+ * Each value is an object `{ uri, row_count, byte_size }` where `uri` is an
+ * `s3://bucket/key` pointer into the `spacecat-{env}-mystique-assets` bucket.
+ * @type {string[]}
+ */
+const GADS_GUIDANCE_REF_KEYS = [
+  'account_auto_ref',
+  'account_pmax_ref',
+  'site_auto_ref',
+  'site_pmax_ref',
+];
+
+// Click-time presigned guidance-CSV download URLs are short-lived (1 hour): the
+// URL is minted on the download request, so it only needs to outlive the click.
+const GADS_GUIDANCE_CSV_TTL_SECONDS = 60 * 60;
+
+// Server-side key prefix that binds a guidance CSV to its site. Mystique writes
+// these CSVs to
+// `gads-placement-exclusions/csv/{site_id}/{customer_id}/{obs_version}/{scope}.{source}.csv`
+// (contract: experience-platform/mystique `s3_bodies.write_csv_body`). Because
+// `data.guidance` is caller-writable, we presign only keys under the AUTHORIZED
+// site's prefix, so a tampered `uri` cannot read another tenant's object within
+// the shared mystique-assets bucket.
+const GADS_GUIDANCE_CSV_KEY_ROOT = 'gads-placement-exclusions/csv';
+
+/**
+ * Parses an `s3://bucket/key` URI into its bucket and key parts.
+ * @param {string} uri - The S3 URI to parse.
+ * @returns {{ bucket: string, key: string }|null} Parsed parts, or null when the
+ *   input is not a well-formed `s3://bucket/key` URI.
+ */
+const parseS3Uri = (uri) => {
+  if (!hasText(uri) || !uri.startsWith('s3://')) {
+    return null;
+  }
+  const withoutScheme = uri.slice('s3://'.length);
+  const slashIndex = withoutScheme.indexOf('/');
+  if (slashIndex <= 0) {
+    return null;
+  }
+  const bucket = withoutScheme.slice(0, slashIndex);
+  const key = withoutScheme.slice(slashIndex + 1);
+  // `slashIndex > 0` guarantees a non-empty bucket segment; only the key can be empty.
+  if (!hasText(key)) {
+    return null;
+  }
+  return { bucket, key };
+};
 
 // Allowed state_transition values on a backoffice review (SITES-43974). Validated
 // so the Learning Agent corpus never receives arbitrary free-text transitions.
@@ -807,6 +859,122 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     return ok(json);
+  };
+
+  /**
+   * Returns a short-lived presigned download URL for one of a
+   * `gads-placement-exclusions` suggestion's guidance CSV references.
+   *
+   * The browser cannot presign S3 keys, so the URL is minted on the download
+   * request (mirroring `llmo/brand-claims.js`): the CSV's `s3://` uri is resolved
+   * from the suggestion's stored `data.guidance[refKey]`. Because that stored data
+   * is caller-writable, authorization does not trust it: the bucket is pinned
+   * server-side to `S3_MYSTIQUE_BUCKET` (no cross-bucket reads) and the key must
+   * sit under the authorized site's prefix `gads-placement-exclusions/csv/{siteId}/`
+   * (no cross-object/cross-tenant reads). Existence is verified, then a 1-hour
+   * `GetObject` URL is signed. Minting per click needs no long TTL.
+   *
+   * @param {object} context of the request.
+   * @returns {Promise<Response>} `{ presignedUrl, expiresAt }`, or an error response.
+   */
+  const getPresignedGuidanceCsvUrl = async (context) => {
+    const siteId = context.params?.siteId;
+    const opptyId = context.params?.opportunityId || undefined;
+    const suggestionId = context.params?.suggestionId || undefined;
+    const refKey = context.params?.refKey;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(opptyId)) {
+      return badRequest('Opportunity ID required');
+    }
+    if (!isValidUUID(suggestionId)) {
+      return badRequest('Suggestion ID required');
+    }
+    if (!GADS_GUIDANCE_REF_KEYS.includes(refKey)) {
+      return badRequest('Invalid guidance CSV reference');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not belong to the organization');
+    }
+
+    // S3 config is an environment-global signal, so this guard is placed after
+    // access control (consistent with the sibling handlers) rather than ahead of it.
+    const { s3 } = ctx;
+    const mystiqueBucket = env?.S3_MYSTIQUE_BUCKET;
+    if (!s3?.s3Client || !s3.getSignedUrl || !s3.GetObjectCommand || !hasText(mystiqueBucket)) {
+      return badRequest('S3 storage is not configured for this environment');
+    }
+
+    const suggestion = await Suggestion.findById(suggestionId);
+    if (!suggestion || suggestion.getOpportunityId() !== opptyId) {
+      return notFound('Suggestion not found');
+    }
+    const opportunity = await suggestion.getOpportunity();
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      return notFound();
+    }
+    if (await getIsSummitPlgEnabled(site, ctx, context, accessControlUtil)
+      && !(await SuggestionGrant.isSuggestionGranted(suggestion.getId()))) {
+      return notFound('Suggestion not found');
+    }
+
+    const parsed = parseS3Uri(suggestion.getData()?.guidance?.[refKey]?.uri);
+    if (!parsed) {
+      return notFound('Guidance CSV not available');
+    }
+    // `data` is caller-writable (PATCH/POST persist it verbatim), so neither the
+    // ref's bucket nor its key is trusted for authorization. Bucket must be the
+    // pinned mystique-assets bucket (no cross-bucket reads)...
+    if (parsed.bucket !== mystiqueBucket) {
+      context.log.warn(`Refusing to presign guidance CSV for suggestion ${suggestionId}: ref ${refKey} names bucket ${parsed.bucket}, expected ${mystiqueBucket}`);
+      return notFound('Guidance CSV not available');
+    }
+    // ...and key must sit under the AUTHORIZED site's CSV prefix, binding the
+    // signed object to the site (closes cross-object/cross-tenant reads within
+    // the shared bucket). `siteId` is already access-checked above.
+    const expectedKeyPrefix = `${GADS_GUIDANCE_CSV_KEY_ROOT}/${siteId}/`;
+    if (!parsed.key.startsWith(expectedKeyPrefix)) {
+      context.log.warn(`Refusing to presign guidance CSV for suggestion ${suggestionId}: ref ${refKey} key is outside the site prefix ${expectedKeyPrefix}`);
+      return notFound('Guidance CSV not available');
+    }
+
+    try {
+      // Presigning never verifies existence; HeadObject yields a clean 404 when
+      // the object is missing (e.g. a ref written ahead of its CSV).
+      await s3.s3Client.send(new HeadObjectCommand({ Bucket: mystiqueBucket, Key: parsed.key }));
+      const command = new s3.GetObjectCommand({ Bucket: mystiqueBucket, Key: parsed.key });
+      const presignedUrl = await s3.getSignedUrl(
+        s3.s3Client,
+        command,
+        { expiresIn: GADS_GUIDANCE_CSV_TTL_SECONDS },
+      );
+      return ok({
+        presignedUrl,
+        expiresAt: new Date(Date.now() + GADS_GUIDANCE_CSV_TTL_SECONDS * 1000).toISOString(),
+      });
+    } catch (err) {
+      if (err.name === 'NotFound' || err.$metadata?.httpStatusCode === 404) {
+        context.log.warn(`Guidance CSV object missing for suggestion ${suggestionId} ref ${refKey}: ${parsed.key}`);
+        return notFound('Guidance CSV not available');
+      }
+      // A server-side S3 failure is not the client's fault: return 5xx (503 for
+      // throttling/transient so clients retry, 500 otherwise) with a generic
+      // message — the internal error text stays in the log, not the response.
+      context.log.error(`Failed to presign guidance CSV for suggestion ${suggestionId} ref ${refKey}: ${err.message}`);
+      const status = err.$metadata?.httpStatusCode;
+      const transient = status === 429 || status === 503
+        || ['ThrottlingException', 'TooManyRequestsException', 'SlowDown', 'RequestLimitExceeded', 'ServiceUnavailable'].includes(err.name);
+      return transient
+        ? createResponse({ message: 'Guidance CSV service temporarily unavailable' }, 503)
+        : internalServerError('Error retrieving guidance CSV');
+    }
   };
 
   /**
@@ -3455,6 +3623,7 @@ function SuggestionsController(ctx, sqs, env) {
     getAllForOpportunity,
     getAllForOpportunityPaged,
     getByID,
+    getPresignedGuidanceCsvUrl,
     getByStatus,
     getByStatusPaged,
     getSuggestionFixes,
