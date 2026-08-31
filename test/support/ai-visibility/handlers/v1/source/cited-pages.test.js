@@ -31,6 +31,8 @@ function sp(query) {
 
 const APEX = 'domain=intuit.com';
 const SUBDOMAIN = 'domain=quickbooks.intuit.com';
+const WWW = 'domain=www.intuit.com';
+const MISSING = '';
 
 describe('AI Visibility – v1 cited-pages search_type (LLMO-7015)', () => {
   let sandbox;
@@ -59,6 +61,16 @@ describe('AI Visibility – v1 cited-pages search_type (LLMO-7015)', () => {
       await handleCitedPages(sp(SUBDOMAIN), clients);
       expect(clients.sourceClient.sources.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
     });
+
+    it('resolves search_type DOMAIN for a bare www subdomain', async () => {
+      await handleCitedPages(sp(WWW), clients);
+      expect(clients.sourceClient.sources.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+    });
+
+    it('resolves search_type DOMAIN when the domain is missing', async () => {
+      await handleCitedPages(sp(MISSING), clients);
+      expect(clients.sourceClient.sources.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+    });
   });
 
   describe('handleCitedPagesTotals', () => {
@@ -71,6 +83,16 @@ describe('AI Visibility – v1 cited-pages search_type (LLMO-7015)', () => {
       await handleCitedPagesTotals(sp(SUBDOMAIN), clients);
       expect(clients.sourceClient.ownedSourcesTotal.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
     });
+
+    it('resolves search_type DOMAIN for a bare www subdomain', async () => {
+      await handleCitedPagesTotals(sp(WWW), clients);
+      expect(clients.sourceClient.ownedSourcesTotal.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+    });
+
+    it('resolves search_type DOMAIN when the domain is missing', async () => {
+      await handleCitedPagesTotals(sp(MISSING), clients);
+      expect(clients.sourceClient.ownedSourcesTotal.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+    });
   });
 
   describe('handleCitedPagesExport', () => {
@@ -82,6 +104,16 @@ describe('AI Visibility – v1 cited-pages search_type (LLMO-7015)', () => {
     it('resolves search_type SUBDOMAIN for a non-www subdomain on the nested request', async () => {
       await handleCitedPagesExport(sp(SUBDOMAIN), clients);
       expect(clients.sourceClient.sourcesExport.firstCall.args[0].request.searchType).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
+    });
+
+    it('resolves search_type DOMAIN for a bare www subdomain on the nested request', async () => {
+      await handleCitedPagesExport(sp(WWW), clients);
+      expect(clients.sourceClient.sourcesExport.firstCall.args[0].request.searchType).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+    });
+
+    it('resolves search_type DOMAIN when the domain is missing on the nested request', async () => {
+      await handleCitedPagesExport(sp(MISSING), clients);
+      expect(clients.sourceClient.sourcesExport.firstCall.args[0].request.searchType).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
     });
   });
 });
