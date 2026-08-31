@@ -28,11 +28,12 @@
  * SSRF guard: the front door is fetched with redirects followed MANUALLY, and every hop's
  * host is validated with `isSafeDomain()` before it is requested. A public domain under
  * attacker control therefore cannot 3xx-redirect the probe into a private/internal host
- * (VPC service, cloud metadata endpoint). As a consequence `finalUrl` is always a
- * public host, so surfacing it in the waitlist reason discloses nothing internal.
+ * (VPC service, cloud metadata endpoint). `finalUrl` is consequently always on a public host —
+ * but its path/query/fragment remain caller-controlled, so a consumer that surfaces it (e.g.
+ * in a waitlist reason persisted or sent to Slack) must reduce it via `sanitizeUrlForReason`.
  */
 
-import { isSafeDomain } from '../controllers/plg/plg-onboarding/validation.js';
+import { isSafeDomain } from './url-safety.js';
 
 const PROBE_TIMEOUT_MS = 15000;
 // Login forms live in the early markup; 200KB is ample to detect them while keeping the
@@ -47,13 +48,15 @@ const BROWSER_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKi
 // Path segment that is unmistakably a login / SSO endpoint. Anchored on a delimiter on both
 // sides so `/authors`, `/login-tips`, etc. do not false-positive, while `/login`,
 // `/sampoorna/login.html`, `/sign-in`, `/sso`, `/oauth`, `/saml` all match.
+// Accepted behavior: the bare `auth` alternative also matches `/auth/callback`, `/auth/verify`,
+// etc. On a front door this is intended — a homepage that resolves into an `/auth/...` flow is
+// treated as gated. See test/support/detect-auth-wall.test.js for the documented case.
 const LOGIN_URL_PATTERN = /(?:^|[/_.-])(?:log[-]?in|sign[-_]?in|sso|oauth|auth|authenticate|authentication|saml)(?:[/._?#=&-]|$)/i;
 
 // Hostnames of well-known identity providers a site's front door commonly redirects to.
 const IDP_HOST_PATTERNS = [
   /(?:^|\.)okta(?:preview)?\.com$/i,
   /(?:^|\.)auth0\.com$/i,
-  /^login\.microsoftonline\.com$/i,
   /^login\.microsoft(?:online)?\.com$/i,
   /^login\.live\.com$/i,
   /^login\.windows\.net$/i,

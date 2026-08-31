@@ -14,6 +14,7 @@ import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { cleanupPlgSiteSuggestionsAndFixes } from '../plg-onboarding-cleanup.js';
 import { updateRumConfig } from '../../../support/rum-config-service.js';
+import { sanitizeUrlForReason } from '../../../support/url-safety.js';
 import { hasActiveSuggestions } from './displacement.js';
 import {
   AEM_CS_AUTHOR_URL_PATTERN, AEM_CS_PUBLISH_HOST_PATTERN, EDS_HOST_PATTERN,
@@ -663,8 +664,11 @@ export async function performAsoPlgOnboarding({
       const authWall = await detectAuthWall({ baseUrl: baseURL, log });
       if (authWall.authenticated) {
         log.info(`Domain ${domain} appears to require authentication (signal: ${authWall.signal}), moving to waitlist`);
+        // finalUrl is host-validated (public) but its path/query/fragment are caller-controlled;
+        // reduce it before it is persisted and forwarded to Slack (mrkdwn) to avoid injection.
+        const safeFinalUrl = authWall.finalUrl ? sanitizeUrlForReason(authWall.finalUrl) : '';
         let waitlistReason = `Domain ${domain} ${AUTHENTICATED_SITE} (detected: ${authWall.signal}`;
-        waitlistReason += authWall.finalUrl ? `, resolved to ${authWall.finalUrl}).` : ').';
+        waitlistReason += safeFinalUrl ? `, resolved to ${safeFinalUrl}).` : ').';
         onboarding.setStatus(STATUSES.WAITLISTED);
         onboarding.setWaitlistReason(waitlistReason);
         onboarding.setSiteId(site?.getId() || null);

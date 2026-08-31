@@ -10,8 +10,12 @@
  * governing permissions and limitations under the License.
  */
 
-import { isIP } from 'node:net';
 import PlgOnboardingModel from '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js';
+
+// isSafeDomain lives in src/support/ (shared SSRF guard) so lower-level probes can reuse it
+// without importing up into a controller. Re-exported here for onboarding callers that already
+// import it from this module.
+export { isSafeDomain } from '../../../support/url-safety.js';
 
 // EDS host pattern: ref--repo--owner.aem.live (or hlx.live)
 export const EDS_HOST_PATTERN = /^([\w-]+)--([\w-]+)--([\w-]+)\.(aem\.live|hlx\.live)$/i;
@@ -46,57 +50,3 @@ export const prepareDomain = (raw) => PlgOnboardingModel.normalizeDomain(stripSc
  * @returns {boolean} true if valid, false otherwise.
  */
 export const isValidDomain = (domain) => PlgOnboardingModel.isValidDomain(domain);
-
-/**
- * Validates that a domain is not a private/internal address to prevent SSRF.
- *
- * IMPORTANT ordering contract: callers MUST invoke prepareDomain() and isValidDomain() BEFORE
- * this function. The hostname is extracted via `split('/')[0]`, so if a raw scheme-prefixed
- * input like "https://10.0.0.1" reaches this function, the split yields "https:" and the
- * private-IP blocklist is bypassed. isValidDomain() rejects any scheme-prefixed input, which
- * is what makes this contract safe.
- *
- * Defense in depth: the raw input is first canonicalized via the WHATWG URL parser so that
- * hex/decimal/octal IP forms (e.g. 0xa9.254.169.254 → 169.254.169.254 AWS IMDS) and
- * IPv6 forms are normalized before denylist matching. The shared isValidDomain already
- * rejects these via its alphabetic-TLD requirement, but canonicalizing here closes the
- * gap if a future caller composes a bypass that survives validation.
- *
- * @param {string} domain - The domain to validate (may include a path, e.g. "nba.com/kings").
- * @returns {boolean} true if safe, false if potentially dangerous.
- */
-export function isSafeDomain(domain) {
-  const rawHostname = domain.split('/')[0];
-  let hostname;
-  try {
-    hostname = new URL(`https://${rawHostname}`).hostname;
-  } catch {
-    return false;
-  }
-  // net.isIP returns 4 (IPv4), 6 (IPv6), or 0 (not an IP). new URL serializes IPv6
-  // hostnames WITH brackets (`[fd00::1]`), which makes a naive isIP(hostname) check
-  // return 0 and silently misses every IPv6 private/loopback/link-local/IPv4-mapped
-  // form. Unwrap the brackets before the isIP test so the backstop catches IPv6
-  // literals (RFC 4193 ULA, RFC 4291 link-local, IPv4-mapped IMDS, etc.) too.
-  const ipLiteral = hostname.replace(/^\[|\]$/g, '');
-  if (isIP(ipLiteral)) {
-    return false;
-  }
-  const blocked = [
-    /^localhost$/i,
-    /\.localhost$/i,
-    /^127\./,
-    /^10\./,
-    /^172\.(1[6-9]|2\d|3[01])\./,
-    /^192\.168\./,
-    /^169\.254\./,
-    /^0\./,
-    // RFC 6761 reserves .localhost for loopback; runtime resolution is platform-dependent
-    // (Linux glibc/systemd hardcode it; macOS does not), so the static gate is required.
-    /^\[::1\]/,
-    /\.local$/i,
-    /\.internal$/i,
-    /\.private\./i,
-  ];
-  return !blocked.some((pattern) => pattern.test(hostname));
-}
