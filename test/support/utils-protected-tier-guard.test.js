@@ -144,6 +144,7 @@ describe('onboardSingleSite — protected-tier preservation (SITES-49886)', func
       disableHandlerForSite: sandbox.stub(),
       save: sandbox.stub().resolves(),
     });
+    const siteEnrollmentCreate = sandbox.stub().resolves({ getId: () => 'enr-new' });
     const context = {
       log: {
         info: sandbox.stub(), warn: sandbox.stub(), error: sandbox.stub(), debug: sandbox.stub(),
@@ -165,11 +166,14 @@ describe('onboardSingleSite — protected-tier preservation (SITES-49886)', func
         Entitlement: {
           findByOrganizationIdAndProductCode: sandbox.stub().resolves(existingEntitlement),
         },
+        SiteEnrollment: {
+          create: siteEnrollmentCreate,
+        },
       },
       imsClient: { getImsOrganizationDetails: sandbox.stub() },
       sqs: { sendMessage: sandbox.stub().resolves() },
     };
-    return { context, configurationFindLatest };
+    return { context, configurationFindLatest, siteEnrollmentCreate };
   };
 
   const profile = { audits: { cwv: {} }, imports: {}, config: {} };
@@ -215,20 +219,26 @@ describe('onboardSingleSite — protected-tier preservation (SITES-49886)', func
     );
   });
 
-  it('preserves an existing PRE_ONBOARD tier but still binds the enrollment: re-asserts the staging tier (not the requested FREE_TRIAL) so createEntitlement only creates the enrollment, and audits run normally', async () => {
+  it('preserves an existing PRE_ONBOARD tier and binds the enrollment DIRECTLY — never calls TierClient.createEntitlement (which rejects PRE_ONBOARD), audits run normally', async () => {
     const { onboardSingleSite, tierCreateForSiteStub } = await loadOnboard();
     const site = makeHappyPathSite();
-    const { context, configurationFindLatest } = makeContext(site, { getTier: () => 'PRE_ONBOARD' });
+    // Site has no ASO enrollment yet — the direct-bind path reads this to stay idempotent.
+    site.getSiteEnrollments = sandbox.stub().resolves([]);
+    const { context, configurationFindLatest, siteEnrollmentCreate } = makeContext(
+      site,
+      { getTier: () => 'PRE_ONBOARD', getId: () => 'ent-test' },
+    );
 
     const result = await run(onboardSingleSite, context);
 
-    // Enrollment path still runs — TierClient is engaged ...
-    expect(tierCreateForSiteStub).to.have.been.calledOnce;
-    const createEntitlement = await tierCreateForSiteStub.firstCall.returnValue;
-    // ... but with the EXISTING PRE_ONBOARD tier, not the requested FREE_TRIAL, so the real
-    // TierClient leaves the tier untouched (currentTier === tier) and only binds the enrollment.
-    expect(createEntitlement.createEntitlement).to.have.been.calledWith('PRE_ONBOARD');
-    expect(createEntitlement.createEntitlement).to.not.have.been.calledWith('FREE_TRIAL');
+    // TierClient is never engaged: createEntitlement('PRE_ONBOARD') throws `Invalid tier` in
+    // prod, so the preserve path must bypass the entitlement API entirely.
+    expect(tierCreateForSiteStub).to.not.have.been.called;
+    // The enrollment is bound directly against the org's existing entitlement.
+    expect(siteEnrollmentCreate).to.have.been.calledOnceWith({
+      siteId: 'site-happy',
+      entitlementId: 'ent-test',
+    });
     // PRE_ONBOARD is not in the PLG skip branch — audit-config path still runs.
     expect(configurationFindLatest).to.have.been.calledOnce;
     // The report reflects the true, preserved tier.
@@ -240,16 +250,38 @@ describe('onboardSingleSite — protected-tier preservation (SITES-49886)', func
     );
   });
 
-  it('promotes a PRE_ONBOARD tier when forceTierUpdate=true (escape hatch): createEntitlement gets the requested FREE_TRIAL', async () => {
+  it('does not double-bind a PRE_ONBOARD enrollment when the site is already enrolled (idempotent)', async () => {
+    const { onboardSingleSite } = await loadOnboard();
+    const site = makeHappyPathSite();
+    // Site already holds an enrollment for the existing entitlement.
+    site.getSiteEnrollments = sandbox.stub().resolves([{ getEntitlementId: () => 'ent-test' }]);
+    const { context, siteEnrollmentCreate } = makeContext(
+      site,
+      { getTier: () => 'PRE_ONBOARD', getId: () => 'ent-test' },
+    );
+
+    const result = await run(onboardSingleSite, context);
+
+    expect(siteEnrollmentCreate).to.not.have.been.called;
+    expect(result.tier).to.equal('PRE_ONBOARD');
+    expect(result.status).to.equal('Success');
+  });
+
+  it('promotes a PRE_ONBOARD tier when forceTierUpdate=true (escape hatch): goes through TierClient with the requested FREE_TRIAL, not the direct bind', async () => {
     const { onboardSingleSite, tierCreateForSiteStub } = await loadOnboard();
     const site = makeHappyPathSite();
-    const { context, configurationFindLatest } = makeContext(site, { getTier: () => 'PRE_ONBOARD' });
+    const { context, configurationFindLatest, siteEnrollmentCreate } = makeContext(
+      site,
+      { getTier: () => 'PRE_ONBOARD', getId: () => 'ent-test' },
+    );
 
     const result = await run(onboardSingleSite, context, { forceTierUpdate: true });
 
     expect(tierCreateForSiteStub).to.have.been.calledOnce;
     const createEntitlement = await tierCreateForSiteStub.firstCall.returnValue;
     expect(createEntitlement.createEntitlement).to.have.been.calledWith('FREE_TRIAL');
+    // Forced promotion uses TierClient, not the direct-bind path.
+    expect(siteEnrollmentCreate).to.not.have.been.called;
     expect(configurationFindLatest).to.have.been.calledOnce;
     expect(result.status).to.equal('Success');
   });
@@ -323,17 +355,23 @@ describe('onboardSingleSite — protected-tier preservation (SITES-49886)', func
       expect(env).to.equal(context.env);
     });
 
-    it('does NOT alert when onboarding a PRE_ONBOARD org (tier preserved, enrollment bound — no downgrade)', async () => {
+    it('does NOT alert when onboarding a PRE_ONBOARD org (tier preserved, enrollment bound directly — no downgrade)', async () => {
       const {
         onboardSingleSite, notifyForcedTierDowngradeStub, tierCreateForSiteStub,
       } = await loadOnboard();
       const site = makeHappyPathSite();
-      const { context } = makeContext(site, { getTier: () => 'PRE_ONBOARD' });
+      site.getSiteEnrollments = sandbox.stub().resolves([]);
+      const { context, siteEnrollmentCreate } = makeContext(
+        site,
+        { getTier: () => 'PRE_ONBOARD', getId: () => 'ent-test' },
+      );
 
       // Default onboard preserves PRE_ONBOARD — the tier is never downgraded, so no alert.
       await run(onboardSingleSite, context);
 
-      expect(tierCreateForSiteStub).to.have.been.calledOnce;
+      // Enrollment is bound directly; TierClient is never engaged for the preserve path.
+      expect(tierCreateForSiteStub).to.not.have.been.called;
+      expect(siteEnrollmentCreate).to.have.been.calledOnce;
       expect(notifyForcedTierDowngradeStub).to.not.have.been.called;
     });
 

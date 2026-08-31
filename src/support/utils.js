@@ -2062,7 +2062,7 @@ export const onboardSingleSite = async (
     const isPreOnboardOrg = existingTier === EntitlementModel.TIERS.PRE_ONBOARD;
     // preservePlgTier: PLG is fully preserved — skip the entitlement/enrollment write AND the
     // audit-config change below. preservePreOnboardTier: preserve only the tier — the enrollment
-    // is still bound and audit config still runs normally. `forced` overrides both.
+    // is still bound (see below) and audit config still runs normally. `forced` overrides both.
     const preservePlgTier = isPlgOrg && !forced;
     const preservePreOnboardTier = isPreOnboardOrg && !forced;
 
@@ -2075,22 +2075,43 @@ export const onboardSingleSite = async (
     if (preservePlgTier) {
       log.info(`Preserving ${existingTier} tier for org ${organizationId} - skipping entitlement/enrollment write during onboard of ${baseURL}`);
       await say(`:lock: Org for \`${baseURL}\` is on the *${existingTier}* tier — onboarding will NOT change the tier, entitlement, or enrollment. Running audits and opportunities only. (Use *Force Tier Update* to override.)`);
-    } else {
-      // Preserve a PRE_ONBOARD staging tier by re-asserting it (createEntitlement then only
-      // binds the missing enrollment); promote everything else — and PRE_ONBOARD too when
-      // forceTierUpdate is set — to the requested tier.
-      if (preservePreOnboardTier) {
-        log.info(`Preserving ${existingTier} tier for org ${organizationId} while binding the site enrollment during onboard of ${baseURL}`);
-        await say(`:lock: Org for \`${baseURL}\` is on the internal *${existingTier}* tier — onboarding will keep that tier and only ensure the site enrollment. (Use *Force Tier Update* to promote it.)`);
+    } else if (preservePreOnboardTier) {
+      // Preserve the PRE_ONBOARD staging tier and bind the site enrollment WITHOUT going through
+      // TierClient.createEntitlement: that call validates its tier argument against the mysticat
+      // ENTITLEMENT_TIER enum (FREE_TRIAL | PAID | PLG) and throws `Invalid tier: PRE_ONBOARD`
+      // before it can create anything (SITES-49886 follow-up). Create the SiteEnrollment directly
+      // against the org's existing entitlement instead — the same direct bind move-plg-site uses —
+      // so the entitlement/tier is never touched. Idempotent: only bind if not already enrolled.
+      log.info(`Preserving ${existingTier} tier for org ${organizationId} while binding the site enrollment during onboard of ${baseURL}`);
+      await say(`:lock: Org for \`${baseURL}\` is on the internal *${existingTier}* tier — onboarding will keep that tier and only ensure the site enrollment. (Use *Force Tier Update* to promote it.)`);
+      try {
+        const entitlementId = existingAso.getId();
+        const siteId = site.getId();
+        const existingEnrollments = await site.getSiteEnrollments();
+        const alreadyEnrolled = existingEnrollments
+          ?.some((se) => se.getEntitlementId() === entitlementId);
+        if (alreadyEnrolled) {
+          log.info(`Site ${siteId} already enrolled in ${existingTier} entitlement ${entitlementId} - nothing to bind`);
+        } else {
+          const siteEnrollment = await dataAccess.SiteEnrollment.create({ siteId, entitlementId });
+          log.info(`Bound ASO enrollment ${siteEnrollment.getId()} for site ${siteId} to existing ${existingTier} entitlement ${entitlementId}`);
+          await say(`:white_check_mark: Bound ASO enrollment ${siteEnrollment.getId()} to the existing ${existingTier} entitlement for site ${siteId}`);
+        }
+      } catch (error) {
+        log.error(`Binding ASO site enrollment for ${baseURL} failed: ${error.message}`);
+        await say(':x: Binding ASO site enrollment failed');
+        reportLine.errors = 'Binding ASO site enrollment failed';
+        reportLine.status = 'Failed';
+        throw error;
       }
-      const effectiveTier = preservePreOnboardTier ? existingTier : tier;
+    } else {
       const { entitlement } = await createEntitlementAndEnrollment(
         site,
         context,
         slackContext,
         reportLine,
         EntitlementModel.PRODUCT_CODES.ASO,
-        effectiveTier,
+        tier,
       );
 
       // SITES-50179: the Force Tier Update escape hatch was exercised on a PLG org (isPlgOrg is
