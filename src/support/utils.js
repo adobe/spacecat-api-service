@@ -2057,26 +2057,33 @@ export const onboardSingleSite = async (
     // promote either tier to the requested FREE_TRIAL/PAID.
     const existingAso = await getAsoEntitlement(organizationId, context);
     const existingTier = existingAso?.getTier() ?? null;
+    const forced = !!additionalParams.forceTierUpdate;
     const isPlgOrg = existingTier === EntitlementModel.TIERS.PLG;
     const isPreOnboardOrg = existingTier === EntitlementModel.TIERS.PRE_ONBOARD;
-    const preserveProtectedTier = isPlgOrg && !additionalParams.forceTierUpdate;
-    const preservePreOnboardTier = isPreOnboardOrg && !additionalParams.forceTierUpdate;
+    // preservePlgTier: PLG is fully preserved — skip the entitlement/enrollment write AND the
+    // audit-config change below. preservePreOnboardTier: preserve only the tier — the enrollment
+    // is still bound and audit config still runs normally. `forced` overrides both.
+    const preservePlgTier = isPlgOrg && !forced;
+    const preservePreOnboardTier = isPreOnboardOrg && !forced;
+
+    // Both preserve paths report the org's true, unchanged tier rather than the requested one.
+    if (preservePlgTier || preservePreOnboardTier) {
+      reportLine.tier = existingTier;
+    }
 
     // Create entitlement and enrollment
-    if (preserveProtectedTier) {
-      reportLine.tier = existingTier; // report the true, unchanged tier
+    if (preservePlgTier) {
       log.info(`Preserving ${existingTier} tier for org ${organizationId} - skipping entitlement/enrollment write during onboard of ${baseURL}`);
       await say(`:lock: Org for \`${baseURL}\` is on the *${existingTier}* tier — onboarding will NOT change the tier, entitlement, or enrollment. Running audits and opportunities only. (Use *Force Tier Update* to override.)`);
     } else {
       // Preserve a PRE_ONBOARD staging tier by re-asserting it (createEntitlement then only
       // binds the missing enrollment); promote everything else — and PRE_ONBOARD too when
       // forceTierUpdate is set — to the requested tier.
-      const effectiveTier = preservePreOnboardTier ? existingTier : tier;
       if (preservePreOnboardTier) {
-        reportLine.tier = existingTier; // report the true, preserved tier — not the requested one
         log.info(`Preserving ${existingTier} tier for org ${organizationId} while binding the site enrollment during onboard of ${baseURL}`);
         await say(`:lock: Org for \`${baseURL}\` is on the internal *${existingTier}* tier — onboarding will keep that tier and only ensure the site enrollment. (Use *Force Tier Update* to promote it.)`);
       }
+      const effectiveTier = preservePreOnboardTier ? existingTier : tier;
       const { entitlement } = await createEntitlementAndEnrollment(
         site,
         context,
@@ -2287,7 +2294,7 @@ export const onboardSingleSite = async (
     // Protected-tier orgs (SITES-49886): leave the existing audit scheduling config exactly
     // as-is. Enabling/disabling handlers here would alter a PLG customer's recurring-audit
     // setup; we only run audits once (below). Skipped unless forceTierUpdate.
-    if (preserveProtectedTier) {
+    if (preservePlgTier) {
       log.debug(`Preserving existing audit configuration for ${existingTier}-tier site ${siteID}`);
     } else {
       const latestConfiguration = await Configuration.findLatest();
@@ -2330,7 +2337,7 @@ export const onboardSingleSite = async (
     const auditsMessage = reportLine.audits || 'None';
     const importsMessage = reportLine.imports || 'None';
     let statusMessage;
-    if (preserveProtectedTier) {
+    if (preservePlgTier) {
       statusMessage = `:white_check_mark: *For site ${baseURL}*: Audit scheduling config preserved (${existingTier} tier); triggered audits once: ${auditsMessage}`;
     } else if (scheduledRun) {
       statusMessage = `:white_check_mark: *For site ${baseURL}*: Adding imports: ${importsMessage} and audits: ${auditsMessage} to scheduled run`;
