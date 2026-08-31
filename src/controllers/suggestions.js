@@ -48,6 +48,7 @@ import {
 } from '@adobe/spacecat-shared-data-access';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
+import DrsClient from '@adobe/spacecat-shared-drs-client';
 import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto/suggestion.js';
 import { isValidLocale } from '../utils/validations.js';
 import { applyFieldProjection } from '../utils/field-projection.js';
@@ -3074,6 +3075,121 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   /**
+   * Cancels an in-progress GeoExperiment: rolls back any deployed suggestions from the edge,
+   * deletes its DRS schedule(s), cleans up its atomic strategy artifact, and removes the
+   * GeoExperiment record. Terminal experiments (COMPLETED or FAILED) cannot be cancelled.
+   *
+   * DRS schedule deletion and suggestion cleanup are best-effort: a failure to delete a schedule
+   * or unblock a suggestion is logged but does not prevent the experiment from being removed,
+   * matching the fail-open pattern used elsewhere in this file (e.g. the edge-geo-exp creation
+   * failure cleanup path).
+   */
+  const cancelGeoExperiment = async (context) => {
+    const { siteId, geoExperimentId } = context.params;
+    const { authInfo: { profile } } = context.attributes;
+    const updatedBy = profile?.email || 'geo-experiment-cancel';
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(geoExperimentId)) {
+      return badRequest('GeoExperiment ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
+    }
+
+    const geoExperiment = await GeoExperiment.findById(geoExperimentId);
+    if (!geoExperiment || geoExperiment.getSiteId() !== siteId) {
+      return notFound('GeoExperiment not found');
+    }
+
+    const status = geoExperiment.getStatus();
+    if (status === GeoExperimentModel.STATUSES.COMPLETED
+      || status === GeoExperimentModel.STATUSES.FAILED) {
+      context.log.warn(`[geo-experiment-cancel-failed] site: ${siteId}, GeoExperiment ${geoExperimentId} is ${status} and cannot be cancelled`);
+      return badRequest(`GeoExperiment ${geoExperimentId} is ${status} and cannot be cancelled`);
+    }
+
+    const phase = geoExperiment.getPhase();
+    const isDeployed = [
+      GeoExperimentModel.PHASES.DEPLOYMENT_DONE,
+      GeoExperimentModel.PHASES.POST_ANALYSIS_STARTED,
+      GeoExperimentModel.PHASES.POST_ANALYSIS_DONE,
+      GeoExperimentModel.PHASES.IMPACT_MEASUREMENT_STARTED,
+    ].includes(phase);
+
+    const opportunityId = geoExperiment.getOpportunityId();
+    const opportunity = opportunityId ? await Opportunity.findById(opportunityId) : null;
+    const allSuggestions = opportunity
+      ? await Suggestion.allByOpportunityId(opportunityId)
+      : [];
+    const experimentSuggestionIds = geoExperiment.getSuggestionIds() || [];
+    const experimentSuggestions = allSuggestions.filter(
+      (s) => experimentSuggestionIds.includes(s.getId()),
+    );
+
+    context.log.info(`[geo-experiment-cancel] site: ${siteId}, GeoExperiment ${geoExperimentId}, phase: ${phase}, status: ${status}, isDeployed: ${isDeployed}, suggestions: ${experimentSuggestions.length}`);
+
+    if (isDeployed && opportunity && isNonEmptyArray(experimentSuggestions)) {
+      try {
+        const tokowakaClient = TokowakaClient.createFrom(context);
+        await tokowakaClient.rollbackSuggestions(site, opportunity, experimentSuggestions, {
+          allSuggestions,
+          updatedBy,
+        });
+      } catch (error) {
+        context.log.error(`[geo-experiment-cancel-failed] site: ${siteId}, GeoExperiment ${geoExperimentId}, Error rolling back suggestions from edge: ${error.message}`, error);
+      }
+    } else if (isNonEmptyArray(experimentSuggestions)) {
+      await Promise.allSettled(experimentSuggestions.map(async (suggestion) => {
+        try {
+          const { edgeOptimizeStatus: _, ...rest } = suggestion.getData();
+          suggestion.setData(rest);
+          suggestion.setUpdatedBy(updatedBy);
+          await suggestion.save();
+        } catch (error) {
+          context.log.error(`[geo-experiment-cancel-failed] site: ${siteId}, GeoExperiment ${geoExperimentId}, Failed to unblock suggestion ${suggestion.getId()}: ${error.message}`, error);
+        }
+      }));
+    }
+
+    const drsClient = DrsClient.createFrom(context);
+    const scheduleIds = [geoExperiment.getPostScheduleId(), geoExperiment.getPreScheduleId()]
+      .filter(Boolean);
+    await Promise.allSettled(scheduleIds.map(async (scheduleId) => {
+      try {
+        await drsClient.deleteSchedule(siteId, scheduleId);
+      } catch (error) {
+        context.log.error(`[geo-experiment-cancel-failed] site: ${siteId}, GeoExperiment ${geoExperimentId}, Failed to delete DRS schedule ${scheduleId}: ${error.message}`, error);
+      }
+    }));
+
+    try {
+      await deleteAtomicStrategy({
+        siteId,
+        strategyId: geoExperimentId,
+        s3: context.s3,
+        log: context.log,
+      });
+    } catch (error) {
+      context.log.error(`[geo-experiment-cancel-failed] site: ${siteId}, GeoExperiment ${geoExperimentId}, Failed to delete atomic strategy: ${error.message}`, error);
+    }
+
+    await geoExperiment.remove();
+
+    context.log.info(`[geo-experiment-cancel] Successfully cancelled GeoExperiment ${geoExperimentId} for site ${siteId} by ${updatedBy}`);
+
+    return noContent();
+  };
+
+  /**
    * Manually (re-)triggers Mystique impact measurement for a GeoExperiment. Only allowed once
    * the experiment has reached post-analysis, with status in_progress or completed (see
    * isImpactMeasurementEligible). Sends a TRIGGER_IMPACT_MEASUREMENT message to the
@@ -3706,6 +3822,7 @@ function SuggestionsController(ctx, sqs, env) {
     getGeoExperimentResults,
     patchGeoExperiment,
     deleteGeoExperiment,
+    cancelGeoExperiment,
     triggerImpactMeasurement,
     triggerGeoExperimentValidation,
     rollbackSuggestionFromEdge,

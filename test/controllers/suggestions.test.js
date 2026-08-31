@@ -25,6 +25,7 @@ import {
 } from '@adobe/spacecat-shared-data-access';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
+import DrsClient from '@adobe/spacecat-shared-drs-client';
 import SuggestionsController from '../../src/controllers/suggestions.js';
 import AccessControlUtil from '../../src/support/access-control-util.js';
 
@@ -173,6 +174,7 @@ describe('Suggestions Controller', () => {
     'getGeoExperimentResults',
     'patchGeoExperiment',
     'deleteGeoExperiment',
+    'cancelGeoExperiment',
     'triggerImpactMeasurement',
     'triggerGeoExperimentValidation',
     'rollbackSuggestionFromEdge',
@@ -12125,6 +12127,256 @@ describe('Suggestions Controller', () => {
         params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
       });
       expect(response.status).to.equal(204);
+      expect(mockGeoExperiment.remove).to.have.been.calledOnce;
+    });
+  });
+
+  describe('cancelGeoExperiment', () => {
+    const GEO_EXP_ID = 'b1b2c3d4-e5f6-7890-abcd-ef1234567890';
+    const { STATUSES, PHASES } = GeoExperimentModel;
+    let mockGeoExperiment;
+    let deleteScheduleStub;
+
+    function createMockGeoExperiment({
+      status = STATUSES.IN_PROGRESS,
+      phase = PHASES.INITIATED,
+      suggestionIds = [SUGGESTION_IDS[0]],
+      preScheduleId = 'pre-sched-1',
+      postScheduleId = null,
+      opportunityId = OPPORTUNITY_ID,
+    } = {}) {
+      return {
+        getId: () => GEO_EXP_ID,
+        getSiteId: () => SITE_ID,
+        getStatus: () => status,
+        getPhase: () => phase,
+        getSuggestionIds: () => suggestionIds,
+        getPreScheduleId: () => preScheduleId,
+        getPostScheduleId: () => postScheduleId,
+        getOpportunityId: () => opportunityId,
+        remove: sandbox.stub().resolves(),
+      };
+    }
+
+    beforeEach(() => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+
+      mockGeoExperiment = createMockGeoExperiment();
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(mockGeoExperiment);
+
+      deleteScheduleStub = sandbox.stub().resolves();
+      sandbox.stub(DrsClient, 'createFrom').returns({ deleteSchedule: deleteScheduleStub });
+
+      // No strategy blob to delete in these tests — reject with NoSuchKey so
+      // deleteAtomicStrategy's idempotent-skip path resolves immediately
+      // instead of retrying through its full backoff on a generic error.
+      const noSuchKey = new Error('not found');
+      noSuchKey.name = 'NoSuchKey';
+      context.s3 = { s3Client: { send: sandbox.stub().rejects(noSuchKey) } };
+    });
+
+    it('returns 400 for invalid siteId', async () => {
+      const response = await suggestionsController.cancelGeoExperiment({
+        ...context,
+        params: { siteId: 'bad', geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 for invalid geoExperimentId', async () => {
+      const response = await suggestionsController.cancelGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: 'bad' },
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 404 when site not found', async () => {
+      const response = await suggestionsController.cancelGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID_NOT_FOUND, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 403 without site access', async () => {
+      AccessControlUtil.prototype.hasAccess.restore();
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
+      const response = await suggestionsController.cancelGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 404 when GeoExperiment not found', async () => {
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(null);
+      const response = await suggestionsController.cancelGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 404 when GeoExperiment belongs to another site', async () => {
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves({
+        ...mockGeoExperiment,
+        getSiteId: () => 'other-site-id',
+      });
+      const response = await suggestionsController.cancelGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 400 and makes no changes when the experiment is COMPLETED', async () => {
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(createMockGeoExperiment({
+        status: STATUSES.COMPLETED,
+      }));
+      const response = await suggestionsController.cancelGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(400);
+      expect(deleteScheduleStub).to.not.have.been.called;
+      expect(mockSuggestion.saveMany).to.not.have.been.called;
+    });
+
+    it('returns 400 and makes no changes when the experiment is FAILED', async () => {
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(createMockGeoExperiment({
+        status: STATUSES.FAILED,
+      }));
+      const response = await suggestionsController.cancelGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(400);
+      expect(deleteScheduleStub).to.not.have.been.called;
+    });
+
+    it('unblocks suggestions (no edge rollback) and deletes the pre-schedule when not yet deployed', async () => {
+      const suggestion = mockSuggestionEntity({
+        ...suggs[0],
+        data: { ...suggs[0].data, edgeOptimizeStatus: 'EXPERIMENT_IN_PROGRESS' },
+      });
+      mockSuggestion.allByOpportunityId.resolves([suggestion]);
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(createMockGeoExperiment({
+        phase: PHASES.PRE_ANALYSIS_STARTED,
+        suggestionIds: [suggestion.getId()],
+        preScheduleId: 'pre-sched-1',
+        postScheduleId: null,
+      }));
+      const rollbackStub = sandbox.stub();
+      sandbox.stub(TokowakaClient, 'createFrom').returns({ rollbackSuggestions: rollbackStub });
+
+      const response = await suggestionsController.cancelGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+
+      expect(response.status).to.equal(204);
+      expect(rollbackStub).to.not.have.been.called;
+      expect(deleteScheduleStub).to.have.been.calledOnceWithExactly(SITE_ID, 'pre-sched-1');
+    });
+
+    it('rolls back suggestions from edge and deletes the post-schedule when deployed', async () => {
+      const suggestion = mockSuggestionEntity(suggs[0]);
+      mockSuggestion.allByOpportunityId.resolves([suggestion]);
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(createMockGeoExperiment({
+        phase: PHASES.POST_ANALYSIS_STARTED,
+        suggestionIds: [suggestion.getId()],
+        preScheduleId: 'pre-sched-1',
+        postScheduleId: 'post-sched-1',
+      }));
+      const rollbackStub = sandbox.stub().resolves({
+        succeededSuggestions: [suggestion],
+        failedSuggestions: [],
+      });
+      sandbox.stub(TokowakaClient, 'createFrom').returns({ rollbackSuggestions: rollbackStub });
+
+      const response = await suggestionsController.cancelGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+
+      expect(response.status).to.equal(204);
+      expect(rollbackStub).to.have.been.calledOnce;
+      expect(deleteScheduleStub).to.have.been.calledWith(SITE_ID, 'post-sched-1');
+      expect(deleteScheduleStub).to.have.been.calledWith(SITE_ID, 'pre-sched-1');
+    });
+
+    it('still cancels (removes the experiment) when DRS schedule deletion fails', async () => {
+      deleteScheduleStub.rejects(new Error('DRS unavailable'));
+      const geoExperiment = createMockGeoExperiment({
+        phase: PHASES.INITIATED,
+        preScheduleId: 'pre-sched-1',
+        postScheduleId: null,
+      });
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(geoExperiment);
+      mockSuggestion.allByOpportunityId.resolves([]);
+
+      const response = await suggestionsController.cancelGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+
+      expect(response.status).to.equal(204);
+      expect(geoExperiment.remove).to.have.been.calledOnce;
+      expect(context.log.error).to.have.been.calledWithMatch(/geo-experiment-cancel-failed.*DRS unavailable/);
+    });
+
+    it('still cancels (removes the experiment) when suggestion rollback fails', async () => {
+      const suggestion = mockSuggestionEntity(suggs[0]);
+      mockSuggestion.allByOpportunityId.resolves([suggestion]);
+      const geoExperiment = createMockGeoExperiment({
+        phase: PHASES.DEPLOYMENT_DONE,
+        suggestionIds: [suggestion.getId()],
+      });
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(geoExperiment);
+      sandbox.stub(TokowakaClient, 'createFrom').returns({
+        rollbackSuggestions: sandbox.stub().rejects(new Error('rollback boom')),
+      });
+
+      const response = await suggestionsController.cancelGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+
+      expect(response.status).to.equal(204);
+      expect(geoExperiment.remove).to.have.been.calledOnce;
+      expect(context.log.error).to.have.been.calledWithMatch(/geo-experiment-cancel-failed.*rollback boom/);
+    });
+
+    it('deletes the atomic strategy and removes the experiment on success', async () => {
+      const deleteAtomicStrategyStub = sandbox.stub().resolves({ success: true, removed: true, attempts: 1 });
+      const ControllerWithAtomicStub = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/atomic-strategy-helper.js': {
+          deleteAtomicStrategy: deleteAtomicStrategyStub,
+        },
+      });
+      const controllerWithAtomicStub = ControllerWithAtomicStub({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, {
+        AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+        LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+      });
+      mockSuggestion.allByOpportunityId.resolves([]);
+
+      const response = await controllerWithAtomicStub.cancelGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+
+      expect(response.status).to.equal(204);
+      expect(deleteAtomicStrategyStub).to.have.been.calledOnceWithExactly({
+        siteId: SITE_ID,
+        strategyId: GEO_EXP_ID,
+        s3: context.s3,
+        log: context.log,
+      });
       expect(mockGeoExperiment.remove).to.have.been.calledOnce;
     });
   });
