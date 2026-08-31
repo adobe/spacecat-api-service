@@ -179,6 +179,7 @@ describe('Suggestions Controller', () => {
     'previewSuggestions',
     'fetchFromEdge',
     'getByID',
+    'getPresignedGuidanceCsvUrl',
     'getByStatus',
     'getByStatusPaged',
     'getSuggestionFixes',
@@ -248,9 +249,14 @@ describe('Suggestions Controller', () => {
     site = {
       getId: sandbox.stub().returns(SITE_ID),
       getDeliveryType: sandbox.stub().returns(SiteModel.DELIVERY_TYPES.AEM_EDGE),
+      getOrganizationId: sandbox.stub().returns('test-org-id'),
+      getOrganization: sandbox.stub().resolves({ getImsOrgId: () => 'test-ims-org@AdobeOrg' }),
     };
     siteNotEnabled = {
       getId: sandbox.stub().returns(SITE_ID_NOT_ENABLED),
+      getDeliveryType: sandbox.stub().returns(SiteModel.DELIVERY_TYPES.AEM_EDGE),
+      getOrganizationId: sandbox.stub().returns('test-org-id'),
+      getOrganization: sandbox.stub().resolves({ getImsOrgId: () => 'test-ims-org@AdobeOrg' }),
     };
 
     removeStub = sandbox.stub().resolves();
@@ -499,6 +505,9 @@ describe('Suggestions Controller', () => {
       SuggestionGrant: mockSuggestionGrant,
       Site: mockSite,
       Configuration: mockConfiguration,
+      Entitlement: {
+        findByOrganizationIdAndProductCode: sandbox.stub().resolves(null),
+      },
       AsyncJob: {
         create: sandbox.stub(),
         findById: sandbox.stub(),
@@ -558,6 +567,373 @@ describe('Suggestions Controller', () => {
 
   it('throws an error if data access cannot be destructured to Suggestion', () => {
     expect(() => SuggestionsController({ dataAccess: { Opportunity: {}, Suggestion: '' } })).to.throw('Data access required');
+  });
+
+  describe('getPresignedGuidanceCsvUrl (click-time gads guidance CSV presign)', () => {
+    const MYSTIQUE_BUCKET = 'spacecat-dev-mystique-assets';
+
+    // Minimal fake for the s3 wrapper's GetObjectCommand: records the { Bucket, Key }
+    // it was constructed with under `.input`, mirroring the real command shape.
+    function FakeGetObjectCommand(params) {
+      this.input = params;
+    }
+
+    let getSignedUrl;
+    let presignLog;
+
+    const buildS3 = (send) => ({
+      s3Client: { send: send || sandbox.stub().resolves({}) },
+      getSignedUrl,
+      GetObjectCommand: FakeGetObjectCommand,
+    });
+
+    const buildController = (s3, envOverrides = {}) => SuggestionsController({
+      dataAccess: mockSuggestionDataAccess,
+      pathInfo: { headers: { 'x-product': 'llmo' } },
+      s3,
+      log: presignLog,
+      ...authContext,
+    }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+      S3_MYSTIQUE_BUCKET: MYSTIQUE_BUCKET,
+      ...envOverrides,
+    });
+
+    const gadsSuggestion = (guidance) => ({
+      id: SUGGESTION_IDS[0],
+      opportunityId: OPPORTUNITY_ID,
+      type: 'PLACEMENT_EXCLUSION',
+      status: 'NEW',
+      rank: 1,
+      data: { guidance },
+      kpiDeltas: {},
+      updatedBy: 'system',
+      updatedAt: new Date(),
+    });
+
+    const returnSuggestion = (suggData) => {
+      mockSuggestion.findById.callsFake((id) => Promise.resolve(
+        id === suggData.id ? mockSuggestionEntity(suggData) : null,
+      ));
+    };
+
+    // Mystique's real per-site CSV key layout (contract: s3_bodies.write_csv_body):
+    // gads-placement-exclusions/csv/{site_id}/{customer_id}/{obs_version}/{scope}.{source}.csv
+    const CUSTOMER_ID = '1234567890';
+    const OBS_VERSION = '2026-08-27_job-abc';
+    const keyFor = (scope, source, siteId = SITE_ID) => `gads-placement-exclusions/csv/${siteId}/${CUSTOMER_ID}/${OBS_VERSION}/${scope}.${source}.csv`;
+
+    const fullGuidance = () => ({
+      account_auto_ref: { uri: `s3://${MYSTIQUE_BUCKET}/${keyFor('account', 'auto')}`, row_count: 10, byte_size: 100 },
+      account_pmax_ref: { uri: `s3://${MYSTIQUE_BUCKET}/${keyFor('account', 'pmax')}`, row_count: 5, byte_size: 50 },
+      site_auto_ref: { uri: `s3://${MYSTIQUE_BUCKET}/${keyFor('site', 'auto')}`, row_count: 3, byte_size: 30 },
+      site_pmax_ref: { uri: `s3://${MYSTIQUE_BUCKET}/${keyFor('site', 'pmax')}`, row_count: 2, byte_size: 20 },
+    });
+
+    const csvParams = (refKey = 'account_auto_ref', overrides = {}) => ({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+        refKey,
+        ...overrides,
+      },
+      ...context,
+      log: presignLog,
+    });
+
+    beforeEach(() => {
+      getSignedUrl = sandbox.stub().callsFake((client, command, opts) => Promise.resolve(
+        `https://signed.example/${command.input.Bucket}/${command.input.Key}?exp=${opts.expiresIn}`,
+      ));
+      presignLog = { info: sandbox.stub(), warn: sandbox.stub(), error: sandbox.stub() };
+    });
+
+    it('returns a presigned URL + expiresAt for a valid ref (pinned bucket, parsed key, 1h TTL)', async () => {
+      returnSuggestion(gadsSuggestion(fullGuidance()));
+      const s3 = buildS3();
+
+      const response = await buildController(s3).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+
+      expect(body.presignedUrl).to.equal(`https://signed.example/${MYSTIQUE_BUCKET}/${keyFor('account', 'auto')}?exp=3600`);
+      expect(body.expiresAt).to.be.a('string');
+      expect(Number.isNaN(new Date(body.expiresAt).getTime())).to.equal(false);
+      // expiresAt tracks the 1h TTL (not merely "a valid date"): within a small tolerance of now+3600s
+      const expiryMs = new Date(body.expiresAt).getTime() - Date.now();
+      expect(expiryMs).to.be.closeTo(3600 * 1000, 5000);
+
+      // presign pins the server bucket (not the caller's uri) + parsed key + 1h TTL
+      expect(getSignedUrl.callCount).to.equal(1);
+      expect(getSignedUrl.firstCall.args[1].input).to.deep.equal({ Bucket: MYSTIQUE_BUCKET, Key: keyFor('account', 'auto') });
+      expect(getSignedUrl.firstCall.args[2]).to.deep.equal({ expiresIn: 3600 });
+
+      // existence verified against the pinned bucket before signing
+      expect(s3.s3Client.send.callCount).to.equal(1);
+      expect(s3.s3Client.send.firstCall.args[0].input).to.deep.equal({ Bucket: MYSTIQUE_BUCKET, Key: keyFor('account', 'auto') });
+    });
+
+    it('presigns the specific requested ref only', async () => {
+      returnSuggestion(gadsSuggestion(fullGuidance()));
+
+      const response = await buildController(buildS3()).getPresignedGuidanceCsvUrl(csvParams('site_pmax_ref'));
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.presignedUrl).to.equal(`https://signed.example/${MYSTIQUE_BUCKET}/${keyFor('site', 'pmax')}?exp=3600`);
+      expect(getSignedUrl.callCount).to.equal(1);
+    });
+
+    it('refuses (404) and warns when the key is outside the authorized site prefix (BOLA guard)', async () => {
+      // Same pinned bucket, but the ref key points at ANOTHER site's CSV prefix.
+      // `data.guidance` is caller-writable, so this is the cross-tenant attack:
+      // the key must sit under `gads-placement-exclusions/csv/{thisSiteId}/`.
+      const otherSiteId = SITE_ID_NOT_FOUND;
+      returnSuggestion(gadsSuggestion({
+        account_auto_ref: { uri: `s3://${MYSTIQUE_BUCKET}/${keyFor('account', 'auto', otherSiteId)}` },
+      }));
+
+      const response = await buildController(buildS3()).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(404);
+      expect(getSignedUrl.called).to.equal(false);
+      expect(presignLog.warn.calledOnce).to.equal(true);
+      expect(presignLog.warn.firstCall.args[0]).to.match(/outside the site prefix/);
+    });
+
+    it('refuses (404) a key in the pinned bucket but outside the gads csv root', async () => {
+      returnSuggestion(gadsSuggestion({
+        account_auto_ref: { uri: `s3://${MYSTIQUE_BUCKET}/brand_claims/llmo/${SITE_ID}/data.json.gz` },
+      }));
+      const response = await buildController(buildS3()).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(404);
+      expect(getSignedUrl.called).to.equal(false);
+    });
+
+    it('refuses (404) and warns when the ref names a foreign bucket (confused-deputy guard)', async () => {
+      returnSuggestion(gadsSuggestion({
+        account_auto_ref: { uri: 's3://attacker-bucket/secrets/data.csv' },
+      }));
+
+      const response = await buildController(buildS3()).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(404);
+      expect(getSignedUrl.called).to.equal(false);
+      expect(presignLog.warn.calledOnce).to.equal(true);
+      expect(presignLog.warn.firstCall.args[0]).to.match(/attacker-bucket/);
+    });
+
+    it('returns 404 when the ref is absent, its uri is null, or the uri is not s3://', async () => {
+      returnSuggestion(gadsSuggestion({ site_auto_ref: { uri: `s3://${MYSTIQUE_BUCKET}/x.csv` } }));
+      let response = await buildController(buildS3()).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(404);
+
+      returnSuggestion(gadsSuggestion({ account_auto_ref: { uri: null } }));
+      response = await buildController(buildS3()).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(404);
+
+      returnSuggestion(gadsSuggestion({ account_auto_ref: { uri: 'https://cdn.example/not-s3.csv' } }));
+      response = await buildController(buildS3()).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(404);
+
+      expect(getSignedUrl.called).to.equal(false);
+    });
+
+    it('returns 404 (no sign) for malformed s3 uris — no slash, empty key, or empty bucket', async () => {
+      // Exercises parseS3Uri's three null-returning branches through the handler
+      // (this parser is the enforcement point for the bucket pin).
+      for (const uri of ['s3://bucket-no-slash', `s3://${MYSTIQUE_BUCKET}/`, 's3:///leading-slash-key']) {
+        returnSuggestion(gadsSuggestion({ account_auto_ref: { uri } }));
+        // eslint-disable-next-line no-await-in-loop
+        const response = await buildController(buildS3()).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+        expect(response.status, `uri=${uri}`).to.equal(404);
+      }
+      expect(getSignedUrl.called).to.equal(false);
+    });
+
+    it('returns 400 for an unknown refKey', async () => {
+      returnSuggestion(gadsSuggestion(fullGuidance()));
+      const response = await buildController(buildS3()).getPresignedGuidanceCsvUrl(csvParams('evil_ref'));
+      expect(response.status).to.equal(400);
+      expect(getSignedUrl.called).to.equal(false);
+    });
+
+    it('returns 400 when S3 is not configured on the request', async () => {
+      returnSuggestion(gadsSuggestion(fullGuidance()));
+      const response = await buildController(undefined).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(400);
+      expect(getSignedUrl.called).to.equal(false);
+    });
+
+    it('returns 400 when S3_MYSTIQUE_BUCKET is not configured', async () => {
+      returnSuggestion(gadsSuggestion(fullGuidance()));
+      const response = await buildController(buildS3(), { S3_MYSTIQUE_BUCKET: undefined })
+        .getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(400);
+      expect(getSignedUrl.called).to.equal(false);
+    });
+
+    it('returns 404 and warns when the object does not exist (HeadObject 404)', async () => {
+      returnSuggestion(gadsSuggestion(fullGuidance()));
+      const notFoundErr = Object.assign(new Error('missing'), { name: 'NotFound' });
+      const s3 = buildS3(sandbox.stub().rejects(notFoundErr));
+
+      const response = await buildController(s3).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(404);
+      expect(getSignedUrl.called).to.equal(false);
+      expect(presignLog.warn.calledOnce).to.equal(true);
+    });
+
+    it('returns 404 when HeadObject reports a 404 via $metadata', async () => {
+      returnSuggestion(gadsSuggestion(fullGuidance()));
+      const metaErr = Object.assign(new Error('missing'), { $metadata: { httpStatusCode: 404 } });
+      const s3 = buildS3(sandbox.stub().rejects(metaErr));
+
+      const response = await buildController(s3).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(404);
+      expect(getSignedUrl.called).to.equal(false);
+    });
+
+    it('maps a non-404, non-transient S3 error to 500 with a generic message (no raw AWS text)', async () => {
+      returnSuggestion(gadsSuggestion(fullGuidance()));
+      const s3 = buildS3(sandbox.stub().rejects(new Error('kaboom internal detail')));
+
+      const response = await buildController(s3).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(500);
+      const body = await response.json();
+      expect(body.message).to.not.match(/kaboom/); // internal error text stays in the log, not the response
+      expect(presignLog.error.calledOnce).to.equal(true);
+      expect(presignLog.error.firstCall.args[0]).to.match(/kaboom/); // ...but is logged
+    });
+
+    it('maps a throttling/transient S3 error to 503', async () => {
+      returnSuggestion(gadsSuggestion(fullGuidance()));
+      const throttled = Object.assign(new Error('slow down'), { name: 'ThrottlingException' });
+      const s3 = buildS3(sandbox.stub().rejects(throttled));
+
+      const response = await buildController(s3).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(503);
+      expect(presignLog.error.calledOnce).to.equal(true);
+    });
+
+    it('maps an S3 error carrying a 503 $metadata status to 503', async () => {
+      returnSuggestion(gadsSuggestion(fullGuidance()));
+      const unavailable = Object.assign(new Error('unavailable'), { $metadata: { httpStatusCode: 503 } });
+      const s3 = buildS3(sandbox.stub().rejects(unavailable));
+
+      const response = await buildController(s3).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(503);
+    });
+
+    it('maps an S3 error carrying a 429 $metadata status to 503 (throttled)', async () => {
+      returnSuggestion(gadsSuggestion(fullGuidance()));
+      const throttled = Object.assign(new Error('too many requests'), { $metadata: { httpStatusCode: 429 } });
+      const s3 = buildS3(sandbox.stub().rejects(throttled));
+
+      const response = await buildController(s3).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(503);
+      expect(presignLog.error.calledOnce).to.equal(true);
+    });
+
+    it('maps a getSignedUrl rejection (HeadObject ok, presign throws) to 500 and does not leak the error', async () => {
+      returnSuggestion(gadsSuggestion(fullGuidance()));
+      getSignedUrl = sandbox.stub().rejects(new Error('presign boom secret detail'));
+      const s3 = buildS3(); // HeadObject (send) resolves; only the presign fails
+
+      const response = await buildController(s3).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(500);
+      const body = await response.json();
+      expect(body.message).to.not.match(/presign boom/); // internal detail stays in the log
+      expect(s3.s3Client.send.callCount).to.equal(1); // HeadObject ran
+      expect(presignLog.error.calledOnce).to.equal(true);
+      expect(presignLog.error.firstCall.args[0]).to.match(/presign boom/);
+    });
+
+    it('returns forbidden when the caller lacks access to the site', async () => {
+      returnSuggestion(gadsSuggestion(fullGuidance()));
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
+
+      const response = await buildController(buildS3()).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(403);
+      expect(getSignedUrl.called).to.equal(false);
+    });
+
+    it('returns 404 when the site is not found', async () => {
+      returnSuggestion(gadsSuggestion(fullGuidance()));
+      const response = await buildController(buildS3()).getPresignedGuidanceCsvUrl(
+        csvParams('account_auto_ref', { siteId: SITE_ID_NOT_FOUND }),
+      );
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 404 when the suggestion is missing or belongs to another opportunity', async () => {
+      mockSuggestion.findById.resolves(null);
+      let response = await buildController(buildS3()).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(404);
+
+      const sugg = gadsSuggestion(fullGuidance());
+      sugg.opportunityId = OPPORTUNITY_ID_NOT_FOUND;
+      returnSuggestion(sugg);
+      response = await buildController(buildS3()).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(404);
+      expect(getSignedUrl.called).to.equal(false);
+    });
+
+    it('returns 404 when the opportunity does not belong to the site', async () => {
+      mockSuggestion.findById.resolves({
+        getId: () => SUGGESTION_IDS[0],
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getOpportunity: async () => ({ getSiteId: () => SITE_ID_NOT_FOUND }),
+        getData: () => ({ guidance: fullGuidance() }),
+      });
+      const response = await buildController(buildS3()).getPresignedGuidanceCsvUrl(csvParams('account_auto_ref'));
+      expect(response.status).to.equal(404);
+      expect(getSignedUrl.called).to.equal(false);
+    });
+
+    it('returns 400 for an invalid siteId / opportunityId / suggestionId', async () => {
+      const c = buildController(buildS3());
+      expect((await c.getPresignedGuidanceCsvUrl(csvParams('account_auto_ref', { siteId: 'nope' }))).status).to.equal(400);
+      expect((await c.getPresignedGuidanceCsvUrl(csvParams('account_auto_ref', { opportunityId: 'nope' }))).status).to.equal(400);
+      expect((await c.getPresignedGuidanceCsvUrl(csvParams('account_auto_ref', { suggestionId: 'nope' }))).status).to.equal(400);
+      expect(getSignedUrl.called).to.equal(false);
+    });
+
+    it('returns 404 (no sign) when summit-plg is enabled and the suggestion is not granted', async () => {
+      // Mirrors the getByID summit-plg gate: the only security-relevant branch
+      // unique to this handler must be exercised.
+      returnSuggestion(gadsSuggestion(fullGuidance()));
+      mockSuggestionGrant.isSuggestionGranted.resolves(false);
+      const ControllerWithSummitPlg = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/utils.js': {
+          getIsSummitPlgEnabled: async () => true,
+        },
+      });
+      const controller = ControllerWithSummitPlg({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        s3: buildS3(),
+        log: presignLog,
+        ...authContext,
+      }, mockSqs, {
+        AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+        LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+        S3_MYSTIQUE_BUCKET: MYSTIQUE_BUCKET,
+      });
+
+      const response = await controller.getPresignedGuidanceCsvUrl({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+          suggestionId: SUGGESTION_IDS[0],
+          refKey: 'account_auto_ref',
+        },
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui' } },
+        ...context,
+        log: presignLog,
+      });
+      expect(response.status).to.equal(404);
+      expect(getSignedUrl.called).to.equal(false);
+    });
   });
 
   describe('getEdgeDeployedUrls', () => {
@@ -5545,6 +5921,306 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(404);
       const error = await response.json();
       expect(error).to.have.property('message', 'Opportunity not found');
+    });
+
+    it('auto-fix suggestions returns 403 for AEM Edge site on PLG tier with active enrollment', async () => {
+      const mockTierClient = {
+        checkValidEntitlement: sandbox.stub().resolves({
+          entitlement: { getTier: () => 'PLG' },
+          siteEnrollment: { getId: () => 'enrollment-1' },
+        }),
+      };
+      const ControllerWithPlgTier = await esmock('../../src/controllers/suggestions.js', {
+        '@adobe/spacecat-shared-tier-client': { default: { createForSite: sandbox.stub().resolves(mockTierClient) } },
+      });
+      const controllerWithPlgTier = ControllerWithPlgTier({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithPlgTier.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body.message).to.match(
+        /requires membership of the 'ASO-EDS-Autofix-Users' IMS group/,
+      );
+      expect(context.log.warn).to.have.been.calledWithMatch(/Auto-fix blocked/);
+    });
+
+    it('auto-fix suggestions returns 403 for AEM Edge site on FREE_TRIAL tier with active enrollment', async () => {
+      const mockTierClient = {
+        checkValidEntitlement: sandbox.stub().resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          siteEnrollment: { getId: () => 'enrollment-2' },
+        }),
+      };
+      const ControllerWithFreeTrial = await esmock('../../src/controllers/suggestions.js', {
+        '@adobe/spacecat-shared-tier-client': { default: { createForSite: sandbox.stub().resolves(mockTierClient) } },
+      });
+      const controllerWithFreeTrial = ControllerWithFreeTrial({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithFreeTrial.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body.message).to.match(
+        /requires membership of the 'ASO-EDS-Autofix-Users' IMS group/,
+      );
+    });
+
+    it('auto-fix suggestions allows through for AEM Edge PLG tier without active enrollment', async () => {
+      const mockTierClient = {
+        checkValidEntitlement: sandbox.stub().resolves({
+          entitlement: { getTier: () => 'PLG' },
+          siteEnrollment: null,
+        }),
+      };
+      const ControllerWithPlgTier = await esmock('../../src/controllers/suggestions.js', {
+        '@adobe/spacecat-shared-tier-client': { default: { createForSite: sandbox.stub().resolves(mockTierClient) } },
+      });
+      const controllerWithPlgTier = ControllerWithPlgTier({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithPlgTier.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.not.equal(403);
+    });
+
+    it('auto-fix suggestions allows AEM Edge Freemium caller in the ASO-EDS-Autofix-Users IMS group', async () => {
+      const mockTierClient = {
+        checkValidEntitlement: sandbox.stub().resolves({
+          entitlement: { getTier: () => 'PLG' },
+          siteEnrollment: { getId: () => 'enrollment-1' },
+        }),
+      };
+      const isImsGroupMemberStub = sandbox.stub().resolves(true);
+      const ControllerWithGroupMember = await esmock('../../src/controllers/suggestions.js', {
+        '@adobe/spacecat-shared-tier-client': { default: { createForSite: sandbox.stub().resolves(mockTierClient) } },
+        '../../src/support/ims-group.js': { isImsGroupMember: isImsGroupMemberStub },
+      });
+      const controllerWithGroupMember = ControllerWithGroupMember({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'ASO' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithGroupMember.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.not.equal(403);
+      expect(isImsGroupMemberStub).to.have.been.calledWithMatch(
+        sinon.match.any,
+        sinon.match({ groupName: 'ASO-EDS-Autofix-Users' }),
+      );
+    });
+
+    it('auto-fix suggestions returns 403 for AEM Edge Freemium caller not in the ASO-EDS-Autofix-Users IMS group', async () => {
+      const mockTierClient = {
+        checkValidEntitlement: sandbox.stub().resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          siteEnrollment: { getId: () => 'enrollment-2' },
+        }),
+      };
+      const ControllerWithNonMember = await esmock('../../src/controllers/suggestions.js', {
+        '@adobe/spacecat-shared-tier-client': { default: { createForSite: sandbox.stub().resolves(mockTierClient) } },
+        '../../src/support/ims-group.js': { isImsGroupMember: sandbox.stub().resolves(false) },
+      });
+      const controllerWithNonMember = ControllerWithNonMember({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'ASO' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithNonMember.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body.message).to.match(
+        /requires membership of the 'ASO-EDS-Autofix-Users' IMS group/,
+      );
+      expect(context.log.warn).to.have.been.calledWithMatch(/not in 'ASO-EDS-Autofix-Users' IMS group/);
+    });
+
+    it('auto-fix suggestions exempts a crosswalk EDS site from the group gate (user-token source)', async () => {
+      site.getAuthoringType = sandbox.stub().returns('cs/crosswalk');
+      const mockTierClient = {
+        checkValidEntitlement: sandbox.stub().resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          siteEnrollment: { getId: () => 'enrollment-2' },
+        }),
+      };
+      const isImsGroupMemberStub = sandbox.stub().resolves(false);
+      const Controller = await esmock('../../src/controllers/suggestions.js', {
+        '@adobe/spacecat-shared-tier-client': { default: { createForSite: sandbox.stub().resolves(mockTierClient) } },
+        '../../src/support/ims-group.js': { isImsGroupMember: isImsGroupMemberStub },
+      });
+      const controller = Controller({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'ASO' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controller.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.not.equal(403);
+      expect(isImsGroupMemberStub).to.not.have.been.called;
+      expect(context.log.info).to.have.been.calledWithMatch(/user-token content source/);
+    });
+
+    it('auto-fix suggestions does NOT exempt a documentauthoring EDS site on the authoring type alone (it is the EDS default and covers Google Drive / SharePoint)', async () => {
+      site.getAuthoringType = sandbox.stub().returns('documentauthoring');
+      const mockTierClient = {
+        checkValidEntitlement: sandbox.stub().resolves({
+          entitlement: { getTier: () => 'PLG' },
+          siteEnrollment: { getId: () => 'enrollment-3' },
+        }),
+      };
+      const isImsGroupMemberStub = sandbox.stub().resolves(false);
+      const Controller = await esmock('../../src/controllers/suggestions.js', {
+        '@adobe/spacecat-shared-tier-client': { default: { createForSite: sandbox.stub().resolves(mockTierClient) } },
+        '../../src/support/ims-group.js': { isImsGroupMember: isImsGroupMemberStub },
+      });
+      const controller = Controller({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'ASO' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controller.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(403);
+      expect(isImsGroupMemberStub).to.have.been.called;
+      const body = await response.json();
+      expect(body.message).to.match(
+        /requires membership of the 'ASO-EDS-Autofix-Users' IMS group/,
+      );
+    });
+
+    it('auto-fix suggestions exempts a Dark Alley EDS site identified by a da.live content source URL (no stored markup type)', async () => {
+      site.getAuthoringType = sandbox.stub().returns('documentauthoring');
+      site.getHlxConfig = sandbox.stub().returns({ content: { source: { url: 'https://content.da.live/org/site/main' } } });
+      const mockTierClient = {
+        checkValidEntitlement: sandbox.stub().resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          siteEnrollment: { getId: () => 'enrollment-3b' },
+        }),
+      };
+      const isImsGroupMemberStub = sandbox.stub().resolves(false);
+      const Controller = await esmock('../../src/controllers/suggestions.js', {
+        '@adobe/spacecat-shared-tier-client': { default: { createForSite: sandbox.stub().resolves(mockTierClient) } },
+        '../../src/support/ims-group.js': { isImsGroupMember: isImsGroupMemberStub },
+      });
+      const controller = Controller({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'ASO' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controller.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.not.equal(403);
+      expect(isImsGroupMemberStub).to.not.have.been.called;
+      expect(context.log.info).to.have.been.calledWithMatch(/user-token content source/);
+    });
+
+    it('auto-fix suggestions exempts an EDS site with a markup content source from the group gate', async () => {
+      site.getHlxConfig = sandbox.stub().returns({ content: { source: { type: 'markup' } } });
+      const mockTierClient = {
+        checkValidEntitlement: sandbox.stub().resolves({
+          entitlement: { getTier: () => 'FREE_TRIAL' },
+          siteEnrollment: { getId: () => 'enrollment-4' },
+        }),
+      };
+      const Controller = await esmock('../../src/controllers/suggestions.js', {
+        '@adobe/spacecat-shared-tier-client': { default: { createForSite: sandbox.stub().resolves(mockTierClient) } },
+        '../../src/support/ims-group.js': { isImsGroupMember: sandbox.stub().resolves(false) },
+      });
+      const controller = Controller({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'ASO' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controller.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.not.equal(403);
+    });
+
+    it('auto-fix suggestions fails closed (403) for a confirmed AEM Edge Freemium user when the group gate errors', async () => {
+      const mockTierClient = {
+        checkValidEntitlement: sandbox.stub().resolves({
+          entitlement: { getTier: () => 'PLG' },
+          siteEnrollment: { getId: () => 'enrollment-1' },
+        }),
+      };
+      // Confirmed freemium (blocked tier + enrollment), but resolving the org
+      // throws — the gate must deny, not fall through the outer fail-open catch.
+      site.getOrganization.rejects(new Error('transient org lookup failure'));
+      const ControllerWithGateError = await esmock('../../src/controllers/suggestions.js', {
+        '@adobe/spacecat-shared-tier-client': { default: { createForSite: sandbox.stub().resolves(mockTierClient) } },
+      });
+      const controllerWithGateError = ControllerWithGateError({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'ASO' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithGateError.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body.message).to.match(
+        /Could not verify Edge Delivery auto-fix authorization/,
+      );
+      expect(context.log.warn).to.have.been.calledWithMatch(/freemium authorization gate error/);
     });
 
     it('auto-fix suggestions no longer blocks on the per-site autofix handler enabled-list (on-demand bypass)', async () => {
