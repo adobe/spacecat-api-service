@@ -1807,9 +1807,9 @@ export async function queueDeliveryConfigWriter(
  * @param {Object} additionalParams - Additional parameters
  * @param {string} additionalParams.tier - Entitlement tier
  * @param {boolean} [additionalParams.forceTierUpdate] - When true, allows the onboard
- *   command to change a PLG/PRE_ONBOARD org's tier/entitlement and audit config. By
- *   default these tiers are preserved (SITES-49886). Separate from `force`, which only
- *   overrides the paid-profile downgrade guard.
+ *   command to change a PLG org's tier/entitlement and audit config. By default the PLG
+ *   tier is preserved (SITES-49886). Separate from `force`, which only overrides the
+ *   paid-profile downgrade guard.
  * @param {Object} options - Additional options
  * @param {Function} options.urlProcessor - Function to process the URL
  *                                          (e.g., extractURLFromSlackInput)
@@ -2036,20 +2036,19 @@ export const onboardSingleSite = async (
     );
 
     // Protected-tier guard (SITES-49886): ASO entitlements are org-level. If the org
-    // already holds a PLG or PRE_ONBOARD ASO entitlement, the onboard command must NOT
-    // touch the tier/entitlement/enrollment — TierClient.createEntitlement(FREE_TRIAL)
-    // would otherwise overwrite (downgrade) the existing tier, exposing all opportunities
-    // instead of the limited PLG set. Onboarding is unsupported for these tiers; we only
-    // run audits/opportunities once (below) and leave the earlier config untouched.
+    // already holds a PLG ASO entitlement, the onboard command must NOT touch the
+    // tier/entitlement/enrollment — TierClient.createEntitlement(FREE_TRIAL) would
+    // otherwise overwrite (downgrade) the existing PLG tier, exposing all opportunities
+    // instead of the limited PLG set. Onboarding is unsupported for PLG; we only run
+    // audits/opportunities once (below) and leave the earlier config untouched.
     // An explicit additionalParams.forceTierUpdate is the sole escape hatch (kept separate
     // from `force`, which only overrides the paid-profile downgrade guard).
+    // PRE_ONBOARD is deliberately NOT protected here: it's an internal staging tier meant
+    // to be promoted to a real tier (FREE_TRIAL/PAID) during onboarding, so the onboard
+    // command may create/update its entitlement normally.
     const existingAso = await getAsoEntitlement(organizationId, context);
     const existingTier = existingAso?.getTier() ?? null;
-    const PROTECTED_EXISTING_TIERS = [
-      EntitlementModel.TIERS.PLG,
-      EntitlementModel.TIERS.PRE_ONBOARD,
-    ];
-    const isProtectedOrg = existingTier != null && PROTECTED_EXISTING_TIERS.includes(existingTier);
+    const isProtectedOrg = existingTier === EntitlementModel.TIERS.PLG;
     const preserveProtectedTier = isProtectedOrg && !additionalParams.forceTierUpdate;
 
     // Create entitlement and enrollment
@@ -2069,9 +2068,9 @@ export const onboardSingleSite = async (
 
       // SITES-50179: the Force Tier Update escape hatch was exercised on a protected org
       // (isProtectedOrg is only true here when forceTierUpdate bypassed the guard above). If it
-      // downgraded a PLG/PRE_ONBOARD org to FREE_TRIAL — the exact transition that silently exposed
-      // the full opportunity set in the original incident — alert the team so every deliberate
-      // override is visible without manual auditing. Best-effort: never blocks onboarding.
+      // downgraded a PLG org to FREE_TRIAL — the exact transition that silently exposed the full
+      // opportunity set in the original incident — alert the team so every deliberate override is
+      // visible without manual auditing. Best-effort: never blocks onboarding.
       if (isProtectedOrg && tier === EntitlementModel.TIERS.FREE_TRIAL) {
         await notifyForcedTierDowngrade(
           {
@@ -2265,8 +2264,8 @@ export const onboardSingleSite = async (
     //     fire once — enable status only gates scheduling, not triggering.
     const wantEnabled = scheduledRun || profile.protected;
     // Protected-tier orgs (SITES-49886): leave the existing audit scheduling config exactly
-    // as-is. Enabling/disabling handlers here would alter a PLG/PRE_ONBOARD customer's
-    // recurring-audit setup; we only run audits once (below). Skipped unless forceTierUpdate.
+    // as-is. Enabling/disabling handlers here would alter a PLG customer's recurring-audit
+    // setup; we only run audits once (below). Skipped unless forceTierUpdate.
     if (preserveProtectedTier) {
       log.debug(`Preserving existing audit configuration for ${existingTier}-tier site ${siteID}`);
     } else {
