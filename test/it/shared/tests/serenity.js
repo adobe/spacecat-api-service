@@ -589,6 +589,132 @@ export default function serenityTests(
       expect(res.status).to.equal(400);
     });
 
+    // category-delete.md: a real delete, not the old untag-only behavior. A
+    // prompt-less category was previously a no-op forever; here it is gone.
+    it('DELETE /serenity/tags/:tagId removes a prompt-less category for good', async () => {
+      await createUsMarket();
+      const category = await createTag('Photography');
+
+      const del = await getHttpClient().admin.delete(
+        `${base}/tags/${category.body.id}?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(del.status).to.equal(204);
+
+      const roots = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=`,
+      );
+      const categoryRoot = roots.body.items.find((t) => t.name === 'category');
+      const children = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${categoryRoot.id}`,
+      );
+      expect(children.body.items.map((t) => t.id)).to.not.include(category.body.id);
+
+      // Idempotent: deleting the already-gone id again is a clean 404, not a
+      // resurrection or a 500 — the id-keyed-route convention.
+      const again = await getHttpClient().admin.delete(
+        `${base}/tags/${category.body.id}?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(again.status).to.equal(404);
+    });
+
+    // The whole subtree is composed and deleted in ONE proxy-side batch call —
+    // deleting the parent takes every sub-category with it.
+    it('DELETE /serenity/tags/:tagId deletes a parent category and its whole subtree', async () => {
+      await createUsMarket();
+      const parent = await createTag('Footwear');
+      const child = await createTag('Sneakers', parent.body.id);
+
+      const del = await getHttpClient().admin.delete(
+        `${base}/tags/${parent.body.id}?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(del.status).to.equal(204);
+
+      const orphanCheck = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${parent.body.id}`,
+      );
+      // The parent itself is gone, so its former children level reads empty.
+      expect(orphanCheck.body.items).to.deep.equal([]);
+
+      const rootsAfter = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=`,
+      );
+      const categoryRoot = rootsAfter.body.items.find((t) => t.name === 'category');
+      const remaining = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${categoryRoot.id}`,
+      );
+      expect(remaining.body.items.map((t) => t.id)).to.not.include.members([
+        parent.body.id, child.body.id,
+      ]);
+    });
+
+    // Prompt preservation is the upstream detach, not client choreography: the
+    // delete never reads or writes a prompt, and the prompt survives fully
+    // present, just no longer carrying the deleted category tag.
+    it('DELETE /serenity/tags/:tagId preserves carrying prompts, unassigned', async () => {
+      await createUsMarket();
+      const category = await createTag('Photography');
+      const created = await getHttpClient().admin.post(`${base}/prompts`, {
+        prompts: [{
+          text: 'What is the best mirrorless camera?',
+          tagIds: [category.body.id],
+          geoTargetId: US_GEO,
+          languageCode: 'en',
+        }],
+      });
+      expect(created.status).to.equal(200);
+      const promptId = created.body.created[0].semrushPromptId;
+
+      const del = await getHttpClient().admin.delete(
+        `${base}/tags/${category.body.id}?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(del.status).to.equal(204);
+
+      const byOldTag = await getHttpClient().admin.get(
+        `${base}/prompts?geoTargetId=${US_GEO}&languageCode=en&tagIds=${category.body.id}`,
+      );
+      // The deleted tag id no longer resolves to anything, so filtering by it
+      // finds nothing — not an error, and not a resurrection of the tag.
+      expect(byOldTag.status).to.equal(200);
+      expect(byOldTag.body.items.map((p) => p.semrushPromptId)).to.not.include(promptId);
+
+      const all = await getHttpClient().admin.get(
+        `${base}/prompts?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(all.body.items.map((p) => p.semrushPromptId)).to.include(promptId);
+    });
+
+    it('DELETE /serenity/tags/:tagId 400s a delete of a dimension root', async () => {
+      await createUsMarket();
+      const roots = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=`,
+      );
+      const categoryRoot = roots.body.items.find((t) => t.name === 'category');
+      const res = await getHttpClient().admin.delete(
+        `${base}/tags/${categoryRoot.id}?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(res.status).to.equal(400);
+    });
+
+    it('DELETE /serenity/tags/:tagId 400s a delete of a server-owned dimension value', async () => {
+      await createUsMarket();
+      const originValue = await getHttpClient().admin.post(`${base}/tags`, {
+        type: 'origin', name: 'ai', geoTargetId: US_GEO, languageCode: 'en',
+      });
+      expect(originValue.status).to.equal(200);
+      const res = await getHttpClient().admin.delete(
+        `${base}/tags/${originValue.body.id}?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(res.status).to.equal(400);
+    });
+
+    it('DELETE /serenity/tags/:tagId 404s an id absent from this market tree', async () => {
+      await createUsMarket();
+      const res = await getHttpClient().admin.delete(
+        `${base}/tags/00000000-0000-4000-8000-000000000000?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(res.status).to.equal(404);
+    });
+
     it('POST /serenity/prompts creates a prompt by id-based tagIds (serenity-docs#24)', async () => {
       await createUsMarket();
       const category = await createTag('Photography');

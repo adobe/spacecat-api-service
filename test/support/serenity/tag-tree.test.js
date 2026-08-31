@@ -27,6 +27,7 @@ import {
   resolveServerOwnedValueInjection,
   findTagsInTree,
   assertParentWithinDimension,
+  collectSubtreeIds,
 } from '../../../src/support/serenity/tag-tree.js';
 import {
   DIMENSION,
@@ -1060,6 +1061,60 @@ describe('serenity tag-tree', () => {
       expect(err).to.be.an('error');
       expect(err.status).to.equal(502);
       expect(err.message).to.match(/tag tree too large to resolve/);
+    });
+  });
+
+  describe('collectSubtreeIds', () => {
+    it('collects just its own id for a childless leaf', async () => {
+      const transport = { listProjectTags: makeListProjectTagsStub() };
+      const ids = await collectSubtreeIds(
+        transport,
+        WS,
+        PROJECT,
+        TAG_IDS.subCategoryHuman,
+        fakeLog(),
+      );
+      expect(ids).to.deep.equal([TAG_IDS.subCategoryHuman]);
+    });
+
+    it('collects a parent plus every descendant across levels, in level order', async () => {
+      const transport = { listProjectTags: makeListProjectTagsStub() };
+      const ids = await collectSubtreeIds(
+        transport,
+        WS,
+        PROJECT,
+        TAG_IDS.categoryRunningShoes,
+        fakeLog(),
+      );
+      expect(ids).to.deep.equal([TAG_IDS.categoryRunningShoes, TAG_IDS.subCategoryHuman]);
+    });
+
+    it('composes the subtree independently of whatever upstream does with a cascade delete', async () => {
+      // The composed id set is what gets sent upstream regardless of whether
+      // the batch-delete operation itself cascades, orphans, or errors on a
+      // parent with live children (category-delete.md §6 gate G1) — this
+      // module never relies on that answer.
+      const transport = { listProjectTags: makeListProjectTagsStub() };
+      const ids = await collectSubtreeIds(transport, WS, PROJECT, TAG_IDS.categoryRoot, fakeLog());
+      expect(ids).to.include.members(
+        [TAG_IDS.categoryRoot, TAG_IDS.categoryRunningShoes, TAG_IDS.subCategoryHuman],
+      );
+    });
+
+    it('502s rather than walk a subtree larger than the read budget', async () => {
+      const children = Array.from({ length: 250 }, (_, i) => ({
+        id: `c${i}`, name: `C${i}`, parent_id: 'r-cat', children_count: 1,
+      }));
+      const levels = { 'r-cat': children };
+      for (const c of children) {
+        levels[c.id] = [];
+      }
+      const transport = { listProjectTags: makeListProjectTagsStub(levels) };
+      const err = await collectSubtreeIds(transport, WS, PROJECT, 'r-cat', fakeLog())
+        .then(() => null, (e) => e);
+      expect(err).to.be.an('error');
+      expect(err.status).to.equal(502);
+      expect(err.message).to.match(/tag subtree too large to resolve/);
     });
   });
 

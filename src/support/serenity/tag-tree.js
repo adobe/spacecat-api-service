@@ -601,6 +601,59 @@ async function findTagInTree(transport, semrushWorkspaceId, projectId, tagId, lo
 }
 
 /**
+ * Collects `tagId` plus every id in its subtree, by walking the draft tree
+ * level by level from that node (category-delete.md §4.2). A delete deletes
+ * the whole subtree, composed HERE rather than relied upon upstream: the
+ * batch-delete operation is not known to cascade (and, per the mock's own
+ * documented behavior, does not), so a caller that only sent the target id
+ * would strand its children as unreachable, prompt-less orphans.
+ *
+ * Composing the id set this way is independent of whatever upstream turns out
+ * to do with a parent-with-children delete: if upstream also cascades, the
+ * extra descendant ids are already-deleted members of the same batch: a
+ * harmless no-op, not an error (batch delete is documented idempotent per id).
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string} tagId - the subtree's root id (included in the result).
+ * @param {object} [log] - logger.
+ * @returns {Promise<string[]>} `tagId` followed by every descendant id, in
+ *   level order.
+ */
+export async function collectSubtreeIds(transport, semrushWorkspaceId, projectId, tagId, log) {
+  const ids = [tagId];
+  let frontier = [tagId];
+  let reads = 0;
+  while (frontier.length > 0) {
+    const next = [];
+    for (const nodeId of frontier) {
+      reads += 1;
+      if (reads > MAX_TREE_READS) {
+        throw new ErrorWithStatusCode('tag subtree too large to resolve', 502);
+      }
+      // Sequential by design — see findTagsInTree for the same rationale.
+      // eslint-disable-next-line no-await-in-loop
+      const { items } = await listProjectTagTree(
+        transport,
+        semrushWorkspaceId,
+        projectId,
+        nodeId,
+        log,
+      );
+      for (const child of items) {
+        ids.push(child.id);
+        if (child.childrenCount > 0) {
+          next.push(child.id);
+        }
+      }
+    }
+    frontier = next;
+  }
+  return ids;
+}
+
+/**
  * Throws unless `parent` is the `dimension` root itself or one of its
  * descendants, and — when a tag is being MOVED under it — unless `parent` sits
  * outside that tag's own subtree.

@@ -1308,7 +1308,12 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     }, fakeLog());
 
     expect(result.items).to.deep.equal([{
-      id: 'root-1', name: 'category:Footwear', parentId: null, childrenCount: 2, path: null,
+      id: 'root-1',
+      name: 'category:Footwear',
+      parentId: null,
+      childrenCount: 2,
+      promptsCount: 0,
+      path: null,
     }]);
     // Tree read, not the prompt-derived path.
     expect(transport.listPromptsByTags).to.not.have.been.called;
@@ -1351,6 +1356,7 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
       name: 'category:Sneakers',
       parentId: 'root-1',
       childrenCount: 0,
+      promptsCount: 0,
       path: [{ id: 'root-1', name: 'category:Footwear' }],
     }]);
     expect(transport.listProjectTags.firstCall.args[2]).to.include({ parentId: 'root-1', draft: true });
