@@ -1237,6 +1237,20 @@ llmo-onboard:
                         registration timed out rather than completed.
                       items:
                         type: object
+                        properties:
+                          providerId:
+                            type: string
+                            description: The prompt-suggestion pipeline's provider id.
+                          status:
+                            type: string
+                            enum: ["created", "already-existed", "submitted", "failed"]
+                            description: |
+                              "created"/"already-existed" for a paying site's recurring schedule;
+                              "submitted" for a trial site's one-shot run; "failed" if
+                              registration/submission itself failed.
+                          error:
+                            type: string
+                            description: Present only when status is "failed".
                     promptSuggestionSchedulesTimedOut:
                       type: boolean
                       description: True if prompt-suggestion schedule registration timed out
