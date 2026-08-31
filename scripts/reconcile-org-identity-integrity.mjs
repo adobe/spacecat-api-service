@@ -78,13 +78,18 @@ const { values } = parseArgs({
   },
 });
 
+// Upper bound on --page-size: PostgREST's own db-max-rows config is a server-side backstop,
+// but a large operator-supplied value still asks for a single huge range unnecessarily -
+// capping here gives a clear error instead of relying on that backstop.
+const MAX_PAGE_SIZE = 10_000;
+
 function parsePageSize(raw) {
   if (raw === undefined) {
     return DEFAULT_PAGE_SIZE;
   }
   const n = Number(raw);
-  if (Number.isNaN(n) || !Number.isInteger(n) || n < 1) {
-    console.error(`ERROR: --page-size must be a positive integer, got "${raw}"`);
+  if (Number.isNaN(n) || !Number.isInteger(n) || n < 1 || n > MAX_PAGE_SIZE) {
+    console.error(`ERROR: --page-size must be a positive integer no greater than ${MAX_PAGE_SIZE}, got "${raw}"`);
     exit(1);
   }
   return n;
@@ -119,18 +124,23 @@ const { postgrestClient } = dataAccess.services;
 const MAX_ROWS_PER_FETCH = 200_000;
 
 /**
- * Fetches every row of a PostgREST table/select via offset pagination, sorted by the immutable
- * primary key `id` (not a mutable timestamp) so a concurrent UPDATE elsewhere in the fleet can't
- * reorder rows across a page boundary. This does NOT make the sweep fully concurrency-safe: a
- * concurrent DELETE of an earlier-sorting row still shifts every later offset by one, which can
- * skip the row that slides into the just-fetched range. Deletes of the rows this script cares
- * about (entitlements, site_enrollments, brands) are rare enough that this is an accepted gap,
- * not a solved one. scripts/reconcile-prompt-suggestion-schedules.mjs's own fleet-wide sweep
- * avoids this class of bug entirely by using cursor pagination
- * (`Site.allByEnrollmentFiltered({ cursor, returnCursor, orderBy: { attribute: 'siteId' } })`)
- * through the data-access model layer rather than PostgREST offset pagination; this script
- * stays on `.range()` for simplicity, since the three tables it reads are not expected to see
- * deletes during a run.
+ * Fetches every row of a PostgREST table/select via keyset pagination on the immutable primary
+ * key `id` (not a mutable timestamp, and not offset pagination — see below). Termination is
+ * driven by an exact server-side row count (`{ count: 'exact' }`), not by "this page came back
+ * short": PostgREST's own `db-max-rows` config can silently cap the rows a single page returns
+ * below the requested limit, so a short page does NOT reliably mean "no more data" — relying on
+ * it would let a `db-max-rows` cap at or below `pageSize` silently truncate the sweep into a
+ * clean-looking but wrong "0 drift" report. `count: 'exact'` is unaffected by that per-page cap
+ * (PostgREST computes it against the full filtered result set), so `rows.length >= totalCount`
+ * is the only safe stop condition.
+ *
+ * Keyset (`.gt('id', lastId)`) rather than offset (`.range(from, to)`) for the cursor itself: an
+ * offset cursor advances by a fixed amount per page, so if a page were ever short for any reason
+ * (including the `db-max-rows` cap above), advancing by the full `pageSize` would skip the rows
+ * that page never returned. A keyset cursor always resumes exactly after the last row actually
+ * seen, so nothing is skippable regardless of how many rows any single page returns. It also
+ * incidentally closes the gap the offset approach had with concurrent deletes (a deleted
+ * earlier-sorting row can no longer shift a later page's boundary).
  * @param {string} table
  * @param {string} select
  * @param {(query: object) => object} [applyFilter] - optional filter chain applied to the query.
@@ -138,15 +148,22 @@ const MAX_ROWS_PER_FETCH = 200_000;
  */
 async function fetchAllRows(table, select, applyFilter = (q) => q) {
   const rows = [];
-  let from = 0;
+  let lastId = null;
+  let totalCount = null;
   for (;;) {
-    const to = from + pageSize - 1;
+    let query = applyFilter(
+      postgrestClient.from(table).select(select, { count: 'exact' }).order('id', { ascending: true }),
+    );
+    if (lastId !== null) {
+      query = query.gt('id', lastId);
+    }
     // eslint-disable-next-line no-await-in-loop
-    const { data, error } = await applyFilter(
-      postgrestClient.from(table).select(select).order('id', { ascending: true }),
-    ).range(from, to);
+    const { data, error, count } = await query.limit(pageSize);
     if (error) {
-      throw new Error(`Failed to fetch ${table} rows ${from}-${to}: ${error.message}`);
+      throw new Error(`Failed to fetch ${table} rows after id=${lastId ?? '(start)'}: ${error.message}`);
+    }
+    if (totalCount === null) {
+      totalCount = count;
     }
     if (rows.length + (data?.length ?? 0) > MAX_ROWS_PER_FETCH) {
       throw new Error(
@@ -155,11 +172,11 @@ async function fetchAllRows(table, select, applyFilter = (q) => q) {
       );
     }
     rows.push(...(data ?? []));
-    if (!data || data.length < pageSize) {
-      log.info(`Fetched ${rows.length} rows from ${table}`);
+    if (!data || data.length === 0 || rows.length >= totalCount) {
+      log.info(`Fetched ${rows.length}/${totalCount ?? '?'} rows from ${table}`);
       return rows;
     }
-    from += pageSize;
+    lastId = data[data.length - 1].id;
   }
 }
 
@@ -261,7 +278,7 @@ try {
   log.info('---');
   log.info(`Duplicate active normalized brand identities: ${duplicateNormalizedNames.length}`);
   for (const group of duplicateNormalizedNames) {
-    log.warn(`  org=${group.organizationId} normalized="${group.normalizedName}" brands=[${group.brands.map((b) => `${b.id} (${JSON.stringify(b.name)})`).join(', ')}]`);
+    log.warn(`  org=${group.organizationId} normalized=${JSON.stringify(group.normalizedName)} brands=[${group.brands.map((b) => `${b.id} (${JSON.stringify(b.name)})`).join(', ')}]`);
   }
 
   log.info('---');
