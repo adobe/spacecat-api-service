@@ -36,6 +36,11 @@ const DEFAULT_WORKSPACE_REPOS = [
 // owner/repo format: non-slash owner + single slash + non-slash repo
 const WORKSPACE_REPO_PATTERN = /^[^/\s]+\/[^/\s]+$/;
 
+// A git commit SHA is exactly 40 hex characters. Used to validate
+// pull_request.head.sha before it is trusted as the requested_head_sha
+// carried in the enqueued job payload (must not silently default).
+const HEAD_SHA_PATTERN = /^[0-9a-f]{40}$/i;
+
 function getWorkspaceRepos(env, log) {
   const raw = env.MYSTICAT_WORKSPACE_REPOS;
   if (!raw) {
@@ -171,6 +176,19 @@ function WebhooksController(context) {
         outcome = 'bad_request';
         return badRequest('Missing required field: pull_request.number');
       }
+      // requested_head_sha (carried in the job payload below) must be a real,
+      // well-formed commit SHA - it identifies the exact head the review will
+      // apply to (Stale-head binding downstream in the Mysticat worker). A
+      // missing or malformed value must fail closed here rather than enqueue
+      // an ambiguous/undefined head for the worker to silently default.
+      if (typeof pr.head?.sha !== 'string' || !HEAD_SHA_PATTERN.test(pr.head.sha)) {
+        emitMetric(
+          { name: 'WebhookBadRequest', dimensions: { MissingField: 'pull_request.head.sha' } },
+          { environment },
+        );
+        outcome = 'bad_request';
+        return badRequest('Missing or malformed required field: pull_request.head.sha');
+      }
       if (!data.repository?.owner?.login) {
         emitMetric(
           { name: 'WebhookBadRequest', dimensions: { MissingField: 'repository.owner.login' } },
@@ -268,6 +286,15 @@ function WebhooksController(context) {
         job_type: jobType,
         workspace_repos: workspaceRepos,
         retry_count: 0,
+        // Requested head SHA at webhook receipt time, taken from the
+        // HMAC-verified body (validated as a 40-char hex commit SHA above).
+        // Lets the worker detect a head change during a review and bind the
+        // terminal verdict to the SHA it actually reviewed.
+        requested_head_sha: pr.head.sha,
+        // Independent count of head changes observed for this request,
+        // separate from retry_count (which tracks re-enqueues after a
+        // worker/infra failure, not head drift). Always 0 at initial enqueue.
+        head_change_count: 0,
         ...(targetId ? { target_id: targetId } : {}),
         ...(observability ? { observability } : {}),
       };
@@ -293,6 +320,8 @@ function WebhooksController(context) {
         // Resolved destination id, for traffic-distribution observability (per the
         // PR #2503 review recommendation).
         targetId,
+        // Requested head SHA is not a secret; log it for head-drift correlation.
+        headSha: jobPayload.requested_head_sha,
       });
 
       emitMetric(

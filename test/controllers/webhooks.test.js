@@ -45,6 +45,7 @@ describe('WebhooksController', () => {
         number: 456,
         draft: false,
         base: { ref: 'main' },
+        head: { sha: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2' },
       },
       repository: {
         name: 'spacecat-api-service',
@@ -105,6 +106,11 @@ describe('WebhooksController', () => {
       'Adobe-AEM-Sites/aem-sites-architecture',
     ]);
     expect(payload.retry_count).to.equal(0);
+    // requested_head_sha carries the HMAC-verified pull_request.head.sha so the
+    // worker can bind its terminal verdict to the SHA it actually reviewed.
+    expect(payload.requested_head_sha).to.equal('a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2');
+    // head_change_count is independent of retry_count and starts at 0.
+    expect(payload.head_change_count).to.equal(0);
     // Every authenticated webhook now carries the resolved destination id.
     expect(payload.target_id).to.equal('github-public');
   });
@@ -188,6 +194,79 @@ describe('WebhooksController', () => {
     expect(response.status).to.equal(400);
     const body = await response.json();
     expect(body.message).to.include('pull_request.number');
+  });
+
+  it('returns 400 and does not enqueue when pull_request.head.sha is missing', async () => {
+    const context = {
+      ...validContext,
+      data: {
+        ...validContext.data,
+        pull_request: { ...validContext.data.pull_request, head: undefined },
+      },
+    };
+
+    const response = await controller.processGitHubWebhook(context);
+
+    expect(response.status).to.equal(400);
+    const body = await response.json();
+    expect(body.message).to.include('pull_request.head.sha');
+    expect(mockSqs.sendMessage.called).to.be.false;
+  });
+
+  it('returns 400 and does not enqueue when pull_request.head.sha is malformed', async () => {
+    const context = {
+      ...validContext,
+      data: {
+        ...validContext.data,
+        // Too short / not hex - must not be treated as a valid commit SHA.
+        pull_request: { ...validContext.data.pull_request, head: { sha: 'not-a-real-sha' } },
+      },
+    };
+
+    const response = await controller.processGitHubWebhook(context);
+
+    expect(response.status).to.equal(400);
+    const body = await response.json();
+    expect(body.message).to.include('pull_request.head.sha');
+    expect(mockSqs.sendMessage.called).to.be.false;
+  });
+
+  it('returns 400 and does not enqueue when pull_request.head.sha is not a string', async () => {
+    const context = {
+      ...validContext,
+      data: {
+        ...validContext.data,
+        pull_request: {
+          ...validContext.data.pull_request,
+          head: { sha: ['a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2'] },
+        },
+      },
+    };
+
+    const response = await controller.processGitHubWebhook(context);
+
+    expect(response.status).to.equal(400);
+    const body = await response.json();
+    expect(body.message).to.include('pull_request.head.sha');
+    expect(mockSqs.sendMessage.called).to.be.false;
+  });
+
+  it('returns 400 and does not enqueue when pull_request.head.sha is the wrong length', async () => {
+    const context = {
+      ...validContext,
+      data: {
+        ...validContext.data,
+        // 39 hex chars - one short of a real commit SHA.
+        pull_request: { ...validContext.data.pull_request, head: { sha: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b' } },
+      },
+    };
+
+    const response = await controller.processGitHubWebhook(context);
+
+    expect(response.status).to.equal(400);
+    const body = await response.json();
+    expect(body.message).to.include('pull_request.head.sha');
+    expect(mockSqs.sendMessage.called).to.be.false;
   });
 
   it('returns 400 with field name when repository.owner.login is missing', async () => {
@@ -699,6 +778,25 @@ describe('WebhooksController', () => {
       const bad = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookBadRequest');
       expect(bad).to.exist;
       expect(bad.args[0].dimensions).to.deep.include({ MissingField: 'action' });
+      const millis = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookProcessingMillis');
+      expect(millis.args[0].dimensions).to.deep.include({ Outcome: 'bad_request' });
+    });
+
+    it('malformed pull_request.head.sha emits WebhookBadRequest with MissingField pull_request.head.sha', async () => {
+      const emfController = buildEmfController();
+      const ctx = {
+        ...validContext,
+        data: {
+          ...validContext.data,
+          pull_request: { ...validContext.data.pull_request, head: { sha: 'nope' } },
+        },
+      };
+      const response = await emfController.processGitHubWebhook(ctx);
+
+      expect(response.status).to.equal(400);
+      const bad = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookBadRequest');
+      expect(bad).to.exist;
+      expect(bad.args[0].dimensions).to.deep.include({ MissingField: 'pull_request.head.sha' });
       const millis = emitMetricStub.getCalls().find((c) => c.args[0].name === 'WebhookProcessingMillis');
       expect(millis.args[0].dimensions).to.deep.include({ Outcome: 'bad_request' });
     });
