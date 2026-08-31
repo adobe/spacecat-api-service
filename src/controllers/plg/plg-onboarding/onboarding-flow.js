@@ -672,6 +672,9 @@ export async function performAsoPlgOnboarding({
         await persistAndNotify(onboarding, context);
         return onboarding;
       }
+      // Informational audit-trail breadcrumb (persisted on the onboarding record like the
+      // other `steps.*` flags): records that the auth-wall probe ran and the front door was
+      // public. Not read back in the flow; kept for post-hoc diagnosis of onboarding runs.
       steps.authWallChecked = true;
     }
 

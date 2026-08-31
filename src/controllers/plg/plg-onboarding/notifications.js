@@ -46,7 +46,7 @@ export function deriveCheckKey(onboarding) {
   if (waitlistReason.includes(NON_PROD_DOMAIN)) {
     return REVIEW_REASONS.NON_PROD_DOMAIN;
   }
-  if (waitlistReason.includes('requires authentication')) {
+  if (waitlistReason.includes(AUTHENTICATED_SITE)) {
     return REVIEW_REASONS.AUTHENTICATED_SITE;
   }
 

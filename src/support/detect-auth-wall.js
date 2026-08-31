@@ -24,10 +24,23 @@
  * signal — an explicit 401, a front door that resolves to a login/SSO URL or IdP host, or
  * a landing page that is unambiguously a login form (password field + a login title/URL).
  * A public homepage with an incidental account/login widget is NOT flagged.
+ *
+ * SSRF guard: the front door is fetched with redirects followed MANUALLY, and every hop's
+ * host is validated with `isSafeDomain()` before it is requested. A public domain under
+ * attacker control therefore cannot 3xx-redirect the probe into a private/internal host
+ * (VPC service, cloud metadata endpoint). As a consequence `finalUrl` is always a
+ * public host, so surfacing it in the waitlist reason discloses nothing internal.
  */
 
+import { isSafeDomain } from '../controllers/plg/plg-onboarding/validation.js';
+
 const PROBE_TIMEOUT_MS = 15000;
-const BODY_SCAN_LIMIT = 500000;
+// Login forms live in the early markup; 200KB is ample to detect them while keeping the
+// per-probe body far smaller than the 500KB we used to buffer.
+const BODY_SCAN_LIMIT = 200000;
+// Cap the redirect chain we will follow. A legitimate front door resolves in a handful of
+// hops; a longer chain is either misconfigured or hostile, and we fail open (treat as public).
+const MAX_REDIRECTS = 10;
 const BROWSER_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
   + '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
@@ -79,6 +92,59 @@ function isHtmlContentType(contentType) {
   return !contentType || /text\/html|application\/xhtml/i.test(contentType);
 }
 
+function hostnameOf(url) {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    /* c8 ignore next 2 */
+    return null;
+  }
+}
+
+/**
+ * Follows redirects manually, validating every hop's host with `isSafeDomain()` BEFORE it is
+ * requested, so an attacker-controlled 3xx on a public domain cannot steer the probe into a
+ * private/internal host (the SSRF vector). Returns the terminal (non-3xx) response together
+ * with the safe final URL, or `null` when a hop resolves to a disallowed host or the chain
+ * exceeds `MAX_REDIRECTS`.
+ *
+ * @returns {Promise<{ response: object, finalUrl: string } | null>}
+ */
+async function fetchGuardingRedirects({
+  fetch, baseUrl, signal, headers, log,
+}) {
+  let currentUrl = baseUrl;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
+    const host = hostnameOf(currentUrl);
+    if (!host || !isSafeDomain(host)) {
+      log?.warn?.(`Auth-wall probe refused disallowed redirect host: ${currentUrl}`);
+      return null;
+    }
+    // eslint-disable-next-line no-await-in-loop
+    const response = await fetch(currentUrl, {
+      method: 'GET', redirect: 'manual', signal, headers,
+    });
+    const status = response.status ?? 0;
+    if (status < 300 || status >= 400) {
+      return { response, finalUrl: currentUrl };
+    }
+    const location = response.headers?.get?.('location');
+    if (!location) {
+      return { response, finalUrl: currentUrl };
+    }
+    let nextUrl;
+    try {
+      nextUrl = new URL(location, currentUrl).toString();
+    } catch {
+      /* c8 ignore next 2 */
+      return { response, finalUrl: currentUrl };
+    }
+    currentUrl = nextUrl;
+  }
+  log?.warn?.(`Auth-wall probe exceeded ${MAX_REDIRECTS} redirects for ${baseUrl}`);
+  return null;
+}
+
 /**
  * Fetches the base URL anonymously (following redirects) and classifies whether its front
  * door is a login / SSO wall.
@@ -97,15 +163,22 @@ export async function detectAuthWall({ baseUrl, log }, { fetch = globalThis.fetc
   const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
 
   try {
-    const response = await fetch(baseUrl, {
-      method: 'GET',
-      redirect: 'follow',
+    const probe = await fetchGuardingRedirects({
+      fetch,
+      baseUrl,
       signal: controller.signal,
       headers: { 'User-Agent': BROWSER_USER_AGENT, Accept: 'text/html,application/xhtml+xml' },
+      log,
     });
 
+    // A disallowed redirect host (SSRF attempt) or an over-long chain: fail open — treat the
+    // site as public and provision normally — without exposing the disallowed target anywhere.
+    if (!probe) {
+      return notAuthenticated();
+    }
+
+    const { response, finalUrl } = probe;
     const status = response.status ?? null;
-    const finalUrl = response.url || baseUrl;
 
     if (status === 401) {
       return {
