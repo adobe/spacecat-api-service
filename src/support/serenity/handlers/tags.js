@@ -898,6 +898,9 @@ function requireSliceQuery(query) {
  * @returns {Promise<{ deletedIds: string[] }>}
  */
 async function deleteResolvedTag(transport, semrushWorkspaceId, projectId, tagId, log) {
+  // Two reads, not one redundant one: findTagsInTree resolves THIS id's own
+  // position/kind (root? server-owned? unknown?), while collectSubtreeIds below
+  // walks its DESCENDANTS. Neither can answer the other's question.
   const found = await findTagsInTree(transport, semrushWorkspaceId, projectId, [tagId], log);
   const target = /** @type {import('../tag-tree.js').TagPosition} */ (found.get(tagId));
   if (target.kind === 'unknown') {

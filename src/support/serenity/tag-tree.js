@@ -613,6 +613,13 @@ async function findTagInTree(transport, semrushWorkspaceId, projectId, tagId, lo
  * extra descendant ids are already-deleted members of the same batch: a
  * harmless no-op, not an error (batch delete is documented idempotent per id).
  *
+ * This is a point-in-time snapshot, not a lock: a tag created under `tagId`
+ * between this read and the caller's subsequent batch-delete call is not in
+ * the returned set and will not be deleted, stranding it as an orphan under a
+ * now-gone parent. Same class of risk as the cascade uncertainty above
+ * (category-delete.md §6 gate G1), not a new one — accepted for the same
+ * reason: there is no upstream lock primitive to hold instead.
+ *
  * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
