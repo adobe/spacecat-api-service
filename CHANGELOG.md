@@ -1,3 +1,50 @@
+## [1.780.2](https://github.com/adobe/spacecat-api-service/compare/v1.780.1...v1.780.2) (2026-08-31)
+
+
+### Bug Fixes
+
+* **onboard:** preserve PRE_ONBOARD tier but bind enrollment during onboard ([#3163](https://github.com/adobe/spacecat-api-service/issues/3163)) ([9c36a84](https://github.com/adobe/spacecat-api-service/commit/9c36a84b56f3b0bda67ebb46d251d4dab0025b3f)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+## [1.780.1](https://github.com/adobe/spacecat-api-service/compare/v1.780.0...v1.780.1) (2026-08-31)
+
+
+### Bug Fixes
+
+* **onboard:** allow onboarding to update entitlement for PRE_ONBOARD orgs ([#3158](https://github.com/adobe/spacecat-api-service/issues/3158)) ([99db837](https://github.com/adobe/spacecat-api-service/commit/99db837d37c2b1eafe40e22cbfea0c3dd50d7188)), closes [Hi#level](https://github.com/Hi/issues/level) [throu#API](https://github.com/throu/issues/API)
+
+# [1.780.0](https://github.com/adobe/spacecat-api-service/compare/v1.779.0...v1.780.0) (2026-08-31)
+
+
+### Features
+
+* **ai-visibility:** scope Cited Pages tab to subdomains via search_type ([#3157](https://github.com/adobe/spacecat-api-service/issues/3157)) ([99283d8](https://github.com/adobe/spacecat-api-service/commit/99283d8913b58ec523c82c61e30d4f745082cb47)), closes [#3041](https://github.com/adobe/spacecat-api-service/issues/3041) [Hi#level](https://github.com/Hi/issues/level) [LLMO-6992/#3041](https://github.com/adobe/spacecat-api-service/issues/3041)
+
+# [1.779.0](https://github.com/adobe/spacecat-api-service/compare/v1.778.0...v1.779.0) (2026-08-31)
+
+
+### Bug Fixes
+
+* **llmo:** report onboarding success honestly when required work fails ([#3155](https://github.com/adobe/spacecat-api-service/issues/3155)) ([393f0a2](https://github.com/adobe/spacecat-api-service/commit/393f0a220fab6bfa2e4863a3b86676624146ea22)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+
+### Features
+
+* **llmo:** read-only org/identity integrity reconciliation report ([#3153](https://github.com/adobe/spacecat-api-service/issues/3153)) ([fe33599](https://github.com/adobe/spacecat-api-service/commit/fe33599873f7c41b17fd34bdc6fb73a1896a72cc)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+# [1.778.0](https://github.com/adobe/spacecat-api-service/compare/v1.777.0...v1.778.0) (2026-08-29)
+
+
+### Features
+
+* **suggestions:** gate EDS auto-fix behind IMS group for PLG/FREE_TRIAL tiers ([#2271](https://github.com/adobe/spacecat-api-service/issues/2271)) ([9a98153](https://github.com/adobe/spacecat-api-service/commit/9a9815324e589bebc1f888636327b887e727d959))
+
+# [1.777.0](https://github.com/adobe/spacecat-api-service/compare/v1.776.0...v1.777.0) (2026-08-29)
+
+
+### Features
+
+* presign Google Ads placement-exclusion CSVs via a click-time endpoint (SITES-50551) ([#3149](https://github.com/adobe/spacecat-api-service/issues/3149)) ([2beeedc](https://github.com/adobe/spacecat-api-service/commit/2beeedc5d0d6965416f13e4eb0ff29a88f7fb7da))
+
 # [1.776.0](https://github.com/adobe/spacecat-api-service/compare/v1.775.1...v1.776.0) (2026-08-28)
 
 

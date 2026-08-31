@@ -1200,6 +1200,66 @@ llmo-onboard:
                     the request body; omitted when the DRS default ('US')
                     applies.
                   example: "IN"
+                brandActivation:
+                  type: object
+                  description: |
+                    Submission-level outcome of the brand activation / prompt-generation
+                    side-effects (LLMO-7218). "Submission" because Brandalf and prompt
+                    generation both complete asynchronously via a DRS-side callback this
+                    endpoint has no visibility into — this reports whether the required
+                    work was successfully HANDED OFF to DRS, not whether it eventually
+                    succeeded. Omitted for site-only onboarding, which never runs this step.
+                  properties:
+                    brandalfTriggered:
+                      type: boolean
+                      description: True if the Brandalf brand-identification job was
+                        successfully submitted (v2 onboarding mode only; always false in v1).
+                    brandalfError:
+                      type:
+                        - string
+                        - 'null'
+                      description: Reason the Brandalf submission failed or was skipped, if any.
+                    promptGenerationJobId:
+                      type:
+                        - string
+                        - 'null'
+                      description: The v1-mode direct prompt-generation DRS job id, if submitted.
+                    promptGenerationError:
+                      type:
+                        - string
+                        - 'null'
+                      description: Reason the v1-mode prompt-generation submission failed, if any.
+                    promptSuggestionSchedules:
+                      type:
+                        - array
+                        - 'null'
+                      description: Per-pipeline registration result (v2 mode only); null when
+                        registration timed out rather than completed.
+                      items:
+                        type: object
+                        properties:
+                          providerId:
+                            type: string
+                            description: The prompt-suggestion pipeline's provider id.
+                          status:
+                            type: string
+                            enum: ["created", "already-existed", "submitted", "failed"]
+                            description: |
+                              "created"/"already-existed" for a paying site's recurring schedule;
+                              "submitted" for a trial site's one-shot run; "failed" if
+                              registration/submission itself failed.
+                          error:
+                            type: string
+                            description: Present only when status is "failed".
+                    promptSuggestionSchedulesTimedOut:
+                      type: boolean
+                      description: True if prompt-suggestion schedule registration timed out
+                        before completing (v2 mode only).
+                    requiredWorkFailed:
+                      type: boolean
+                      description: True if any required submission for the resolved onboarding
+                        mode failed. When true, `message` reports a degraded outcome instead of
+                        unconditional success.
               required:
                 - message
                 - domain

@@ -763,6 +763,7 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': 'llmo/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions': 'llmo/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'llmo/can_view',
+      'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/guidance-csv/:refKey': 'llmo/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': 'llmo/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status': 'llmo/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit': 'llmo/can_view',
@@ -1087,6 +1088,7 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit/:cursor': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'aso/can_view',
+      'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/guidance-csv/:refKey': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': 'aso/can_view',
       'GET /sites/:siteId/edge-deployed-urls': 'aso/can_view',
       'GET /sites/:siteId/fixes': 'aso/can_view',
@@ -1358,6 +1360,9 @@ const routeFacsCapabilities = {
     // target / language / semrush prompt id / aio tag id), not SpaceCat
     // resources. The enclosing :brandId is the FACS resource for these routes.
     'semrushPromptId', 'geoTargetId', 'languageCode', 'tagId',
+    // gads guidance-CSV download selector (one of the four `*_ref` keys) — a
+    // label naming which stored CSV to presign, not a FACS resource.
+    'refKey',
     // Filter / pagination / format params (not entities):
     'base64PageUrl', 'base64Url', 'baseURL', 'channel', 'cursor',
     'dataSource', 'deliveryType', 'endDate', 'eventType',
