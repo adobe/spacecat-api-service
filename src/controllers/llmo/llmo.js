@@ -1050,6 +1050,11 @@ function LlmoController(ctx) {
         organizationId: result.organizationId,
         siteId: result.siteId,
         detectedCdn: result.detectedCdn,
+        // Intentionally always 'completed', never 'failed', even when
+        // brandActivation.requiredWorkFailed is true: the site/org/entitlement/config work this
+        // endpoint owns did succeed (hence the 200 response), and 'failed' would overclaim a
+        // total failure the enum has no room to qualify. requiredWorkFailed is the correct field
+        // for a caller to branch on for the "succeeded with a degraded step" case.
         status: 'completed',
         createdAt: new Date().toISOString(),
         brandProfileExecutionName,

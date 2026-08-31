@@ -1474,6 +1474,11 @@ export async function activateBrandAndGeneratePrompts({
     } catch (drsClientError) {
       log.error(`DRS client creation failed, skipping Brandalf + schedules: ${drsClientError.message}`);
       say(':warning: DRS client unavailable (will need manual trigger)');
+      // LLMO-7218 AC4: without this, brandalfError stays null and the returned summary says
+      // requiredWorkFailed=true with no captured reason anywhere in it — exactly the "reconstruct
+      // from logs" outcome AC4 exists to prevent. Mirrors the v1 branch below, which already
+      // records drsError.message from its own DrsClient.createFrom call.
+      brandalfError = drsClientError.message;
     }
 
     if (drsClient) {
@@ -1617,6 +1622,16 @@ export async function activateBrandAndGeneratePrompts({
   // no Brandalf step at all. A schedule-registration timeout counts as failed, not merely
   // unknown — the caller needs an actionable signal, and "unknown" would let this collapse back
   // into the same silent-success outcome AC3 exists to prevent.
+  //
+  // "DRS client not configured" deliberately counts as failed here too, same as a genuine submit
+  // error: either way the customer ends this onboarding with zero prompts, which is exactly the
+  // gap AC3 exists to surface. This is a real outcome in dev/local environments where DRS secrets
+  // are absent (not merely a test-fixture artifact) — see the two failure-scenario tests the PR
+  // author already treats as legitimate (DRS-not-configured, Brandalf-submission-failure).
+  // A trial-tier one-shot prompt-suggestion run failing counts the same way, even though
+  // trial sites never get the durable recurring schedule PAID sites do (LLMO-7218's schedule
+  // reconciliation scope is PAID-only) — a trial customer whose one-time job failed to submit
+  // also ends this onboarding with zero prompts, so the same signal applies.
   const requiredWorkFailed = onboardingMode === LLMO_ONBOARDING_MODE_V2
     ? !brandalfTriggered || promptSuggestionSchedulesTimedOut
       || promptSuggestionSchedules?.some((r) => r.status === 'failed')

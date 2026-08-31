@@ -6507,12 +6507,17 @@ describe('LLMO Onboarding Functions', () => {
       const context = buildV2Context();
       const params = buildV2Params(context);
       // Resolves (does not reject) despite createFrom throwing.
-      await activateBrandAndGeneratePrompts(params);
+      const result = await activateBrandAndGeneratePrompts(params);
 
       expect(mockDrsClient.createFrom).to.have.been.calledOnce;
       const errorLogs = context.log.error.getCalls().map((c) => c.args[0]);
       expect(errorLogs.some((m) => m.includes('DRS client creation failed'))).to.be.true;
       expect(params.say).to.have.been.calledWithMatch(/DRS client unavailable/);
+      // LLMO-7218 AC4: the reason must be captured on the returned summary, not just logged,
+      // so a caller can recover it without reconstructing from logs.
+      expect(result.brandalfError).to.equal('DRS client init boom');
+      expect(result.brandalfTriggered).to.be.false;
+      expect(result.requiredWorkFailed).to.be.true;
     });
 
     it('warns when schedule registration times out (settleWithin fallback)', async () => {
