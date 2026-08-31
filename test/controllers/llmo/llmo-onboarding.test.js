@@ -1623,6 +1623,10 @@ describe('LLMO Onboarding Functions', () => {
       expect(siteConfig.updateLlmoBrand).to.have.been.calledWith('Test Brand');
       expect(mockSite.save).to.have.been.called;
 
+      // LLMO-7218 AC3: siteOnly skips brand activation entirely, so the top-level
+      // result carries no brandActivation summary at all.
+      expect(result.brandActivation).to.be.undefined;
+
       // Always-run path preserved: v2 customer config + brandalf flag
       expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres).to.have.been.calledOnce;
       expect(upsertStub).to.have.been.calledOnce;
@@ -2118,7 +2122,11 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
       const mockTracingFetch = createMockTracingFetch();
-      originalSetTimeout = mockSetTimeoutImmediate();
+      // Real (fake) timers, not mockSetTimeoutImmediate: the latter fires settleWithin's
+      // timeout branch synchronously, forcing a false schedule-registration timeout that
+      // flips requiredWorkFailed — a fixture artifact unrelated to the brand-write branch
+      // under test. tickAsync fast-forwards the real caps once the fast stubs resolve.
+      const clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       const mockComposeBaseURL = createMockComposeBaseURL();
       const { mockClient: sharePointClient } = createMockSharePointClient(
         sinon,
@@ -2149,19 +2157,27 @@ describe('LLMO Onboarding Functions', () => {
         sqs: { sendMessage: sinon.stub().resolves() },
       };
 
-      const result = await onboardWithMocks(
-        {
-          domain: 'example.com',
-          imsOrgId: 'ABC123@AdobeOrg',
-          brandName: 'Test Brand',
-        },
-        context,
-      );
+      let result;
+      try {
+        const pending = onboardWithMocks(
+          {
+            domain: 'example.com',
+            imsOrgId: 'ABC123@AdobeOrg',
+            brandName: 'Test Brand',
+          },
+          context,
+        );
+        await clock.tickAsync(60000);
+        result = await pending;
+      } finally {
+        clock.restore();
+      }
 
-      // Onboarding completes despite upsertBrand failure
-      expect(result.message).to.equal(
-        'LLMO onboarding completed with warnings: required brand/prompt-generation work failed',
-      );
+      // Onboarding completes successfully despite the upsertBrand failure: the initial
+      // brand write is best-effort, while the required Brandalf submission + schedule
+      // registration both succeed here, so requiredWorkFailed is false.
+      expect(result.message).to.equal('LLMO onboarding completed successfully');
+      expect(result.brandActivation?.requiredWorkFailed).to.be.false;
       expect(failingUpsertBrand).to.have.been.calledOnce;
       expect(mockLog.warn).to.have.been.calledWith(
         'Failed to create initial brand in normalized table: '
@@ -2234,7 +2250,11 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
       const mockTracingFetch = createMockTracingFetch();
-      originalSetTimeout = mockSetTimeoutImmediate();
+      // Real (fake) timers, not mockSetTimeoutImmediate: the latter fires settleWithin's
+      // timeout branch synchronously, forcing a false schedule-registration timeout that
+      // flips requiredWorkFailed — a fixture artifact unrelated to the brand-write branch
+      // under test. tickAsync fast-forwards the real caps once the fast stubs resolve.
+      const clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       const mockComposeBaseURL = createMockComposeBaseURL();
       const { mockClient: sharePointClient } = createMockSharePointClient(
         sinon,
@@ -2265,13 +2285,23 @@ describe('LLMO Onboarding Functions', () => {
         sqs: { sendMessage: sinon.stub().resolves() },
       };
 
-      const result = await onboardWithMocks(
-        { domain: 'example.com', imsOrgId: 'ABC123@AdobeOrg', brandName: 'Test Brand' },
-        context,
-      );
+      let result;
+      try {
+        const pending = onboardWithMocks(
+          { domain: 'example.com', imsOrgId: 'ABC123@AdobeOrg', brandName: 'Test Brand' },
+          context,
+        );
+        await clock.tickAsync(60000);
+        result = await pending;
+      } finally {
+        clock.restore();
+      }
 
-      // Onboarding still completes
-      expect(result.message).to.equal('LLMO onboarding completed with warnings: required brand/prompt-generation work failed');
+      // Onboarding completes successfully: skipping the collision brand write does not
+      // affect the required Brandalf submission / schedule registration, both of which
+      // succeed here, so requiredWorkFailed is false.
+      expect(result.message).to.equal('LLMO onboarding completed successfully');
+      expect(result.brandActivation?.requiredWorkFailed).to.be.false;
       // The existing brand's primary site is NOT touched
       expect(mockUpsertBrand).to.not.have.been.called;
       expect(mockLog.warn).to.have.been.calledWithMatch(
@@ -2340,7 +2370,11 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
       const mockTracingFetch = createMockTracingFetch();
-      originalSetTimeout = mockSetTimeoutImmediate();
+      // Real (fake) timers, not mockSetTimeoutImmediate: the latter fires settleWithin's
+      // timeout branch synchronously, forcing a false schedule-registration timeout that
+      // flips requiredWorkFailed — a fixture artifact unrelated to the brand-write branch
+      // under test. tickAsync fast-forwards the real caps once the fast stubs resolve.
+      const clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       const mockComposeBaseURL = createMockComposeBaseURL();
       const { mockClient: sharePointClient } = createMockSharePointClient(
         sinon,
@@ -2371,12 +2405,23 @@ describe('LLMO Onboarding Functions', () => {
         sqs: { sendMessage: sinon.stub().resolves() },
       };
 
-      const result = await onboardWithMocks(
-        { domain: 'example.com', imsOrgId: 'ABC123@AdobeOrg', brandName: 'Test Brand' },
-        context,
-      );
+      let result;
+      try {
+        const pending = onboardWithMocks(
+          { domain: 'example.com', imsOrgId: 'ABC123@AdobeOrg', brandName: 'Test Brand' },
+          context,
+        );
+        await clock.tickAsync(60000);
+        result = await pending;
+      } finally {
+        clock.restore();
+      }
 
-      expect(result.message).to.equal('LLMO onboarding completed with warnings: required brand/prompt-generation work failed');
+      // Onboarding completes successfully: failing closed on the lookup skips only the
+      // best-effort brand write; the required Brandalf submission / schedule registration
+      // both succeed here, so requiredWorkFailed is false.
+      expect(result.message).to.equal('LLMO onboarding completed successfully');
+      expect(result.brandActivation?.requiredWorkFailed).to.be.false;
       expect(mockUpsertBrand).to.not.have.been.called;
       expect(mockLog.warn).to.have.been.calledWithMatch(
         'failed to look up existing brand',
@@ -2445,7 +2490,11 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
       const mockTracingFetch = createMockTracingFetch();
-      originalSetTimeout = mockSetTimeoutImmediate();
+      // Real (fake) timers, not mockSetTimeoutImmediate: the latter fires settleWithin's
+      // timeout branch synchronously, forcing a false schedule-registration timeout that
+      // flips requiredWorkFailed — a fixture artifact unrelated to the brand-write branch
+      // under test. tickAsync fast-forwards the real caps once the fast stubs resolve.
+      const clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       const mockComposeBaseURL = createMockComposeBaseURL();
       const { mockClient: sharePointClient } = createMockSharePointClient(
         sinon,
@@ -2476,12 +2525,23 @@ describe('LLMO Onboarding Functions', () => {
         sqs: { sendMessage: sinon.stub().resolves() },
       };
 
-      const result = await onboardWithMocks(
-        { domain: 'example.com', imsOrgId: 'ABC123@AdobeOrg', brandName: 'Test Brand' },
-        context,
-      );
+      let result;
+      try {
+        const pending = onboardWithMocks(
+          { domain: 'example.com', imsOrgId: 'ABC123@AdobeOrg', brandName: 'Test Brand' },
+          context,
+        );
+        await clock.tickAsync(60000);
+        result = await pending;
+      } finally {
+        clock.restore();
+      }
 
-      expect(result.message).to.equal('LLMO onboarding completed with warnings: required brand/prompt-generation work failed');
+      // Onboarding completes successfully: the brand write proceeds and the required
+      // Brandalf submission / schedule registration both succeed here, so
+      // requiredWorkFailed is false.
+      expect(result.message).to.equal('LLMO onboarding completed successfully');
+      expect(result.brandActivation?.requiredWorkFailed).to.be.false;
       expect(mockUpsertBrand).to.have.been.calledOnce;
       expect(mockLog.info).to.have.been.calledWith('Created initial brand "Test Brand" in normalized table for site site123');
     });
@@ -2548,7 +2608,11 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
       const mockTracingFetch = createMockTracingFetch();
-      originalSetTimeout = mockSetTimeoutImmediate();
+      // Real (fake) timers, not mockSetTimeoutImmediate: the latter fires settleWithin's
+      // timeout branch synchronously, forcing a false schedule-registration timeout that
+      // flips requiredWorkFailed — a fixture artifact unrelated to the brand-write branch
+      // under test. tickAsync fast-forwards the real caps once the fast stubs resolve.
+      const clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       const mockComposeBaseURL = createMockComposeBaseURL();
       const { mockClient: sharePointClient } = createMockSharePointClient(
         sinon,
@@ -2579,12 +2643,23 @@ describe('LLMO Onboarding Functions', () => {
         sqs: { sendMessage: sinon.stub().resolves() },
       };
 
-      const result = await onboardWithMocks(
-        { domain: 'example.com', imsOrgId: 'ABC123@AdobeOrg', brandName: 'Test Brand' },
-        context,
-      );
+      let result;
+      try {
+        const pending = onboardWithMocks(
+          { domain: 'example.com', imsOrgId: 'ABC123@AdobeOrg', brandName: 'Test Brand' },
+          context,
+        );
+        await clock.tickAsync(60000);
+        result = await pending;
+      } finally {
+        clock.restore();
+      }
 
-      expect(result.message).to.equal('LLMO onboarding completed with warnings: required brand/prompt-generation work failed');
+      // Onboarding completes successfully: the same-site re-onboard is not a collision,
+      // so the brand write proceeds and the required Brandalf submission / schedule
+      // registration both succeed here, so requiredWorkFailed is false.
+      expect(result.message).to.equal('LLMO onboarding completed successfully');
+      expect(result.brandActivation?.requiredWorkFailed).to.be.false;
       expect(mockUpsertBrand).to.have.been.calledOnce;
       expect(mockLog.warn).to.not.have.been.calledWithMatch('already exists with a different primary site');
     });
@@ -6614,6 +6689,115 @@ describe('LLMO Onboarding Functions', () => {
       // All three trial pipelines surfaced the one-shot failure, none swallowed.
       expect(oneShotLogs).to.have.lengthOf(3);
       expect(params.say).to.have.been.calledWithMatch(/Failed to run\/register DRS .*\(one-shot run\)/);
+    });
+
+    // LLMO-7218 AC3/AC4: the returned submission-outcome summary is the contract
+    // performLlmoOnboarding / the HTTP + Slack layers use to report an honest
+    // outcome. These assert the SHAPE of that object directly (not just a message
+    // string), which nothing else in this suite covered.
+    it('v2 full success: returns brandalfTriggered + all-created schedules + requiredWorkFailed false', async () => {
+      const mockDrsClient = createMockDrsClient(sandbox);
+      const { activateBrandAndGeneratePrompts } = await esmockOnboarding(
+        createCommonEsmockDependencies({
+          mockDrsClient,
+          mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+        }),
+      );
+
+      const context = buildV2Context();
+      const result = await activateBrandAndGeneratePrompts(buildV2Params(context));
+
+      expect(result.brandalfTriggered).to.be.true;
+      expect(result.brandalfError).to.equal(null);
+      expect(result.promptSuggestionSchedules).to.be.an('array').with.lengthOf(3);
+      expect(result.promptSuggestionSchedules.map((r) => r.status))
+        .to.deep.equal(['created', 'created', 'created']);
+      expect(result.promptSuggestionSchedulesTimedOut).to.be.false;
+      expect(result.requiredWorkFailed).to.be.false;
+      // v2 has no direct prompt-generation submit (deferred to DRS post-Brandalf).
+      expect(result.promptGenerationJobId).to.equal(null);
+      expect(result.promptGenerationError).to.equal(null);
+    });
+
+    it('v2: a per-pipeline failed schedule result flags requiredWorkFailed (not a timeout)', async () => {
+      const err = new Error('DRS POST /schedules failed');
+      err.status = 503;
+      // Only the agentic-traffic pipeline's registration fails; the other two succeed.
+      const createSchedule = sandbox.stub();
+      createSchedule
+        .withArgs(sinon.match((a) => a.providerIds[0] === 'prompt_generation_agentic_traffic'))
+        .rejects(err);
+      createSchedule.resolves({ scheduleId: 'sched-ok', alreadyExisted: false });
+
+      const mockDrsClient = createMockDrsClient(sandbox, { createSchedule });
+      const { activateBrandAndGeneratePrompts } = await esmockOnboarding(
+        createCommonEsmockDependencies({
+          mockDrsClient,
+          mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+        }),
+      );
+
+      const context = buildV2Context();
+      const result = await activateBrandAndGeneratePrompts(buildV2Params(context));
+
+      // Brandalf succeeded and nothing timed out — the degradation is a genuine
+      // per-pipeline registration failure, surfaced with the documented shape.
+      expect(result.brandalfTriggered).to.be.true;
+      expect(result.promptSuggestionSchedulesTimedOut).to.be.false;
+      const failed = result.promptSuggestionSchedules.filter((r) => r.status === 'failed');
+      expect(failed).to.have.lengthOf(1);
+      expect(failed[0].providerId).to.equal('prompt_generation_agentic_traffic');
+      expect(failed[0].error).to.equal('DRS POST /schedules failed');
+      // requiredWorkFailed is driven by the `.some(r => r.status === 'failed')` branch.
+      expect(result.requiredWorkFailed).to.be.true;
+    });
+
+    it('v1 success: returns promptGenerationJobId, no Brandalf, requiredWorkFailed false', async () => {
+      const mockDrsClient = createMockDrsClient(sandbox);
+      const { activateBrandAndGeneratePrompts } = await esmockOnboarding(
+        createCommonEsmockDependencies({
+          mockDrsClient,
+          mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+        }),
+      );
+
+      const context = buildV2Context();
+      const result = await activateBrandAndGeneratePrompts({
+        ...buildV2Params(context),
+        onboardingMode: 'v1',
+      });
+
+      const instance = mockDrsClient.createFrom();
+      expect(instance.submitPromptGenerationJob).to.have.been.calledOnce;
+      // v1 never triggers Brandalf or registers recurring schedules.
+      expect(instance.submitJob).to.not.have.been.called;
+      expect(instance.createSchedule).to.not.have.been.called;
+      expect(result.promptGenerationJobId).to.equal('test-drs-job-123');
+      expect(result.promptGenerationError).to.equal(null);
+      expect(result.brandalfTriggered).to.be.false;
+      expect(result.requiredWorkFailed).to.be.false;
+    });
+
+    it('v1 failure: submitPromptGenerationJob with no job_id sets promptGenerationError + requiredWorkFailed', async () => {
+      const mockDrsClient = createMockDrsClient(sandbox, {
+        submitPromptGenerationJob: sandbox.stub().resolves({}), // no job_id
+      });
+      const { activateBrandAndGeneratePrompts } = await esmockOnboarding(
+        createCommonEsmockDependencies({
+          mockDrsClient,
+          mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+        }),
+      );
+
+      const context = buildV2Context();
+      const result = await activateBrandAndGeneratePrompts({
+        ...buildV2Params(context),
+        onboardingMode: 'v1',
+      });
+
+      expect(result.promptGenerationJobId).to.equal(null);
+      expect(result.promptGenerationError).to.equal('DRS submitPromptGenerationJob returned no job_id');
+      expect(result.requiredWorkFailed).to.be.true;
     });
   });
 });
