@@ -111,6 +111,9 @@ const log = console;
 // mysticat-data-service), and createDataAccess simply omits the apikey/Authorization headers
 // when it's absent, falling back to the unauthenticated postgrest_anon role — the same pattern
 // scripts/reconcile-prompt-suggestion-schedules.mjs already documents for its own PostgREST reads.
+if (!env.POSTGREST_API_KEY) {
+  log.warn('POSTGREST_API_KEY not set; running as postgrest_anon');
+}
 const dataAccess = createDataAccess({
   postgrestUrl: env.POSTGREST_URL,
   postgrestSchema: env.POSTGREST_SCHEMA,
@@ -125,14 +128,13 @@ const MAX_ROWS_PER_FETCH = 200_000;
 
 /**
  * Fetches every row of a PostgREST table/select via keyset pagination on the immutable primary
- * key `id` (not a mutable timestamp, and not offset pagination — see below). Termination is
- * driven by an exact server-side row count (`{ count: 'exact' }`), not by "this page came back
- * short": PostgREST's own `db-max-rows` config can silently cap the rows a single page returns
- * below the requested limit, so a short page does NOT reliably mean "no more data" — relying on
- * it would let a `db-max-rows` cap at or below `pageSize` silently truncate the sweep into a
- * clean-looking but wrong "0 drift" report. `count: 'exact'` is unaffected by that per-page cap
- * (PostgREST computes it against the full filtered result set), so `rows.length >= totalCount`
- * is the only safe stop condition.
+ * key `id` (not a mutable timestamp, and not offset pagination — see below). Termination is on
+ * an EMPTY page (`data.length === 0`), not a SHORT one (`data.length < pageSize`): PostgREST's
+ * own `db-max-rows` config can silently cap the rows a single page returns below the requested
+ * limit, so a short-but-non-empty page does not reliably mean "no more data" under offset
+ * pagination. Keyset pagination removes the need to special-case that: asking for "up to
+ * `pageSize` rows with `id` greater than the last one seen" and getting zero back always means
+ * there is nothing left, cap or no cap, so an exact server-side row count isn't needed either.
  *
  * Keyset (`.gt('id', lastId)`) rather than offset (`.range(from, to)`) for the cursor itself: an
  * offset cursor advances by a fixed amount per page, so if a page were ever short for any reason
@@ -149,21 +151,17 @@ const MAX_ROWS_PER_FETCH = 200_000;
 async function fetchAllRows(table, select, applyFilter = (q) => q) {
   const rows = [];
   let lastId = null;
-  let totalCount = null;
   for (;;) {
     let query = applyFilter(
-      postgrestClient.from(table).select(select, { count: 'exact' }).order('id', { ascending: true }),
+      postgrestClient.from(table).select(select).order('id', { ascending: true }),
     );
     if (lastId !== null) {
       query = query.gt('id', lastId);
     }
     // eslint-disable-next-line no-await-in-loop
-    const { data, error, count } = await query.limit(pageSize);
+    const { data, error } = await query.limit(pageSize);
     if (error) {
       throw new Error(`Failed to fetch ${table} rows after id=${lastId ?? '(start)'}: ${error.message}`);
-    }
-    if (totalCount === null) {
-      totalCount = count;
     }
     if (rows.length + (data?.length ?? 0) > MAX_ROWS_PER_FETCH) {
       throw new Error(
@@ -172,8 +170,8 @@ async function fetchAllRows(table, select, applyFilter = (q) => q) {
       );
     }
     rows.push(...(data ?? []));
-    if (!data || data.length === 0 || rows.length >= totalCount) {
-      log.info(`Fetched ${rows.length}/${totalCount ?? '?'} rows from ${table}`);
+    if (!data || data.length === 0) {
+      log.info(`Fetched ${rows.length} rows from ${table}`);
       return rows;
     }
     lastId = data[data.length - 1].id;
