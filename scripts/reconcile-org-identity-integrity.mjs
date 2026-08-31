@@ -101,6 +101,11 @@ if (!env.POSTGREST_URL) {
 // Init
 // ---------------------------------------------------------------------------
 const log = console;
+// POSTGREST_API_KEY is deliberately NOT required: this script only ever reads (entitlements,
+// site_enrollments, brands are all `GRANT SELECT ... TO postgrest_anon` with no RLS policy in
+// mysticat-data-service), and createDataAccess simply omits the apikey/Authorization headers
+// when it's absent, falling back to the unauthenticated postgrest_anon role — the same pattern
+// scripts/reconcile-prompt-suggestion-schedules.mjs already documents for its own PostgREST reads.
 const dataAccess = createDataAccess({
   postgrestUrl: env.POSTGREST_URL,
   postgrestSchema: env.POSTGREST_SCHEMA,
@@ -108,12 +113,20 @@ const dataAccess = createDataAccess({
 }, log);
 const { postgrestClient } = dataAccess.services;
 
+// Hard ceiling on rows accumulated by a single fetchAllRows() call — not a realistic size for
+// any of this script's three tables today, but a safety valve against unbounded memory growth
+// if a filter regresses to matching far more rows than expected, or a pagination bug loops.
+const MAX_ROWS_PER_FETCH = 200_000;
+
 /**
  * Fetches every row of a PostgREST table/select via offset pagination, sorted by the immutable
- * primary key `id` (not a mutable timestamp) so a concurrent write elsewhere in the fleet can't
- * shift row order across a page boundary and cause a row to be silently skipped or duplicated —
- * the same class of bug fixed in scripts/reconcile-prompt-suggestion-schedules.mjs's own
- * fleet-wide sweep.
+ * primary key `id` (not a mutable timestamp) so a concurrent UPDATE elsewhere in the fleet can't
+ * reorder rows across a page boundary. This does NOT make the sweep fully concurrency-safe: a
+ * concurrent DELETE of an earlier-sorting row still shifts every later offset by one, which can
+ * skip the row that slides into the just-fetched range. Deletes of the rows this script cares
+ * about (entitlements, site_enrollments, brands) are rare enough that this is an accepted gap,
+ * not a solved one — same offset-pagination shape as
+ * scripts/reconcile-prompt-suggestion-schedules.mjs's own fleet-wide sweep.
  * @param {string} table
  * @param {string} select
  * @param {(query: object) => object} [applyFilter] - optional filter chain applied to the query.
@@ -132,7 +145,14 @@ async function fetchAllRows(table, select, applyFilter = (q) => q) {
       throw new Error(`Failed to fetch ${table} rows ${from}-${to}: ${error.message}`);
     }
     rows.push(...(data ?? []));
+    if (rows.length > MAX_ROWS_PER_FETCH) {
+      throw new Error(
+        `Aborting fetch of ${table}: exceeded ${MAX_ROWS_PER_FETCH} rows, which is far beyond `
+        + 'this table\'s expected size and likely indicates a filter or pagination bug.',
+      );
+    }
     if (!data || data.length < pageSize) {
+      log.info(`Fetched ${rows.length} rows from ${table}`);
       return rows;
     }
     from += pageSize;
