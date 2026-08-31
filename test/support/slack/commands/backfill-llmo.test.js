@@ -811,10 +811,51 @@ describe('BackfillLlmoCommand', () => {
 
       expect(sqsStub.sendMessage.callCount).to.equal(1);
       const [, message] = sqsStub.sendMessage.firstCall.args;
+      expect(message.auditContext).to.have.all.keys('year', 'month', 'day', 'hour');
       expect(message.auditContext.year).to.equal(2024);
       expect(message.auditContext.month).to.equal(11);
       expect(message.auditContext.day).to.equal(15);
       expect(message.auditContext.hour).to.equal(14);
+    });
+
+    it('adds processFullDay/forceReprocess/isSubAudit for a specific date and hour when force=true', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves(siteStub);
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        `audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS}`,
+        'year=2024', 'month=11', 'day=15', 'hour=23',
+        'force=true',
+      ], slackContext);
+
+      expect(sqsStub.sendMessage.callCount).to.equal(1);
+      const [, message] = sqsStub.sendMessage.firstCall.args;
+      expect(message.auditContext).to.have.all.keys('year', 'month', 'day', 'hour', 'processFullDay', 'forceReprocess', 'isSubAudit');
+      expect(message.auditContext.hour).to.equal(23);
+      expect(message.auditContext.processFullDay).to.be.true;
+      expect(message.auditContext.forceReprocess).to.be.true;
+      expect(message.auditContext.isSubAudit).to.be.true;
+    });
+
+    it('adds forceReprocess/isSubAudit to the days-loop backfill when force=true', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves(siteStub);
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        `audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS}`,
+        'days=2',
+        'force=true',
+      ], slackContext);
+
+      expect(sqsStub.sendMessage.callCount).to.equal(2);
+      for (const call of sqsStub.sendMessage.getCalls()) {
+        const [, message] = call.args;
+        expect(message.auditContext).to.have.all.keys('year', 'month', 'day', 'hour', 'processFullDay', 'forceReprocess', 'isSubAudit');
+        expect(message.auditContext.forceReprocess).to.be.true;
+        expect(message.auditContext.isSubAudit).to.be.true;
+      }
     });
 
     it('rejects days parameter greater than 14 for cdn-logs-analysis', async () => {
