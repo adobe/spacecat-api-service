@@ -387,7 +387,11 @@ describe('onboard-llmo-modal', () => {
       await onboardSite(input, lambdaCtx, slackCtx);
 
       expect(sayStub).to.have.been.calledWith(':gear: Test Brand onboarding started...');
-      expect(sayStub).to.have.been.calledWith(sinon.match(':white_check_mark: *LLMO onboarding completed successfully!*'));
+      // This test's context has no DRS client configured, so schedule registration inside
+      // activateBrandAndGeneratePrompts genuinely times out against a real (non-mocked)
+      // DrsClient - the banner honestly reports that (LLMO-7218 AC3) rather than the
+      // unconditional success message this test asserted on before that gate existed.
+      expect(sayStub).to.have.been.calledWith(sinon.match(':warning: *LLMO onboarding completed with warnings*'));
       expect(sayStub).to.have.been.calledWith(sinon.match(':link: *Site:* https://example.com'));
       expect(sayStub).to.have.been.calledWith(sinon.match(':identification_card: *Site ID:* site123'));
       expect(sayStub).to.have.been.calledWith(sinon.match(':file_folder: *Data Folder:* example-com'));
@@ -481,12 +485,15 @@ describe('onboard-llmo-modal', () => {
 
       await onboardSite(input, lambdaCtx, slackCtx);
 
-      const successCall = sayStub.getCalls().find(
+      // Matches either banner variant - this test's DRS-unconfigured context genuinely
+      // times out schedule registration (see the test above), so the banner is the
+      // "with warnings" variant here, not the plain success one (LLMO-7218 AC3).
+      const finalCall = sayStub.getCalls().find(
         (call) => typeof call.args[0] === 'string'
-          && call.args[0].includes('LLMO onboarding completed successfully'),
+          && call.args[0].includes('LLMO onboarding completed'),
       );
-      expect(successCall, 'success message was sent').to.exist;
-      expect(successCall.args[0]).to.not.include(':globe_with_meridians:');
+      expect(finalCall, 'final onboarding message was sent').to.exist;
+      expect(finalCall.args[0]).to.not.include(':globe_with_meridians:');
     });
 
     it('should always call GitHub to update helix-query.yaml, ignoring a stray tempOnboarding param (LLMO-7141)', async () => {

@@ -2160,7 +2160,7 @@ describe('LLMO Onboarding Functions', () => {
 
       // Onboarding completes despite upsertBrand failure
       expect(result.message).to.equal(
-        'LLMO onboarding completed successfully',
+        'LLMO onboarding completed with warnings: required brand/prompt-generation work failed',
       );
       expect(failingUpsertBrand).to.have.been.calledOnce;
       expect(mockLog.warn).to.have.been.calledWith(
@@ -2271,7 +2271,7 @@ describe('LLMO Onboarding Functions', () => {
       );
 
       // Onboarding still completes
-      expect(result.message).to.equal('LLMO onboarding completed successfully');
+      expect(result.message).to.equal('LLMO onboarding completed with warnings: required brand/prompt-generation work failed');
       // The existing brand's primary site is NOT touched
       expect(mockUpsertBrand).to.not.have.been.called;
       expect(mockLog.warn).to.have.been.calledWithMatch(
@@ -2376,7 +2376,7 @@ describe('LLMO Onboarding Functions', () => {
         context,
       );
 
-      expect(result.message).to.equal('LLMO onboarding completed successfully');
+      expect(result.message).to.equal('LLMO onboarding completed with warnings: required brand/prompt-generation work failed');
       expect(mockUpsertBrand).to.not.have.been.called;
       expect(mockLog.warn).to.have.been.calledWithMatch(
         'failed to look up existing brand',
@@ -2481,7 +2481,7 @@ describe('LLMO Onboarding Functions', () => {
         context,
       );
 
-      expect(result.message).to.equal('LLMO onboarding completed successfully');
+      expect(result.message).to.equal('LLMO onboarding completed with warnings: required brand/prompt-generation work failed');
       expect(mockUpsertBrand).to.have.been.calledOnce;
       expect(mockLog.info).to.have.been.calledWith('Created initial brand "Test Brand" in normalized table for site site123');
     });
@@ -2584,7 +2584,7 @@ describe('LLMO Onboarding Functions', () => {
         context,
       );
 
-      expect(result.message).to.equal('LLMO onboarding completed successfully');
+      expect(result.message).to.equal('LLMO onboarding completed with warnings: required brand/prompt-generation work failed');
       expect(mockUpsertBrand).to.have.been.calledOnce;
       expect(mockLog.warn).to.not.have.been.calledWithMatch('already exists with a different primary site');
     });
@@ -3491,7 +3491,7 @@ describe('LLMO Onboarding Functions', () => {
 
       // Verify onboarding completed successfully
       expect(result.siteId).to.equal('site123');
-      expect(result.message).to.equal('LLMO onboarding completed successfully');
+      expect(result.message).to.equal('LLMO onboarding completed with warnings: required brand/prompt-generation work failed');
 
       // Verify DRS was checked but not called (prompt gen is deferred, only Brandalf is checked)
       expect(mockLog.debug).to.have.been.calledWith('DRS client not configured, skipping Brandalf flow');
@@ -3582,7 +3582,7 @@ describe('LLMO Onboarding Functions', () => {
 
       // Verify onboarding completed successfully despite DRS failure
       expect(result.siteId).to.equal('site123');
-      expect(result.message).to.equal('LLMO onboarding completed successfully');
+      expect(result.message).to.equal('LLMO onboarding completed with warnings: required brand/prompt-generation work failed');
 
       // Verify error was logged but didn't fail onboarding
       expect(mockLog.error).to.have.been.calledWith('Failed to start DRS Brandalf flow: Brandalf API connection failed');

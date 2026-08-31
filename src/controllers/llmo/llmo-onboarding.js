@@ -1359,7 +1359,21 @@ export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
  * @param {string} [params.region] - Optional ISO 3166-1 alpha-2 region.
  * @param {object} params.context - The request context.
  * @param {Function} [params.say] - Optional Slack say callback.
- * @returns {Promise<void>}
+ * @returns {Promise<{
+ *   brandalfTriggered: boolean,
+ *   brandalfError: string|null,
+ *   promptGenerationJobId: string|null,
+ *   promptGenerationError: string|null,
+ *   promptSuggestionSchedules: Array<object>|null,
+ *   promptSuggestionSchedulesTimedOut: boolean,
+ *   requiredWorkFailed: boolean,
+ * }>} A submission-level summary (LLMO-7218 AC3/AC4) of the best-effort DRS side-effects
+ *   this function runs. "Submission" because Brandalf and prompt generation both complete
+ *   asynchronously via a DRS-side callback this repo has no visibility into (LLMO-4258
+ *   option b) — this cannot report whether the async work eventually SUCCEEDED, only
+ *   whether it was successfully HANDED OFF to DRS. `requiredWorkFailed` is true when any
+ *   required submission for the resolved onboarding mode failed, so a caller can tell a
+ *   degraded onboarding apart from a fully successful one instead of always seeing success.
  */
 export async function activateBrandAndGeneratePrompts({
   onboardingMode,
@@ -1374,6 +1388,18 @@ export async function activateBrandAndGeneratePrompts({
   say = () => {},
 }) {
   const { log } = context;
+
+  // LLMO-7218 AC3/AC4: tracked here (not thrown) because every DRS side-effect below stays
+  // best-effort by design — a DRS outage must not fail the site/entitlement/config work this
+  // function's caller already committed. Returned instead so the caller can report an honest
+  // outcome rather than the unconditional "completed successfully" this function previously
+  // gave no way to contradict.
+  let brandalfTriggered = false;
+  let brandalfError = null;
+  let promptGenerationJobId = null;
+  let promptGenerationError = null;
+  let promptSuggestionSchedules = null;
+  let promptSuggestionSchedulesTimedOut = false;
 
   if (onboardingMode === LLMO_ONBOARDING_MODE_V2) {
     const postgrestClient = context.dataAccess?.services?.postgrestClient;
@@ -1468,12 +1494,15 @@ export async function activateBrandAndGeneratePrompts({
             log,
             say,
           });
+          brandalfTriggered = true;
         } else {
           log.debug('DRS client not configured, skipping Brandalf flow');
+          brandalfError = 'DRS client not configured';
         }
       } catch (drsError) {
         log.error(`Failed to start DRS Brandalf flow: ${drsError.message}`);
         say(':warning: Failed to start DRS Brandalf flow (will need manual trigger)');
+        brandalfError = drsError.message;
       }
 
       // Run the "prompt suggestion" pipelines, tier-gated (LLMO prompt-suggestion
@@ -1529,6 +1558,9 @@ export async function activateBrandAndGeneratePrompts({
           + `${SCHEDULE_REGISTRATION_TIMEOUT_MS}ms for site ${site.getId()} `
           + '(schedules may still have been created server-side; may need manual verification)');
         say(':warning: DRS schedule registration timed out (may need manual verification)');
+        promptSuggestionSchedulesTimedOut = true;
+      } else {
+        promptSuggestionSchedules = scheduleResult.results;
       }
     }
   } else {
@@ -1569,14 +1601,36 @@ export async function activateBrandAndGeneratePrompts({
         }
         log.info(`Started DRS prompt generation: job=${drsJob.job_id}`);
         say(`:robot_face: Started DRS prompt generation job: ${drsJob.job_id}`);
+        promptGenerationJobId = drsJob.job_id;
       } else {
         log.debug('DRS client not configured, skipping prompt generation');
+        promptGenerationError = 'DRS client not configured';
       }
     } catch (drsError) {
       log.error(`Failed to start DRS prompt generation: ${drsError.message}`);
       say(`:warning: Failed to start DRS prompt generation for site ${site.getId()} (will need manual trigger)`);
+      promptGenerationError = drsError.message;
     }
   }
+
+  // Required-work gate (LLMO-7218 AC3): what counts as "required" differs by mode, since v1 has
+  // no Brandalf step at all. A schedule-registration timeout counts as failed, not merely
+  // unknown — the caller needs an actionable signal, and "unknown" would let this collapse back
+  // into the same silent-success outcome AC3 exists to prevent.
+  const requiredWorkFailed = onboardingMode === LLMO_ONBOARDING_MODE_V2
+    ? !brandalfTriggered || promptSuggestionSchedulesTimedOut
+      || promptSuggestionSchedules?.some((r) => r.status === 'failed')
+    : promptGenerationJobId === null;
+
+  return {
+    brandalfTriggered,
+    brandalfError,
+    promptGenerationJobId,
+    promptGenerationError,
+    promptSuggestionSchedules,
+    promptSuggestionSchedulesTimedOut,
+    requiredWorkFailed,
+  };
 }
 
 /**
@@ -1747,8 +1801,9 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     // entity (upsertBrand), no Brandalf job, and no v1 prompt-generation job.
     // ensureInitialCustomerConfigV2 + the brandalf feature flag deliberately stay
     // in the always-run path above.
+    let brandActivationResult = null;
     if (!siteOnly) {
-      await activateBrandAndGeneratePrompts({
+      brandActivationResult = await activateBrandAndGeneratePrompts({
         onboardingMode,
         organization,
         site,
@@ -1773,6 +1828,11 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       : [...BASIC_AUDITS, 'wikipedia-analysis'];
     await triggerAudits(auditsToTrigger, context, site);
 
+    // LLMO-7218 AC3: the response can no longer claim unconditional success when a required
+    // brand/prompt-generation submission failed - siteOnly onboarding has no brand-activation
+    // step at all, so it is unaffected by this gate.
+    const requiredWorkFailed = brandActivationResult?.requiredWorkFailed ?? false;
+
     return {
       site,
       siteId: site.getId(),
@@ -1780,7 +1840,10 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       baseURL,
       dataFolder,
       detectedCdn,
-      message: 'LLMO onboarding completed successfully',
+      message: requiredWorkFailed
+        ? 'LLMO onboarding completed with warnings: required brand/prompt-generation work failed'
+        : 'LLMO onboarding completed successfully',
+      ...(brandActivationResult ? { brandActivation: brandActivationResult } : {}),
     };
   } catch (error) {
     log.error(`Error during LLMO onboarding: ${error.message}. Attempting cleanup.`);

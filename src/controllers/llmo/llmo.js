@@ -1053,6 +1053,10 @@ function LlmoController(ctx) {
         status: 'completed',
         createdAt: new Date().toISOString(),
         brandProfileExecutionName,
+        // LLMO-7218 AC4: structured submission-level context (which required step failed, if
+        // any) so a caller doesn't have to reconstruct it from logs. Absent for siteOnly
+        // onboarding, which never runs brand activation.
+        ...(result.brandActivation ? { brandActivation: result.brandActivation } : {}),
         ...(region ? { region } : {}),
       });
     } catch (error) {
