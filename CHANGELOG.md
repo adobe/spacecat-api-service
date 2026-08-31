@@ -1,3 +1,15 @@
+# [1.779.0](https://github.com/adobe/spacecat-api-service/compare/v1.778.0...v1.779.0) (2026-08-31)
+
+
+### Bug Fixes
+
+* **llmo:** report onboarding success honestly when required work fails ([#3155](https://github.com/adobe/spacecat-api-service/issues/3155)) ([393f0a2](https://github.com/adobe/spacecat-api-service/commit/393f0a220fab6bfa2e4863a3b86676624146ea22)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+
+### Features
+
+* **llmo:** read-only org/identity integrity reconciliation report ([#3153](https://github.com/adobe/spacecat-api-service/issues/3153)) ([fe33599](https://github.com/adobe/spacecat-api-service/commit/fe33599873f7c41b17fd34bdc6fb73a1896a72cc)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 # [1.778.0](https://github.com/adobe/spacecat-api-service/compare/v1.777.0...v1.778.0) (2026-08-29)
 
 
