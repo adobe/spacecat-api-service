@@ -1,3 +1,10 @@
+# [1.780.0](https://github.com/adobe/spacecat-api-service/compare/v1.779.0...v1.780.0) (2026-08-31)
+
+
+### Features
+
+* **ai-visibility:** scope Cited Pages tab to subdomains via search_type ([#3157](https://github.com/adobe/spacecat-api-service/issues/3157)) ([99283d8](https://github.com/adobe/spacecat-api-service/commit/99283d8913b58ec523c82c61e30d4f745082cb47)), closes [#3041](https://github.com/adobe/spacecat-api-service/issues/3041) [Hi#level](https://github.com/Hi/issues/level) [LLMO-6992/#3041](https://github.com/adobe/spacecat-api-service/issues/3041)
+
 # [1.779.0](https://github.com/adobe/spacecat-api-service/compare/v1.778.0...v1.779.0) (2026-08-31)
 
 

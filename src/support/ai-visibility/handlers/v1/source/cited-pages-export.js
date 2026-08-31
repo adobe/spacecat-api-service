@@ -25,7 +25,6 @@ import {
   SourcesRequestSchema,
 } from '@quazar/ai-seo-ts/v2/source/messages_pb.js';
 import {
-  SEARCH_TYPE_ENUM,
   SOURCE_CATEGORY_ENUM,
   SOURCES_REQUEST_ORDER_BY_ENUM,
 } from '@quazar/ai-seo-ts/v2/source/enums_pb.js';
@@ -34,6 +33,7 @@ import {
   resolveCountry,
   engineToLlm,
   responseFromGrpcError,
+  resolveSearchType,
   PROTO_FROM_JSON,
   PROTO_TO_JSON,
 } from '../../../grpc-utils.js';
@@ -48,6 +48,7 @@ export async function handleCitedPagesExport(sp, clients) {
   const sortDirection = sp.get('sortDirection') || ORDER_DIRECTION_ENUM.DESC;
   const date = sp.get('date');
   const { limit, offset } = parseLimitOffset(sp);
+  const searchType = resolveSearchType(domain);
 
   let exportRequest;
   try {
@@ -65,7 +66,7 @@ export async function handleCitedPagesExport(sp, clients) {
         },
         range: { limit, offset },
         target_date: date,
-        search_type: SEARCH_TYPE_ENUM.DOMAIN,
+        search_type: searchType,
       },
       PROTO_FROM_JSON,
     );
