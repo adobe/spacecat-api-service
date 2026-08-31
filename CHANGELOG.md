@@ -1,3 +1,10 @@
+## [1.780.1](https://github.com/adobe/spacecat-api-service/compare/v1.780.0...v1.780.1) (2026-08-31)
+
+
+### Bug Fixes
+
+* **onboard:** allow onboarding to update entitlement for PRE_ONBOARD orgs ([#3158](https://github.com/adobe/spacecat-api-service/issues/3158)) ([99db837](https://github.com/adobe/spacecat-api-service/commit/99db837d37c2b1eafe40e22cbfea0c3dd50d7188)), closes [Hi#level](https://github.com/Hi/issues/level) [throu#API](https://github.com/throu/issues/API)
+
 # [1.780.0](https://github.com/adobe/spacecat-api-service/compare/v1.779.0...v1.780.0) (2026-08-31)
 
 
