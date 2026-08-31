@@ -6367,8 +6367,8 @@ site-llmo-akamai-versions:
                 active:
                   type: object
                   description: >-
-                    The PAPI activation record currently ACTIVE on each network, keyed by network
-                    name. A network with no active version is absent.
+                    The version currently ACTIVE on each network, keyed by network name. A network
+                    the property was never activated on is absent.
                   properties:
                     STAGING:
                       $ref: '#/akamai-active-activation'
@@ -6963,11 +6963,16 @@ akamai-property-ref:
 akamai-active-activation:
   type: object
   additionalProperties: false
-  description: The version currently ACTIVE on a network (projected from the PAPI activation record).
+  description: >-
+    The version currently ACTIVE on a network, from PAPI's bounded
+    `/versions/latest?activatedOn=NETWORK` lookup.
   properties:
     activationId:
-      type: string
-      example: 'atv_20135679'
+      type: [string, 'null']
+      description: >-
+        Always null — a bounded version lookup carries no activation record. Retained for
+        response-shape stability.
+      example: null
     propertyVersion:
       type: integer
       example: 5
