@@ -1634,7 +1634,7 @@ export async function activateBrandAndGeneratePrompts({
   // also ends this onboarding with zero prompts, so the same signal applies.
   const requiredWorkFailed = onboardingMode === LLMO_ONBOARDING_MODE_V2
     ? !brandalfTriggered || promptSuggestionSchedulesTimedOut
-      || promptSuggestionSchedules?.some((r) => r.status === 'failed')
+      || Boolean(promptSuggestionSchedules?.some((r) => r.status === 'failed'))
     : promptGenerationJobId === null;
 
   return {

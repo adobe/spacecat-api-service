@@ -1038,7 +1038,7 @@ function LlmoController(ctx) {
         log.warn(`LLMO onboarding: failed to trigger brand-profile workflow for site ${result.siteId}`, hookError);
       }
 
-      log.info(`LLMO onboarding completed successfully for domain ${domain}`);
+      log.info(`LLMO onboarding ${result.brandActivation?.requiredWorkFailed ? 'completed with warnings' : 'completed successfully'} for domain ${domain}`);
 
       return ok({
         message: result.message,

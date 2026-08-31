@@ -161,6 +161,13 @@ describe('LLMO Onboarding Functions', () => {
     return sandbox.stub().resolves({ ok, status, statusText });
   };
 
+  // Safe only when the code under test never reaches a settleWithin-wrapped call (this fires
+  // ANY setTimeout synchronously, so it forces settleWithin's timeout branch to win every race).
+  // v1 onboarding has no settleWithin calls at all, so it's unaffected here. Any V2 test whose
+  // outcome depends on settleWithin actually resolving (tier lookup, schedule registration)
+  // must use `sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })` + `clock.tickAsync`
+  // instead - using this helper there previously caused 5 tests to assert a false
+  // schedule-registration-timeout outcome unrelated to what they were testing (LLMO-7218).
   const mockSetTimeoutImmediate = (sandbox = sinon) => {
     const original = global.setTimeout;
     global.setTimeout = sandbox.stub().callsFake((fn) => {
@@ -6615,11 +6622,15 @@ describe('LLMO Onboarding Functions', () => {
         // Advance past every pending timer (schedule-registration + any sibling
         // settleWithin), flushing microtasks between ticks.
         await clock.tickAsync(60000);
-        await pending;
+        const result = await pending;
 
         const warnLogs = context.log.warn.getCalls().map((c) => c.args[0]);
         expect(warnLogs.some((m) => m.includes('schedule registration timed out'))).to.be.true;
         expect(params.say).to.have.been.calledWithMatch(/schedule registration timed out/);
+        // The promptSuggestionSchedulesTimedOut disjunct of requiredWorkFailed, exercised
+        // directly (not via the .some(status==='failed') or !brandalfTriggered disjuncts).
+        expect(result.promptSuggestionSchedulesTimedOut).to.be.true;
+        expect(result.requiredWorkFailed).to.be.true;
       } finally {
         clock.restore();
       }
