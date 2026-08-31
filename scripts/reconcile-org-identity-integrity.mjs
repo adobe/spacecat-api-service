@@ -148,13 +148,13 @@ async function fetchAllRows(table, select, applyFilter = (q) => q) {
     if (error) {
       throw new Error(`Failed to fetch ${table} rows ${from}-${to}: ${error.message}`);
     }
-    rows.push(...(data ?? []));
-    if (rows.length > MAX_ROWS_PER_FETCH) {
+    if (rows.length + (data?.length ?? 0) > MAX_ROWS_PER_FETCH) {
       throw new Error(
-        `Aborting fetch of ${table}: exceeded ${MAX_ROWS_PER_FETCH} rows, which is far beyond `
+        `Aborting fetch of ${table}: would exceed ${MAX_ROWS_PER_FETCH} rows, which is far beyond `
         + 'this table\'s expected size and likely indicates a filter or pagination bug.',
       );
     }
+    rows.push(...(data ?? []));
     if (!data || data.length < pageSize) {
       log.info(`Fetched ${rows.length} rows from ${table}`);
       return rows;
@@ -172,6 +172,11 @@ function normalizeBrandName(name) {
 // Check 1: foreign LLMO enrollments
 // ---------------------------------------------------------------------------
 async function findForeignLlmoEnrollments() {
+  // `entitlements!inner`/`sites!inner` (here and in findActiveBrandIntegrityIssues below) make
+  // the nested-field access below null-safe, but as a side effect they silently drop any row
+  // with a dangling reference (a site_enrollment pointing at a deleted entitlement, an active
+  // brand whose site_id doesn't resolve) rather than surfacing it. Assumed prevented by FK
+  // constraints today; not verified by this script.
   const rows = await fetchAllRows(
     'site_enrollments',
     'id,site_id,entitlement_id,entitlements!inner(organization_id,product_code),sites!inner(organization_id,base_url)',
@@ -247,7 +252,7 @@ try {
   }
 } catch (error) {
   failed = true;
-  log.error(`FAILED to check foreign LLMO enrollments: ${error.message}`, error);
+  log.error(`FAILED to check foreign LLMO enrollments: ${error.message}`);
 }
 
 try {
@@ -266,7 +271,7 @@ try {
   }
 } catch (error) {
   failed = true;
-  log.error(`FAILED to check active brand integrity: ${error.message}`, error);
+  log.error(`FAILED to check active brand integrity: ${error.message}`);
 }
 
 exit(failed ? 1 : 0);
