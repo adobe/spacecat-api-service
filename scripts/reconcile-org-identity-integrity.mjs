@@ -125,8 +125,12 @@ const MAX_ROWS_PER_FETCH = 200_000;
  * concurrent DELETE of an earlier-sorting row still shifts every later offset by one, which can
  * skip the row that slides into the just-fetched range. Deletes of the rows this script cares
  * about (entitlements, site_enrollments, brands) are rare enough that this is an accepted gap,
- * not a solved one — same offset-pagination shape as
- * scripts/reconcile-prompt-suggestion-schedules.mjs's own fleet-wide sweep.
+ * not a solved one. scripts/reconcile-prompt-suggestion-schedules.mjs's own fleet-wide sweep
+ * avoids this class of bug entirely by using cursor pagination
+ * (`Site.allByEnrollmentFiltered({ cursor, returnCursor, orderBy: { attribute: 'siteId' } })`)
+ * through the data-access model layer rather than PostgREST offset pagination; this script
+ * stays on `.range()` for simplicity, since the three tables it reads are not expected to see
+ * deletes during a run.
  * @param {string} table
  * @param {string} select
  * @param {(query: object) => object} [applyFilter] - optional filter chain applied to the query.
@@ -239,7 +243,7 @@ try {
   log.info('---');
   log.info(`Foreign LLMO enrollments: ${foreignEnrollments.length}`);
   for (const row of foreignEnrollments) {
-    log.warn(`  enrollment=${row.enrollmentId} site=${row.siteId} (${row.siteBaseUrl}, org=${row.siteOrganizationId}) entitlement=${row.entitlementId} (org=${row.entitlementOrganizationId})`);
+    log.warn(`  enrollment=${row.enrollmentId} site=${row.siteId} (${JSON.stringify(row.siteBaseUrl)}, org=${row.siteOrganizationId}) entitlement=${row.entitlementId} (org=${row.entitlementOrganizationId})`);
   }
 } catch (error) {
   failed = true;
@@ -258,7 +262,7 @@ try {
   log.info('---');
   log.info(`Active brand / site organization mismatches: ${orgMismatches.length}`);
   for (const row of orgMismatches) {
-    log.warn(`  brand=${row.brandId} (${row.brandName}, org=${row.brandOrganizationId}) site=${row.siteId} (${row.siteBaseUrl}, org=${row.siteOrganizationId})`);
+    log.warn(`  brand=${row.brandId} (${JSON.stringify(row.brandName)}, org=${row.brandOrganizationId}) site=${row.siteId} (${JSON.stringify(row.siteBaseUrl)}, org=${row.siteOrganizationId})`);
   }
 } catch (error) {
   failed = true;
