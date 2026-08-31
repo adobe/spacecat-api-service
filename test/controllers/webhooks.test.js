@@ -115,6 +115,26 @@ describe('WebhooksController', () => {
     expect(payload.target_id).to.equal('github-public');
   });
 
+  it('normalizes pull_request.head.sha to lowercase before enqueueing', async () => {
+    const context = {
+      ...validContext,
+      data: {
+        ...validContext.data,
+        pull_request: {
+          ...validContext.data.pull_request,
+          head: { sha: 'A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6A1B2' },
+        },
+      },
+    };
+
+    const response = await controller.processGitHubWebhook(context);
+
+    expect(response.status).to.equal(202);
+    const [, payload] = mockSqs.sendMessage.firstCall.args;
+    expect(payload.requested_head_sha)
+      .to.equal('a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2');
+  });
+
   it('returns 204 for non-pull_request event', async () => {
     const context = {
       ...validContext,
@@ -239,6 +259,26 @@ describe('WebhooksController', () => {
         pull_request: {
           ...validContext.data.pull_request,
           head: { sha: ['a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2'] },
+        },
+      },
+    };
+
+    const response = await controller.processGitHubWebhook(context);
+
+    expect(response.status).to.equal(400);
+    const body = await response.json();
+    expect(body.message).to.include('pull_request.head.sha');
+    expect(mockSqs.sendMessage.called).to.be.false;
+  });
+
+  it('returns 400 and does not enqueue when pull_request.head.sha is null', async () => {
+    const context = {
+      ...validContext,
+      data: {
+        ...validContext.data,
+        pull_request: {
+          ...validContext.data.pull_request,
+          head: { sha: null },
         },
       },
     };

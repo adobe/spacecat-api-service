@@ -189,6 +189,7 @@ function WebhooksController(context) {
         outcome = 'bad_request';
         return badRequest('Missing or malformed required field: pull_request.head.sha');
       }
+      const requestedHeadSha = pr.head.sha.toLowerCase();
       if (!data.repository?.owner?.login) {
         emitMetric(
           { name: 'WebhookBadRequest', dimensions: { MissingField: 'repository.owner.login' } },
@@ -290,7 +291,7 @@ function WebhooksController(context) {
         // HMAC-verified body (validated as a 40-char hex commit SHA above).
         // Lets the worker detect a head change during a review and bind the
         // terminal verdict to the SHA it actually reviewed.
-        requested_head_sha: pr.head.sha,
+        requested_head_sha: requestedHeadSha,
         // Independent count of head changes observed for this request,
         // separate from retry_count (which tracks re-enqueues after a
         // worker/infra failure, not head drift). Always 0 at initial enqueue.
