@@ -425,6 +425,7 @@ export default function getRouteHandlers(
     'DELETE /sites/:siteId/geo-experiments/:geoExperimentId': suggestionsController.deleteGeoExperiment,
     'POST /sites/:siteId/geo-experiments/:geoExperimentId/trigger-impact-measurement': suggestionsController.triggerImpactMeasurement,
     'POST /sites/:siteId/geo-experiments/:geoExperimentId/validate': suggestionsController.triggerGeoExperimentValidation,
+    'POST /sites/:siteId/geo-experiments/:geoExperimentId/cancel': suggestionsController.cancelGeoExperiment,
     'GET /sites/:siteId/traffic/paid': paidController.getTopPaidPages,
     'GET /sites/:siteId/traffic/paid/page-type-platform-campaign': trafficController.getPaidTrafficByPageTypePlatformCampaign,
     'GET /sites/:siteId/traffic/paid/url-page-type': trafficController.getPaidTrafficByUrlPageType,
