@@ -3503,6 +3503,39 @@ site-llmo-cloudfront-permissions:
     security:
       - api_key: [ ]
 
+site-llmo-cloudfront-template:
+  get:
+    tags:
+      - llmo
+    summary: Download the CloudFront connector role CloudFormation template
+    description: |
+      Returns the raw CloudFormation connector-role template as a YAML file download. It is the
+      same template the AWS quick-create link uses, for customers who create the stack manually
+      (expired quick-create presign, or no AWS console admin access). Read-only — no cross-account
+      customer AWS calls.
+    operationId: getLlmoCloudFrontTemplate
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    responses:
+      '200':
+        description: The CloudFront connector role CloudFormation template YAML.
+        content:
+          text/yaml:
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
 site-llmo-cloudfront-log-delivery:
   post:
     tags:
