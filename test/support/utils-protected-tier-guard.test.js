@@ -183,34 +183,48 @@ describe('onboardSingleSite — protected-tier preservation (SITES-49886)', func
     { profileName: 'demo' },
   );
 
-  ['PLG', 'PRE_ONBOARD'].forEach((protectedTier) => {
-    it(`preserves an existing ${protectedTier} tier: no entitlement/enrollment write, no audit-config change, still runs audits + opportunities once`, async () => {
-      const { onboardSingleSite, sfnSendStub, tierCreateForSiteStub } = await loadOnboard();
-      const site = makeHappyPathSite();
-      const existingEntitlement = { getTier: () => protectedTier };
-      const { context, configurationFindLatest } = makeContext(site, existingEntitlement);
+  it('preserves an existing PLG tier: no entitlement/enrollment write, no audit-config change, still runs audits + opportunities once', async () => {
+    const { onboardSingleSite, sfnSendStub, tierCreateForSiteStub } = await loadOnboard();
+    const site = makeHappyPathSite();
+    const existingEntitlement = { getTier: () => 'PLG' };
+    const { context, configurationFindLatest } = makeContext(site, existingEntitlement);
 
-      const result = await run(onboardSingleSite, context);
+    const result = await run(onboardSingleSite, context);
 
-      // Tier / entitlement / enrollment untouched — TierClient never engaged.
-      expect(tierCreateForSiteStub).to.not.have.been.called;
-      // Audit scheduling config left as-is — findLatest lives inside the skipped branch.
-      expect(configurationFindLatest).to.not.have.been.called;
-      // Audits still triggered once ...
-      expect(context.sqs.sendMessage).to.have.been.calledWith(
-        context.env.AUDIT_JOBS_QUEUE_URL,
-        sinon.match({ type: 'cwv', siteId: 'site-happy' }),
-      );
-      // ... and the opportunity workflow still starts once.
-      expect(sfnSendStub).to.have.been.calledOnce;
-      // The report reflects the true, unchanged tier and the run succeeds.
-      expect(result.tier).to.equal(protectedTier);
-      expect(result.status).to.equal('Success');
-      // Operator is told the tier was preserved.
-      expect(sayStub).to.have.been.calledWith(
-        sinon.match(new RegExp(`on the \\*${protectedTier}\\* tier`)),
-      );
-    });
+    // Tier / entitlement / enrollment untouched — TierClient never engaged.
+    expect(tierCreateForSiteStub).to.not.have.been.called;
+    // Audit scheduling config left as-is — findLatest lives inside the skipped branch.
+    expect(configurationFindLatest).to.not.have.been.called;
+    // Audits still triggered once ...
+    expect(context.sqs.sendMessage).to.have.been.calledWith(
+      context.env.AUDIT_JOBS_QUEUE_URL,
+      sinon.match({ type: 'cwv', siteId: 'site-happy' }),
+    );
+    // ... and the opportunity workflow still starts once.
+    expect(sfnSendStub).to.have.been.calledOnce;
+    // The report reflects the true, unchanged tier and the run succeeds.
+    expect(result.tier).to.equal('PLG');
+    expect(result.status).to.equal('Success');
+    // Operator is told the tier was preserved.
+    expect(sayStub).to.have.been.calledWith(
+      sinon.match(/on the \*PLG\* tier/),
+    );
+  });
+
+  it('does NOT preserve an existing PRE_ONBOARD tier: creates/updates the entitlement normally (internal staging tier, promoted during onboarding)', async () => {
+    const { onboardSingleSite, tierCreateForSiteStub } = await loadOnboard();
+    const site = makeHappyPathSite();
+    const { context, configurationFindLatest } = makeContext(site, { getTier: () => 'PRE_ONBOARD' });
+
+    const result = await run(onboardSingleSite, context);
+
+    // PRE_ONBOARD is no longer protected — the normal entitlement write + audit-config path run.
+    expect(tierCreateForSiteStub).to.have.been.calledOnce;
+    const createEntitlement = await tierCreateForSiteStub.firstCall.returnValue;
+    // Default requested tier is FREE_TRIAL — the staging tier is promoted.
+    expect(createEntitlement.createEntitlement).to.have.been.calledWith('FREE_TRIAL');
+    expect(configurationFindLatest).to.have.been.calledOnce;
+    expect(result.status).to.equal('Success');
   });
 
   it('creates an entitlement normally when the org has NO existing ASO entitlement (ims2 → s3 happy path)', async () => {
@@ -258,29 +272,41 @@ describe('onboardSingleSite — protected-tier preservation (SITES-49886)', func
    * only assert the wiring: it fires on that exact transition and stays silent otherwise.
    */
   describe('force-downgrade alert (SITES-50179)', () => {
-    ['PLG', 'PRE_ONBOARD'].forEach((protectedTier) => {
-      it(`alerts the team when forceTierUpdate downgrades ${protectedTier} → FREE_TRIAL`, async () => {
-        const { onboardSingleSite, notifyForcedTierDowngradeStub } = await loadOnboard();
-        const site = makeHappyPathSite();
-        const { context } = makeContext(site, { getTier: () => protectedTier });
+    it('alerts the team when forceTierUpdate downgrades PLG → FREE_TRIAL', async () => {
+      const { onboardSingleSite, notifyForcedTierDowngradeStub } = await loadOnboard();
+      const site = makeHappyPathSite();
+      const { context } = makeContext(site, { getTier: () => 'PLG' });
 
-        await run(onboardSingleSite, context, { forceTierUpdate: true });
+      await run(onboardSingleSite, context, { forceTierUpdate: true });
 
-        expect(notifyForcedTierDowngradeStub).to.have.been.calledOnce;
-        const [payload, env] = notifyForcedTierDowngradeStub.firstCall.args;
-        expect(payload).to.include({
-          fromTier: protectedTier,
-          toTier: 'FREE_TRIAL',
-          baseURL: SITE_URL,
-          siteId: 'site-happy',
-          entitlementId: 'ent-test',
-        });
-        // Source thread is threaded through so the team can see who forced it.
-        expect(payload.sourceChannelId).to.equal('C1');
-        expect(payload.sourceThreadTs).to.equal('1.0');
-        // env is forwarded so the helper can resolve the PLG channel + bot token.
-        expect(env).to.equal(context.env);
+      expect(notifyForcedTierDowngradeStub).to.have.been.calledOnce;
+      const [payload, env] = notifyForcedTierDowngradeStub.firstCall.args;
+      expect(payload).to.include({
+        fromTier: 'PLG',
+        toTier: 'FREE_TRIAL',
+        baseURL: SITE_URL,
+        siteId: 'site-happy',
+        entitlementId: 'ent-test',
       });
+      // Source thread is threaded through so the team can see who forced it.
+      expect(payload.sourceChannelId).to.equal('C1');
+      expect(payload.sourceThreadTs).to.equal('1.0');
+      // env is forwarded so the helper can resolve the PLG channel + bot token.
+      expect(env).to.equal(context.env);
+    });
+
+    it('does NOT alert when onboarding a PRE_ONBOARD org to FREE_TRIAL (no longer a protected tier)', async () => {
+      const {
+        onboardSingleSite, notifyForcedTierDowngradeStub, tierCreateForSiteStub,
+      } = await loadOnboard();
+      const site = makeHappyPathSite();
+      const { context } = makeContext(site, { getTier: () => 'PRE_ONBOARD' });
+
+      // No forceTierUpdate needed — PRE_ONBOARD is promoted through the normal path.
+      await run(onboardSingleSite, context);
+
+      expect(tierCreateForSiteStub).to.have.been.calledOnce;
+      expect(notifyForcedTierDowngradeStub).to.not.have.been.called;
     });
 
     it('does NOT alert when the protected tier is preserved (no forceTierUpdate)', async () => {
