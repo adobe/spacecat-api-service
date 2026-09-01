@@ -947,7 +947,9 @@ async function deleteResolvedTag(transport, semrushWorkspaceId, projectId, tagId
  * @param {string} tagId - upstream tag id to delete.
  * @param {object} query - query params ({ geoTargetId, languageCode }).
  * @param {object} log - logger.
- * @returns {Promise<{status: number, deletedIds: string[]}>}
+ * @returns {Promise<{status: number, deletedIds: string[]}>} deletedIds is unread by
+ *   the controller (which always returns 204 with no body) — kept for the log line above
+ *   and for test introspection, not a consumed contract.
  */
 export async function handleDeleteTag(
   transport,
@@ -993,7 +995,9 @@ export async function handleDeleteTag(
  * @param {string} tagId - upstream tag id to delete.
  * @param {object} query - query params ({ geoTargetId, languageCode }).
  * @param {object} log - logger.
- * @returns {Promise<{status: number, deletedIds: string[]}>}
+ * @returns {Promise<{status: number, deletedIds: string[]}>} deletedIds is unread by
+ *   the controller (which always returns 204 with no body) — kept for the log line above
+ *   and for test introspection, not a consumed contract.
  */
 export async function handleDeleteTagSubworkspace(
   transport,
