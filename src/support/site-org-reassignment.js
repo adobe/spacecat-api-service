@@ -20,9 +20,13 @@
  * fact. Rather than drift silently, fail with an EXPLICIT reconciliation failure and make
  * the operator offboard/transfer the enrollments first.
  *
- * This mirrors the inline guard already enforced on the only other reassignment path,
- * llmo-onboarding.js::createOrFindSite (which likewise refuses to move an enrolled site);
- * it is factored out here so the admin Slack reassignment path enforces the same invariant.
+ * This mirrors the inline guard already enforced on llmo-onboarding.js::createOrFindSite
+ * (which likewise refuses to move an enrolled site); it is factored out here so the admin
+ * Slack reassignment paths enforce the same invariant. Applied at every reassignment site
+ * that does not already revoke enrollments first: set-ims-org-modal.js,
+ * onboard-llmo-modal.js::checkOrg, and approve-org.js. (move-plg-site.js and
+ * bypass-handlers.js deliberately revoke/gate enrollments themselves before moving, and
+ * onboarding-flow.js only reassigns from internal/demo orgs, so they don't route here.)
  *
  * Fails CLOSED: if the enrollments cannot be read back (a non-array), the move is aborted
  * rather than assumed safe — a swallowed read must not be treated as "no enrollments".

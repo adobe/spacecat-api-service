@@ -32,6 +32,9 @@ describe('approveOrg', () => {
 
     site = {
       getId: () => 'site-id-1234',
+      getBaseURL: () => 'https://spacecat.com',
+      getOrganizationId: () => 'existing-org',
+      getSiteEnrollments: sinon.stub().resolves([]),
       setOrganizationId: sinon.stub(),
       save: sinon.stub().resolves(),
     };
@@ -101,6 +104,26 @@ describe('approveOrg', () => {
       text: 'Approved by @test-user :checked:',
       type: 'mrkdwn',
     });
+  });
+
+  it('blocks the org approval when the site still has enrollments to orphan (LLMO-7284 AC12)', async () => {
+    context.dataAccess.Organization.findByImsOrgId.resolves(org);
+    context.dataAccess.Site.findByBaseURL.resolves(site);
+    site.getSiteEnrollments = sinon.stub().resolves([{ getId: () => 'enr-1' }]);
+
+    const approveOrgAction = approveOrg(context);
+
+    let thrown;
+    await approveOrgAction({ ack: ackMock, body, respond: respondMock })
+      .catch((e) => {
+        thrown = e;
+      });
+
+    // The reassignment is refused explicitly and the site's org is never changed.
+    expect(thrown).to.be.an('error');
+    expect(thrown.code).to.equal('site_org_reassignment_blocked');
+    expect(site.setOrganizationId).to.not.have.been.called;
+    expect(site.save).to.not.have.been.called;
   });
 
   it('should do nothing if IMS org ID and base URL are not found in the message text', async () => {

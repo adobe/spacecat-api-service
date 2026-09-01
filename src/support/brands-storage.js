@@ -1276,15 +1276,20 @@ export async function upsertBrand({
     throw err;
   }
 
-  // LLMO-7284 (AC13): a create/upsert that RESULTS in an active brand must not
-  // introduce a second active brand with the same normalized name in this org.
-  // Exclude the same-name row we may be updating (`existing`) so re-upserting a
-  // brand verbatim stays idempotent — its own row is not its own duplicate. Skipped
-  // when the row lands `pending` (not yet an active identity; the check is re-run at
-  // activation time in updateBrand). The exact-name `existing` lookup above cannot
-  // catch a DIFFERENT exact name that normalizes to the same value, which is the gap
-  // the DB's `uq_brand_name_per_org` also misses.
-  if (status === 'active') {
+  // LLMO-7284 (AC13): a create/upsert that produces a NET-NEW active identity must
+  // not introduce a second active brand with the same normalized name in this org.
+  // Only fire for a fresh create or a pending->active upsert (`existing?.status !==
+  // 'active'`): `name` is the upsert conflict key and cannot change here, so
+  // re-saving an ALREADY-active row by its own exact name introduces no new
+  // normalized identity — checking it would wrongly 409 a verbatim re-onboard in an
+  // org that already holds a pre-existing normalized-duplicate twin (the exact dirty
+  // data the reconcile report surfaces), wedging SQS-retried re-syncs. Excludes the
+  // same-name `existing` row for the same reason. The exact-name lookup above and the
+  // DB's `uq_brand_name_per_org` both miss a DIFFERENT exact name that normalizes to
+  // the same value; this closes that gap. Best-effort against a concurrent create of
+  // a normalized twin (read-then-write, no DB backstop for the normalized case — the
+  // partial unique index is deferred); the exact-name race is still caught by the DB.
+  if (status === 'active' && existing?.status !== 'active') {
     await assertNoDuplicateActiveBrandName({
       postgrestClient,
       organizationId,
@@ -1478,6 +1483,7 @@ export async function updateBrand({
   const needsExistingFetch = hasText(updates.baseSiteId)
     || wantsClearBaseSite
     || updates.status !== undefined
+    || updates.name !== undefined // LLMO-7284: a rename needs the current name+status
     || updates.expectedUpdatedAt !== undefined;
   let existing = null;
   if (needsExistingFetch) {
@@ -1589,13 +1595,21 @@ export async function updateBrand({
     }
   }
 
-  // LLMO-7284 (AC13): a brand becoming active (pending->active) must not collide with
-  // another active brand's normalized name in this org. Only a genuine promotion pays
-  // the check — a routine save that echoes status:'active' on an already-active brand
-  // is a no-op and is skipped. `existing` is guaranteed loaded here (needsExistingFetch
-  // covers status changes). Excludes this brand's own row. The name is the one being
-  // written if this PATCH also renames, else the persisted name.
-  if (patch.status === 'active' && existing?.status !== 'active') {
+  // LLMO-7284 (AC13): the write must not leave a second active brand with the same
+  // normalized name in this org. Two distinct new-active-identity events are checked
+  // (a routine save that echoes status:'active' with no rename is a no-op and skipped):
+  //   1. a genuine promotion (pending->active), and
+  //   2. a RENAME of an already-active brand to a different normalized name.
+  // `existing` is guaranteed loaded here (needsExistingFetch covers both status and
+  // name changes). Excludes this brand's own row. Best-effort against a concurrent
+  // twin (read-then-write, no DB backstop for the normalized case).
+  const isPromotion = patch.status === 'active' && existing?.status !== 'active';
+  const willBeActive = patch.status === 'active'
+    || (patch.status === undefined && existing?.status === 'active');
+  const isActiveRename = willBeActive
+    && hasText(patch.name)
+    && normalizeBrandName(patch.name) !== normalizeBrandName(existing?.name);
+  if (isPromotion || isActiveRename) {
     const resultingName = hasText(patch.name) ? patch.name : existing?.name;
     await assertNoDuplicateActiveBrandName({
       postgrestClient,

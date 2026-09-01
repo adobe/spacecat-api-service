@@ -11,6 +11,7 @@
  */
 
 import { Blocks, Message } from 'slack-block-builder';
+import { assertSiteOrgReassignmentSafe } from '../../site-org-reassignment.js';
 
 function extractOrg(text) {
   const regex = /IMS org ID `([^`]+)`.*<([^|>]+)/;
@@ -46,6 +47,11 @@ export default function approveOrg(lambdaContext) {
         const { imsOrgId, baseURL } = extractedOrg;
         const org = await Organization.findByImsOrgId(imsOrgId);
         const site = await Site.findByBaseURL(baseURL);
+
+        // LLMO-7284 (AC12): don't silently orphan the site's enrollments on
+        // reassignment — fail explicitly if the move would leave foreign enrollments
+        // behind. A same-org approval is a no-op inside the guard.
+        await assertSiteOrgReassignmentSafe({ site, targetOrgId: org.getId(), log });
 
         site.setOrganizationId(org.getId());
         await site.save();

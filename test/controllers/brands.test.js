@@ -7959,8 +7959,11 @@ describe('Brands Controller', () => {
         data: { id: BRAND_UUID },
         error: null,
       });
-      // Second call: updateBrand returns null (brand update returns no data)
+      // Second call: LLMO-7284 pre-read of the current row for the rename (null → no
+      // dup scan; this brand is being treated as absent).
       maybeSingleStub.onSecondCall().resolves({ data: null, error: null });
+      // Third call: updateBrand's UPDATE returns null (brand update returns no data)
+      maybeSingleStub.onThirdCall().resolves({ data: null, error: null });
 
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({
