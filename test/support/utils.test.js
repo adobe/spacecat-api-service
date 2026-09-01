@@ -43,6 +43,7 @@ import {
   sendGlobalImportRunMessage,
   triggerGlobalImportRun,
   triggerGeoExperimentImpactMeasurement,
+  checkGeoExperimentImpactMeasurement,
 } from '../../src/support/utils.js';
 
 use(chaiAsPromised);
@@ -2311,6 +2312,34 @@ describe('utils', () => {
 
       expect(sqs.sendMessage).to.have.been.calledOnceWithExactly('queue-url', {
         type: 'TRIGGER_IMPACT_MEASUREMENT',
+        geoExperimentId: 'geo-exp-1',
+        triggeredBy: 'unknown',
+      });
+    });
+  });
+
+  describe('checkGeoExperimentImpactMeasurement', () => {
+    it('sends a CHECK_IMPACT_MEASUREMENT message with the given triggeredBy', async () => {
+      const sqs = { sendMessage: sinon.stub().resolves() };
+      const lambdaContext = { sqs, env: { LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'queue-url' } };
+
+      await checkGeoExperimentImpactMeasurement('geo-exp-1', 'user@example.com', lambdaContext);
+
+      expect(sqs.sendMessage).to.have.been.calledOnceWithExactly('queue-url', {
+        type: 'CHECK_IMPACT_MEASUREMENT',
+        geoExperimentId: 'geo-exp-1',
+        triggeredBy: 'user@example.com',
+      });
+    });
+
+    it('falls back triggeredBy to "unknown" when not provided', async () => {
+      const sqs = { sendMessage: sinon.stub().resolves() };
+      const lambdaContext = { sqs, env: { LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'queue-url' } };
+
+      await checkGeoExperimentImpactMeasurement('geo-exp-1', undefined, lambdaContext);
+
+      expect(sqs.sendMessage).to.have.been.calledOnceWithExactly('queue-url', {
+        type: 'CHECK_IMPACT_MEASUREMENT',
         geoExperimentId: 'geo-exp-1',
         triggeredBy: 'unknown',
       });
