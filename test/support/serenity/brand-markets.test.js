@@ -18,14 +18,10 @@ import { buildBrandMarketsResponse } from '../../../src/support/serenity/brand-m
 
 use(sinonChai);
 
-function makeRow({
-  geoTargetId, languageCode, siteId = 'site-1', status = 'live',
-}) {
+function makeRow({ geoTargetId, languageCode }) {
   return {
     getGeoTargetId: () => geoTargetId,
     getLanguageCode: () => languageCode,
-    getSiteId: () => siteId,
-    getStatus: () => status,
   };
 }
 
@@ -46,30 +42,18 @@ describe('brand-markets.js — buildBrandMarketsResponse', () => {
 
   it('maps country geoTargetIds to ISO region codes, preserving order and passing fields through', () => {
     const rows = [
-      makeRow({
-        geoTargetId: 2356, languageCode: 'en', siteId: 'site-in', status: 'live',
-      }),
-      makeRow({
-        geoTargetId: 2840, languageCode: 'en', siteId: 'site-us', status: 'live',
-      }),
-      makeRow({
-        geoTargetId: 2826, languageCode: 'en', siteId: 'site-gb', status: 'live',
-      }),
+      makeRow({ geoTargetId: 2356, languageCode: 'en' }),
+      makeRow({ geoTargetId: 2840, languageCode: 'en' }),
+      makeRow({ geoTargetId: 2826, languageCode: 'en' }),
     ];
 
     const result = buildBrandMarketsResponse(rows, log);
 
     expect(result).to.deep.equal({
       items: [
-        {
-          region: 'IN', languageCode: 'en', geoTargetId: 2356, siteId: 'site-in', status: 'live',
-        },
-        {
-          region: 'US', languageCode: 'en', geoTargetId: 2840, siteId: 'site-us', status: 'live',
-        },
-        {
-          region: 'GB', languageCode: 'en', geoTargetId: 2826, siteId: 'site-gb', status: 'live',
-        },
+        { region: 'IN', languageCode: 'en', geoTargetId: 2356 },
+        { region: 'US', languageCode: 'en', geoTargetId: 2840 },
+        { region: 'GB', languageCode: 'en', geoTargetId: 2826 },
       ],
     });
     expect(log.warn).not.to.have.been.called;
@@ -78,16 +62,14 @@ describe('brand-markets.js — buildBrandMarketsResponse', () => {
   it('skips a non-country geoTargetId row and warns once, keeping the country row', () => {
     const rows = [
       makeRow({ geoTargetId: 1023191, languageCode: 'en' }), // sub-national — not a whole country
-      makeRow({
-        geoTargetId: 2840, languageCode: 'en', siteId: 'site-us', status: 'live',
-      }),
+      makeRow({ geoTargetId: 2840, languageCode: 'en' }),
     ];
 
     const result = buildBrandMarketsResponse(rows, log);
 
     expect(result.items).to.have.lengthOf(1);
     expect(result.items[0]).to.deep.equal({
-      region: 'US', languageCode: 'en', geoTargetId: 2840, siteId: 'site-us', status: 'live',
+      region: 'US', languageCode: 'en', geoTargetId: 2840,
     });
     expect(log.warn).to.have.been.calledOnce;
   });
@@ -100,18 +82,5 @@ describe('brand-markets.js — buildBrandMarketsResponse', () => {
   it('returns an empty items array for undefined rows', () => {
     expect(buildBrandMarketsResponse(undefined, log)).to.deep.equal({ items: [] });
     expect(log.warn).not.to.have.been.called;
-  });
-
-  it('passes through a null siteId', () => {
-    const rows = [
-      makeRow({
-        geoTargetId: 2840, languageCode: 'en', siteId: null, status: 'live',
-      }),
-    ];
-
-    const result = buildBrandMarketsResponse(rows, log);
-
-    expect(result.items).to.have.lengthOf(1);
-    expect(result.items[0].siteId).to.equal(null);
   });
 });

@@ -29,17 +29,22 @@ import { marketForGeoTargetId } from './locations.js';
  * at warn level once. Sub-national geo support is a follow-up, not a
  * silent fallback here.
  *
+ * The `BrandSemrushProject` store has no `status` or `siteId` column (only
+ * `brandId`, `semrushProjectId`, `geoTargetId`, `languageCode`, plus the
+ * `deletedAt` soft-delete tombstone) — "live" status exists only in the
+ * IMS-gated Semrush listing, which this S2S endpoint cannot reach — so
+ * neither field is part of the response shape. Soft-delete filtering
+ * (`deletedAt`) is the caller's (Task A2) DB-read concern, not this
+ * builder's.
+ *
  * @param {Array<object>} [rows] - `BrandSemrushProject` rows (or row-likes)
- *   exposing `getGeoTargetId()`, `getLanguageCode()`, `getSiteId?()`
- *   (nullable), and `getStatus?()` (nullable).
+ *   exposing `getGeoTargetId()` and `getLanguageCode()`.
  * @param {{ warn?: Function }} [log] - logger; `warn` is called once per
  *   skipped (non-country) row.
  * @returns {{ items: Array<{
  *   region: string,
  *   languageCode: string,
  *   geoTargetId: number,
- *   siteId: (string|null),
- *   status: (string|null),
  * }> }}
  */
 export function buildBrandMarketsResponse(rows, log) {
@@ -63,8 +68,6 @@ export function buildBrandMarketsResponse(rows, log) {
       region,
       languageCode: row.getLanguageCode(),
       geoTargetId,
-      siteId: row.getSiteId?.() ?? null,
-      status: row.getStatus?.() ?? null,
     });
   }
   return { items };
