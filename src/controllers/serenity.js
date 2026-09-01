@@ -85,6 +85,8 @@ import { ErrorWithStatusCode, resolveSemrushImsToken as resolveImsTokenViaPromis
 import {
   ensureMarketSite,
   resolveSiteIdentity,
+  resolveMarketIdentity,
+  logMarketCreated,
   unlinkMarketSiteIfOrphaned,
 } from '../support/serenity/site-linkage.js';
 import { X_PROMISE_TOKEN_HEADER, PROMISE_TOKEN_REQUIRED_ERROR_CODE } from '../utils/constants.js';
@@ -815,6 +817,13 @@ function SerenityController(context, log, env) {
     }
   };
 
+  /**
+   * @typedef {{
+   *   geoTargetId: number, languageCode: string|null, workspaceId: string,
+   *   promptCount?: number,
+   * }} MarketCreateSuccessBody
+   */
+
   const createMarket = async (ctx) => {
     let auth;
     try {
@@ -863,26 +872,31 @@ function SerenityController(context, log, env) {
       if (auth.mode === 'subworkspace') {
         const brand = await loadBrand(ctx, auth.brandUuid);
         // The subworkspace create handler has no Site access (narrowed dataAccess),
-        // so derive the Semrush project domain from the supplied siteId HERE when
-        // brandDomain is absent. A supplied-but-unresolvable siteId is a hard 400.
-        // `primaryUrl` is always DERIVED here, never taken from the request. It is
-        // not part of the documented create-market contract, and passing a caller's
-        // value straight through would put an unvalidated string on the Semrush
-        // project. Set unconditionally so a client that sends one is ignored rather
-        // than trusted.
+        // so derive the Semrush project domain from the supplied siteId HERE,
+        // ALWAYS when one resolves — a resolving siteId is authoritative over any
+        // brandDomain also sent, matching the flat handler's own siteId-first
+        // derivation in markets.js (see resolveMarketIdentity, shared by both).
+        // A supplied-but-unresolvable siteId is a hard 400 (see the pre-check
+        // above — suppliedSiteIdentity is already guaranteed non-null here
+        // whenever a siteId was supplied). `primaryUrl` is always DERIVED here,
+        // never taken from the request. It is not part of the documented
+        // create-market contract, and passing a caller's value straight through
+        // would put an unvalidated string on the Semrush project.
         let effectiveBody = {
           ...requestBody,
           primaryUrl: siteIdentityFromUrlString(requestBody.brandDomain),
         };
-        if (suppliedSiteIdentity && !hasText(requestBody.brandDomain)) {
+        if (suppliedSiteId) {
+          const identity = resolveMarketIdentity(suppliedSiteIdentity, true, undefined, undefined);
           // Both values from the read above, for the same reason the domain is
           // derived here at all: the handler has no Site access. Only `primaryUrl`
-          // can carry a subpath — `brandDomain` is a bare FQDN because a path there
-          // is rejected upstream.
+          // can carry a subpath — `brandDomain` is a bare FQDN because a path
+          // there is rejected upstream. Applied whenever a siteId resolved, even
+          // alongside a supplied brandDomain — the resolving siteId wins.
           effectiveBody = {
             ...effectiveBody,
-            brandDomain: suppliedSiteIdentity.domain,
-            primaryUrl: suppliedSiteIdentity.primaryUrl ?? undefined,
+            brandDomain: identity.domain,
+            primaryUrl: identity.primaryUrl ?? undefined,
           };
         }
         // Brand aliases are brand-level but region-scoped: the create handler
@@ -998,6 +1012,23 @@ function SerenityController(context, log, env) {
             : null;
           if (projectId) {
             await linkSiteToRow(ctx.dataAccess, projectId, linkedSiteId, log);
+            // `result.body` is a success|error union a `status === 201` test
+            // cannot narrow (see the `projectId` comment above) — asserted here
+            // since `projectId` being truthy already proves this is the success
+            // shape.
+            const successBody = /** @type {MarketCreateSuccessBody} */ (result.body);
+            logMarketCreated(log, {
+              brandId: auth.brandUuid,
+              geoTargetId: successBody.geoTargetId,
+              languageCode: successBody.languageCode,
+              siteId: linkedSiteId,
+              brandDomain: effectiveBody.brandDomain,
+              primaryUrl: effectiveBody.primaryUrl,
+              semrushWorkspaceId: successBody.workspaceId,
+              semrushProjectId: projectId,
+              generatePrompts: genMarketTopics,
+              promptCount: successBody.promptCount,
+            });
           } else {
             // Unreachable while the handler keeps its 201 contract (a created
             // market always names its project). Worth a line if that ever

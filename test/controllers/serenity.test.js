@@ -1552,6 +1552,51 @@ describe('SerenityController', () => {
       expect(opts).to.include({ siteId: 'site-onboarded', domain: 'acme.com/markets' });
     });
 
+    it('createMarket resolves the supplied siteId\'s domain over a conflicting brandDomain (siteId authoritative)', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({
+        status: 201,
+        body: {
+          brandId: BRAND, geoTargetId: 2840, languageCode: 'en', projectId: 'P-NEW', workspaceId: 'subworkspace-ws-1',
+        },
+      });
+      resolveSiteIdentityStub.resolves({ domain: 'acme.com', primaryUrl: 'acme.com/markets' });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        data: {
+          market: 'us',
+          languageCode: 'en',
+          siteId: 'site-onboarded',
+          brandDomain: 'conflicting-literal.com',
+          brandNames: ['X'],
+        },
+      });
+      const response = await controller.createMarket(ctx);
+      expect(response.status).to.equal(201);
+      // The resolved Site identity wins over the literal brandDomain the caller
+      // also sent — a supplied siteId is authoritative whenever it resolves.
+      const handlerBody = handlers.handleCreateMarketSubworkspace.firstCall.args[3];
+      expect(handlerBody.brandDomain).to.equal('acme.com');
+      expect(handlerBody.primaryUrl).to.equal('acme.com/markets');
+    });
+
+    it('createMarket logs market-created telemetry on a live subworkspace 201', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({
+        status: 201,
+        body: {
+          brandId: BRAND, geoTargetId: 2840, languageCode: 'en', projectId: 'P-NEW', workspaceId: 'subworkspace-ws-1', promptCount: 5,
+        },
+      });
+      const log = fakeLog();
+      const controller = SerenityController({ env: {} }, log, {});
+      const response = await controller.createMarket(fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'], generatePrompts: true,
+        },
+      }));
+      expect(response.status).to.equal(201);
+      expect(log.info).to.have.been.calledWithMatch(/serenity create-market: market created/);
+    });
+
     it('createMarket 400s when a supplied siteId does not resolve to a domain', async () => {
       resolveSiteIdentityStub.resolves(null);
       const controller = SerenityController({ env: {} }, fakeLog(), {});
