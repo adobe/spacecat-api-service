@@ -288,6 +288,7 @@ const routeFacsCapabilities = {
       // Site-level LLMO config
       'POST /sites/:siteId/llmo/config': 'llmo/can_configure',
       'PATCH /sites/:siteId/llmo/config': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/brand-claims/request': 'llmo/can_configure',
       // Site-level scraper config — a site write surfaced through the
       // generic /config namespace rather than under /llmo/, but
       // configuration nonetheless.

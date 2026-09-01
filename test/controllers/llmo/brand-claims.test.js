@@ -342,3 +342,81 @@ describe('handleBrandClaims', () => {
     expect(expiresAt).to.be.at.most(after + oneHourMs);
   });
 });
+
+describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
+  let handleRequestBrandClaims;
+  let sandbox;
+  let sqsSend;
+  let postSlackMessage;
+  let site;
+  let context;
+
+  const httpUtils = {
+    accepted: (body) => ({ status: 202, json: async () => body }),
+    badRequest: (message) => ({ status: 400, json: async () => ({ message }) }),
+    notFound: (message) => ({ status: 404, json: async () => ({ message }) }),
+    internalServerError: (message) => ({ status: 500, json: async () => ({ message }) }),
+  };
+
+  beforeEach(async () => {
+    sandbox = sinon.createSandbox();
+    sqsSend = sandbox.stub().resolves();
+    postSlackMessage = sandbox.stub().resolves();
+
+    const mod = await esmock('../../../src/controllers/llmo/brand-claims.js', {
+      '@adobe/spacecat-shared-http-utils': httpUtils,
+      '../../../src/utils/slack/base.js': { postSlackMessage },
+    });
+    handleRequestBrandClaims = mod.handleRequestBrandClaims;
+
+    site = {
+      getId: () => 'site-1',
+      getBaseURL: () => 'https://acme.example',
+    };
+    context = {
+      log: { info: sinon.stub(), warn: sinon.stub(), error: sinon.stub() },
+      sqs: { sendMessage: sqsSend },
+      env: {
+        AUDIT_JOBS_QUEUE_URL: 'audit-q',
+        SLACK_LLMO_ALERTS_CHANNEL_ID: 'C123',
+        SLACK_BOT_TOKEN: 'xoxb-1',
+      },
+    };
+  });
+
+  afterEach(() => sandbox.restore());
+
+  it('triggers the brand-claims audit with onDemand and notifies Slack (202)', async () => {
+    const result = await handleRequestBrandClaims(context, site);
+    expect(result.status).to.equal(202);
+    expect(sqsSend).to.have.been.calledOnce;
+    const [queueUrl, msg] = sqsSend.getCall(0).args;
+    expect(queueUrl).to.equal('audit-q');
+    expect(msg.type).to.equal('brand-claims');
+    expect(msg.siteId).to.equal('site-1');
+    expect(msg.onDemand).to.equal(true);
+    expect(postSlackMessage).to.have.been.calledOnce;
+  });
+
+  it('returns 500 when AUDIT_JOBS_QUEUE_URL is not configured', async () => {
+    context.env.AUDIT_JOBS_QUEUE_URL = undefined;
+    const result = await handleRequestBrandClaims(context, site);
+    expect(result.status).to.equal(500);
+    expect(sqsSend).to.not.have.been.called;
+  });
+
+  it('still succeeds when the Slack notification fails (best-effort)', async () => {
+    postSlackMessage.rejects(new Error('slack down'));
+    const result = await handleRequestBrandClaims(context, site);
+    expect(result.status).to.equal(202);
+    expect(sqsSend).to.have.been.calledOnce;
+  });
+
+  it('skips Slack when not configured but still triggers the audit', async () => {
+    context.env.SLACK_BOT_TOKEN = undefined;
+    const result = await handleRequestBrandClaims(context, site);
+    expect(result.status).to.equal(202);
+    expect(sqsSend).to.have.been.calledOnce;
+    expect(postSlackMessage).to.not.have.been.called;
+  });
+});

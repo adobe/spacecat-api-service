@@ -11,11 +11,12 @@
  */
 
 import {
-  badRequest, notFound,
+  badRequest, notFound, accepted, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import { HeadObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { cachedOk } from '../../support/cached-response.js';
 import { dateToIsoWeek } from '../../support/elements/week-utils.js';
+import { postSlackMessage } from '../../utils/slack/base.js';
 
 const CLAIMS_PREFIX = 'brand_claims/llmo';
 const WEEK_RE = /^\d{4}-W\d{2}$/;
@@ -157,4 +158,56 @@ export async function handleBrandClaims(context) {
     log.error(`S3 error retrieving brand claims for site ${siteId}: ${s3Error.message}`);
     return badRequest(`Error retrieving brand claims: ${s3Error.message}`);
   }
+}
+
+/**
+ * On-demand Brand Claims trigger for trial customers (LLMO-7263). Triggers the
+ * audit-worker `brand-claims` audit for the site with `onDemand: true`, which
+ * finds the latest Brand Presence sheet and publishes a one-shot
+ * `BRAND_PRESENCE_SHEET_WRITTEN` event (on_demand=true). The audit-worker owns
+ * the sheet lookup + event shape, so this endpoint just fires the trigger; the
+ * run happens once WITHOUT setting the persistent `brand_claims_enabled` flag
+ * (which the weekly emit would otherwise re-run every week). Site + LLMO access
+ * is validated by the caller.
+ *
+ * @param {object} context - Request context (log, sqs, env).
+ * @param {object} site - The resolved, access-checked Site model.
+ * @returns {Promise<Response>} 202 accepted, or a 5xx on a misconfiguration.
+ */
+export async function handleRequestBrandClaims(context, site) {
+  const { log, sqs, env } = context;
+
+  const queueUrl = env?.AUDIT_JOBS_QUEUE_URL;
+  if (!queueUrl) {
+    log.error('Brand Claims on-demand: AUDIT_JOBS_QUEUE_URL is not configured');
+    return internalServerError('Brand Claims on-demand trigger is not configured for this environment');
+  }
+
+  await sqs.sendMessage(queueUrl, {
+    type: 'brand-claims',
+    siteId: site.getId(),
+    onDemand: true,
+    auditContext: { trigger: 'on-demand-brand-claims' },
+  });
+  log.info(`Brand Claims on-demand: triggered brand-claims audit for site ${site.getId()}`);
+
+  const slackChannel = env?.SLACK_LLMO_ALERTS_CHANNEL_ID;
+  const slackToken = env?.SLACK_BOT_TOKEN;
+  if (slackChannel && slackToken) {
+    try {
+      await postSlackMessage(
+        slackChannel,
+        `:rocket: On-demand Brand Claims requested for *${site.getBaseURL()}* (${site.getId()}).`,
+        slackToken,
+      );
+    } catch (slackError) {
+      // Slack notification is best-effort — the trigger is already queued.
+      log.warn(`Brand Claims on-demand: Slack notification failed: ${slackError.message}`);
+    }
+  }
+
+  return accepted({
+    siteId: site.getId(),
+    message: 'Brand Claims run requested; results appear once the pipeline completes.',
+  });
 }
