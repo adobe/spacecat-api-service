@@ -98,7 +98,7 @@ const DEFAULT_BRAND_REGION = 'US';
 
 /**
  * Maps the legacy `GL` "worldwide" sentinel (Greenland's real ISO 3166-1
- * alpha-2 code, historically misused as a global placeholder — SITES-3168)
+ * alpha-2 code, historically misused as a global placeholder — #3168)
  * onto DEFAULT_BRAND_REGION. Case-insensitive, whitespace-trim-aware; any
  * other value passes through unchanged.
  * @param {*} region
@@ -114,7 +114,7 @@ function normalizeGlRegionSentinel(region) {
 /**
  * Coerces a raw region array to strings, normalizes the GL sentinel, and
  * drops blanks. Shared by every write path that persists a raw,
- * client-supplied regions array directly (SITES-3168).
+ * client-supplied regions array directly (#3168).
  * @param {Array<*>} regions
  * @returns {string[]}
  */
@@ -145,7 +145,7 @@ export function convertV1ToV2(llmoConfig, brandName, imsOrgId) {
 
   // Collect all unique regions from V1 config. Normalizes the legacy GL
   // sentinel to DEFAULT_BRAND_REGION before lowercasing so an explicit
-  // (not just missing) GL/gl value can never reach allRegions (SITES-3168).
+  // (not just missing) GL/gl value can never reach allRegions (#3168).
   const allRegions = new Set();
   const allUrls = new Set();
   const collectRegion = (r) => allRegions.add(normalizeGlRegionSentinel(r).toLowerCase());

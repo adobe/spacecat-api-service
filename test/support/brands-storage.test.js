@@ -2319,7 +2319,7 @@ describe('brands-storage', () => {
       expect(result.region).to.deep.equal(['42']);
     });
 
-    it('normalizes GL to US on create, case-insensitively and whitespace-trimmed (SITES-3168)', async () => {
+    it('normalizes GL to US on create, case-insensitively and whitespace-trimmed (#3168)', async () => {
       const client = createCapturingClient({
         brands: [
           { data: null, error: null }, // no existing brand
@@ -2358,7 +2358,7 @@ describe('brands-storage', () => {
     });
 
     it('normalizes GL to US in aliases, competitors, social accounts, and earned '
-      + 'content on create (SITES-3168)', async () => {
+      + 'content on create (#3168)', async () => {
       const client = createCapturingClient({
         brands: [
           { data: null, error: null },
@@ -3239,7 +3239,7 @@ describe('brands-storage', () => {
       expect(result.region).to.deep.equal(['42']);
     });
 
-    it('normalizes GL to US on update, case-insensitively and whitespace-trimmed (SITES-3168)', async () => {
+    it('normalizes GL to US on update, case-insensitively and whitespace-trimmed (#3168)', async () => {
       const client = createCapturingClient({
         brands: [
           { data: makeBrandRow({ regions: ['US', 'US', 'DE'] }), error: null },

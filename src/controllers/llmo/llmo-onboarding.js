@@ -220,7 +220,7 @@ export async function triggerBrandalfOnboardingJob({
 // selected a market we seed it directly so the brand record is correct
 // immediately and stays correct even if Brandalf never completes. `region`
 // is a validated ISO 3166-1 alpha-2 code (e.g. 'US'); absent → keep the
-// DEFAULT_BRAND_REGION placeholder that Brandalf overwrites. SITES-3168: the
+// DEFAULT_BRAND_REGION placeholder that Brandalf overwrites. #3168: the
 // previous 'gl' placeholder collided with Greenland's real ISO code.
 export function onboardingStubRegions(region) {
   return region ? [region] : [DEFAULT_BRAND_REGION];

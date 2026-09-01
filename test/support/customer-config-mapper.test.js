@@ -75,7 +75,7 @@ describe('Customer Config Mapper', () => {
       expect(brand.competitors).to.have.lengthOf(1);
       expect(brand.prompts).to.have.lengthOf(1);
 
-      // SITES-3168: an explicit 'GL' input value (not just a missing region)
+      // #3168: an explicit 'GL' input value (not just a missing region)
       // must never survive into the persisted config — normalized to US.
       expect(brand.region).to.deep.equal(['us', 'gb']);
       expect(brand.brandAliases[1].regions).to.deep.equal(['US']);
