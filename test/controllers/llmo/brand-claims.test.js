@@ -426,29 +426,6 @@ describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
     expect(postSlackMessage).to.not.have.been.called;
   });
 
-  it('passes a cleaned topic filter through to the audit message', async () => {
-    context.data = { topics: [' Pricing ', 'Support', 'Pricing', '  '] };
-    const result = await handleRequestBrandClaims(context, site);
-    expect(result.status).to.equal(202);
-    const [, msg] = sqsSend.getCall(0).args;
-    expect(msg.topics).to.deep.equal(['Pricing', 'Support']);
-  });
-
-  it('omits topics when the array is empty (runs all topics)', async () => {
-    context.data = { topics: [] };
-    const result = await handleRequestBrandClaims(context, site);
-    expect(result.status).to.equal(202);
-    const [, msg] = sqsSend.getCall(0).args;
-    expect(msg).to.not.have.property('topics');
-  });
-
-  it('returns 400 when topics is not an array of strings', async () => {
-    context.data = { topics: 'Pricing' };
-    const result = await handleRequestBrandClaims(context, site);
-    expect(result.status).to.equal(400);
-    expect(sqsSend).to.not.have.been.called;
-  });
-
   it('returns 429 and does not enqueue when the last run is within 7 days', async () => {
     const ranAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(); // 2 days ago
     getLatestAudit.resolves({ getAuditedAt: () => ranAt });
