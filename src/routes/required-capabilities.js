@@ -306,6 +306,26 @@ const routeRequiredCapabilities = {
   'DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'organization:write',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete': 'organization:write',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/check': 'organization:read',
+  // ABV custom-dashboard analytics + CRUD (v1: fixture data / S3-backed store).
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/analytics/metadata': 'brand:read',
+  'POST /v2/orgs/:spaceCatId/brands/:brandId/analytics/query': 'brand:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/dashboards': 'brand:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId': 'brand:read',
+  'POST /v2/orgs/:spaceCatId/brands/:brandId/dashboards': 'organization:write',
+  'PATCH /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId': 'organization:write',
+  'DELETE /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId': 'organization:write',
+  // eslint-disable-next-line max-len
+  'POST /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/duplicate': 'organization:write',
+  // Starring only mutates the caller's own personal starred list, not shared
+  // dashboard state, so it only needs read access — unlike the rest of this block.
+  'POST /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/star': 'brand:read',
+  // eslint-disable-next-line max-len
+  'DELETE /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/star': 'brand:read',
+  'POST /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/tiles': 'organization:write',
+  // eslint-disable-next-line max-len
+  'PATCH /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/tiles/:tileId': 'organization:write',
+  // eslint-disable-next-line max-len
+  'DELETE /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/tiles/:tileId': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/jobs/:jobId': 'organization:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': 'organization:write',

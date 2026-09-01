@@ -670,6 +670,25 @@ describe('getRouteHandlers', () => {
     createSchedules: sinon.stub(),
   };
 
+  const mockAnalyticsController = {
+    getMetadata: sinon.stub(),
+    runQuery: sinon.stub(),
+  };
+
+  const mockDashboardsController = {
+    listDashboards: sinon.stub(),
+    getDashboard: sinon.stub(),
+    createDashboard: sinon.stub(),
+    updateDashboard: sinon.stub(),
+    deleteDashboard: sinon.stub(),
+    duplicateDashboard: sinon.stub(),
+    starDashboard: sinon.stub(),
+    unstarDashboard: sinon.stub(),
+    addTile: sinon.stub(),
+    updateTile: sinon.stub(),
+    removeTile: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -740,6 +759,8 @@ describe('getRouteHandlers', () => {
       mockRedirectsController,
       mockAuditPolicyController,
       mockPromptSuggestionSchedulesController,
+      mockAnalyticsController,
+      mockDashboardsController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -1455,8 +1476,27 @@ describe('getRouteHandlers', () => {
       'POST /organizations/:organizationId/task-management/:provider/tickets',
       'GET /organizations/:organizationId/task-management/connections/:connectionId/projects',
       'GET /organizations/:organizationId/task-management/connections/:connectionId/issue-types',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/analytics/metadata',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/analytics/query',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/dashboards',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/dashboards',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId',
+      'PATCH /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId',
+      'DELETE /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/duplicate',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/star',
+      'DELETE /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/star',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/tiles',
+      'PATCH /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/tiles/:tileId',
+      'DELETE /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/tiles/:tileId',
     ];
     expect(Object.keys(dynamicRoutes)).to.have.members(expectedDynamicRouteKeys);
+
+    expect(dynamicRoutes['GET /v2/orgs/:spaceCatId/brands/:brandId/analytics/metadata'].handler).to.equal(mockAnalyticsController.getMetadata);
+    expect(dynamicRoutes['POST /v2/orgs/:spaceCatId/brands/:brandId/analytics/query'].handler).to.equal(mockAnalyticsController.runQuery);
+    expect(dynamicRoutes['GET /v2/orgs/:spaceCatId/brands/:brandId/dashboards'].handler).to.equal(mockDashboardsController.listDashboards);
+    expect(dynamicRoutes['POST /v2/orgs/:spaceCatId/brands/:brandId/dashboards'].handler).to.equal(mockDashboardsController.createDashboard);
+    expect(dynamicRoutes['GET /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId'].handler).to.equal(mockDashboardsController.getDashboard);
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
     expect(dynamicRoutes['GET /audits/latest/:auditType'].paramNames).to.deep.equal(['auditType']);

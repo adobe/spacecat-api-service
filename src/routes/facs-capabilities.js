@@ -636,6 +636,17 @@ const routeFacsCapabilities = {
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/categories/:categoryId': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/topics/:topicId': 'llmo/can_configure',
+      // ABV custom-dashboard CRUD (v1: S3-backed store, see llmo-dashboards.js).
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/dashboards': 'llmo/can_configure',
+      'PATCH /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId': 'llmo/can_configure',
+      'DELETE /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId': 'llmo/can_configure',
+      // eslint-disable-next-line max-len
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/duplicate': 'llmo/can_configure',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/tiles': 'llmo/can_configure',
+      // eslint-disable-next-line max-len
+      'PATCH /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/tiles/:tileId': 'llmo/can_configure',
+      // eslint-disable-next-line max-len
+      'DELETE /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/tiles/:tileId': 'llmo/can_configure',
       // POST (non-onboard, non-deploy, non-query)
       'POST /consent-banner': 'llmo/can_configure',
       'POST /organizations/:organizationId/sites/:siteId/contact-sales-lead': 'llmo/can_configure',
@@ -876,6 +887,16 @@ const routeFacsCapabilities = {
       'GET /v2/orgs/:spaceCatId/brands/:brandId': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'llmo/can_view',
+      // ABV custom-dashboard analytics + CRUD (v1: fixture data / S3-backed store).
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/analytics/metadata': 'llmo/can_view',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/analytics/query': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/dashboards': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId': 'llmo/can_view',
+      // Starring only mutates the caller's own personal starred list, not shared
+      // dashboard state, so it only needs view access.
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/star': 'llmo/can_view',
+      // eslint-disable-next-line max-len
+      'DELETE /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/star': 'llmo/can_view',
       // Serenity proxy (Semrush AIO replacement) — reads under brand
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/jobs/:jobId': 'llmo/can_view',
@@ -1347,6 +1368,11 @@ const routeFacsCapabilities = {
     'jobId', 'jobType', 'onboardingId', 'opportunityId', 'plgOnboardingId',
     'promptId', 'questionKey', 'reportId', 'suggestionId', 'tokenId',
     'topicId',
+    // ABV custom-dashboard entity ids (LLMO-scoped, not yet under ReBAC — the
+    // enclosing :brandId is the FACS resource for these routes; graduate
+    // 'dashboardId' to PRODUCTS_FACS_RESOURCE_PARAM_ALIASES.LLMO if/when
+    // per-dashboard ReBAC sharing is implemented).
+    'dashboardId', 'tileId',
     // Resources not yet in any product's FACS scope (graduate to a product
     // map when ReBAC is added). `siteId` is omitted — it is the ASO ReBAC
     // anchor and lives in PRODUCTS_FACS_RESOURCE_PARAM_ALIASES.ASO above.
