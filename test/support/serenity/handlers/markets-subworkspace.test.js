@@ -1177,6 +1177,7 @@ describe('markets-subworkspace handlers', () => {
         name: 'category:Sneakers',
         parentId: 'root-1',
         childrenCount: 0,
+        promptsCount: 0,
         path: [{ id: 'root-1', name: 'category:Footwear' }],
       }]);
       expect(transport.listPromptsByTags).to.not.have.been.called;

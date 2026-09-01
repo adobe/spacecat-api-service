@@ -163,6 +163,8 @@ describe('SerenityController', () => {
     handleCreateTagSubworkspace: sinon.stub(),
     handleUpdateTag: sinon.stub(),
     handleUpdateTagSubworkspace: sinon.stub(),
+    handleDeleteTag: sinon.stub(),
+    handleDeleteTagSubworkspace: sinon.stub(),
   };
   let decommissionStub;
   let ensureSubworkspaceStub;
@@ -284,6 +286,8 @@ describe('SerenityController', () => {
         handleCreateTagSubworkspace: handlers.handleCreateTagSubworkspace,
         handleUpdateTag: handlers.handleUpdateTag,
         handleUpdateTagSubworkspace: handlers.handleUpdateTagSubworkspace,
+        handleDeleteTag: handlers.handleDeleteTag,
+        handleDeleteTagSubworkspace: handlers.handleDeleteTagSubworkspace,
       },
       '../../src/support/serenity/workspace-lifecycle.js': {
         ensureSubworkspace: ensureSubworkspaceStub,
@@ -1325,6 +1329,48 @@ describe('SerenityController', () => {
       expect(handlers.handleUpdateTag).to.not.have.been.called;
       expect(handlers.handleUpdateTagSubworkspace).to.not.have.been.called;
     });
+
+    it('deleteTag requires the :tagId path param', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.deleteTag(fakeContext({ params: {} }));
+      expect(response.status).to.equal(400);
+      expect(handlers.handleDeleteTag).to.not.have.been.called;
+    });
+
+    it('deleteTag forwards tagId + query slice to the flat handler and returns 204', async () => {
+      handlers.handleDeleteTag.resolves({ status: 204 });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ params: { tagId: 'tag-1' } });
+      ctx.request = { url: 'https://x?geoTargetId=2840&languageCode=en' };
+      const response = await controller.deleteTag(ctx);
+      expect(response.status).to.equal(204);
+      expect(handlers.handleDeleteTag).to.have.been.calledOnce;
+      expect(handlers.handleDeleteTag.firstCall.args[4]).to.equal('tag-1');
+      expect(handlers.handleDeleteTagSubworkspace).to.not.have.been.called;
+    });
+
+    it('deleteTag returns the authorize error without throwing (auth.error short-circuit)', async () => {
+      accessControlHasAccessStub.resolves(false);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.deleteTag(fakeContext({ params: { tagId: 'tag-1' } }));
+      expect(response.status).to.equal(403);
+      expect(handlers.handleDeleteTag).to.not.have.been.called;
+      expect(handlers.handleDeleteTagSubworkspace).to.not.have.been.called;
+    });
+
+    it('deleteTag maps a handler 400 (server-owned dimension) through mapError', async () => {
+      handlers.handleDeleteTag.rejects(new ErrorWithStatusCode(
+        'a value of the server-owned "intent" dimension cannot be deleted',
+        400,
+      ));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ params: { tagId: 'tag-1' } });
+      ctx.request = { url: 'https://x?geoTargetId=2840&languageCode=en' };
+      const response = await controller.deleteTag(ctx);
+      expect(response.status).to.equal(400);
+      const body = await readBody(response);
+      expect(body.message).to.match(/server-owned "intent" dimension cannot be deleted/);
+    });
   });
 
   describe('controller surface', () => {
@@ -1340,6 +1386,7 @@ describe('SerenityController', () => {
       expect(controller.deleteMarket).to.be.a('function');
       expect(controller.listTags).to.be.a('function');
       expect(controller.createTag).to.be.a('function');
+      expect(controller.deleteTag).to.be.a('function');
       expect(controller.listModels).to.be.a('function');
       expect(controller.updateModels).to.be.a('function');
 
@@ -1834,6 +1881,19 @@ describe('SerenityController', () => {
       expect(handlers.handleUpdateTagSubworkspace.firstCall.args[1]).to.equal('subworkspace-ws-1');
       expect(handlers.handleUpdateTagSubworkspace.firstCall.args[2]).to.equal('tag-1');
       expect(handlers.handleUpdateTag).to.not.have.been.called;
+    });
+
+    it('deleteTag routes to the subworkspace handler with the brand workspace + tagId', async () => {
+      handlers.handleDeleteTagSubworkspace.resolves({ status: 204 });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ params: { tagId: 'tag-1' } });
+      ctx.request = { url: 'https://x?geoTargetId=2840&languageCode=en' };
+      const response = await controller.deleteTag(ctx);
+      expect(response.status).to.equal(204);
+      expect(handlers.handleDeleteTagSubworkspace).to.have.been.calledOnce;
+      expect(handlers.handleDeleteTagSubworkspace.firstCall.args[1]).to.equal('subworkspace-ws-1');
+      expect(handlers.handleDeleteTagSubworkspace.firstCall.args[2]).to.equal('tag-1');
+      expect(handlers.handleDeleteTag).to.not.have.been.called;
     });
 
     it('bulkDeletePrompts routes to the subworkspace handler in subworkspace mode', async () => {
