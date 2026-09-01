@@ -106,6 +106,21 @@ describe('approveOrg', () => {
     });
   });
 
+  it('responds actionably (no throw, no move) when the site cannot be resolved', async () => {
+    // Site removed between the message being posted and the approval click: the guard's
+    // contract needs a resolved site, so surface a reason instead of an opaque TypeError.
+    context.dataAccess.Organization.findByImsOrgId.resolves(org);
+    context.dataAccess.Site.findByBaseURL.resolves(null);
+
+    const approveOrgAction = approveOrg(context);
+    await approveOrgAction({ ack: ackMock, body, respond: respondMock });
+
+    expect(site.setOrganizationId).to.not.have.been.called;
+    expect(site.save).to.not.have.been.called;
+    const texts = respondMock.getCalls().map((c) => c.args[0]?.text ?? '');
+    expect(texts.some((t) => t.includes('no site found'))).to.be.true;
+  });
+
   it('blocks the org approval when the site still has enrollments to orphan (LLMO-7284 AC12)', async () => {
     context.dataAccess.Organization.findByImsOrgId.resolves(org);
     context.dataAccess.Site.findByBaseURL.resolves(site);

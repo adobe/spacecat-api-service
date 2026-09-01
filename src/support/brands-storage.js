@@ -13,11 +13,17 @@
 import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
 
 import { SERENITY_BRAND_SITE_TYPE } from './serenity/site-linkage.js';
+import { normalizeBrandName } from './normalize-brand-name.js';
 import { readFeatureFlagScopes, resolveFlagRowForBrand } from './feature-flags-storage.js';
 import {
   SERENITY_FEATURE_FLAG_NAME,
   SERENITY_FEATURE_FLAG_PRODUCT,
 } from './serenity/serenity-active.js';
+
+// Upper bound for the active-brand duplicate scan (LLMO-7284). Comfortably above
+// any realistic active-brands-per-org count; its only purpose is to make a
+// silent PostgREST db-max-rows truncation impossible (a full page => fail closed).
+const ACTIVE_BRAND_SCAN_LIMIT = 1000;
 
 /**
  * PostgREST select string — joins all normalized child tables.
@@ -1110,18 +1116,12 @@ export async function listSiteIdsForBrands(organizationId, brandIds, postgrestCl
   return siteIds;
 }
 
-/**
- * Whitespace-collapse + case-fold, matching the normalization shape used by
- * scripts/reconcile-org-identity-integrity.mjs (and the established LLMO-7117
- * `_normalize_org_name` pattern). Two brand names that reduce to the same value are
- * the same active identity for uniqueness purposes — e.g. "Acme Inc" and "acme  inc".
- *
- * @param {string} name
- * @returns {string}
- */
-export function normalizeBrandName(name) {
-  return String(name ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
-}
+// normalizeBrandName is the canonical brand-name comparison key. It is defined
+// once in ./normalize-brand-name.js and shared with the detection-side reconcile
+// report (scripts/reconcile-org-identity-integrity.mjs) so prevention and
+// detection can never drift. Re-exported here to preserve the existing public
+// import surface (`import { normalizeBrandName } from './brands-storage.js'`).
+export { normalizeBrandName };
 
 /**
  * LLMO-7284 (AC13): prevent a SECOND active brand with the same normalized name in one
@@ -1147,13 +1147,18 @@ export function normalizeBrandName(name) {
  * @param {string} params.name              the name the brand will hold once written
  * @param {string} [params.excludeBrandId]  the brand being written — its own row must not
  *                                           be counted as its own duplicate
+ * @param {object} [params.log]             logger for the block/truncation breadcrumbs
  * @throws {Error} `.status=409`, `.code='brand_duplicate_active_name'` on a collision
  */
+// TODO(SITES-49449): remove this app-layer scan once the normalized-name partial
+// unique index lands and prod is de-duped — the DB then holds the invariant and a
+// second (drift-prone) enforcement point here becomes redundant cost.
 export async function assertNoDuplicateActiveBrandName({
   postgrestClient,
   organizationId,
   name,
   excludeBrandId = null,
+  log = console,
 }) {
   const normalized = normalizeBrandName(name);
   // An empty/whitespace-only name is rejected by the callers' own name validation;
@@ -1166,7 +1171,13 @@ export async function assertNoDuplicateActiveBrandName({
     .from('brands')
     .select('id, name')
     .eq('organization_id', organizationId)
-    .eq('status', 'active');
+    .eq('status', 'active')
+    // Bound the scan so a PostgREST db-max-rows cap cannot SILENTLY truncate it and
+    // let a normalized twin beyond the cap slip through (which would make this
+    // fail-closed guard fail OPEN). ACTIVE_BRAND_SCAN_LIMIT is far above any real
+    // active-brands-per-org count; hitting it means misconfiguration, so we fail
+    // closed loudly below rather than validate a partial view.
+    .limit(ACTIVE_BRAND_SCAN_LIMIT);
   if (hasText(excludeBrandId)) {
     query = query.neq('id', excludeBrandId);
   }
@@ -1174,9 +1185,25 @@ export async function assertNoDuplicateActiveBrandName({
   if (error) {
     throw new Error(`Failed to check for a duplicate active brand named "${name}": ${error.message}`);
   }
+  if ((data || []).length >= ACTIVE_BRAND_SCAN_LIMIT) {
+    // Fail CLOSED: a full page means the scan may be truncated, so we cannot prove
+    // uniqueness. Rejecting is safer than admitting a possible duplicate silently.
+    throw new Error(
+      `Active-brand duplicate scan for org ${organizationId} returned the full `
+      + `${ACTIVE_BRAND_SCAN_LIMIT}-row cap; the result may be truncated and `
+      + 'uniqueness cannot be verified. Aborting the write (investigate db-max-rows / '
+      + 'the org\'s active-brand count).',
+    );
+  }
 
   const clash = (data || []).find((b) => normalizeBrandName(b.name) === normalized);
   if (clash) {
+    // Live ops breadcrumb: the after-the-fact reconcile report also catches this,
+    // but a warn here surfaces a blocked duplicate at the moment it happens.
+    log?.warn?.(
+      `[llmo-7284] blocked a duplicate active brand in org ${organizationId}: `
+      + `"${name}" collides with existing "${clash.name}" (normalized-equal).`,
+    );
     const err = new Error(
       `An active brand named "${clash.name}" already exists in this organization `
       + '(brand names are compared case- and whitespace-insensitively). '
@@ -1295,6 +1322,7 @@ export async function upsertBrand({
       organizationId,
       name: brand.name,
       excludeBrandId: existing?.id,
+      log,
     });
   }
 

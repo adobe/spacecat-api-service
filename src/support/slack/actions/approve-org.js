@@ -48,6 +48,19 @@ export default function approveOrg(lambdaContext) {
         const org = await Organization.findByImsOrgId(imsOrgId);
         const site = await Site.findByBaseURL(baseURL);
 
+        // The reassignment guard's contract requires a resolved site (it dereferences
+        // site.getOrganizationId()), and we dereference org.getId() below. If either
+        // could not be resolved (site removed, or IMS org unresolved, between the
+        // message being posted and this approval click), surface an actionable reason
+        // instead of an opaque TypeError, and do not attempt the move (fail closed).
+        if (!site || !org) {
+          await respond({
+            replace_original: false,
+            text: `:x: Cannot approve: ${!site ? `no site found for ${baseURL}` : `no org found for ${imsOrgId}`}.`,
+          });
+          return;
+        }
+
         // LLMO-7284 (AC12): don't silently orphan the site's enrollments on
         // reassignment — fail explicitly if the move would leave foreign enrollments
         // behind. A same-org approval is a no-op inside the guard.

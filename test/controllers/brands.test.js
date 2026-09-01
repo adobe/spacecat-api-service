@@ -5011,6 +5011,7 @@ describe('Brands Controller', () => {
           neq: sandbox.stub().returnsThis(),
           in: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           upsert: sandbox.stub().returnsThis(),
           delete: sandbox.stub().returnsThis(),
           single: sandbox.stub().resolves({
@@ -5167,6 +5168,32 @@ describe('Brands Controller', () => {
         const upsertArgs = upsertStub.firstCall.args[0];
         expect(upsertArgs.forceBrandId).to.equal(provisionArgs.brandId);
         expect(upsertArgs.semrushSubWorkspaceId).to.equal('ws-1');
+      });
+
+      it('surfaces a duplicate-active-brand rejection as a 409 with its code (LLMO-7284 AC13)', async () => {
+        // End-to-end seam the missing IT would otherwise cover: a typed 409 thrown by
+        // upsertBrand must reach the client as a 409 body carrying brand_duplicate_active_name.
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
+        const dupErr = Object.assign(
+          new Error('An active brand named "Acme Inc" already exists in this organization'),
+          { status: 409, code: 'brand_duplicate_active_name' },
+        );
+        const upsertStub = sinon.stub().rejects(dupErr);
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(409);
+        const body = await response.json();
+        expect(body.code).to.equal('brand_duplicate_active_name');
       });
 
       it('writes the mapping row for the initial market after the brand row is persisted', async () => {
@@ -7971,6 +7998,7 @@ describe('Brands Controller', () => {
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
           maybeSingle: maybeSingleStub,
@@ -9533,6 +9561,7 @@ describe('Brands Controller', () => {
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
           maybeSingle: maybeSingleStub,
@@ -9748,6 +9777,7 @@ describe('Brands Controller', () => {
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
           maybeSingle: maybeSingleStub,
@@ -9811,6 +9841,7 @@ describe('Brands Controller', () => {
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
           maybeSingle: maybeSingleStub,

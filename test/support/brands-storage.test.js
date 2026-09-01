@@ -1068,6 +1068,7 @@ describe('brands-storage', () => {
           neqCalls.push([col, val]);
           return query;
         }),
+        limit: sinon.stub().returnsThis(),
         then: (resolve) => resolve(result),
       };
       return {
@@ -1119,6 +1120,26 @@ describe('brands-storage', () => {
       await expect(assertNoDuplicateActiveBrandName({
         postgrestClient: client, organizationId: ORG_ID, name: 'Acme Inc',
       })).to.be.rejectedWith('Failed to check for a duplicate active brand named "Acme Inc": boom');
+    });
+
+    it('fails closed when the scan returns a full page (possible truncation)', async () => {
+      // A full 1000-row page (none of which collide) means the scan may be truncated,
+      // so uniqueness cannot be proven — the guard must reject rather than fail open.
+      const fullPage = Array.from({ length: 1000 }, (_, i) => ({ id: `b${i}`, name: `Brand ${i}` }));
+      const client = clientReturning({ data: fullPage, error: null });
+      await expect(assertNoDuplicateActiveBrandName({
+        postgrestClient: client, organizationId: ORG_ID, name: 'Acme Inc',
+      })).to.be.rejectedWith(/returned the full 1000-row cap.*uniqueness cannot be verified/);
+    });
+
+    it('logs a warning when it blocks a duplicate', async () => {
+      const client = clientReturning({ data: [{ id: 'b1', name: 'acme  inc' }], error: null });
+      const log = { warn: sinon.stub() };
+      await assertNoDuplicateActiveBrandName({
+        postgrestClient: client, organizationId: ORG_ID, name: 'Acme Inc', log,
+      }).catch(() => {});
+      expect(log.warn).to.have.been.calledOnce;
+      expect(log.warn.firstCall.args[0]).to.contain('blocked a duplicate active brand');
     });
   });
 
@@ -4018,6 +4039,20 @@ describe('brands-storage', () => {
 
       expect(err.status).to.equal(409);
       expect(err.code).to.equal('brand_duplicate_active_name');
+    });
+
+    it('fails closed when the pre-transition read errors (LLMO-7284 AC13)', async () => {
+      // The read that determines whether the promotion guard should run must fail
+      // CLOSED: a swallowed read error must NOT let a brand be promoted unchecked.
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: null, error: { message: 'boom' } }, // pre-transition read errors
+        ],
+      });
+
+      await expect(setBrandStatus({
+        organizationId: ORG_ID, brandId: BRAND_ID, status: 'active', postgrestClient,
+      })).to.be.rejectedWith('Failed to read brand before status transition: boom');
     });
 
     it('setBrandStatus SKIPS the duplicate scan for a no-op re-approval of an already-active brand (LLMO-7284 AC13)', async () => {

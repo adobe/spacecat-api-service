@@ -24,9 +24,13 @@
  * (which likewise refuses to move an enrolled site); it is factored out here so the admin
  * Slack reassignment paths enforce the same invariant. Applied at every reassignment site
  * that does not already revoke enrollments first: set-ims-org-modal.js,
- * onboard-llmo-modal.js::checkOrg, and approve-org.js. (move-plg-site.js and
- * bypass-handlers.js deliberately revoke/gate enrollments themselves before moving, and
- * onboarding-flow.js only reassigns from internal/demo orgs, so they don't route here.)
+ * onboard-llmo-modal.js::checkOrg, and approve-org.js. The paths NOT routed here are only
+ * PARTIALLY equivalent, and deliberately out of this change's scope: move-plg-site.js and
+ * bypass-handlers.js gate on `enrollments.length > 0` before moving, but that gate is NOT
+ * fail-closed on an unverifiable (null/undefined) read the way this guard is — a null read
+ * there short-circuits falsy and the move proceeds; onboarding-flow.js reassigns only from
+ * internal/demo orgs. Converging those onto this guard is a tracked follow-up (see the PR
+ * discussion); until then the reconcile report remains the backstop for any straggler.
  *
  * Fails CLOSED: if the enrollments cannot be read back (a non-array), the move is aborted
  * rather than assumed safe — a swallowed read must not be treated as "no enrollments".
@@ -67,6 +71,9 @@ export async function assertSiteOrgReassignmentSafe({ site, targetOrgId, log = c
       `Unable to verify enrollments for site ${site.getBaseURL()} `
       + `(current org ${currentOrgId}); aborting org reassignment to avoid orphaning them.`,
     );
+    // `.status`/`.code` here are an INTERNAL classifier the Slack callers switch on, not an
+    // HTTP contract (this helper is not mounted on an HTTP route). 502 flags "could not
+    // verify a dependency read"; if this ever fronts a REST endpoint, treat it as 5xx.
     err.status = 502;
     err.code = 'site_org_reassignment_unverified';
     throw err;
