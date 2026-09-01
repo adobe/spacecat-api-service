@@ -3601,6 +3601,26 @@ describe('brands-storage', () => {
       expect(result).to.not.be.null;
     });
 
+    it('updateBrand SKIPS the duplicate scan when an active brand is renamed to its own normalized name (LLMO-7284 AC13)', async () => {
+      // Renaming "Acme Inc" -> "acme  inc" is the SAME normalized identity, so isActiveRename
+      // is false and the scan MUST NOT run. No duplicate-scan slot is provided: if the guard
+      // wrongly fired it would consume the update slot (an object, not an array) and throw,
+      // and it would 409 a cosmetic rename in an org that already holds a normalized twin.
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { name: 'Acme Inc', site_id: 'site-1', status: 'active' }, error: null }, // existing fetch
+          { data: { id: BRAND_ID }, error: null }, // update (NO scan slot before it)
+          { data: makeBrandRow({ name: 'acme  inc', status: 'active', site_id: 'site-1' }), error: null }, // getBrandById
+        ],
+      });
+
+      const result = await updateBrand({
+        organizationId: ORG_ID, brandId: BRAND_ID, updates: { name: 'acme  inc' }, postgrestClient,
+      });
+
+      expect(result).to.not.be.null;
+    });
+
     it('updateBrand rejects a promote-to-active without a site_id with a 400 (re-land of #2504)', async () => {
       const postgrestClient = createTableMockClient({
         brands: [{ data: { site_id: null, status: 'pending' }, error: null }],
@@ -3998,6 +4018,26 @@ describe('brands-storage', () => {
 
       expect(err.status).to.equal(409);
       expect(err.code).to.equal('brand_duplicate_active_name');
+    });
+
+    it('setBrandStatus SKIPS the duplicate scan for a no-op re-approval of an already-active brand (LLMO-7284 AC13)', async () => {
+      // The pre-transition read shows the brand is ALREADY active, so the promotion guard is
+      // skipped (current.status !== 'active' is false). No duplicate-scan slot is provided: a
+      // scan here would 409 a harmless re-approval in an org that already holds a normalized
+      // twin (the dirty data the reconcile report surfaces).
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { name: 'Acme Inc', status: 'active' }, error: null }, // pre-transition read (already active)
+          { data: { id: BRAND_ID }, error: null }, // update (NO scan slot before it)
+          { data: makeBrandRow({ name: 'Acme Inc', status: 'active', site_id: 'site-1' }), error: null }, // getBrandById
+        ],
+      });
+
+      const result = await setBrandStatus({
+        organizationId: ORG_ID, brandId: BRAND_ID, status: 'active', postgrestClient,
+      });
+
+      expect(result.status).to.equal('active');
     });
 
     it('throws a generic error on other database failures', async () => {

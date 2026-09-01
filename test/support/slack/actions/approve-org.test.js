@@ -124,6 +124,10 @@ describe('approveOrg', () => {
     expect(thrown.code).to.equal('site_org_reassignment_blocked');
     expect(site.setOrganizationId).to.not.have.been.called;
     expect(site.save).to.not.have.been.called;
+    // LLMO-7284 (AC12): the operator is told, explicitly and actionably, why it was refused
+    // (parity with set-ims-org-modal / onboard-llmo-modal) — not just a log entry.
+    const respondTexts = respondMock.getCalls().map((c) => c.args[0]?.text ?? c.args[0]);
+    expect(respondTexts.some((t) => typeof t === 'string' && t.includes(':x:') && t.includes('enrollment'))).to.equal(true);
   });
 
   it('should do nothing if IMS org ID and base URL are not found in the message text', async () => {

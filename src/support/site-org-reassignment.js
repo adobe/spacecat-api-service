@@ -31,8 +31,18 @@
  * Fails CLOSED: if the enrollments cannot be read back (a non-array), the move is aborted
  * rather than assumed safe — a swallowed read must not be treated as "no enrollments".
  *
+ * SCOPE (LLMO-7284): this guard covers ONLY enrollment orphaning (reconcile Check 1). It
+ * does NOT cover the brand/site org mismatch (reconcile Check 3): an active brand anchored to
+ * this site via `brands.site_id` keeps its own `organization_id` when the site moves, so a
+ * site with no enrollments but an active brand can still drift. Blocking that is intentionally
+ * deferred here — it needs brand-transfer semantics (move vs. refuse), not just a block — and
+ * is tracked separately; it is called out so the omission is explicit rather than silent. A
+ * Check-3 straggler is still surfaced by the reconcile report after the fact.
+ *
  * @param {object} params
- * @param {object} params.site         the Site being reassigned (SpaceCat data-access model)
+ * @param {object} params.site         the Site being reassigned (SpaceCat data-access model);
+ *   must be a resolved, non-null Site — callers null-check `site` before invoking, since
+ *   `site.getOrganizationId()` is dereferenced immediately below.
  * @param {string|null} params.targetOrgId  the org the site is moving to; `null` when the
  *   target org does not exist yet (a brand-new org — always a real move)
  * @param {object} [params.log]
@@ -64,7 +74,7 @@ export async function assertSiteOrgReassignmentSafe({ site, targetOrgId, log = c
 
   if (enrollments.length > 0) {
     const err = new Error(
-      `Site ${site.getBaseURL()} still has ${enrollments.length} active enrollment(s) under `
+      `Site ${site.getBaseURL()} still has ${enrollments.length} enrollment(s) under `
       + `org ${currentOrgId}; reassigning it${targetOrgId ? ` to ${targetOrgId}` : ''} would `
       + 'orphan them as foreign enrollments. Offboard or transfer the enrollments first, then retry.',
     );

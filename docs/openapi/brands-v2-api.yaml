@@ -104,6 +104,10 @@ v2-brands-for-org:
             organization (`code: brand_site_org_mismatch`).
           - The brand's primary URL is already the primary URL (base site) of
             another brand in this organization.
+          - A create/upsert that resolves to `active` would produce a second
+            active brand with the same normalized name (case- and
+            whitespace-insensitive) in this organization
+            (`code: brand_duplicate_active_name`).
         headers:
           X-Error:
             $ref: './headers.yaml#/xError'
@@ -228,6 +232,10 @@ v2-brand-for-org:
             (`code: brand_site_org_mismatch`).
           - The brand's primary URL is already the primary URL (base site) of
             another brand in this organization.
+          - A `pending -> active` promotion, or a rename of an active brand,
+            would produce a second active brand with the same normalized name
+            (case- and whitespace-insensitive) in this organization
+            (`code: brand_duplicate_active_name`).
         headers:
           X-Error:
             $ref: './headers.yaml#/xError'
@@ -331,8 +339,14 @@ v2-brand-for-org-activate:
         description: Organization or brand not found
       '409':
         description: |
-          The brand's primary URL is already the primary URL (base site) of
-          another brand in this organization.
+          Conflict. One of (disambiguated by the `code` field in the response
+          body, where present):
+          - The brand's primary URL is already the primary URL (base site) of
+            another brand in this organization.
+          - Activation (a `pending -> active` promotion) would produce a second
+            active brand with the same normalized name (case- and
+            whitespace-insensitive) in this organization
+            (`code: brand_duplicate_active_name`).
       '500':
         $ref: './responses.yaml#/500'
       '503':
@@ -397,6 +411,11 @@ v2-brand-status-for-org:
         description: User does not have access to this organization
       '404':
         description: Organization or brand not found
+      '409':
+        description: |
+          A status transition to `active` would produce a second active brand
+          with the same normalized name (case- and whitespace-insensitive) in
+          this organization (`code: brand_duplicate_active_name`).
       '500':
         $ref: './responses.yaml#/500'
       '503':

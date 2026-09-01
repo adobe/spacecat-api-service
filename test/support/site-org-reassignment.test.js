@@ -51,7 +51,7 @@ describe('assertSiteOrgReassignmentSafe (LLMO-7284 AC12)', () => {
     expect(err).to.be.an('error');
     expect(err.status).to.equal(409);
     expect(err.code).to.equal('site_org_reassignment_blocked');
-    expect(err.message).to.contain('2 active enrollment');
+    expect(err.message).to.contain('2 enrollment');
   });
 
   it('blocks a move to a brand-new org (null target) when enrollments exist', async () => {

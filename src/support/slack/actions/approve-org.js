@@ -74,6 +74,12 @@ export default function approveOrg(lambdaContext) {
       await respond(reply);
     } catch (e) {
       log.error('Error occurred while acknowledging org approval', e);
+      // LLMO-7284 (AC12): surface a blocked/unverified reassignment to the operator
+      // (parity with set-ims-org-modal.js and onboard-llmo-modal.js) so the actionable
+      // "offboard or transfer the enrollments first" reason is not swallowed into logs.
+      if (typeof e?.code === 'string' && e.code.startsWith('site_org_reassignment')) {
+        await respond({ replace_original: false, text: `:x: ${e.message}` });
+      }
       throw e;
     }
   };

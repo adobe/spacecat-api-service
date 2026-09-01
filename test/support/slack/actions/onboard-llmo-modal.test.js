@@ -2250,6 +2250,10 @@ example-com:
       // The site's org is never changed and no entitlement/enrollment is created.
       expect(mockSite.setOrganizationId).to.not.have.been.called;
       expect(mockSite.save).to.not.have.been.called;
+      // LLMO-7284 (AC12): the guard aborts before any entitlement is provisioned, so no
+      // TierClient entitlement/enrollment is created for the would-be new org (parity with
+      // the set-ims-org block test's explicit entitlement-not-called assertion).
+      expect(mockTierClient.createEntitlement).to.not.have.been.called;
       // The operator is told, explicitly and actionably, why the move was refused.
       const texts = mockClient.chat.postMessage.getCalls().map((c) => c.args[0].text);
       expect(texts.some((t) => t.includes(':x:') && t.includes('enrollment'))).to.equal(true);
