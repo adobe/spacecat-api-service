@@ -11,7 +11,7 @@
  */
 
 import {
-  badRequest, notFound, accepted, internalServerError,
+  badRequest, notFound, accepted, internalServerError, createResponse,
 } from '@adobe/spacecat-shared-http-utils';
 import { HeadObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { cachedOk } from '../../support/cached-response.js';
@@ -20,6 +20,13 @@ import { postSlackMessage } from '../../utils/slack/base.js';
 
 const CLAIMS_PREFIX = 'brand_claims/llmo';
 const WEEK_RE = /^\d{4}-W\d{2}$/;
+
+// Audit type + 7-day cooldown for on-demand Brand Claims runs (LLMO-7263). Trial
+// customers may request a fresh run at most once per week; the UI shows the same
+// window, and this is the authoritative server-side backstop (the UI gate is
+// bypassable). Kept in step with project-elmo-ui's BRAND_CLAIMS_REQUEST_COOLDOWN_MS.
+const BRAND_CLAIMS_AUDIT_TYPE = 'brand-claims';
+const BRAND_CLAIMS_REQUEST_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 // `model` is interpolated into the S3 key, so constrain it to alphanumerics,
 // dots, hyphens, underscores — no `/` — to prevent using HeadObject as an
 // object-existence probe across arbitrary key paths.
@@ -195,6 +202,34 @@ export async function handleRequestBrandClaims(context, site) {
     if (cleaned.length > 0) {
       topics = cleaned;
     }
+  }
+
+  // 7-day cooldown backstop: refuse a new run if the last brand-claims audit ran
+  // within the window. Mirrors the UI's disabled "Request new run" button so the two
+  // agree; because the UI button is bypassable this is the authoritative gate. Fails
+  // OPEN — a lookup error must not block a legitimate first/eligible request.
+  try {
+    const latestAudit = await site.getLatestAuditByAuditType(BRAND_CLAIMS_AUDIT_TYPE);
+    const ranAtMs = latestAudit?.getAuditedAt ? Date.parse(latestAudit.getAuditedAt()) : NaN;
+    if (Number.isFinite(ranAtMs)) {
+      const elapsed = Date.now() - ranAtMs;
+      if (elapsed < BRAND_CLAIMS_REQUEST_COOLDOWN_MS) {
+        const availableAt = new Date(ranAtMs + BRAND_CLAIMS_REQUEST_COOLDOWN_MS).toISOString();
+        const retryAfterSeconds = Math.ceil((BRAND_CLAIMS_REQUEST_COOLDOWN_MS - elapsed) / 1000);
+        log.info(`Brand Claims on-demand: cooldown active for site ${site.getId()}, available at ${availableAt}`);
+        return createResponse(
+          {
+            siteId: site.getId(),
+            availableAt,
+            message: 'A Brand Claims run was requested recently; a new run can be requested once per 7 days.',
+          },
+          429,
+          { 'Retry-After': String(retryAfterSeconds) },
+        );
+      }
+    }
+  } catch (auditError) {
+    log.warn(`Brand Claims on-demand: cooldown lookup failed for site ${site.getId()}, allowing request: ${auditError.message}`);
   }
 
   await sqs.sendMessage(queueUrl, {

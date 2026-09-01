@@ -351,17 +351,22 @@ describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
   let site;
   let context;
 
+  let getLatestAudit;
+
   const httpUtils = {
     accepted: (body) => ({ status: 202, json: async () => body }),
     badRequest: (message) => ({ status: 400, json: async () => ({ message }) }),
     notFound: (message) => ({ status: 404, json: async () => ({ message }) }),
     internalServerError: (message) => ({ status: 500, json: async () => ({ message }) }),
+    createResponse: (body, status, headers) => ({ status, headers, json: async () => body }),
   };
 
   beforeEach(async () => {
     sandbox = sinon.createSandbox();
     sqsSend = sandbox.stub().resolves();
     postSlackMessage = sandbox.stub().resolves();
+    // Default: no prior brand-claims audit → not in cooldown.
+    getLatestAudit = sandbox.stub().resolves(null);
 
     const mod = await esmock('../../../src/controllers/llmo/brand-claims.js', {
       '@adobe/spacecat-shared-http-utils': httpUtils,
@@ -372,6 +377,7 @@ describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
     site = {
       getId: () => 'site-1',
       getBaseURL: () => 'https://acme.example',
+      getLatestAuditByAuditType: (...args) => getLatestAudit(...args),
     };
     context = {
       log: { info: sinon.stub(), warn: sinon.stub(), error: sinon.stub() },
@@ -441,5 +447,34 @@ describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
     const result = await handleRequestBrandClaims(context, site);
     expect(result.status).to.equal(400);
     expect(sqsSend).to.not.have.been.called;
+  });
+
+  it('returns 429 and does not enqueue when the last run is within 7 days', async () => {
+    const ranAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(); // 2 days ago
+    getLatestAudit.resolves({ getAuditedAt: () => ranAt });
+    const result = await handleRequestBrandClaims(context, site);
+    expect(result.status).to.equal(429);
+    expect(result.headers).to.have.property('Retry-After');
+    const body = await result.json();
+    expect(body.siteId).to.equal('site-1');
+    expect(body).to.have.property('availableAt');
+    expect(sqsSend).to.not.have.been.called;
+    expect(postSlackMessage).to.not.have.been.called;
+  });
+
+  it('proceeds (202) when the last run is older than 7 days', async () => {
+    const ranAt = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(); // 8 days ago
+    getLatestAudit.resolves({ getAuditedAt: () => ranAt });
+    const result = await handleRequestBrandClaims(context, site);
+    expect(result.status).to.equal(202);
+    expect(sqsSend).to.have.been.calledOnce;
+  });
+
+  it('fails open (202) when the cooldown lookup throws', async () => {
+    getLatestAudit.rejects(new Error('db down'));
+    const result = await handleRequestBrandClaims(context, site);
+    expect(result.status).to.equal(202);
+    expect(sqsSend).to.have.been.calledOnce;
+    expect(context.log.warn).to.have.been.called;
   });
 });
