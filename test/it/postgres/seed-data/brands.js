@@ -71,20 +71,4 @@ export const brands = [
     pending_semrush_provisioning: { primaryUrl: 'https://site4-delegate.example.com' },
     updated_by: 'seed',
   },
-  {
-    // LLMO-7284 (AC13) duplicate-active-brand IT: a PENDING brand in ORG_1, already
-    // anchored to a dedicated site (seed-data/sites.js — NOT the shared "free" SITE_2),
-    // whose name normalizes to the same value as BRAND_1's "Test Brand"
-    // ("test  brand" -> "test brand"). Promoting it to active via any of the three
-    // non-provisioning endpoints (update, status transition, activate) must 409
-    // brand_duplicate_active_name against the already-active BRAND_1.
-    id: 'ab111111-1111-4111-b111-1111111111dd',
-    organization_id: '11111111-1111-4111-b111-111111111111',
-    name: 'test  brand',
-    site_id: 'ab111111-1111-4111-b111-2222222222ee',
-    status: 'pending',
-    origin: 'human',
-    regions: ['us'],
-    updated_by: 'seed',
-  },
 ];

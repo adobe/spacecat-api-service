@@ -14,7 +14,6 @@ import { expect } from 'chai';
 import {
   ORG_1_ID,
   BRAND_1_ID,
-  BRAND_DUP_PENDING_ID,
   SITE_1_ID,
   SITE_2_ID,
   SITE_2_BASE_URL,
@@ -409,33 +408,58 @@ export default function brandsTests(getHttpClient, resetData) {
   // serenity-active org, per createBrandForOrg's Semrush-mode gate) would additionally
   // provision a real Semrush workspace via the vendor mock, which is a materially
   // different, unverified path this change does not attempt to cover.
+  //
+  // The colliding brand is created at RUNTIME (not static seed data): a static seed
+  // row permanently changes ORG_1's total site/brand counts, which broke this file's
+  // OWN and sites.js's fixed-count assertions the first time this was tried (every
+  // resetData() call reseeds from the static baseline, so a static addition is visible
+  // to every OTHER describe block too). A dynamic create/patch, scoped to this describe
+  // block's own before(resetData()), is invisible to every other block by the time it
+  // runs — each one calls resetData() itself first, truncating back to the same static
+  // baseline this block also started from. SITE_2 is safe to claim here for the same
+  // reason: any other describe (e.g. the LLMO-5870 primary-URL reuse block earlier in
+  // this file) starts from its own fresh reset and never observes what this block did.
   describe('Brands v2 duplicate-active-brand guard on promotion (LLMO-7284 AC13)', () => {
-    before(() => resetData());
+    let dupBrandId;
+
+    before(async () => {
+      await resetData();
+      const http = getHttpClient();
+      const create = await http.admin.post(`/v2/orgs/${ORG_1_ID}/brands`, {
+        name: 'test  brand', region: ['US'], status: 'pending',
+      });
+      expect(create.status).to.equal(201);
+      dupBrandId = create.body.id;
+      const anchor = await http.admin.patch(`/v2/orgs/${ORG_1_ID}/brands/${dupBrandId}`, {
+        baseSiteId: SITE_2_ID,
+      });
+      expect(anchor.status).to.equal(200);
+    });
 
     it('PATCH /brands/:id/status refuses to promote a normalized-twin name to active', async () => {
       const http = getHttpClient();
 
-      const res = await http.admin.patch(`/v2/orgs/${ORG_1_ID}/brands/${BRAND_DUP_PENDING_ID}/status`, {
+      const res = await http.admin.patch(`/v2/orgs/${ORG_1_ID}/brands/${dupBrandId}/status`, {
         status: 'active',
       });
       expect(res.status).to.equal(409);
       expect(res.body.code).to.equal('brand_duplicate_active_name');
 
       // No partial write — the brand stays pending against the already-active BRAND_1.
-      const getRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/brands/${BRAND_DUP_PENDING_ID}`);
+      const getRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/brands/${dupBrandId}`);
       expect(getRes.body.status).to.equal('pending');
     });
 
     it('PATCH /brands/:id refuses to promote a normalized-twin name to active', async () => {
       const http = getHttpClient();
 
-      const res = await http.admin.patch(`/v2/orgs/${ORG_1_ID}/brands/${BRAND_DUP_PENDING_ID}`, {
+      const res = await http.admin.patch(`/v2/orgs/${ORG_1_ID}/brands/${dupBrandId}`, {
         status: 'active',
       });
       expect(res.status).to.equal(409);
       expect(res.body.code).to.equal('brand_duplicate_active_name');
 
-      const getRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/brands/${BRAND_DUP_PENDING_ID}`);
+      const getRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/brands/${dupBrandId}`);
       expect(getRes.body.status).to.equal('pending');
     });
 
@@ -443,13 +467,13 @@ export default function brandsTests(getHttpClient, resetData) {
       const http = getHttpClient();
 
       const res = await http.admin.post(
-        `/v2/orgs/${ORG_1_ID}/brands/${BRAND_DUP_PENDING_ID}/activate`,
+        `/v2/orgs/${ORG_1_ID}/brands/${dupBrandId}/activate`,
         { generatePrompts: false },
       );
       expect(res.status).to.equal(409);
       expect(res.body.code).to.equal('brand_duplicate_active_name');
 
-      const getRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/brands/${BRAND_DUP_PENDING_ID}`);
+      const getRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/brands/${dupBrandId}`);
       expect(getRes.body.status).to.equal('pending');
     });
 
@@ -459,13 +483,13 @@ export default function brandsTests(getHttpClient, resetData) {
       // Rename first (still pending — a rename alone never triggers the promotion
       // guard, only an ACTIVE rename or a status change does), then promote: the
       // guard must not false-positive on a genuinely unique name.
-      const rename = await http.admin.patch(`/v2/orgs/${ORG_1_ID}/brands/${BRAND_DUP_PENDING_ID}`, {
+      const rename = await http.admin.patch(`/v2/orgs/${ORG_1_ID}/brands/${dupBrandId}`, {
         name: 'Genuinely Unique Brand Name',
       });
       expect(rename.status).to.equal(200);
       expect(rename.body.status).to.equal('pending');
 
-      const activate = await http.admin.patch(`/v2/orgs/${ORG_1_ID}/brands/${BRAND_DUP_PENDING_ID}/status`, {
+      const activate = await http.admin.patch(`/v2/orgs/${ORG_1_ID}/brands/${dupBrandId}/status`, {
         status: 'active',
       });
       expect(activate.status).to.equal(200);
