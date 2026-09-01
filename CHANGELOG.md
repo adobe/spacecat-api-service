@@ -1,3 +1,10 @@
+# [1.782.0](https://github.com/adobe/spacecat-api-service/compare/v1.781.1...v1.782.0) (2026-09-01)
+
+
+### Features
+
+* **suggestions:** gate suggestionKey write-on-create behind admin/S2S ([#3174](https://github.com/adobe/spacecat-api-service/issues/3174)) ([08e3e09](https://github.com/adobe/spacecat-api-service/commit/08e3e0972c55369da8047c6bf66f053e12d3286c))
+
 ## [1.781.1](https://github.com/adobe/spacecat-api-service/compare/v1.781.0...v1.781.1) (2026-09-01)
 
 
