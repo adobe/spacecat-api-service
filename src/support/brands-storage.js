@@ -18,7 +18,7 @@ import {
   SERENITY_FEATURE_FLAG_NAME,
   SERENITY_FEATURE_FLAG_PRODUCT,
 } from './serenity/serenity-active.js';
-import { normalizeGlRegionSentinel, sanitizeRegions } from './customer-config-mapper.js';
+import { sanitizeRegions } from './customer-config-mapper.js';
 
 /**
  * PostgREST select string — joins all normalized child tables.
@@ -547,7 +547,7 @@ async function syncSocialAccounts(brandId, organizationId, socialAccounts, postg
       organization_id: organizationId,
       brand_id: brandId,
       url: s.url,
-      regions: (s.regions || []).map(normalizeGlRegionSentinel),
+      regions: sanitizeRegions(s.regions),
       updated_by: updatedBy,
     }));
   await replaceChildRows('brand_social_accounts', brandId, rows, 'brand_id,url', postgrestClient);
@@ -571,7 +571,7 @@ async function syncEarnedSources(brandId, organizationId, earnedContent, postgre
       brand_id: brandId,
       name: e.name,
       url: e.url,
-      regions: (e.regions || []).map(normalizeGlRegionSentinel),
+      regions: sanitizeRegions(e.regions),
       updated_by: updatedBy,
     }));
   await replaceChildRows('brand_earned_sources', brandId, rows, 'brand_id,url', postgrestClient);
@@ -591,7 +591,7 @@ async function syncAliases(brandId, organizationId, brandAliases, postgrestClien
   const rows = (brandAliases || [])
     .map((a) => ({
       alias: typeof a === 'string' ? a : a?.name,
-      regions: (a?.regions || []).map(normalizeGlRegionSentinel),
+      regions: sanitizeRegions(a?.regions),
     }))
     .filter((a) => hasText(a.alias) && !seen.has(a.alias) && seen.add(a.alias))
     .map((a) => ({
@@ -620,7 +620,7 @@ async function syncCompetitors(brandId, organizationId, competitors, postgrestCl
       name: typeof c === 'string' ? c : c?.name,
       url: c?.url || null,
       aliases: Array.isArray(c?.aliases) ? c.aliases : [],
-      regions: (c?.regions || []).map(normalizeGlRegionSentinel),
+      regions: sanitizeRegions(c?.regions),
     }))
     .filter((c) => hasText(c.name) && !seen.has(c.name) && seen.add(c.name))
     .map((c) => ({

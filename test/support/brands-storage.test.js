@@ -2394,6 +2394,43 @@ describe('brands-storage', () => {
       expect(earnedUpsert.row[0].regions).to.deep.equal(['US']);
     });
 
+    it('dedupes GL alongside an explicit US in aliases, competitors, social '
+      + 'accounts, and earned content on create', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: {
+          name: 'Test',
+          brandAliases: [{ name: 'Alias', regions: ['GL', 'US'] }],
+          competitors: [{ name: 'Rival', url: 'https://rival.com', regions: ['GL', 'US'] }],
+          socialAccounts: [{ url: 'https://x.com/test', regions: ['GL', 'US'] }],
+          earnedContent: [{ name: 'Blog', url: 'https://blog.com', regions: ['GL', 'US'] }],
+        },
+        postgrestClient: client,
+      });
+
+      const aliasesUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brand_aliases');
+      expect(aliasesUpsert.row[0].regions).to.deep.equal(['US']);
+
+      const competitorsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'competitors');
+      expect(competitorsUpsert.row[0].regions).to.deep.equal(['US']);
+
+      const socialUpsert = client.capturedCalls.upsert
+        .find((c) => c.table === 'brand_social_accounts');
+      expect(socialUpsert.row[0].regions).to.deep.equal(['US']);
+
+      const earnedUpsert = client.capturedCalls.upsert
+        .find((c) => c.table === 'brand_earned_sources');
+      expect(earnedUpsert.row[0].regions).to.deep.equal(['US']);
+    });
+
     it('accepts string aliases (not objects) in brandAliases', async () => {
       const fullBrandRow = makeBrandRow({
         brand_aliases: [{ alias: 'StringAlias', regions: [] }],
