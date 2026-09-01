@@ -1,3 +1,17 @@
+## [1.781.1](https://github.com/adobe/spacecat-api-service/compare/v1.781.0...v1.781.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* **deps:** bump spacecat-shared-scrape-client to 2.7.2 for PRE_ONBOARD tier ([#3171](https://github.com/adobe/spacecat-api-service/issues/3171)) ([45ebc67](https://github.com/adobe/spacecat-api-service/commit/45ebc67e187c16ecef3c50a9937b9bc6c49e491c)), closes [#1904](https://github.com/adobe/spacecat-api-service/issues/1904) [Hi#level](https://github.com/Hi/issues/level) [#1904](https://github.com/adobe/spacecat-api-service/issues/1904) [#1904](https://github.com/adobe/spacecat-api-service/issues/1904)
+
+# [1.781.0](https://github.com/adobe/spacecat-api-service/compare/v1.780.2...v1.781.0) (2026-09-01)
+
+
+### Features
+
+* **serenity:** real category delete — DELETE /serenity/tags/:tagId ([#3161](https://github.com/adobe/spacecat-api-service/issues/3161)) ([c9e72e7](https://github.com/adobe/spacecat-api-service/commit/c9e72e7f90e874a8ec787a5899391e05119e409e)), closes [Hi#level](https://github.com/Hi/issues/level) [adobe/serenity-docs#427](https://github.com/adobe/serenity-docs/issues/427) [adobe/spacecat-shared#1903](https://github.com/adobe/spacecat-shared/issues/1903) [adobe/spacecat-shared#1903](https://github.com/adobe/spacecat-shared/issues/1903) [adobe/spacecat-shared#1903](https://github.com/adobe/spacecat-shared/issues/1903) [spacecat-shared#1903](https://github.com/spacecat-shared/issues/1903)
+
 ## [1.780.2](https://github.com/adobe/spacecat-api-service/compare/v1.780.1...v1.780.2) (2026-08-31)
 
 
