@@ -15,6 +15,11 @@ import { readFeatureFlag } from './feature-flags-storage.js';
 export const LLMO_FEATURE_FLAG_PRODUCT = 'LLMO';
 export const LLMO_BRANDALF_FLAG = 'brandalf';
 export const LLMO_BRANDALF_MIGRATION_FLAG = 'brandalf_migration';
+/**
+ * @deprecated The resolver can no longer return v1 (brandalf-migration cleanup §2),
+ * so this constant now has zero production importers. Retained only for the §1
+ * follow-up that deletes the remaining v1 plumbing; remove it there.
+ */
 export const LLMO_ONBOARDING_MODE_V1 = 'v1';
 export const LLMO_ONBOARDING_MODE_V2 = 'v2';
 

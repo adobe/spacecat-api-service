@@ -2127,6 +2127,11 @@ describe('LLMO Onboarding Functions', () => {
       expect(result.message).to.equal('LLMO onboarding completed successfully');
       expect(mockLog.info).to.have.been.calledWith('Created site site123 for https://example.com using LLMO onboarding mode v2');
 
+      // Stale 'v1' pin does not degrade the run: all required DRS submissions
+      // still succeed, so the brand-activation summary reports no failure
+      // (matches the other brand-activation happy-path tests).
+      expect(result.brandActivation?.requiredWorkFailed).to.be.false;
+
       // v2 path taken: customer config + brandalf flag + Brandalf DRS job.
       expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres).to.have.been.calledOnce;
       expect(upsertStub).to.have.been.calledOnce;
@@ -5913,6 +5918,25 @@ describe('LLMO Onboarding Functions', () => {
       baseURL: 'https://example.com',
       context,
       say: sandbox.stub(),
+    });
+
+    it('throws when called with a non-v2 onboardingMode (contract guard, fails closed)', async () => {
+      const mockDrsClient = createMockDrsClient(sandbox);
+      const { activateBrandAndGeneratePrompts } = await esmockOnboarding(
+        createCommonEsmockDependencies({
+          mockDrsClient,
+          mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+        }),
+      );
+
+      const context = buildV2Context();
+      await expect(
+        activateBrandAndGeneratePrompts({ ...buildV2Params(context), onboardingMode: 'v1' }),
+      ).to.be.rejectedWith("activateBrandAndGeneratePrompts requires onboardingMode 'v2'; got 'v1'");
+
+      // Guard fires before any DRS hand-off, so a stale 'v1' can never leak into
+      // Brandalf job metadata.
+      expect(mockDrsClient.createFrom().submitJob).to.not.have.been.called;
     });
 
     it('registers all three prompt-suggestion schedules after the Brandalf trigger', async () => {

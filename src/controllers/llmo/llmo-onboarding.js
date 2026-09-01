@@ -33,6 +33,7 @@ import {
   resolveLlmoOnboardingMode,
   LLMO_FEATURE_FLAG_PRODUCT,
   LLMO_BRANDALF_FLAG,
+  LLMO_ONBOARDING_MODE_V2,
 } from '../../support/llmo-onboarding-mode.js';
 import { upsertFeatureFlag } from '../../support/feature-flags-storage.js';
 import { detectCdnForDomain } from '../../support/cdn-detection.js';
@@ -1390,6 +1391,16 @@ export async function activateBrandAndGeneratePrompts({
   context,
   say = () => {},
 }) {
+  // Contract guard (brandalf-migration cleanup §2): the resolver can no longer
+  // produce a non-v2 mode, and this value is stamped into DRS Brandalf job
+  // metadata. Fail closed so a future caller can never regress a stale 'v1' into
+  // DRS rather than silently handing off a v1-tagged job.
+  if (onboardingMode !== LLMO_ONBOARDING_MODE_V2) {
+    throw new Error(
+      `activateBrandAndGeneratePrompts requires onboardingMode '${LLMO_ONBOARDING_MODE_V2}'; got '${onboardingMode}'`,
+    );
+  }
+
   const { log } = context;
 
   // LLMO-7218 AC3/AC4: tracked here (not thrown) because every DRS side-effect below stays
