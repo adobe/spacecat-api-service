@@ -429,8 +429,15 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
 
     const { site, siteId } = result;
 
+    // LLMO-7218 AC3/AC4: the per-step :warning: messages from activateBrandAndGeneratePrompts
+    // already streamed to this thread in real time as they happened; this final banner must
+    // not override that with an unconditional checkmark when required work actually failed.
+    const requiredWorkFailed = result.brandActivation?.requiredWorkFailed ?? false;
     const regionLine = region ? `\n:globe_with_meridians: *Region:* ${region}` : '';
-    const message = `:white_check_mark: *LLMO onboarding completed successfully!*
+    const statusLine = requiredWorkFailed
+      ? ':warning: *LLMO onboarding completed with warnings* — see the messages above for what needs manual follow-up.'
+      : ':white_check_mark: *LLMO onboarding completed successfully!*';
+    const message = `${statusLine}
 
 :link: *Site:* ${baseURL}
 :identification_card: *Site ID:* ${siteId}

@@ -42,6 +42,7 @@ import {
   PROMISE_TOKEN_REQUIRED_ERROR_CODE,
 } from '../utils/constants.js';
 import { updateRumConfig } from './rum-config-service.js';
+import { notifyForcedTierDowngrade } from './slack/tier-change-alert.js';
 // Two signals indicate a previous paid onboarding:
 // 1. ahref-paid-pages import — unique to the paid profile's import set.
 // 2. onboardConfig.lastProfile === 'paid' — set for sites backfilled via script or onboarded
@@ -85,19 +86,10 @@ export const sanitizeExecutionName = (value) => {
   return executionName.slice(0, 80);
 };
 
-/**
- * Checks if the url parameter "url" equals "ALL".
- * @param {string} url - URL parameter.
- * @returns {boolean} True if url equals "ALL", false otherwise.
- */
-export const isAuditForAllUrls = (url) => url.toUpperCase() === 'ALL';
-
-/**
- * Checks if the deliveryType parameter "deliveryType" equals "ALL".
- * @param {string} deliveryType - deliveryType parameter.
- * @returns {boolean} True if deliveryType equals "ALL", false otherwise.
- */
-export const isAuditForAllDeliveryTypes = (deliveryType) => deliveryType.toUpperCase() === 'ALL';
+// Re-exported from a dependency-free leaf so lower-level modules (e.g. utils/slack/base.js) can
+// use these predicates without importing this hub module — importing them from here would create
+// an import cycle once this module imports slack helpers (SITES-50179).
+export { isAuditForAllUrls, isAuditForAllDeliveryTypes } from './audit-run-scope.js';
 
 /**
  * Sends an audit message for a single URL.
@@ -330,6 +322,18 @@ export const sendAuditMessages = async (
  * @param {Object} lambdaContext - The Lambda context object.
  * @return {Promise} - A promise representing the audit trigger operation.
  */
+// Offsite Opportunities audit types (LLMO-6973). Single source of truth — imported by
+// src/support/slack/commands/run-audit.js, which already depends on this module for
+// triggerAuditForSite, so importing this predicate back into it introduces no new cycle.
+export const OFFSITE_AUDIT_TYPES = [
+  'offsite-brand-presence',
+  'cited-analysis',
+  'reddit-analysis',
+  'youtube-analysis',
+  'wikipedia-analysis',
+];
+export const isOffsiteAuditType = (auditType) => OFFSITE_AUDIT_TYPES.includes(auditType);
+
 export const triggerAuditForSite = async (
   site,
   auditType,
@@ -346,6 +350,15 @@ export const triggerAuditForSite = async (
       channelId: slackContext.channelId,
       threadTs: slackContext.threadTs,
     },
+    // LLMO-6973: stamp the dispatching service into the message's auditContext, scoped
+    // strictly to the five offsite audit types — spacecat-audit-worker reads this (via an
+    // `origin` marker, see the audit_orchestration_spacecat_request_received "trigger"/"peer"
+    // fields) to tell a scheduled run apart from a Slack-triggered one, but only for offsite
+    // analyses. Gated here (rather than added unconditionally) to keep this shared framework
+    // code's message shape byte-for-byte unchanged for every other audit type in the system,
+    // mirroring how spacecat-jobs-dispatcher's equivalent change stays strictly scoped to
+    // offsite-brand-presence in its own shared dispatch path.
+    ...(isOffsiteAuditType(auditType) && { origin: 'api-service' }),
     ...auditContext,
   },
   site.getId(),
@@ -1794,9 +1807,10 @@ export async function queueDeliveryConfigWriter(
  * @param {Object} additionalParams - Additional parameters
  * @param {string} additionalParams.tier - Entitlement tier
  * @param {boolean} [additionalParams.forceTierUpdate] - When true, allows the onboard
- *   command to change a PLG/PRE_ONBOARD org's tier/entitlement and audit config. By
- *   default these tiers are preserved (SITES-49886). Separate from `force`, which only
- *   overrides the paid-profile downgrade guard.
+ *   command to promote a protected tier to the requested one. By default a PLG org's
+ *   tier/entitlement/enrollment and audit config are fully preserved, and a PRE_ONBOARD org's
+ *   tier is preserved while its enrollment is still bound (SITES-49886). Separate from
+ *   `force`, which only overrides the paid-profile downgrade guard.
  * @param {Object} options - Additional options
  * @param {Function} options.urlProcessor - Function to process the URL
  *                                          (e.g., extractURLFromSlackInput)
@@ -2022,37 +2036,87 @@ export const onboardSingleSite = async (
       prefetchedSite,
     );
 
-    // Protected-tier guard (SITES-49886): ASO entitlements are org-level. If the org
-    // already holds a PLG or PRE_ONBOARD ASO entitlement, the onboard command must NOT
-    // touch the tier/entitlement/enrollment — TierClient.createEntitlement(FREE_TRIAL)
-    // would otherwise overwrite (downgrade) the existing tier, exposing all opportunities
-    // instead of the limited PLG set. Onboarding is unsupported for these tiers; we only
-    // run audits/opportunities once (below) and leave the earlier config untouched.
-    // An explicit additionalParams.forceTierUpdate is the sole escape hatch (kept separate
-    // from `force`, which only overrides the paid-profile downgrade guard).
+    // Protected-tier guard (SITES-49886): ASO entitlements are org-level.
+    //
+    // PLG: the onboard command must NOT touch the tier/entitlement/enrollment —
+    // TierClient.createEntitlement(FREE_TRIAL) would otherwise overwrite (downgrade) the
+    // existing PLG tier, exposing all opportunities instead of the limited PLG set.
+    // Onboarding is unsupported for PLG; we only run audits/opportunities once (below) and
+    // leave the earlier config untouched.
+    //
+    // PRE_ONBOARD: an internal staging tier (set by the move-plg-site flow) that must be
+    // promoted deliberately, never silently downgraded. We preserve the TIER but still bind
+    // the site enrollment — passing the org's existing PRE_ONBOARD tier to createEntitlement
+    // leaves the tier as-is (currentTier === tier, so no setTier) while still creating the
+    // enrollment when the site has none. Audits/opportunities run normally (PRE_ONBOARD is not
+    // in the PLG skip branch). This is not a RESTRICTED_TIERS violation: that guard blocks
+    // *requesting* tier=PRE_ONBOARD; here we only re-assert the org's already-existing tier.
+    //
+    // additionalParams.forceTierUpdate is the sole escape hatch for both tiers (kept separate
+    // from `force`, which only overrides the paid-profile downgrade guard): it lets onboarding
+    // promote either tier to the requested FREE_TRIAL/PAID.
     const existingAso = await getAsoEntitlement(organizationId, context);
     const existingTier = existingAso?.getTier() ?? null;
-    const PROTECTED_EXISTING_TIERS = [
-      EntitlementModel.TIERS.PLG,
-      EntitlementModel.TIERS.PRE_ONBOARD,
-    ];
-    const isProtectedOrg = existingTier != null && PROTECTED_EXISTING_TIERS.includes(existingTier);
-    const preserveProtectedTier = isProtectedOrg && !additionalParams.forceTierUpdate;
+    const forced = !!additionalParams.forceTierUpdate;
+    const isPlgOrg = existingTier === EntitlementModel.TIERS.PLG;
+    const isPreOnboardOrg = existingTier === EntitlementModel.TIERS.PRE_ONBOARD;
+    // preservePlgTier: PLG is fully preserved — skip the entitlement/enrollment write AND the
+    // audit-config change below. preservePreOnboardTier: preserve only the tier — the enrollment
+    // is still bound and audit config still runs normally. `forced` overrides both.
+    const preservePlgTier = isPlgOrg && !forced;
+    const preservePreOnboardTier = isPreOnboardOrg && !forced;
+
+    // Both preserve paths report the org's true, unchanged tier rather than the requested one.
+    if (preservePlgTier || preservePreOnboardTier) {
+      reportLine.tier = existingTier;
+    }
 
     // Create entitlement and enrollment
-    if (preserveProtectedTier) {
-      reportLine.tier = existingTier; // report the true, unchanged tier
+    if (preservePlgTier) {
       log.info(`Preserving ${existingTier} tier for org ${organizationId} - skipping entitlement/enrollment write during onboard of ${baseURL}`);
       await say(`:lock: Org for \`${baseURL}\` is on the *${existingTier}* tier — onboarding will NOT change the tier, entitlement, or enrollment. Running audits and opportunities only. (Use *Force Tier Update* to override.)`);
     } else {
-      await createEntitlementAndEnrollment(
+      // Preserve a PRE_ONBOARD staging tier by re-asserting it (createEntitlement then only
+      // binds the missing enrollment); promote everything else — and PRE_ONBOARD too when
+      // forceTierUpdate is set — to the requested tier.
+      if (preservePreOnboardTier) {
+        log.info(`Preserving ${existingTier} tier for org ${organizationId} while binding the site enrollment during onboard of ${baseURL}`);
+        await say(`:lock: Org for \`${baseURL}\` is on the internal *${existingTier}* tier — onboarding will keep that tier and only ensure the site enrollment. (Use *Force Tier Update* to promote it.)`);
+      }
+      const effectiveTier = preservePreOnboardTier ? existingTier : tier;
+      const { entitlement } = await createEntitlementAndEnrollment(
         site,
         context,
         slackContext,
         reportLine,
         EntitlementModel.PRODUCT_CODES.ASO,
-        tier,
+        effectiveTier,
       );
+
+      // SITES-50179: the Force Tier Update escape hatch was exercised on a PLG org (isPlgOrg is
+      // only true in this branch when forceTierUpdate bypassed the guard above). If it downgraded
+      // PLG to FREE_TRIAL — the exact transition that silently exposed the full opportunity set in
+      // the original incident — alert the team so every deliberate override is visible without
+      // manual auditing. A PRE_ONBOARD promotion is an expected admin action and is deliberately
+      // not alerted. Best-effort: never blocks onboarding.
+      if (isPlgOrg && tier === EntitlementModel.TIERS.FREE_TRIAL) {
+        await notifyForcedTierDowngrade(
+          {
+            baseURL,
+            organizationId,
+            imsOrgID,
+            siteId: site.getId(),
+            entitlementId: entitlement?.getId?.(),
+            fromTier: existingTier,
+            toTier: tier,
+            profileName,
+            sourceChannelId: slackContext.channelId,
+            sourceThreadTs: slackContext.threadTs,
+          },
+          env,
+          log,
+        );
+      }
     }
 
     // Create new project or assign existing project
@@ -2228,9 +2292,9 @@ export const onboardSingleSite = async (
     //     fire once — enable status only gates scheduling, not triggering.
     const wantEnabled = scheduledRun || profile.protected;
     // Protected-tier orgs (SITES-49886): leave the existing audit scheduling config exactly
-    // as-is. Enabling/disabling handlers here would alter a PLG/PRE_ONBOARD customer's
-    // recurring-audit setup; we only run audits once (below). Skipped unless forceTierUpdate.
-    if (preserveProtectedTier) {
+    // as-is. Enabling/disabling handlers here would alter a PLG customer's recurring-audit
+    // setup; we only run audits once (below). Skipped unless forceTierUpdate.
+    if (preservePlgTier) {
       log.debug(`Preserving existing audit configuration for ${existingTier}-tier site ${siteID}`);
     } else {
       const latestConfiguration = await Configuration.findLatest();
@@ -2273,7 +2337,7 @@ export const onboardSingleSite = async (
     const auditsMessage = reportLine.audits || 'None';
     const importsMessage = reportLine.imports || 'None';
     let statusMessage;
-    if (preserveProtectedTier) {
+    if (preservePlgTier) {
       statusMessage = `:white_check_mark: *For site ${baseURL}*: Audit scheduling config preserved (${existingTier} tier); triggered audits once: ${auditsMessage}`;
     } else if (scheduledRun) {
       statusMessage = `:white_check_mark: *For site ${baseURL}*: Adding imports: ${importsMessage} and audits: ${auditsMessage} to scheduled run`;

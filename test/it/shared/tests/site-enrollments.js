@@ -113,5 +113,34 @@ export default function siteEnrollmentTests(getHttpClient, resetData) {
         expect(res.status).to.equal(403);
       });
     });
+
+    // ── POST create (admin-or-S2S entitlement:create) ──
+    // createPlgEnrollment is gated by admin-or-S2S entitlement:create (SITES-50526).
+    // CONSUMER_2 (s2sConsumerReadAll) holds the capability; CONSUMER_1
+    // (s2sConsumerReadOnly) does not. No summit-plg handler is enabled in the seed, so an
+    // authorized caller passes the capability gate and is rejected further downstream
+    // (handler-not-enabled) rather than at the gate — that is the not-403 vs 403
+    // distinction these tests assert.
+    describe('POST /sites/:siteId/site-enrollments', () => {
+      before(() => resetData());
+
+      it('s2sConsumerReadAll: passes the entitlement:create gate (not 403)', async () => {
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadAll.post(`/sites/${SITE_1_ID}/site-enrollments`, {});
+        expect(res.status).to.not.equal(403);
+      });
+
+      it('s2sConsumerReadOnly: returns 403 (lacks entitlement:create)', async () => {
+        const http = getHttpClient();
+        const res = await http.s2sConsumerReadOnly.post(`/sites/${SITE_1_ID}/site-enrollments`, {});
+        expect(res.status).to.equal(403);
+      });
+
+      it('user: returns 403 (admin-or-S2S only)', async () => {
+        const http = getHttpClient();
+        const res = await http.user.post(`/sites/${SITE_1_ID}/site-enrollments`, {});
+        expect(res.status).to.equal(403);
+      });
+    });
   });
 }

@@ -1361,8 +1361,63 @@ describe('brands-storage', () => {
       });
 
       const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
-      expect(brandsUpsert.row).to.not.have.property('site_id');
+      // The attempted change to 'different-site' is rejected (warns, doesn't
+      // apply), but site_id must still be carried forward as the EXISTING
+      // value rather than omitted from the row entirely — an omitted column
+      // is not preserved by the upsert and would trip
+      // chk_active_brand_has_site_id on write (see the fix above this branch).
+      expect(brandsUpsert.row.site_id).to.equal('original-site');
       expect(log.warn).to.have.been.calledWithMatch('immutable');
+    });
+
+    it('carries forward site_id when re-upserting an already-anchored brand with the SAME baseSiteId', async () => {
+      // The exact case that was silently broken: a caller (e.g. a migration
+      // script) reads a brand back and re-submits its own already-correct
+      // baseSiteId verbatim. None of the three original branches matched this
+      // (existing !== null, existing.site_id already set, and the "changed"
+      // branch's inequality check is false), so site_id was omitted from the
+      // upsert row entirely — silently clearing an already-anchored brand and
+      // tripping chk_active_brand_has_site_id with a 400 on a request that
+      // never intended to touch the anchor.
+      const client = createCapturingClient({
+        brands: [
+          { data: { site_id: 'same-site' }, error: null }, // existing lookup
+          { data: { id: BRAND_ID, name: 'Test' }, error: null }, // upsert result
+          { data: makeBrandRow({ name: 'Test', site_id: 'same-site' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', baseSiteId: 'same-site' },
+        postgrestClient: client,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row.site_id).to.equal('same-site');
+    });
+
+    it('carries forward site_id when re-upserting an already-anchored brand with NO baseSiteId in the body', async () => {
+      // Same underlying gap, different trigger: a partial upsert that omits
+      // baseSiteId altogether on an already-anchored brand also hit none of
+      // the three original branches (all three require hasText(baseSiteId)
+      // except the existing===null branch), dropping site_id the same way.
+      const client = createCapturingClient({
+        brands: [
+          { data: { site_id: 'existing-site' }, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test', site_id: 'existing-site' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test' },
+        postgrestClient: client,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row.site_id).to.equal('existing-site');
     });
 
     it('rejects a fresh create whose baseSiteId belongs to a different org (serenity-docs#346)', async () => {
@@ -2650,6 +2705,89 @@ describe('brands-storage', () => {
       expect(brandsUpdate.row.site_id).to.equal('different-site-id');
     });
 
+    it('re-points baseSiteId to a site that is already one of the brand\'s OWN '
+      + 'secondary siteIds (serenity-docs#349 live-testing regression: this must NOT '
+      + 'be treated as a no-op)', async () => {
+      // Live e2e testing on a real org found that re-pointing a brand's primary site
+      // onto a site that was already listed among the brand's own secondary siteIds
+      // (via brand_sites) came back as a silent no-op: 200, but baseSiteId/updatedAt
+      // unchanged. This function has no code path that even reads brand_sites when
+      // deciding whether to write site_id (updateBrand's own pre-write `existing`
+      // read is a plain `site_id` column read, not a brand_sites join), so a target
+      // already known to the brand must be re-pointed exactly like any other target.
+      const client = createCapturingClient({
+        brands: [
+          // 1st call: select current row — brand anchored to OLD_SITE.
+          { data: { site_id: 'old-primary-site-id', status: 'active' }, error: null },
+          // 2nd call: the UPDATE's own RETURNING (BRAND_SELECT embed) — what a real
+          // PostgREST `Prefer: return=representation` response looks like on this
+          // UPDATE. site_id now NEW_SITE, and brand_sites still lists OLD_SITE +
+          // NEW_SITE + a third secondary (mirrors the live bug report: the target
+          // was already a secondary URL before the re-point). This call is
+          // guaranteed to land on the writer (see updateBrand's comment), so — per
+          // the fix — updateBrand builds its result directly from THIS row when
+          // (as here) no child-table collection was touched by the same PATCH.
+          {
+            data: makeBrandRow({
+              site_id: 'new-secondary-site-id',
+              base_site: { id: 'new-secondary-site-id', base_url: 'https://example.com' },
+              status: 'active',
+              updated_at: '2026-01-02T00:00:00Z',
+              brand_sites: [
+                { site_id: 'old-primary-site-id', paths: [], sites: { base_url: 'https://haha.com' } },
+                { site_id: 'new-secondary-site-id', paths: [], sites: { base_url: 'https://example.com' } },
+                { site_id: 'third-site-id', paths: [], sites: { base_url: 'https://you.com' } },
+              ],
+            }),
+            error: null,
+          },
+          // 3rd call: getBrandById re-fetch. Deliberately modeled as STALE — still
+          // shows the OLD site_id/updatedAt — to simulate the CONFIRMED production
+          // mechanism (serenity-docs#349 follow-up): this env's postgrestClient
+          // points at `data-svc-balanced.internal`, where a bare GET can be served
+          // by a lagging Aurora reader replica even though the write already
+          // committed on the writer. Because this PATCH touches no child-table
+          // collection, the fix never issues this call at all. If a future change
+          // reintroduced the old unconditional getBrandById() re-fetch, this stale
+          // fixture would make the assertions below fail — proving this test
+          // actually exercises the race, not just a mock that was never stale.
+          {
+            data: makeBrandRow({
+              site_id: 'old-primary-site-id',
+              base_site: { id: 'old-primary-site-id', base_url: 'https://haha.com' },
+              status: 'active',
+              updated_at: '2026-01-01T00:00:00Z',
+              brand_sites: [
+                { site_id: 'old-primary-site-id', paths: [], sites: { base_url: 'https://haha.com' } },
+                { site_id: 'new-secondary-site-id', paths: [], sites: { base_url: 'https://example.com' } },
+                { site_id: 'third-site-id', paths: [], sites: { base_url: 'https://you.com' } },
+              ],
+            }),
+            error: null,
+          },
+        ],
+        sites: { data: { id: 'new-secondary-site-id' }, error: null }, // target belongs to org
+      });
+
+      const result = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { baseSiteId: 'new-secondary-site-id' },
+        postgrestClient: client,
+      });
+
+      expect(result).to.not.be.null;
+      const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
+      // The write itself must carry the NEW site_id — never silently dropped or
+      // reverted because the target was already a known secondary.
+      expect(brandsUpdate.row.site_id).to.equal('new-secondary-site-id');
+      expect(result.baseSiteId).to.equal('new-secondary-site-id');
+      expect(result.updatedAt).to.equal('2026-01-02T00:00:00Z');
+      expect(result.siteIds).to.include.members([
+        'old-primary-site-id', 'new-secondary-site-id', 'third-site-id',
+      ]);
+    });
+
     it('clears site_id when a pending brand passes baseSiteId: null (LLMO-5870)', async () => {
       const client = createCapturingClient({
         brands: [
@@ -2797,9 +2935,13 @@ describe('brands-storage', () => {
     });
 
     it('normalizes brand guidance fields in update patch', async () => {
+      // No baseSiteId/status/expectedUpdatedAt here, so there is no pre-read: the
+      // 1st brands call IS the UPDATE's own RETURNING. Since this PATCH touches no
+      // child-table collection, updateBrand returns straight off this row (no
+      // follow-up read at all) — so it must already carry the applied values, the
+      // same way a real `Prefer: return=representation` response would.
       const client = createCapturingClient({
         brands: [
-          { data: { id: BRAND_ID }, error: null },
           {
             data: makeBrandRow({
               brand_context: null,
@@ -3002,11 +3144,13 @@ describe('brands-storage', () => {
     });
 
     it('handles non-string region values in updates', async () => {
+      // region-only patch: no child-table collection touched, so updateBrand
+      // returns straight off the UPDATE's own RETURNING row (1st/only brands call)
+      // — no follow-up read.
       const fullBrandRow = makeBrandRow({ regions: ['42'] });
 
       const postgrestClient = createTableMockClient({
         brands: [
-          { data: { id: BRAND_ID }, error: null },
           { data: fullBrandRow, error: null },
         ],
       });

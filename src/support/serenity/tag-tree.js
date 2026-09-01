@@ -54,6 +54,8 @@ import {
   INTENT_ROOT_NAME,
   rootNameOfDimension,
   dimensionOfRootName,
+  displayNameOfValue,
+  valueSlugOfDisplayName,
 } from './prompt-tags.js';
 
 /** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */
@@ -86,6 +88,18 @@ import {
 const MAX_TREE_READS = 200;
 
 /**
+ * Bounds the total id count {@link collectSubtreeIds} forwards into a single
+ * upstream batch-delete call. This is independent of {@link MAX_TREE_READS}:
+ * a shallow-but-wide subtree (one category with thousands of direct leaf
+ * children) completes in a single read, well under the read cap, yet would
+ * otherwise produce a batch-delete payload with thousands of ids. Unlike the
+ * read cap's "truncating would be a wrong answer" concern, refusing an
+ * oversized DELETE with a clear error is the correct behavior, not a
+ * degraded one.
+ */
+const MAX_SUBTREE_DELETE_SIZE = 2000;
+
+/**
  * Lists one level of the tree and indexes it by bare name. Uniqueness is per
  * `(project, parent)`, so a name is unambiguous WITHIN a level.
  *
@@ -116,18 +130,6 @@ export async function indexLevelByName(transport, semrushWorkspaceId, projectId,
 }
 
 /**
- * The names of `wanted` that a level index does not already carry, and therefore
- * still have to be created under that parent.
- *
- * @param {Map<string, string>} level - a level index.
- * @param {readonly string[]} wanted - the names the caller asked for.
- * @returns {string[]} what still has to be created.
- */
-function missingNames(level, wanted) {
-  return wanted.filter((name) => !level.has(name));
-}
-
-/**
  * Creates the missing names under one parent and returns their ids, merged with
  * the ones that already existed. A single upstream call carries every name for
  * one parent, so the batch never straddles two parents (the wire has exactly one
@@ -139,16 +141,35 @@ function missingNames(level, wanted) {
  * a name another writer minted first, or one the upstream echoed but did not
  * persist, is resolved, not claimed.
  *
+ * ALIAS-TOLERANT (tag-display-names.md §5 phase 1): a wanted name resolves if
+ * the level carries that name itself OR any of its {@link aliasesOf} spellings
+ * (e.g. the pre-freeze slug beside the display name once the vocabulary
+ * changes) — only the WANTED (canonical) name is ever created. This is purely
+ * additive: a wanted name resolved via an alias is recorded under BOTH its own
+ * literal tree spelling (unchanged, from `indexLevelByName`) AND the canonical
+ * `wanted` spelling in the returned `byName`, so a caller indexing by either
+ * the literal name (anomaly detection, e.g. {@link ensureDimensionRoots}'s
+ * split-root guardrails) or the canonical name it asked for gets an answer.
+ * Under today's IDENTITY PLACEHOLDER maps every alias set is a singleton (the
+ * canonical name is its own only alias), so this is a no-op — `aliasesOf`
+ * defaults to "no aliases" for every existing caller that does not pass it.
+ *
  * Fails closed: throws a 502 rather than returning a map missing a wanted name.
  *
  * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
  * @param {string} parentId - '' to create at the root level.
- * @param {readonly string[]} wanted - bare names that must exist under `parentId`.
+ * @param {readonly string[]} wanted - bare (canonical) names that must exist
+ *   under `parentId`; only these are ever created.
  * @param {object} [log] - logger.
+ * @param {(name: string) => readonly string[]} [aliasesOf] - additional
+ *   spellings that, if already present at this level, resolve a wanted name
+ *   without creating it. Defaults to "no aliases" — every pre-existing caller
+ *   is unaffected.
  * @returns {Promise<{ byName: Map<string, string>, createdNames: string[] }>}
- *   `byName` maps every wanted name to its tag id.
+ *   `byName` maps every wanted name (and any literal tree name it did not ask
+ *   for) to its tag id.
  */
 export async function ensureChildren(
   transport,
@@ -157,9 +178,25 @@ export async function ensureChildren(
   parentId,
   wanted,
   log,
+  aliasesOf = () => [],
 ) {
   const existing = await indexLevelByName(transport, semrushWorkspaceId, projectId, parentId, log);
-  const missing = missingNames(existing, wanted);
+  const missing = [];
+  for (const name of wanted) {
+    if (existing.has(name)) {
+      // Nothing to do — the exact wanted spelling is already there.
+    } else {
+      const alias = aliasesOf(name).find((a) => existing.has(a));
+      if (alias !== undefined) {
+        // Additive only: the alias's own literal key stays exactly as
+        // `indexLevelByName` found it; this adds the canonical spelling as a
+        // second key pointing at the same id.
+        existing.set(name, /** @type {string} */ (existing.get(alias)));
+      } else {
+        missing.push(name);
+      }
+    }
+  }
   if (missing.length === 0) {
     return { byName: existing, createdNames: [] };
   }
@@ -247,6 +284,61 @@ export async function ensureChildren(
 const LEGACY_SOURCE_ROOT_NAME = 'source';
 
 /**
+ * The dimensions whose ROOT may carry a display rename (tag-display-names.md
+ * §1 item 4) — `category`, `type`, `source`. `intent` is excluded (its root is
+ * `$abv_tags$intent` forever, no display rename) and `origin` is excluded
+ * (retired by remap, not renamed) — both already have their OWN dedicated
+ * split-root guardrails above/below, so they are deliberately not folded into
+ * this generalized one.
+ */
+const DISPLAY_RENAMING_DIMENSIONS = [DIMENSION.CATEGORY, DIMENSION.TYPE, DIMENSION.SOURCE];
+
+/**
+ * The alias set {@link ensureChildren} checks for one of
+ * {@link DISPLAY_RENAMING_DIMENSIONS}'s CURRENT root-name spellings — the bare
+ * dimension key, so a project that still carries the pre-freeze slug root
+ * resolves under it rather than minting a second, empty root beside it
+ * (tag-display-names.md §5 phase 1). Under today's IDENTITY PLACEHOLDER
+ * ({@link rootNameOfDimension} returning the dimension key verbatim for these
+ * three) the alias coincides with the name itself, so this returns `[]` — no
+ * behavior change until the vocabulary freezes.
+ *
+ * @param {string} rootName - one of `DIMENSION_PROVISION_ORDER.map(rootNameOfDimension)`.
+ * @returns {string[]}
+ */
+function rootAliasesOf(rootName) {
+  const dimension = DIMENSION_PROVISION_ORDER.find((d) => rootNameOfDimension(d) === rootName);
+  const aliasable = /** @type {readonly string[]} */ (DISPLAY_RENAMING_DIMENSIONS);
+  if (!dimension || !aliasable.includes(dimension) || dimension === rootName) {
+    return [];
+  }
+  return [dimension];
+}
+
+/**
+ * The alias set {@link ensureChildren} checks for a SERVER-OWNED VALUE's
+ * current display form ({@link displayNameOfValue}) — the bare slug it was
+ * derived from, via {@link valueSlugOfDisplayName}, so a project that still
+ * carries the pre-freeze slug-named value resolves under it rather than
+ * minting a second, empty value beside it (tag-display-names.md §5 phase 1).
+ * Only `source`/`type` values can currently diverge from their slug (the
+ * closed `intent`/`origin` vocabularies never display-rename); for those,
+ * {@link valueSlugOfDisplayName} always returns `undefined`, so the alias set
+ * is empty and this is a no-op there too. Under today's IDENTITY PLACEHOLDER
+ * maps (`source`/`type`) the alias coincides with the display name itself, so
+ * this returns `[]` for every value until the vocabulary freezes.
+ *
+ * @param {string} dimension - a server-owned dimension.
+ * @returns {(displayName: string) => string[]}
+ */
+function valueAliasesOf(dimension) {
+  return (displayName) => {
+    const slug = valueSlugOfDisplayName(dimension, displayName);
+    return slug && slug !== displayName ? [slug] : [];
+  };
+}
+
+/**
  * Resolves the five dimension roots, creating any that a project is missing.
  * Older projects predate this taxonomy entirely, so this is the seam that brings
  * them forward on first touch.
@@ -287,6 +379,7 @@ export async function ensureDimensionRoots(transport, semrushWorkspaceId, projec
     '',
     DIMENSION_PROVISION_ORDER.map(rootNameOfDimension),
     log,
+    rootAliasesOf,
   );
 
   // Observability guardrail (no tolerance, no behavior change): freshly minting `origin`
@@ -325,6 +418,35 @@ export async function ensureDimensionRoots(transport, semrushWorkspaceId, projec
       + `\`${INTENT_ROOT_NAME}\` — the intent dimension is split on this project`,
       { semrushWorkspaceId, projectId, event: 'intent-rename-split-root' },
     );
+  }
+
+  // Generalized split-root guardrail (tag-display-names.md §3 step 4, §5 phase
+  // 1) — the value-level analog of the two guardrails above, for the THREE
+  // roots this spec display-renames. `ensureChildren`'s alias resolution
+  // (above) prefers whichever spelling the tree already has, so it can only
+  // ever surface ONE side of a genuine split; this is what surfaces the other.
+  // `byName` carries BOTH the dimension-key entry and the display-name entry
+  // whenever either was literally present on the tree (ensureChildren is
+  // additive, never destructive) — so two DIFFERENT ids under the same
+  // dimension means both spellings exist as distinct root tags.
+  // IDENTITY PLACEHOLDER today: `rootNameOfDimension(dimension) === dimension`
+  // for all three, so this loop body never runs until the vocabulary freezes.
+  for (const dimension of DISPLAY_RENAMING_DIMENSIONS) {
+    const displayName = rootNameOfDimension(dimension);
+    if (displayName !== dimension) {
+      const displayId = byName.get(displayName);
+      const slugId = byName.get(dimension);
+      if (displayId && slugId && displayId !== slugId) {
+        log?.warn?.(
+          `ensureDimensionRoots: both the slug root "${dimension}" and its display root `
+          + `"${displayName}" exist as distinct tags — the display-name migration may `
+          + 'have missed this project',
+          {
+            semrushWorkspaceId, projectId, dimension, event: 'display-rename-split-root',
+          },
+        );
+      }
+    }
   }
 
   // Return the roots keyed by DIMENSION, in canonical order.
@@ -491,6 +613,69 @@ async function findTagInTree(transport, semrushWorkspaceId, projectId, tagId, lo
 }
 
 /**
+ * Collects `tagId` plus every id in its subtree, by walking the draft tree
+ * level by level from that node (category-delete.md §4.2). A delete deletes
+ * the whole subtree, composed HERE rather than relied upon upstream: the
+ * batch-delete operation is not known to cascade (and, per the mock's own
+ * documented behavior, does not), so a caller that only sent the target id
+ * would strand its children as unreachable, prompt-less orphans.
+ *
+ * Composing the id set this way is independent of whatever upstream turns out
+ * to do with a parent-with-children delete: if upstream also cascades, the
+ * extra descendant ids are already-deleted members of the same batch: a
+ * harmless no-op, not an error (batch delete is documented idempotent per id).
+ *
+ * This is a point-in-time snapshot, not a lock: a tag created under `tagId`
+ * between this read and the caller's subsequent batch-delete call is not in
+ * the returned set and will not be deleted, stranding it as an orphan under a
+ * now-gone parent. Same class of risk as the cascade uncertainty above
+ * (category-delete.md §6 gate G1), not a new one — accepted for the same
+ * reason: there is no upstream lock primitive to hold instead.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string} tagId - the subtree's root id (included in the result).
+ * @param {object} [log] - logger.
+ * @returns {Promise<string[]>} `tagId` followed by every descendant id, in
+ *   level order.
+ */
+export async function collectSubtreeIds(transport, semrushWorkspaceId, projectId, tagId, log) {
+  const ids = [tagId];
+  let frontier = [tagId];
+  let reads = 0;
+  while (frontier.length > 0) {
+    const next = [];
+    for (const nodeId of frontier) {
+      reads += 1;
+      if (reads > MAX_TREE_READS) {
+        throw new ErrorWithStatusCode('tag subtree too large to resolve', 502);
+      }
+      // Sequential by design — see findTagsInTree for the same rationale.
+      // eslint-disable-next-line no-await-in-loop
+      const { items } = await listProjectTagTree(
+        transport,
+        semrushWorkspaceId,
+        projectId,
+        nodeId,
+        log,
+      );
+      for (const child of items) {
+        ids.push(child.id);
+        if (ids.length > MAX_SUBTREE_DELETE_SIZE) {
+          throw new ErrorWithStatusCode('tag subtree too large to delete', 502);
+        }
+        if (child.childrenCount > 0) {
+          next.push(child.id);
+        }
+      }
+    }
+    frontier = next;
+  }
+  return ids;
+}
+
+/**
  * Throws unless `parent` is the `dimension` root itself or one of its
  * descendants, and — when a tag is being MOVED under it — unless `parent` sits
  * outside that tag's own subtree.
@@ -629,18 +814,23 @@ export async function ensureServerOwnedValue(
 ) {
   const roots = await ensureDimensionRoots(transport, semrushWorkspaceId, projectId, log);
   const rootId = requireServerOwnedRootId(roots, dimension);
+  // Resolve/create by the value's CURRENT display form (identity today — see
+  // {@link displayNameOfValue}), tolerating the bare slug as an alias
+  // (tag-display-names.md §5 phase 1).
+  const displayName = displayNameOfValue(dimension, value);
   const { byName, createdNames } = await ensureChildren(
     transport,
     semrushWorkspaceId,
     projectId,
     rootId,
-    [value],
+    [displayName],
     log,
+    valueAliasesOf(dimension),
   );
   return {
-    id: /** @type {string} */ (byName.get(value)),
+    id: /** @type {string} */ (byName.get(displayName)),
     rootId,
-    created: createdNames.includes(value),
+    created: createdNames.includes(displayName),
   };
 }
 
@@ -679,16 +869,19 @@ export async function resolveServerOwnedValueInjection(
 ) {
   const roots = await ensureDimensionRoots(transport, semrushWorkspaceId, projectId, log);
   const rootId = requireServerOwnedRootId(roots, dimension);
+  // Same display-form resolve-or-create as ensureServerOwnedValue, above.
+  const displayName = displayNameOfValue(dimension, wantValue);
   const { byName } = await ensureChildren(
     transport,
     semrushWorkspaceId,
     projectId,
     rootId,
-    [wantValue],
+    [displayName],
     log,
+    valueAliasesOf(dimension),
   );
   return {
-    computedId: /** @type {string} */ (byName.get(wantValue)),
+    computedId: /** @type {string} */ (byName.get(displayName)),
     valueTagIds: [...byName.values()],
   };
 }

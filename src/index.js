@@ -109,6 +109,7 @@ import DrsBpPgAuditController from './controllers/drs-bp-pg-audit.js';
 import routeRequiredCapabilities, { INTERNAL_ROUTES } from './routes/required-capabilities.js';
 import routeFacsCapabilities from './routes/facs-capabilities.js';
 import { secondaryResolvers } from './support/facs-secondary-resolvers.js';
+import { compositeResolvers } from './support/facs-composite-resolvers.js';
 import ContactSalesLeadsController from './controllers/contact-sales-leads.js';
 import PageRelationshipsController from './controllers/page-relationships.js';
 import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
@@ -496,7 +497,7 @@ const wrappedMain = wrap(run)
   // Enforces the hybrid MAC/FACS model (JWT facs_permissions ∪ state-layer grants)
   // for FACS-governed external callers; internal identities and non-enrolled orgs
   // bypass. See routeFacsCapabilities for route → capability classification.
-  .with(facsWrapper, { routeFacsCapabilities, secondaryResolvers })
+  .with(facsWrapper, { routeFacsCapabilities, secondaryResolvers, compositeResolvers })
   .with(readOnlyAdminWrapper, {
     routeCapabilities: routeRequiredCapabilities,
     internalRoutes: INTERNAL_ROUTES,

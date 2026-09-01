@@ -1002,6 +1002,31 @@ describe('Fixes Controller', () => {
       expect(await response.json()).deep.equals(fixEntities.map((fix) => FixDto.toJSON(fix)));
     });
 
+    it('narrows opportunities by the caller\'s permitted composite types (D4)', async () => {
+      const securityFix = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        changeDetails: { arbitrary: 'sec' },
+      });
+      // Two opportunity types on the site; caller is scoped to 'security' only.
+      dataAccess.Opportunity.allBySiteId.resolves([
+        { getId: () => opportunityId, getType: () => 'security' },
+        { getId: () => opportunityId2, getType: () => 'meta-tags' },
+      ]);
+      fixEntityCollection.allByOpportunityIds
+        .withArgs([opportunityId])
+        .resolves([securityFix]);
+
+      requestContext.attributes = { facsComposite: { values: ['security'] } };
+      const response = await fixesController.getAllForSite(requestContext);
+
+      expect(response).includes({ status: 200 });
+      expect(await response.json()).deep.equals([FixDto.toJSON(securityFix)]);
+      // The non-permitted (meta-tags) opportunity id is never queried for fixes.
+      expect(fixEntityCollection.allByOpportunityIds)
+        .to.have.been.calledOnceWithExactly([opportunityId]);
+    });
+
     it('filters aggregated fixes by status in-memory', async () => {
       const pendingFix = await fixEntityCollection.create({
         type: Suggestion.TYPES.CONTENT_UPDATE,

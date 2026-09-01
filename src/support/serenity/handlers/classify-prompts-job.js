@@ -30,6 +30,7 @@ import {
 } from './prompts.js';
 import { ORIGIN_VALUE } from '../prompt-tags.js';
 import { resolveIntentValueInjection } from '../tag-tree.js';
+import { buildSliceProjectMap, sliceKey } from '../subworkspace-projects.js';
 
 /** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
 
@@ -139,7 +140,8 @@ async function requeuePending(context, job, semrushWorkspaceId, items) {
  * @param {SerenityTransport} transport - Serenity transport built from the exchanged
  *   access token.
  * @param {object} metadata - the job's metadata (`brandId`, `semrushWorkspaceId`,
- *   `prompts`).
+ *   `prompts`, and — for a subworkspace-mode CSV import — `authMode`,
+ *   `workspaceId`, `parentWorkspaceId`).
  * @returns {Promise<object>} the job result.
  */
 async function createAndClassify(context, job, transport, metadata) {
@@ -149,13 +151,37 @@ async function createAndClassify(context, job, transport, metadata) {
   // Authorship (LLMO-6289): the caller id captured at enqueue time in the create
   // controller, carried through the async job so classified-on-create prompts are
   // stamped with the human/service that submitted them, not the job runner.
-  const { brandId, semrushWorkspaceId, callerId = 'unknown' } = metadata;
+  const {
+    brandId, semrushWorkspaceId, callerId = 'unknown', authMode,
+  } = metadata;
   const inputs = Array.isArray(metadata.prompts) ? metadata.prompts : [];
 
-  const projects = await dataAccess.BrandSemrushProject.allByBrandId(brandId);
-  const projectsBySlice = new Map();
-  for (const p of projects || []) {
-    projectsBySlice.set(`${p.getGeoTargetId()}:${p.getLanguageCode()}`, p);
+  // Slice→project resolution is the ONLY create-path difference between the two
+  // modes (mirrors the sync twins handleCreatePrompts vs
+  // handleCreatePromptsSubworkspace): flat mode reads the BrandSemrushProject DB
+  // mapping, subworkspace resolves projects from ONE live listing of the
+  // sub-workspace (buildSliceProjectMap). Everything downstream — the classifier,
+  // tag/intent injectors, per-slice create + publish-once fan-out, the pending
+  // self-requeue — is the shared, project-id-keyed logic below.
+  const isSubworkspace = authMode === 'subworkspace';
+  /** @type {(geoTargetId: number, languageCode: string) => string | null} */
+  let resolveProjectIdForSlice;
+  if (isSubworkspace) {
+    const projectsBySlice = await buildSliceProjectMap(transport, semrushWorkspaceId, log);
+    resolveProjectIdForSlice = (geoTargetId, languageCode) => {
+      const project = projectsBySlice.get(sliceKey(geoTargetId, languageCode));
+      return project ? String(project.id) : null;
+    };
+  } else {
+    const projects = await dataAccess.BrandSemrushProject.allByBrandId(brandId);
+    const projectsBySlice = new Map();
+    for (const p of projects || []) {
+      projectsBySlice.set(`${p.getGeoTargetId()}:${p.getLanguageCode()}`, p);
+    }
+    resolveProjectIdForSlice = (geoTargetId, languageCode) => {
+      const project = projectsBySlice.get(`${geoTargetId}:${languageCode}`);
+      return project ? project.getSemrushProjectId() : null;
+    };
   }
 
   const classifyPromptType = await buildPromptTypeClassifier(dataAccess, brandId);
@@ -180,8 +206,8 @@ async function createAndClassify(context, job, transport, metadata) {
     if (!input) {
       return { skipped: { text: String(raw?.text || ''), reason: /** @type {string} */ (reason) } };
     }
-    const project = projectsBySlice.get(`${input.geoTargetId}:${input.languageCode}`);
-    if (!project) {
+    const projectId = resolveProjectIdForSlice(input.geoTargetId, input.languageCode);
+    if (!projectId) {
       return {
         skipped: {
           text: input.text,
@@ -189,7 +215,6 @@ async function createAndClassify(context, job, transport, metadata) {
         },
       };
     }
-    const projectId = project.getSemrushProjectId();
     try {
       let typed = await injectComputedTags(projectId, input);
       typed = await injectComputedIntent(projectId, typed);
@@ -289,7 +314,8 @@ async function createAndClassify(context, job, transport, metadata) {
  * @param {SerenityTransport} transport
  * @param {object} metadata - `{ semrushWorkspaceId, items: [{ projectId,
  *   promptId, text, tagIds }] }` — `tagIds` is the FULL desired tag set minus
- *   `intent` (caller tags + server type/origin), matching the edit handlers'
+ *   `intent` (caller tags + server type/source; `origin` no longer gets its
+ *   own tag, tag-display-names.md §3), matching the edit handlers'
  *   "recompute the whole set, then replace" contract.
  * @returns {Promise<object>} the job result.
  */
