@@ -183,13 +183,28 @@ export async function handleRequestBrandClaims(context, site) {
     return internalServerError('Brand Claims on-demand trigger is not configured for this environment');
   }
 
+  // Optional topic filter (LLMO-7263): when the caller selects topics, the run is
+  // scoped to claims for those topics; absent/empty means all topics (default).
+  const rawTopics = context.data?.topics;
+  let topics;
+  if (rawTopics !== undefined) {
+    if (!Array.isArray(rawTopics) || !rawTopics.every((t) => typeof t === 'string')) {
+      return badRequest('`topics` must be an array of strings');
+    }
+    const cleaned = [...new Set(rawTopics.map((t) => t.trim()).filter((t) => t.length > 0))];
+    if (cleaned.length > 0) {
+      topics = cleaned;
+    }
+  }
+
   await sqs.sendMessage(queueUrl, {
     type: 'brand-claims',
     siteId: site.getId(),
     onDemand: true,
+    ...(topics ? { topics } : {}),
     auditContext: { trigger: 'on-demand-brand-claims' },
   });
-  log.info(`Brand Claims on-demand: triggered brand-claims audit for site ${site.getId()}`);
+  log.info(`Brand Claims on-demand: triggered brand-claims audit for site ${site.getId()}${topics ? ` (topics: ${topics.length})` : ''}`);
 
   const slackChannel = env?.SLACK_LLMO_ALERTS_CHANNEL_ID;
   const slackToken = env?.SLACK_BOT_TOKEN;
