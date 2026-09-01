@@ -664,6 +664,31 @@ export default function serenityTests(
       );
       expect(del.status).to.equal(204);
 
+      // `parent` itself is gone, so its former children level reads empty —
+      // this is the only check that can distinguish "both children deleted"
+      // from "only the branch with a grandchild followed" (a fan-out bug that
+      // only captures the LAST frontier node's children would still delete
+      // childWithGrandchild and leave leafChild behind as an orphan the
+      // category-root-level check alone could never catch, since leafChild
+      // was never a category-root-level node to begin with).
+      const underParent = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${parent.body.id}`,
+      );
+      expect(underParent.body.items).to.deep.equal([]);
+      expect(underParent.body.items.map((t) => t.id)).to.not.include.members([
+        childWithGrandchild.body.id, leafChild.body.id,
+      ]);
+
+      // The deeper grandchild is gone too — proves the walk followed the
+      // WITH-grandchild branch to its own second level, not just its first.
+      const underChildWithGrandchild = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${childWithGrandchild.body.id}`,
+      );
+      expect(underChildWithGrandchild.body.items).to.deep.equal([]);
+      expect(underChildWithGrandchild.body.items.map((t) => t.id)).to.not.include(
+        grandchild.body.id,
+      );
+
       const rootsAfter = await getHttpClient().admin.get(
         `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=`,
       );
@@ -671,11 +696,7 @@ export default function serenityTests(
       const remaining = await getHttpClient().admin.get(
         `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${categoryRoot.id}`,
       );
-      // All four nodes are gone — the leaf sibling with no children of its own
-      // is not left behind by a fan-out that only follows one branch.
-      expect(remaining.body.items.map((t) => t.id)).to.not.include.members([
-        parent.body.id, childWithGrandchild.body.id, grandchild.body.id, leafChild.body.id,
-      ]);
+      expect(remaining.body.items.map((t) => t.id)).to.not.include(parent.body.id);
     });
 
     // Prompt preservation is the upstream detach, not client choreography: the
