@@ -1335,7 +1335,12 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     }, fakeLog());
 
     expect(result.items).to.deep.equal([{
-      id: 'root-1', name: 'category:Footwear', parentId: null, childrenCount: 2, path: null,
+      id: 'root-1',
+      name: 'category:Footwear',
+      parentId: null,
+      childrenCount: 2,
+      promptsCount: 0,
+      path: null,
     }]);
     // Tree read, not the prompt-derived path.
     expect(transport.listPromptsByTags).to.not.have.been.called;
@@ -1378,9 +1383,46 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
       name: 'category:Sneakers',
       parentId: 'root-1',
       childrenCount: 0,
+      promptsCount: 0,
       path: [{ id: 'root-1', name: 'category:Footwear' }],
     }]);
     expect(transport.listProjectTags.firstCall.args[2]).to.include({ parentId: 'root-1', draft: true });
+  });
+
+  it('listTags (TREE read) maps a non-zero upstream prompts_count through as promptsCount', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-tree', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = {
+      listPromptsByTags: sinon.stub(),
+      listProjectTags: sinon.stub().resolves({
+        page: 1,
+        total: 1,
+        items: [{
+          id: 'child-1',
+          name: 'category:Sneakers',
+          parent_id: 'root-1',
+          children_count: 0,
+          prompts_count: 7,
+          path: [{ id: 'root-1', name: 'category:Footwear' }],
+        }],
+      }),
+    };
+
+    const result = await handleListTags(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en', parentId: 'root-1',
+    }, fakeLog());
+
+    expect(result.items).to.deep.equal([{
+      id: 'child-1',
+      name: 'category:Sneakers',
+      parentId: 'root-1',
+      childrenCount: 0,
+      promptsCount: 7,
+      path: [{ id: 'root-1', name: 'category:Footwear' }],
+    }]);
   });
 
   it('listTags 400s a parentId query over the length ceiling (MysticatBot review, PR 2737)', async () => {

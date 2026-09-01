@@ -88,6 +88,18 @@ import {
 const MAX_TREE_READS = 200;
 
 /**
+ * Bounds the total id count {@link collectSubtreeIds} forwards into a single
+ * upstream batch-delete call. This is independent of {@link MAX_TREE_READS}:
+ * a shallow-but-wide subtree (one category with thousands of direct leaf
+ * children) completes in a single read, well under the read cap, yet would
+ * otherwise produce a batch-delete payload with thousands of ids. Unlike the
+ * read cap's "truncating would be a wrong answer" concern, refusing an
+ * oversized DELETE with a clear error is the correct behavior, not a
+ * degraded one.
+ */
+const MAX_SUBTREE_DELETE_SIZE = 2000;
+
+/**
  * Lists one level of the tree and indexes it by bare name. Uniqueness is per
  * `(project, parent)`, so a name is unambiguous WITHIN a level.
  *
@@ -598,6 +610,69 @@ export async function findTagsInTree(transport, semrushWorkspaceId, projectId, t
 async function findTagInTree(transport, semrushWorkspaceId, projectId, tagId, log) {
   const found = await findTagsInTree(transport, semrushWorkspaceId, projectId, [tagId], log);
   return /** @type {TagPosition} */ (found.get(tagId));
+}
+
+/**
+ * Collects `tagId` plus every id in its subtree, by walking the draft tree
+ * level by level from that node (category-delete.md §4.2). A delete deletes
+ * the whole subtree, composed HERE rather than relied upon upstream: the
+ * batch-delete operation is not known to cascade (and, per the mock's own
+ * documented behavior, does not), so a caller that only sent the target id
+ * would strand its children as unreachable, prompt-less orphans.
+ *
+ * Composing the id set this way is independent of whatever upstream turns out
+ * to do with a parent-with-children delete: if upstream also cascades, the
+ * extra descendant ids are already-deleted members of the same batch: a
+ * harmless no-op, not an error (batch delete is documented idempotent per id).
+ *
+ * This is a point-in-time snapshot, not a lock: a tag created under `tagId`
+ * between this read and the caller's subsequent batch-delete call is not in
+ * the returned set and will not be deleted, stranding it as an orphan under a
+ * now-gone parent. Same class of risk as the cascade uncertainty above
+ * (category-delete.md §6 gate G1), not a new one — accepted for the same
+ * reason: there is no upstream lock primitive to hold instead.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string} tagId - the subtree's root id (included in the result).
+ * @param {object} [log] - logger.
+ * @returns {Promise<string[]>} `tagId` followed by every descendant id, in
+ *   level order.
+ */
+export async function collectSubtreeIds(transport, semrushWorkspaceId, projectId, tagId, log) {
+  const ids = [tagId];
+  let frontier = [tagId];
+  let reads = 0;
+  while (frontier.length > 0) {
+    const next = [];
+    for (const nodeId of frontier) {
+      reads += 1;
+      if (reads > MAX_TREE_READS) {
+        throw new ErrorWithStatusCode('tag subtree too large to resolve', 502);
+      }
+      // Sequential by design — see findTagsInTree for the same rationale.
+      // eslint-disable-next-line no-await-in-loop
+      const { items } = await listProjectTagTree(
+        transport,
+        semrushWorkspaceId,
+        projectId,
+        nodeId,
+        log,
+      );
+      for (const child of items) {
+        ids.push(child.id);
+        if (ids.length > MAX_SUBTREE_DELETE_SIZE) {
+          throw new ErrorWithStatusCode('tag subtree too large to delete', 502);
+        }
+        if (child.childrenCount > 0) {
+          next.push(child.id);
+        }
+      }
+    }
+    frontier = next;
+  }
+  return ids;
 }
 
 /**

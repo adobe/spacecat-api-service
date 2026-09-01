@@ -781,7 +781,8 @@ export async function listTagsForProject(transport, semrushWorkspaceId, projectI
  *   every item, as every pre-existing caller does.
  * @returns {Promise<{ items: Array<{
  *   id: string, name: string, parentId: string | null,
- *   childrenCount: number, path: Array<{ id: string, name: string }> | null,
+ *   childrenCount: number, promptsCount: number,
+ *   path: Array<{ id: string, name: string }> | null,
  * }> }>}
  */
 export async function listProjectTagTree(
@@ -811,6 +812,7 @@ export async function listProjectTagTree(
           name: typeof t.name === 'string' ? t.name : '',
           parentId: typeof t.parent_id === 'string' && t.parent_id ? t.parent_id : null,
           childrenCount: typeof t.children_count === 'number' ? t.children_count : 0,
+          promptsCount: typeof t.prompts_count === 'number' ? t.prompts_count : 0,
           path: Array.isArray(t.path)
             ? t.path.map((p) => ({
               id: typeof p?.id === 'string' ? p.id : '',
