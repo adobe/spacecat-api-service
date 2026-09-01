@@ -517,6 +517,15 @@ describe('serenity site-linkage: resolveMarketIdentity', () => {
       .to.deep.equal({ domain: 'site.example.com', primaryUrl: 'site.example.com/markets' });
   });
 
+  it('passes through a resolved siteId with a null primaryUrl unchanged', () => {
+    // Pins the shape when the resolved Site identity itself carries no
+    // primaryUrl — the siteId branch returns the identity's fields verbatim,
+    // it does not derive a fallback from anything else.
+    const siteIdentity = { domain: 'example.com', primaryUrl: null };
+    expect(resolveMarketIdentity(siteIdentity, true, 'conflicting-brand.com', undefined))
+      .to.deep.equal({ domain: 'example.com', primaryUrl: null });
+  });
+
   it('a supplied-but-unresolved siteId hard-fails (nulls), never falling back to brandDomain', () => {
     expect(resolveMarketIdentity(null, true, 'brand.com', undefined))
       .to.deep.equal({ domain: null, primaryUrl: null });

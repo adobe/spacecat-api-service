@@ -531,6 +531,17 @@ describe('handlers/markets.js — handleCreateMarket', () => {
 
     expect(result.status).to.equal(201);
     expect(log.info).to.have.been.calledWithMatch(/serenity create-market: market created/);
+    // The fields are the entire point of this event — a regression that logs the
+    // wrong resolved identity must fail here, not just a missing log call.
+    expect(log.info.firstCall.args[1]).to.include({
+      brandId: BRAND,
+      brandDomain: 'adobe.com',
+      primaryUrl: 'adobe.com',
+      semrushWorkspaceId: WORKSPACE,
+      semrushProjectId: 'proj-new',
+      siteId: null,
+      generatePrompts: false,
+    });
   });
 
   it('400s when a supplied siteId does not resolve to a site domain', async () => {

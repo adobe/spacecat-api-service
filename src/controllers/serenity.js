@@ -16,7 +16,7 @@ import {
   createResponse, forbidden, internalServerError, noContent, notFound, accepted,
 } from '@adobe/spacecat-shared-http-utils';
 import {
-  hasText, isNonEmptyObject, isValidUUID, siteIdentityFromUrlString,
+  hasText, isNonEmptyObject, isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
@@ -874,33 +874,34 @@ function SerenityController(context, log, env) {
       if (auth.mode === 'subworkspace') {
         const brand = await loadBrand(ctx, auth.brandUuid);
         // The subworkspace create handler has no Site access (narrowed dataAccess),
-        // so derive the Semrush project domain from the supplied siteId HERE,
-        // ALWAYS when one resolves — a resolving siteId is authoritative over any
-        // brandDomain also sent, matching the flat handler's own siteId-first
-        // derivation in markets.js (see resolveMarketIdentity, shared by both).
-        // A supplied-but-unresolvable siteId is a hard 400 (see the pre-check
-        // above — suppliedSiteIdentity is already guaranteed non-null here
-        // whenever a siteId was supplied). `primaryUrl` is always DERIVED here,
-        // never taken from the request. It is not part of the documented
-        // create-market contract, and passing a caller's value straight through
-        // would put an unvalidated string on the Semrush project.
-        let effectiveBody = {
+        // so derive the Semrush project domain HERE via the same shared rule the
+        // flat handler uses (resolveMarketIdentity, markets.js): a resolving siteId
+        // is authoritative over any brandDomain also sent; brandDomain is consulted
+        // only when no siteId was supplied; a supplied-but-unresolvable siteId is a
+        // hard 400 (see the pre-check above — suppliedSiteIdentity is already
+        // guaranteed non-null here whenever a siteId was supplied). Both branches go
+        // through the one function so this call site cannot silently diverge from
+        // the flat handler's. `primaryUrl` is always DERIVED here, never taken from
+        // the request — unlike the flat handler, which does trust a caller-supplied
+        // primaryUrl when deriving from brandDomain. That primaryUrl is not part of
+        // the documented create-market contract on this path, and passing a
+        // caller's value straight through would put an unvalidated string on the
+        // Semrush project, so it is deliberately omitted from the call below.
+        const identity = resolveMarketIdentity(
+          suppliedSiteIdentity,
+          !!suppliedSiteId,
+          requestBody.brandDomain,
+          undefined,
+        );
+        // Only `primaryUrl` can carry a subpath — `brandDomain` is a bare FQDN
+        // because a path there is rejected upstream. The two travel together —
+        // resolveMarketIdentity never resolves one without the other — so both
+        // are assigned the same way, with no separate null-coalescing on either.
+        const effectiveBody = {
           ...requestBody,
-          primaryUrl: siteIdentityFromUrlString(requestBody.brandDomain),
+          brandDomain: identity.domain,
+          primaryUrl: identity.primaryUrl,
         };
-        if (suppliedSiteId) {
-          const identity = resolveMarketIdentity(suppliedSiteIdentity, true, undefined, undefined);
-          // Both values from the read above, for the same reason the domain is
-          // derived here at all: the handler has no Site access. Only `primaryUrl`
-          // can carry a subpath — `brandDomain` is a bare FQDN because a path
-          // there is rejected upstream. Applied whenever a siteId resolved, even
-          // alongside a supplied brandDomain — the resolving siteId wins.
-          effectiveBody = {
-            ...effectiveBody,
-            brandDomain: identity.domain,
-            primaryUrl: identity.primaryUrl ?? undefined,
-          };
-        }
         // Brand aliases are brand-level but region-scoped: the create handler
         // clamps each to the new market's region before writing brand_names.
         const brandAliases = await getBrandAliases(
@@ -1023,7 +1024,12 @@ function SerenityController(context, log, env) {
               brandId: auth.brandUuid,
               geoTargetId: successBody.geoTargetId,
               languageCode: successBody.languageCode,
-              siteId: linkedSiteId,
+              // The supplied/resolved siteId, not `linkedSiteId` — the brand_sites
+              // mirror write is best-effort and can fail independently of a valid
+              // siteId being supplied, which would otherwise log a null siteId for
+              // a market that in fact had one. Matches the flat handler's own
+              // telemetry, which reports the supplied siteId the same way.
+              siteId: suppliedSiteId ?? null,
               brandDomain: effectiveBody.brandDomain,
               primaryUrl: effectiveBody.primaryUrl,
               semrushWorkspaceId: successBody.workspaceId,
