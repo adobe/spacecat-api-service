@@ -1,3 +1,10 @@
+## [1.780.2](https://github.com/adobe/spacecat-api-service/compare/v1.780.1...v1.780.2) (2026-08-31)
+
+
+### Bug Fixes
+
+* **onboard:** preserve PRE_ONBOARD tier but bind enrollment during onboard ([#3163](https://github.com/adobe/spacecat-api-service/issues/3163)) ([9c36a84](https://github.com/adobe/spacecat-api-service/commit/9c36a84b56f3b0bda67ebb46d251d4dab0025b3f)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 ## [1.780.1](https://github.com/adobe/spacecat-api-service/compare/v1.780.0...v1.780.1) (2026-08-31)
 
 
