@@ -68,6 +68,8 @@ import {
   handleCreateTagSubworkspace,
   handleUpdateTag,
   handleUpdateTagSubworkspace,
+  handleDeleteTag,
+  handleDeleteTagSubworkspace,
 } from '../support/serenity/handlers/tags.js';
 import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
 import { isSerenityActiveForBrand } from '../support/serenity/serenity-active.js';
@@ -1216,6 +1218,50 @@ function SerenityController(context, log, env) {
     }
   };
 
+  /**
+   * DELETE /serenity/tags/:tagId — delete a category (or sub-category) and its
+   * whole subtree, preserving every carrying prompt (category-delete.md). The
+   * market slice travels as query params (`geoTargetId`, `languageCode`) since
+   * a DELETE has no body. Dispatches by workspace mode, mirroring updateTag.
+   */
+  const deleteTag = async (ctx) => {
+    let auth;
+    try {
+      const imsToken = await resolveSemrushImsToken(ctx);
+      const { tagId } = ctx?.params || {};
+      if (!hasText(tagId)) {
+        throw new ErrorWithStatusCode('Missing tagId', 400);
+      }
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      if (auth.mode === 'subworkspace') {
+        await handleDeleteTagSubworkspace(
+          transport,
+          /** @type {string} */ (auth.workspaceId),
+          tagId,
+          parsedQuery(ctx),
+          log,
+        );
+      } else {
+        await handleDeleteTag(
+          transport,
+          ctx.dataAccess,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (auth.workspaceId),
+          tagId,
+          parsedQuery(ctx),
+          log,
+        );
+      }
+      return noContent();
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
   const listModels = async (ctx) => {
     let auth;
     try {
@@ -1991,6 +2037,7 @@ function SerenityController(context, log, env) {
     listTags,
     createTag,
     updateTag,
+    deleteTag,
     listModels,
     listOrgModels,
     listOrgLanguages,

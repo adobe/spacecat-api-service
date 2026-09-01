@@ -12528,6 +12528,13 @@ SerenityTag:
       description: |
         Number of direct children under this tag. Populated by the TREE read
         (typically non-zero only on root categories).
+    promptsCount:
+      type: integer
+      description: |
+        Number of prompts directly carrying this tag. Populated by the TREE read;
+        used to show cascade impact before a delete. Deliberately not in the
+        top-level `required` list, same as `childrenCount`: absent on the flat,
+        prompt-derived listing.
     path:
       type: [array, 'null']
       description: |

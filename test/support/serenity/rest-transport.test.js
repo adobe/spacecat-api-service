@@ -1348,6 +1348,34 @@ describe('Semrush REST transport', () => {
     });
   });
 
+  describe('deleteProjectTags', () => {
+    it('DELETEs /aio/tags with a batch { ids } body and no prompt_id query', async () => {
+      fetchStub.resolves(fetchOk(null));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const result = await transport.deleteProjectTags(WORKSPACE_ID, PROJECT_ID, ['tag-1', 'tag-2']);
+
+      const call = await callOf(fetchStub);
+      expect(call.method).to.equal('DELETE');
+      expect(call.url).to.equal(
+        `https://www.semrush.com/enterprise/projects/api/v2/workspaces/${WORKSPACE_ID}/projects/${PROJECT_ID}/aio/tags`,
+      );
+      expect(JSON.parse(call.body)).to.deep.equal({ ids: ['tag-1', 'tag-2'] });
+      expect(result).to.equal(null);
+    });
+
+    it('surfaces an upstream failure as a ProjectEngineApiError', async () => {
+      fetchStub.resolves(fetchFail(502, { message: 'upstream down' }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await expect(transport.deleteProjectTags(WORKSPACE_ID, PROJECT_ID, ['tag-1']))
+        .to.be.rejected.then((err) => {
+          expect(err).to.be.instanceOf(ProjectEngineApiError);
+          expect(err.status).to.equal(502);
+        });
+    });
+  });
+
   describe('getBrandTopics', () => {
     it('GETs /v1/workspaces/{ws}/brand-topics with domain + country query', async () => {
       fetchStub.resolves(fetchOk([
