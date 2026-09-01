@@ -14,6 +14,7 @@ import { expect } from 'chai';
 import {
   ORG_1_ID,
   BRAND_1_ID,
+  BRAND_DUP_PENDING_ID,
   SITE_1_ID,
   SITE_2_ID,
   SITE_2_BASE_URL,
@@ -395,6 +396,80 @@ export default function brandsTests(getHttpClient, resetData) {
       // No partial write — the brand keeps its (absent) anchor.
       const getRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/brands/${brandId}`);
       expect(getRes.body.baseSiteId == null).to.equal(true);
+    });
+  });
+
+  // LLMO-7284 (AC13): a real end-to-end DB-backed check that promoting a pending brand
+  // to active is refused when its name normalizes to an already-active brand's name in
+  // the same org — over real HTTP against real PostgreSQL, not the mocked-postgrest
+  // unit tests in test/support/brands-storage.test.js. Deliberately scoped to the three
+  // promotion endpoints that do NOT provision a Semrush sub-workspace (update, status
+  // transition, activate) — the create endpoint's own active-status duplicate check
+  // ALSO exists (see brands-storage.test.js), but exercising it here in ORG_1 (a
+  // serenity-active org, per createBrandForOrg's Semrush-mode gate) would additionally
+  // provision a real Semrush workspace via the vendor mock, which is a materially
+  // different, unverified path this change does not attempt to cover.
+  describe('Brands v2 duplicate-active-brand guard on promotion (LLMO-7284 AC13)', () => {
+    before(() => resetData());
+
+    it('PATCH /brands/:id/status refuses to promote a normalized-twin name to active', async () => {
+      const http = getHttpClient();
+
+      const res = await http.admin.patch(`/v2/orgs/${ORG_1_ID}/brands/${BRAND_DUP_PENDING_ID}/status`, {
+        status: 'active',
+      });
+      expect(res.status).to.equal(409);
+      expect(res.body.code).to.equal('brand_duplicate_active_name');
+
+      // No partial write — the brand stays pending against the already-active BRAND_1.
+      const getRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/brands/${BRAND_DUP_PENDING_ID}`);
+      expect(getRes.body.status).to.equal('pending');
+    });
+
+    it('PATCH /brands/:id refuses to promote a normalized-twin name to active', async () => {
+      const http = getHttpClient();
+
+      const res = await http.admin.patch(`/v2/orgs/${ORG_1_ID}/brands/${BRAND_DUP_PENDING_ID}`, {
+        status: 'active',
+      });
+      expect(res.status).to.equal(409);
+      expect(res.body.code).to.equal('brand_duplicate_active_name');
+
+      const getRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/brands/${BRAND_DUP_PENDING_ID}`);
+      expect(getRes.body.status).to.equal('pending');
+    });
+
+    it('POST /brands/:id/activate refuses to promote a normalized-twin name to active', async () => {
+      const http = getHttpClient();
+
+      const res = await http.admin.post(
+        `/v2/orgs/${ORG_1_ID}/brands/${BRAND_DUP_PENDING_ID}/activate`,
+        { generatePrompts: false },
+      );
+      expect(res.status).to.equal(409);
+      expect(res.body.code).to.equal('brand_duplicate_active_name');
+
+      const getRes = await http.admin.get(`/v2/orgs/${ORG_1_ID}/brands/${BRAND_DUP_PENDING_ID}`);
+      expect(getRes.body.status).to.equal('pending');
+    });
+
+    it('PATCH /brands/:id/status allows promotion once renamed to a unique name', async () => {
+      const http = getHttpClient();
+
+      // Rename first (still pending — a rename alone never triggers the promotion
+      // guard, only an ACTIVE rename or a status change does), then promote: the
+      // guard must not false-positive on a genuinely unique name.
+      const rename = await http.admin.patch(`/v2/orgs/${ORG_1_ID}/brands/${BRAND_DUP_PENDING_ID}`, {
+        name: 'Genuinely Unique Brand Name',
+      });
+      expect(rename.status).to.equal(200);
+      expect(rename.body.status).to.equal('pending');
+
+      const activate = await http.admin.patch(`/v2/orgs/${ORG_1_ID}/brands/${BRAND_DUP_PENDING_ID}/status`, {
+        status: 'active',
+      });
+      expect(activate.status).to.equal(200);
+      expect(activate.body.status).to.equal('active');
     });
   });
 }

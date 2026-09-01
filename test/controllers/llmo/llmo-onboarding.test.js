@@ -1387,6 +1387,7 @@ describe('LLMO Onboarding Functions', () => {
       });
 
       const mockSite = {
+        getId: sinon.stub().returns('site-id-1'),
         getOrganizationId: sinon.stub().returns('old-org-123'),
         setOrganizationId: sinon.stub(),
         getSiteEnrollments: sinon.stub().resolves([]),
@@ -1424,6 +1425,7 @@ describe('LLMO Onboarding Functions', () => {
 
       const mockSite = {
         getOrganizationId: sinon.stub().returns('other-org-789'),
+        getBaseURL: sinon.stub().returns('https://example.com'),
         setOrganizationId: sinon.stub(),
         getSiteEnrollments: sinon.stub().resolves([{ getId: () => 'enroll-1' }]),
         save: sinon.stub().resolves(),
@@ -1433,9 +1435,13 @@ describe('LLMO Onboarding Functions', () => {
 
       const context = { dataAccess: mockDataAccess };
 
+      // LLMO-7284: createOrFindSite now delegates to assertSiteOrgReassignmentSafe, so the
+      // thrown message comes from that shared guard (also `.status=409`,
+      // `.code=site_org_reassignment_blocked`, not asserted here — this test only covers the
+      // message text createOrFindSite's own callers rely on).
       await expect(
         createOrFindSite('https://example.com', 'new-org-456', context),
-      ).to.be.rejectedWith('belongs to org other-org-789 with active enrollments and cannot be moved to org new-org-456');
+      ).to.be.rejectedWith('still has 1 enrollment(s) under org other-org-789; reassigning it to new-org-456 would orphan them as foreign enrollments');
 
       expect(mockSite.setOrganizationId).to.not.have.been.called;
       expect(mockSite.save).to.not.have.been.called;
@@ -1456,6 +1462,7 @@ describe('LLMO Onboarding Functions', () => {
 
       const mockSite = {
         getOrganizationId: sinon.stub().returns('other-org-789'),
+        getBaseURL: sinon.stub().returns('https://example.com'),
         setOrganizationId: sinon.stub(),
         getSiteEnrollments: sinon.stub().resolves(null),
         save: sinon.stub().resolves(),

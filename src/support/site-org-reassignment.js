@@ -20,17 +20,17 @@
  * fact. Rather than drift silently, fail with an EXPLICIT reconciliation failure and make
  * the operator offboard/transfer the enrollments first.
  *
- * This mirrors the inline guard already enforced on llmo-onboarding.js::createOrFindSite
- * (which likewise refuses to move an enrolled site); it is factored out here so the admin
- * Slack reassignment paths enforce the same invariant. Applied at every reassignment site
- * that does not already revoke enrollments first: set-ims-org-modal.js,
- * onboard-llmo-modal.js::checkOrg, and approve-org.js. The paths NOT routed here are only
- * PARTIALLY equivalent, and deliberately out of this change's scope: move-plg-site.js and
- * bypass-handlers.js gate on `enrollments.length > 0` before moving, but that gate is NOT
- * fail-closed on an unverifiable (null/undefined) read the way this guard is — a null read
- * there short-circuits falsy and the move proceeds; onboarding-flow.js reassigns only from
- * internal/demo orgs. Converging those onto this guard is a tracked follow-up (see the PR
- * discussion); until then the reconcile report remains the backstop for any straggler.
+ * Applied at every reassignment site that does not already revoke enrollments first:
+ * set-ims-org-modal.js, onboard-llmo-modal.js::checkOrg, approve-org.js, and
+ * llmo-onboarding.js::createOrFindSite (the last of these originally had its own inline
+ * enrollment check; converged onto this shared guard so a straggler can't be orphaned by one
+ * path while the others are guarded). The paths NOT routed here are only PARTIALLY equivalent,
+ * and deliberately out of this change's scope: move-plg-site.js and bypass-handlers.js gate on
+ * `enrollments.length > 0` before moving, but that gate is NOT fail-closed on an unverifiable
+ * (null/undefined) read the way this guard is — a null read there short-circuits falsy and the
+ * move proceeds; onboarding-flow.js reassigns only from internal/demo orgs. Converging those
+ * onto this guard is a tracked follow-up (see the PR discussion); until then the reconcile
+ * report remains the backstop for any straggler.
  *
  * Fails CLOSED: if the enrollments cannot be read back (a non-array), the move is aborted
  * rather than assumed safe — a swallowed read must not be treated as "no enrollments".

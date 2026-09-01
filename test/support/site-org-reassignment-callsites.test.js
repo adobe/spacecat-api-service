@@ -44,8 +44,8 @@ const ALLOWLISTED_ORG_MUTATION_FILES = new Map([
   ['src/support/slack/actions/approve-org.js', 'guarded by assertSiteOrgReassignmentSafe'],
   ['src/support/slack/actions/set-ims-org-modal.js', 'guarded by assertSiteOrgReassignmentSafe'],
   ['src/support/slack/actions/onboard-llmo-modal.js', 'guarded by assertSiteOrgReassignmentSafe'],
+  ['src/controllers/llmo/llmo-onboarding.js', 'guarded by assertSiteOrgReassignmentSafe'],
   // Self-gating: inline enrollment guard or revoke/gate-first before the move.
-  ['src/controllers/llmo/llmo-onboarding.js', 'inline enrollment guard in createOrFindSite (convergence tracked)'],
   ['src/support/slack/actions/move-plg-site.js', 'revokes/gates enrollments before moving'],
   ['src/controllers/plg/plg-onboarding/bypass-handlers.js', 'inline enrollment gate (not fail-closed on null read; tracked follow-up)'],
   ['src/controllers/plg/plg-onboarding/onboarding-flow.js', 'reassigns only from internal/demo orgs'],

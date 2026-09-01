@@ -80,6 +80,18 @@ export const sites = [
     is_live: true,
     name: 'Site Four (Delegate)',
   },
+  // LLMO-7284 (AC13) duplicate-active-brand IT: a dedicated ORG_1 site, permanently
+  // anchored to the seeded pending brand in seed-data/brands.js — NOT the shared
+  // "free" SITE_2, which another IT (LLMO-5870 primary-URL reuse) claims and
+  // releases at runtime and must find unclaimed at the start of its own describe.
+  {
+    id: 'ab111111-1111-4111-b111-2222222222ee',
+    base_url: 'https://dup-brand-guard.example.com',
+    organization_id: '11111111-1111-4111-b111-111111111111',
+    delivery_type: 'aem_edge',
+    is_live: true,
+    name: 'Duplicate-Brand-Guard IT Site',
+  },
   // Serenity market-mirror Site (ORG_1): mirrors a Semrush market domain.
   // delivery_type 'other' — a Semrush-managed market site is not an AEM target
   // (matches ensureMarketSite). Linked to BRAND_1 via a type='serenity'

@@ -47,6 +47,16 @@ export const MARKET_SITE_1_BASE_URL = 'https://semrush-market.example.fr';
 
 export const BRAND_1_ID = 'ab111111-1111-4111-b111-111111111111'; // ORG_1, "Test Brand"
 
+// LLMO-7284 (AC13): a PENDING brand in ORG_1, already anchored to SITE_2 (free —
+// no other brand claims it as a base site), whose name normalizes to the same
+// value as BRAND_1's "Test Brand". Used to exercise the duplicate-active-brand
+// guard on the three promotion paths that don't provision Semrush (PATCH
+// .../brands/:id, PATCH .../brands/:id/status, POST .../brands/:id/activate) —
+// unlike POST .../brands (create), none of these three touch
+// provisionBrandSubworkspace, so no Semrush-mock wiring is needed to exercise them
+// against ORG_1's serenity-active org for real over HTTP.
+export const BRAND_DUP_PENDING_ID = 'ab111111-1111-4111-b111-1111111111dd';
+
 // ── Brand Presence (topic-prompts intent enrichment) ──
 // A prompt row carrying an `intent`, plus a brand_presence_executions row that
 // references it, so the topic-prompts endpoint can be asserted to enrich
