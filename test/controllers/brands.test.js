@@ -9732,8 +9732,12 @@ describe('Brands Controller', () => {
       const maybeSingleStub = sandbox.stub();
       // resolveBrandUuid succeeds...
       maybeSingleStub.onFirstCall().resolves({ data: { id: BRAND_UUID }, error: null });
-      // ...but the status update is filtered out by .neq('status','deleted') → no row.
+      // LLMO-7284 pre-transition read (status→active): the soft-deleted brand is
+      // excluded by .neq('status','deleted'), so it reads back as null and the
+      // duplicate-active check is skipped.
       maybeSingleStub.onSecondCall().resolves({ data: null, error: null });
+      // ...then the status update is filtered out by .neq('status','deleted') → no row.
+      maybeSingleStub.onThirdCall().resolves({ data: null, error: null });
 
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({
@@ -9786,8 +9790,11 @@ describe('Brands Controller', () => {
       const maybeSingleStub = sandbox.stub();
       // resolveBrandUuid resolves the UUID...
       maybeSingleStub.onFirstCall().resolves({ data: { id: BRAND_UUID }, error: null });
+      // LLMO-7284 pre-transition read (status→active): a pending brand with a
+      // unique name, so the duplicate-active check passes and the write proceeds.
+      maybeSingleStub.onSecondCall().resolves({ data: { name: 'Test Brand', status: 'pending' }, error: null });
       // ...then setBrandStatus hits the DB constraint on the update.
-      maybeSingleStub.onSecondCall().resolves({
+      maybeSingleStub.onThirdCall().resolves({
         data: null,
         error: {
           code: '23514',
