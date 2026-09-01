@@ -36,9 +36,9 @@ const DEFAULT_WORKSPACE_REPOS = [
 // owner/repo format: non-slash owner + single slash + non-slash repo
 const WORKSPACE_REPO_PATTERN = /^[^/\s]+\/[^/\s]+$/;
 
-// A git commit SHA is exactly 40 hex characters. Used to validate
-// pull_request.head.sha before it is trusted as the requested_head_sha
-// carried in the enqueued job payload (must not silently default).
+// A git commit SHA is exactly 40 hex characters. Case-insensitive matching
+// accepts hexadecimal input defensively; the value is canonicalized to
+// lowercase before it is carried in the enqueued job payload.
 const HEAD_SHA_PATTERN = /^[0-9a-f]{40}$/i;
 
 function getWorkspaceRepos(env, log) {

@@ -309,6 +309,40 @@ describe('WebhooksController', () => {
     expect(mockSqs.sendMessage.called).to.be.false;
   });
 
+  it('returns 400 and does not enqueue when pull_request.head.sha is too long', async () => {
+    const context = {
+      ...validContext,
+      data: {
+        ...validContext.data,
+        pull_request: { ...validContext.data.pull_request, head: { sha: 'a'.repeat(41) } },
+      },
+    };
+
+    const response = await controller.processGitHubWebhook(context);
+
+    expect(response.status).to.equal(400);
+    const body = await response.json();
+    expect(body.message).to.include('pull_request.head.sha');
+    expect(mockSqs.sendMessage.called).to.be.false;
+  });
+
+  it('returns 400 and does not enqueue when pull_request.head.sha contains non-hex characters', async () => {
+    const context = {
+      ...validContext,
+      data: {
+        ...validContext.data,
+        pull_request: { ...validContext.data.pull_request, head: { sha: 'g'.repeat(40) } },
+      },
+    };
+
+    const response = await controller.processGitHubWebhook(context);
+
+    expect(response.status).to.equal(400);
+    const body = await response.json();
+    expect(body.message).to.include('pull_request.head.sha');
+    expect(mockSqs.sendMessage.called).to.be.false;
+  });
+
   it('returns 400 with field name when repository.owner.login is missing', async () => {
     const context = {
       ...validContext,
