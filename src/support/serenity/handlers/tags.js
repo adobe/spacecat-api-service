@@ -890,6 +890,14 @@ function requireSliceQuery(query) {
  * parent-with-children delete (unconfirmed either way -- see category-delete.md
  * §6 gate G1). A publish follows so the delete is live, not stuck in draft.
  *
+ * Investigated and rejected: the vendored `model.BatchDeleteRequest` type also
+ * exposes `cascade?: boolean` and `all?: boolean` fields. Neither has a
+ * description in the upstream swagger (`spec/projectengine_swagger_public.yaml`,
+ * spacecat-shared) -- completely undocumented, unverified semantics on a
+ * production, no-undo delete path. Not adopted without a live-verified
+ * contract; {@link collectSubtreeIds}'s client-side composition stays the
+ * source of truth until one exists.
+ *
  * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId

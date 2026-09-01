@@ -1986,6 +1986,29 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
         fakeLog(),
       )).to.be.rejectedWith('upstream 502');
     });
+
+    it('propagates a quotaExceeded 409 when the post-delete republish 405s on quota (SITES-49206)', async () => {
+      const transport = makeTransport({
+        publishProject: sinon.stub().rejects(
+          new SerenityTransportError(405, 'publish failed: 405', '<html>405 Not Allowed</html>'),
+        ),
+      });
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const err = await handler.handleDeleteTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        TAG_IDS.subCategoryHuman,
+        query,
+        fakeLog(),
+      ).then(() => null, (e) => e);
+      expect(err).to.not.equal(null);
+      expect(err.status).to.equal(409);
+      expect(err.code).to.equal(ERROR_CODES.QUOTA_EXCEEDED);
+      expect(transport.deleteProjectTags).to.have.been.calledOnce;
+      expect(transport.publishProject).to.have.been.calledOnce;
+    });
   });
 
   describe('handleDeleteTagSubworkspace', () => {

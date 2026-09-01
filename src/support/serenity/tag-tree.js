@@ -88,6 +88,18 @@ import {
 const MAX_TREE_READS = 200;
 
 /**
+ * Bounds the total id count {@link collectSubtreeIds} forwards into a single
+ * upstream batch-delete call. This is independent of {@link MAX_TREE_READS}:
+ * a shallow-but-wide subtree (one category with thousands of direct leaf
+ * children) completes in a single read, well under the read cap, yet would
+ * otherwise produce a batch-delete payload with thousands of ids. Unlike the
+ * read cap's "truncating would be a wrong answer" concern, refusing an
+ * oversized DELETE with a clear error is the correct behavior, not a
+ * degraded one.
+ */
+const MAX_SUBTREE_DELETE_SIZE = 2000;
+
+/**
  * Lists one level of the tree and indexes it by bare name. Uniqueness is per
  * `(project, parent)`, so a name is unambiguous WITHIN a level.
  *
@@ -650,6 +662,9 @@ export async function collectSubtreeIds(transport, semrushWorkspaceId, projectId
       );
       for (const child of items) {
         ids.push(child.id);
+        if (ids.length > MAX_SUBTREE_DELETE_SIZE) {
+          throw new ErrorWithStatusCode('tag subtree too large to delete', 502);
+        }
         if (child.childrenCount > 0) {
           next.push(child.id);
         }

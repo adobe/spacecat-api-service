@@ -647,6 +647,37 @@ export default function serenityTests(
       ]);
     });
 
+    // Multi-branch shape: the parent has TWO children, and only ONE of them has
+    // its own child. The single-branch-chain test above cannot catch a bug in
+    // the per-level fan-out (e.g. only capturing the last frontier node's
+    // children); this one exercises the shape the headline "whole subtree"
+    // guarantee actually depends on.
+    it('DELETE /serenity/tags/:tagId deletes a parent with multiple children, only one of which has its own child', async () => {
+      await createUsMarket();
+      const parent = await createTag('Outdoor Gear');
+      const childWithGrandchild = await createTag('Tents', parent.body.id);
+      const grandchild = await createTag('Backpacking Tents', childWithGrandchild.body.id);
+      const leafChild = await createTag('Sleeping Bags', parent.body.id);
+
+      const del = await getHttpClient().admin.delete(
+        `${base}/tags/${parent.body.id}?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(del.status).to.equal(204);
+
+      const rootsAfter = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=`,
+      );
+      const categoryRoot = rootsAfter.body.items.find((t) => t.name === 'category');
+      const remaining = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${categoryRoot.id}`,
+      );
+      // All four nodes are gone — the leaf sibling with no children of its own
+      // is not left behind by a fan-out that only follows one branch.
+      expect(remaining.body.items.map((t) => t.id)).to.not.include.members([
+        parent.body.id, childWithGrandchild.body.id, grandchild.body.id, leafChild.body.id,
+      ]);
+    });
+
     // Prompt preservation is the upstream detach, not client choreography: the
     // delete never reads or writes a prompt, and the prompt survives fully
     // present, just no longer carrying the deleted category tag.

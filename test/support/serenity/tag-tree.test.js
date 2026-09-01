@@ -1101,13 +1101,64 @@ describe('serenity tag-tree', () => {
       );
     });
 
-    it('502s rather than walk a subtree larger than the read budget', async () => {
-      const children = Array.from({ length: 250 }, (_, i) => ({
-        id: `c${i}`, name: `C${i}`, parent_id: 'r-cat', children_count: 1,
+    it('collects every sibling at a level, including a sibling with its own descendants alongside a childless one', async () => {
+      // Regression guard for a per-level fan-out bug (e.g. only capturing the
+      // LAST frontier node's children into `next`) that a single-branch chain
+      // can never catch: two siblings under the root, only one of which has
+      // its own child.
+      const leafSiblingId = 'category-leaf-sibling';
+      const levels = dimensionTreeLevels({
+        [TAG_IDS.categoryRoot]: [
+          {
+            id: TAG_IDS.categoryRunningShoes,
+            name: 'Running Shoes',
+            parent_id: TAG_IDS.categoryRoot,
+            children_count: 1,
+            path: null,
+          },
+          {
+            id: leafSiblingId,
+            name: 'Leaf Sibling',
+            parent_id: TAG_IDS.categoryRoot,
+            children_count: 0,
+            path: null,
+          },
+        ],
+      });
+      const transport = { listProjectTags: makeListProjectTagsStub(levels) };
+      const ids = await collectSubtreeIds(transport, WS, PROJECT, TAG_IDS.categoryRoot, fakeLog());
+      expect(ids).to.have.members([
+        TAG_IDS.categoryRoot, TAG_IDS.categoryRunningShoes, TAG_IDS.subCategoryHuman, leafSiblingId,
+      ]);
+      expect(ids).to.have.lengthOf(4);
+    });
+
+    it('502s when the collected id count exceeds the delete-size budget', async () => {
+      const children = Array.from({ length: 2001 }, (_, i) => ({
+        id: `c${i}`, name: `C${i}`, parent_id: 'r-cat', children_count: 0,
       }));
       const levels = { 'r-cat': children };
-      for (const c of children) {
-        levels[c.id] = [];
+      const transport = { listProjectTags: makeListProjectTagsStub(levels) };
+      const err = await collectSubtreeIds(transport, WS, PROJECT, 'r-cat', fakeLog())
+        .then(() => null, (e) => e);
+      expect(err).to.be.an('error');
+      expect(err.status).to.equal(502);
+      expect(err.message).to.match(/tag subtree too large to delete/);
+    });
+
+    it('502s rather than walk a subtree larger than the read budget', async () => {
+      // Depth, not width, exhausts the READ budget here: a single-child chain
+      // over 200 levels deep costs 200+ reads (one per level) while the total
+      // id count stays small — this isolates the read-count cap from the
+      // separate id-count cap covered by the delete-size-budget test below.
+      const levels = {};
+      let parentId = 'r-cat';
+      for (let i = 0; i < 205; i += 1) {
+        const childId = `c${i}`;
+        levels[parentId] = [{
+          id: childId, name: `C${i}`, parent_id: parentId, children_count: 1,
+        }];
+        parentId = childId;
       }
       const transport = { listProjectTags: makeListProjectTagsStub(levels) };
       const err = await collectSubtreeIds(transport, WS, PROJECT, 'r-cat', fakeLog())
