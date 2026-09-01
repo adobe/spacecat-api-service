@@ -112,17 +112,20 @@ function normalizeGlRegionSentinel(region) {
 }
 
 /**
- * Coerces a raw region array to strings, normalizes the GL sentinel, and
- * drops blanks. Shared by every write path that persists a raw,
- * client-supplied regions array directly (#3168).
+ * Coerces a raw region array to strings, normalizes the GL sentinel, drops
+ * blanks, and deduplicates (normalizing GL can otherwise collapse two
+ * distinct input values onto the same US region). Shared by every write path
+ * that persists a raw, client-supplied regions array directly (#3168).
  * @param {Array<*>} regions
  * @returns {string[]}
  */
 function sanitizeRegions(regions) {
-  return (regions || [])
-    .map((r) => (typeof r === 'string' ? r : String(r)))
-    .map(normalizeGlRegionSentinel)
-    .filter(hasText);
+  return [...new Set(
+    (regions || [])
+      .map((r) => (typeof r === 'string' ? r : String(r)))
+      .map(normalizeGlRegionSentinel)
+      .filter(hasText),
+  )];
 }
 
 /**

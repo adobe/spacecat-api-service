@@ -791,10 +791,14 @@ describe('Customer Config Mapper', () => {
   });
 
   describe('sanitizeRegions', () => {
-    it('coerces, normalizes GL, and drops blanks', () => {
+    it('coerces, normalizes GL, drops blanks, and dedupes', () => {
       expect(sanitizeRegions(['GL', ' gl ', 'DE', 42, ''])).to.deep.equal([
-        'US', 'US', 'DE', '42',
+        'US', 'DE', '42',
       ]);
+    });
+
+    it('dedupes an explicit GL alongside an explicit US', () => {
+      expect(sanitizeRegions(['GL', 'US', 'DE'])).to.deep.equal(['US', 'DE']);
     });
 
     it('returns an empty array for null/undefined/empty input', () => {

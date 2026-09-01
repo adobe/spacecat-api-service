@@ -2324,7 +2324,7 @@ describe('brands-storage', () => {
         brands: [
           { data: null, error: null }, // no existing brand
           { data: { id: BRAND_ID, name: 'Test' }, error: null }, // upsert result
-          { data: makeBrandRow({ regions: ['US', 'US', 'DE'] }), error: null },
+          { data: makeBrandRow({ regions: ['US', 'DE'] }), error: null },
         ],
       });
 
@@ -2335,7 +2335,7 @@ describe('brands-storage', () => {
       });
 
       const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
-      expect(brandsUpsert.row.regions).to.deep.equal(['US', 'US', 'DE']);
+      expect(brandsUpsert.row.regions).to.deep.equal(['US', 'DE']);
     });
 
     it('leaves non-GL region values untouched on create', async () => {
@@ -3242,7 +3242,7 @@ describe('brands-storage', () => {
     it('normalizes GL to US on update, case-insensitively and whitespace-trimmed (#3168)', async () => {
       const client = createCapturingClient({
         brands: [
-          { data: makeBrandRow({ regions: ['US', 'US', 'DE'] }), error: null },
+          { data: makeBrandRow({ regions: ['US', 'DE'] }), error: null },
         ],
       });
 
@@ -3254,7 +3254,7 @@ describe('brands-storage', () => {
       });
 
       const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
-      expect(brandsUpdate.row.regions).to.deep.equal(['US', 'US', 'DE']);
+      expect(brandsUpdate.row.regions).to.deep.equal(['US', 'DE']);
     });
 
     it('leaves non-GL region values untouched on update', async () => {
