@@ -11,7 +11,7 @@
  */
 
 import {
-  badRequest, forbidden, notFound, ok, createResponse,
+  badRequest, forbidden, notFound, ok, createResponse, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import AccessControlUtil from '../../support/access-control-util.js';
@@ -348,18 +348,31 @@ function LlmoDashboardsController(context) {
     return createResponse({}, 204);
   };
 
+  // Same graceful-degradation pattern as redirects.js/S3_ASO_OVERLAYS_BUCKET: a missing
+  // bucket env var (e.g. the Vault entry hasn't been added to this environment yet) 500s
+  // cleanly on these routes only, rather than an unhandled AWS SDK "Bucket is required"
+  // exception — so shipping this feature does not have to be gated on every environment's
+  // Vault entry existing first.
+  const requireBucketConfigured = (handler) => async (ctx) => {
+    if (!hasText(bucket)) {
+      ctx.log.error('[dashboards] S3_DASHBOARDS_BUCKET is not configured');
+      return internalServerError('Dashboards endpoint not configured');
+    }
+    return handler(ctx);
+  };
+
   return {
-    listDashboards,
-    getDashboard,
-    createDashboard,
-    updateDashboard,
-    deleteDashboard,
-    duplicateDashboard,
-    starDashboard: setStarred(true),
-    unstarDashboard: setStarred(false),
-    addTile,
-    updateTile,
-    removeTile,
+    listDashboards: requireBucketConfigured(listDashboards),
+    getDashboard: requireBucketConfigured(getDashboard),
+    createDashboard: requireBucketConfigured(createDashboard),
+    updateDashboard: requireBucketConfigured(updateDashboard),
+    deleteDashboard: requireBucketConfigured(deleteDashboard),
+    duplicateDashboard: requireBucketConfigured(duplicateDashboard),
+    starDashboard: requireBucketConfigured(setStarred(true)),
+    unstarDashboard: requireBucketConfigured(setStarred(false)),
+    addTile: requireBucketConfigured(addTile),
+    updateTile: requireBucketConfigured(updateTile),
+    removeTile: requireBucketConfigured(removeTile),
   };
 }
 

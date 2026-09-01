@@ -117,6 +117,7 @@ describe('LlmoDashboardsController', () => {
       data: {},
       s3: makeFakeS3(),
       env: { S3_DASHBOARDS_BUCKET: 'test-bucket' },
+      log: { error: sandbox.stub() },
     };
   });
 
@@ -168,6 +169,14 @@ describe('LlmoDashboardsController', () => {
     const response = await controller.getDashboard(otherCtx);
     const body = await response.json();
     expect(body.ownerName).to.be.undefined;
+  });
+
+  it('returns 500 when S3_DASHBOARDS_BUCKET is not configured, without touching S3', async () => {
+    const unconfiguredCtx = { ...mockContext, env: {} };
+    const controller = LlmoDashboardsController(unconfiguredCtx);
+    const response = await controller.listDashboards(unconfiguredCtx);
+    expect(response.status).to.equal(500);
+    expect(unconfiguredCtx.log.error.called).to.be.true;
   });
 
   it('rejects create without a name', async () => {
