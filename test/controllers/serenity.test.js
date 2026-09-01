@@ -1507,6 +1507,13 @@ describe('SerenityController', () => {
       // contract, which is why it must not fail silently if that ever changes.
       expect(linkSiteToRowStub).to.not.have.been.called;
       expect(log.warn).to.have.been.calledWithMatch(/201 without a projectId/);
+      // The create-market telemetry event must still fire on a malformed 201 —
+      // ops needs the event even when the body is missing fields, matching the
+      // flat handler's unconditional log; only the DB link above is skipped.
+      expect(log.info).to.have.been.calledWithMatch(
+        /serenity create-market: market created/,
+        sinon.match({ semrushProjectId: null, geoTargetId: 2840, languageCode: 'en' }),
+      );
     });
 
     it('createMarket mirrors the brand host when the market carries no url of its own', async () => {

@@ -1015,10 +1015,24 @@ function SerenityController(context, log, env) {
             : null;
           if (projectId) {
             await linkSiteToRow(ctx.dataAccess, projectId, linkedSiteId, log);
-            // `result.body` is a success|error union a `status === 201` test
-            // cannot narrow (see the `projectId` comment above) — asserted here
-            // since `projectId` being truthy already proves this is the success
-            // shape.
+          } else {
+            // Unreachable while the handler keeps its 201 contract (a created
+            // market always names its project). Worth a line if that ever
+            // changes: the market silently keeps no site otherwise, which is
+            // exactly the failure this whole path exists to have fixed.
+            log?.warn?.('serenity create-market: 201 without a projectId — market left unlinked', {
+              brandId: auth.brandUuid, siteId: linkedSiteId,
+            });
+          }
+          // Logged unconditionally on the outer `status === 201`, NOT nested inside
+          // `if (projectId)` — a malformed 201 body still deserves the create-market
+          // event (with `semrushProjectId: null`) so ops isn't blind to it, and it
+          // matches the flat handler's own unconditional log. The cast below is a
+          // type ASSERTION (not the `projectId` runtime guard above): TS accepts it
+          // directly off the `status === 201` narrowing without also needing the
+          // `'projectId' in` check, because that check exists for the DB link's
+          // runtime safety, not for this cast's type-checking.
+          {
             const successBody = /** @type {MarketCreateSuccessBody} */ (result.body);
             logMarketCreated(log, {
               brandId: auth.brandUuid,
@@ -1036,14 +1050,6 @@ function SerenityController(context, log, env) {
               semrushProjectId: projectId,
               generatePrompts: genMarketTopics,
               promptCount: successBody.promptCount,
-            });
-          } else {
-            // Unreachable while the handler keeps its 201 contract (a created
-            // market always names its project). Worth a line if that ever
-            // changes: the market silently keeps no site otherwise, which is
-            // exactly the failure this whole path exists to have fixed.
-            log?.warn?.('serenity create-market: 201 without a projectId — market left unlinked', {
-              brandId: auth.brandUuid, siteId: linkedSiteId,
             });
           }
         }
