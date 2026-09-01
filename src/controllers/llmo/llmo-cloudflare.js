@@ -371,20 +371,31 @@ function LlmoCloudflareController(ctx) {
 
     const siteId = site.getId();
 
-    // targetHost is derived server-side from the site's own base URL — never taken from the client
-    // — so the worker always forwards to the canonical host for the site. resolveCanonicalHost
-    // normalizes a bare apex (example.com) to its www host, matching how audits/crawls resolve the
-    // origin and keeping host derivation consistent across CDNs (CloudFront uses the same helper),
-    // but then confirms that synthesized www host actually resolves in DNS — sites served only from
-    // the apex (no www record) fall back to the apex instead of pointing the worker at a dead host.
+    // targetHost defaults to a server-side derivation from the site's own base URL, but the
+    // caller may override it (e.g. the frontend's editable "Target hostname" field) as long as
+    // it stays within the site's own domain — hostInSiteDomain enforces the same rule addRoute
+    // already uses, so the worker can never be pointed at a host unrelated to the site.
+    const { targetHost: clientTargetHost } = context.data || {};
     let targetHost;
-    try {
-      targetHost = await resolveCanonicalHost(site.getBaseURL(), log);
-    } catch (e) {
-      log.error(auditLine(context, 'deploy-worker', 'target-host-failed', {
-        severity: 'error', siteId, accountId, error: e.message,
-      }));
-      return internalServerError('Could not derive target host from site base URL');
+    if (hasText(clientTargetHost)) {
+      if (!hostInSiteDomain(clientTargetHost.trim(), site.getBaseURL())) {
+        return badRequest('targetHost must target the site\'s domain');
+      }
+      targetHost = clientTargetHost.trim().toLowerCase();
+    } else {
+      // resolveCanonicalHost normalizes a bare apex (example.com) to its www host, matching how
+      // audits/crawls resolve the origin and keeping host derivation consistent across CDNs
+      // (CloudFront uses the same helper), but then confirms that synthesized www host actually
+      // resolves in DNS — sites served only from the apex (no www record) fall back to the apex
+      // instead of pointing the worker at a dead host.
+      try {
+        targetHost = await resolveCanonicalHost(site.getBaseURL(), log);
+      } catch (e) {
+        log.error(auditLine(context, 'deploy-worker', 'target-host-failed', {
+          severity: 'error', siteId, accountId, error: e.message,
+        }));
+        return internalServerError('Could not derive target host from site base URL');
+      }
     }
 
     // Tags attached to the worker. CF_WORKER_OWNER_TAG is always present and always first so the
