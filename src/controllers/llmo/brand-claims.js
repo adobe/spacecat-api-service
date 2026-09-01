@@ -226,7 +226,9 @@ export async function handleRequestBrandClaims(context, site) {
   });
   log.info(`Brand Claims on-demand: triggered brand-claims audit for site ${site.getId()}`);
 
-  const slackChannel = env?.SLACK_LLMO_ALERTS_CHANNEL_ID;
+  // Dedicated channel for on-demand Brand Claims request alerts (LLMO-7263),
+  // set in Vault, so these can be routed/muted independently of other LLMO alerts.
+  const slackChannel = env?.SLACK_BRAND_CLAIMS_REQUEST_CHANNEL_ID;
   const slackToken = env?.SLACK_BOT_TOKEN;
   if (slackChannel && slackToken) {
     try {

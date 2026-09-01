@@ -384,7 +384,7 @@ describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
       sqs: { sendMessage: sqsSend },
       env: {
         AUDIT_JOBS_QUEUE_URL: 'audit-q',
-        SLACK_LLMO_ALERTS_CHANNEL_ID: 'C123',
+        SLACK_BRAND_CLAIMS_REQUEST_CHANNEL_ID: 'C123',
         SLACK_BOT_TOKEN: 'xoxb-1',
       },
     };
