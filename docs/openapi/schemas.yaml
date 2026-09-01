@@ -14370,7 +14370,7 @@ OnboardingProvisioningResponse:
 # `analysis` is the query endpoint's governed metric/dimension definition;
 # `visualization` is a presentation-only, unvalidated blob (chartType/axes/
 # colors) the API stores and returns as-is. See llmo-analytics.js /
-# llmo-dashboards.js / in-memory-dashboard-store.js for the implementation
+# llmo-dashboards.js / s3-dashboard-store.js for the implementation
 # this mirrors, and project-elmo-ui's src/api/customDashboardsApi.ts for the
 # client-side type definitions this was written from.
 # ============================================================================

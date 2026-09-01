@@ -248,6 +248,38 @@ describe('LlmoDashboardsController', () => {
     expect(response.status).to.equal(403);
   });
 
+  it('forbids an editor (non-owner) from changing dashboard visibility', async () => {
+    const controller = LlmoDashboardsController(mockContext);
+    const createResponse = await controller.createDashboard({
+      ...mockContext, data: { name: 'D1', visibility: 'private' },
+    });
+    const { id } = await createResponse.json();
+    mockContext.params.dashboardId = id;
+    mockContext.data = {
+      sharedWith: [{ userId: 'editor@example.com', role: 'editor' }],
+    };
+    await controller.updateDashboard(mockContext);
+
+    const editorCtx = asUser('editor@example.com');
+    editorCtx.params = { ...mockContext.params, dashboardId: id };
+    editorCtx.data = { visibility: 'org' };
+    const response = await controller.updateDashboard(editorCtx);
+    expect(response.status).to.equal(403);
+  });
+
+  it('allows the owner to change dashboard visibility', async () => {
+    const controller = LlmoDashboardsController(mockContext);
+    const createResponse = await controller.createDashboard({
+      ...mockContext, data: { name: 'D1', visibility: 'private' },
+    });
+    const { id } = await createResponse.json();
+    mockContext.params.dashboardId = id;
+    mockContext.data = { visibility: 'org' };
+    const response = await controller.updateDashboard(mockContext);
+    expect(response.status).to.equal(200);
+    expect((await response.json()).visibility).to.equal('org');
+  });
+
   it('forbids a non-owner from deleting a dashboard', async () => {
     const controller = LlmoDashboardsController(mockContext);
     const createResponse = await controller.createDashboard({
@@ -342,6 +374,25 @@ describe('LlmoDashboardsController', () => {
 
       const removeResponse = await controller.removeTile(mockContext);
       expect(removeResponse.status).to.equal(204);
+    });
+
+    it('rejects a tile update that would clear analysis/visualization without a snapshot', async () => {
+      mockContext.data = {
+        title: 'Tile 1', analysis: {}, visualization: {}, layout: { size: 'M' },
+      };
+      const addResponse = await controller.addTile(mockContext);
+      const { id: tileId } = await addResponse.json();
+
+      mockContext.params.tileId = tileId;
+      mockContext.data = { analysis: null, visualization: null };
+      const response = await controller.updateTile(mockContext);
+      expect(response.status).to.equal(400);
+
+      // The invalid patch must not have persisted.
+      const getResponse = await controller.getDashboard(mockContext);
+      const dashboard = await getResponse.json();
+      const tile = dashboard.tiles.find((t) => t.id === tileId);
+      expect(tile.analysis).to.deep.equal({});
     });
   });
 });

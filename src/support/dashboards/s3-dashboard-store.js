@@ -19,8 +19,7 @@ import { randomUUID } from 'crypto';
  *   dashboards/{orgId}/{dashboardId}.json
  *
  * Dashboards are org-scoped — `brandId` is stored for context but is never used
- * as an access gate (see `assertOrgScope` comment in the old in-memory store for the
- * rationale: a dashboard must not vanish when the user switches brands).
+ * as an access gate: a dashboard must not vanish when the user switches brands.
  *
  * Every exported function is async and accepts the caller's `context.s3` object
  * (injected by `s3ClientWrapper` in `src/support/s3.js`) plus the bucket name from

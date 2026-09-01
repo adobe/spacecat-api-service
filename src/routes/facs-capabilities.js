@@ -636,15 +636,12 @@ const routeFacsCapabilities = {
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/categories/:categoryId': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/topics/:topicId': 'llmo/can_configure',
-      // ABV custom-dashboard CRUD (v1: in-memory store, see llmo-dashboards.js).
+      // ABV custom-dashboard CRUD (v1: S3-backed store, see llmo-dashboards.js).
       'POST /v2/orgs/:spaceCatId/brands/:brandId/dashboards': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId': 'llmo/can_configure',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId': 'llmo/can_configure',
       // eslint-disable-next-line max-len
       'POST /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/duplicate': 'llmo/can_configure',
-      'POST /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/star': 'llmo/can_configure',
-      // eslint-disable-next-line max-len
-      'DELETE /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/star': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/tiles': 'llmo/can_configure',
       // eslint-disable-next-line max-len
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/tiles/:tileId': 'llmo/can_configure',
@@ -890,11 +887,16 @@ const routeFacsCapabilities = {
       'GET /v2/orgs/:spaceCatId/brands/:brandId': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'llmo/can_view',
-      // ABV custom-dashboard analytics + CRUD (v1: fixture data / in-memory store).
+      // ABV custom-dashboard analytics + CRUD (v1: fixture data / S3-backed store).
       'GET /v2/orgs/:spaceCatId/brands/:brandId/analytics/metadata': 'llmo/can_view',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/analytics/query': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/dashboards': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId': 'llmo/can_view',
+      // Starring only mutates the caller's own personal starred list, not shared
+      // dashboard state, so it only needs view access.
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/star': 'llmo/can_view',
+      // eslint-disable-next-line max-len
+      'DELETE /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId/star': 'llmo/can_view',
       // Serenity proxy (Semrush AIO replacement) — reads under brand
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/jobs/:jobId': 'llmo/can_view',

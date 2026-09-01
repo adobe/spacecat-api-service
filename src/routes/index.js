@@ -245,7 +245,7 @@ export default function getRouteHandlers(
     // ABV custom-dashboard analytics query API (v1: fixture data, see llmo-analytics.js).
     'GET /v2/orgs/:spaceCatId/brands/:brandId/analytics/metadata': analyticsController.getMetadata,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/analytics/query': analyticsController.runQuery,
-    // ABV custom-dashboard CRUD (v1: in-memory store, see llmo-dashboards.js).
+    // ABV custom-dashboard CRUD (v1: S3-backed store, see llmo-dashboards.js).
     'GET /v2/orgs/:spaceCatId/brands/:brandId/dashboards': dashboardsController.listDashboards,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/dashboards': dashboardsController.createDashboard,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/dashboards/:dashboardId': dashboardsController.getDashboard,

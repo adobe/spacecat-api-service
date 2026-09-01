@@ -87,10 +87,11 @@ tags:
   - name: custom-dashboards
     description: >-
       ABV custom dashboards (v1 prototype) — governed analytics query plus
-      dashboard/tile CRUD. Dashboards persist in-memory server-side and the
-      analytics query returns deterministic fixture data; see
-      llmo-dashboards.js / llmo-analytics.js for why and how this swaps to a
-      real data source later without changing the API contract.
+      dashboard/tile CRUD. Dashboards persist as JSON objects in S3 (see
+      s3-dashboard-store.js) and the analytics query returns deterministic
+      fixture data; see llmo-dashboards.js / llmo-analytics.js for why and how
+      this swaps to a real data source later without changing the API
+      contract.
 
 paths:
   /audits/latest/{auditType}:

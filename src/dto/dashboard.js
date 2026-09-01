@@ -11,14 +11,14 @@
  */
 
 /**
- * Data Transfer Object for the in-memory Dashboard record — never returns the raw store
+ * Data Transfer Object for the S3-backed Dashboard record — never returns the raw store
  * object (e.g. drops nothing sensitive today, but keeps the same "never expose the model
  * directly" shape this repo's other DTOs follow, so swapping the store for a real
  * persisted entity later doesn't change the response shape).
  */
 export const DashboardDto = {
   /**
-   * @param {Object} dashboard - a record from in-memory-dashboard-store.js
+   * @param {Object} dashboard - a record from s3-dashboard-store.js
    * @param {string} callerUserId - the requesting user, to compute `isStarred`
    * @param {string} [callerDisplayName] - the requesting user's display name (from their
    *   own IMS profile). Only ever populated for the caller's own dashboards — resolving a

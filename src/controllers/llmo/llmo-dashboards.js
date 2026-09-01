@@ -150,6 +150,12 @@ function LlmoDashboardsController(context) {
     if (sharedWith !== undefined && existing.ownerId !== callerId) {
       return forbidden('Only the owner can modify sharing settings');
     }
+    // Visibility is a coarser access-control lever than a single named share — it can
+    // expose a private dashboard to the entire org — so it gets the same owner-only
+    // guard as sharedWith above, not the lower canEdit() bar the rest of this patch uses.
+    if (visibility !== undefined && existing.ownerId !== callerId) {
+      return forbidden('Only the owner can change dashboard visibility');
+    }
     if (visibility !== undefined && !VISIBILITIES.includes(visibility)) {
       return badRequest(`visibility must be one of: ${VISIBILITIES.join(', ')}`);
     }
@@ -296,6 +302,18 @@ function LlmoDashboardsController(context) {
       ...(localOverrides !== undefined && { localOverrides }),
       ...(applyGlobalFilters !== undefined && { applyGlobalFilters }),
     };
+    const existingTile = existing.tiles.find((tile) => tile.id === tileId);
+    if (!existingTile) {
+      return notFound(`Tile not found: ${tileId}`);
+    }
+    // Same governed-tile invariant addTile enforces: apply the patch on top of the
+    // existing tile first, so a patch clearing analysis/visualization without a
+    // snapshot (or vice versa) is caught here rather than persisting a tile with no
+    // valid render path.
+    const merged = { ...existingTile, ...patch };
+    if (!merged.snapshot && (!merged.analysis || !merged.visualization)) {
+      return badRequest('governed tiles require analysis and visualization; snapshot tiles require snapshot');
+    }
     const result = await store.updateTile(s3, bucket, {
       id: dashboardId, orgId: spaceCatId, tileId, patch,
     });
