@@ -121,6 +121,19 @@ describe('approveOrg', () => {
     expect(texts.some((t) => t.includes('no site found'))).to.be.true;
   });
 
+  it('responds actionably (no throw, no move) when the org cannot be resolved', async () => {
+    context.dataAccess.Organization.findByImsOrgId.resolves(null);
+    context.dataAccess.Site.findByBaseURL.resolves(site);
+
+    const approveOrgAction = approveOrg(context);
+    await approveOrgAction({ ack: ackMock, body, respond: respondMock });
+
+    expect(site.setOrganizationId).to.not.have.been.called;
+    expect(site.save).to.not.have.been.called;
+    const texts = respondMock.getCalls().map((c) => c.args[0]?.text ?? '');
+    expect(texts.some((t) => t.includes('no org found'))).to.be.true;
+  });
+
   it('blocks the org approval when the site still has enrollments to orphan (LLMO-7284 AC12)', async () => {
     context.dataAccess.Organization.findByImsOrgId.resolves(org);
     context.dataAccess.Site.findByBaseURL.resolves(site);

@@ -92,4 +92,20 @@ describe('site org-reassignment call-site backstop (LLMO-7284)', () => {
       `Allowlisted file(s) no longer mutate a site org; remove them from the allowlist: ${stale.join(', ')}.`,
     ).to.deep.equal([]);
   });
+
+  it('files tagged "guarded" still call assertSiteOrgReassignmentSafe', () => {
+    // Enumeration proves the file mutates a site org; this proves the ones we claim
+    // are guarded still actually invoke the guard. Removing the guard call (while
+    // leaving the mutation) must fail here rather than silently rot the allowlist note.
+    const unguarded = [...ALLOWLISTED_ORG_MUTATION_FILES.entries()]
+      .filter(([, note]) => note.startsWith('guarded by assertSiteOrgReassignmentSafe'))
+      .filter(([file]) => !readFileSync(join(REPO_ROOT, file), 'utf8').includes('assertSiteOrgReassignmentSafe'))
+      .map(([file]) => file);
+
+    expect(
+      unguarded,
+      `File(s) tagged "guarded" no longer call assertSiteOrgReassignmentSafe: ${unguarded.join(', ')}. `
+      + 'Re-wire the guard or move the entry to a self-gating/exempt note.',
+    ).to.deep.equal([]);
+  });
 });

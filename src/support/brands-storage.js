@@ -21,8 +21,12 @@ import {
 } from './serenity/serenity-active.js';
 
 // Upper bound for the active-brand duplicate scan (LLMO-7284). Comfortably above
-// any realistic active-brands-per-org count; its only purpose is to make a
-// silent PostgREST db-max-rows truncation impossible (a full page => fail closed).
+// any realistic active-brands-per-org count. It makes a silent PostgREST
+// truncation DETECTABLE only when the server's `db-max-rows` is >= this value: a
+// full page then means "possibly truncated" and we fail closed. If a deployment
+// sets `db-max-rows` BELOW this, `.limit()` is capped lower, the full-page check
+// cannot fire, and the guarantee weakens — the durable fix is the SITES-49449 DB
+// partial unique index, which retires this app-layer scan entirely.
 const ACTIVE_BRAND_SCAN_LIMIT = 1000;
 
 /**
@@ -1172,11 +1176,12 @@ export async function assertNoDuplicateActiveBrandName({
     .select('id, name')
     .eq('organization_id', organizationId)
     .eq('status', 'active')
-    // Bound the scan so a PostgREST db-max-rows cap cannot SILENTLY truncate it and
-    // let a normalized twin beyond the cap slip through (which would make this
-    // fail-closed guard fail OPEN). ACTIVE_BRAND_SCAN_LIMIT is far above any real
-    // active-brands-per-org count; hitting it means misconfiguration, so we fail
-    // closed loudly below rather than validate a partial view.
+    // Bound the scan so a PostgREST truncation becomes DETECTABLE: a full page is
+    // treated as "possibly truncated" and fails closed below rather than validating
+    // a partial view. This detects truncation only when `db-max-rows` >= the limit
+    // (a lower server cap would cap `.limit()` too and mask the full page); real
+    // active-brands-per-org counts are tiny, and SITES-49449 moves the invariant
+    // into the DB and removes this scan.
     .limit(ACTIVE_BRAND_SCAN_LIMIT);
   if (hasText(excludeBrandId)) {
     query = query.neq('id', excludeBrandId);
@@ -1915,6 +1920,7 @@ export async function setBrandStatus({
   status,
   postgrestClient,
   updatedBy = 'system',
+  log = console,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required');
@@ -1938,7 +1944,7 @@ export async function setBrandStatus({
     }
     if (current && current.status !== 'active') {
       await assertNoDuplicateActiveBrandName({
-        postgrestClient, organizationId, name: current.name, excludeBrandId: brandId,
+        postgrestClient, organizationId, name: current.name, excludeBrandId: brandId, log,
       });
     }
   }
