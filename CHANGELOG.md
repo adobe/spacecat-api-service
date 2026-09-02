@@ -1,3 +1,10 @@
+## [1.784.4](https://github.com/adobe/spacecat-api-service/compare/v1.784.3...v1.784.4) (2026-09-02)
+
+
+### Bug Fixes
+
+* **plg-onboarding:** re-parent site project into customer org on reassignment ([#3184](https://github.com/adobe/spacecat-api-service/issues/3184)) ([8c57e0e](https://github.com/adobe/spacecat-api-service/commit/8c57e0e24a7aa572bae622a5f36e345395e13883))
+
 ## [1.784.3](https://github.com/adobe/spacecat-api-service/compare/v1.784.2...v1.784.3) (2026-09-02)
 
 
