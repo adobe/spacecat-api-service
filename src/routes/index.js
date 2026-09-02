@@ -250,6 +250,7 @@ export default function getRouteHandlers(
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': serenityController.listTags,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': serenityController.createTag,
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId': serenityController.updateTag,
+    'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId': serenityController.deleteTag,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': serenityController.listModels,
     'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': serenityController.updateModels,
     // Brand-independent global model catalog (add-brand wizard, before a brand exists).
@@ -595,6 +596,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/global-sheet-data/:configName': llmoController.getLlmoGlobalSheetData,
     'GET /sites/:siteId/llmo/rationale': llmoController.getLlmoRationale,
     'GET /sites/:siteId/llmo/brand-claims': llmoController.getBrandClaims,
+    'POST /sites/:siteId/llmo/brand-claims/request': llmoController.requestBrandClaims,
     'GET /sites/:siteId/llmo/strategy/demo/brand-presence': llmoController.getDemoBrandPresence,
     'GET /sites/:siteId/llmo/strategy/demo/recommendations': llmoController.getDemoRecommendations,
     'POST /llmo/onboard': llmoController.onboardCustomer,

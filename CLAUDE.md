@@ -317,7 +317,7 @@ Agents in `src/agents/` use `@langchain/langgraph` for workflow orchestration.
 2. **Specification Sync**: Keep OpenAPI specs and implementation in sync
    - Run `npm run docs:lint` after modifying specs
    - Run `npm run docs:build` before completing implementation
-3. **Routing Consistency**: Add routes to BOTH `src/index.js` and `src/routes/index.js`
+3. **Routing Consistency**: Add routes to `src/routes/index.js`. `src/index.js` only wires each domain's controller into context (e.g. `SerenityController(context, log, context.env)`) — it does not list individual routes, so it needs a change only when adding a new controller/pattern, not for a new route on an existing one.
 4. **Access Control**: Always use `AccessControlUtil` for tenant data
 5. **DTO Usage**: Transform all responses through DTOs
 6. **HTTP Helpers**: Use shared helpers from `@adobe/spacecat-shared-http-utils` (`ok`, `badRequest`, `notFound`, `forbidden`, `accepted`, etc.)

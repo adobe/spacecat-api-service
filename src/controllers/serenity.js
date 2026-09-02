@@ -16,7 +16,7 @@ import {
   createResponse, forbidden, internalServerError, noContent, notFound, accepted,
 } from '@adobe/spacecat-shared-http-utils';
 import {
-  hasText, isNonEmptyObject, isValidUUID, siteIdentityFromUrlString,
+  hasText, isNonEmptyObject, isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
@@ -68,6 +68,8 @@ import {
   handleCreateTagSubworkspace,
   handleUpdateTag,
   handleUpdateTagSubworkspace,
+  handleDeleteTag,
+  handleDeleteTagSubworkspace,
 } from '../support/serenity/handlers/tags.js';
 import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
 import { isSerenityActiveForBrand } from '../support/serenity/serenity-active.js';
@@ -85,6 +87,8 @@ import { ErrorWithStatusCode, resolveSemrushImsToken as resolveImsTokenViaPromis
 import {
   ensureMarketSite,
   resolveSiteIdentity,
+  resolveMarketIdentity,
+  logMarketCreated,
   unlinkMarketSiteIfOrphaned,
 } from '../support/serenity/site-linkage.js';
 import { X_PROMISE_TOKEN_HEADER, PROMISE_TOKEN_REQUIRED_ERROR_CODE } from '../utils/constants.js';
@@ -815,6 +819,13 @@ function SerenityController(context, log, env) {
     }
   };
 
+  /**
+   * @typedef {{
+   *   geoTargetId: number, languageCode: string|null, workspaceId: string,
+   *   promptCount?: number,
+   * }} MarketCreateSuccessBody
+   */
+
   const createMarket = async (ctx) => {
     let auth;
     try {
@@ -863,28 +874,34 @@ function SerenityController(context, log, env) {
       if (auth.mode === 'subworkspace') {
         const brand = await loadBrand(ctx, auth.brandUuid);
         // The subworkspace create handler has no Site access (narrowed dataAccess),
-        // so derive the Semrush project domain from the supplied siteId HERE when
-        // brandDomain is absent. A supplied-but-unresolvable siteId is a hard 400.
-        // `primaryUrl` is always DERIVED here, never taken from the request. It is
-        // not part of the documented create-market contract, and passing a caller's
-        // value straight through would put an unvalidated string on the Semrush
-        // project. Set unconditionally so a client that sends one is ignored rather
-        // than trusted.
-        let effectiveBody = {
+        // so derive the Semrush project domain HERE via the same shared rule the
+        // flat handler uses (resolveMarketIdentity, markets.js): a resolving siteId
+        // is authoritative over any brandDomain also sent; brandDomain is consulted
+        // only when no siteId was supplied; a supplied-but-unresolvable siteId is a
+        // hard 400 (see the pre-check above — suppliedSiteIdentity is already
+        // guaranteed non-null here whenever a siteId was supplied). Both branches go
+        // through the one function so this call site cannot silently diverge from
+        // the flat handler's. `primaryUrl` is always DERIVED here, never taken from
+        // the request — unlike the flat handler, which does trust a caller-supplied
+        // primaryUrl when deriving from brandDomain. That primaryUrl is not part of
+        // the documented create-market contract on this path, and passing a
+        // caller's value straight through would put an unvalidated string on the
+        // Semrush project, so it is deliberately omitted from the call below.
+        const identity = resolveMarketIdentity(
+          suppliedSiteIdentity,
+          !!suppliedSiteId,
+          requestBody.brandDomain,
+          undefined,
+        );
+        // Only `primaryUrl` can carry a subpath — `brandDomain` is a bare FQDN
+        // because a path there is rejected upstream. The two travel together —
+        // resolveMarketIdentity never resolves one without the other — so both
+        // are assigned the same way, with no separate null-coalescing on either.
+        const effectiveBody = {
           ...requestBody,
-          primaryUrl: siteIdentityFromUrlString(requestBody.brandDomain),
+          brandDomain: identity.domain,
+          primaryUrl: identity.primaryUrl,
         };
-        if (suppliedSiteIdentity && !hasText(requestBody.brandDomain)) {
-          // Both values from the read above, for the same reason the domain is
-          // derived here at all: the handler has no Site access. Only `primaryUrl`
-          // can carry a subpath — `brandDomain` is a bare FQDN because a path there
-          // is rejected upstream.
-          effectiveBody = {
-            ...effectiveBody,
-            brandDomain: suppliedSiteIdentity.domain,
-            primaryUrl: suppliedSiteIdentity.primaryUrl ?? undefined,
-          };
-        }
         // Brand aliases are brand-level but region-scoped: the create handler
         // clamps each to the new market's region before writing brand_names.
         const brandAliases = await getBrandAliases(
@@ -1005,6 +1022,34 @@ function SerenityController(context, log, env) {
             // exactly the failure this whole path exists to have fixed.
             log?.warn?.('serenity create-market: 201 without a projectId — market left unlinked', {
               brandId: auth.brandUuid, siteId: linkedSiteId,
+            });
+          }
+          // Logged unconditionally on the outer `status === 201`, NOT nested inside
+          // `if (projectId)` — a malformed 201 body still deserves the create-market
+          // event (with `semrushProjectId: null`) so ops isn't blind to it, and it
+          // matches the flat handler's own unconditional log. The cast below is a
+          // type ASSERTION (not the `projectId` runtime guard above): TS accepts it
+          // directly off the `status === 201` narrowing without also needing the
+          // `'projectId' in` check, because that check exists for the DB link's
+          // runtime safety, not for this cast's type-checking.
+          {
+            const successBody = /** @type {MarketCreateSuccessBody} */ (result.body);
+            logMarketCreated(log, {
+              brandId: auth.brandUuid,
+              geoTargetId: successBody.geoTargetId,
+              languageCode: successBody.languageCode,
+              // The supplied/resolved siteId, not `linkedSiteId` — the brand_sites
+              // mirror write is best-effort and can fail independently of a valid
+              // siteId being supplied, which would otherwise log a null siteId for
+              // a market that in fact had one. Matches the flat handler's own
+              // telemetry, which reports the supplied siteId the same way.
+              siteId: suppliedSiteId ?? null,
+              brandDomain: effectiveBody.brandDomain,
+              primaryUrl: effectiveBody.primaryUrl,
+              semrushWorkspaceId: successBody.workspaceId,
+              semrushProjectId: projectId,
+              generatePrompts: genMarketTopics,
+              promptCount: successBody.promptCount,
             });
           }
         }
@@ -1211,6 +1256,50 @@ function SerenityController(context, log, env) {
           log,
         );
       return createResponse(result.body, result.status);
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
+  /**
+   * DELETE /serenity/tags/:tagId — delete a category (or sub-category) and its
+   * whole subtree, preserving every carrying prompt (category-delete.md). The
+   * market slice travels as query params (`geoTargetId`, `languageCode`) since
+   * a DELETE has no body. Dispatches by workspace mode, mirroring updateTag.
+   */
+  const deleteTag = async (ctx) => {
+    let auth;
+    try {
+      const imsToken = await resolveSemrushImsToken(ctx);
+      const { tagId } = ctx?.params || {};
+      if (!hasText(tagId)) {
+        throw new ErrorWithStatusCode('Missing tagId', 400);
+      }
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      if (auth.mode === 'subworkspace') {
+        await handleDeleteTagSubworkspace(
+          transport,
+          /** @type {string} */ (auth.workspaceId),
+          tagId,
+          parsedQuery(ctx),
+          log,
+        );
+      } else {
+        await handleDeleteTag(
+          transport,
+          ctx.dataAccess,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (auth.workspaceId),
+          tagId,
+          parsedQuery(ctx),
+          log,
+        );
+      }
+      return noContent();
     } catch (e) {
       return mapError(e, log, reqCtxOf(ctx, auth));
     }
@@ -1991,6 +2080,7 @@ function SerenityController(context, log, env) {
     listTags,
     createTag,
     updateTag,
+    deleteTag,
     listModels,
     listOrgModels,
     listOrgLanguages,

@@ -6956,7 +6956,7 @@ CustomerConfigUrl:
       items:
         type: string
       description: Regions where this URL is applicable
-      example: ["GL", "US", "GB"]
+      example: ["US", "GB"]
 CustomerConfigSocialAccount:
   type: object
   description: A social media account for a brand
@@ -6979,7 +6979,7 @@ CustomerConfigSocialAccount:
       items:
         type: string
       description: Regions where this account is relevant
-      example: ["GL"]
+      example: ["US"]
 CustomerConfigBrandAlias:
   type: object
   description: An alternative name for a brand
@@ -7042,7 +7042,7 @@ CustomerConfigRelatedBrand:
       items:
         type: string
       description: Regions where this relationship is relevant
-      example: ["GL"]
+      example: ["US"]
 CustomerConfigEarnedContent:
   type: object
   description: Earned media content source
@@ -7075,7 +7075,7 @@ CustomerConfigEarnedContent:
       items:
         type: string
       description: Regions where this source is relevant
-      example: ["GL"]
+      example: ["US"]
 CustomerConfigBrand:
   type: object
   description: A brand configuration with all associated metadata
@@ -7110,7 +7110,7 @@ CustomerConfigBrand:
       items:
         type: string
       description: Regions where this brand operates
-      example: ["GL", "US", "GB"]
+      example: ["US", "GB"]
     description:
       type: string
       description: Detailed description of the brand
@@ -12528,6 +12528,13 @@ SerenityTag:
       description: |
         Number of direct children under this tag. Populated by the TREE read
         (typically non-zero only on root categories).
+    promptsCount:
+      type: integer
+      description: |
+        Number of prompts directly carrying this tag. Populated by the TREE read;
+        used to show cascade impact before a delete. Deliberately not in the
+        top-level `required` list, same as `childrenCount`: absent on the flat,
+        prompt-derived listing.
     path:
       type: [array, 'null']
       description: |
