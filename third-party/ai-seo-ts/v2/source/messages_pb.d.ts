@@ -2489,6 +2489,13 @@ export declare type SourcesTotalsRequest = Message<"semrush.services.ai_seo.v2.s
    * @generated from field: optional string target_date = 7;
    */
   targetDate?: string;
+
+  /**
+   * search_type controls how target.domain is scoped. UNSPECIFIED defaults to DOMAIN.
+   *
+   * @generated from field: semrush.services.ai_seo.v2.source.SEARCH_TYPE.ENUM search_type = 8;
+   */
+  searchType: SEARCH_TYPE_ENUM;
 };
 
 /**
@@ -2537,6 +2544,13 @@ export declare type SourcesTotalsRequestJson = {
    * @generated from field: optional string target_date = 7;
    */
   targetDate?: string;
+
+  /**
+   * search_type controls how target.domain is scoped. UNSPECIFIED defaults to DOMAIN.
+   *
+   * @generated from field: semrush.services.ai_seo.v2.source.SEARCH_TYPE.ENUM search_type = 8;
+   */
+  searchType?: SEARCH_TYPE_ENUMJson;
 };
 
 /**
