@@ -776,6 +776,8 @@ paths:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-routing'
   /sites/{siteId}/llmo/cdn-onboard/cloudflare/config:
     $ref: './llmo-api.yaml#/site-llmo-cloudflare-config'
+  /sites/{siteId}/llmo/cdn-onboard/cloudflare/target-host:
+    $ref: './llmo-api.yaml#/site-llmo-cloudflare-target-host'
   /sites/{siteId}/llmo/cdn-onboard/cloudflare/accounts:
     $ref: './llmo-api.yaml#/site-llmo-cloudflare-accounts'
   /sites/{siteId}/llmo/cdn-onboard/cloudflare/zones:

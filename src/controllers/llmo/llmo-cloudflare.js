@@ -271,6 +271,30 @@ function LlmoCloudflareController(ctx) {
     return ok({ clientId });
   };
 
+  /**
+   * GET /sites/:siteId/llmo/cdn-onboard/cloudflare/target-host
+   * Read-only preview of the target host deployWorker would derive server-side when the caller
+   * omits targetHost — lets the frontend prefill/suggest a value before the user reaches the
+   * deploy step, without needing a Cloudflare token or performing any deploy side effect.
+   */
+  const getTargetHost = async (context) => {
+    const result = await getSiteAndCheckAccess(context);
+    if (result.status) {
+      return result;
+    }
+    const { site } = result;
+
+    try {
+      const targetHost = await resolveCanonicalHost(site.getBaseURL(), log);
+      return ok({ targetHost });
+    } catch (e) {
+      log.error(auditLine(context, 'target-host', 'resolve-failed', {
+        severity: 'error', siteId: site.getId(), error: e.message,
+      }));
+      return internalServerError('Could not derive target host from site base URL');
+    }
+  };
+
   // GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts
   const listAccounts = cfListProxy('listAccounts', 'account listing', 'list-accounts');
 
@@ -633,6 +657,7 @@ function LlmoCloudflareController(ctx) {
 
   return {
     getCloudflareConfig,
+    getTargetHost,
     listAccounts,
     listZones,
     deployWorker,
