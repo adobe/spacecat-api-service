@@ -12,6 +12,7 @@
 
 import { checkGeoExperimentImpactMeasurement } from '../../utils.js';
 import { isImpactMeasurementCheckEligible } from '../../geo-experiment-helper.js';
+import { resolveGeoExperiment } from './impact-measurement-helper.js';
 import BaseCommand from './base.js';
 import { extractURLFromSlackInput, postErrorMessage, postSiteNotFoundMessage } from '../../../utils/slack/base.js';
 
@@ -24,7 +25,8 @@ const PHRASES = ['check-impact-measurement'];
  * finished — this command does not itself return the completion result, since the update
  * happens asynchronously via the llmo-experimentation-engine-queue (fire-and-request, matching
  * trigger-impact-measurement's fire-and-forget shape). Run `get-site {baseURL}` or a follow-up
- * check after a short wait to see the updated phase/status.
+ * check after a short wait to see the updated phase/status. An explicit geoExperimentId can
+ * optionally be supplied to target a specific experiment instead of the site's most recent one.
  *
  * Needed because trigger-impact-measurement can re-arm a COMPLETED experiment while leaving it
  * COMPLETED (invisible to the engine's own cron sweep) — this is the manual entry point to
@@ -37,7 +39,7 @@ export default function CheckImpactMeasurementCommand(context) {
     name: 'Check Impact Measurement',
     description: 'Manually checks an in-flight Mystique impact-measurement task for a site\'s geo-experiment.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {baseURL}`,
+    usageText: `${PHRASES[0]} {baseURL} [geoExperimentId]`,
   });
 
   const { dataAccess, log, sqs } = context;
@@ -47,7 +49,7 @@ export default function CheckImpactMeasurementCommand(context) {
     const { say, user } = slackContext;
 
     try {
-      const [baseURLInput] = args;
+      const [baseURLInput, geoExperimentIdInput] = args;
       const baseURL = extractURLFromSlackInput(baseURLInput);
 
       if (!baseURL) {
@@ -61,14 +63,14 @@ export default function CheckImpactMeasurementCommand(context) {
         return;
       }
 
-      const { data: experiments } = await GeoExperiment.allBySiteId(site.getId());
-      if (experiments.length === 0) {
-        await say(`:x: No geo-experiments found for '${baseURL}'.`);
+      const { geoExperiment, errorMessage } = await resolveGeoExperiment({
+        GeoExperiment, site, baseURL, geoExperimentIdInput,
+      });
+      if (errorMessage) {
+        await say(errorMessage);
         return;
       }
 
-      // allBySiteId is ordered by most recently updated — the first result is the current one.
-      const [geoExperiment] = experiments;
       const geoExperimentId = geoExperiment.getId();
 
       if (!isImpactMeasurementCheckEligible(geoExperiment)) {

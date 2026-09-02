@@ -17,15 +17,19 @@ import esmock from 'esmock';
 
 use(sinonChai);
 
+const VALID_GEO_EXP_ID = '11111111-1111-4111-8111-111111111111';
+
 function mockGeoExperiment({
   id = 'geo-exp-1',
   phase = 'post_analysis_done',
   status = 'COMPLETED',
+  siteId = 'site-1',
 } = {}) {
   return {
     getId: () => id,
     getPhase: () => phase,
     getStatus: () => status,
+    getSiteId: () => siteId,
   };
 }
 
@@ -67,7 +71,7 @@ describe('TriggerImpactMeasurementCommand', () => {
 
     dataAccessStub = {
       Site: { findByBaseURL: sinon.stub() },
-      GeoExperiment: { allBySiteId: sinon.stub() },
+      GeoExperiment: { allBySiteId: sinon.stub(), findById: sinon.stub() },
     };
 
     sqsStub = { sendMessage: sinon.stub().resolves() };
@@ -187,6 +191,63 @@ describe('TriggerImpactMeasurementCommand', () => {
       'unknown',
       { sqs: sqsStub, env: context.env },
     );
+  });
+
+  it('triggers measurement for an explicitly supplied geoExperimentId', async () => {
+    extractURLFromSlackInputStub.returns('https://example.com');
+    dataAccessStub.Site.findByBaseURL.resolves({ getId: () => 'site-1' });
+    dataAccessStub.GeoExperiment.findById.resolves(
+      mockGeoExperiment({ id: VALID_GEO_EXP_ID, siteId: 'site-1' }),
+    );
+    const command = TriggerImpactMeasurementCommand(context);
+
+    await command.handleExecution(['example.com', VALID_GEO_EXP_ID], slackContext);
+
+    expect(dataAccessStub.GeoExperiment.findById).to.have.been.calledOnceWith(VALID_GEO_EXP_ID);
+    expect(dataAccessStub.GeoExperiment.allBySiteId).to.not.have.been.called;
+    expect(triggerGeoExperimentImpactMeasurementStub).to.have.been.calledOnceWithExactly(
+      VALID_GEO_EXP_ID,
+      'U01USER',
+      { sqs: sqsStub, env: context.env },
+    );
+  });
+
+  it('rejects an invalid geoExperimentId', async () => {
+    extractURLFromSlackInputStub.returns('https://example.com');
+    dataAccessStub.Site.findByBaseURL.resolves({ getId: () => 'site-1' });
+    const command = TriggerImpactMeasurementCommand(context);
+
+    await command.handleExecution(['example.com', 'not-a-uuid'], slackContext);
+
+    expect(slackContext.say.firstCall.args[0]).to.include('not a valid geo-experiment id');
+    expect(dataAccessStub.GeoExperiment.findById).to.not.have.been.called;
+    expect(triggerGeoExperimentImpactMeasurementStub).to.not.have.been.called;
+  });
+
+  it('notifies when the supplied geoExperimentId is not found', async () => {
+    extractURLFromSlackInputStub.returns('https://example.com');
+    dataAccessStub.Site.findByBaseURL.resolves({ getId: () => 'site-1' });
+    dataAccessStub.GeoExperiment.findById.resolves(null);
+    const command = TriggerImpactMeasurementCommand(context);
+
+    await command.handleExecution(['example.com', VALID_GEO_EXP_ID], slackContext);
+
+    expect(slackContext.say.firstCall.args[0]).to.include('No geo-experiment found with id');
+    expect(triggerGeoExperimentImpactMeasurementStub).to.not.have.been.called;
+  });
+
+  it('notifies when the supplied geoExperimentId belongs to another site', async () => {
+    extractURLFromSlackInputStub.returns('https://example.com');
+    dataAccessStub.Site.findByBaseURL.resolves({ getId: () => 'site-1' });
+    dataAccessStub.GeoExperiment.findById.resolves(
+      mockGeoExperiment({ id: VALID_GEO_EXP_ID, siteId: 'site-2' }),
+    );
+    const command = TriggerImpactMeasurementCommand(context);
+
+    await command.handleExecution(['example.com', VALID_GEO_EXP_ID], slackContext);
+
+    expect(slackContext.say.firstCall.args[0]).to.include('does not belong to');
+    expect(triggerGeoExperimentImpactMeasurementStub).to.not.have.been.called;
   });
 
   it('logs and posts an error message when an exception occurs', async () => {
