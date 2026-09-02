@@ -177,6 +177,7 @@ const routeFacsCapabilities = {
     // Admin-only reads
     'GET /organizations', // admin OR S2S readAll
     'GET /organizations/by-product-code/:productCode', // admin OR S2S readAll
+    'GET /organizations/by-access-map-sheet/:productCode', // hasAdminReadAccess only
     'GET /sites', // admin OR S2S readAll
     'GET /sites.csv', // hasAdminReadAccess
     'GET /sites.xlsx', // hasAdminReadAccess

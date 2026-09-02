@@ -192,6 +192,7 @@ describe('Organizations Controller', () => {
     'createOrganization',
     'getAll',
     'getByProductCode',
+    'getByAccessMapSheet',
     'getByID',
     'getSitesForOrganization',
     'getProjectsByOrganizationId',

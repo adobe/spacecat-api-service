@@ -218,6 +218,7 @@ export default function getRouteHandlers(
     'GET /organizations/by-ims-org-id/:imsOrgId': organizationsController.getByImsOrgID,
     'GET /organizations/by-ims-org-id/:imsOrgId/slack-config': organizationsController.getSlackConfigByImsOrgID,
     'GET /organizations/by-product-code/:productCode': organizationsController.getByProductCode,
+    'GET /organizations/by-access-map-sheet/:productCode': organizationsController.getByAccessMapSheet,
     'PATCH /organizations/:organizationId': organizationsController.updateOrganization,
     'DELETE /organizations/:organizationId': organizationsController.removeOrganization,
     'GET /organizations/:organizationId/sites': organizationsController.getSitesForOrganization,
