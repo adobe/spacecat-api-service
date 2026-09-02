@@ -69,14 +69,20 @@ describe('market-tracking-trends definitions', () => {
     // Semrush 422s on `advanced: { op: 'and', filters: [] }` — it is NOT treated as
     // "match all". Verified live 2026-09-02 against TRENDS_MV (b5281393) and
     // MARKET_CITATIONS_TREND (2e5a6f4e): empty AND → 422, key omitted → 200.
-    it('omits the advanced block entirely when all-platforms is combined with no region', () => {
-      for (const build of [buildMarketMentionsTrendPayload, buildMarketCitationsTrendPayload]) {
-        const payload = build({ ...range, platform: 'all' });
-        expect(payload.filters).to.not.have.property('advanced');
-        expect(payload.filters.simple).to.deep.equal({
-          start_date: '2026-07-01', end_date: '2026-07-28',
-        });
-      }
+    it('omits the advanced block entirely for the mentions element (all-platforms, no region)', () => {
+      const payload = buildMarketMentionsTrendPayload({ ...range, platform: 'all' });
+      expect(payload.filters).to.not.have.property('advanced');
+      expect(payload.filters.simple).to.deep.equal({
+        start_date: '2026-07-01', end_date: '2026-07-28',
+      });
+    });
+
+    it('omits the advanced block entirely for the citations element (all-platforms, no region)', () => {
+      const payload = buildMarketCitationsTrendPayload({ ...range, platform: 'all' });
+      expect(payload.filters).to.not.have.property('advanced');
+      expect(payload.filters.simple).to.deep.equal({
+        start_date: '2026-07-01', end_date: '2026-07-28',
+      });
     });
 
     it('omits the advanced block when both the model and projectIds are absent', () => {

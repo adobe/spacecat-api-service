@@ -15,6 +15,7 @@ import {
   ALL_PLATFORMS,
   isAllPlatforms,
   isAllModelsFilter,
+  buildModelFilter,
   buildAdvancedFilters,
 } from '../../../src/support/elements/constants.js';
 
@@ -52,6 +53,52 @@ describe('elements constants', () => {
       expect(isAllModelsFilter('search-gpt')).to.equal(false);
       expect(isAllModelsFilter('openai')).to.equal(false);
       expect(isAllModelsFilter('not-a-real-model')).to.equal(false);
+    });
+
+    // Not reachable from HTTP query params (always string|undefined), but the `typeof`
+    // check means any non-string is treated as "absent" — documented here so the
+    // contract is explicit if a non-HTTP caller ever passes one.
+    it('treats a non-string value as absent (aggregate), not as a model', () => {
+      expect(isAllModelsFilter(0)).to.equal(true);
+      expect(isAllModelsFilter(false)).to.equal(true);
+      expect(isAllModelsFilter({})).to.equal(true);
+    });
+  });
+
+  describe('buildModelFilter', () => {
+    it('returns null for the all-models aggregate (absent or the "all" sentinel)', () => {
+      expect(buildModelFilter(undefined)).to.equal(null);
+      expect(buildModelFilter('')).to.equal(null);
+      expect(buildModelFilter('all')).to.equal(null);
+      expect(buildModelFilter(ALL_PLATFORMS)).to.equal(null);
+      // the aggregate case wins regardless of `wrap`
+      expect(buildModelFilter('all', { wrap: false })).to.equal(null);
+    });
+
+    it('wraps the eq in a one-member or block by default (wrap: true)', () => {
+      expect(buildModelFilter('search-gpt')).to.deep.equal({
+        op: 'or',
+        filters: [{ op: 'eq', val: 'search-gpt', col: 'CBF_model' }],
+      });
+    });
+
+    it('returns a bare eq when wrap is false (stats mentions/citations shape)', () => {
+      expect(buildModelFilter('search-gpt', { wrap: false })).to.deep.equal({
+        op: 'eq', val: 'search-gpt', col: 'CBF_model',
+      });
+    });
+
+    it('translates a UI platform code to its Semrush model name', () => {
+      expect(buildModelFilter('openai').filters[0].val).to.equal('chatgpt-paid');
+      expect(buildModelFilter('chatgpt').filters[0].val).to.equal('search-gpt');
+      expect(buildModelFilter('gemini', { wrap: false }).val).to.equal('gemini-2.5-flash');
+    });
+
+    it('falls back to the default model for an unrecognized value (NOT the aggregate)', () => {
+      expect(buildModelFilter('not-a-real-model')).to.deep.equal({
+        op: 'or',
+        filters: [{ op: 'eq', val: 'search-gpt', col: 'CBF_model' }],
+      });
     });
   });
 

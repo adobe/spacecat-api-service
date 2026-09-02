@@ -129,6 +129,20 @@ export function resolveElementModel(value) {
  * `absent/'all' → omit, else resolve-and-scope` branch shared by the brand-presence family
  * (stats, kpi-headlines, market-tracking-trends, sentiment-overview).
  *
+ * ⚠️ Two DIFFERENT "absent platform" semantics coexist on this surface — pick deliberately:
+ *
+ *  - `buildModelFilter` (this one): absent/`'all'` → `null`, so the filter is OMITTED and
+ *    the result is an all-model aggregate. Use for the brand-presence family (stats,
+ *    kpi-headlines, market-tracking-trends, sentiment-overview) — the surfaces whose UI
+ *    exposes a real "All Platforms" option.
+ *  - {@link resolveElementModel}: absent/unrecognized → {@link DEFAULT_ELEMENT_MODEL}
+ *    (`search-gpt`). Use for url-prompts, topics, cited-domains, owned-urls and
+ *    url-inspector — surfaces with no "All Platforms" option, where falling back to a
+ *    single default model is the intended contract.
+ *
+ * The distinction is enforced only by which helper a definition file calls, so switching a
+ * caller from one to the other silently changes that endpoint's aggregation semantics.
+ *
  * @param {string} [requestedModel] - Raw model/platform value (callers pass `model || platform`).
  * @param {object} [opts]
  * @param {boolean} [opts.wrap=true] - Wrap the `eq` in a one-member `or` block (the shape most

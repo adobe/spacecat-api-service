@@ -1425,10 +1425,10 @@ v2-serenity-brand-presence-sentiment-overview:
           AI model to scope sentiment to. Accepts a Semrush Elements model name
           directly, or a SpaceCat/UI platform code (translated server-side).
           Omitted (the "All Platforms" default) or the `all` sentinel → the
-          all-model aggregate across every model the brand has data for
-          (`CBF_model` filter dropped, Semrush aggregates server-side); an
-          unrecognized value falls back to the single default `search-gpt`
-          (LLMO-7093).
+          all-model aggregate across every model the brand has data for,
+          computed upstream as a deduplicated cross-model union (not a
+          client-side sum). An unrecognized value falls back to the single
+          default `search-gpt` (LLMO-7093).
         schema:
           type: string
           x-canonical-values:
@@ -2136,10 +2136,10 @@ v2-serenity-brand-presence-stats:
           AI model to scope stats to. Accepts a Semrush Elements model name
           directly, or a SpaceCat/UI platform code (translated server-side).
           Omitted (the "All Platforms" default) or the `all` sentinel → the
-          all-model aggregate across every model the brand has data for
-          (`CBF_model` filter dropped, Semrush aggregates server-side); an
-          unrecognized value falls back to the single default `search-gpt`
-          (LLMO-7093).
+          all-model aggregate across every model the brand has data for,
+          computed upstream as a deduplicated cross-model union (not a
+          client-side sum). An unrecognized value falls back to the single
+          default `search-gpt` (LLMO-7093).
         schema:
           type: string
           x-canonical-values:
@@ -2696,10 +2696,10 @@ v2-serenity-market-tracking-trends:
           AI model to scope the trends to. Accepts a Semrush Elements model name
           directly, or a SpaceCat/UI platform code (translated server-side).
           Omitted (the "All Platforms" default) or the `all` sentinel → the
-          all-model aggregate across every model the brand has data for
-          (`CBF_model` filter dropped, Semrush aggregates server-side); an
-          unrecognized value falls back to the single default `search-gpt`
-          (LLMO-7093).
+          all-model aggregate across every model the brand has data for,
+          computed upstream as a deduplicated cross-model union (not a
+          client-side sum). An unrecognized value falls back to the single
+          default `search-gpt` (LLMO-7093).
         schema:
           type: string
           x-canonical-values:
@@ -2831,7 +2831,8 @@ v2-serenity-kpi-headlines:
           name directly, or a SpaceCat/UI platform code (translated
           server-side). Omitted (the "All Platforms" default) or the `all`
           sentinel → the all-model aggregate across every model the brand has
-          data for (`CBF_model` filter dropped, Semrush aggregates server-side);
+          data for (aggregated upstream as a deduplicated cross-model union, not a
+          client-side sum);
           an unrecognized value falls back to the single default `search-gpt`
           (LLMO-7093).
         schema:
@@ -2974,7 +2975,8 @@ v2-serenity-source-visibility-headline:
           name directly, or a SpaceCat/UI platform code (translated
           server-side). Omitted (the "All Platforms" default) or the `all`
           sentinel → the all-model aggregate across every model the brand has
-          data for (`CBF_model` filter dropped, Semrush aggregates server-side);
+          data for (aggregated upstream as a deduplicated cross-model union, not a
+          client-side sum);
           an unrecognized value falls back to the single default `search-gpt`
           (LLMO-7093).
         schema:
@@ -3111,10 +3113,10 @@ v2-serenity-competitor-summary:
           AI model to scope the totals to. Accepts a Semrush Elements model name
           directly, or a SpaceCat/UI platform code (translated server-side).
           Omitted (the "All Platforms" default) or the `all` sentinel → the
-          all-model aggregate across every model the brand has data for
-          (`CBF_model` filter dropped, Semrush aggregates server-side); an
-          unrecognized value falls back to the single default `search-gpt`
-          (LLMO-7093).
+          all-model aggregate across every model the brand has data for,
+          computed upstream as a deduplicated cross-model union (not a
+          client-side sum). An unrecognized value falls back to the single
+          default `search-gpt` (LLMO-7093).
         schema:
           type: string
           x-canonical-values:
