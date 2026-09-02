@@ -182,7 +182,12 @@ function lowercaseAliasPlan(aliases) {
       recased.push(lowercase);
     }
   }
-  return { original: stored, withoutAffected, recased };
+  return {
+    original: stored,
+    withoutAffected,
+    recased,
+    affectedCount: affected.size,
+  };
 }
 
 function benchmarkUpdateBody(benchmark, brand, brandAliases) {
@@ -202,7 +207,14 @@ function benchmarkUpdateBody(benchmark, brand, brandAliases) {
   };
 }
 
-async function repairBenchmarkAliasCase(transport, workspaceId, projectId, benchmark, brand) {
+async function repairBenchmarkAliasCase(
+  transport,
+  workspaceId,
+  projectId,
+  benchmark,
+  brand,
+  log,
+) {
   const plan = lowercaseAliasPlan(benchmark?.brand_aliases);
   if (plan === null) {
     return;
@@ -221,6 +233,12 @@ async function repairBenchmarkAliasCase(transport, workspaceId, projectId, bench
       benchmark.id,
       benchmarkUpdateBody(benchmark, brand, plan.recased),
     );
+    log?.info?.('brand-urls: repaired benchmark alias casing', {
+      workspaceId,
+      projectId,
+      benchmarkId: benchmark.id,
+      count: plan.affectedCount,
+    });
   } catch (repairError) {
     try {
       await transport.updateBenchmark(
@@ -229,6 +247,13 @@ async function repairBenchmarkAliasCase(transport, workspaceId, projectId, bench
         benchmark.id,
         benchmarkUpdateBody(benchmark, brand, plan.original),
       );
+      log?.warn?.('brand-urls: restored benchmark aliases after recase failure', {
+        workspaceId,
+        projectId,
+        benchmarkId: benchmark.id,
+        count: plan.affectedCount,
+        status: repairError?.status,
+      });
     } catch (rollbackError) {
       throw new AggregateError(
         [repairError, rollbackError],
@@ -415,7 +440,7 @@ export async function ensureOwnBrandBenchmark(
     || benchmarks.find(matchesOwn);
   if (existing) {
     if (repairAliasCase) {
-      await repairBenchmarkAliasCase(transport, workspaceId, projectId, existing, brand);
+      await repairBenchmarkAliasCase(transport, workspaceId, projectId, existing, brand, log);
     }
     return String(existing.id);
   }

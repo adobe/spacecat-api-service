@@ -314,6 +314,8 @@ describe('brand-urls helpers', () => {
     });
 
     it('re-cases mixed-case aliases with two full-state updates', async () => {
+      const info = sandbox.stub();
+      const warn = sandbox.stub();
       const transport = {
         listBenchmarks: sandbox.stub().resolves({
           aio_benchmarks: [{
@@ -336,7 +338,7 @@ describe('brand-urls helpers', () => {
         WS,
         PID,
         BRAND,
-        undefined,
+        { info, warn },
         { repairAliasCase: true },
       )).to.equal('main-1');
 
@@ -368,9 +370,21 @@ describe('brand-urls helpers', () => {
         },
       ]);
       expect(transport.createBenchmarks).to.not.have.been.called;
+      expect(info).to.have.been.calledOnceWith(
+        'brand-urls: repaired benchmark alias casing',
+        {
+          workspaceId: WS,
+          projectId: PID,
+          benchmarkId: 'main-1',
+          count: 2,
+        },
+      );
+      expect(warn).to.not.have.been.called;
     });
 
     it('restores the original aliases when the lowercase re-add fails', async () => {
+      const info = sandbox.stub();
+      const warn = sandbox.stub();
       const recaseError = new SerenityTransportError(500, 'recase failed');
       const updateBenchmark = sandbox.stub();
       updateBenchmark.onFirstCall().resolves(null);
@@ -395,7 +409,7 @@ describe('brand-urls helpers', () => {
         WS,
         PID,
         BRAND,
-        undefined,
+        { info, warn },
         { repairAliasCase: true },
       )).to.be.rejectedWith(/recase failed/);
 
@@ -411,6 +425,17 @@ describe('brand-urls helpers', () => {
           primary_url: 'acme.com/products/widget',
         },
       ]);
+      expect(info).to.not.have.been.called;
+      expect(warn).to.have.been.calledOnceWith(
+        'brand-urls: restored benchmark aliases after recase failure',
+        {
+          workspaceId: WS,
+          projectId: PID,
+          benchmarkId: 'main-1',
+          count: 2,
+          status: 500,
+        },
+      );
     });
 
     it('reports both the re-add and rollback failures', async () => {
